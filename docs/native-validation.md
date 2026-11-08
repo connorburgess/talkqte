@@ -71,4 +71,17 @@ All **six groups below remain pending**. Use a fresh isolated preview, fictional
 | Native accessibility and keyboard completion | With explicit permission to change assistive settings, check VoiceOver reading order, question announcements, Why?/source relationship, Save/Dismiss, and returning to notes. Test focus after an action removes the question, larger text, and the user's normal keyboard settings. Browser live-region assertions and this notebook smoke check do not establish VoiceOver behavior or accessibility conformance. |
 | Screen sharing | In a separately authorized synthetic sharing session, inspect the receiving side for each supported sharing mode: whole display, individual window, and app where available. Document whether the companion is visible and whether Hide removes it. Treat it as potentially visible until verified; do not describe it as hidden from sharing. |
 
-Microphone permission, real-device capture, and audio release/disconnect checks remain separate work. None is required to run the fictional window checks. See the [architecture](architecture.md) and [Glance design limits](glance-mode.md).
+## Microphone activity check
+
+On 8 November 2026 the owner ran a short check with the owner's explicit permission. It used a separately named, ad-hoc-signed debug bundle ("TalkQTE Mic Check", identifier `com.talkqte.miccheck`) built from [`33260ba`](https://github.com/connorburgess/talkqte/commit/33260baf2172f11f2e34b7cc7a5a6f311db6c7b4) (`main` plus the worker-count fix in #30), on an Apple M5 Pro with macOS 26.4 and the default input device. The bundle carried the `com.apple.security.device.audio-input` entitlement and the usage text "Show microphone activity when you choose to start monitoring. Audio is not saved or sent anywhere." The fictional demo was not involved, and nothing was recorded, kept, transcribed, or sent.
+
+| Check            | Result                                                                                                                  |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Permission       | macOS asked for microphone access only after **Start microphone** was chosen; the owner allowed it.                     |
+| Signal activity  | Speaking showed **Signal detected** in the app.                                                                         |
+| Stop and release | After **Stop microphone**, the app showed the microphone as off, and the macOS menu-bar microphone indicator went away. |
+| App exit         | The test app quit cleanly with no leftover process.                                                                     |
+
+These are the owner's observations, reported to the developer; no screen capture was taken. The owner noted the controls work but the interface needs polish. Not checked: permission denial, device disconnect or change, headphones or Bluetooth, other Macs or macOS versions, and long sessions. Microphone activity is still not connected to transcription or cues.
+
+Real-device capture of both sides of a call and disconnect checks remain separate work. None is required to run the fictional window checks. See the [architecture](architecture.md) and [Glance design limits](glance-mode.md).

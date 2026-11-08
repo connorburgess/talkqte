@@ -71,7 +71,7 @@ The companion is configured not to take keyboard focus; use the notebook for key
 <details>
 <summary>Microphone activity and development commands</summary>
 
-Choose **Start microphone** explicitly and grant macOS permission if prompted. **Stop microphone** releases the input device; the stopping state remains until release completes. Pausing or ending the fictional demo does not stop monitoring. Hiding the companion only hides its window. The monitor does not retain samples, upload audio, hear the other side of a call through system audio, or generate cues. The browser preview cannot monitor a microphone. Real permission, device-disconnect, and audio-operation checks remain pending.
+Choose **Start microphone** explicitly and grant macOS permission if prompted. **Stop microphone** releases the input device; the stopping state remains until release completes. Pausing or ending the fictional demo does not stop monitoring. Hiding the companion only hides its window. The monitor does not retain samples, upload audio, hear the other side of a call through system audio, or generate cues. The browser preview cannot monitor a microphone. On one Mac, the permission prompt, signal activity, and Stop releasing the microphone have been checked ([record](docs/native-validation.md#microphone-activity-check)); permission denial, device disconnect, and other setups remain unchecked.
 
 `npm run dev` serves a separate browser simulation at `http://127.0.0.1:1420`. `npm test` runs browser behavior checks; `npm run build` builds the frontend. Browser checks do not verify Rust IPC or native windows.
 
