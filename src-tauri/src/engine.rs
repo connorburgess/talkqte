@@ -488,29 +488,39 @@ impl Engine {
         {
             // The same fixed question shortly after it was shown is redundant,
             // whether it was answered, dismissed, or ignored.
-            let repeated = |kind: &str| {
+            // Open questions repeat per question text, not per kind, so an
+            // unrelated question is not hidden by an earlier one.
+            let repeat_key = |kind: &str, question: &str| {
+                if kind == OPEN {
+                    format!("{OPEN}:{}", question.to_lowercase())
+                } else {
+                    kind.to_string()
+                }
+            };
+            let repeated = |key: &str| {
                 self.last_shown
                     .iter()
-                    .any(|(shown, at)| shown == kind && segment.at_ms < at + REPEAT_MS)
+                    .any(|(shown, at)| shown == key && segment.at_ms < at + REPEAT_MS)
             };
             if let Some((kind, question)) = suggest(&suggestible)
                 .into_iter()
-                .find(|(kind, _)| !repeated(kind))
+                .find(|(kind, question)| !repeated(&repeat_key(kind, question)))
             {
+                let key = repeat_key(kind, &question);
                 // Remember the previous time in case this cue is withdrawn
                 // before the user ever sees it.
                 let previous = self
                     .last_shown
                     .iter()
-                    .position(|(shown, _)| shown == kind)
+                    .position(|(shown, _)| shown == &key)
                     .map(|index| self.last_shown.remove(index).1);
-                self.unshown = Some((kind.into(), previous));
-                self.last_shown.push((kind.into(), segment.at_ms));
+                self.unshown = Some((key.clone(), previous));
+                self.last_shown.push((key, segment.at_ms));
                 self.cue_deadline = segment.at_ms + CUE_MS;
                 self.state.cue = Some(Cue {
                     id: format!("{}:{}", self.generation, segment.id),
                     kind: kind.into(),
-                    question: question.into(),
+                    question,
                     evidence: segment.text,
                     source_id: segment.id,
                     remaining_ms: self.cue_deadline - now,
@@ -660,7 +670,7 @@ impl Engine {
     }
 }
 
-fn suggest(text: &str) -> Vec<(&'static str, &'static str)> {
+fn suggest(text: &str) -> Vec<(&'static str, String)> {
     // Match complete words, not fragments such as "cannot" or "monsoon".
     // Keep apostrophes inside words so "can't" never becomes "can".
     let words: Vec<_> = text
@@ -683,19 +693,126 @@ fn suggest(text: &str) -> Vec<(&'static str, &'static str)> {
             .windows(2)
             .any(|pair| is_word(pair[0], "someone") && is_word(pair[1], "can"))
     }) {
-        found.push(("Owner", "Who will take the first draft?"));
+        found.push(("Owner", "Who will take the first draft?".into()));
     }
     if words.iter().any(|word| is_word(word, "soon")) {
-        found.push(("Timing", "What date should we aim for?"));
+        found.push(("Timing", "What date should we aim for?".into()));
     }
     if words
         .iter()
         .position(|word| is_word(word, "either"))
         .is_some_and(|index| words[index + 1..].iter().any(|word| is_word(word, "or")))
     {
-        found.push(("Decision", "How will we choose between those options?"));
+        found.push((
+            "Decision",
+            "How will we choose between those options?".into(),
+        ));
+    }
+    // An open question is raised only when no fixed question matched the
+    // line, even a suppressed repeat, so it never re-asks a fixed one.
+    if found.is_empty() {
+        if let Some(question) = open_question(text) {
+            found.push((OPEN, question));
+        }
     }
     found
+}
+
+/// The cue kind for a question put to the group by a speaker.
+pub const OPEN: &str = "Open question";
+
+/// Returns an explicit question put to the group, such as "Does anyone have
+/// time this week?" or "Any thoughts on the timeline?": a sentence that ends
+/// with a question mark and opens, after a short lead-in, with one of a few
+/// group-addressing phrases. Call logistics ("Can anyone hear me?", "Who can
+/// see my screen?") are excluded by a short word list, and a question that
+/// the same line goes on to answer is not raised. Questions put to one
+/// person, questions in other words, and transcripts that drop the question
+/// mark are missed. Text over 200 characters is cut with an ellipsis.
+fn open_question(text: &str) -> Option<String> {
+    const OPENERS: [&[&str]; 11] = [
+        &["does", "anyone"],
+        &["has", "anyone"],
+        &["can", "anyone"],
+        &["could", "anyone"],
+        &["would", "anyone"],
+        &["any", "thoughts"],
+        &["any", "objections"],
+        &["who", "can"],
+        &["who", "could"],
+        &["who", "wants"],
+        &["who", "will"],
+    ];
+    const LEAD_INS: [&str; 7] = ["so", "ok", "okay", "alright", "and", "but", "well"];
+    // Words that mark the question as about the call itself, not the work.
+    const LOGISTICS: [&str; 14] = [
+        "hear",
+        "echo",
+        "audio",
+        "mic",
+        "microphone",
+        "screen",
+        "camera",
+        "video",
+        "mute",
+        "muted",
+        "call",
+        "coffee",
+        "connection",
+        "lag",
+    ];
+    let normal = |word: &str| {
+        word.replace(['’', '‘'], "'")
+            .trim_matches(|character: char| !character.is_alphanumeric() && character != '\'')
+            .to_lowercase()
+    };
+    let mut end = 0;
+    for sentence in text.split_inclusive(['.', '?', '!']) {
+        end += sentence.len();
+        let sentence = sentence.trim();
+        if !sentence.ends_with('?') {
+            continue;
+        }
+        let words: Vec<String> = sentence
+            .split_whitespace()
+            .map(normal)
+            .filter(|word| !word.is_empty())
+            .collect();
+        let start = words
+            .iter()
+            .take_while(|word| LEAD_INS.contains(&word.as_str()))
+            .count();
+        let body = &words[start..];
+        let opens = OPENERS.iter().any(|opener| {
+            body.len() > opener.len()
+                && body
+                    .iter()
+                    .zip(opener.iter())
+                    .all(|(word, part)| word == part)
+        });
+        if !opens || body.iter().any(|word| LOGISTICS.contains(&word.as_str())) {
+            continue;
+        }
+        // The rest of the line may already answer it: "Who can take it? I
+        // will." A later question in the same line can still count.
+        let rest = &text[end..];
+        if ["Owner", "Timing", "Decision"]
+            .iter()
+            .any(|kind| resolves(kind, rest))
+        {
+            continue;
+        }
+        let quoted = sentence.trim_matches(['"', '“', '”', '‘', '’', '\'']);
+        let count = quoted.chars().count();
+        return Some(if count > 200 {
+            let mut cut: String = quoted.chars().take(199).collect();
+            cut.push('…');
+            cut
+        } else {
+            quoted.to_string()
+        });
+    }
+    None
 }
 
 /// The cue kind for a question addressed to the user by name.
@@ -1119,6 +1236,12 @@ fn corrects(text: &str) -> Option<usize> {
 /// pulls away a useful one. So anything that reads as a question, a hedge, or
 /// a negation never counts, and only "I" or a capitalized name can be an owner.
 fn resolves(kind: &str, text: &str) -> bool {
+    // An open question is answered by any recognized owner, date, or choice.
+    if kind == OPEN {
+        return ["Owner", "Timing", "Decision"]
+            .iter()
+            .any(|fixed| resolves(fixed, text));
+    }
     const WEEKDAYS: [&str; 7] = [
         "monday",
         "tuesday",
@@ -2545,5 +2668,121 @@ mod tests {
             .iter()
             .all(|line| scripted.contains(&line.text.as_str())));
         assert!(!e.live_input);
+    }
+
+    #[test]
+    fn an_explicit_question_put_to_the_group_becomes_an_open_question_cue() {
+        for line in [
+            "Does anyone have time to review the draft this week?",
+            "So, any thoughts on the timeline?",
+            "Who can take the welcome guide?",
+            "Would anyone object to moving the review?",
+        ] {
+            let mut e = live_session();
+            e.ingest(e.session(), live("w1", 9_000, line)).unwrap();
+            let cue = e.state.cue.as_ref().unwrap_or_else(|| panic!("{line}"));
+            assert_eq!(cue.kind, OPEN, "{line}");
+            assert_eq!(cue.question, line.trim(), "{line}");
+        }
+    }
+
+    #[test]
+    fn statements_other_questions_and_named_questions_are_not_open_questions() {
+        for line in [
+            "Anyone can send the file later.",
+            "Does anyone have time this week",
+            "Is the review still on Friday?",
+            "Alex, can you take the welcome guide?",
+            "What do you think, Sam?",
+            // Call logistics, not the work.
+            "Can anyone hear me?",
+            "Does anyone mind if I share my screen?",
+            "Who's on the call?",
+            "Would anyone like a coffee?",
+            // Answered in the same line.
+            "Who can take the welcome guide? I'll take it.",
+        ] {
+            let mut e = live_session();
+            e.set_user_name(Some("Sam".into())).unwrap();
+            e.ingest(e.session(), live("w1", 9_000, line)).unwrap();
+            assert!(
+                e.state.cue.as_ref().is_none_or(|cue| cue.kind != OPEN),
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_open_question_is_withdrawn_by_an_answer_and_not_re_raised_but_another_may_follow() {
+        let mut e = live_session();
+        e.ingest(
+            e.session(),
+            live("w1", 9_000, "Who can take the welcome guide?"),
+        )
+        .unwrap();
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, OPEN);
+        e.advance(2_000);
+        e.ingest(e.session(), live("w2", 11_000, "Maya will take it."))
+            .unwrap();
+        assert!(e.state.cue.is_none(), "answered by a named owner");
+        // Past the pause, the same question is a repeat; a different one is not.
+        e.advance(12_000);
+        e.ingest(
+            e.session(),
+            live("w3", 23_000, "Who can take the welcome guide?"),
+        )
+        .unwrap();
+        assert!(e.state.cue.is_none(), "same question within two minutes");
+        e.advance(2_000);
+        e.ingest(
+            e.session(),
+            live("w4", 25_000, "Any objections to moving the review?"),
+        )
+        .unwrap();
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, OPEN);
+    }
+
+    #[test]
+    fn a_suppressed_fixed_question_does_not_come_back_as_an_open_question() {
+        let mut e = live_session();
+        e.ingest(e.session(), live("w1", 9_000, "Someone can take notes."))
+            .unwrap();
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&id, Response::Dismiss).unwrap();
+        e.advance(12_000);
+        e.ingest(
+            e.session(),
+            live("w2", 21_000, "Someone can take notes, who can take it?"),
+        )
+        .unwrap();
+        assert!(e.state.cue.is_none());
+    }
+
+    #[test]
+    fn a_self_answered_question_does_not_hide_a_later_one_in_the_same_line() {
+        let line = "Who can take notes? I'll take it. Any objections to Friday?";
+        assert_eq!(
+            open_question(line).as_deref(),
+            Some("Any objections to Friday?")
+        );
+    }
+
+    #[test]
+    fn a_long_open_question_is_cut_with_an_ellipsis() {
+        let long = format!("Does anyone {}?", "really ".repeat(40));
+        let question = open_question(&long).unwrap();
+        assert_eq!(question.chars().count(), 200);
+        assert!(question.ends_with('…'));
+    }
+
+    #[test]
+    fn a_fixed_question_wins_over_an_open_question_in_the_same_line() {
+        let mut e = live_session();
+        e.ingest(
+            e.session(),
+            live("w1", 9_000, "Someone can take it. Who can take it?"),
+        )
+        .unwrap();
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Owner");
     }
 }

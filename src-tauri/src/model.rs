@@ -502,6 +502,9 @@ mod tests {
         times: Mutex<Vec<std::time::Instant>>,
         /// Errors to return instead of a body, one per request, newest last.
         errors: Mutex<Vec<FetchError>>,
+        /// Set on the first request, so a cancel lands during the next wait
+        /// without depending on thread timing.
+        cancel_on_request: Mutex<Option<std::sync::Arc<AtomicBool>>>,
     }
 
     impl Fake {
@@ -513,6 +516,7 @@ mod tests {
                 requests: Mutex::new(vec![]),
                 times: Mutex::new(vec![]),
                 errors: Mutex::new(vec![]),
+                cancel_on_request: Mutex::new(None),
             }
         }
     }
@@ -533,6 +537,9 @@ mod tests {
         fn get(&self, url: &str, offset: u64) -> Result<Response, FetchError> {
             self.requests.lock().unwrap().push((url.into(), offset));
             self.times.lock().unwrap().push(std::time::Instant::now());
+            if let Some(cancel) = self.cancel_on_request.lock().unwrap().take() {
+                cancel.store(true, Ordering::Release);
+            }
             if let Some(error) = self.errors.lock().unwrap().pop() {
                 return Err(error);
             }
@@ -870,13 +877,8 @@ mod tests {
             retry_after: Some(std::time::Duration::from_secs(3_600)),
         });
         let cancel = std::sync::Arc::new(AtomicBool::new(false));
-        let setter = cancel.clone();
-        let waiter = std::thread::spawn(move || {
-            std::thread::sleep(STALL_WAIT);
-            setter.store(true, Ordering::Release);
-        });
+        *fake.cancel_on_request.lock().unwrap() = Some(cancel.clone());
         let result = download(dir.path(), &spec, &fake, plenty, |_, _| {}, &cancel);
-        waiter.join().unwrap();
         assert_eq!(result.unwrap_err(), Failure::Cancelled);
         assert!(leftovers(dir.path()).is_empty());
     }
@@ -936,19 +938,10 @@ mod tests {
         let spec = real_spec(&["test://7"]);
         let fake = Fake::new(vec![]);
         let cancel = std::sync::Arc::new(AtomicBool::new(false));
-        let setter = cancel.clone();
-        let waiter = std::thread::spawn(move || {
-            std::thread::sleep(STALL_WAIT / 2);
-            setter.store(true, Ordering::Release);
-        });
+        *fake.cancel_on_request.lock().unwrap() = Some(cancel.clone());
         let result = download(dir.path(), &spec, &fake, plenty, |_, _| {}, &cancel);
-        waiter.join().unwrap();
         assert_eq!(result.unwrap_err(), Failure::Cancelled);
-        // Cancel landed before or during the first wait; never a second attempt.
-        assert!(
-            fake.requests.lock().unwrap().len() <= 1,
-            "no second attempt"
-        );
+        assert_eq!(fake.requests.lock().unwrap().len(), 1, "no second attempt");
         assert!(leftovers(dir.path()).is_empty());
     }
 
