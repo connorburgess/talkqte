@@ -15,6 +15,7 @@ export interface Cue {
   totalMs: number;
   held: boolean;
   expanded: boolean;
+  resolvedBy: { sourceId: string; evidence: string } | null;
 }
 export interface CueSnapshot {
   revision: number;

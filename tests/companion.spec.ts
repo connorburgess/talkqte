@@ -135,3 +135,50 @@ test('questions expire quietly without requiring a response', async ({
   );
   await expect(page.getByRole('status')).toHaveText('Demo running · Scripted');
 });
+
+test('a question answered by the conversation leaves without a response', async ({
+  page,
+}) => {
+  await page.clock.runFor(37_200);
+  const question = page.getByRole('region', { name: 'Suggested question' });
+  await expect(
+    page.getByRole('heading', { name: 'What date should we aim for?' }),
+  ).toBeVisible();
+  // The fictional speakers agree on Friday at 51 s, before the cue would expire.
+  await page.clock.runFor(14_000);
+  await expect(question).toHaveCount(0);
+  await expect(page.getByRole('status')).toHaveText('Demo running · Scripted');
+});
+
+test('an answered question being read stays and shows the answer', async ({
+  page,
+}) => {
+  await page.clock.runFor(37_200);
+  await page.getByRole('button', { name: 'Why?' }).click();
+  // The native companion grows to 600 px for context with an answer.
+  await page.setViewportSize({ width: 420, height: 600 });
+  await page.clock.runFor(14_000);
+  const question = page.getByRole('region', { name: 'Suggested question' });
+  await expect(
+    question.getByRole('heading', { name: 'What date should we aim for?' }),
+  ).toBeVisible();
+  await expect(question).toContainText(
+    'This was answered in the conversation. Kept here until you dismiss it.',
+  );
+  await expect(question.locator('.question-context')).toContainText(
+    'Answered later',
+  );
+  await expect(question.locator('.question-context')).toContainText(
+    'ready by Friday',
+  );
+  await expectCompanionToFit(page);
+  await page.evaluate(async () => {
+    const previewPath = '/src/lib/preview.ts';
+    const preview = await import(previewPath);
+    preview.command('set_question_size', { value: 'large' });
+  });
+  await page.setViewportSize({ width: 420, height: 660 });
+  await expectCompanionToFit(page);
+  await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
+  await expect(question).toHaveCount(0);
+});

@@ -26,6 +26,7 @@ AI is intended to select relevant context, decide whether a cue would help, and 
 | ---------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | Fictional conversation replay with fixed, phrase-based questions | AI-selected context and prompts grounded in the conversation             |
 | Floating companion, source disclosure, pause, and dismissal      | Useful timing, suppression of answered questions, and stale-cue handling |
+| Phrase-based withdrawal when a later line answers the question   | Recognizing paraphrased answers, redundant cues, and topic changes       |
 | Separate, opt-in macOS microphone activity indicator             | Both sides of meeting audio and live transcription                       |
 | In-memory demo notes and reviewed Markdown export                | Reliable meeting use, processing choices, and install/update support     |
 
