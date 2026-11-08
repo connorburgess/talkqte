@@ -15,6 +15,12 @@ TalkQTE is an early desktop prototype with an optional microphone activity check
 
 Do not use this prototype for real or sensitive meeting data. Closing the app loses unsaved notes, and there is no implemented storage protection beyond the operating system's process boundaries. Real-device microphone operation, permission prompts, and disconnect behavior still need explicit native testing; synthetic tests do not prove those platform behaviors.
 
+## Optional fictional development lab
+
+The [Claude cue lab](docs/claude-cue-lab.md) is a separate, explicitly invoked development script. A selected bundled fictional scenario is sent to Claude through the user's subscription; this is hosted processing. It has no microphone, live transcript, arbitrary-file input, or connection to the desktop engine. Listing cases and offline tests do not invoke a model.
+
+The runner disables tools, customizations, MCP connections, and session persistence, uses a temporary working directory, and prints a filtered report to stdout. It does not store a meeting archive or extract credentials. These controls do not establish zero provider retention or prevent all CLI diagnostic/account state. Review the CLI and provider settings independently before any future work with real content. No such input path is implemented here.
+
 ## Requirements for meeting capture
 
 - Capture begins only after an explicit action. Show whether the microphone, system audio, or both are active.

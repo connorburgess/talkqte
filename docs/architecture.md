@@ -35,6 +35,8 @@ Export preparation stores a Markdown snapshot in Rust. The subsequent native sav
 
 The browser preview uses `src/lib/preview.ts`, a development-only simulation. Its UI tests complement the Rust engine tests; they do not test Rust IPC, native dialogs, or native windows. There is currently no full meeting-audio pipeline, inference worker, database, or integration adapter.
 
+The optional [Claude cue lab](claude-cue-lab.md) is a separate Node development script, not an application inference worker. It sends one bundled fictional case through the official subscription-authenticated CLI, checks the returned decision and source IDs, and prints a report. It cannot mutate Rust cue state, receive captured audio, or supply live app prompts. A later app integration still requires a Rust-owned worker, validated source/version boundaries, resource budgets, cancellation, and an explicit processing decision.
+
 ### Microphone activity on macOS
 
 `src-tauri/src/microphone.rs` owns a separate, default-off microphone monitor. Only the main window can invoke `start_microphone`; the main and companion windows can invoke `microphone_snapshot` and `stop_microphone`. The `microphone:changed` event contains only a revision, status (`off`, `starting`, `listening`, `stopping`, or `error`), a `canStart` flag, coarse activity (`quiet` or `active`), and an optional public error message. `canStart` is true only when monitoring is off or a failed stream has finished cleanup; cleanup completion emits a newer revision so the UI can enable retry. Consumers must ignore older revisions. No samples, device names, or precise levels are sent to webviews.

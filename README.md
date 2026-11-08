@@ -58,6 +58,10 @@ For UI development, `npm run dev` starts a browser preview at `http://127.0.0.1:
 
 These are development targets. The activity monitor does not yet transcribe meetings or supply live prompts, and the prototype has no retention controls. See [ROADMAP.md](ROADMAP.md) and the [current privacy behavior](PRIVACY.md).
 
+## Fictional cue lab
+
+An optional developer lab evaluates one bundled fictional scenario through Claude Code with Opus 5.5 using an existing subscription. It explores when to stay quiet or resolve a cue; it is separate from the phrase-based app and does not process real calls. `npm run lab:claude` lists cases without inference. Read the [lab setup and billing checks](docs/claude-cue-lab.md) before explicitly running a case; separately billed inference APIs are not supported.
+
 ## Project decisions
 
 - [Product goal and first proof](PRODUCT.md#goal-and-first-proof)
