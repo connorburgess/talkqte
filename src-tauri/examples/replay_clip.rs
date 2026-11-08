@@ -23,6 +23,7 @@ struct Args {
     clip: PathBuf,
     chunk_ms: u64,
     end_at_ms: Option<u64>,
+    report_every_ms: u64,
 }
 
 fn args() -> Result<Args, String> {
@@ -30,6 +31,7 @@ fn args() -> Result<Args, String> {
     let mut clip = None;
     let mut chunk_ms = 4_000;
     let mut end_at_ms = None;
+    let mut report_every_ms = 60_000;
     let mut list = std::env::args().skip(1);
     while let Some(flag) = list.next() {
         let value = list.next().ok_or(format!("{flag} needs a value"))?;
@@ -37,6 +39,11 @@ fn args() -> Result<Args, String> {
             "--model" => model = Some(PathBuf::from(value)),
             "--clip" => clip = Some(PathBuf::from(value)),
             "--chunk-ms" => chunk_ms = value.parse().map_err(|_| "--chunk-ms must be a number")?,
+            "--report-every-ms" => {
+                report_every_ms = value
+                    .parse()
+                    .map_err(|_| "--report-every-ms must be a number")?
+            }
             "--end-at-ms" => {
                 end_at_ms = Some(value.parse().map_err(|_| "--end-at-ms must be a number")?)
             }
@@ -51,6 +58,7 @@ fn args() -> Result<Args, String> {
         clip: clip.ok_or("--clip is required")?,
         chunk_ms,
         end_at_ms,
+        report_every_ms: report_every_ms.max(1_000),
     })
 }
 
@@ -117,11 +125,24 @@ fn run() -> Result<(), String> {
         engine.session()
     };
     let sink_engine = engine.clone();
-    let worker = Worker::start(session, 8, recognizer, move |session, segment| {
-        sink_engine.lock().unwrap().ingest(session, segment)
-    });
-
     let begun = Instant::now();
+    // Delay from when a line started being spoken to when the engine has it.
+    let delays = Arc::new(Mutex::new(Vec::<u64>::new()));
+    let sink_delays = delays.clone();
+    let worker = Worker::start(session, 8, recognizer, move |session, segment| {
+        let spoken_at = segment.at_ms;
+        let result = sink_engine.lock().unwrap().ingest(session, segment);
+        if result.is_ok() {
+            let delay = (begun.elapsed().as_millis() as u64).saturating_sub(spoken_at);
+            sink_delays.lock().unwrap().push(delay);
+        }
+        result
+    });
+    let mut next_report = args.report_every_ms;
+    println!(
+        "pid={} (sample memory and CPU from outside if `ps` is sandboxed)",
+        std::process::id()
+    );
     let chunk_samples = (args.chunk_ms as usize * SAMPLE_RATE) / 1_000;
     let mut next_chunk = 0usize;
     let mut shown: Option<String> = None;
@@ -144,6 +165,18 @@ fn run() -> Result<(), String> {
             next_chunk += 1;
         }
         max_backlog = max_backlog.max(worker.backlog());
+        if now_ms >= next_report {
+            println!(
+                "t={}s backlog={} lines={} {}",
+                now_ms / 1_000,
+                worker.backlog(),
+                delays.lock().unwrap().len(),
+                usage().map_or("usage unavailable".into(), |(rss, cpu)| format!(
+                    "rss_mb={rss:.0} cpu_s={cpu:.1}"
+                ))
+            );
+            next_report += args.report_every_ms;
+        }
         let mut engine = engine.lock().unwrap();
         // Keep the engine clock on real time without dropping fractions.
         let target = begun.elapsed().as_millis() as u64;
@@ -219,6 +252,25 @@ fn run() -> Result<(), String> {
         let stats = worker.stop();
         let engine = engine.lock().unwrap();
         println!("worker {stats:?} max_backlog={max_backlog}");
+        let mut delays = delays.lock().unwrap().clone();
+        delays.sort_unstable();
+        if !delays.is_empty() {
+            let at = |q: f64| delays[((delays.len() - 1) as f64 * q).round() as usize];
+            println!(
+                "line delay ms: p50={} p95={} max={} (n={}, includes waiting for the chunk to fill)",
+                at(0.5),
+                at(0.95),
+                at(1.0),
+                delays.len()
+            );
+        }
+        println!(
+            "resources after {:.0}s: {}",
+            begun.elapsed().as_secs_f64(),
+            usage().map_or("unavailable".into(), |(rss, cpu)| format!(
+                "rss_mb={rss:.0} cpu_s={cpu:.1}"
+            ))
+        );
         println!(
             "lines={} final_cue={:?}",
             engine.state.transcript.len(),
@@ -226,4 +278,22 @@ fn run() -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+/// Resident memory (MB) and total CPU seconds of this process, from `ps`.
+/// None when `ps` cannot run, for example under a sandbox.
+fn usage() -> Option<(f64, f64)> {
+    let out = std::process::Command::new("ps")
+        .args(["-o", "rss=,time=", "-p", &std::process::id().to_string()])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())?;
+    let text = String::from_utf8(out.stdout).ok()?;
+    let mut parts = text.split_whitespace();
+    let rss_mb = parts.next()?.parse::<f64>().ok()? / 1_024.0;
+    // TIME is [[hh:]mm:]ss.ss
+    let cpu_s = parts.next()?.split(':').try_fold(0.0, |total, part| {
+        part.parse::<f64>().ok().map(|n| total * 60.0 + n)
+    })?;
+    Some((rss_mb, cpu_s))
 }

@@ -45,7 +45,7 @@ Without both variables the test is skipped. It sends the clip through the real w
 - when a cue is shown, and whether it expired, was withdrawn, or was cleared by End;
 - the worker's counts and its largest backlog.
 
-It prints no transcript text. Clips over 32 MiB are refused.
+It prints no transcript text. Clips over 32 MiB are refused. With `--report-every-ms`, it prints the backlog and line count periodically. Memory and CPU appear too when `ps` is available, which it is not under `sandbox-exec`. At the end it prints the speech-to-transcript delay: median, 95th percentile, and maximum.
 
 With `--end-at-ms`, the session ends at that moment. The check fails unless audio was still queued or being transcribed at End, so an End between chunks cannot pass vacuously. Work already in progress is then allowed to finish, so late lines meet the engine's own refusal. The check fails if anything changes after End.
 
@@ -102,7 +102,31 @@ Real-time replay of the 30.4-second two-voice meeting clip in 5-second chunks, s
 | End at 10 s                | End came while one chunk was being transcribed and cleared the question. That chunk's 2 late lines were refused by the engine, and nothing changed after End: no new lines, same revision.                                                                                                                                                                         |
 | End between chunks (7.5 s) | Refused as a vacuous check, as designed.                                                                                                                                                                                                                                                                                                                           |
 
-These are short, clean synthetic clips with two system voices on one machine. It does not measure accuracy on real meetings, noisy audio, overlapping speakers, sustained sessions, or other hardware, and it is not a latency or resource budget.
+These are short, clean synthetic clips with two system voices on one machine.
+
+### Sustained session
+
+A 10-minute replay of the two-voice meeting clip repeated 20 times, in real time, with `tiny.en`, a release build, 5-second chunks, and the network denied. Memory and CPU were sampled with `ps` from outside the sandbox every 30 seconds, because the sandbox blocks `ps`.
+
+| Measure                    | Result                                                                                                                                                                                        |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Audio handled              | 607.9 s in 122 chunks: 180 lines accepted, 0 dropped, 0 recognizer failures, 0 refused                                                                                                        |
+| Backlog                    | Never more than 1 chunk, so recognition kept up with real time throughout                                                                                                                     |
+| Speech-to-transcript delay | Median 5.14 s, 95th percentile 5.21 s, maximum 5.32 s, measured from the start of a recognized line to the engine accepting it. Almost all of this is waiting for the 5-second chunk to fill. |
+| Memory                     | About 238 MB in the first two minutes, then steady at 197–204 MB to the end; no growth across 10 minutes                                                                                      |
+| CPU                        | 42.7 s of processor time over 600 s, about 7% of one core                                                                                                                                     |
+
+Chunk length sets the delay. On the 30-second meeting clip:
+
+| Chunk | Delay (median) | Question shown | Question withdrawn |
+| ----- | -------------- | -------------- | ------------------ |
+| 2 s   | 2.15 s         | 6.1 s          | 18.3 s             |
+| 3 s   | 3.13 s         | 6.2 s          | 18.1 s             |
+| 5 s   | 5.16 s         | 5.3 s          | 20.2 s             |
+
+Shorter chunks deliver lines sooner, but fixed-length chunks cut words at their edges, which delayed the first question slightly. Splitting chunks at pauses in speech would keep the lower delay without cutting words; that is the next improvement to evaluate.
+
+These figures describe one clean synthetic voice pair on one Mac. They do not include capture, the companion window, the other side of a call, noise, or other hardware, and they are inputs to the budget proposal, not budgets. It does not measure accuracy on real meetings, noisy audio, overlapping speakers, sustained sessions, or other hardware, and it is not a latency or resource budget.
 
 ## Still needed
 
