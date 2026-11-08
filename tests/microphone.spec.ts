@@ -327,6 +327,10 @@ test('your name is applied when you leave the field, and a rejected name explain
   await nativePage(page, '?live');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const name = page.getByRole('textbox', { name: 'Name' });
+  // Wide and tall enough to read and tap, not a checkbox-sized box.
+  const box = (await name.boundingBox())!;
+  expect(box.width).toBeGreaterThanOrEqual(160);
+  expect(box.height).toBeGreaterThanOrEqual(44);
   await name.fill('  Sam ');
   await name.press('Enter');
   await expect(name).toHaveValue('Sam');

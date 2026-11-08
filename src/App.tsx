@@ -846,6 +846,7 @@ function Notebook() {
                 <label htmlFor="user-name">Name</label>
                 <input
                   id="user-name"
+                  type="text"
                   value={userName}
                   maxLength={40}
                   autoComplete="off"
