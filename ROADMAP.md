@@ -23,7 +23,9 @@ This is a development plan. Unchecked items are not implemented.
 - [x] Browser checks for keyboard navigation, narrow layout, and reduced motion.
 - [x] Separate, explicit macOS microphone activity monitoring with a Stop control and no retained audio.
 - [ ] Verify real microphone permission, device release, signal activity, and disconnect behavior on macOS.
-- [ ] Verify cross-app focus, Spaces, full-screen meetings, and screen-sharing behavior on macOS.
+- [ ] Verify native placement, cross-app focus, Spaces, full-screen meetings, and screen-sharing behavior on macOS.
+
+The [native validation record](docs/native-validation.md) covers a limited macOS notebook keyboard smoke check and lists the remaining companion acceptance checks. It is not a complete accessibility or meeting-app compatibility pass.
 
 The question demo plays synthetic text. Separate microphone monitoring measures signal activity only; it does not supply live prompts or transcribe audio. The prototype does not capture system audio, persist a notebook, or integrate with other services.
 
