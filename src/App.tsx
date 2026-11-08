@@ -214,6 +214,8 @@ function Notebook() {
   const [notice, setNotice] = useState('');
   const modal = useRef<HTMLDialogElement>(null);
   const exportButton = useRef<HTMLButtonElement>(null);
+  const notesEditor = useRef<HTMLTextAreaElement>(null);
+  const transcriptTab = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (state && !initialized.current) {
       initialized.current = true;
@@ -245,6 +247,7 @@ function Notebook() {
     .includes(search.toLowerCase().trim());
   const respond = (response: 'save' | 'dismiss') => {
     if (!state.cue) return;
+    const actionFocus = document.activeElement;
     void run(async () => {
       await bridge.command('respond_to_cue', { id: state.cue!.id, response });
       setNotice(
@@ -252,6 +255,16 @@ function Notebook() {
           ? 'Question saved to your notebook.'
           : 'Question dismissed.',
       );
+      // Only this notebook's explicit response restores focus. Passive expiry
+      // and companion events must not move it, nor a reply after the user has
+      // already moved to another control or application.
+      if (
+        document.hasFocus() &&
+        (document.activeElement === actionFocus ||
+          document.activeElement === document.body)
+      ) {
+        (notesEditor.current ?? transcriptTab.current)?.focus();
+      }
     });
   };
   const prepareExport = () =>
@@ -542,6 +555,7 @@ function Notebook() {
                     Notes
                   </button>
                   <button
+                    ref={transcriptTab}
                     role="tab"
                     aria-selected={tab === 'transcript'}
                     aria-controls="transcript-panel"
@@ -577,6 +591,7 @@ function Notebook() {
                       Meeting notes
                     </label>
                     <textarea
+                      ref={notesEditor}
                       id="meeting-notes"
                       className="note-editor"
                       placeholder="What would you like to remember?"

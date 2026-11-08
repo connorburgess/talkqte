@@ -1,5 +1,95 @@
 import { expect, test } from '@playwright/test';
 
+for (const response of ['Save question', 'Dismiss'] as const) {
+  test(`keyboard ${response} returns to notes after removing a paused question`, async ({
+    page,
+  }) => {
+    await page.clock.install();
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Try demo', exact: true }).click();
+    await page.clock.runFor(5_200);
+    await page.getByRole('button', { name: 'Pause', exact: true }).click();
+    const question = page.getByRole('region', { name: 'Suggested question' });
+    const notes = page.getByRole('textbox', { name: 'Meeting notes' });
+    // Native Tab navigation is checked separately; begin at the control so
+    // this regression does not depend on the browser's tab-to-buttons setting.
+    await question.getByRole('button', { name: 'Why?' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(
+      question.getByRole('button', { name: 'Hide context' }),
+    ).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(question.getByRole('button', { name: 'Why?' })).toBeFocused();
+    await expect(question.locator('blockquote')).toBeHidden();
+    await question.getByRole('button', { name: response }).focus();
+    await expect(
+      question.getByRole('button', { name: response }),
+    ).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(question).toHaveCount(0);
+    await expect(notes).toBeFocused();
+    await page.keyboard.type('Fictional follow-up note.');
+    await expect(notes).toHaveValue('Fictional follow-up note.');
+    await expect(page.locator('.saved-question')).toHaveCount(
+      response === 'Save question' ? 1 : 0,
+    );
+  });
+}
+
+test('a transcript reader returns to the selected tab after dismissing a question', async ({
+  page,
+}) => {
+  await page.clock.install();
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
+  await page.clock.runFor(5_200);
+  const transcript = page.getByRole('tab', { name: /Transcript/ });
+  await transcript.click();
+  const dismiss = page.getByRole('button', { name: 'Dismiss', exact: true });
+  await dismiss.focus();
+  await page.keyboard.press('Enter');
+  await expect(
+    page.getByRole('region', { name: 'Suggested question' }),
+  ).toHaveCount(0);
+  await expect(transcript).toBeFocused();
+  await expect(transcript).toHaveAttribute('aria-selected', 'true');
+  await expect(
+    page.getByRole('tabpanel', { name: /Transcript/ }),
+  ).toBeVisible();
+});
+
+test('timed expiry and a remote companion response leave the current notebook control focused', async ({
+  page,
+}) => {
+  await page.clock.install();
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
+  await page.clock.runFor(5_200);
+  const search = page.getByRole('textbox', { name: 'Search meetings' });
+  await search.focus();
+  await page.clock.runFor(18_000);
+  const question = page.getByRole('region', { name: 'Suggested question' });
+  await expect(question).toHaveCount(0);
+  await expect(search).toBeFocused();
+  await page.clock.runFor(20_000);
+  await expect(question).toBeVisible();
+  await expect(search).toBeFocused();
+  // A second window sends the same command without invoking the notebook's
+  // response handler. The resulting shared snapshot must not move focus.
+  await page.evaluate(async () => {
+    const path = '/src/lib/preview.ts';
+    const preview = await import(path);
+    let id: string | undefined;
+    const stop = preview.connect((state: { cue: { id: string } | null }) => {
+      id = state.cue?.id;
+    });
+    stop();
+    preview.command('respond_to_cue', { id, response: 'dismiss' });
+  });
+  await expect(question).toHaveCount(0);
+  await expect(search).toBeFocused();
+});
+
 test('Why reveals the source and keeps a question through later prompts and playback completion', async ({
   page,
 }) => {
