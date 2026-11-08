@@ -17,7 +17,12 @@ import {
   X,
 } from 'lucide-react';
 import * as bridge from './lib/bridge';
-import { clockTime, type CueSnapshot, type Snapshot } from './lib/types';
+import {
+  clockTime,
+  type CueSnapshot,
+  type LiveStatus,
+  type Snapshot,
+} from './lib/types';
 import { Question } from './components/Question';
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
@@ -70,10 +75,13 @@ function FloatingQuestion() {
   const { state, error, busy, run } = useSession<CueSnapshot>();
   const microphone = useMicrophone();
   const mic = microphone.state;
-  const microphoneControl = microphone.active || (!mic && !!microphone.error);
+  const live = !!state?.live && state.status === 'running';
+  const microphoneControl =
+    !live && (microphone.active || (!mic && !!microphone.error));
   const active =
     state?.overlayEnabled &&
-    (microphoneControl ||
+    (live ||
+      microphoneControl ||
       state.cue ||
       ['running', 'paused'].includes(state.status));
   const paused = state?.status === 'paused';
@@ -96,23 +104,41 @@ function FloatingQuestion() {
                       }
                     />
                   )}
-                  {microphoneControl ? 'Mic only' : 'TalkQTE'}
+                  {microphoneControl ? 'Mic only' : live ? 'Live' : 'TalkQTE'}
                 </strong>
                 <span role="status">
-                  {microphoneControl
-                    ? microphone.stopPending && mic?.status !== 'stopping'
-                      ? 'Stop requested…'
-                      : !mic
-                        ? 'Status unavailable'
-                        : microphoneLabel(mic)
-                    : paused
-                      ? 'Demo paused · Scripted'
-                      : state.status === 'ended'
-                        ? 'Demo ended · Question kept'
-                        : 'Demo running · Scripted'}
+                  {live
+                    ? mic?.status === 'listening'
+                      ? 'Listening · On this device'
+                      : microphoneLabel(mic)
+                    : microphoneControl
+                      ? microphone.stopPending && mic?.status !== 'stopping'
+                        ? 'Stop requested…'
+                        : !mic
+                          ? 'Status unavailable'
+                          : microphoneLabel(mic)
+                      : paused
+                        ? 'Demo paused · Scripted'
+                        : state.status === 'ended'
+                          ? state.live
+                            ? 'Live session ended'
+                            : 'Demo ended · Question kept'
+                          : 'Demo running · Scripted'}
                 </span>
               </div>
-              {microphoneControl ? (
+              {live ? (
+                <button
+                  className="companion-control"
+                  aria-label="Stop live session"
+                  title="Stop live session"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(() => bridge.command('stop_live_session'))
+                  }
+                >
+                  <span>Stop</span>
+                </button>
+              ) : microphoneControl ? (
                 <button
                   className="companion-control"
                   aria-label="Stop microphone"
@@ -208,6 +234,7 @@ function Notebook() {
   const initialized = useRef(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
+  const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
   const modal = useRef<HTMLDialogElement>(null);
   const exportButton = useRef<HTMLButtonElement>(null);
   const notesEditor = useRef<HTMLTextAreaElement>(null);
@@ -218,6 +245,17 @@ function Notebook() {
       setNotes(state.notes);
     }
   }, [state]);
+  useEffect(() => {
+    bridge
+      .liveStatus()
+      .then(setLiveStatus)
+      .catch(() =>
+        setLiveStatus({
+          available: false,
+          reason: 'Live transcription status is unavailable.',
+        }),
+      );
+  }, []);
   useEffect(() => {
     if (preview !== null) modal.current?.showModal();
     else if (modal.current?.open) {
@@ -238,6 +276,7 @@ function Notebook() {
       </main>
     );
   const active = state.status === 'running' || state.status === 'paused';
+  const live = state.live && state.status === 'running';
   const matches = `${state.title} ${state.description} demo`
     .toLowerCase()
     .includes(search.toLowerCase().trim());
@@ -349,14 +388,22 @@ function Notebook() {
               }}
             >
               <div className="meeting-line">
-                <span className="demo-tag">Demo meeting</span>
+                <span className="demo-tag">
+                  {state.live ? 'Live session' : 'Demo meeting'}
+                </span>
                 <ChevronRight size={15} />
               </div>
               <strong>{state.title}</strong>
-              <p>A welcome guide for the garden</p>
-              <span className="meeting-meta">
-                Robin & Alex <span>1m 44s</span>
-              </span>
+              {state.live ? (
+                <p>Your microphone, transcribed on this device</p>
+              ) : (
+                <>
+                  <p>A welcome guide for the garden</p>
+                  <span className="meeting-meta">
+                    Robin & Alex <span>1m 44s</span>
+                  </span>
+                </>
+              )}
             </button>
           ) : (
             <div className="search-empty">
@@ -396,7 +443,7 @@ function Notebook() {
             {bridge.desktop ? 'Desktop prototype' : 'Browser preview'}
           </span>
         </header>
-        <MicrophoneControl microphone={microphone} />
+        <MicrophoneControl microphone={microphone} live={live} />
         {error && (
           <div className="error-banner" role="alert">
             <span>{error}</span>
@@ -419,19 +466,32 @@ function Notebook() {
                 </div>
                 <h1>{state.title}</h1>
                 <p>{state.description}</p>
-                <div className="participants">
-                  <span className="avatar">R</span>
-                  <span className="avatar second">A</span>
-                  <span>Robin & Alex</span>
-                  <span className="meta-divider" />
-                  <span>Fictional demo</span>
-                </div>
+                {state.live ? (
+                  <div className="participants">
+                    <span>Your microphone</span>
+                    <span className="meta-divider" />
+                    <span>Not saved</span>
+                  </div>
+                ) : (
+                  <div className="participants">
+                    <span className="avatar">R</span>
+                    <span className="avatar second">A</span>
+                    <span>Robin & Alex</span>
+                    <span className="meta-divider" />
+                    <span>Fictional demo</span>
+                  </div>
+                )}
               </div>
               <button
                 ref={exportButton}
                 className="secondary-button export-button"
                 onClick={prepareExport}
-                disabled={busy}
+                disabled={busy || state.live}
+                title={
+                  state.live
+                    ? 'Live sessions are not saved or exported.'
+                    : undefined
+                }
               >
                 <ArrowUpRight size={16} />
                 Export
@@ -443,23 +503,42 @@ function Notebook() {
                 <span className={`status-dot ${state.status}`} />
                 <div>
                   <strong>
-                    {state.status === 'running'
-                      ? 'Demo in progress'
-                      : state.status === 'paused'
-                        ? 'Demo paused'
-                        : state.status === 'ended'
-                          ? 'Demo finished'
-                          : 'Ready when you are'}
+                    {state.live
+                      ? live
+                        ? 'Live session in progress'
+                        : 'Live session ended'
+                      : state.status === 'running'
+                        ? 'Demo in progress'
+                        : state.status === 'paused'
+                          ? 'Demo paused'
+                          : state.status === 'ended'
+                            ? 'Demo finished'
+                            : 'Ready when you are'}
                   </strong>
-                  <span>Scripted conversation · separate from microphone</span>
+                  <span>
+                    {state.live
+                      ? 'Your microphone · transcribed on this device · not saved'
+                      : 'Scripted conversation · separate from microphone'}
+                  </span>
                 </div>
               </div>
               <div className="session-actions">
                 <span className="session-clock">
                   {clockTime(state.elapsedMs)}
-                  <span> / {clockTime(state.durationMs)}</span>
+                  {!state.live && <span> / {clockTime(state.durationMs)}</span>}
                 </span>
-                {active ? (
+                {live ? (
+                  <button
+                    className="secondary-button"
+                    disabled={busy}
+                    onClick={() =>
+                      void run(() => bridge.command('stop_live_session'))
+                    }
+                  >
+                    <Square size={14} />
+                    Stop live session
+                  </button>
+                ) : active ? (
                   <>
                     <button
                       className="secondary-button"
@@ -492,19 +571,42 @@ function Notebook() {
                     </button>
                   </>
                 ) : (
-                  <button
-                    className="primary-button"
-                    disabled={busy}
-                    onClick={() =>
-                      void run(() => {
-                        setNotice('');
-                        return bridge.command('start_demo');
-                      })
-                    }
-                  >
-                    <Play size={15} />
-                    {state.status === 'ended' ? 'Replay demo' : 'Try demo'}
-                  </button>
+                  <>
+                    {liveStatus?.available && (
+                      <button
+                        className="secondary-button"
+                        disabled={busy || microphone.active}
+                        title={
+                          microphone.active
+                            ? 'Stop the microphone check first.'
+                            : undefined
+                        }
+                        onClick={() =>
+                          void run(() => {
+                            setNotice('');
+                            return bridge.command('start_live_session');
+                          })
+                        }
+                      >
+                        Start live session
+                      </button>
+                    )}
+                    <button
+                      className="primary-button"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(() => {
+                          setNotice('');
+                          return bridge.command('start_demo');
+                        })
+                      }
+                    >
+                      <Play size={15} />
+                      {state.status === 'ended' && !state.live
+                        ? 'Replay demo'
+                        : 'Try demo'}
+                    </button>
+                  </>
                 )}
               </div>
             </section>
@@ -823,12 +925,33 @@ function Notebook() {
             </section>
             <section className="setting">
               <div>
+                <h2>Live transcription</h2>
+                <p>
+                  Start live session in the notebook to get questions from what
+                  your microphone hears. A speech model transcribes on this
+                  device. Audio is not recorded, and other apps’ audio is not
+                  captured. The transcript stays in memory until you start
+                  another session or close the app; it is never saved, exported,
+                  or sent.
+                </p>
+                <p className="small muted" role="status">
+                  {!liveStatus
+                    ? 'Checking…'
+                    : liveStatus.available
+                      ? 'Ready on this device.'
+                      : liveStatus.reason}
+                </p>
+              </div>
+            </section>
+            <section className="setting">
+              <div>
                 <h2>Your data in this prototype</h2>
                 <p>
                   The optional microphone check retains no audio and does not
-                  transcribe. Notes exist in memory until you close the app.
-                  Exports contain exactly the text you review and are saved to
-                  the location you choose.
+                  transcribe. A live session’s transcript is kept in memory only
+                  and cannot be exported. Notes exist in memory until you close
+                  the app. Exports contain exactly the text you review and are
+                  saved to the location you choose.
                 </p>
               </div>
               <ShieldCheck size={24} />
@@ -836,9 +959,9 @@ function Notebook() {
             <section className="coming-next">
               <h2>What comes next</h2>
               <p>
-                Local Whisper transcription, full meeting audio, and a notebook
-                that remembers your sessions. Integrations with other
-                note-takers are planned for later.
+                Downloading the speech model during setup, full meeting audio,
+                and a notebook that remembers your sessions. Integrations with
+                other note-takers are planned for later.
               </p>
               <p className="small muted">
                 These features are not available in this prototype.

@@ -17,6 +17,9 @@ struct Runtime {
     engine: Engine,
     last_tick: Instant,
     export: Option<String>,
+    /// The running live session, if any. Stop it outside this lock, because
+    /// delivering transcript lines takes the lock.
+    live: Option<live::LiveSession>,
 }
 
 impl Runtime {
@@ -68,20 +71,65 @@ fn snapshot(
     .map_err(|_| "Could not read the demo.".into())
 }
 
+/// A fresh engine that keeps the person's display choices and notes.
+fn carry_over(previous: &Engine, mut next: Engine) -> Engine {
+    let state = &previous.state;
+    next.set_sensitivity(state.sensitivity);
+    next.set_overlay(state.overlay_enabled);
+    next.set_companion_position(state.companion_position);
+    next.set_question_size(state.question_size);
+    next.state.notes = state.notes.clone();
+    next
+}
+
 #[tauri::command]
 fn start_demo(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
-    change(&app, &state, Engine::start)
+    change(&app, &state, |e| {
+        // After a live session, the demo starts from its script again.
+        if e.state.live && !matches!(e.state.status, engine::Status::Running) {
+            *e = carry_over(e, Engine::default());
+        }
+        e.start()
+    })
 }
 #[tauri::command]
 fn pause_demo(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
-    change(&app, &state, Engine::pause)
+    change(&app, &state, |e| {
+        if e.state.live {
+            return Err("A live session cannot be paused. Stop it instead.".into());
+        }
+        e.pause()
+    })
 }
 #[tauri::command]
 fn resume_demo(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
-    change(&app, &state, Engine::resume)
+    change(&app, &state, |e| {
+        if e.state.live {
+            return Err("A live session cannot be resumed. Start a new one.".into());
+        }
+        e.resume()
+    })
 }
 #[tauri::command]
-fn end_demo(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
+fn end_demo(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    microphone: tauri::State<microphone::Controller>,
+) -> Result<(), String> {
+    // End during a live session stops capture and discards transcription in
+    // progress; nothing more reaches the ended session.
+    if let Some(session_runner) = state
+        .0
+        .lock()
+        .ok()
+        .and_then(|mut runtime| runtime.live.take())
+    {
+        let (handle, controller) = (app.clone(), microphone.inner().clone());
+        tauri::async_runtime::spawn_blocking(move || {
+            microphone::stop_blocking(&handle, controller);
+            session_runner.end();
+        });
+    }
     change(&app, &state, |e| {
         e.end();
         Ok(())
@@ -164,6 +212,11 @@ fn export_preview(state: tauri::State<AppState>) -> Result<String, String> {
         .0
         .lock()
         .map_err(|_| "Could not prepare the export.")?;
+    // Live transcripts stay in memory only; this version never saves them.
+    if runtime.engine.state.live {
+        runtime.export = None;
+        return Err("Live sessions are not saved or exported.".into());
+    }
     let markdown = runtime.engine.markdown();
     runtime.export = Some(markdown.clone());
     Ok(markdown)
@@ -202,6 +255,213 @@ async fn export_markdown(
     .map_err(|_| "Could not open the save dialog.")?
 }
 
+/// Where the local speech model is expected: `TALKQTE_WHISPER_MODEL`, or the
+/// app's data folder. Nothing is downloaded here.
+fn model_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    if let Some(path) = std::env::var_os("TALKQTE_WHISPER_MODEL") {
+        return Some(path.into());
+    }
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|dir| dir.join("models").join("ggml-tiny.en.bin"))
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveStatus {
+    available: bool,
+    reason: Option<&'static str>,
+}
+
+#[tauri::command]
+fn live_status(app: tauri::AppHandle) -> LiveStatus {
+    let reason = if !cfg!(feature = "local-whisper") {
+        Some("This build does not include local transcription.")
+    } else if !model_path(&app).is_some_and(|path| path.is_file()) {
+        Some("The local speech model is not installed.")
+    } else {
+        None
+    };
+    LiveStatus {
+        available: reason.is_none(),
+        reason,
+    }
+}
+
+/// Starts a live session: the microphone feeds local transcription, and the
+/// cue engine runs on what is said. Nothing is recorded, stored, or sent.
+#[tauri::command]
+async fn start_live_session(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    microphone: tauri::State<'_, microphone::Controller>,
+) -> Result<(), String> {
+    #[cfg(not(feature = "local-whisper"))]
+    {
+        let _ = (app, state, microphone);
+        Err("This build does not include local transcription.".into())
+    }
+    #[cfg(feature = "local-whisper")]
+    {
+        let model = model_path(&app)
+            .filter(|path| path.is_file())
+            .ok_or("The local speech model is not installed.")?;
+        if state.0.lock().is_ok_and(|runtime| runtime.live.is_some()) {
+            return Err("A live session is already running.".into());
+        }
+        // Load the model before capture starts, so a bad file is reported
+        // here and the microphone never opens for nothing.
+        let recognizer = tauri::async_runtime::spawn_blocking(move || {
+            transcription::whisper::LocalWhisper::load(&model, 4)
+        })
+        .await
+        .map_err(|_| "Could not load the local speech model.")?
+        .map_err(|_| "Could not load the local speech model.")?;
+        let session = {
+            let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
+            if runtime.live.is_some() {
+                return Err("A live session is already running.".into());
+            }
+            runtime.sync();
+            if matches!(
+                runtime.engine.state.status,
+                engine::Status::Running | engine::Status::Paused
+            ) {
+                return Err(if runtime.engine.state.live {
+                    "A live session is already running.".into()
+                } else {
+                    "End the demo before starting a live session.".into()
+                });
+            }
+            // Keep the person's display choices; start from a clean session.
+            let mut engine = carry_over(&runtime.engine, Engine::live());
+            engine.start()?;
+            runtime.export = None;
+            runtime.engine = engine;
+            runtime.last_tick = Instant::now();
+            publish(&app, &runtime);
+            runtime.engine.session()
+        };
+        let handle = app.clone();
+        let controller = microphone.inner().clone();
+        let stopper = controller.clone();
+        let is_current = move |runtime: &Runtime| {
+            runtime.engine.session() == session
+                && runtime.engine.state.live
+                && runtime.engine.state.status == engine::Status::Running
+        };
+        let on_tap: microphone::OnTap = Box::new(move |chunker| {
+            // Line times count from when capture began on the session clock.
+            let started_at = handle
+                .state::<AppState>()
+                .0
+                .lock()
+                .ok()
+                .and_then(|mut runtime| {
+                    runtime.sync();
+                    is_current(&runtime).then_some(runtime.engine.state.elapsed_ms)
+                });
+            let Some(started_at) = started_at else {
+                microphone::stop_blocking(&handle, stopper);
+                return;
+            };
+            let sink_app = handle.clone();
+            let session_runner = live::LiveSession::start(
+                chunker,
+                session,
+                started_at,
+                recognizer,
+                move |session, segment| {
+                    let state = sink_app.state::<AppState>();
+                    let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
+                    runtime.sync();
+                    let result = runtime.engine.ingest(session, segment);
+                    publish(&sink_app, &runtime);
+                    result
+                },
+            );
+            // Keep the session only if it is still the current one.
+            let unused = handle
+                .state::<AppState>()
+                .0
+                .lock()
+                .ok()
+                .and_then(|mut runtime| {
+                    if is_current(&runtime) && runtime.live.is_none() {
+                        runtime.live = Some(session_runner);
+                        None
+                    } else {
+                        Some(session_runner)
+                    }
+                });
+            if let Some(unused) = unused {
+                microphone::stop_blocking(&handle, stopper);
+                unused.end();
+            }
+        });
+        let started = microphone::start(app.clone(), controller, Some((3_000, on_tap))).await;
+        if started.is_err() {
+            // Capture never began, so the live session ends with nothing in it.
+            let _ = change(&app, &state, |e| {
+                if e.session() == session {
+                    e.end();
+                }
+                Ok(())
+            });
+        }
+        started
+    }
+}
+
+/// Stops a live session: capture stops first, queued audio is transcribed,
+/// then the session ends.
+#[tauri::command]
+async fn stop_live_session(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    microphone: tauri::State<'_, microphone::Controller>,
+) -> Result<(), String> {
+    let controller = microphone.inner().clone();
+    let stopper = app.clone();
+    tauri::async_runtime::spawn_blocking(move || microphone::stop_blocking(&stopper, controller))
+        .await
+        .map_err(|_| "Could not stop the microphone. Try again.")?;
+    let session_runner = state
+        .0
+        .lock()
+        .ok()
+        .and_then(|mut runtime| runtime.live.take());
+    if let Some(session_runner) = session_runner {
+        tauri::async_runtime::spawn_blocking(move || session_runner.stop())
+            .await
+            .map_err(|_| "Could not finish transcription.")?;
+    }
+    change(&app, &state, |e| {
+        e.end();
+        Ok(())
+    })
+}
+
+/// Stop microphone during a live session stops the whole session, so the
+/// notebook never shows a live session with nothing listening.
+#[tauri::command]
+async fn stop_microphone(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    microphone: tauri::State<'_, microphone::Controller>,
+) -> Result<(), String> {
+    let live = state.0.lock().is_ok_and(|runtime| {
+        runtime.live.is_some()
+            || (runtime.engine.state.live && runtime.engine.state.status == engine::Status::Running)
+    });
+    if live {
+        stop_live_session(app, state, microphone).await
+    } else {
+        microphone::stop_microphone(app, microphone.inner().clone()).await
+    }
+}
+
 pub fn run() {
     let context = tauri::generate_context!();
     #[cfg(target_os = "macos")]
@@ -212,6 +472,7 @@ pub fn run() {
             engine: Engine::default(),
             last_tick: Instant::now(),
             export: None,
+            live: None,
         })))
         .manage(companion::WindowState::default())
         .manage(microphone::Controller::default())
@@ -230,9 +491,12 @@ pub fn run() {
             set_overlay,
             export_preview,
             export_markdown,
+            live_status,
+            start_live_session,
+            stop_live_session,
             microphone::microphone_snapshot,
             microphone::start_microphone,
-            microphone::stop_microphone
+            stop_microphone
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

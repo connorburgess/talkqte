@@ -109,6 +109,21 @@ test('search has a recoverable empty state and settings explain the prototype', 
   ).toBeVisible();
 });
 
+test('the browser preview never offers a live microphone session', async ({
+  page,
+}) => {
+  await expect(
+    page.getByRole('button', { name: 'Start live session' }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Live transcription' }),
+  ).toBeVisible();
+  await expect(
+    page.getByText('Available in the desktop app.', { exact: true }),
+  ).toBeVisible();
+});
+
 test('narrow layout keeps the demo and question controls usable with reduced motion', async ({
   page,
 }) => {

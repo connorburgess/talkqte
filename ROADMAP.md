@@ -58,7 +58,7 @@ This track runs alongside the feature milestones below. The goal includes a depe
 
 The [native validation record](docs/native-validation.md) covers a limited macOS notebook keyboard smoke check and lists the remaining companion acceptance checks. It is not a complete accessibility or meeting-app compatibility pass.
 
-The question demo plays synthetic text. Separate microphone monitoring measures signal activity only; it does not supply live prompts or transcribe audio. The prototype does not capture system audio, persist a notebook, or integrate with other services.
+The question demo plays synthetic text. Separate microphone monitoring measures signal activity only. In developer builds, a live session transcribes the microphone locally and runs the phrase-based questions on it; it has not been checked on real hardware or in a real meeting. The prototype does not capture system audio, persist a notebook, or integrate with other services.
 
 ## Next product validation
 
@@ -81,7 +81,7 @@ See the [review findings, current gaps, and experiment](docs/research.md). No us
 Prove that audio capture, local transcription, and the floating prompt can coexist with a real meeting app before expanding the dashboard.
 
 - [ ] Start and stop microphone and system-audio capture with explicit permission.
-- [x] Transcribe a synthetic meeting locally without network access after model setup. A real-time developer replay of a fictional two-voice clip with a feature-gated Whisper backend; not yet wired into the app or capture.
+- [x] Transcribe a synthetic meeting locally without network access after model setup. A real-time developer replay of a fictional two-voice clip with a feature-gated Whisper backend. A developer build routes the microphone into a live session; system audio is not captured.
 - [x] Measure transcript delay, memory growth, CPU use, and dropped audio. A 10-minute synthetic replay measured these ([results](docs/local-transcription.md#sustained-session)); live capture and the companion are not yet included.
 - [ ] Show a dismissible prompt without taking keyboard focus from the meeting.
 - [ ] Confirm stop/pause and device-change behavior, including headphones.

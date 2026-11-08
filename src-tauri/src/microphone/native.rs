@@ -50,6 +50,7 @@ fn input<T>(
     device: &cpal::Device,
     config: cpal::StreamConfig,
     meter: Arc<Meter>,
+    tap: Option<crate::audio_tap::TapInput>,
 ) -> Result<Box<dyn CaptureStream>, Failure>
 where
     T: cpal::SizedSample,
@@ -58,10 +59,17 @@ where
     use cpal::traits::DeviceTrait;
     use std::{sync::atomic::Ordering, time::Duration};
     let failures = meter.clone();
+    let mut tap = tap;
     device
         .build_input_stream(
             config,
-            move |data: &[T], _| meter.observe(data.iter().map(|sample| sample.to_sample::<f32>())),
+            // Both the meter and the tap are allocation-free and wait-free.
+            move |data: &[T], _| {
+                meter.observe(data.iter().map(|sample| sample.to_sample::<f32>()));
+                if let Some(tap) = tap.as_mut() {
+                    tap.push_interleaved(data.iter().map(|sample| sample.to_sample::<f32>()));
+                }
+            },
             move |_| failures.failed.store(true, Ordering::Release),
             Some(Duration::from_secs(2)),
         )
@@ -70,7 +78,10 @@ where
 }
 
 #[cfg(target_os = "macos")]
-pub(super) fn build_stream(meter: Arc<Meter>) -> Result<Box<dyn CaptureStream>, Failure> {
+pub(super) fn build_stream(
+    meter: Arc<Meter>,
+    tap_chunk_ms: Option<u64>,
+) -> Result<(Box<dyn CaptureStream>, Option<crate::audio_tap::Chunker>), Failure> {
     use cpal::traits::{DeviceTrait, HostTrait};
     let device = cpal::default_host()
         .default_input_device()
@@ -78,26 +89,39 @@ pub(super) fn build_stream(meter: Arc<Meter>) -> Result<Box<dyn CaptureStream>, 
     let supported = device.default_input_config().map_err(|_| Failure::Device)?;
     let format = supported.sample_format();
     let config = supported.config();
+    // For a live session, the callback also feeds a tap toward transcription.
+    let (tap, chunker) = match tap_chunk_ms {
+        Some(chunk_ms) => {
+            let (tap, chunker) =
+                crate::audio_tap::tap(config.sample_rate, config.channels, chunk_ms);
+            (Some(tap), Some(chunker))
+        }
+        None => (None, None),
+    };
     // Use the current default input device and its native format. No loopback,
     // device-name telemetry, file output, or automatic device switching.
-    match format {
-        cpal::SampleFormat::I8 => input::<i8>(&device, config, meter),
-        cpal::SampleFormat::I16 => input::<i16>(&device, config, meter),
-        cpal::SampleFormat::I24 => input::<cpal::I24>(&device, config, meter),
-        cpal::SampleFormat::I32 => input::<i32>(&device, config, meter),
-        cpal::SampleFormat::I64 => input::<i64>(&device, config, meter),
-        cpal::SampleFormat::U8 => input::<u8>(&device, config, meter),
-        cpal::SampleFormat::U16 => input::<u16>(&device, config, meter),
-        cpal::SampleFormat::U24 => input::<cpal::U24>(&device, config, meter),
-        cpal::SampleFormat::U32 => input::<u32>(&device, config, meter),
-        cpal::SampleFormat::U64 => input::<u64>(&device, config, meter),
-        cpal::SampleFormat::F32 => input::<f32>(&device, config, meter),
-        cpal::SampleFormat::F64 => input::<f64>(&device, config, meter),
+    let stream = match format {
+        cpal::SampleFormat::I8 => input::<i8>(&device, config, meter, tap),
+        cpal::SampleFormat::I16 => input::<i16>(&device, config, meter, tap),
+        cpal::SampleFormat::I24 => input::<cpal::I24>(&device, config, meter, tap),
+        cpal::SampleFormat::I32 => input::<i32>(&device, config, meter, tap),
+        cpal::SampleFormat::I64 => input::<i64>(&device, config, meter, tap),
+        cpal::SampleFormat::U8 => input::<u8>(&device, config, meter, tap),
+        cpal::SampleFormat::U16 => input::<u16>(&device, config, meter, tap),
+        cpal::SampleFormat::U24 => input::<cpal::U24>(&device, config, meter, tap),
+        cpal::SampleFormat::U32 => input::<u32>(&device, config, meter, tap),
+        cpal::SampleFormat::U64 => input::<u64>(&device, config, meter, tap),
+        cpal::SampleFormat::F32 => input::<f32>(&device, config, meter, tap),
+        cpal::SampleFormat::F64 => input::<f64>(&device, config, meter, tap),
         _ => Err(Failure::Unsupported),
-    }
+    }?;
+    Ok((stream, chunker))
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(super) fn build_stream(_meter: Arc<Meter>) -> Result<Box<dyn CaptureStream>, Failure> {
+pub(super) fn build_stream(
+    _meter: Arc<Meter>,
+    _tap_chunk_ms: Option<u64>,
+) -> Result<(Box<dyn CaptureStream>, Option<crate::audio_tap::Chunker>), Failure> {
     Err(Failure::Unsupported)
 }

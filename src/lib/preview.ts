@@ -1,12 +1,13 @@
 // Browser-only visual development adapter. This is not the desktop session engine.
 import demo from '../demo.json';
-import type { Commands, Cue, Snapshot } from './types';
+import type { Commands, Cue, LiveStatus, Snapshot } from './types';
 
 const state: Snapshot = {
   revision: 0,
   title: demo.title,
   description: demo.description,
   status: 'ready',
+  live: false,
   elapsedMs: 0,
   durationMs: demo.durationMs,
   transcript: [],
@@ -122,6 +123,9 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
       state.cue = null;
       state.status = 'running';
       break;
+    case 'start_live_session':
+    case 'stop_live_session':
+      throw new Error('Live sessions are available in the desktop app.');
     case 'pause_demo':
       state.status = 'paused';
       break;
@@ -177,6 +181,10 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
       break;
   }
   emit();
+}
+// The browser preview never opens the microphone or transcribes.
+export function liveStatus(): LiveStatus {
+  return { available: false, reason: 'Available in the desktop app.' };
 }
 export function exportPreview() {
   reviewedExport = `# ${state.title}\n\nFictional demo transcript; not derived from microphone audio.\n\n## Notes\n\n${state.notes}\n\n## Saved questions\n\n${state.saved.map((cue) => `- ${cue.question}\n  Context: ${cue.evidence}`).join('\n') || 'No saved questions.'}\n\n## Demo transcript\n\n${state.transcript.map((segment) => `**${segment.speaker}:** ${segment.text}`).join('\n\n')}\n`;

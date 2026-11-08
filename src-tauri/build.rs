@@ -18,6 +18,9 @@ fn main() {
             "microphone_snapshot",
             "start_microphone",
             "stop_microphone",
+            "live_status",
+            "start_live_session",
+            "stop_live_session",
         ]),
     ))
     .expect("Tauri build configuration failed");

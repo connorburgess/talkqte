@@ -197,6 +197,13 @@ impl Controller {
         Ok((state.generation, state.snapshot.clone()))
     }
 
+    /// True while this start's stream is the active capture.
+    pub fn is_capturing(&self, generation: u64) -> bool {
+        self.0
+            .lock()
+            .is_ok_and(|state| state.generation == generation && state.capture.is_some())
+    }
+
     fn is_starting(&self, generation: u64) -> bool {
         self.0.lock().is_ok_and(|state| {
             state.generation == generation && state.snapshot.status == Status::Starting
@@ -357,6 +364,14 @@ fn publish_and_cleanup(app: &tauri::AppHandle, controller: Controller, update: U
     }
 }
 
+/// Stops capture from a worker thread (for a live session ending). Does
+/// nothing if the microphone is already off.
+pub fn stop_blocking(app: &tauri::AppHandle, controller: Controller) {
+    if let Ok(update) = controller.request_stop() {
+        publish_and_cleanup(app, controller, update);
+    }
+}
+
 #[tauri::command]
 pub async fn microphone_snapshot(state: tauri::State<'_, Controller>) -> Result<Snapshot, String> {
     let controller = state.inner().clone();
@@ -370,14 +385,31 @@ pub async fn start_microphone(
     app: tauri::AppHandle,
     state: tauri::State<'_, Controller>,
 ) -> Result<(), String> {
-    let controller = state.inner().clone();
+    start(app, state.inner().clone(), None).await
+}
+
+/// Called with the tap's chunker once capture has really started.
+pub type OnTap = Box<dyn FnOnce(crate::audio_tap::Chunker) + Send>;
+
+/// Starts capture. With `tap`, the callback also feeds a transcription tap
+/// with chunks of the given length, and `OnTap` receives its chunker only if
+/// this start is still current when the stream begins.
+pub async fn start(
+    app: tauri::AppHandle,
+    controller: Controller,
+    tap: Option<(u64, OnTap)>,
+) -> Result<(), String> {
     let preparer = controller.clone();
     let (generation, snapshot) =
         tauri::async_runtime::spawn_blocking(move || preparer.begin_start())
             .await
             .map_err(|_| "Could not start the microphone check.")??;
     publish(&app, &snapshot);
-    // Only this explicit main-window command can request microphone access.
+    // The permission callback may be shared between threads, so the one-shot
+    // tap hand-off is taken out of a lock exactly once.
+    let chunk_ms = tap.as_ref().map(|(chunk_ms, _)| *chunk_ms);
+    let on_tap = Arc::new(Mutex::new(tap.map(|(_, on_tap)| on_tap)));
+    // Only an explicit main-window command can request microphone access.
     // Neither device locks nor authorization callbacks run on the UI thread.
     tauri::async_runtime::spawn_blocking(move || {
         if !controller.is_starting(generation) {
@@ -386,16 +418,27 @@ pub async fn start_microphone(
         native::request_permission(move |permission| {
             let controller = controller.clone();
             let app = app.clone();
+            let on_tap = on_tap.clone();
             tauri::async_runtime::spawn_blocking(move || {
                 if !controller.is_starting(generation) {
                     return;
                 }
+                let on_tap = on_tap.lock().ok().and_then(|mut slot| slot.take());
                 let meter = Arc::new(Meter::default());
-                let stream = permission.and_then(|()| native::build_stream(meter.clone()));
+                let built = permission.and_then(|()| native::build_stream(meter.clone(), chunk_ms));
+                let (stream, chunker) = match built {
+                    Ok((stream, chunker)) => (Ok(stream), chunker),
+                    Err(failure) => (Err(failure), None),
+                };
                 if let Some(update) =
                     controller.complete_start(generation, meter, stream, Instant::now())
                 {
-                    publish_and_cleanup(&app, controller, update);
+                    publish_and_cleanup(&app, controller.clone(), update);
+                }
+                if let (Some(chunker), Some(on_tap)) = (chunker, on_tap) {
+                    if controller.is_capturing(generation) {
+                        on_tap(chunker);
+                    }
                 }
             });
         });
@@ -403,12 +446,9 @@ pub async fn start_microphone(
     Ok(())
 }
 
-#[tauri::command]
-pub async fn stop_microphone(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, Controller>,
-) -> Result<(), String> {
-    let controller = state.inner().clone();
+/// Stops the microphone check. The `stop_microphone` command in `lib.rs`
+/// calls this, or stops the live session when one is running.
+pub async fn stop_microphone(app: tauri::AppHandle, controller: Controller) -> Result<(), String> {
     let stopper = controller.clone();
     let update = tauri::async_runtime::spawn_blocking(move || stopper.request_stop())
         .await

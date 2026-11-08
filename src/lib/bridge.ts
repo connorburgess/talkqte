@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { Commands, CueSnapshot, Snapshot } from './types';
+import type { Commands, CueSnapshot, LiveStatus, Snapshot } from './types';
 
 export const desktop = isTauri();
 // The preview adapter is for browser development only. The desktop always uses Rust.
@@ -35,6 +35,11 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
   });
   queue = result.catch(() => {});
   return result;
+}
+
+export async function liveStatus() {
+  if (preview) return (await preview).liveStatus();
+  return invoke<LiveStatus>('live_status');
 }
 
 export async function exportPreview() {

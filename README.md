@@ -22,17 +22,17 @@ AI is intended to select relevant context, decide whether a cue would help, and 
 
 ## Where it stands today
 
-**Early development.** The app runs from source on macOS, but it does not yet understand a live meeting or generate AI cues. There is no supported public release.
+**Early development.** The app runs from source on macOS, but it does not yet understand a live meeting or generate AI cues. A developer build can transcribe your own microphone on the device and apply the same phrase-based questions; it does not hear the other side of a call. There is no supported public release.
 
 | Working prototype                                                | Still to build and validate                                              |
 | ---------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | Fictional conversation replay with fixed, phrase-based questions | AI-selected context and prompts grounded in the conversation             |
 | Floating companion, source disclosure, pause, and dismissal      | Useful timing, suppression of answered questions, and stale-cue handling |
 | Phrase-based withdrawal when a later line answers the question   | Recognizing paraphrased answers, redundant cues, and topic changes       |
-| Separate, opt-in macOS microphone activity indicator             | Both sides of meeting audio and live transcription                       |
+| Opt-in microphone activity check; local live session (dev build) | Both sides of meeting audio, model setup, and real-meeting accuracy      |
 | In-memory demo notes and reviewed Markdown export                | Reliable meeting use, processing choices, and install/update support     |
 
-The microphone indicator measures signal activity only. It does not transcribe, record, or feed the demo. No note-taker integration is implemented. See [current privacy behavior](PRIVACY.md) and the [native validation record](docs/native-validation.md) for the limits of existing checks.
+The microphone indicator measures signal activity only. It does not transcribe, record, or feed the demo. A live session is separate: see [Live session](#live-session-developer-build). No note-taker integration is implemented. See [current privacy behavior](PRIVACY.md) and the [native validation record](docs/native-validation.md) for the limits of existing checks.
 
 ## Where we are heading
 
@@ -53,7 +53,7 @@ These are development milestones, not announced release dates or current capabil
 
 ## Run the current prototype
 
-The stack is Rust, Tauri 2, React, and TypeScript. Local Whisper is planned for transcription; it is not wired into the app. The AI cue runtime is still being evaluated, and a lab model is not automatically the production choice.
+The stack is Rust, Tauri 2, React, and TypeScript. Local Whisper transcription is available only in a developer build with a manually installed model. The AI cue runtime is still being evaluated, and a lab model is not automatically the production choice.
 
 On macOS, install Node.js 22, Rust 1.97.1, and Xcode Command Line Tools. See [Tauri's prerequisites](https://v2.tauri.app/start/prerequisites/).
 
@@ -78,6 +78,18 @@ Choose **Start microphone** explicitly and grant macOS permission if prompted. *
 `APPLE_SIGNING_IDENTITY=- npm run tauri -- build --debug --bundles app` builds an ad-hoc-signed local development app. It is not a Developer ID-signed or notarized release.
 
 </details>
+
+## Live session (developer build)
+
+A live session transcribes your microphone on this Mac and runs the phrase-based questions on what it hears. It is off in ordinary builds. To try it, build with the `local-whisper` feature (needs CMake), and install the checked `tiny.en` model as described in [local transcription](docs/local-transcription.md#run-the-check), either at `~/Library/Application Support/com.talkqte.desktop/models/ggml-tiny.en.bin` or at a path given in `TALKQTE_WHISPER_MODEL`:
+
+```sh
+npm run tauri -- dev --features local-whisper
+```
+
+Choose **Start live session** in the notebook and grant microphone permission if asked. **Stop live session**, in the notebook or companion, releases the microphone, finishes transcribing the last few seconds, and ends the session; **Stop microphone** does the same. Lines arrive about 3 seconds after they are spoken. Audio is not recorded. The transcript stays in memory until you start another session or quit, and a live session cannot be exported. Other apps' audio, including the other side of a call, is not captured. Settings shows whether this build and model support a live session.
+
+This has been checked with synthetic audio and a scripted recognizer in tests. A live session on real hardware, real-meeting accuracy, and the setup download in the [model delivery plan](docs/model-delivery.md) are still unchecked or unbuilt.
 
 ## Fictional cue lab
 

@@ -109,6 +109,8 @@ pub struct Snapshot {
     pub overlay_enabled: bool,
     pub companion_position: CompanionPosition,
     pub question_size: QuestionSize,
+    /// True for a live session fed by transcription rather than the demo.
+    pub live: bool,
 }
 
 // The floating window never receives the notebook or full transcript.
@@ -117,6 +119,7 @@ pub struct Snapshot {
 pub struct CueSnapshot {
     pub revision: u64,
     pub status: Status,
+    pub live: bool,
     pub cue: Option<Cue>,
     pub overlay_enabled: bool,
     pub companion_position: CompanionPosition,
@@ -179,6 +182,7 @@ impl Engine {
                 overlay_enabled: true,
                 companion_position: CompanionPosition::BottomRight,
                 question_size: QuestionSize::Standard,
+                live: demo.segments.is_empty() && demo.duration_ms == u64::MAX,
             },
             demo,
             generation: 0,
@@ -196,6 +200,7 @@ impl Engine {
         CueSnapshot {
             revision: self.state.revision,
             status: self.state.status,
+            live: self.state.live,
             cue: self.state.cue.clone(),
             overlay_enabled: self.state.overlay_enabled,
             companion_position: self.state.companion_position,
