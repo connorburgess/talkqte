@@ -73,3 +73,31 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
       - run: npm run tauri -- build --debug --bundles app
+
+  windows:
+    name: Windows Arm Rust and desktop build
+    runs-on: windows-11-arm
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Install the pinned Rust toolchain
+        shell: pwsh
+        run: |
+          if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
+            Invoke-WebRequest https://static.rust-lang.org/rustup/dist/aarch64-pc-windows-msvc/rustup-init.exe -OutFile rustup-init.exe
+            .\rustup-init.exe -y --no-modify-path --profile minimal --default-toolchain none
+            "$env:USERPROFILE\.cargo\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+            $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
+          }
+          rustup toolchain install 1.97.1 --profile minimal --component clippy
+          rustc +1.97.1 -vV
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+      - run: npm run tauri -- build --debug --no-bundle
