@@ -448,6 +448,50 @@ svg {
   border-radius: var(--radius-panel);
   background: #f0f2e9;
 }
+.microphone-panel {
+  margin: 20px clamp(16px, 3vw, 44px) 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: #f0f2e9;
+}
+.microphone-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.microphone-heading > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.microphone-heading strong {
+  font-size: 16px;
+}
+.microphone-status,
+.microphone-activity {
+  color: #52624d;
+  font-size: 14px;
+}
+.microphone-activity {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.microphone-panel p {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: #52624d;
+}
+.microphone-panel .microphone-message {
+  color: #85432e;
+}
+.status-dot.active {
+  background: #326542;
+}
 .session-state {
   display: flex;
   align-items: center;
@@ -958,6 +1002,15 @@ svg {
 .companion-status strong {
   font-size: 15px;
   font-weight: 750;
+}
+.companion-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.companion-title .status-dot {
+  width: 6px;
+  height: 6px;
 }
 .companion-status span {
   color: #c5d5c7;

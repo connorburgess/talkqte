@@ -16,7 +16,7 @@ export function Question({
     <section className="question" aria-label="Suggested question">
       <div className="question-top">
         <span>
-          <MessageCircle size={16} /> {cue.kind}
+          <MessageCircle size={16} /> Demo question · {cue.kind}
         </span>
       </div>
       <h2 aria-live="polite">{cue.question}</h2>

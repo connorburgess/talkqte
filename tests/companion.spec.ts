@@ -30,7 +30,7 @@ test.beforeEach(async ({ page }) => {
   await page.clock.install();
   await page.goto('/?window=cue');
   await expect(
-    page.getByText('Start the demo from your notebook.'),
+    page.getByText('Start the demo or microphone from your notebook.'),
   ).toBeVisible();
   await sessionAction(page, 'start_demo');
 });
@@ -39,7 +39,7 @@ test('companion stays compact between questions and preserves a paused question'
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 76 });
-  await expect(page.getByRole('status')).toHaveText('Demo running · No audio');
+  await expect(page.getByRole('status')).toHaveText('Demo running · Scripted');
   await expect(page.getByRole('button', { name: 'Pause demo' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Pause demo' })).toHaveText(
     'Pause',
@@ -61,7 +61,7 @@ test('companion stays compact between questions and preserves a paused question'
   await page.getByRole('button', { name: 'Pause demo' }).click();
   await page.setViewportSize({ width: 320, height: 76 });
   await page.clock.runFor(30_000);
-  await expect(page.getByRole('status')).toHaveText('Demo paused · No audio');
+  await expect(page.getByRole('status')).toHaveText('Demo paused · Scripted');
   await expect(page.getByRole('button', { name: 'Resume demo' })).toHaveText(
     'Resume',
   );
@@ -134,5 +134,5 @@ test('questions expire quietly without requiring a response', async ({
   await expect(page.getByRole('button', { name: 'Pause demo' })).toHaveText(
     'Pause',
   );
-  await expect(page.getByRole('status')).toHaveText('Demo running · No audio');
+  await expect(page.getByRole('status')).toHaveText('Demo running · Scripted');
 });

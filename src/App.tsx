@@ -21,6 +21,8 @@ import {
 import * as bridge from './lib/bridge';
 import { clockTime, type CueSnapshot, type Snapshot } from './lib/types';
 import { Question } from './components/Question';
+import { MicrophoneControl } from './components/MicrophoneControl';
+import { microphoneLabel, useMicrophone } from './lib/microphone';
 
 const floating = new URLSearchParams(location.search).get('window') === 'cue';
 
@@ -68,8 +70,12 @@ function useSession<T extends CueSnapshot>() {
 
 function FloatingQuestion() {
   const { state, error, busy, run } = useSession<CueSnapshot>();
+  const microphone = useMicrophone();
+  const mic = microphone.state;
+  const microphoneControl = microphone.active || (!mic && !!microphone.error);
   const active =
-    state?.overlayEnabled && ['running', 'paused'].includes(state.status);
+    state?.overlayEnabled &&
+    (microphoneControl || ['running', 'paused'].includes(state.status));
   const paused = state?.status === 'paused';
   return (
     <main className="floating-surface" aria-label="Meeting companion">
@@ -78,24 +84,61 @@ function FloatingQuestion() {
           <>
             <header className="companion-bar">
               <div className="companion-status">
-                <strong>TalkQTE</strong>
+                <strong className="companion-title">
+                  {mic?.status === 'listening' && (
+                    <span
+                      className={`status-dot ${mic.activity}`}
+                      role="img"
+                      aria-label={
+                        mic.activity === 'active'
+                          ? 'Signal detected'
+                          : 'Quiet input'
+                      }
+                    />
+                  )}
+                  {microphoneControl ? 'Mic only' : 'TalkQTE'}
+                </strong>
                 <span role="status">
-                  {paused ? 'Demo paused' : 'Demo running'} · No audio
+                  {microphoneControl
+                    ? microphone.stopPending && mic?.status !== 'stopping'
+                      ? 'Stop requested…'
+                      : !mic
+                        ? 'Status unavailable'
+                        : microphoneLabel(mic)
+                    : paused
+                      ? 'Demo paused · Scripted'
+                      : 'Demo running · Scripted'}
                 </span>
               </div>
-              <button
-                className="companion-control"
-                aria-label={paused ? 'Resume demo' : 'Pause demo'}
-                title={paused ? 'Resume demo' : 'Pause demo'}
-                disabled={busy}
-                onClick={() =>
-                  void run(() =>
-                    bridge.command(paused ? 'resume_demo' : 'pause_demo'),
-                  )
-                }
-              >
-                <span>{paused ? 'Resume' : 'Pause'}</span>
-              </button>
+              {microphoneControl ? (
+                <button
+                  className="companion-control"
+                  aria-label="Stop microphone"
+                  title="Stop microphone"
+                  disabled={
+                    microphone.busy ||
+                    mic?.status === 'stopping' ||
+                    (mic?.status === 'error' && !mic.canStart)
+                  }
+                  onClick={() => void microphone.stop()}
+                >
+                  Stop mic
+                </button>
+              ) : (
+                <button
+                  className="companion-control"
+                  aria-label={paused ? 'Resume demo' : 'Pause demo'}
+                  title={paused ? 'Resume demo' : 'Pause demo'}
+                  disabled={busy}
+                  onClick={() =>
+                    void run(() =>
+                      bridge.command(paused ? 'resume_demo' : 'pause_demo'),
+                    )
+                  }
+                >
+                  <span>{paused ? 'Resume' : 'Pause'}</span>
+                </button>
+              )}
               <button
                 className="companion-control"
                 aria-label="Hide companion"
@@ -130,12 +173,12 @@ function FloatingQuestion() {
           <p className="floating-empty">
             {state?.overlayEnabled === false
               ? 'Companion hidden. Show it again in Settings.'
-              : 'Start the demo from your notebook.'}
+              : 'Start the demo or microphone from your notebook.'}
           </p>
         )}
-        {error && (
+        {(error || microphone.error) && (
           <p role="alert" className="floating-error">
-            {error}
+            {error || microphone.error}
           </p>
         )}
       </div>
@@ -145,6 +188,7 @@ function FloatingQuestion() {
 
 function Notebook() {
   const { state, error, setError, busy, run } = useSession<Snapshot>();
+  const microphone = useMicrophone();
   const [view, setView] = useState<'notebook' | 'saved' | 'settings'>(
     'notebook',
   );
@@ -241,7 +285,7 @@ function Notebook() {
             <p>
               A space to think.
               <br />
-              <span>This prototype captures no audio.</span>
+              <span>Microphone starts only when you choose.</span>
             </p>
           </div>
           <button
@@ -345,6 +389,7 @@ function Notebook() {
             {bridge.desktop ? 'Desktop prototype' : 'Browser preview'}
           </span>
         </header>
+        <MicrophoneControl microphone={microphone} />
         {error && (
           <div className="error-banner" role="alert">
             <span>{error}</span>
@@ -399,7 +444,7 @@ function Notebook() {
                           ? 'Demo finished'
                           : 'Ready when you are'}
                   </strong>
-                  <span>No audio captured</span>
+                  <span>Scripted conversation · separate from microphone</span>
                 </div>
               </div>
               <div className="session-actions">
@@ -545,7 +590,7 @@ function Notebook() {
                     className="transcript"
                   >
                     <p className="muted small">
-                      Scripted conversation · no microphone or system audio
+                      Scripted conversation · not from microphone audio
                     </p>
                     {state.transcript.length ? (
                       state.transcript.map((segment) => (
@@ -698,7 +743,7 @@ function Notebook() {
                 <h2>Floating question window</h2>
                 <p>
                   {bridge.desktop
-                    ? 'Keep a small companion at the bottom-right during the demo. It expands for a question and has pause and hide controls. You can always respond from the notebook.'
+                    ? 'Keep a small companion at the bottom-right during the demo or microphone check. Stop microphone controls take priority while it is on. Hide only hides the window; it does not stop the microphone.'
                     : 'Available in the desktop app. The browser preview shows questions inside the notebook.'}
                 </p>
                 <p className="small">
@@ -724,9 +769,10 @@ function Notebook() {
               <div>
                 <h2>Your data in this prototype</h2>
                 <p>
-                  No audio is captured. Notes and saved questions exist in
-                  memory until you close the app. Exports contain exactly the
-                  text you review and are saved to the location you choose.
+                  The optional microphone check retains no audio and does not
+                  transcribe. Notes and saved questions exist in memory until
+                  you close the app. Exports contain exactly the text you review
+                  and are saved to the location you choose.
                 </p>
               </div>
               <ShieldCheck size={24} />
@@ -734,8 +780,8 @@ function Notebook() {
             <section className="coming-next">
               <h2>What comes next</h2>
               <p>
-                Local Whisper transcription, microphone and meeting audio, and a
-                notebook that remembers your sessions. Integrations with other
+                Local Whisper transcription, full meeting audio, and a notebook
+                that remembers your sessions. Integrations with other
                 note-takers are planned for later.
               </p>
               <p className="small muted">

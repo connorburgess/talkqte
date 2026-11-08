@@ -2,6 +2,7 @@ mod companion;
 #[cfg(target_os = "macos")]
 mod companion_macos;
 mod engine;
+mod microphone;
 
 use engine::{Engine, Response, Sensitivity};
 use std::{sync::Mutex, time::Instant};
@@ -178,6 +179,7 @@ pub fn run() {
             export: None,
         })))
         .manage(companion::WindowState::default())
+        .manage(microphone::Controller::default())
         .invoke_handler(tauri::generate_handler![
             snapshot,
             start_demo,
@@ -189,7 +191,10 @@ pub fn run() {
             set_sensitivity,
             set_overlay,
             export_preview,
-            export_markdown
+            export_markdown,
+            microphone::microphone_snapshot,
+            microphone::start_microphone,
+            microphone::stop_microphone
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -209,11 +214,17 @@ pub fn run() {
                     if runtime.engine.state.revision != before {
                         publish(&handle, &runtime);
                     }
-                    let mode = companion::Mode::for_snapshot(&runtime.engine.cue_snapshot());
+                    let cue = runtime.engine.cue_snapshot();
+                    drop(runtime);
+                    microphone::refresh(&handle);
+                    let Some(microphone) = handle.state::<microphone::Controller>().try_status()
+                    else {
+                        continue;
+                    };
+                    let mode = companion::Mode::for_snapshot(&cue, microphone);
                     let needs_placement =
                         mode != runtime_mode || last_placement.elapsed().as_secs() >= 1;
                     runtime_mode = mode;
-                    drop(runtime);
                     if needs_placement {
                         companion::refresh(&handle);
                         last_placement = Instant::now();
@@ -237,6 +248,14 @@ pub fn run() {
                 window.app_handle().exit(0);
             }
         })
-        .run(context)
-        .expect("TalkQTE could not start");
+        .build(context)
+        .expect("TalkQTE could not start")
+        .run(|app, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                microphone::stop_on_exit(app);
+            }
+        });
 }

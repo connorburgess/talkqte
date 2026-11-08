@@ -272,7 +272,7 @@ impl Engine {
     }
 
     pub fn markdown(&self) -> String {
-        let mut out = format!("# {}\n\nFictional TalkQTE demo. No audio was captured.\n\n## Notes\n\n{}\n\n## Saved questions\n\n", self.state.title, self.state.notes);
+        let mut out = format!("# {}\n\nFictional demo transcript; not derived from microphone audio.\n\n## Notes\n\n{}\n\n## Saved questions\n\n", self.state.title, self.state.notes);
         if self.state.saved.is_empty() {
             out.push_str("No saved questions.\n");
         }

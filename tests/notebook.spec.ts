@@ -63,6 +63,7 @@ test('export saves exactly the reviewed text even as the demo moves on', async (
   const dialog = page.getByRole('dialog', { name: 'Review your export' });
   await expect(dialog).toContainText('Ask about a large-print welcome guide.');
   const reviewed = await dialog.locator('pre').innerText();
+  expect(reviewed).toContain('not derived from microphone audio');
   await page.clock.runFor(12_000);
   const downloading = page.waitForEvent('download');
   await dialog.getByRole('button', { name: 'Download Markdown' }).click();

@@ -31,7 +31,21 @@ On macOS, `src-tauri/src/companion_macos.rs` selects a native titled frame with 
 
 Export preparation stores a Markdown snapshot in Rust. The subsequent native save dialog writes that exact snapshot, not a new version assembled after the user reviews it. The frontend cannot supply an arbitrary filesystem destination to the export command.
 
-The browser preview uses `src/lib/preview.ts`, a development-only simulation. Its UI tests complement the Rust engine tests; they do not test Rust IPC, native dialogs, or native windows. There is currently no capture adapter, inference worker, database, or integration adapter.
+The browser preview uses `src/lib/preview.ts`, a development-only simulation. Its UI tests complement the Rust engine tests; they do not test Rust IPC, native dialogs, or native windows. There is currently no full meeting-audio pipeline, inference worker, database, or integration adapter.
+
+### Microphone activity on macOS
+
+`src-tauri/src/microphone.rs` owns a separate, default-off microphone monitor. Only the main window can invoke `start_microphone`; the main and companion windows can invoke `microphone_snapshot` and `stop_microphone`. The `microphone:changed` event contains only a revision, status (`off`, `starting`, `listening`, `stopping`, or `error`), a `canStart` flag, coarse activity (`quiet` or `active`), and an optional public error message. `canStart` is true only when monitoring is off or a failed stream has finished cleanup; cleanup completion emits a newer revision so the UI can enable retry. Consumers must ignore older revisions. No samples, device names, or precise levels are sent to webviews.
+
+The native adapter checks AVFoundation microphone authorization and requests permission only after the explicit start command. Once authorized, a worker creates a CPAL input stream for the current default microphone in its native format. Status remains `starting` until samples arrive. Cancelling a pending start invalidates its generation, so a late permission result cannot restart monitoring. Microphone commands await controller work on blocking workers; native window/timer reads skip busy state instead of waiting behind device startup. App exit schedules cleanup without blocking the event loop. Once stop is accepted, `stopping` remains visible until teardown completes, then an event reports `off`. New starts are rejected during teardown, including cleanup after an error; errors require an explicit retry. There is no automatic device switching or automatic restart.
+
+The audio callback inspects at most 4,096 samples per buffer and writes only atomic activity, buffer-count, and failure summaries. It does not allocate an audio buffer, lock application state, emit events, log, write files, or retain samples. A native poll reads those summaries every 200 ms, holds the activity indicator briefly to avoid flicker, and requests capture cleanup on a stream error or after three seconds without callbacks. Native stream destruction runs on a blocking worker after publishing the error, so a slow device cannot hold up the demo timer or companion updates. This level threshold detects signal activity, not speech, speakers, or meeting participation.
+
+Microphone monitoring is independent of fictional demo playback; pausing or ending the demo does not stop the microphone. It does not capture system output, other apps' audio, or both sides of a call. It does not transcribe, record, retain audio, use a model, or send audio over the network. The browser preview does not request microphone permission. Synthetic tests cover signal, lifecycle, and deliberately blocked stream teardown behavior without opening a real device; permission prompts, device changes, and real-device operation still need opt-in native verification.
+
+The notebook exposes explicit Start microphone and Stop microphone controls separately from the demo. The compact companion remains available during microphone starting, activity, stopping, and errors even when no demo is running. Its Stop mic action takes priority over demo playback controls. Hide only hides the window; it does not stop monitoring. Question cards and exported transcripts remain labeled as fictional demo content, independent of microphone input. Frontend tests use a test-only mocked IPC entry point; the browser preview itself never simulates microphone activity.
+
+The macOS bundle includes `NSMicrophoneUsageDescription`; the audio-input entitlement is configured in `Entitlements.plist` and is embedded when signing. For a local bundle check, use `APPLE_SIGNING_IDENTITY=- npm run tauri -- build --debug --bundles app` to ad-hoc sign with the configured entitlement. An unsigned development build is not evidence that entitlements were applied. Inspect the built bundle and signature without invoking microphone start automatically. Ad-hoc signing is not Developer ID signing or notarization.
 
 ### Planned meeting pipeline
 
@@ -77,5 +91,8 @@ Investigate macOS ScreenCaptureKit/Core Audio through maintained native bindings
 - [Tauri introduction](https://v2.tauri.app/start/)
 - [Tauri process model](https://v2.tauri.app/concept/process-model/)
 - [Tauri window API](https://v2.tauri.app/reference/javascript/api/namespacewindow/)
+- [Tauri macOS bundle configuration](https://v2.tauri.app/distribute/macos-application-bundle/)
+- [CPAL input-stream API](https://docs.rs/cpal/0.18.2/cpal/)
+- [Apple microphone authorization](https://developer.apple.com/documentation/avfoundation/requesting-authorization-to-capture-and-save-media)
 - [ScreenCaptureKit Rust bindings](https://docs.rs/screencapturekit/latest/screencapturekit/)
 - [whisper.cpp](https://github.com/ggml-org/whisper.cpp)

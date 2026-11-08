@@ -20,9 +20,11 @@ This is a development plan. Unchecked items are not implemented.
 - [x] Preview Markdown and save exactly the reviewed content to a chosen destination.
 - [x] Separate native question window with a restricted command and event surface.
 - [x] Browser checks for keyboard navigation, narrow layout, and reduced motion.
+- [x] Separate, explicit macOS microphone activity monitoring with a Stop control and no retained audio.
+- [ ] Verify real microphone permission, device release, signal activity, and disconnect behavior on macOS.
 - [ ] Verify cross-app focus, Spaces, full-screen meetings, and screen-sharing behavior on macOS.
 
-This prototype plays synthetic text. It does not capture or transcribe audio, persist a notebook, or integrate with other services.
+The question demo plays synthetic text. Separate microphone monitoring measures signal activity only; it does not supply live prompts or transcribe audio. The prototype does not capture system audio, persist a notebook, or integrate with other services.
 
 ## First technical milestone
 

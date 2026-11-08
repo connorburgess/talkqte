@@ -2,6 +2,7 @@
 //! the main thread so a command cannot deadlock while waiting for that thread.
 use crate::{
     engine::{CueSnapshot, Status},
+    microphone::{Controller as Microphone, Status as MicrophoneStatus},
     AppState,
 };
 use std::sync::Mutex;
@@ -15,11 +16,15 @@ pub enum Mode {
 }
 
 impl Mode {
-    pub fn for_snapshot(state: &CueSnapshot) -> Self {
-        if !state.overlay_enabled || matches!(state.status, Status::Ready | Status::Ended) {
+    pub fn for_snapshot(state: &CueSnapshot, microphone: MicrophoneStatus) -> Self {
+        if !state.overlay_enabled {
             Self::Hidden
         } else if state.status == Status::Running && state.cue.is_some() {
             Self::Question
+        } else if microphone == MicrophoneStatus::Off
+            && matches!(state.status, Status::Ready | Status::Ended)
+        {
+            Self::Hidden
         } else {
             Self::Compact
         }
@@ -63,11 +68,15 @@ pub struct WindowState(Mutex<Option<(Mode, Option<Frame>)>>);
 pub fn refresh(app: &tauri::AppHandle) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
-        let mode = {
+        let cue = {
             let state = handle.state::<AppState>();
             let Ok(runtime) = state.0.lock() else { return };
-            Mode::for_snapshot(&runtime.engine.cue_snapshot())
+            runtime.engine.cue_snapshot()
         }; // Release the engine lock before every native window operation.
+        let Some(microphone) = handle.state::<Microphone>().try_status() else {
+            return;
+        };
+        let mode = Mode::for_snapshot(&cue, microphone);
         let Some(window) = handle.get_webview_window("cue") else {
             return;
         };
@@ -117,24 +126,90 @@ mod tests {
     #[test]
     fn companion_follows_session_and_question_lifecycle() {
         let mut engine = Engine::default();
-        assert_eq!(Mode::for_snapshot(&engine.cue_snapshot()), Mode::Hidden);
+        assert_eq!(
+            Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
+            Mode::Hidden
+        );
         engine.start().unwrap();
-        assert_eq!(Mode::for_snapshot(&engine.cue_snapshot()), Mode::Compact);
+        assert_eq!(
+            Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
+            Mode::Compact
+        );
         engine.advance(5_200);
-        assert_eq!(Mode::for_snapshot(&engine.cue_snapshot()), Mode::Question);
+        assert_eq!(
+            Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
+            Mode::Question
+        );
         engine.pause().unwrap();
-        assert_eq!(Mode::for_snapshot(&engine.cue_snapshot()), Mode::Compact);
+        assert_eq!(
+            Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
+            Mode::Compact
+        );
         engine.resume().unwrap();
         let id = engine.state.cue.as_ref().unwrap().id.clone();
         engine.respond(&id, Response::Save).unwrap();
-        assert_eq!(Mode::for_snapshot(&engine.cue_snapshot()), Mode::Compact);
+        assert_eq!(
+            Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
+            Mode::Compact
+        );
         assert_eq!(engine.state.saved.len(), 1);
         engine.set_overlay(false);
-        assert_eq!(Mode::for_snapshot(&engine.cue_snapshot()), Mode::Hidden);
+        assert_eq!(
+            Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
+            Mode::Hidden
+        );
         engine.set_overlay(true);
-        assert_eq!(Mode::for_snapshot(&engine.cue_snapshot()), Mode::Compact);
+        assert_eq!(
+            Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
+            Mode::Compact
+        );
         engine.end();
-        assert_eq!(Mode::for_snapshot(&engine.cue_snapshot()), Mode::Hidden);
+        assert_eq!(
+            Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
+            Mode::Hidden
+        );
+    }
+
+    #[test]
+    fn microphone_keeps_companion_available_without_demo_and_respects_hide() {
+        let mut engine = Engine::default();
+        for status in [
+            MicrophoneStatus::Starting,
+            MicrophoneStatus::Listening,
+            MicrophoneStatus::Stopping,
+            MicrophoneStatus::Error,
+        ] {
+            assert_eq!(
+                Mode::for_snapshot(&engine.cue_snapshot(), status),
+                Mode::Compact
+            );
+            engine.start().unwrap();
+            engine.advance(5_200);
+            assert_eq!(
+                Mode::for_snapshot(&engine.cue_snapshot(), status),
+                Mode::Question
+            );
+            engine.pause().unwrap();
+            assert_eq!(
+                Mode::for_snapshot(&engine.cue_snapshot(), status),
+                Mode::Compact
+            );
+            engine.end();
+            assert_eq!(
+                Mode::for_snapshot(&engine.cue_snapshot(), status),
+                Mode::Compact
+            );
+            engine.set_overlay(false);
+            assert_eq!(
+                Mode::for_snapshot(&engine.cue_snapshot(), status),
+                Mode::Hidden
+            );
+            engine.set_overlay(true);
+        }
+        assert_eq!(
+            Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
+            Mode::Hidden
+        );
     }
 
     #[test]
