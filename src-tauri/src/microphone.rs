@@ -353,56 +353,74 @@ fn publish_and_cleanup(app: &tauri::AppHandle, controller: Controller, update: U
 }
 
 #[tauri::command]
-pub fn microphone_snapshot(state: tauri::State<Controller>) -> Result<Snapshot, String> {
-    state.snapshot()
+pub async fn microphone_snapshot(state: tauri::State<'_, Controller>) -> Result<Snapshot, String> {
+    let controller = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || controller.snapshot())
+        .await
+        .map_err(|_| "Could not read microphone status.")?
 }
 
 #[tauri::command]
-pub fn start_microphone(
+pub async fn start_microphone(
     app: tauri::AppHandle,
-    state: tauri::State<Controller>,
+    state: tauri::State<'_, Controller>,
 ) -> Result<(), String> {
     let controller = state.inner().clone();
-    let (generation, snapshot) = controller.begin_start()?;
+    let preparer = controller.clone();
+    let (generation, snapshot) =
+        tauri::async_runtime::spawn_blocking(move || preparer.begin_start())
+            .await
+            .map_err(|_| "Could not start the microphone check.")??;
     publish(&app, &snapshot);
     // Only this explicit main-window command can request microphone access.
-    native::request_permission(move |permission| {
+    // Neither device locks nor authorization callbacks run on the UI thread.
+    tauri::async_runtime::spawn_blocking(move || {
         if !controller.is_starting(generation) {
             return;
         }
-        let controller = controller.clone();
-        let app = app.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            if !controller.is_starting(generation) {
-                return;
-            }
-            let meter = Arc::new(Meter::default());
-            let stream = permission.and_then(|()| native::build_stream(meter.clone()));
-            if let Some(update) =
-                controller.complete_start(generation, meter, stream, Instant::now())
-            {
-                publish_and_cleanup(&app, controller, update);
-            }
+        native::request_permission(move |permission| {
+            let controller = controller.clone();
+            let app = app.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                if !controller.is_starting(generation) {
+                    return;
+                }
+                let meter = Arc::new(Meter::default());
+                let stream = permission.and_then(|()| native::build_stream(meter.clone()));
+                if let Some(update) =
+                    controller.complete_start(generation, meter, stream, Instant::now())
+                {
+                    publish_and_cleanup(&app, controller, update);
+                }
+            });
         });
     });
     Ok(())
 }
 
 #[tauri::command]
-pub fn stop_microphone(
+pub async fn stop_microphone(
     app: tauri::AppHandle,
-    state: tauri::State<Controller>,
+    state: tauri::State<'_, Controller>,
 ) -> Result<(), String> {
-    let update = state.request_stop()?;
-    publish_and_cleanup(&app, state.inner().clone(), update);
+    let controller = state.inner().clone();
+    let stopper = controller.clone();
+    let update = tauri::async_runtime::spawn_blocking(move || stopper.request_stop())
+        .await
+        .map_err(|_| "Could not stop the microphone check. Try Stop microphone again.")??;
+    publish_and_cleanup(&app, controller, update);
     Ok(())
 }
 
 pub fn stop_on_exit(app: &tauri::AppHandle) {
-    let controller = app.state::<Controller>();
-    if let Ok(update) = controller.request_stop() {
-        publish_and_cleanup(app, controller.inner().clone(), update);
-    }
+    let controller = app.state::<Controller>().inner().clone();
+    let app = app.clone();
+    // A stalled device must not block the event loop or prevent Quit.
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Ok(update) = controller.request_stop() {
+            publish_and_cleanup(&app, controller, update);
+        }
+    });
 }
 
 pub fn refresh(app: &tauri::AppHandle) {
