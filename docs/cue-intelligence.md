@@ -54,7 +54,7 @@ Measure conversational performance directly. Coding benchmarks and model size do
 
 ## Rules baseline on the shared suite
 
-The current phrase rules were run on the same eight fictional cases the [Claude lab](claude-cue-lab.md) uses, through a live engine session (`rules_baseline_on_the_shared_fictional_suite` in `engine.rs`). "No cue raised" means the case starts with a visible cue, but the rules never raise one from the first line, so they cannot take part.
+The current phrase rules were run on the fictional cases the [Claude lab](claude-cue-lab.md) uses, through a live engine session (`rules_baseline_on_the_shared_fictional_suite` in `engine.rs`). "No cue raised" means the case starts with a visible cue, but the rules never raise one from the first line, so they cannot take part.
 
 | Case                   | Expected | Rules (9 November 2026)                                                                             |
 | ---------------------- | -------- | --------------------------------------------------------------------------------------------------- |
@@ -66,8 +66,21 @@ The current phrase rules were run on the same eight fictional cases the [Claude 
 | uncertain-speaker      | quiet    | no cue raised                                                                                       |
 | context-reminder       | show     | quiet: the rules have no context reminders                                                          |
 | transcript-instruction | quiet    | quiet, and correctly ignores the embedded instruction                                               |
+| context-corrected      | withdraw | quiet: the correction is not a recognized answer or topic change                                    |
+| paraphrased-use        | resolved | no cue raised                                                                                       |
+| repeated-trigger       | quiet    | no cue raised                                                                                       |
 
-The rules match the expected action in 2 of 8 cases, and both matches come from doing nothing. On the same cases, the subscription-backed Claude lab matched 7 of 8, each run once ([lab record](claude-cue-lab.md#validation-record)). Its one disagreement, `missing-owner`, is a defensible judgment that a cue would duplicate what the speakers were already settling. They miss paraphrased triggers, context reminders, and topic changes said in other words. This is the comparison point for a semantic evaluator on the same inputs. Like the lab's own results, it is a smoke check on eight small examples, not evidence about real meetings.
+The rules match the expected action in 2 of 11 cases, both by doing nothing; on the first eight they match 2. On those eight, the subscription-backed Claude lab matched 7, each run once ([lab record](claude-cue-lab.md#validation-record)). Its one disagreement, `missing-owner`, is a defensible judgment that a cue would duplicate what the speakers were already settling. The rules miss paraphrased triggers, context reminders, and topic changes said in other words. This is the comparison point for a semantic evaluator on the same inputs. Like the lab's own results, it is a smoke check on small examples, not evidence about real meetings.
+
+### Outcome labels
+
+Three labeled cases were added on 9 November 2026 to cover outcome signals the first eight lacked. They have not been run in the Claude lab, which would need a new explicit authorization:
+
+- `context-corrected`: a speaker withdraws the premise behind a visible cue that asks for a new date ("Actually, the supplier review is staying where it is"). Expected: withdraw. The correction removes the cue's basis without answering it.
+- `paraphrased-use`: the participant asks the visible cue's question in other words, and another speaker answers. Expected: resolved, with observed use "possible". Use and resolution are labeled separately; similar speech is a possible signal of use, not proof that the cue caused it or helped.
+- `repeated-trigger`: a speaker restates the line that raised a visible cue. Expected: quiet, because a second cue would duplicate the one already shown. The rules never raise the first cue here, so this case does not exercise their two-minute repeat pause.
+
+Across the suite, labels keep observed use and resolution apart; no case labels usefulness or involves dismissal. These are labels written by the developer, not outcomes observed in meetings.
 
 ## Smallest useful evaluation
 

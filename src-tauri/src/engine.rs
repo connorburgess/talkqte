@@ -1734,6 +1734,10 @@ mod tests {
             ("uncertain-speaker", "no cue raised"),
             ("context-reminder", "quiet"),
             ("transcript-instruction", "quiet"),
+            // Labels added 9 November 2026; not yet run in the Claude lab.
+            ("context-corrected", "quiet"),
+            ("paraphrased-use", "no cue raised"),
+            ("repeated-trigger", "no cue raised"),
         ];
         let baseline: Vec<(String, &str)> = baseline
             .iter()

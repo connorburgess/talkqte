@@ -13,7 +13,7 @@ npm run lab:claude
 npm run test:cue-lab
 ```
 
-The eight fictional cases cover a missing owner, an already-answered issue, a visible cue being resolved, a question asked but unanswered, a topic change, uncertain speaker attribution, a context reminder, and an instruction embedded in a transcript. Expected labels are withheld from the model. Only bundled cases are accepted; there is no arbitrary transcript/file input or unattended loop.
+The bundled fictional cases cover a missing owner, an already-answered issue, a visible cue being resolved, a question asked but unanswered, a topic change, uncertain speaker attribution, a context reminder, an instruction embedded in a transcript, a corrected premise, a paraphrased use, and a repeated trigger. The last three were added after the validation record below and have not been run. Expected labels are withheld from the model. Only bundled cases are accepted; there is no arbitrary transcript/file input or unattended loop.
 
 ## Check the subscription, then run one case
 

@@ -143,5 +143,70 @@
     ],
     "existingCue": null,
     "expected": { "action": "quiet", "observedUse": "not_observed" }
+  },
+  {
+    "id": "context-corrected",
+    "events": [
+      {
+        "id": "e1",
+        "speaker": "other",
+        "text": "The supplier review is moving soon, so we need a new date."
+      },
+      {
+        "id": "e2",
+        "speaker": "other",
+        "text": "Actually, the supplier review is staying where it is."
+      }
+    ],
+    "existingCue": {
+      "text": "What new date should the supplier review move to?",
+      "sourceIds": ["e1"]
+    },
+    "expected": { "action": "withdraw", "observedUse": "not_observed" }
+  },
+  {
+    "id": "paraphrased-use",
+    "events": [
+      {
+        "id": "e1",
+        "speaker": "other",
+        "text": "Someone should send the revised checklist."
+      },
+      {
+        "id": "e2",
+        "speaker": "participant",
+        "text": "Could one of us own getting that list out?"
+      },
+      {
+        "id": "e3",
+        "speaker": "other",
+        "text": "I'll send it. This is Priya."
+      }
+    ],
+    "existingCue": {
+      "text": "Who will send the revised checklist?",
+      "sourceIds": ["e1"]
+    },
+    "expected": { "action": "resolved", "observedUse": "possible" }
+  },
+  {
+    "id": "repeated-trigger",
+    "events": [
+      {
+        "id": "e1",
+        "speaker": "other",
+        "text": "Someone should send the revised checklist."
+      },
+      {
+        "id": "e2",
+        "speaker": "other",
+        "text": "Someone really should send that checklist."
+      }
+    ],
+    "existingCue": {
+      "text": "Who will send the revised checklist?",
+      "sourceIds": ["e1"]
+    },
+    "expected": { "action": "quiet", "observedUse": "not_observed" }
   }
 ]
