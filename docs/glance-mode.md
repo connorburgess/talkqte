@@ -12,6 +12,16 @@ Settings offers standard or larger question text and bottom-right, top-center, t
 
 The companion remains passive and does not take keyboard focus. The same question, disclosure, Save/Dismiss actions, and settings are available through the notebook's keyboard controls. Native VoiceOver and cross-app focus behavior need further testing. No camera permission, gaze tracking, video alteration, or new microphone behavior is involved.
 
+## Prototype appearance
+
+These browser-rendered screenshots use only the bundled fictional demo. They show the interface at its intended window sizes, not a verification of native placement or focus behavior.
+
+| Before: source always visible | Glance: complete question first |
+| --- | --- |
+| ![Previous question card with source text](assets/glance-before.png) | ![Glance question card with a Why control](assets/glance-after.png) |
+
+Opening **Why?** expands the source and holds the question: [expanded context screenshot](assets/glance-context.png).
+
 ## What informed the choices
 
 | Evidence | Relevant finding and limit | Design implication, not a tested TalkQTE result |
@@ -34,3 +44,5 @@ Prioritize listening comprehension, correct interpretation of the question, usef
 Actual eye correction changes outgoing video and is a separate opt-in capability. It is not implemented by Glance view. No claim that reading is hidden, that eye contact is improved, or that an accessibility outcome is proven should be added without suitable evaluation.
 
 For a broader update, use the [reusable deep research prompt](research-prompt.md). It covers participation, timing, accessibility, gaze, speech recognition, trust, privacy, and supported integrations, with evidence-quality and scope checks.
+
+The [broader review summary](research.md#what-the-broader-review-adds) records the participation/listening tradeoff, maps recommendations to the current code, and prioritizes a human-cued comparison before automatic detection.

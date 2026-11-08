@@ -1,6 +1,6 @@
 # Research and product decisions
 
-Reviewed 8 November 2026. This is the short entry point for evidence used in TalkQTE. The [product goal](../PRODUCT.md#goal-and-first-proof) is the source of truth for scope; the [roadmap](../ROADMAP.md) distinguishes implemented work from planned work.
+Reviewed 8 November 2026. This is the short entry point for evidence used in TalkQTE, including the [supplied research review](https://www.perplexity.ai/search/96f96101-bdaf-442d-b978-c5230df4e616). The [product goal](../PRODUCT.md#goal-and-first-proof) is the source of truth for scope; the [roadmap](../ROADMAP.md) distinguishes implemented work from planned work.
 
 ## The short version
 
@@ -9,6 +9,8 @@ Reviewed 8 November 2026. This is the short entry point for evidence used in Tal
 - **Near-camera placement is an option, not a promise of invisible reading.** Gaze studies use different setups and do not establish one universally correct location for a live prompt.
 - **Looking away is normal.** Eye contact is not an attention, honesty, or participation score. People differ in what feels comfortable and lets them listen.
 - **Prove the core experience before expanding it.** Live transcription, prompt relevance, accessible controls, and native meeting behavior need validation before broader claims or integrations.
+
+The report's central tradeoff is that assistance may help someone formulate a question while the act of reading it makes them miss speech. Its closest example is a human-operated conversational scaffold, not proven automatic meeting understanding. Test useful clarification and listening comprehension together; confidence or more accepted suggestions alone cannot settle the question.
 
 ## What we use, and why
 
@@ -22,9 +24,36 @@ Reviewed 8 November 2026. This is the short entry point for evidence used in Tal
 
 Primary-source links, study designs, sample limitations, and the proposed comparison are in [Glance view: design and evidence](glance-mode.md). Keep those qualifications with any claim drawn from a study.
 
-## New research intake
+## What the broader review adds
 
-The shared [broader research report](https://www.perplexity.ai/search/96f96101-bdaf-442d-b978-c5230df4e616) is pending review: its contents were not accessible on 8 November 2026. No findings or recommendations above are attributed to that report. Add its summary and verified primary sources when the text is available.
+The supplied report could not inspect this repository. Its implementation statements are provisional. This reconciliation checked app commit [`567d7e2`](https://github.com/connorburgess/talkqte/commit/567d7e2bc34244ae42e0507a7ffb53643a66124b) on the Glance feature branch, based on main at [`0f5d5f2`](https://github.com/connorburgess/talkqte/commit/0f5d5f2cc37b658ab1bb624935d8ce41fb6ac5c8); feature-branch behavior is not a released capability.
+
+| Finding and source | Evidence boundary | Decision for TalkQTE |
+| --- | --- | --- |
+| [He and Fussell (2025), conversational scaffolding/XPLAIN](https://doi.org/10.1145/3715070.3749273) | The supplied review describes 27 non-native speakers using a human-operated prototype, with perceived clarification benefits alongside overload and missed speech. These details remain report-derived: the publisher full text could not be independently retrieved for this reconciliation. It was not a controlled demonstration of TalkQTE or automatic detection. | Prioritize a no-assistance comparison with human-selected cues. Do not claim improved participation, or adopt the discussed 3–5-second delay as a validated rule. |
+| [Lin and Carlile (2019), switching non-spatial attention](https://www.nature.com/articles/s41598-019-44560-1.pdf) | The original paper's abstract and introduction were checked. Changing the target voice impaired recognition in constrained multi-talker sentence tasks. This was not a test of visual prompts. | Check comprehension around cue arrival and speaker changes. A change of speaker is not automatically spare attention. |
+| [Levinson and Torreira (2015), turn-taking and language processing](https://www.frontiersin.org/journals/psychology/articles/10.3389/fpsyg.2015.00731/full) | Primary-source abstract and indexed sections were checked. The review describes overlap between listening and preparing a response, not an optimal notification delay. | Do not infer readiness from silence or microphone activity. Keep timing policy separate from audio activity monitoring. |
+| [Buçinca, Malaya, and Gajos (2021), *To Trust or to Think*](https://arxiv.org/abs/2102.09692) | Author abstract and paper excerpts were checked. In an experiment with 199 participants, interventions requiring more deliberate thought reduced overreliance relative to simple explanations, with worse subjective ratings for the strongest interventions. The task was not conversation. | Make the source cheap to inspect; do not treat an explanation as proof of correctness or require a disruptive verification ritual. |
+
+The report also lists streaming transcription implementations, platform capabilities, and adjacent work. These remain leads to evaluate, not selected dependencies or performance guarantees. In particular, a published transcription latency is not a Mac meeting benchmark, diarization is not identity or addressee detection, and capture filters do not guarantee exclusion from another app's screen share. Recheck official documentation when implementing an adapter. Existing [integration capability notes](../ROADMAP.md#future-goal-work-with-other-note-taking-apps) keep Granola prior-note access separate from Fireflies live-input experiments and from writeback.
+
+## Adopt now, test next, defer
+
+**Adopt in the prototype:** one complete question by default, source on demand, stable reading time, Save/Dismiss, demo Pause, larger text, and optional placement. The current hold is triggered by **Why?**, not a separate Hold button. Keyboard actions are in the notebook. Appearance is session-only. These are implemented choices, not demonstrated user benefits.
+
+**Test next:** whether people discover the hold through **Why?** or need an explicit Hold action; a focused keyboard route and native VoiceOver; user-controlled announcements; no-assistance versus complete-question and keyword formats. The notebook currently uses a polite live region; a manual announcement command, announcement preferences, and independent assistance pause are not implemented. Demo Pause stops fictional playback; it does not stop the separate microphone monitor.
+
+**Validate before automating:** unresolved-candidate detection, cancellation when the conversation answers an issue, deduplication, transcript revision handling, and semantic staleness. The current elapsed-time label does not detect a topic shift or resolution. A future reading hold should keep content stable while clearly marking withdrawn or resolved evidence; it must not keep inviting a known-wrong question. No backlog of old prompts is needed to test this.
+
+**Defer:** synthetic eye correction, automatic addressee inference, long answer feeds, broad archives, and provider writeback. Do not build engagement, emotion, competence, or disability scores. The existing direct-question goal remains a later, separately validated capability; manual control is the fallback when attribution is uncertain.
+
+## The next experiment
+
+Use matched fictional conversations and human-selected cue opportunities before adding transcription and detection errors. Compare no assistance with one stable question and optional evidence; counterbalance scenario and condition order. Check useful clarifications and comprehension of the surrounding speech together. Also record already-answered questions, late cues, distraction, and whether participants could ignore, hold, save, or dismiss a prompt.
+
+Include naturally resolved ambiguities, direct questions, topic changes, and cases where silence is the correct app behavior. Test content, timing, placement, and detection separately. If a format increases missed speech, revise it even when users report greater confidence. If automation adds no value over user-requested help, keep the simpler interaction. A small formative study can expose failures and preferences; it cannot establish broad effectiveness or disability-specific benefits. No user study has been run yet.
+
+## Keeping the evidence current
 
 For each finding we adopt, record the source and date, population and task studied, relevant result and limitations, the proposed product decision, and a way to check it in TalkQTE. Label the decision as implemented, proposed, or deferred. Distinguish a published result from our inference and from a measured TalkQTE outcome. Preserve contrary findings that could change the decision.
 

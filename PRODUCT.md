@@ -65,7 +65,7 @@ Evaluate Granola first, Fireflies second, and others when actual demand justifie
 
 ## Smallest useful comparison
 
-Try a short fictional meeting workflow with and without TalkQTE, keeping the existing note-taking workflow unchanged. Use comparable scenarios and alternate the order to reduce familiarity effects. Record which questions were useful, already answered or stale, and whether a prompt made the conversation harder to follow. Include a case where the right behavior is to stay quiet.
+Try a short fictional meeting workflow with and without TalkQTE, keeping the existing note-taking workflow unchanged. Start with human-selected question opportunities to isolate the interaction from detection errors. Use comparable scenarios and alternate the order to reduce familiarity effects. Treat useful clarification and listening comprehension as co-primary outcomes: record which questions were useful, already answered or stale, and whether a prompt made the conversation harder to follow. Include a case where the right behavior is to stay quiet.
 
 Use the observations to choose the next small change. A demo or a few comparisons do not establish effectiveness; no broad research program or automatic collection of real meeting data is required.
 

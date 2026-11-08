@@ -27,6 +27,18 @@ This is a development plan. Unchecked items are not implemented.
 
 The question demo plays synthetic text. Separate microphone monitoring measures signal activity only; it does not supply live prompts or transcribe audio. The prototype does not capture system audio, persist a notebook, or integrate with other services.
 
+## Next product validation
+
+Test the clarification interaction before investing in automatic detection. This can run independently of the native audio feasibility work below.
+
+- [ ] Compare no assistance with stable, human-selected questions in matched fictional conversations; counterbalance order.
+- [ ] Measure useful clarification and listening comprehension together, including already-answered and late cues.
+- [ ] Check whether the **Why?** hold is discoverable or needs a separate Hold action.
+- [ ] Check the notebook's keyboard route, native VoiceOver, reading time, and announcement preferences with users' normal setups.
+- [ ] Test content, timing, and placement separately; keep a simpler manual interaction if automation does not add value.
+
+See the [review findings, current gaps, and experiment](docs/research.md). No user-outcome study has been completed.
+
 ## First technical milestone
 
 Prove that audio capture, local transcription, and the floating prompt can coexist with a real meeting app before expanding the dashboard.
