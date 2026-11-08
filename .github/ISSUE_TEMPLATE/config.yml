@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security reporting
+    url: https://github.com/connorburgess/talkqte/security
+    about: Use a private channel for vulnerabilities. Do not post private data in issues.

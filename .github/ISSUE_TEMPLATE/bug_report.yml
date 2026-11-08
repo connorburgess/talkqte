@@ -1,0 +1,31 @@
+name: Bug report
+description: Describe unexpected behavior with a fictional reproduction.
+body:
+  - type: markdown
+    attributes:
+      value: "Do not attach real meeting data, credentials, or identifying logs. Report vulnerabilities using SECURITY.md."
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit and operating system
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Use fictional dialogue and an isolated test profile.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true

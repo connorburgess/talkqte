@@ -1,0 +1,43 @@
+# Dependency and build output
+node_modules/
+dist/
+target/
+src-tauri/target/
+coverage/
+playwright-report/
+test-results/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# Runtime state and private evidence do not belong in the checkout
+data/
+recordings/
+transcripts/
+meetings/
+private/
+models/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.ogg
+*.mp4
+*.mov
+*.gguf
+*.ggml
+ggml-*.bin

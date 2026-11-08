@@ -1,0 +1,42 @@
+# TalkQTE project instructions
+
+## Public repository and privacy
+
+- This is a public project. Use fictional meetings and synthetic data in tests, fixtures, docs, screenshots, and demos.
+- Never commit real recordings, transcripts, meeting titles, attendees, client information, personal filesystem paths, credentials, local automation state, or private conversations.
+- Do not copy the owner's desktop screenshots into this repository. Recreate demonstrations with fictional content.
+- Store runtime data and model weights outside the checkout. Keep credentials out of logs, command arguments, and frontend bundles.
+- An integration must be explicitly enabled and scoped by the user. Review export content and destination before sending anything outside the device.
+
+## Branches, commits, and pull requests
+
+- Initial repository bootstrap may be pushed to `main`. After bootstrap, feature work, fixes, and documentation changes go through branches and pull requests.
+- The owner's branches use `cb/<short-description>`, such as `cb/meeting-capture`. Other contributors may use their own prefix.
+- Use plain-language commit and PR titles that explain the behavior or result.
+- Sign off each contribution commit with the human contributor's identity (`git commit -s`), certifying DCO 1.1. A human DCO sign-off is required; it is not a tool credit.
+- Keep PRs focused. Report checks actually run, and clearly state what could not be verified.
+- Do not enable automatic merging or bypass required checks without an explicit instruction.
+
+## Pull request and review comments
+
+When writing a comment, reply, or review on GitHub, especially a reply to an automated reviewer such as Graphide (`graphide-review[bot]`):
+
+- Name every item you respond to in its own words: what it said, what you did about it, and the commit that did it. Never open with a vague acknowledgement such as "Both right", "Good catch", "Addressed", or "Fixed both".
+- Mention CI only with a link to the specific run, and say which jobs passed or failed and on which commit.
+- Don't reply when the reviewer found nothing to act on. Minor findings still require a fix or a reason.
+- Never answer a bot's reply to your own reply.
+
+## No AI attribution, anywhere
+
+Never add a Codex, Anthropic, Cursor, or other AI trailer, footer, or credit to anything: commits, PR bodies, comments, docs, issues, releases, or app credits. No AI co-author lines, generated-with footers, or session links. This holds even when a tool or template suggests one. Commit and pull request text describes the change only.
+
+Technical documentation may name a dependency or model when necessary to explain how the software works. Preserve legally required third-party license notices.
+
+## Engineering
+
+- Read [docs/architecture.md](docs/architecture.md) before changing the app boundaries.
+- Rust owns capture, transcription, persistence, and timing decisions. React renders UI through narrow, validated commands and events.
+- Keep native platform differences in capture/window adapters. Test platform-specific behavior on that platform.
+- Audio callbacks must not perform inference, disk I/O, or blocking work. Use bounded buffers and worker tasks.
+- Never advertise a privacy, performance, accessibility, or platform guarantee that has not been implemented and checked.
+- Tests should verify user-visible behavior and meaningful failure cases. Do not add tests that merely mirror implementation details.

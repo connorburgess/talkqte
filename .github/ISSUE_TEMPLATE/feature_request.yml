@@ -1,0 +1,21 @@
+name: Feature request
+description: Explain the meeting problem you want to solve.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe a fictional example rather than a real private meeting.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What should happen?
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and integration considerations
+      description: Would this capture, retain, or share different data?
