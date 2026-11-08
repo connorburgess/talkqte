@@ -202,6 +202,33 @@ test('keyboard users can change notebook tabs and close the export preview', asy
   ).toBeFocused();
 });
 
+test('a line about an imported note shows a reminder that names the note as its source', async ({
+  page,
+}) => {
+  const panel = page.getByRole('region', { name: 'Prior context' });
+  await panel.getByRole('button', { name: 'Add notes from a file' }).click();
+  const dialog = page.getByRole('dialog', { name: /Choose notes/ });
+  await dialog.getByRole('checkbox', { name: /Garden welcome guide/ }).check();
+  await dialog.getByRole('button', { name: 'Import 1 selected' }).click();
+  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
+  await page.clock.runFor(5200);
+  const question = page.getByRole('region', { name: 'Suggested question' });
+  await expect(
+    question.getByRole('heading', { name: 'Garden welcome guide' }),
+  ).toBeVisible();
+  await expect(question).toContainText('Reminder from your notes · 2026-10-28');
+  await question.getByRole('button', { name: 'Why?' }).click();
+  await expect(question).toContainText('From your imported note, 2026-10-28');
+  await expect(question).toContainText('not from this conversation');
+  await expect(question).toContainText('tool shed');
+  await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
+  await expect(question).toHaveCount(0);
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await expect(
+    page.getByRole('dialog', { name: 'Review your export' }).locator('pre'),
+  ).not.toContainText('tool shed');
+});
+
 test('prior notes from a file are chosen, shown apart from the conversation, removable, and never exported', async ({
   page,
 }) => {

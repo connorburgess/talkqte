@@ -16,6 +16,8 @@ export interface Cue {
   held: boolean;
   expanded: boolean;
   resolvedBy: { sourceId: string; evidence: string } | null;
+  /** Set for a context reminder: the imported note it quotes. */
+  note: { title: string; sourceDate: string; provider: string } | null;
 }
 export interface CueSnapshot {
   revision: number;

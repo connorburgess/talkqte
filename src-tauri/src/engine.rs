@@ -82,6 +82,8 @@ pub struct Cue {
     /// Later conversation that appears to answer this cue. Only a held cue
     /// can carry this: an unheld answered cue is withdrawn instead.
     pub resolved_by: Option<Resolution>,
+    /// Set for a context cue: the imported note it quotes.
+    pub note: Option<NoteRef>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -89,6 +91,85 @@ pub struct Cue {
 pub struct Resolution {
     pub source_id: String,
     pub evidence: String,
+}
+
+/// The imported note a context cue comes from, so the companion can say so
+/// instead of presenting the note as something said in the conversation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteRef {
+    pub title: String,
+    pub source_date: String,
+    pub provider: String,
+}
+
+/// The cue kind for a reminder drawn from an imported note.
+pub const CONTEXT: &str = "Context";
+/// Title words this long or longer identify a note; a line must contain at
+/// least two of them to be about that note.
+const TERM_MIN_CHARS: usize = 5;
+const TERMS_NEEDED: usize = 2;
+/// Titles with more terms than this need three matching words, because two
+/// common words then co-occur too easily in ordinary speech.
+const LONG_TITLE_TERMS: usize = 6;
+/// Common meeting and function words that never identify a note.
+const NOTE_STOP_WORDS: &[&str] = &[
+    "about",
+    "after",
+    "again",
+    "agenda",
+    "ahead",
+    "catch",
+    "check",
+    "could",
+    "daily",
+    "discussion",
+    "every",
+    "first",
+    "going",
+    "meeting",
+    "minutes",
+    "monthly",
+    "month",
+    "notes",
+    "other",
+    "people",
+    "planning",
+    "quick",
+    "really",
+    "review",
+    "should",
+    "standup",
+    "still",
+    "sync",
+    "team",
+    "their",
+    "there",
+    "these",
+    "thing",
+    "things",
+    "think",
+    "those",
+    "today",
+    "update",
+    "weekly",
+    "where",
+    "which",
+    "while",
+    "would",
+    "yesterday",
+    "tomorrow",
+];
+
+/// An imported note prepared for matching.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NoteTerms {
+    key: String,
+    title: String,
+    source_date: String,
+    provider: String,
+    excerpt: String,
+    terms: Vec<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -140,6 +221,9 @@ pub struct Engine {
     /// addressed to them. Never stored or sent anywhere.
     /// When each question type was last shown in this session.
     last_shown: Vec<(String, u64)>,
+    /// Imported notes prepared for matching, and the keys already shown.
+    notes: Vec<NoteTerms>,
+    shown_notes: Vec<String>,
     /// A cue type created since the last publish, with its previous time.
     unshown: Option<(String, Option<u64>)>,
 }
@@ -191,6 +275,8 @@ impl Engine {
             cooldown_until: 0,
             live_input: false,
             last_shown: vec![],
+            notes: vec![],
+            shown_notes: vec![],
             unshown: None,
         }
     }
@@ -220,6 +306,7 @@ impl Engine {
         self.generation += 1;
         self.live_input = false;
         self.last_shown.clear();
+        self.shown_notes.clear();
         self.next_segment = 0;
         self.cooldown_until = 0;
         self.state.elapsed_ms = 0;
@@ -467,6 +554,7 @@ impl Engine {
                     held: false,
                     expanded: false,
                     resolved_by: None,
+                    note: None,
                 });
             }
             return;
@@ -481,6 +569,9 @@ impl Engine {
         } else {
             after_correction.to_string()
         };
+        // Kept for the context reminder below; a fixed question may move the
+        // segment's ID into its cue first.
+        let line_id = segment.id.clone();
         // Skip stale suggestions after a suspended app catches up.
         if self.state.cue.is_none()
             && segment.at_ms >= self.cooldown_until
@@ -528,6 +619,41 @@ impl Engine {
                     held: false,
                     expanded: false,
                     resolved_by: None,
+                    note: None,
+                });
+            }
+        }
+        // A line about an imported note reminds the user of it once, with the
+        // note as its source: a context reminder, lowest in priority, under
+        // the same expiry and pause as a question. This is a phrase match on
+        // the note's title, not a judgment that the note is relevant.
+        if self.state.cue.is_none()
+            && segment.at_ms >= self.cooldown_until
+            && now - segment.at_ms < CUE_MS
+        {
+            // Only words not taken back, and not put to someone else, count.
+            if let Some(note) = self.note_for(&suggestible).cloned() {
+                // Shown once per session from creation, whether or not the
+                // user got to read it: a reminder is not re-raised later.
+                self.shown_notes.push(note.key.clone());
+                self.unshown = None;
+                self.cue_deadline = segment.at_ms + CUE_MS;
+                self.state.cue = Some(Cue {
+                    id: format!("{}:{}", self.generation, line_id),
+                    kind: CONTEXT.into(),
+                    question: note.title.clone(),
+                    evidence: note.excerpt.clone(),
+                    source_id: note.key.clone(),
+                    remaining_ms: self.cue_deadline - now,
+                    total_ms: CUE_MS,
+                    held: false,
+                    expanded: false,
+                    resolved_by: None,
+                    note: Some(NoteRef {
+                        title: note.title,
+                        source_date: note.source_date,
+                        provider: note.provider,
+                    }),
                 });
             }
         }
@@ -606,6 +732,56 @@ impl Engine {
 
     /// Sets or clears the name used to recognize questions addressed to the
     /// user. Kept in memory for this app session only.
+    /// Replaces the imported notes a context cue may quote: `(key, title,
+    /// date, provider, excerpt)` per note. A note already shown this session
+    /// stays shown.
+    pub fn set_notes(&mut self, notes: Vec<(String, String, String, String, String)>) {
+        self.notes = notes
+            .into_iter()
+            .map(|(key, title, source_date, provider, excerpt)| NoteTerms {
+                terms: note_terms(&title),
+                key,
+                title,
+                source_date,
+                provider,
+                excerpt,
+            })
+            .collect();
+        let keys: Vec<&String> = self.notes.iter().map(|note| &note.key).collect();
+        self.shown_notes.retain(|key| keys.contains(&key));
+    }
+
+    /// Carries imported notes to a replacement engine.
+    pub fn copy_notes_from(&mut self, previous: &Engine) {
+        self.notes = previous.notes.clone();
+        self.shown_notes = previous.shown_notes.clone();
+    }
+
+    /// The first imported note this line is about, by its title words, that
+    /// has not been shown this session.
+    fn note_for(&self, text: &str) -> Option<&NoteTerms> {
+        let words: Vec<String> = text
+            .split(|character: char| !character.is_alphanumeric() && character != '\'')
+            .filter(|word| !word.is_empty())
+            .map(|word| word.to_lowercase())
+            .collect();
+        self.notes.iter().find(|note| {
+            let needed = if note.terms.len() > LONG_TITLE_TERMS {
+                TERMS_NEEDED + 1
+            } else {
+                TERMS_NEEDED
+            };
+            !self.shown_notes.contains(&note.key)
+                && note.terms.len() >= needed
+                && note
+                    .terms
+                    .iter()
+                    .filter(|term| words.contains(term))
+                    .count()
+                    >= needed
+        })
+    }
+
     pub fn set_user_name(&mut self, name: Option<String>) -> Result<(), String> {
         let name = name
             .map(|name| name.trim().to_string())
@@ -716,6 +892,25 @@ fn suggest(text: &str) -> Vec<(&'static str, String)> {
         }
     }
     found
+}
+
+/// The distinctive words of a note's title: alphabetic, at least
+/// `TERM_MIN_CHARS` long, lowercased, without repeats.
+fn note_terms(title: &str) -> Vec<String> {
+    let mut terms: Vec<String> = Vec::new();
+    for word in title
+        .split(|character: char| !character.is_alphanumeric() && character != '\'')
+        .map(|word| word.to_lowercase())
+    {
+        if word.chars().count() >= TERM_MIN_CHARS
+            && word.chars().all(char::is_alphabetic)
+            && !NOTE_STOP_WORDS.contains(&word.as_str())
+            && !terms.contains(&word)
+        {
+            terms.push(word);
+        }
+    }
+    terms
 }
 
 /// The cue kind for a question put to the group by a speaker.
@@ -2784,5 +2979,202 @@ mod tests {
         )
         .unwrap();
         assert_eq!(e.state.cue.as_ref().unwrap().kind, "Owner");
+    }
+
+    fn with_notes() -> Engine {
+        let mut e = live_session();
+        e.set_notes(vec![
+            (
+                "file:n1".into(),
+                "Garden welcome guide".into(),
+                "2026-10-28".into(),
+                "file".into(),
+                "Draft a one-page guide with a map of the tool shed.".into(),
+            ),
+            (
+                "file:n2".into(),
+                "Sign".into(),
+                "2026-11-05".into(),
+                "file".into(),
+                "Too short a title to match.".into(),
+            ),
+        ]);
+        e
+    }
+
+    #[test]
+    fn a_line_about_an_imported_note_raises_a_context_cue_with_the_note_as_source() {
+        let mut e = with_notes();
+        e.ingest(
+            e.session(),
+            live(
+                "w1",
+                9_000,
+                "Let's get the welcome guide sorted before the garden day.",
+            ),
+        )
+        .unwrap();
+        let cue = e.state.cue.as_ref().unwrap();
+        assert_eq!(cue.kind, CONTEXT);
+        assert_eq!(cue.question, "Garden welcome guide");
+        assert!(cue.evidence.contains("tool shed"));
+        assert_eq!(cue.note.as_ref().unwrap().source_date, "2026-10-28");
+        assert_eq!(cue.source_id, "file:n1");
+    }
+
+    #[test]
+    fn one_title_word_or_a_short_title_is_not_enough_and_a_note_is_shown_once() {
+        let mut e = with_notes();
+        e.ingest(e.session(), live("w1", 9_000, "The guide is late."))
+            .unwrap();
+        assert!(e.state.cue.is_none(), "one term");
+        e.ingest(e.session(), live("w2", 9_500, "Sign it today."))
+            .unwrap();
+        assert!(e.state.cue.is_none(), "short title has no terms");
+        e.ingest(
+            e.session(),
+            live("w3", 10_000, "The welcome guide needs a map."),
+        )
+        .unwrap();
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&id, Response::Dismiss).unwrap();
+        e.advance(20_000);
+        e.ingest(
+            e.session(),
+            live("w4", 30_000, "Back to the welcome guide and the map."),
+        )
+        .unwrap();
+        assert!(e.state.cue.is_none(), "already shown this session");
+    }
+
+    #[test]
+    fn a_fixed_question_wins_over_a_context_cue_and_removed_notes_stop_matching() {
+        let mut e = with_notes();
+        e.ingest(
+            e.session(),
+            live("w1", 9_000, "Someone can take the welcome guide."),
+        )
+        .unwrap();
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Owner");
+        let mut e = with_notes();
+        e.set_notes(vec![]);
+        e.ingest(
+            e.session(),
+            live("w1", 9_000, "The welcome guide for the garden."),
+        )
+        .unwrap();
+        assert!(e.state.cue.is_none());
+    }
+
+    #[test]
+    fn common_words_long_titles_excerpts_and_retracted_words_do_not_match() {
+        let mut e = live_session();
+        e.set_notes(vec![
+            (
+                "file:a".into(),
+                "Weekly planning meeting notes".into(),
+                "2026-11-01".into(),
+                "file".into(),
+                "Agenda items.".into(),
+            ),
+            (
+                "file:b".into(),
+                "Orchard volunteer handover plan for spring planting season and watering schedule"
+                    .into(),
+                "2026-11-02".into(),
+                "file".into(),
+                "Seedling trays go to the north shed.".into(),
+            ),
+            (
+                "file:c".into(),
+                "Jardín opening".into(),
+                "2026-11-03".into(),
+                "file".into(),
+                "Menu draft.".into(),
+            ),
+        ]);
+        e.ingest(
+            e.session(),
+            live("w1", 9_000, "We should start planning the meeting."),
+        )
+        .unwrap();
+        assert!(e.state.cue.is_none(), "stop words never identify a note");
+        e.ingest(
+            e.session(),
+            live("w2", 9_200, "The seedling trays and the north shed again."),
+        )
+        .unwrap();
+        assert!(
+            e.state.cue.is_none(),
+            "excerpt words do not match, only the title"
+        );
+        e.ingest(
+            e.session(),
+            live("w3", 9_400, "The orchard handover is next week."),
+        )
+        .unwrap();
+        assert!(
+            e.state.cue.is_none(),
+            "two of a long title's eight words are not enough"
+        );
+        e.ingest(
+            e.session(),
+            live(
+                "w4",
+                9_600,
+                "The orchard handover and the watering schedule.",
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            e.state.cue.as_ref().unwrap().question,
+            "Orchard volunteer handover plan for spring planting season and watering schedule"
+        );
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&id, Response::Dismiss).unwrap();
+        e.advance(20_000);
+        e.ingest(
+            e.session(),
+            live(
+                "w5",
+                30_000,
+                "The jardín opening is on. Scratch that, it is off.",
+            ),
+        )
+        .unwrap();
+        assert!(e.state.cue.is_none(), "words taken back do not match");
+        e.advance(2_000);
+        e.ingest(e.session(), live("w6", 31_000, "Now, the jardín opening."))
+            .unwrap();
+        assert_eq!(
+            e.state.cue.as_ref().unwrap().question,
+            "Jardín opening",
+            "accented words count"
+        );
+    }
+
+    #[test]
+    fn notes_carry_to_a_replacement_engine_and_a_new_session_may_show_them_again() {
+        let mut e = with_notes();
+        e.ingest(
+            e.session(),
+            live("w1", 9_000, "The welcome guide for the garden."),
+        )
+        .unwrap();
+        assert!(e.state.cue.is_some());
+        let mut next = Engine::live();
+        next.copy_notes_from(&e);
+        next.start().unwrap();
+        next.advance(10_000);
+        next.ingest(
+            next.session(),
+            live("w1", 9_000, "The welcome guide for the garden."),
+        )
+        .unwrap();
+        assert_eq!(
+            next.state.cue.as_ref().map(|cue| cue.kind.as_str()),
+            Some(CONTEXT),
+            "a new session starts with no note shown yet"
+        );
     }
 }

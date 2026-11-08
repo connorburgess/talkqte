@@ -92,6 +92,7 @@ fn carry_over(previous: &Engine, mut next: Engine) -> Engine {
     next.set_question_size(state.question_size);
     next.state.notes = state.notes.clone();
     next.state.user_name = state.user_name.clone();
+    next.copy_notes_from(previous);
     next.continue_sessions_from(previous);
     next
 }
@@ -536,7 +537,23 @@ struct PickedNotes {
     skipped: usize,
 }
 
-fn publish_context(app: &tauri::AppHandle, runtime: &Runtime) {
+fn publish_context(app: &tauri::AppHandle, runtime: &mut Runtime) {
+    // The engine may quote an imported note as a context reminder.
+    let notes = runtime
+        .context
+        .items()
+        .iter()
+        .map(|item| {
+            (
+                format!("{}:{}", item.provider.id(), item.source_id),
+                item.title.clone(),
+                item.source_date.clone(),
+                item.provider.id().to_string(),
+                item.excerpt.clone(),
+            )
+        })
+        .collect();
+    runtime.engine.set_notes(notes);
     let _ = app.emit_to("main", "context:changed", runtime.context.items());
 }
 
@@ -603,7 +620,7 @@ fn import_context_notes(
     let outcome = runtime
         .context
         .merge(context::Provider::File, &ids, fetched);
-    publish_context(&app, &runtime);
+    publish_context(&app, &mut runtime);
     Ok(outcome)
 }
 
@@ -634,7 +651,7 @@ fn remove_context_item(
     if !runtime.context.remove(context::Provider::File, &source_id) {
         return Err("That note is no longer imported.".into());
     }
-    publish_context(&app, &runtime);
+    publish_context(&app, &mut runtime);
     Ok(())
 }
 
@@ -648,7 +665,7 @@ fn remove_context_from(
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
     let removed = runtime.context.remove_all_from(context::Provider::File);
     runtime.pending_import = None;
-    publish_context(&app, &runtime);
+    publish_context(&app, &mut runtime);
     Ok(removed)
 }
 

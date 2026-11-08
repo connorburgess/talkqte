@@ -28,7 +28,9 @@ export function Question({
     >
       <h2 aria-live={announce ? 'polite' : undefined}>{cue.question}</h2>
       <p className="question-meta">
-        {live ? 'Live question' : 'Demo question'} · {cue.kind}
+        {cue.note
+          ? `Reminder from your notes · ${cue.note.sourceDate}`
+          : `${live ? 'Live question' : 'Demo question'} · ${cue.kind}`}
       </p>
       <button
         className="question-disclosure"
@@ -44,7 +46,11 @@ export function Question({
       </button>
       <div id={contextId} hidden={!cue.expanded} className="question-context">
         <p>
-          {live ? 'From the live transcript' : 'From the fictional transcript'}
+          {cue.note
+            ? `From your imported note, ${cue.note.sourceDate} · not from this conversation`
+            : live
+              ? 'From the live transcript'
+              : 'From the fictional transcript'}
         </p>
         <blockquote className="evidence">“{cue.evidence}”</blockquote>
         {cue.resolvedBy && (

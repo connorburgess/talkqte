@@ -94,7 +94,56 @@ function tick() {
         held: false,
         expanded: false,
         resolvedBy: null,
+        note: null,
       };
+    }
+    // A line about an imported note reminds the user of it once, with the
+    // note as its source; lowest in priority.
+    if (!state.cue && segment.atMs >= cooldown) {
+      const words = segment.text
+        .toLowerCase()
+        .split(/[^\p{L}\p{N}']+/u)
+        .filter(Boolean);
+      const note = contextItems.find((item) => {
+        if (shownNotes.includes(item.sourceId)) return false;
+        const terms = [
+          ...new Set(
+            item.title
+              .toLowerCase()
+              .split(/[^\p{L}\p{N}']+/u)
+              .filter(
+                (w) =>
+                  w.length >= 5 && /^\p{L}+$/u.test(w) && !STOP_WORDS.has(w),
+              ),
+          ),
+        ];
+        const needed = terms.length > 6 ? 3 : 2;
+        return (
+          terms.length >= needed &&
+          terms.filter((t) => words.includes(t)).length >= needed
+        );
+      });
+      if (note) {
+        shownNotes.push(note.sourceId);
+        deadline = segment.atMs + 18_000;
+        state.cue = {
+          id: `${generation}:${segment.id}:note`,
+          kind: 'Context',
+          question: note.title,
+          evidence: note.excerpt,
+          sourceId: `file:${note.sourceId}`,
+          remainingMs: deadline - state.elapsedMs,
+          totalMs: 18_000,
+          held: false,
+          expanded: false,
+          resolvedBy: null,
+          note: {
+            title: note.title,
+            sourceDate: note.sourceDate,
+            provider: 'file',
+          },
+        };
+      }
     }
   }
   if (state.elapsedMs >= state.durationMs) {
@@ -126,6 +175,7 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
         throw new Error('End the current demo before replaying it.');
       generation++;
       cooldown = 0;
+      shownNotes = [];
       state.elapsedMs = 0;
       state.transcript = [];
       state.cue = null;
@@ -235,6 +285,56 @@ const exampleNotes: ContextItem[] = [
   },
 ];
 let contextItems: ContextItem[] = [];
+// Notes already quoted as a reminder this demo run.
+let shownNotes: string[] = [];
+// Mirrors the engine's list of words that never identify a note.
+const STOP_WORDS = new Set([
+  'about',
+  'after',
+  'again',
+  'agenda',
+  'ahead',
+  'catch',
+  'check',
+  'could',
+  'daily',
+  'discussion',
+  'every',
+  'first',
+  'going',
+  'meeting',
+  'minutes',
+  'monthly',
+  'month',
+  'notes',
+  'other',
+  'people',
+  'planning',
+  'quick',
+  'really',
+  'review',
+  'should',
+  'standup',
+  'still',
+  'sync',
+  'team',
+  'their',
+  'there',
+  'these',
+  'thing',
+  'things',
+  'think',
+  'those',
+  'today',
+  'update',
+  'weekly',
+  'where',
+  'which',
+  'while',
+  'would',
+  'yesterday',
+  'tomorrow',
+]);
 const contextListeners = new Set<(items: ContextItem[]) => void>();
 function emitContext() {
   for (const receive of contextListeners)
@@ -250,6 +350,7 @@ export function connectContext(receive: (items: ContextItem[]) => void) {
 export function removeAllContext(): number {
   const removed = contextItems.length;
   contextItems = [];
+  shownNotes = [];
   emitContext();
   return removed;
 }
