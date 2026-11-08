@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 const CUE_MS: u64 = 18_000;
+/// A question asked of the user stays long enough for them to answer.
+const ASKED_MS: u64 = 45_000;
 /// A question type shown within this window is not asked again.
 const REPEAT_MS: u64 = 120_000;
 const MAX_NOTE_CHARS: usize = 20_000;
@@ -387,7 +389,15 @@ impl Engine {
         // A question being read stays, and this line may raise a new one.
         let spoken_at = segment.at_ms;
         let mut withdrawn_for_topic = false;
-        if topic_shift(&segment.text) && !self.state.cue.as_ref().is_some_and(|cue| cue.held) {
+        // A direct question is preserved while the user answers, so a topic
+        // phrase does not clear it.
+        if topic_shift(&segment.text)
+            && !self
+                .state
+                .cue
+                .as_ref()
+                .is_some_and(|cue| cue.held || cue.kind == ASKED)
+        {
             // A question type is not a repeat on a new topic. While the user
             // is reading a question, keep the history so a dismissed
             // question cannot come straight back.
@@ -411,7 +421,7 @@ impl Engine {
                 if self.state.cue.take().is_some() {
                     self.forget_unshown();
                 }
-                self.cue_deadline = segment.at_ms + CUE_MS;
+                self.cue_deadline = segment.at_ms + ASKED_MS;
                 self.state.cue = Some(Cue {
                     id: format!("{}:{}", self.generation, segment.id),
                     kind: ASKED.into(),
@@ -419,7 +429,7 @@ impl Engine {
                     evidence: segment.text,
                     source_id: segment.id,
                     remaining_ms: self.cue_deadline - now,
-                    total_ms: CUE_MS,
+                    total_ms: ASKED_MS,
                     held: false,
                     expanded: false,
                     resolved_by: None,
@@ -1598,13 +1608,46 @@ mod tests {
         let mut e = play(&[
             (1_000, "Someone can take the first draft."),
             (1_500, "Robin, can you take it?"),
-            (40_000, "Someone can book the hall."),
+            (60_000, "Someone can book the hall."),
         ]);
         e.set_user_name(Some("Robin".into())).unwrap();
         e.advance(2_000); // One catch-up tick: the suggestion never reaches the user.
         assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
-        e.advance(38_000);
+        e.advance(58_000);
         assert_eq!(e.state.cue.as_ref().unwrap().source_id, "t3");
+    }
+
+    #[test]
+    fn a_direct_question_stays_while_the_user_answers() {
+        let mut e = play(&[
+            (1_000, "Robin, can you take the first draft?"),
+            (6_000, "Moving on to the budget."),
+            (10_000, "Someone can book the hall."),
+            (30_000, "We should finish soon."),
+        ]);
+        e.set_user_name(Some("Robin".into())).unwrap();
+        e.advance(1_000);
+        e.advance(29_000);
+        let cue = e.state.cue.as_ref().expect("still shown after 29 seconds");
+        assert_eq!((cue.kind.as_str(), cue.source_id.as_str()), (ASKED, "t1"));
+        assert_eq!(cue.total_ms, 45_000);
+        e.advance(16_000);
+        assert!(e.state.cue.is_none(), "expires after 45 seconds");
+    }
+
+    #[test]
+    fn only_a_newer_direct_question_replaces_one_and_dismissal_still_works() {
+        let mut e = play(&[
+            (1_000, "Robin, can you take the first draft?"),
+            (5_000, "What do you think about the budget, Robin?"),
+        ]);
+        e.set_user_name(Some("Robin".into())).unwrap();
+        e.advance(5_000);
+        let cue = e.state.cue.as_ref().unwrap();
+        assert_eq!(cue.source_id, "t2");
+        let id = cue.id.clone();
+        e.respond(&id, Response::Dismiss).unwrap();
+        assert!(e.state.cue.is_none());
     }
 
     #[test]
