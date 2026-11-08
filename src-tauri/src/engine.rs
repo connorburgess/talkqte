@@ -291,12 +291,33 @@ impl Engine {
 }
 
 fn suggest(text: &str) -> Option<(&'static str, &'static str)> {
-    let text = text.to_lowercase();
-    if text.contains("someone can") {
+    // Match complete words, not fragments such as "cannot" or "monsoon".
+    // Keep apostrophes inside words so "can't" never becomes "can".
+    let words: Vec<_> = text
+        .split(|character: char| {
+            !character.is_alphanumeric() && character != '\'' && character != '’'
+        })
+        .map(|word| word.trim_matches(['\'', '’']))
+        .filter(|word| !word.is_empty())
+        .collect();
+    let is_word = |word: &str, expected: &str| word.eq_ignore_ascii_case(expected);
+    if text.split(['.', '?', '!', ';']).any(|sentence| {
+        let sentence_words: Vec<_> = sentence
+            .split_whitespace()
+            .map(|word| word.trim_matches(|character: char| !character.is_alphanumeric()))
+            .collect();
+        sentence_words
+            .windows(2)
+            .any(|pair| is_word(pair[0], "someone") && is_word(pair[1], "can"))
+    }) {
         Some(("Owner", "Who will take the first draft?"))
-    } else if text.contains("soon") {
+    } else if words.iter().any(|word| is_word(word, "soon")) {
         Some(("Timing", "What date should we aim for?"))
-    } else if text.contains("either") && text.contains(" or ") {
+    } else if words
+        .iter()
+        .position(|word| is_word(word, "either"))
+        .is_some_and(|index| words[index + 1..].iter().any(|word| is_word(word, "or")))
+    {
         Some(("Decision", "How will we choose between those options?"))
     } else {
         None
@@ -312,6 +333,58 @@ mod tests {
         engine.start().unwrap();
         engine.advance(5_000);
         engine
+    }
+
+    fn play_statement(text: &str) -> Engine {
+        let mut engine = Engine::default();
+        engine.demo.segments = vec![Segment {
+            id: "example".into(),
+            at_ms: 1_000,
+            speaker: "Robin".into(),
+            text: text.into(),
+        }];
+        engine.start().unwrap();
+        engine.advance(1_000);
+        engine
+    }
+
+    #[test]
+    fn unrelated_word_fragments_and_negative_statements_stay_quiet() {
+        for text in [
+            "The guide explains how monsoons affect the garden.",
+            "Someone cannot take the first draft this week.",
+            "Someone can't take the first draft this week.",
+            "Someone can’t take the first draft this week.",
+            "Someone canvassed the garden volunteers yesterday.",
+            "Ask someone. Can the guide include a map?",
+            "Eitherway is the name of a fictional group, or so I was told.",
+        ] {
+            let engine = play_statement(text);
+            assert!(engine.state.cue.is_none(), "Unexpected prompt: {text}");
+            assert_eq!(engine.state.transcript[0].text, text);
+        }
+    }
+
+    #[test]
+    fn complete_keywords_keep_their_questions_with_case_and_punctuation() {
+        for (text, kind) in [
+            ("SOMEONE can take the first draft.", "Owner"),
+            ("We should finish 'soon'.", "Timing"),
+            ("We should finish ‘soon’.", "Timing"),
+            (
+                "We should finish SOON—before the visitors arrive.",
+                "Timing",
+            ),
+            (
+                "We can either print it OR put a link by the gate.",
+                "Decision",
+            ),
+        ] {
+            let engine = play_statement(text);
+            let cue = engine.state.cue.as_ref().expect("a useful candidate");
+            assert_eq!(cue.kind, kind);
+            assert_eq!(cue.evidence, text);
+        }
     }
 
     #[test]
