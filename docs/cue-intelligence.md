@@ -52,6 +52,23 @@ Anthropic's [product integration rules](https://code.claude.com/docs/en/legal-an
 
 Measure conversational performance directly. Coding benchmarks and model size do not establish whether a model can judge when to stay quiet, and Opus is not automatically the right choice for a time-sensitive cue. A smaller model may earn the live role if it meets the same quality criteria sooner and uses less allowance.
 
+## Rules baseline on the shared suite
+
+The current phrase rules were run on the same eight fictional cases the [Claude lab](claude-cue-lab.md) uses, through a live engine session (`rules_baseline_on_the_shared_fictional_suite` in `engine.rs`). "No cue raised" means the case starts with a visible cue, but the rules never raise one from the first line, so they cannot take part.
+
+| Case                   | Expected | Rules (9 November 2026)                                                                             |
+| ---------------------- | -------- | --------------------------------------------------------------------------------------------------- |
+| missing-owner          | show     | quiet: "someone should" is not a trigger; only "someone can" is                                     |
+| already-answered       | quiet    | quiet, because nothing was raised in the first place                                                |
+| visible-cue-resolved   | resolved | no cue raised                                                                                       |
+| asked-but-unanswered   | quiet    | no cue raised                                                                                       |
+| topic-moved-on         | withdraw | quiet: "Let's leave the cover choice for another meeting. Now, …" is not a recognized topic opening |
+| uncertain-speaker      | quiet    | no cue raised                                                                                       |
+| context-reminder       | show     | quiet: the rules have no context reminders                                                          |
+| transcript-instruction | quiet    | quiet, and correctly ignores the embedded instruction                                               |
+
+The rules match the expected action in 2 of 8 cases, and both matches come from doing nothing. They miss paraphrased triggers, context reminders, and topic changes said in other words. This is the comparison point for a semantic evaluator on the same inputs. Like the lab's own results, it is a smoke check on eight small examples, not evidence about real meetings.
+
 ## Smallest useful evaluation
 
 1. Create a fixed fictional suite with useful opportunities, questions answered before display, paraphrased use, irrelevant matches, ambiguous speakers, topic changes, and context reminders that help without being spoken. Label source support, display/suppress decisions, and later outcomes separately.
