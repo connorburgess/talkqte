@@ -3,6 +3,7 @@ mod companion;
 mod companion_macos;
 pub mod engine;
 mod microphone;
+pub mod transcription;
 
 use engine::{CompanionPosition, Engine, QuestionSize, Response, Sensitivity};
 use std::{sync::Mutex, time::Instant};
