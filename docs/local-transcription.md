@@ -8,7 +8,7 @@ The optional `local-whisper` Cargo feature adds `LocalWhisper`, a [Transcriber](
 
 `Engine::live()` creates a session with no scripted demo lines, for transcript input through `Engine::ingest`.
 
-The app looks for the model at `TALKQTE_WHISPER_MODEL`, or at `models/ggml-tiny.en.bin` in its data folder. **Start live session** loads it before opening the microphone, so a missing or unreadable model is reported without starting capture. The capture callback feeds the [audio tap](architecture.md); a runner thread moves 3-second chunks to the worker every 250 ms and the worker's lines go to `Engine::ingest`. Stop releases the microphone first, then transcribes what was queued, waiting up to 10 seconds. If the microphone is refused or fails, the session ends.
+The app looks for the model at `TALKQTE_WHISPER_MODEL`, or at `models/ggml-tiny.en.bin` in its data folder, where **Download speech model** in Settings puts it after checking its SHA-256. **Start live session** loads it before opening the microphone, so a missing or unreadable model is reported without starting capture. The capture callback feeds the [audio tap](architecture.md); a runner thread moves 3-second chunks to the worker every 250 ms and the worker's lines go to `Engine::ingest`. Stop releases the microphone first, then transcribes what was queued, waiting up to 10 seconds. If the microphone is refused or fails, the session ends.
 
 ## Run the check
 
@@ -132,7 +132,7 @@ These figures describe one clean synthetic voice pair on one Mac. They do not in
 
 ## Still needed
 
-- Model delivery: planned in the [model delivery plan](model-delivery.md); not implemented.
+- Model delivery: the Settings download is built; the first-run setup step and update path are not. See the [model delivery plan](model-delivery.md#what-is-implemented).
 - A live session on real hardware: permission, release on Stop and End, and delay with the companion showing.
 - Sustained-session measurements of delay, memory growth, CPU use, and dropped audio.
 

@@ -21,8 +21,11 @@ import {
   clockTime,
   type CueSnapshot,
   type LiveStatus,
+  type ModelStatus,
   type Snapshot,
 } from './lib/types';
+
+const megabytes = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
 import { Question } from './components/Question';
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
@@ -237,6 +240,7 @@ function Notebook() {
   const [preview, setPreview] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
+  const [model, setModel] = useState<ModelStatus | null>(null);
   const modal = useRef<HTMLDialogElement>(null);
   const exportButton = useRef<HTMLButtonElement>(null);
   const notesEditor = useRef<HTMLTextAreaElement>(null);
@@ -248,7 +252,9 @@ function Notebook() {
       setUserName(state.userName ?? '');
     }
   }, [state]);
+  const modelState = model?.status;
   useEffect(() => {
+    // Rechecked whenever the model is installed or removed.
     bridge
       .liveStatus()
       .then(setLiveStatus)
@@ -258,6 +264,28 @@ function Notebook() {
           reason: 'Live transcription status is unavailable.',
         }),
       );
+  }, [modelState]);
+  useEffect(() => {
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    bridge
+      .watchModel((incoming) => {
+        if (!disposed)
+          setModel((previous) =>
+            !previous || incoming.revision >= previous.revision
+              ? incoming
+              : previous,
+          );
+      })
+      .then((unsubscribe) => {
+        if (disposed) unsubscribe();
+        else stop = unsubscribe;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      stop?.();
+    };
   }, []);
   useEffect(() => {
     if (preview !== null) modal.current?.showModal();
@@ -506,7 +534,7 @@ function Notebook() {
                 ref={exportButton}
                 className="secondary-button export-button"
                 onClick={prepareExport}
-                disabled={busy || state.live}
+                disabled={busy || live}
                 title={
                   state.live
                     ? 'Live sessions are not saved or exported.'
@@ -998,6 +1026,65 @@ function Notebook() {
                       ? 'Ready on this device.'
                       : liveStatus.reason}
                 </p>
+                {model &&
+                  ['missing', 'downloading', 'installed'].includes(
+                    model.status,
+                  ) && (
+                    <div className="model-download">
+                      <h3>Speech model</h3>
+                      <p>
+                        {model.status === 'installed'
+                          ? `${model.name} is installed on this device (${megabytes(model.sizeBytes)}).`
+                          : `Download ${model.name} (${megabytes(model.sizeBytes)}) from the whisper.cpp model repository (MIT license). It needs about ${megabytes(model.neededBytes)} free. This is the only network request: it sends nothing about you, your meetings, or your audio. The file is checked against a pinned checksum before use.`}
+                      </p>
+                      {model.status === 'downloading' && (
+                        <progress
+                          aria-label="Model download"
+                          value={model.received}
+                          max={model.sizeBytes}
+                        />
+                      )}
+                      {model.message && (
+                        <p className="microphone-message" role="alert">
+                          {model.message}
+                        </p>
+                      )}
+                      {model.status === 'missing' && (
+                        <button
+                          className="secondary-button"
+                          disabled={busy}
+                          onClick={() =>
+                            void run(() => bridge.command('download_model'))
+                          }
+                        >
+                          Download speech model
+                        </button>
+                      )}
+                      {model.status === 'downloading' && (
+                        <button
+                          className="secondary-button"
+                          onClick={() =>
+                            void run(() =>
+                              bridge.command('cancel_model_download'),
+                            )
+                          }
+                        >
+                          Cancel download
+                        </button>
+                      )}
+                      {model.status === 'installed' && (
+                        <button
+                          className="secondary-button"
+                          disabled={busy || live}
+                          onClick={() =>
+                            void run(() => bridge.command('remove_model'))
+                          }
+                        >
+                          Remove model
+                        </button>
+                      )}
+                    </div>
+                  )}
               </div>
             </section>
             <section className="setting">

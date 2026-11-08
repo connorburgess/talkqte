@@ -4,7 +4,7 @@ import type { MicrophoneSnapshot } from '../src/lib/microphone';
 async function nativePage(page: Page, query = '') {
   await page.clock.install();
   await page.route(
-    /\/\?(?:window=cue|delay-microphone|live).*|:\d+\/$/,
+    /\/\?(?:window=cue|delay-microphone|live|model).*|:\d+\/$/,
     async (route) => {
       if (route.request().resourceType() !== 'document')
         return route.continue();
@@ -342,4 +342,41 @@ test('your name is applied when you leave the field, and a rejected name explain
   );
   // The field shows the name still in effect, not the rejected one.
   await expect(name).toHaveValue('Sam');
+});
+
+test('the speech model downloads only when chosen, shows progress, and can be cancelled or removed', async ({
+  page,
+}) => {
+  await nativePage(page, '?model');
+  await expect(
+    page.getByRole('button', { name: 'Start live session' }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const section = page.locator('.model-download');
+  await expect(section).toContainText('78 MB');
+  await expect(section).toContainText('only network request');
+  expect(await page.evaluate(() => window.microphoneTest.calls)).not.toContain(
+    'download_model',
+  );
+  await page.getByRole('button', { name: 'Download speech model' }).click();
+  await expect(
+    page.getByRole('progressbar', { name: 'Model download' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel download' }).click();
+  await expect(section.getByRole('alert')).toHaveText(
+    'Download cancelled. Nothing was installed.',
+  );
+  await page.getByRole('button', { name: 'Download speech model' }).click();
+  await page.evaluate(() => window.modelTest.finish());
+  await expect(section).toContainText('is installed on this device');
+  await expect(page.getByText('Ready on this device.')).toBeVisible();
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Start live session' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Remove model' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Download speech model' }),
+  ).toBeVisible();
 });

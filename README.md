@@ -81,15 +81,17 @@ Choose **Start microphone** explicitly and grant macOS permission if prompted. *
 
 ## Live session (developer build)
 
-A live session transcribes your microphone on this Mac and runs the phrase-based questions on what it hears. It is off in ordinary builds. To try it, build with the `local-whisper` feature (needs CMake), and install the checked `tiny.en` model as described in [local transcription](docs/local-transcription.md#run-the-check), either at `~/Library/Application Support/com.talkqte.desktop/models/ggml-tiny.en.bin` or at a path given in `TALKQTE_WHISPER_MODEL`:
+A live session transcribes your microphone on this Mac and runs the phrase-based questions on what it hears. It is off in ordinary builds. To try it, build with the `local-whisper` feature (needs CMake):
 
 ```sh
 npm run tauri -- dev --features local-whisper
 ```
 
+Then choose **Download speech model** in Settings. It fetches the 78 MB `tiny.en` model from the whisper.cpp model repository, checks it against a pinned SHA-256, and keeps it in the app's data folder; **Remove model** deletes it. The download is the only network request and sends nothing about you or your audio. A developer can instead point `TALKQTE_WHISPER_MODEL` at their own model file, which is not checksum-checked.
+
 Choose **Start live session** in the notebook and grant microphone permission if asked. **Stop live session**, in the notebook or companion, releases the microphone, finishes transcribing the last few seconds, and ends the session; **Stop microphone** does the same. If microphone access is refused or the device fails, the session ends. Speech is transcribed in 3-second chunks, so lines appear a few seconds after they are spoken; the delay on real hardware has not been measured. Audio is not recorded. The transcript stays in memory until you start another session or quit, and a live session cannot be exported. Other apps' audio, including the other side of a call, is not captured. Settings shows whether this build and model support a live session.
 
-This has been checked with synthetic audio and a scripted recognizer in tests. A live session on real hardware, real-meeting accuracy, and the setup download in the [model delivery plan](docs/model-delivery.md) are still unchecked or unbuilt.
+This has been checked with synthetic audio and a scripted recognizer in tests. The download is tested against a simulated server, plus one ranged request to the real source. A live session on real hardware, real-meeting accuracy, and the first-run setup step in the [model delivery plan](docs/model-delivery.md) are still unchecked or unbuilt.
 
 ## Fictional cue lab
 

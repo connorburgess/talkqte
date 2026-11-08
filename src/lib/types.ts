@@ -54,7 +54,19 @@ export type Commands = {
   set_overlay: { enabled: boolean };
   start_live_session: undefined;
   stop_live_session: undefined;
+  download_model: undefined;
+  cancel_model_download: undefined;
+  remove_model: undefined;
 };
+export interface ModelStatus {
+  revision: number;
+  status: 'unavailable' | 'developer' | 'missing' | 'downloading' | 'installed';
+  name: string;
+  sizeBytes: number;
+  neededBytes: number;
+  received: number;
+  message: string | null;
+}
 export interface LiveStatus {
   available: boolean;
   reason: string | null;

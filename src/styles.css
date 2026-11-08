@@ -916,6 +916,23 @@ svg {
   color: var(--ink);
   font-size: 16px;
 }
+.model-download {
+  margin-top: 20px;
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+.model-download h3 {
+  font-size: 16px;
+}
+.model-download p {
+  margin-top: 0;
+}
+.model-download progress {
+  width: min(100%, 24rem);
+  height: 10px;
+  accent-color: var(--forest);
+}
 .coming-next {
   padding-top: 32px;
 }
