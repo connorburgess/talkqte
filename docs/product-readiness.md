@@ -2,19 +2,21 @@
 
 Status: planning baseline, 8 November 2026. These are requirements and experiments, not implemented capabilities or a release announcement. The [roadmap](../ROADMAP.md) tracks delivery; [PRODUCT.md](../PRODUCT.md#goal-and-first-proof) defines the user outcome.
 
-TalkQTE should become a dependable meeting companion that people can discover, install, use alongside existing tools, and keep up to date with minimal friction. Work toward the defined feature set and whole-product readiness together. A pleasant fictional demo, an integration mock, or a successful build proves only its own narrow behavior.
+TalkQTE should help people stay grounded and respond during a conversation through timely, relevant context. Deliver that experience as a dependable companion people can discover, install, use alongside existing tools, and keep up to date with minimal friction. Work toward the defined feature set and whole-product readiness together. A pleasant fictional demo, an integration mock, or a successful build proves only its own narrow behavior.
+
+The current public objective is to explain the idea with a clearly labeled fictional concept preview and invite people to follow development. Downloads, tester recruitment, and a broad launch are not current calls to action. The pilot and distribution stages below remain preparation for later decisions. Saving and note-taking are secondary use cases; a successful preview or first experience need not end in a saved artifact.
 
 ## Areas every release must account for
 
 | Area | What readiness means | Next evidence to collect |
 | --- | --- | --- |
-| User value and scope | Useful clarification while preserving listening; stable controls and a clear supported use case | Matched fictional conversations with and without assistance; record useful, stale, wrong, and distracting questions |
+| User value and scope | Relevant context that supports orientation and timely participation while preserving listening | Matched fictional conversations with and without assistance; compare clarification questions and context reminders separately, recording unsupported, late, and distracting cues |
 | Reliability and scale | Bounded memory and work queues; responsive stop/cancel; sustained operation alongside a call | Set latency, memory, CPU/energy, and recovery budgets on named Macs before the benchmark; test long sessions, overload, device changes, and interrupted work |
 | Compatibility and accessibility | Explicit supported OS, hardware, meeting apps, languages, and assistive setups | Native focus, Spaces, full-screen, sharing, keyboard, VoiceOver, and permission-denial checks; unsupported cases remain visible |
 | Integrations | Supported, scoped connections with provenance, understandable errors, and independent core operation | Granola capability/authentication decision and a fictional end-to-end adapter test, followed by an explicitly authorized account check |
 | Privacy, security, and data lifecycle | Clear input/processing state, protected credentials, chosen retention, reliable deletion, and safe exports | Follow data from capture/import through storage, logs, diagnostics, deletion, and export; test boundaries and failure cases against [PRIVACY.md](../PRIVACY.md) |
 | Installation, models, and updates | An ordinary user can install, try, upgrade, recover, and uninstall without a development environment | Clean-machine install and upgrade tests; interrupted model downloads, integrity checks, low disk space, compatible model versions, and recovery without losing saved work |
-| Discovery and onboarding | An accurate promise, a clear next action, and a short path to a useful first experience | Observe invited users from the website through a fictional demo and an explicitly enabled supported session; record time, abandonment, and help needed |
+| Discovery and onboarding | Explain the concept and invite following development now; prepare a short path to supported first use later | Review whether the fictional preview communicates timely context without implying live functionality; later, observe supported setup and record time, abandonment, and help needed |
 | Support and operation | Known limitations, release notes, troubleshooting, a support route, and a response plan for failed releases | Rehearse a failed update/provider outage; offer user-reviewed diagnostics without meeting content; assign a release/support owner |
 | Sustainability | A viable cost and maintenance model as usage grows | Estimate artifact/model download bandwidth, storage, signing/release operations, optional provider costs, and support effort; review dependency/model terms before distribution |
 
@@ -34,7 +36,9 @@ For any proposed backend, record the unmet need, expected load, data boundary, l
 
 Start planning now. Keep previous-note import, live transcript input, and provider writeback as independent capabilities. A successful read does not validate live input or mutation support.
 
-The first Granola slice should let a user select a small prior-note context, see its source and date, and remove it. It must remain distinguishable from live meeting evidence. Keep the existing note-taker as the primary record; the local core should remain usable when disconnected.
+The first Granola slice should let a user select a small prior-note context, see its source and date, and remove it. Evaluate whether that context helps them stay grounded in the current conversation. It must remain distinguishable from live meeting evidence. Keep the existing note-taker as the primary record; the local core should remain usable when disconnected. Saving generated prompts or writing them back is not required to establish this value.
+
+The note-taker can record the actual discussion without a second manual saving workflow in TalkQTE. Unused suggestions should expire with their context, not silently become meeting facts, decisions, or action items. Keep prompt lifecycle state separate from the meeting record. A retained cue or provider writeback needs a demonstrated use case; do not treat automatic archiving as the default replacement for a Save button.
 
 | Candidate | Official documentation checked on 8 November 2026 | Decision still needed |
 | --- | --- | --- |
@@ -54,8 +58,9 @@ Plan both how people find TalkQTE and how they receive a maintained application.
 
 | Channel | Initial role | Gate before using it |
 | --- | --- | --- |
-| talkqte.com and versioned release downloads | Primary candidate for an accurate introduction, compatibility information, demo, and a direct download | Tested installable artifact, clear release status, release notes, privacy information, and support path; retain coming-soon copy until then |
-| Invited pilot and relevant Mac/meeting-workflow communities | Learn whether the promise, setup, and first useful experience work for the intended audience | Consent to participate, a bounded supported scenario, a feedback route, and an explicit outreach decision |
+| talkqte.com | Explain a labeled fictional concept now, with “Follow development on GitHub” as the primary link | Distinguish intended context/response assistance from the phrase-based prototype; keep links few and relevant; no save/export step required |
+| Website-linked versioned release downloads | Later delivery of a supported application | Tested installable artifact, clear release status, release notes, privacy information, and support path; no download call to action now |
+| Invited pilot and relevant Mac/meeting-workflow communities | Later evaluation of setup and first useful experience | Readiness review, consent to participate, a bounded supported scenario, a feedback route, and an explicit recruitment/outreach decision; do not recruit from the current site |
 | Granola/Fireflies ecosystem content or partnerships | Reach people with an existing note-taking workflow | A verified integration and honest provider-specific guidance; no implied endorsement or partnership |
 | Homebrew Cask | Possible convenient installation route for users who prefer it | Stable maintained artifacts and eligibility review against [Homebrew's acceptance requirements](https://docs.brew.sh/Acceptable-Casks); listing is not guaranteed |
 | Mac App Store | Potential additional discovery and installation route | Separate feasibility check for sandboxed capture, companion behavior, model delivery, and review requirements; [Tauri's store guide](https://v2.tauri.app/distribute/app-store/) requires sandbox configuration |
@@ -64,13 +69,13 @@ For direct macOS delivery, plan Developer ID signing and notarization using the 
 
 Target first use: understand the purpose and compatibility, install, try the fictional demo without an account or capture permission, then explicitly enable a supported input when ready. Explain model size and storage before downloading; make progress, retry, and cancellation clear. Ask for OS permissions when the chosen action needs them, explain denial recovery, and make Stop easy to find. Keep provider connections optional.
 
-Use one bounded acquisition/onboarding experiment at a time. Record the audience, channel hypothesis, supported build, success criteria, observed setup friction, and next decision. Start with participant feedback and manual observations; analytics, forms, paid promotion, and outreach are separate product/execution decisions. Do not collect meeting content to measure conversion.
+When a later stage is approved, use one bounded acquisition/onboarding experiment at a time. Record the audience, channel hypothesis, supported build, success criteria, observed setup friction, and next decision. Start with participant feedback and manual observations; analytics, forms, paid promotion, and outreach are separate product/execution decisions. Do not collect meeting content to measure conversion.
 
 ## Release stages and acceptance
 
-1. **Development:** preserve honest demo labels; establish the support matrix, budgets, integration contract, and install/update plan alongside core development. Prepare a reproducible synthetic validation suite.
+1. **Development (current):** explain the intended experience with a fictional concept preview and a follow-development link. Establish the support matrix, budgets, integration contract, and install/update plan alongside core development. Prepare a reproducible synthetic validation suite; do not turn release planning into premature recruitment or a download offer.
 2. **Invited pilot:** verify the advertised feature slice end to end, including clean installation, first use, interruption recovery, privacy, accessibility, and a support route. Set acceptance criteria before inviting participants. Test updates between candidate versions before widening the pilot. Include integration tests if the pilot promises a connection.
-3. **Wider distribution:** demonstrate useful clarification without unacceptable listening cost, reliable supported operation, recovery from a failed release, sustainable delivery/support costs, and accurate download/help material. Publish limitations and release notes. Expand channels based on observed fit.
+3. **Wider distribution:** demonstrate useful context and participation without unacceptable listening cost, reliable supported operation, recovery from a failed release, sustainable delivery/support costs, and accurate download/help material. Publish limitations and release notes. Expand channels based on observed fit.
 
 The roadmap's full future feature set need not block a clearly scoped pilot. Each release must deliver its advertised slice completely. Windows, mobile, enterprise deployment, additional providers, and commercial packaging each need their own demand and feasibility decision; planning them is not a promise of support.
 

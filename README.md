@@ -2,13 +2,15 @@
 
 # TalkQTE
 
-A privacy-focused meeting companion for timely questions and clearer notes.
+A privacy-focused meeting companion for timely context and participation.
 
 Built in public with Rust, Tauri, and React. **Early development:** a runnable desktop prototype is available from source. It plays a fictional meeting and includes an opt-in macOS microphone activity monitor. Live meeting transcription, system-audio capture, and persistent storage are not implemented yet. There is no signed release.
 
 ## The idea
 
-One useful question, at the right moment. Notice a point that needs clarification during a meeting and show a question while it is still relevant. Save a question for later without replacing an existing notes workflow.
+Stay grounded. Respond in the moment. The aim is to supply relevant context and prompts while the conversation is still on that topic. A clarification question is one possible cue. The intended flow is context, an opportunity to respond, then the cue clears. Your existing note-taker can remain the record of what was said or decided; saving a prompt is not part of the core experience.
+
+The current prototype uses fictional dialogue and phrase rules; broader context assistance is the intended direction. Follow development on GitHub.
 
 Prompts should help you participate without stealing focus or demanding a response. TalkQTE is intended to work independently or alongside tools such as Granola and Fireflies; provider integrations are future work. The visual style is still being explored.
 
@@ -47,12 +49,12 @@ For UI development, `npm run dev` starts a browser preview at `http://127.0.0.1:
 
 ## Intended first usable version
 
-- macOS desktop app with a small floating prompt window and saved questions.
+- macOS desktop app with a small floating cue window and clear context and response controls.
 - Local Whisper transcription, with no transcription API key required.
 - Microphone and system-audio capture, started explicitly by the user.
-- Suggestions for missing owners, vague deadlines, and unanswered questions.
+- Clarification prompts for missing owners, vague deadlines, and unanswered questions as the first bounded slice; source-backed context reminders need separate validation.
 - A clear pause control, adjustable prompt frequency, and keyboard access.
-- Private local storage and explicit export, using fictional data for every public demo.
+- Clear privacy and retention choices for any saved content. Saving, note-taking, and export are secondary use cases to validate; public demos use fictional data.
 
 These are development targets. The activity monitor does not yet transcribe meetings or supply live prompts, and the prototype has no retention controls. See [ROADMAP.md](ROADMAP.md) and the [current privacy behavior](PRIVACY.md).
 

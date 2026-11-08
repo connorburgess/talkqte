@@ -2,6 +2,8 @@
 
 This is a development plan. Unchecked items are not implemented.
 
+The product goal is timely context that helps someone stay grounded and respond during the conversation. Clarification questions are the first bounded cue type. Saving and note-taking are secondary use cases to validate, not required proof of value. Current public presentation should explain a clearly labeled fictional concept and invite people to follow development; recruitment and downloads remain later stages.
+
 ## Production, integrations, and distribution
 
 This track runs alongside the feature milestones below. The goal includes a dependable, supportable product that people can discover, install, connect to existing tools, and update with minimal friction. Use the [product readiness plan](docs/product-readiness.md) to choose the next release blocker and record evidence; a demo or successful build alone does not establish readiness.
@@ -45,10 +47,11 @@ The question demo plays synthetic text. Separate microphone monitoring measures 
 
 ## Next product validation
 
-Test the clarification interaction before investing in automatic detection. This can run independently of the native audio feasibility work below.
+Test the in-conversation interaction before investing in automatic detection. This can run independently of the native audio feasibility work below.
 
 - [ ] Compare no assistance with stable, human-selected questions in matched fictional conversations; counterbalance order.
-- [ ] Measure useful clarification and listening comprehension together, including already-answered and late cues.
+- [ ] Compare source-backed context reminders in a separate human-cued condition; check orientation and appropriate responses while the topic is still active.
+- [ ] Measure useful participation and listening comprehension together, with useful clarification specific to the question condition; include unsupported, already-answered, and late cues. Do not use saves or speaking speed as the success measure.
 - [ ] Check whether the **Why?** hold is discoverable or needs a separate Hold action.
 - [ ] Check the notebook's keyboard route, native VoiceOver, reading time, and announcement preferences with users' normal setups.
 - [ ] Test content, timing, and placement separately; keep a simpler manual interaction if automation does not add value.
@@ -67,18 +70,18 @@ Prove that audio capture, local transcription, and the floating prompt can coexi
 
 ## First usable version
 
-- [ ] Minimal session view with the current question, saved questions, and optional notes.
-- [ ] One question at a time, expiry, cooldown, pause, and adjustable sensitivity.
+- [ ] Minimal session view centered on the current cue and its controls; saved questions and notes remain optional prototype capabilities.
+- [ ] One cue at a time, expiry, cooldown, pause, and adjustable sensitivity.
 - [ ] Initial cues for missing owners, vague deadlines, and explicit open questions.
 - [ ] Suppress questions answered by the conversation before display, and cancel stale or redundant prompts.
 - [ ] Prioritize questions clearly addressed to the user; remain quiet for another or uncertain addressee.
 - [ ] Preserve a direct question while the user answers, without competing cues, fabricated answers, response scores, or countdown pressure; keep save and dismiss available.
-- [ ] Save a question for later; mark a question resolved.
+- [ ] Mark a cue resolved; validate a separate use case before expanding saving or making it part of the core flow.
 - [ ] Selected-meeting context and a simple meeting goal.
-- [ ] Minimal prompt history, Markdown export, and clear retention controls.
+- [ ] Clear retention controls for any retained content; expand prompt history or Markdown export only for a demonstrated use case.
 - [ ] Accessible keyboard operation and reduced-motion support.
 - [ ] Fictional demo mode that never reads the user's meeting store.
-- [ ] Compare a short fictional meeting workflow with and without TalkQTE: useful questions, stale or redundant prompts, and distraction.
+- [ ] Compare a short fictional meeting workflow with and without TalkQTE: useful context and participation, listening, stale or redundant prompts, and distraction.
 
 The [product goal and first proof](PRODUCT.md#goal-and-first-proof) define what this milestone is trying to establish. Use the [research decision notes](docs/research.md) to connect findings to a specific change and a test; adding a study to the reading list does not establish a product benefit.
 

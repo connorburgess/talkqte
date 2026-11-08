@@ -4,13 +4,15 @@ Reviewed 8 November 2026. This is the short entry point for evidence used in Tal
 
 ## The short version
 
-- **Help the user participate while still listening.** One useful clarification matters more than generating lots of prompts. This is the product goal, not a measured result.
+- **Help the user stay grounded and respond in the moment while still listening.** A clarification question is one possible cue; source-backed context reminders are a broader product hypothesis to evaluate. This is the product goal, not a measured result. Saving a prompt is not required to demonstrate value.
 - **Keep a question easy to read and under the user's control.** The prototype shows the complete question first; opening **Why?** reveals its source and keeps it available. This default is a design choice to evaluate.
 - **Near-camera placement is an option, not a promise of invisible reading.** Gaze studies use different setups and do not establish one universally correct location for a live prompt.
 - **Looking away is normal.** Eye contact is not an attention, honesty, or participation score. People differ in what feels comfortable and lets them listen.
 - **Prove the core experience before expanding it.** Live transcription, prompt relevance, accessible controls, and native meeting behavior need validation before broader claims or integrations.
 
 The report's central tradeoff is that assistance may help someone formulate a question while the act of reading it makes them miss speech. Its closest example is a human-operated conversational scaffold, not proven automatic meeting understanding. Test useful clarification and listening comprehension together; confidence or more accepted suggestions alone cannot settle the question.
+
+The review chiefly informs the clarification slice. It does not establish benefits from broader context or response assistance. Test those cue types separately, measuring accurate context, orientation, appropriate responses while the topic is active, and listening comprehension. Do not turn “respond in the moment” into pressure to speak or a speed score.
 
 ## What we use, and why
 
@@ -49,7 +51,9 @@ The report also lists streaming transcription implementations, platform capabili
 
 ## The next experiment
 
-Use matched fictional conversations and human-selected cue opportunities before adding transcription and detection errors. Compare no assistance with one stable question and optional evidence; counterbalance scenario and condition order. Check useful clarifications and comprehension of the surrounding speech together. Also record already-answered questions, late cues, distraction, and whether participants could ignore, hold, save, or dismiss a prompt.
+Use matched fictional conversations and human-selected cue opportunities before adding transcription and detection errors. Compare no assistance with one stable question and optional evidence; counterbalance scenario and condition order. Check useful clarifications and comprehension of the surrounding speech together. Also record already-answered questions, late cues, distraction, and whether participants could ignore, hold, or dismiss a prompt. Saving is an optional behavior to study only for a separate use case.
+
+Add a separate context-reminder condition to test the broader participation goal. Measure whether the information is supported and relevant, whether it helps participants remain oriented or respond appropriately in time, and whether surrounding speech is still understood. A successful clarification condition does not establish success for this broader format.
 
 Include naturally resolved ambiguities, direct questions, topic changes, and cases where silence is the correct app behavior. Test content, timing, placement, and detection separately. If a format increases missed speech, revise it even when users report greater confidence. If automation adds no value over user-requested help, keep the simpler interaction. A small formative study can expose failures and preferences; it cannot establish broad effectiveness or disability-specific benefits. No user study has been run yet.
 
@@ -65,7 +69,9 @@ Keep the detailed evidence and decisions in this app repository. The [website re
 
 Suggested coming-soon wording:
 
-> One useful question, at the right moment. TalkQTE is an early desktop prototype exploring timely clarification prompts, with saved questions and optional notes. Follow its development on GitHub.
+> Stay grounded. Respond in the moment. TalkQTE is an early prototype exploring timely context and prompts that support participation. Follow development on GitHub.
+
+A fictional **Concept preview** may show “Can we commit to Friday?”, the context cue “Earlier, legal said review takes two days.”, and the response prompt “Will the draft be ready Wednesday?” The benefit is intended to happen in the conversation; omit a save/export step. Clearly distinguish this intended experience from the current fictional dialogue and phrase rules. Keep the primary link focused on following development; downloads and tester recruitment belong to later readiness decisions.
 
 A later design explainer can say that Glance view presents one complete question, offers its source on request, and lets users choose larger text or optional near-camera placement. Describe these as prototype controls, with a link to their [evidence and limits](glance-mode.md).
 

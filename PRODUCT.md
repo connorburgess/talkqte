@@ -12,21 +12,23 @@ Rust application core, Tauri 2, React, TypeScript, and CSS. Local Whisper is the
 
 ## Purpose
 
-One useful question, at the right moment.
+Stay grounded. Respond in the moment.
 
-Help a meeting participant notice a useful clarification while the conversation is still on that topic. TalkQTE should work on its own or alongside an existing note-taker without requiring a new notes workflow.
+Help a meeting participant follow what is happening and use relevant context to respond while the moment still matters. A clarification question is one possible prompt; a concise source-backed reminder or response prompt may also support participation. These broader cue types are product directions to validate, not implemented capabilities. TalkQTE should work on its own or alongside an existing note-taker without requiring a new notes workflow.
 
-The initial audience includes people who want a little help participating and people who already use Granola or Fireflies for their meeting record. Keep saved questions and minimal prompt history; the existing note-taker can remain the primary record.
+The initial audience includes people who want a little help participating and people who already use Granola or Fireflies for their meeting record. The existing note-taker can remain the primary record. Saving prompts and note-taking are secondary capabilities whose value needs a demonstrated use case; they are not the core product promise or required end of the experience. This direction does not remove existing Save, notes, or export functionality.
+
+The intended flow is relevant context, an opportunity to respond, then the cue clears when no longer useful. An existing note-taker owns the record of what was actually said or decided; TalkQTE should not ask the user to save the same conversation again. An unused suggestion is not a meeting fact, decision, or action item and should not be automatically written into that record. There is no established need for a saved-prompt archive.
 
 ## Goal and first proof
 
-**Help someone ask a relevant clarification while keeping up with the conversation.** A question that arrives after the topic has moved on, repeats an answer, or makes listening harder is a product failure even if its wording is good.
+**Help someone stay grounded and respond in the moment through timely, relevant context while continuing to follow the conversation.** A cue that arrives too late, introduces unsupported context, or makes listening harder fails that goal even if its wording is good. Useful participation can include understanding without speaking; response speed or speaking more is not an end in itself.
 
 **Deliver the defined feature set as a dependable product that people can discover, install, use with their existing tools, and keep up to date with minimal friction.** Production reliability, scalability, integration readiness, distribution, and ongoing support are part of the goal from the start. Plan and validate them alongside feature development rather than leaving them until the prototype feels complete.
 
-The first technical goal is a macOS companion that can receive both sides of a synthetic call, transcribe locally, and show one controllable question without taking focus from the meeting. The current fictional demo and separate microphone activity monitor do not meet that goal yet. See the [technical milestone](ROADMAP.md#first-technical-milestone).
+The first technical goal is a macOS companion that can receive both sides of a synthetic call, transcribe locally, and show one controllable cue without taking focus from the meeting. Clarification questions remain the bounded first implementation slice. The current fictional demo and separate microphone activity monitor do not meet that goal yet. See the [technical milestone](ROADMAP.md#first-technical-milestone).
 
-The first product proof is a comparison of short fictional conversations with and without prompts. Record whether a question was useful, timely, already answered, or distracting; check whether people still understood the conversation and could ignore, hold, save, or dismiss the prompt. Include cases where staying quiet is correct. Agree on acceptance criteria before evaluating a candidate, and record misses as well as useful prompts. A higher prompt count or more saves alone is not success.
+The first product proof is a comparison of short fictional conversations with and without cues. Check whether the cue supplies accurate relevant context, helps the participant stay oriented or make an appropriate response in time, and preserves comprehension of surrounding speech. Compare clarification questions and context reminders separately with human-selected content before automating them. Keep useful clarification as a specific outcome of the question condition. Include already-answered, late, unsupported, and distracting cues, and cases where staying quiet is correct. Check ignore, hold, and dismiss controls. Agree on acceptance criteria before evaluation; more prompts, faster speech, or more saves alone is not success.
 
 This keeps the next work focused on live input, relevance, timing, and user control. Broader meeting management, summaries, and integrations follow only when they support that experience. Camera-facing gaze is an optional presentation preference, not the product goal or a measure of successful participation.
 
@@ -42,13 +44,14 @@ For the local-first core, scaling includes resource use on supported devices, re
 
 ## Operating context
 
-The app accompanies a meeting in another application. Its small prompt window must not take keyboard focus. Keep the resting companion quiet and minimal; use rounded surfaces, readable type, and clearly named controls when a question appears. A dashboard supports reviewing saved questions and optional notes before and after meetings.
+The app accompanies a meeting in another application. Its small prompt window must not take keyboard focus. Keep the resting companion quiet and minimal; use rounded surfaces, readable type, and clearly named controls when a cue appears. The current notebook supports saved questions and optional notes; it is an existing prototype capability, not a required step in the intended experience.
 
-The current notebook is a prototype surface, not a requirement to build a meeting-management product. Archives, summaries, CRM features, and a broad integration framework can wait until the clarification experience proves useful.
+The current notebook is a prototype surface, not a requirement to build a meeting-management product. Additional saving, archives, summaries, and CRM work need a specific use case that supports participation. Integration readiness continues alongside the core work, with selected prior context as the first Granola candidate.
 
 ## Product principles
 
-- One timely question at a time; dismissal is always easy and has no penalty.
+- One timely cue at a time; dismissal is always easy and has no penalty.
+- Ground context and response prompts in inspectable sources. Do not invent facts, commitments, or an answer on the user's behalf.
 - Let the conversation answer first. Cancel a candidate that is resolved before display, and remove a displayed question when it becomes stale or redundant. These checks are not implemented in the current phrase-based demo.
 - Timing should preserve relevance without countdown pressure, scores, or a demand to respond.
 - Keep the rules-first approach until observed misses or false prompts justify a more complex method.
@@ -66,9 +69,21 @@ Keep the question visible while the user is answering, without a competing sugge
 
 ## Brand commitments
 
-TalkQTE is the product name; talkqte is the repository name. Marketing describes a privacy-focused meeting companion for timely questions and clearer notes.
+TalkQTE is the product name; talkqte is the repository name. Describe a privacy-focused meeting companion for timely context and participation. Suggested headline: **Stay grounded. Respond in the moment.** AI assistance is the intended direction, not a claim that the phrase-based prototype already generates language-model responses. Note-taking or agentic note-taking should not define the product without a separate use case.
 
 Focus, low distraction, and compatibility are product hypotheses to test. Related products exist; do not claim TalkQTE is first, unique, or proven to improve meetings.
+
+## Current public presentation
+
+Explain the idea and give interested people a reason to follow development. Use a short fictional **Concept preview**, with **Follow development on GitHub** as the primary link. Keep links and topics few and relevant. Downloads, tester recruitment, and a broad launch are later stages; production and integration planning still continue now.
+
+Proposed sequence:
+
+- Conversation: “Can we commit to Friday?”
+- Context cue: “Earlier, legal said review takes two days.”
+- Response prompt: “Will the draft be ready Wednesday?”
+
+The intended benefit occurs during the conversation; no save or export step is required. Label this as an intended experience, distinct from the current fictional dialogue and phrase-rule prototype. It is not evidence of live transcription or language-model-generated context.
 
 ## Integration priorities
 
@@ -76,7 +91,7 @@ Plan and validate integration boundaries now, alongside the core experience. Eva
 
 ## Smallest useful comparison
 
-Try a short fictional meeting workflow with and without TalkQTE, keeping the existing note-taking workflow unchanged. Start with human-selected question opportunities to isolate the interaction from detection errors. Use comparable scenarios and alternate the order to reduce familiarity effects. Treat useful clarification and listening comprehension as co-primary outcomes: record which questions were useful, already answered or stale, and whether a prompt made the conversation harder to follow. Include a case where the right behavior is to stay quiet.
+Try a short fictional meeting workflow with and without TalkQTE, keeping any existing note-taking workflow unchanged. Start with human-selected cues to isolate the interaction from detection errors. Use comparable scenarios and alternate order to reduce familiarity effects. Evaluate timely, context-grounded participation and listening comprehension together; measure useful clarification within the question condition. Compare context reminders as a separate condition, including whether people remain oriented without needing to speak. Record stale or unsupported cues and distraction. Include a case where the right behavior is to stay quiet. Saving is not a required outcome.
 
 Use the observations to choose the next small change. A demo or a few comparisons do not establish effectiveness; no broad research program or automatic collection of real meeting data is required.
 
