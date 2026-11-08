@@ -16,9 +16,9 @@ Reviewed public contribution documents on 2026-11-08. These projects inform Talk
 
 ## TalkQTE choices
 
-- Apache-2.0 and DCO sign-offs; no separate CLA.
+- Sustainable Use License and a short contributor agreement for new work, with human origin sign-offs. Earlier Apache-2.0 grants and DCO records remain intact; see [licensing](../LICENSING.md).
 - Initial bootstrap on `main`, then branches and PRs. Owner branches use `cb/`.
 - Tests and demos use fictional meetings and isolated profiles.
-- Required checks should cover DCO, attribution, private-data/secret scanning, Rust and frontend validation, and relevant app behavior.
+- Required checks should cover contribution sign-offs, attribution, private-data/secret scanning, Rust and frontend validation, and relevant app behavior. Contributor-agreement acceptance is a separate manual review before merging.
 - Graphide is a review aid. Its comments do not replace deterministic checks or maintainer review.
 - Keep the contributor process small. A prototype does not need another project's ticket system, infrastructure matrix, release branches, or coverage percentage copied wholesale.

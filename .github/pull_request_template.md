@@ -10,7 +10,8 @@ Use only fictional data in screenshots or examples. -->
 
 ## Checklist
 
-- [ ] Each contribution commit has a human DCO sign-off (`git commit -s`).
+- [ ] Each contribution commit has an author-matching human sign-off (`git commit -s`).
+- [ ] Every contributor other than the project steward has personally accepted the contributor agreement as described in CONTRIBUTING.md, with a link to the agreement revision. Maintainer verification is required before merging.
 - [ ] The change includes no private meeting data, recordings, credentials, or personal screenshots.
 - [ ] Relevant behavior was checked; storage, capture, permission, retention, or export changes are described.
 - [ ] There are no tool credits, generated-with footers, or session links.

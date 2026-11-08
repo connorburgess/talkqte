@@ -3,7 +3,7 @@ name = "talkqte"
 version = "0.1.0"
 description = "A privacy-focused meeting companion for timely questions and clearer notes"
 edition = "2021"
-license = "Apache-2.0"
+license-file = "../LICENSE"
 rust-version = "1.97.1"
 
 [lib]
