@@ -24,15 +24,16 @@ AI is intended to select relevant context, decide whether a cue would help, and 
 
 **Early development.** The app runs from source on macOS, but it does not yet understand a live meeting or generate AI cues. A developer build can transcribe your own microphone on the device and apply the same phrase-based questions; it does not hear the other side of a call. There is no supported public release.
 
-| Working prototype                                                | Still to build and validate                                              |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Fictional conversation replay with fixed, phrase-based questions | AI-selected context and prompts grounded in the conversation             |
-| Floating companion, source disclosure, pause, and dismissal      | Useful timing, suppression of answered questions, and stale-cue handling |
-| Phrase-based withdrawal when a later line answers the question   | Recognizing paraphrased answers, redundant cues, and topic changes       |
-| Opt-in microphone activity check; local live session (dev build) | Both sides of meeting audio, model setup, and real-meeting accuracy      |
-| In-memory demo notes and reviewed Markdown export                | Reliable meeting use, processing choices, and install/update support     |
+| Working prototype                                                                                                          | Still to build and validate                                                        |
+| -------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Fictional conversation replay with fixed, phrase-based questions                                                           | AI-selected context and prompts grounded in the conversation                       |
+| Floating companion, source disclosure, pause, and dismissal                                                                | Useful timing, and semantic suppression of answered questions and stale cues       |
+| Phrase-based withdrawal for answers, corrections, and topic openings; the same question is not repeated within two minutes | Recognizing paraphrased answers, duplicates, and topic changes said in other words |
+| Opt-in microphone activity check; local live session (dev build)                                                           | Both sides of meeting audio, model setup, and real-meeting accuracy                |
+| Prior notes imported from a file you choose, with a once-per-note reminder when the conversation touches a note's title    | A connected note-taker, and evidence that reminders help rather than interrupt     |
+| In-memory demo notes and reviewed Markdown export                                                                          | Reliable meeting use, processing choices, and install/update support               |
 
-The microphone indicator measures signal activity only. It does not transcribe, record, or feed the demo. A live session is separate: see [Live session](#live-session-developer-build). No note-taker integration is implemented. See [current privacy behavior](PRIVACY.md) and the [native validation record](docs/native-validation.md) for the limits of existing checks.
+The microphone indicator measures signal activity only. It does not transcribe, record, or feed the demo. A live session is separate: see [Live session](#live-session-developer-build). No note-taker is connected; prior notes come only from a file you choose, and the reminder they can raise is a title-word match, not a judgment of relevance. See [current privacy behavior](PRIVACY.md) and the [native validation record](docs/native-validation.md) for the limits of existing checks.
 
 ## Where we are heading
 
@@ -66,7 +67,7 @@ Choose **Try demo** for the fictional community-garden conversation. It requires
 
 The companion is configured not to take keyboard focus; use the notebook for keyboard controls. Dismissal there returns focus to notes or the selected Transcript tab unless you have already moved elsewhere. Cross-app focus and native placement still have [pending checks](docs/native-validation.md). See [Glance view](docs/glance-mode.md) for the current hold and expiry behavior.
 
-**Prior context from a file:** the notebook's **Add notes from a file** reads a small JSON notes file you choose (a `notes` list with an `id`, `date`, and `text` for each note; up to 1 MB and 200 notes are read, and up to 20 can be kept), lets you tick the notes to keep, and shows them beside your notebook labeled as not from this conversation. They stay in memory for the session, can be removed one by one, and are never exported. When a line of the conversation uses two or more distinctive words from a note's title, the companion shows that note once as a reminder, labeled with its date and "not from this conversation"; this is a phrase match on the title, not a judgment of relevance, and whether such reminders help is an untested hypothesis. No note-taker is connected; this is the file half of the [integration plan](docs/product-readiness.md#integration-readiness).
+**Prior context from a file:** the notebook's **Add notes from a file** reads a small JSON notes file you choose (a `notes` list with an `id`, `date`, and `text` for each note; up to 1 MB and 200 notes are read, and up to 20 can be kept), lets you tick the notes to keep, and shows them beside your notebook labeled as not from this conversation. They stay in memory for the session, can be removed one by one or all at once, and are never exported. When a line of the conversation uses two or more distinctive words from a note's title, the companion shows that note once as a reminder, labeled with its date and "not from this conversation"; this is a phrase match on the title, not a judgment of relevance, and whether such reminders help is an untested hypothesis. No note-taker is connected; this is the file half of the [integration plan](docs/product-readiness.md#integration-readiness).
 
 **Demo notes are kept in memory until you quit.** Review and export anything you want to retain. Optional notes and export support prototype exploration; saving generated cues is not part of the live flow.
 

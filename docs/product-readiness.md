@@ -64,7 +64,7 @@ Fetching happens outside the in-memory store, which keeps at most 20 notes. Beha
 - **Cancellation:** discards the results of a request already in progress, and cuts a wait short when the caller's wait checks for a cancel.
 - **Removal:** removing a note deletes its copy. Removing all of a provider's notes is its own action, separate from disconnecting, which must only stop future access, as [PRIVACY.md](../PRIVACY.md) requires. No disconnect operation exists yet.
 
-There are no adapter fixtures in a real provider format, no adapter, authentication, network request, or user interface, and imported notes are not yet shown or used for cues.
+There are no adapter fixtures in a real provider format, and no Granola adapter, authentication, or network request. Imported notes are shown beside the notebook and can raise a title-word context reminder; no evaluator judges their relevance.
 
 An integration is ready only after a user can connect, understand access, select context, recover from a failure, disconnect, and manage imported copies. A mock is preparation; account-level validation and the full user flow are separate release gates. Any writeback needs a verified endpoint plus reviewed content and destination.
 
