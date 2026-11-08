@@ -39,7 +39,7 @@ test('pause freezes a question, resume lets it expire without saving it', async 
   await page.clock.runFor(30_000);
   await expect(
     page.getByRole('button', { name: 'Save question', exact: true }),
-  ).toBeDisabled();
+  ).toBeEnabled();
   await expect(
     page.getByRole('heading', { name: 'Who will take the first draft?' }),
   ).toBeVisible();

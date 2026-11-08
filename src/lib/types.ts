@@ -13,12 +13,16 @@ export interface Cue {
   sourceId: string;
   remainingMs: number;
   totalMs: number;
+  held: boolean;
+  expanded: boolean;
 }
 export interface CueSnapshot {
   revision: number;
   status: Status;
   cue: Cue | null;
   overlayEnabled: boolean;
+  companionPosition: 'bottomRight' | 'topCenter' | 'topLeft' | 'topRight';
+  questionSize: 'standard' | 'large';
 }
 export interface Snapshot extends CueSnapshot {
   title: string;
@@ -36,6 +40,9 @@ export type Commands = {
   resume_demo: undefined;
   end_demo: undefined;
   respond_to_cue: { id: string; response: 'save' | 'dismiss' };
+  inspect_cue: { id: string; expanded: boolean };
+  set_companion_position: { value: CueSnapshot['companionPosition'] };
+  set_question_size: { value: CueSnapshot['questionSize'] };
   update_notes: { notes: string };
   set_sensitivity: { value: Snapshot['sensitivity'] };
   set_overlay: { enabled: boolean };

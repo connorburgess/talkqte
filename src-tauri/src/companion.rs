@@ -1,7 +1,7 @@
 //! Native placement stays outside the engine lock. All window queries run on
 //! the main thread so a command cannot deadlock while waiting for that thread.
 use crate::{
-    engine::{CueSnapshot, Status},
+    engine::{CompanionPosition, CueSnapshot, QuestionSize, Status},
     microphone::{Controller as Microphone, Status as MicrophoneStatus},
     AppState,
 };
@@ -13,14 +13,19 @@ pub enum Mode {
     Hidden,
     Compact,
     Question,
+    Details,
 }
 
 impl Mode {
     pub fn for_snapshot(state: &CueSnapshot, microphone: MicrophoneStatus) -> Self {
         if !state.overlay_enabled {
             Self::Hidden
-        } else if state.status == Status::Running && state.cue.is_some() {
-            Self::Question
+        } else if let Some(cue) = &state.cue {
+            if cue.expanded {
+                Self::Details
+            } else {
+                Self::Question
+            }
         } else if microphone == MicrophoneStatus::Off
             && matches!(state.status, Status::Ready | Status::Ended)
         {
@@ -41,22 +46,50 @@ struct Frame {
 
 // Physical coordinates include negative origins for monitors left/above the
 // primary display. Clamp each dimension before anchoring on small work areas.
-fn frame(origin: (i32, i32), area: (u32, u32), scale: f64, mode: Mode) -> Frame {
+fn frame(
+    origin: (i32, i32),
+    area: (u32, u32),
+    scale: f64,
+    mode: Mode,
+    position: CompanionPosition,
+    text_size: QuestionSize,
+) -> Frame {
     let scale = if scale.is_finite() && scale > 0.0 {
         scale
     } else {
         1.0
     };
     let margin = (20.0 * scale).round() as u32;
-    let width = ((if mode == Mode::Question { 420.0 } else { 320.0 } * scale).round() as u32)
+    let question = matches!(mode, Mode::Question | Mode::Details);
+    let width = ((if question { 420.0 } else { 320.0 } * scale).round() as u32)
         .min(area.0.saturating_sub(2 * margin).max(1));
-    let height = ((if mode == Mode::Question { 420.0 } else { 76.0 } * scale).round() as u32)
-        .min(area.1.saturating_sub(2 * margin).max(1));
+    let logical_height = match mode {
+        Mode::Question => 340.0,
+        Mode::Details => 500.0,
+        _ => 76.0,
+    } + if question && text_size == QuestionSize::Large {
+        60.0
+    } else {
+        0.0
+    };
+    let height =
+        ((logical_height * scale).round() as u32).min(area.1.saturating_sub(2 * margin).max(1));
+    let left = margin.min(area.0.saturating_sub(width));
+    let right = area.0.saturating_sub(width + margin);
+    let top = margin.min(area.1.saturating_sub(height));
+    let x = match position {
+        CompanionPosition::BottomRight | CompanionPosition::TopRight => right,
+        CompanionPosition::TopLeft => left,
+        CompanionPosition::TopCenter => area.0.saturating_sub(width) / 2,
+    };
+    let y = if position == CompanionPosition::BottomRight {
+        area.1.saturating_sub(height + margin)
+    } else {
+        top
+    };
     Frame {
-        x: (i64::from(origin.0) + i64::from(area.0.saturating_sub(width + margin)))
-            .clamp(i32::MIN.into(), i32::MAX.into()) as i32,
-        y: (i64::from(origin.1) + i64::from(area.1.saturating_sub(height + margin)))
-            .clamp(i32::MIN.into(), i32::MAX.into()) as i32,
+        x: (i64::from(origin.0) + i64::from(x)).clamp(i32::MIN.into(), i32::MAX.into()) as i32,
+        y: (i64::from(origin.1) + i64::from(y)).clamp(i32::MIN.into(), i32::MAX.into()) as i32,
         width,
         height,
     }
@@ -95,6 +128,8 @@ pub fn refresh(app: &tauri::AppHandle) {
                 (area.size.width, area.size.height),
                 monitor.scale_factor(),
                 mode,
+                cue.companion_position,
+                cue.question_size,
             ))
         };
         let state = handle.state::<WindowState>();
@@ -143,7 +178,7 @@ mod tests {
         engine.pause().unwrap();
         assert_eq!(
             Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
-            Mode::Compact
+            Mode::Question
         );
         engine.resume().unwrap();
         let id = engine.state.cue.as_ref().unwrap().id.clone();
@@ -192,7 +227,7 @@ mod tests {
             engine.pause().unwrap();
             assert_eq!(
                 Mode::for_snapshot(&engine.cue_snapshot(), status),
-                Mode::Compact
+                Mode::Question
             );
             engine.end();
             assert_eq!(
@@ -214,8 +249,22 @@ mod tests {
 
     #[test]
     fn expands_upward_above_the_dock_on_scaled_negative_origin_display() {
-        let compact = frame((-2560, 50), (2560, 1330), 2.0, Mode::Compact);
-        let question = frame((-2560, 50), (2560, 1330), 2.0, Mode::Question);
+        let compact = frame(
+            (-2560, 50),
+            (2560, 1330),
+            2.0,
+            Mode::Compact,
+            CompanionPosition::BottomRight,
+            QuestionSize::Standard,
+        );
+        let question = frame(
+            (-2560, 50),
+            (2560, 1330),
+            2.0,
+            Mode::Question,
+            CompanionPosition::BottomRight,
+            QuestionSize::Standard,
+        );
         assert_eq!(compact.x, -680);
         assert_eq!(compact.y, 1188);
         assert!(question.width > compact.width);
@@ -234,11 +283,100 @@ mod tests {
     fn stays_inside_small_work_areas() {
         for (width, height) in [(320, 240), (1, 1), (1280, 720)] {
             for scale in [1.0, 1.5, 2.0] {
-                let result = frame((40, -200), (width, height), scale, Mode::Question);
+                let result = frame(
+                    (40, -200),
+                    (width, height),
+                    scale,
+                    Mode::Question,
+                    CompanionPosition::BottomRight,
+                    QuestionSize::Standard,
+                );
                 assert!(result.x >= 40 && result.y >= -200);
                 assert!(result.x as i64 + i64::from(result.width) <= 40 + i64::from(width));
                 assert!(result.y as i64 + i64::from(result.height) <= -200 + i64::from(height));
             }
         }
+    }
+
+    #[test]
+    fn top_placements_keep_their_anchor_when_context_opens() {
+        for position in [
+            CompanionPosition::TopLeft,
+            CompanionPosition::TopCenter,
+            CompanionPosition::TopRight,
+        ] {
+            let question = frame(
+                (-1600, -900),
+                (1600, 860),
+                1.0,
+                Mode::Question,
+                position,
+                QuestionSize::Standard,
+            );
+            let details = frame(
+                (-1600, -900),
+                (1600, 860),
+                1.0,
+                Mode::Details,
+                position,
+                QuestionSize::Large,
+            );
+            assert_eq!(question.y, -880);
+            assert_eq!(details.y, question.y);
+            assert_eq!(details.x, question.x);
+            assert!(details.height > question.height);
+            if position == CompanionPosition::TopCenter {
+                assert_eq!(question.x + question.width as i32 / 2, -800);
+            }
+        }
+    }
+
+    #[test]
+    fn every_placement_clamps_large_context_to_small_or_scaled_work_areas() {
+        for position in [
+            CompanionPosition::BottomRight,
+            CompanionPosition::TopCenter,
+            CompanionPosition::TopLeft,
+            CompanionPosition::TopRight,
+        ] {
+            for area in [(1, 1), (280, 240), (1440, 850)] {
+                for scale in [1.0, 2.0] {
+                    let f = frame(
+                        (-500, 40),
+                        area,
+                        scale,
+                        Mode::Details,
+                        position,
+                        QuestionSize::Large,
+                    );
+                    assert!(f.x >= -500 && f.y >= 40);
+                    assert!(i64::from(f.x) + i64::from(f.width) <= -500 + i64::from(area.0));
+                    assert!(i64::from(f.y) + i64::from(f.height) <= 40 + i64::from(area.1));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn reading_mode_stays_visible_after_playback_finishes() {
+        let mut engine = Engine::default();
+        engine.start().unwrap();
+        engine.advance(5_000);
+        engine.inspect_cue("1:s2", true).unwrap();
+        engine.advance(200_000);
+        assert_eq!(
+            Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
+            Mode::Details
+        );
+        engine.inspect_cue("1:s2", false).unwrap();
+        assert_eq!(
+            Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
+            Mode::Question
+        );
+        engine.respond("1:s2", Response::Dismiss).unwrap();
+        assert_eq!(
+            Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
+            Mode::Hidden
+        );
     }
 }

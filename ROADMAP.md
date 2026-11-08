@@ -19,12 +19,25 @@ This is a development plan. Unchecked items are not implemented.
 - [x] Preserve manual notes and saved questions during replay; keep them in memory until quit.
 - [x] Preview Markdown and save exactly the reviewed content to a chosen destination.
 - [x] Separate native question window with a restricted command and event surface.
+- [x] Compact complete questions, source disclosure that holds a question for reading, larger text, and optional near-camera placement.
 - [x] Browser checks for keyboard navigation, narrow layout, and reduced motion.
 - [x] Separate, explicit macOS microphone activity monitoring with a Stop control and no retained audio.
 - [ ] Verify real microphone permission, device release, signal activity, and disconnect behavior on macOS.
 - [ ] Verify cross-app focus, Spaces, full-screen meetings, and screen-sharing behavior on macOS.
 
 The question demo plays synthetic text. Separate microphone monitoring measures signal activity only; it does not supply live prompts or transcribe audio. The prototype does not capture system audio, persist a notebook, or integrate with other services.
+
+## Next product validation
+
+Test the clarification interaction before investing in automatic detection. This can run independently of the native audio feasibility work below.
+
+- [ ] Compare no assistance with stable, human-selected questions in matched fictional conversations; counterbalance order.
+- [ ] Measure useful clarification and listening comprehension together, including already-answered and late cues.
+- [ ] Check whether the **Why?** hold is discoverable or needs a separate Hold action.
+- [ ] Check the notebook's keyboard route, native VoiceOver, reading time, and announcement preferences with users' normal setups.
+- [ ] Test content, timing, and placement separately; keep a simpler manual interaction if automation does not add value.
+
+See the [review findings, current gaps, and experiment](docs/research.md). No user-outcome study has been completed.
 
 ## First technical milestone
 
@@ -50,6 +63,8 @@ Prove that audio capture, local transcription, and the floating prompt can coexi
 - [ ] Accessible keyboard operation and reduced-motion support.
 - [ ] Fictional demo mode that never reads the user's meeting store.
 - [ ] Compare a short fictional meeting workflow with and without TalkQTE: useful questions, stale or redundant prompts, and distraction.
+
+The [product goal and first proof](PRODUCT.md#goal-and-first-proof) define what this milestone is trying to establish. Use the [research decision notes](docs/research.md) to connect findings to a specific change and a test; adding a study to the reading list does not establish a product benefit.
 
 ## Future goal: work with other note-taking apps
 
