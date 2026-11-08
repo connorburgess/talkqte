@@ -52,6 +52,31 @@ Run separate native experiments for eligible audio sources on Android and iOS, i
 
 Evaluate Android overlays and other supported platform surfaces independently from audio capture. Retain the foreground companion when the operating system cannot support the desired presentation. Do not publish phone-only support until the entire path works on the stated device matrix.
 
+## Next experiment
+
+**Phone cue presentation beside Meet, with no pairing or capture.** This is the smallest test of phase 1. It checks whether one cue can stay readable and controllable on a phone while Google Meet is active, before any pairing or audio work.
+
+- **Setup:** two test accounts join a fictional call; one joins on the phone under test. On the same phone, open the browser preview from a development server on a trusted local network, choose **Try demo**, and switch Meet to its supported picture-in-picture mode, or use split screen where Android offers it. The preview runs its own fictional simulation; it has no access to the call, the desktop session, or any audio. Stop the server afterwards.
+- **Record for each phone, OS version, browser, and Meet mode:**
+  - whether the question is readable at standard and large text;
+  - whether **Why?** and **Dismiss** remain usable touch targets;
+  - whether Meet's essential controls stay visible;
+  - whether Meet audio continues uninterrupted;
+  - what happens to the cue when the phone switches back to full-screen Meet, locks, or backgrounds the browser.
+- **Pass:**
+  - the cue is readable and dismissible beside Meet without covering its controls or interrupting its audio;
+  - after the browser is suspended and resumed, an expired question does not come back as a new prompt.
+- **Fail:** record what was hidden, blocked, or interrupted. A failure argues for a native surface or a second screen, not for capture work.
+
+This does not test the live conversation, pairing, a native app, or a screen reader beyond a basic check. Results apply only to the devices and modes recorded.
+
+**Gates that stay unresolved after it:**
+
+- **Pairing:** how the phone discovers and authenticates one selected desktop session. This covers local network permission prompts, encryption in transit, revocation, and reconnecting after suspension without replaying stale cues.
+- **Live source:** whether the paired desktop actually receives the meeting through a supported path while the user joins Meet on the phone, without echo or a second participant appearing in the call.
+- **Same-phone capture:** whether any eligible audio source exists for both sides of a Meet call on iOS or Android (see the limits above).
+- **Native surfaces:** Android overlays and other platform surfaces, tested separately from capture.
+
 ## Acceptance gates
 
 - Use only fictional meetings and synthetic data. Keep raw test recordings, device logs, and runtime data outside the repository.
