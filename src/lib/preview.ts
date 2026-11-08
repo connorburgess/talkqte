@@ -24,6 +24,8 @@ const prompts: Record<string, [string, string]> = {
   s4: ['Timing', 'What date should we aim for?'],
   s6: ['Decision', 'How will we choose between those options?'],
 };
+// Mirrors the desktop engine's answer detection for the bundled demo only.
+const resolutions: Record<string, string> = { s5: 'Timing' };
 let generation = 0;
 let cooldown = 0;
 let deadline = 0;
@@ -51,6 +53,19 @@ function tick() {
   for (const segment of demo.segments.slice(state.transcript.length)) {
     if (segment.atMs > state.elapsedMs) break;
     state.transcript.push(segment);
+    if (
+      state.cue &&
+      !state.cue.resolvedBy &&
+      resolutions[segment.id] === state.cue.kind
+    ) {
+      if (state.cue.held)
+        state.cue.resolvedBy = { sourceId: segment.id, evidence: segment.text };
+      else {
+        state.cue = null;
+        cooldown = segment.atMs + quietMs();
+      }
+      continue;
+    }
     const prompt = prompts[segment.id];
     if (
       prompt &&
@@ -69,6 +84,7 @@ function tick() {
         totalMs: 18_000,
         held: false,
         expanded: false,
+        resolvedBy: null,
       };
     }
   }

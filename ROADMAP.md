@@ -50,6 +50,7 @@ This track runs alongside the feature milestones below. The goal includes a depe
 - [x] Separate native question window with a restricted command and event surface.
 - [x] Compact complete questions, source disclosure that holds a question for reading, larger text, and optional near-camera placement.
 - [x] Browser checks for keyboard navigation, narrow layout, and reduced motion.
+- [x] Withdraw a question when a later line matches a fixed owner, date, or choice pattern; keep a question being read in place and mark it answered with its source. Phrase rules only.
 - [x] Separate, explicit macOS microphone activity monitoring with a Stop control and no retained audio.
 - [ ] Verify real microphone permission, device release, signal activity, and disconnect behavior on macOS.
 - [ ] Verify native placement, cross-app focus, Spaces, full-screen meetings, and screen-sharing behavior on macOS.

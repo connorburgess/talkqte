@@ -14,6 +14,8 @@ pub enum Mode {
     Compact,
     Question,
     Details,
+    /// Context plus the later line that answered the question.
+    AnsweredDetails,
 }
 
 impl Mode {
@@ -21,7 +23,9 @@ impl Mode {
         if !state.overlay_enabled {
             Self::Hidden
         } else if let Some(cue) = &state.cue {
-            if cue.expanded {
+            if cue.expanded && cue.resolved_by.is_some() {
+                Self::AnsweredDetails
+            } else if cue.expanded {
                 Self::Details
             } else {
                 Self::Question
@@ -60,12 +64,13 @@ fn frame(
         1.0
     };
     let margin = (20.0 * scale).round() as u32;
-    let question = matches!(mode, Mode::Question | Mode::Details);
+    let question = matches!(mode, Mode::Question | Mode::Details | Mode::AnsweredDetails);
     let width = ((if question { 420.0 } else { 320.0 } * scale).round() as u32)
         .min(area.0.saturating_sub(2 * margin).max(1));
     let logical_height = match mode {
         Mode::Question => 340.0,
         Mode::Details => 500.0,
+        Mode::AnsweredDetails => 600.0,
         _ => 76.0,
     } + if question && text_size == QuestionSize::Large {
         60.0
@@ -202,6 +207,40 @@ mod tests {
         assert_eq!(
             Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
             Mode::Hidden
+        );
+    }
+
+    #[test]
+    fn an_answered_question_being_read_gets_room_for_the_answer() {
+        let mut engine = Engine::default();
+        engine.start().unwrap();
+        engine.advance(37_000);
+        let id = engine.state.cue.as_ref().unwrap().id.clone();
+        engine.inspect_cue(&id, true).unwrap();
+        engine.advance(14_000); // The demo agrees on Friday at 51 s.
+        let mode = Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off);
+        assert_eq!(mode, Mode::AnsweredDetails);
+        let at = |mode, size| {
+            frame(
+                (0, 0),
+                (1600, 1000),
+                1.0,
+                mode,
+                CompanionPosition::BottomRight,
+                size,
+            )
+        };
+        for size in [QuestionSize::Standard, QuestionSize::Large] {
+            assert!(at(Mode::AnsweredDetails, size).height > at(Mode::Details, size).height);
+            assert_eq!(
+                at(Mode::AnsweredDetails, size).width,
+                at(Mode::Details, size).width
+            );
+        }
+        engine.inspect_cue(&id, false).unwrap();
+        assert_eq!(
+            Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
+            Mode::Question
         );
     }
 

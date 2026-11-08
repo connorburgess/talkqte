@@ -40,13 +40,27 @@ export function Question({
       <div id={contextId} hidden={!cue.expanded} className="question-context">
         <p>From the fictional transcript</p>
         <blockquote className="evidence">“{cue.evidence}”</blockquote>
+        {cue.resolvedBy && (
+          <>
+            <p>Answered later</p>
+            <blockquote className="evidence">
+              “{cue.resolvedBy.evidence}”
+            </blockquote>
+          </>
+        )}
       </div>
-      {cue.held && (
+      {cue.resolvedBy ? (
         <p className="question-held">
-          {cue.remainingMs === 0
-            ? 'Earlier in the demo. Kept here until you dismiss it.'
-            : 'Kept here until you dismiss it.'}
+          This was answered in the conversation. Kept here until you dismiss it.
         </p>
+      ) : (
+        cue.held && (
+          <p className="question-held">
+            {cue.remainingMs === 0
+              ? 'Earlier in the demo. Kept here until you dismiss it.'
+              : 'Kept here until you dismiss it.'}
+          </p>
+        )
       )}
       <div className="question-actions">
         <button

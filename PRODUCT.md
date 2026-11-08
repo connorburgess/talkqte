@@ -58,7 +58,7 @@ The current notebook is a prototype surface, not a requirement to build a meetin
 
 - One timely cue at a time; dismissal is always easy and has no penalty.
 - Ground context and response prompts in inspectable sources. Do not invent facts, commitments, or an answer on the user's behalf.
-- Let the conversation answer first. Cancel a candidate that is resolved before display, and remove a displayed question when it becomes stale or redundant. These checks are not implemented in the current phrase-based demo.
+- Let the conversation answer first. Cancel a candidate that is resolved before display, and remove a displayed question when it becomes stale or redundant. The demo withdraws a question when a later line matches a fixed answer pattern, such as naming an owner or a day; it does not yet judge meaning, redundancy, or topic changes.
 - Timing should preserve relevance without countdown pressure, scores, or a demand to respond.
 - AI should select useful context and prompts, including when to stay quiet. Compare candidate reasoning against simple baselines and human-labeled fictional cases. The current phrase rules are a demo scaffold, not the intended product intelligence.
 - Plan production operation, integration, installation, updates, and support alongside the feature they enable; distinguish planned readiness from verified capability.

@@ -72,6 +72,16 @@ pub struct Cue {
     pub total_ms: u64,
     pub held: bool,
     pub expanded: bool,
+    /// Later conversation that appears to answer this cue. Only a held cue
+    /// can carry this: an unheld answered cue is withdrawn instead.
+    pub resolved_by: Option<Resolution>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Resolution {
+    pub source_id: String,
+    pub evidence: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -223,6 +233,23 @@ impl Engine {
             let segment = segment.clone();
             self.next_segment += 1;
             self.state.transcript.push(segment.clone());
+            // The conversation answered the open cue. Withdraw it before the
+            // user spends attention on it, unless they are reading it; then
+            // keep the text in place and say it was answered.
+            if let Some(cue) = self.state.cue.as_mut() {
+                if cue.resolved_by.is_none() && resolves(&cue.kind, &segment.text) {
+                    if cue.held {
+                        cue.resolved_by = Some(Resolution {
+                            source_id: segment.id.clone(),
+                            evidence: segment.text.clone(),
+                        });
+                    } else {
+                        self.state.cue = None;
+                        self.cooldown_until = segment.at_ms + self.cooldown();
+                    }
+                    continue;
+                }
+            }
             // Skip stale suggestions after a suspended app catches up.
             if self.state.cue.is_none()
                 && segment.at_ms >= self.cooldown_until
@@ -240,6 +267,7 @@ impl Engine {
                         total_ms: CUE_MS,
                         held: false,
                         expanded: false,
+                        resolved_by: None,
                     });
                 }
             }
@@ -377,6 +405,134 @@ fn suggest(text: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
+/// Conservative signs that later conversation answered an open cue.
+/// A missed answer only leaves a question up until it expires; a false match
+/// pulls away a useful one. So anything that reads as a question, a hedge, or
+/// a negation never counts, and only "I" or a capitalized name can be an owner.
+fn resolves(kind: &str, text: &str) -> bool {
+    const WEEKDAYS: [&str; 7] = [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+    ];
+    const MONTHS: [&str; 12] = [
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+    ];
+    const TASKS: [&str; 6] = ["take", "draft", "write", "handle", "own", "lead"];
+    const NEGATIONS: [&str; 10] = [
+        "not", "never", "no", "nobody", "nothing", "none", "neither", "nor", "cannot", "wont",
+    ];
+    // Transcripts often drop "?", so a sentence that opens like a question
+    // or is hedged does not count either.
+    const QUESTION_OPENERS: [&str; 20] = [
+        "should", "shall", "can", "could", "will", "would", "do", "does", "did", "is", "are",
+        "was", "were", "what", "who", "when", "which", "how", "why", "where",
+    ];
+    const HEDGES: [&str; 5] = ["maybe", "perhaps", "might", "probably", "possibly"];
+    // Capitalized words that do not name a person.
+    const NOT_OWNERS: [&str; 16] = [
+        "it",
+        "that",
+        "this",
+        "we",
+        "they",
+        "you",
+        "he",
+        "she",
+        "what",
+        "which",
+        "who",
+        "someone",
+        "somebody",
+        "anyone",
+        "everybody",
+        "everyone",
+    ];
+    text.split_inclusive(['.', '?', '!', ';'])
+        .filter(|sentence| !sentence.trim_end().ends_with('?'))
+        .any(|sentence| {
+            // (lowercase word, written with a capital letter)
+            let mut words: Vec<(String, bool)> = Vec::new();
+            for raw in sentence.split_whitespace() {
+                let raw = raw
+                    .replace(['’', '‘'], "'")
+                    .trim_matches(|character: char| {
+                        !character.is_alphanumeric() && character != '\''
+                    })
+                    .trim_matches('\'')
+                    .to_string();
+                let capital = raw.chars().next().is_some_and(char::is_uppercase);
+                let word = raw.to_lowercase();
+                // "I'll take" reads as "I will take".
+                match word.strip_suffix("'ll") {
+                    Some(subject) if !subject.is_empty() => {
+                        words.push((subject.into(), capital));
+                        words.push(("will".into(), false));
+                    }
+                    _ if !word.is_empty() => words.push((word, capital)),
+                    _ => {}
+                }
+            }
+            if words.is_empty()
+                || QUESTION_OPENERS.contains(&words[0].0.as_str())
+                || words.iter().any(|(word, _)| {
+                    NEGATIONS.contains(&word.as_str())
+                        || word.ends_with("n't")
+                        || HEDGES.contains(&word.as_str())
+                })
+            {
+                return false;
+            }
+            let at = |index: usize| {
+                words
+                    .get(index)
+                    .map(|(word, _)| word.as_str())
+                    .unwrap_or("")
+            };
+            (0..words.len()).any(|index| match kind {
+                "Owner" => {
+                    let (subject, capital) = &words[index];
+                    matches!(at(index + 1), "will" | "can")
+                        && TASKS.contains(&at(index + 2))
+                        && (subject == "i"
+                            || (*capital
+                                && subject.chars().all(char::is_alphabetic)
+                                && !NOT_OWNERS.contains(&subject.as_str())))
+                }
+                "Timing" => {
+                    at(index) == "tomorrow"
+                        || (matches!(at(index), "by" | "before" | "until")
+                            && (WEEKDAYS.contains(&at(index + 1))
+                                || MONTHS.contains(&at(index + 1))))
+                }
+                "Decision" => {
+                    // "Let's go with the sign", not "I'll go with you".
+                    (at(index) == "go"
+                        && at(index + 1) == "with"
+                        && !matches!(at(index + 2), "you" | "me" | "us" | "them" | "him" | "her"))
+                        || at(index) == "decided"
+                        || at(index) == "chose"
+                }
+                _ => false,
+            })
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -399,6 +555,221 @@ mod tests {
         engine.start().unwrap();
         engine.advance(1_000);
         engine
+    }
+
+    fn play(lines: &[(u64, &str)]) -> Engine {
+        let mut engine = Engine::default();
+        engine.demo.segments = lines
+            .iter()
+            .enumerate()
+            .map(|(index, (at_ms, text))| Segment {
+                id: format!("t{}", index + 1),
+                at_ms: *at_ms,
+                speaker: if index % 2 == 0 { "Robin" } else { "Alex" }.into(),
+                text: (*text).into(),
+            })
+            .collect();
+        engine.start().unwrap();
+        engine
+    }
+
+    #[test]
+    fn a_later_answer_withdraws_the_open_question() {
+        for (prompt, answer) in [
+            (
+                "Someone can take the first draft.",
+                "Jordan will take the first draft.",
+            ),
+            (
+                "Someone can take the first draft.",
+                "Sure, I’ll draft it tonight.",
+            ),
+            ("Someone can take the first draft.", "OK, I‘ll take it."),
+            ("We should finish soon.", "Let's have it ready by Friday."),
+            ("We should finish soon.", "I can bring it tomorrow."),
+            (
+                "We could either print it or put a sign by the gate.",
+                "Let's go with the sign.",
+            ),
+            (
+                "We could either print it or put a sign by the gate.",
+                "We decided to print it.",
+            ),
+        ] {
+            let mut e = play(&[(1_000, prompt), (4_000, answer)]);
+            e.advance(1_000);
+            assert!(e.state.cue.is_some(), "No question for: {prompt}");
+            e.advance(3_000);
+            assert!(e.state.cue.is_none(), "Still asking after: {answer}");
+            assert_eq!(e.state.transcript.len(), 2);
+            // The answered question cannot be acted on afterwards.
+            assert!(e.respond("1:t1", Response::Dismiss).is_err());
+        }
+    }
+
+    #[test]
+    fn questions_negations_and_unrelated_statements_do_not_count_as_answers() {
+        for (prompt, reply) in [
+            (
+                "Someone can take the first draft.",
+                "Who will take the first draft?",
+            ),
+            (
+                "Someone can take the first draft.",
+                "I can't take the first draft.",
+            ),
+            (
+                "Someone can take the first draft.",
+                "It will take a week to write.",
+            ),
+            (
+                "Someone can take the first draft.",
+                "We will take it to the meeting.",
+            ),
+            ("We should finish soon.", "Can we finish by Friday?"),
+            ("We should finish soon.", "It won't be ready by Friday."),
+            ("We should finish soon.", "The seedlings arrive in spring."),
+            (
+                "We could either print it or use a sign.",
+                "We haven't decided yet.",
+            ),
+            (
+                "We could either print it or use a sign.",
+                "I'll go with you to the gate.",
+            ),
+            (
+                "We could either print it or use a sign.",
+                "Let's go with the sign?",
+            ),
+            // Found in review: negations, non-person owners, unmarked questions.
+            ("We should finish soon.", "We cannot finish by Friday."),
+            ("We should finish soon.", "We wont make it by Friday."),
+            ("We should finish soon.", "No way we finish by Friday."),
+            ("We should finish soon.", "By Friday is not realistic."),
+            ("We should finish soon.", "Tomorrow doesn't work for me."),
+            (
+                "We should finish soon.",
+                "Can we do it by Friday, or is that too tight.",
+            ),
+            ("We should finish soon.", "I talked to Sam on Monday."),
+            (
+                "We could either print it or use a sign.",
+                "Nobody decided anything yet.",
+            ),
+            (
+                "We could either print it or use a sign.",
+                "Nothing was decided.",
+            ),
+            (
+                "We could either print it or use a sign.",
+                "Should we go with the sign.",
+            ),
+            (
+                "Someone can take the first draft.",
+                "The draft will take a week.",
+            ),
+            (
+                "Someone can take the first draft.",
+                "No one will take the first draft.",
+            ),
+            (
+                "Someone can take the first draft.",
+                "None of us can take it.",
+            ),
+            (
+                "Someone can take the first draft.",
+                "What will take longest is the layout.",
+            ),
+            (
+                "Someone can take the first draft.",
+                "Somebody else will draft it.",
+            ),
+            (
+                "Someone can take the first draft.",
+                "Everybody can write a section.",
+            ),
+            (
+                "Someone can take the first draft.",
+                "Maybe Jordan can take it.",
+            ),
+            // A different issue's answer leaves this one open.
+            (
+                "We should finish soon.",
+                "Jordan will take the first draft.",
+            ),
+        ] {
+            let mut e = play(&[(1_000, prompt), (4_000, reply)]);
+            e.advance(4_000);
+            assert!(e.state.cue.is_some(), "Withdrawn after: {reply}");
+        }
+    }
+
+    #[test]
+    fn the_bundled_demo_withdraws_its_timing_question_once_a_date_is_set() {
+        let mut e = Engine::default();
+        e.start().unwrap();
+        e.advance(37_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Timing");
+        e.advance(14_000); // s5 sets a date at 51 s, before the 55 s expiry.
+        assert!(e.state.cue.is_none());
+        e.advance(18_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Decision");
+    }
+
+    #[test]
+    fn a_question_answered_while_catching_up_is_never_shown() {
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (2_000, "Jordan will take it."),
+        ]);
+        // One late tick delivers both lines, as after a stalled timer.
+        e.advance(3_000);
+        assert!(e.state.cue.is_none());
+        assert!(e.cue_snapshot().cue.is_none());
+        assert_eq!(e.state.transcript.len(), 2);
+    }
+
+    #[test]
+    fn a_question_being_read_stays_put_and_shows_the_answer() {
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (4_000, "Jordan will take the first draft."),
+            (6_000, "Let's finish soon."),
+        ]);
+        e.advance(1_000);
+        e.inspect_cue("1:t1", true).unwrap();
+        e.advance(3_000);
+        let cue = e.state.cue.as_ref().expect("held text is not pulled away");
+        assert_eq!(cue.question, "Who will take the first draft?");
+        assert_eq!(
+            cue.resolved_by,
+            Some(Resolution {
+                source_id: "t2".into(),
+                evidence: "Jordan will take the first draft.".into(),
+            })
+        );
+        let payload = serde_json::to_value(e.cue_snapshot()).unwrap();
+        assert_eq!(payload["cue"]["resolvedBy"]["sourceId"], "t2");
+        // Reading a resolved cue does not let new cues compete with it.
+        e.advance(2_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().id, "1:t1");
+        e.respond("1:t1", Response::Dismiss).unwrap();
+        assert!(e.state.cue.is_none());
+    }
+
+    #[test]
+    fn an_answer_leaves_space_before_the_next_question() {
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (4_000, "Jordan will take the first draft."),
+            (8_000, "We should finish soon."),
+            (20_000, "We could either print it or use a sign."),
+        ]);
+        e.advance(8_000);
+        assert!(e.state.cue.is_none(), "Cooldown follows the answer");
+        e.advance(12_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Decision");
+        assert!(e.state.cue.as_ref().unwrap().resolved_by.is_none());
     }
 
     #[test]
