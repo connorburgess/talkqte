@@ -34,6 +34,7 @@ Technical documentation may name a dependency or model when necessary to explain
 
 ## Engineering
 
+- Update README.md in the same change when user-visible behavior, setup, usage, or limitations make it inaccurate. Leave it unchanged for unrelated internal work.
 - Read [docs/architecture.md](docs/architecture.md) before changing the app boundaries.
 - Rust owns capture, transcription, persistence, and timing decisions. React renders UI through narrow, validated commands and events.
 - Keep native platform differences in capture/window adapters. Test platform-specific behavior on that platform.

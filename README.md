@@ -6,9 +6,9 @@ Built in public with Rust, Tauri, and React. **Early development:** a runnable d
 
 ## The idea
 
-Listen during a meeting, notice a point that needs clarification, and show one useful question while it is still relevant. Save the important bits in a meeting notebook afterward.
+One useful question, at the right moment. Notice a point that needs clarification during a meeting and show a question while it is still relevant. Save a question for later without replacing an existing notes workflow.
 
-Prompts should help you participate without stealing focus or demanding a response. The visual style is still being explored.
+Prompts should help you participate without stealing focus or demanding a response. TalkQTE is intended to work independently or alongside tools such as Granola and Fireflies; provider integrations are future work. The visual style is still being explored.
 
 ## Try the prototype
 
@@ -33,7 +33,7 @@ For UI development, `npm run dev` starts a browser preview at `http://127.0.0.1:
 
 ## Intended first usable version
 
-- macOS desktop app with a meeting notebook and a small floating prompt window.
+- macOS desktop app with a small floating prompt window and saved questions.
 - Local Whisper transcription, with no transcription API key required.
 - Microphone and system-audio capture, started explicitly by the user.
 - Suggestions for missing owners, vague deadlines, and unanswered questions.
