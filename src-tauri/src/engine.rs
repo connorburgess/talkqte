@@ -588,6 +588,12 @@ impl Engine {
         Ok(())
     }
 
+    /// Continues session numbering from `previous`, so a session in this
+    /// engine never reuses an ID that late work for the old one still holds.
+    pub fn continue_sessions_from(&mut self, previous: &Engine) {
+        self.generation = self.generation.max(previous.generation);
+    }
+
     pub fn set_sensitivity(&mut self, value: Sensitivity) {
         self.state.sensitivity = value;
         self.changed();
@@ -1979,5 +1985,20 @@ mod tests {
         assert!(payload.get("transcript").is_none());
         assert!(payload.get("saved").is_none());
         assert!(payload["cue"]["question"].is_string());
+    }
+
+    #[test]
+    fn a_replacement_engine_never_reuses_an_earlier_session_id() {
+        let mut demo = Engine::default();
+        demo.start().unwrap();
+        let old = demo.session();
+        let mut next = Engine::live();
+        next.continue_sessions_from(&demo);
+        next.start().unwrap();
+        next.advance(2_000);
+        assert_ne!(next.session(), old);
+        assert!(next.ingest(old, live("w1", 1_000, "Late line.")).is_err());
+        next.ingest(next.session(), live("w1", 1_000, "Current line."))
+            .unwrap();
     }
 }

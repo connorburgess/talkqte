@@ -87,7 +87,7 @@ A live session transcribes your microphone on this Mac and runs the phrase-based
 npm run tauri -- dev --features local-whisper
 ```
 
-Choose **Start live session** in the notebook and grant microphone permission if asked. **Stop live session**, in the notebook or companion, releases the microphone, finishes transcribing the last few seconds, and ends the session; **Stop microphone** does the same. Lines arrive about 3 seconds after they are spoken. Audio is not recorded. The transcript stays in memory until you start another session or quit, and a live session cannot be exported. Other apps' audio, including the other side of a call, is not captured. Settings shows whether this build and model support a live session.
+Choose **Start live session** in the notebook and grant microphone permission if asked. **Stop live session**, in the notebook or companion, releases the microphone, finishes transcribing the last few seconds, and ends the session; **Stop microphone** does the same. If microphone access is refused or the device fails, the session ends. Speech is transcribed in 3-second chunks, so lines appear a few seconds after they are spoken; the delay on real hardware has not been measured. Audio is not recorded. The transcript stays in memory until you start another session or quit, and a live session cannot be exported. Other apps' audio, including the other side of a call, is not captured. Settings shows whether this build and model support a live session.
 
 This has been checked with synthetic audio and a scripted recognizer in tests. A live session on real hardware, real-meeting accuracy, and the setup download in the [model delivery plan](docs/model-delivery.md) are still unchecked or unbuilt.
 

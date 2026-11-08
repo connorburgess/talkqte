@@ -68,6 +68,15 @@ pub struct Stats {
     pub detached: bool,
 }
 
+/// Cancels a worker without owning it; see `Worker::cancel_handle`.
+pub struct CancelHandle(Arc<AtomicBool>);
+
+impl CancelHandle {
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
 pub struct Worker {
     sender: Option<SyncSender<AudioChunk>>,
     cancelled: Arc<AtomicBool>,
@@ -156,6 +165,11 @@ impl Worker {
         self.queued
             .load(Ordering::Relaxed)
             .saturating_sub(self.completed.load(Ordering::Acquire))
+    }
+
+    /// A handle that cancels this worker from another thread, like `cancel`.
+    pub fn cancel_handle(&self) -> CancelHandle {
+        CancelHandle(self.cancelled.clone())
     }
 
     /// Cancels without waiting: no further results are delivered, and

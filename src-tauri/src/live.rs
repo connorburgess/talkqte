@@ -7,7 +7,7 @@
 use crate::{
     audio_tap::Chunker,
     engine::Segment,
-    transcription::{Stats, Transcriber, Worker},
+    transcription::{CancelHandle, Stats, Transcriber, Worker},
 };
 use std::{
     sync::{
@@ -38,6 +38,8 @@ pub struct Report {
 pub struct LiveSession {
     stop: Arc<AtomicBool>,
     refused: Arc<AtomicU64>,
+    // Lets End cancel the worker before joining the runner that owns it.
+    cancel: CancelHandle,
     thread: Option<JoinHandle<(Chunker, Worker)>>,
     session_start_ms: u64,
 }
@@ -59,6 +61,7 @@ impl LiveSession {
         S: FnMut(u64, Segment) -> Result<(), String> + Send + 'static,
     {
         let worker = Worker::start(session, WORKER_QUEUE, transcriber, sink);
+        let cancel = worker.cancel_handle();
         let stop = Arc::new(AtomicBool::new(false));
         let refused = Arc::new(AtomicU64::new(0));
         let (flag, count) = (stop.clone(), refused.clone());
@@ -79,6 +82,7 @@ impl LiveSession {
         Self {
             stop,
             refused,
+            cancel,
             thread: Some(thread),
             session_start_ms,
         }
@@ -110,6 +114,8 @@ impl LiveSession {
     /// Stops at once for End: queued audio and results in progress are
     /// discarded, and nothing more reaches the engine.
     pub fn end(mut self) -> Report {
+        // Cancel first: the runner may still be sleeping between drains.
+        self.cancel.cancel();
         self.stop.store(true, Ordering::Release);
         let Some(thread) = self.thread.take() else {
             return Report::default();
@@ -117,7 +123,6 @@ impl LiveSession {
         let Ok((chunker, worker)) = thread.join() else {
             return Report::default();
         };
-        worker.cancel();
         Report {
             tap_overruns: chunker.overruns(),
             refused_chunks: self.refused.load(Ordering::Relaxed),
@@ -128,10 +133,10 @@ impl LiveSession {
 
 impl Drop for LiveSession {
     fn drop(&mut self) {
+        self.cancel.cancel();
         self.stop.store(true, Ordering::Release);
         if let Some(thread) = self.thread.take() {
             if let Ok((_, worker)) = thread.join() {
-                worker.cancel();
                 worker.stop();
             }
         }

@@ -17,9 +17,9 @@ struct Runtime {
     engine: Engine,
     last_tick: Instant,
     export: Option<String>,
-    /// The running live session, if any. Stop it outside this lock, because
+    /// The running live session, if any. Finish it outside this lock, because
     /// delivering transcript lines takes the lock.
-    live: Option<live::LiveSession>,
+    live: Option<Live>,
 }
 
 impl Runtime {
@@ -79,6 +79,7 @@ fn carry_over(previous: &Engine, mut next: Engine) -> Engine {
     next.set_companion_position(state.companion_position);
     next.set_question_size(state.question_size);
     next.state.notes = state.notes.clone();
+    next.continue_sessions_from(previous);
     next
 }
 
@@ -111,29 +112,22 @@ fn resume_demo(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<(
     })
 }
 #[tauri::command]
-fn end_demo(
-    app: tauri::AppHandle,
-    state: tauri::State<AppState>,
-    microphone: tauri::State<microphone::Controller>,
-) -> Result<(), String> {
-    // End during a live session stops capture and discards transcription in
-    // progress; nothing more reaches the ended session.
-    if let Some(session_runner) = state
+fn end_demo(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
+    let live = state
         .0
         .lock()
         .ok()
-        .and_then(|mut runtime| runtime.live.take())
-    {
-        let (handle, controller) = (app.clone(), microphone.inner().clone());
-        tauri::async_runtime::spawn_blocking(move || {
-            microphone::stop_blocking(&handle, controller);
-            session_runner.end();
-        });
-    }
-    change(&app, &state, |e| {
+        .and_then(|mut runtime| runtime.live.take());
+    let result = change(&app, &state, |e| {
         e.end();
         Ok(())
-    })
+    });
+    // End during a live session releases the microphone and discards
+    // transcription in progress; nothing more reaches the ended session.
+    if let Some(live) = live {
+        tauri::async_runtime::spawn_blocking(move || finish_live(&app, live, false));
+    }
+    result
 }
 #[tauri::command]
 fn respond_to_cue(
@@ -289,6 +283,40 @@ fn live_status(app: tauri::AppHandle) -> LiveStatus {
     }
 }
 
+/// A live session's parts: the engine session it feeds, the microphone start
+/// capturing for it, and its runner once capture has begun.
+struct Live {
+    session: u64,
+    microphone: Option<u64>,
+    runner: Option<live::LiveSession>,
+}
+
+/// Finishes a live session already taken out of the runtime: releases its
+/// microphone, transcribes the queued audio (`flush`) or discards it, then
+/// ends the engine session if it is still the one this fed. Blocks; call it
+/// without holding the runtime lock, because delivering lines takes it.
+fn finish_live(app: &tauri::AppHandle, live: Live, flush: bool) {
+    if let Some(generation) = live.microphone {
+        let controller = app.state::<microphone::Controller>().inner().clone();
+        microphone::stop_blocking(app, controller, generation);
+    }
+    if let Some(runner) = live.runner {
+        if flush {
+            runner.stop();
+        } else {
+            runner.end();
+        }
+    }
+    let state = app.state::<AppState>();
+    let _ = change(app, &state, |e| {
+        if e.state.live && e.session() == live.session && e.state.status == engine::Status::Running
+        {
+            e.end();
+        }
+        Ok(())
+    });
+}
+
 /// Starts a live session: the microphone feeds local transcription, and the
 /// cue engine runs on what is said. Nothing is recorded, stored, or sent.
 #[tauri::command]
@@ -320,15 +348,14 @@ async fn start_live_session(
         .map_err(|_| "Could not load the local speech model.")?;
         let session = {
             let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
-            if runtime.live.is_some() {
-                return Err("A live session is already running.".into());
-            }
             runtime.sync();
-            if matches!(
-                runtime.engine.state.status,
-                engine::Status::Running | engine::Status::Paused
-            ) {
-                return Err(if runtime.engine.state.live {
+            if runtime.live.is_some()
+                || matches!(
+                    runtime.engine.state.status,
+                    engine::Status::Running | engine::Status::Paused
+                )
+            {
+                return Err(if runtime.engine.state.live || runtime.live.is_some() {
                     "A live session is already running.".into()
                 } else {
                     "End the demo before starting a live session.".into()
@@ -340,107 +367,119 @@ async fn start_live_session(
             runtime.export = None;
             runtime.engine = engine;
             runtime.last_tick = Instant::now();
+            let session = runtime.engine.session();
+            runtime.live = Some(Live {
+                session,
+                microphone: None,
+                runner: None,
+            });
             publish(&app, &runtime);
-            runtime.engine.session()
+            session
         };
+        companion::refresh(&app);
         let handle = app.clone();
         let controller = microphone.inner().clone();
         let stopper = controller.clone();
-        let is_current = move |runtime: &Runtime| {
-            runtime.engine.session() == session
-                && runtime.engine.state.live
-                && runtime.engine.state.status == engine::Status::Running
-        };
-        let on_tap: microphone::OnTap = Box::new(move |chunker| {
-            // Line times count from when capture began on the session clock.
-            let started_at = handle
-                .state::<AppState>()
-                .0
-                .lock()
-                .ok()
-                .and_then(|mut runtime| {
-                    runtime.sync();
-                    is_current(&runtime).then_some(runtime.engine.state.elapsed_ms)
-                });
-            let Some(started_at) = started_at else {
-                microphone::stop_blocking(&handle, stopper);
-                return;
-            };
+        let on_tap: microphone::OnTap = Box::new(move |generation, chunker| {
             let sink_app = handle.clone();
-            let session_runner = live::LiveSession::start(
-                chunker,
-                session,
-                started_at,
-                recognizer,
-                move |session, segment| {
-                    let state = sink_app.state::<AppState>();
-                    let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
-                    runtime.sync();
-                    let result = runtime.engine.ingest(session, segment);
-                    publish(&sink_app, &runtime);
-                    result
-                },
-            );
-            // Keep the session only if it is still the current one.
-            let unused = handle
+            let sink = move |session, segment| {
+                let state = sink_app.state::<AppState>();
+                let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
+                runtime.sync();
+                let result = runtime.engine.ingest(session, segment);
+                publish(&sink_app, &runtime);
+                result
+            };
+            // Attach the runner only to the session that asked for it.
+            let kept = handle
                 .state::<AppState>()
                 .0
                 .lock()
-                .ok()
-                .and_then(|mut runtime| {
-                    if is_current(&runtime) && runtime.live.is_none() {
-                        runtime.live = Some(session_runner);
-                        None
-                    } else {
-                        Some(session_runner)
+                .is_ok_and(|mut runtime| {
+                    runtime.sync();
+                    let engine = &runtime.engine;
+                    if !(engine.state.live
+                        && engine.session() == session
+                        && engine.state.status == engine::Status::Running)
+                    {
+                        return false;
                     }
+                    // Line times count from when capture began on the session clock.
+                    let started_at = engine.state.elapsed_ms;
+                    let Some(live) = runtime
+                        .live
+                        .as_mut()
+                        .filter(|live| live.session == session && live.runner.is_none())
+                    else {
+                        return false;
+                    };
+                    live.microphone = Some(generation);
+                    live.runner = Some(live::LiveSession::start(
+                        chunker, session, started_at, recognizer, sink,
+                    ));
+                    true
                 });
-            if let Some(unused) = unused {
-                microphone::stop_blocking(&handle, stopper);
-                unused.end();
+            if !kept {
+                microphone::stop_blocking(&handle, stopper, generation);
             }
         });
-        let started = microphone::start(app.clone(), controller, Some((3_000, on_tap))).await;
-        if started.is_err() {
-            // Capture never began, so the live session ends with nothing in it.
-            let _ = change(&app, &state, |e| {
-                if e.session() == session {
-                    e.end();
+        match microphone::start(app.clone(), controller.clone(), Some((3_000, on_tap))).await {
+            Ok(generation) => {
+                let orphaned = state.0.lock().map_or(true, |mut runtime| {
+                    match runtime.live.as_mut().filter(|live| live.session == session) {
+                        Some(live) => {
+                            live.microphone = Some(generation);
+                            false
+                        }
+                        None => true,
+                    }
+                });
+                if orphaned {
+                    // Stopped while capture was being requested.
+                    let handle = app.clone();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        microphone::stop_blocking(&handle, controller, generation)
+                    });
                 }
                 Ok(())
-            });
+            }
+            Err(error) => {
+                // Capture never began, so the session ends with nothing in it.
+                let live =
+                    state.0.lock().ok().and_then(|mut runtime| {
+                        runtime.live.take_if(|live| live.session == session)
+                    });
+                if let Some(live) = live {
+                    let handle = app.clone();
+                    let _ = tauri::async_runtime::spawn_blocking(move || {
+                        finish_live(&handle, live, false)
+                    })
+                    .await;
+                }
+                Err(error)
+            }
         }
-        started
     }
 }
 
 /// Stops a live session: capture stops first, queued audio is transcribed,
-/// then the session ends.
+/// then the session ends. Does nothing when no live session is running.
 #[tauri::command]
 async fn stop_live_session(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
-    microphone: tauri::State<'_, microphone::Controller>,
 ) -> Result<(), String> {
-    let controller = microphone.inner().clone();
-    let stopper = app.clone();
-    tauri::async_runtime::spawn_blocking(move || microphone::stop_blocking(&stopper, controller))
-        .await
-        .map_err(|_| "Could not stop the microphone. Try again.")?;
-    let session_runner = state
+    let Some(live) = state
         .0
         .lock()
         .ok()
-        .and_then(|mut runtime| runtime.live.take());
-    if let Some(session_runner) = session_runner {
-        tauri::async_runtime::spawn_blocking(move || session_runner.stop())
-            .await
-            .map_err(|_| "Could not finish transcription.")?;
-    }
-    change(&app, &state, |e| {
-        e.end();
-        Ok(())
-    })
+        .and_then(|mut runtime| runtime.live.take())
+    else {
+        return Ok(());
+    };
+    tauri::async_runtime::spawn_blocking(move || finish_live(&app, live, true))
+        .await
+        .map_err(|_| "Could not finish the live session.".into())
 }
 
 /// Stop microphone during a live session stops the whole session, so the
@@ -451,12 +490,8 @@ async fn stop_microphone(
     state: tauri::State<'_, AppState>,
     microphone: tauri::State<'_, microphone::Controller>,
 ) -> Result<(), String> {
-    let live = state.0.lock().is_ok_and(|runtime| {
-        runtime.live.is_some()
-            || (runtime.engine.state.live && runtime.engine.state.status == engine::Status::Running)
-    });
-    if live {
-        stop_live_session(app, state, microphone).await
+    if state.0.lock().is_ok_and(|runtime| runtime.live.is_some()) {
+        stop_live_session(app, state).await
     } else {
         microphone::stop_microphone(app, microphone.inner().clone()).await
     }
@@ -515,6 +550,25 @@ pub fn run() {
                     runtime.sync();
                     if runtime.engine.state.revision != before {
                         publish(&handle, &runtime);
+                    }
+                    // A live session whose microphone was refused, failed, or
+                    // stopped elsewhere ends rather than run with nothing
+                    // listening. The check never waits on the device.
+                    let controller = handle.state::<microphone::Controller>();
+                    let lost = runtime
+                        .live
+                        .as_ref()
+                        .and_then(|live| live.microphone)
+                        .is_some_and(|generation| {
+                            controller.try_is_live(generation) == Some(false)
+                        });
+                    if lost {
+                        if let Some(live) = runtime.live.take() {
+                            let app = handle.clone();
+                            tauri::async_runtime::spawn_blocking(move || {
+                                finish_live(&app, live, true)
+                            });
+                        }
                     }
                     let cue = runtime.engine.cue_snapshot();
                     drop(runtime);

@@ -698,7 +698,9 @@ function Notebook() {
                     className="transcript"
                   >
                     <p className="muted small">
-                      Scripted conversation · not from microphone audio
+                      {state.live
+                        ? 'Your microphone · transcribed on this device'
+                        : 'Scripted conversation · not from microphone audio'}
                     </p>
                     {state.transcript.length ? (
                       state.transcript.map((segment) => (

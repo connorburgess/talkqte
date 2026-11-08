@@ -197,6 +197,15 @@ impl Controller {
         Ok((state.generation, state.snapshot.clone()))
     }
 
+    /// Whether this start is still starting or listening. `None` when the
+    /// controller is busy, so the app's timer never waits on a device.
+    pub fn try_is_live(&self, generation: u64) -> Option<bool> {
+        self.0.try_lock().ok().map(|state| {
+            state.generation == generation
+                && matches!(state.snapshot.status, Status::Starting | Status::Listening)
+        })
+    }
+
     /// True while this start's stream is the active capture.
     pub fn is_capturing(&self, generation: u64) -> bool {
         self.0
@@ -257,10 +266,20 @@ impl Controller {
     }
 
     fn request_stop(&self) -> Result<Update, String> {
+        self.request_stop_of(None)?
+            .ok_or_else(|| "Microphone controls are unavailable.".into())
+    }
+
+    /// Stops capture, or with `Some(generation)` only if that start is still
+    /// the current one, so a late stop never ends a newer capture.
+    fn request_stop_of(&self, generation: Option<u64>) -> Result<Option<Update>, String> {
         let mut state = self
             .0
             .lock()
             .map_err(|_| "Microphone controls are unavailable.")?;
+        if generation.is_some_and(|generation| generation != state.generation) {
+            return Ok(None);
+        }
         state.generation += 1;
         let retired = state.capture.take().map(|capture| capture._stream);
         state.cleanup_pending |= retired.is_some();
@@ -273,10 +292,10 @@ impl Controller {
         } else {
             state.update(Status::Off, Activity::Quiet, None);
         }
-        Ok(Update {
+        Ok(Some(Update {
             snapshot: state.snapshot.clone(),
             retired,
-        })
+        }))
     }
 
     // Called only after the old stream has actually been released. An error
@@ -366,8 +385,10 @@ fn publish_and_cleanup(app: &tauri::AppHandle, controller: Controller, update: U
 
 /// Stops capture from a worker thread (for a live session ending). Does
 /// nothing if the microphone is already off.
-pub fn stop_blocking(app: &tauri::AppHandle, controller: Controller) {
-    if let Ok(update) = controller.request_stop() {
+/// Stops the capture begun by `generation` (see `start`), if it is still
+/// current, and publishes the change. Blocks briefly on the controller lock.
+pub fn stop_blocking(app: &tauri::AppHandle, controller: Controller, generation: u64) {
+    if let Ok(Some(update)) = controller.request_stop_of(Some(generation)) {
         publish_and_cleanup(app, controller, update);
     }
 }
@@ -385,20 +406,22 @@ pub async fn start_microphone(
     app: tauri::AppHandle,
     state: tauri::State<'_, Controller>,
 ) -> Result<(), String> {
-    start(app, state.inner().clone(), None).await
+    start(app, state.inner().clone(), None).await.map(|_| ())
 }
 
-/// Called with the tap's chunker once capture has really started.
-pub type OnTap = Box<dyn FnOnce(crate::audio_tap::Chunker) + Send>;
+/// Called with the start's generation and the tap's chunker once capture has
+/// really started.
+pub type OnTap = Box<dyn FnOnce(u64, crate::audio_tap::Chunker) + Send>;
 
 /// Starts capture. With `tap`, the callback also feeds a transcription tap
 /// with chunks of the given length, and `OnTap` receives its chunker only if
-/// this start is still current when the stream begins.
+/// this start is still current when the stream begins. Returns the start's
+/// generation once it is requested; permission and device results come later.
 pub async fn start(
     app: tauri::AppHandle,
     controller: Controller,
     tap: Option<(u64, OnTap)>,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let preparer = controller.clone();
     let (generation, snapshot) =
         tauri::async_runtime::spawn_blocking(move || preparer.begin_start())
@@ -437,13 +460,13 @@ pub async fn start(
                 }
                 if let (Some(chunker), Some(on_tap)) = (chunker, on_tap) {
                     if controller.is_capturing(generation) {
-                        on_tap(chunker);
+                        on_tap(generation, chunker);
                     }
                 }
             });
         });
     });
-    Ok(())
+    Ok(generation)
 }
 
 /// Stops the microphone check. The `stop_microphone` command in `lib.rs`
@@ -809,6 +832,39 @@ mod tests {
             assert!(controller.snapshot().unwrap().can_start);
             assert!(controller.begin_start().is_ok());
         }
+    }
+
+    #[test]
+    fn a_late_stop_for_an_earlier_start_leaves_a_newer_capture_running() {
+        let controller = Controller::default();
+        let (old, _) = controller.begin_start().unwrap();
+        finish(&controller, controller.request_stop().unwrap());
+        let (current, _) = controller.begin_start().unwrap();
+        let (stream, _, drops) = fake(false);
+        let meter = Arc::new(Meter::default());
+        controller.complete_start(current, meter, Ok(stream), Instant::now());
+        assert_eq!(controller.try_is_live(old), Some(false));
+        assert!(controller.request_stop_of(Some(old)).unwrap().is_none());
+        assert!(controller.is_capturing(current));
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        let update = controller.request_stop_of(Some(current)).unwrap().unwrap();
+        assert_eq!(controller.try_is_live(current), Some(false));
+        finish(&controller, update);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_refused_permission_is_not_a_live_capture() {
+        let controller = Controller::default();
+        let (generation, _) = controller.begin_start().unwrap();
+        assert_eq!(controller.try_is_live(generation), Some(true));
+        controller.complete_start(
+            generation,
+            Arc::new(Meter::default()),
+            Err(Failure::Permission),
+            Instant::now(),
+        );
+        assert_eq!(controller.try_is_live(generation), Some(false));
     }
 
     #[test]
