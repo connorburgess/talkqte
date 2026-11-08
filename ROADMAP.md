@@ -69,6 +69,7 @@ Test the in-conversation interaction before investing in automatic detection. Th
 - [ ] Check the notebook's keyboard route, native VoiceOver, reading time, and announcement preferences with users' normal setups.
 - [ ] Test content, timing, and placement separately; keep a simpler manual interaction if automation does not add value.
 - [ ] Label fictional examples of cue use, natural resolution, correction, and topic changes; validate conversation-based outcome signals without equating use with usefulness or dismissal with failure.
+- [x] Add an explicitly invoked Claude Code lab with bundled fictional cases, subscription-login checks, bounded execution, and offline failure-path tests. This is evaluation tooling, not live cue intelligence or evidence of user benefit.
 - [ ] Compare rules with semantic cue suppression and resolution using the [intelligence evaluation plan](docs/cue-intelligence.md); start with an explicitly initiated subscription-backed fictional lab, without separately billed inference APIs. Measure false suppression, latency, privacy boundaries, and allowance use before choosing a model/runtime.
 
 See the [review findings, current gaps, and experiment](docs/research.md). No user-outcome study has been completed.
