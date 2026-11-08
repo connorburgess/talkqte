@@ -5,6 +5,7 @@ import type { Cue, CueSnapshot } from '../lib/types';
 export function Question({
   cue,
   size,
+  live = false,
   announce = true,
   busy,
   onDismiss,
@@ -12,6 +13,8 @@ export function Question({
 }: {
   cue: Cue;
   size: CueSnapshot['questionSize'];
+  /** The question comes from local transcription, not the fictional demo. */
+  live?: boolean;
   announce?: boolean;
   busy: boolean;
   onDismiss: () => void;
@@ -24,7 +27,9 @@ export function Question({
       aria-label="Suggested question"
     >
       <h2 aria-live={announce ? 'polite' : undefined}>{cue.question}</h2>
-      <p className="question-meta">Demo question · {cue.kind}</p>
+      <p className="question-meta">
+        {live ? 'Live question' : 'Demo question'} · {cue.kind}
+      </p>
       <button
         className="question-disclosure"
         aria-expanded={cue.expanded}
@@ -38,7 +43,9 @@ export function Question({
         {cue.expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
       </button>
       <div id={contextId} hidden={!cue.expanded} className="question-context">
-        <p>From the fictional transcript</p>
+        <p>
+          {live ? 'From the live transcript' : 'From the fictional transcript'}
+        </p>
         <blockquote className="evidence">“{cue.evidence}”</blockquote>
         {cue.resolvedBy && (
           <>
@@ -57,7 +64,7 @@ export function Question({
         cue.held && (
           <p className="question-held">
             {cue.remainingMs === 0
-              ? 'Earlier in the demo. Kept here until you dismiss it.'
+              ? `Earlier in the ${live ? 'session' : 'demo'}. Kept here until you dismiss it.`
               : 'Kept here until you dismiss it.'}
           </p>
         )

@@ -1,8 +1,48 @@
 import { desktop } from '../lib/bridge';
 import { microphoneLabel, type Microphone } from '../lib/microphone';
 
-export function MicrophoneControl({ microphone }: { microphone: Microphone }) {
+export function MicrophoneControl({
+  microphone,
+  live = false,
+}: {
+  microphone: Microphone;
+  live?: boolean;
+}) {
   const { state, error, busy, active, start, stop } = microphone;
+  if (live)
+    return (
+      <section className="microphone-panel" aria-label="Microphone">
+        <div className="microphone-heading">
+          <div>
+            <strong>Live session</strong>
+            <span className="microphone-status" role="status">
+              {microphoneLabel(state)}
+            </span>
+            {state?.status === 'listening' && (
+              <span className="microphone-activity">
+                <span
+                  className={`status-dot ${state.activity}`}
+                  aria-hidden="true"
+                />
+                {state.activity === 'active'
+                  ? 'Signal detected'
+                  : 'Quiet input'}
+              </span>
+            )}
+          </div>
+        </div>
+        <p>
+          Your microphone is transcribed on this device. Audio is not recorded,
+          and the transcript is not saved or sent. Stop live session to release
+          the microphone.
+        </p>
+        {(error || state?.message) && (
+          <p className="microphone-message" role="alert">
+            {error || state?.message}
+          </p>
+        )}
+      </section>
+    );
   const stopping =
     state?.status === 'stopping' ||
     (state?.status === 'error' && !state.canStart);

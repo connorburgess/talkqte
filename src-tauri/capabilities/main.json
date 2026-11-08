@@ -22,6 +22,9 @@
     "allow-export-preview",
     "allow-microphone-snapshot",
     "allow-start-microphone",
-    "allow-stop-microphone"
+    "allow-stop-microphone",
+    "allow-live-status",
+    "allow-start-live-session",
+    "allow-stop-live-session"
   ]
 }

@@ -1,12 +1,14 @@
 # Local transcription check
 
-Status: developer check, 8 November 2026. The app does not transcribe meetings, start a transcription worker, or route the microphone to one. This page records how the local recognizer is checked and what that check shows.
+Status: developer check, 8 November 2026; live session added 9 November 2026. In builds with the `local-whisper` feature, the app's live session routes the microphone to a transcription worker on the device. This page records how the local recognizer is checked and what that check shows.
 
 ## What exists
 
 The optional `local-whisper` Cargo feature adds `LocalWhisper`, a [Transcriber](architecture.md) that runs whisper.cpp in-process on the transcription worker thread through the `whisper-rs` crate. It reads only the model file it is given: it downloads nothing, opens no network connection, and writes no audio to disk. Whisper does not separate speakers, so every recognized line is labelled `Speaker`. The feature is off by default, so ordinary builds and CI do not compile whisper.cpp. Building it needs CMake and a C++ toolchain.
 
 `Engine::live()` creates a session with no scripted demo lines, for transcript input through `Engine::ingest`.
+
+The app looks for the model at `TALKQTE_WHISPER_MODEL`, or at `models/ggml-tiny.en.bin` in its data folder. **Start live session** loads it before opening the microphone, so a missing or unreadable model is reported without starting capture. The capture callback feeds the [audio tap](architecture.md); a runner thread moves 3-second chunks to the worker every 250 ms and the worker's lines go to `Engine::ingest`. Stop releases the microphone first, then transcribes what was queued, waiting up to 10 seconds. If the microphone is refused or fails, the session ends.
 
 ## Run the check
 
@@ -130,9 +132,8 @@ These figures describe one clean synthetic voice pair on one Mac. They do not in
 
 ## Still needed
 
-- Starting and stopping a worker with the app's own session controls, and showing a live session in the companion.
 - Model delivery: planned in the [model delivery plan](model-delivery.md); not implemented.
-- A display for live sessions: `Engine::live()` has no fixed duration, so the UI must not show its duration as an end time.
+- A live session on real hardware: permission, release on Stop and End, and delay with the companion showing.
 - Sustained-session measurements of delay, memory growth, CPU use, and dropped audio.
 
 whisper.cpp is MIT-licensed and `whisper-rs` is released under the Unlicense. Any distributed build that enables this feature must include the whisper.cpp license notice.

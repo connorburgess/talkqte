@@ -109,6 +109,8 @@ pub struct Snapshot {
     pub overlay_enabled: bool,
     pub companion_position: CompanionPosition,
     pub question_size: QuestionSize,
+    /// True for a live session fed by transcription rather than the demo.
+    pub live: bool,
 }
 
 // The floating window never receives the notebook or full transcript.
@@ -117,6 +119,7 @@ pub struct Snapshot {
 pub struct CueSnapshot {
     pub revision: u64,
     pub status: Status,
+    pub live: bool,
     pub cue: Option<Cue>,
     pub overlay_enabled: bool,
     pub companion_position: CompanionPosition,
@@ -179,6 +182,7 @@ impl Engine {
                 overlay_enabled: true,
                 companion_position: CompanionPosition::BottomRight,
                 question_size: QuestionSize::Standard,
+                live: demo.segments.is_empty() && demo.duration_ms == u64::MAX,
             },
             demo,
             generation: 0,
@@ -196,6 +200,7 @@ impl Engine {
         CueSnapshot {
             revision: self.state.revision,
             status: self.state.status,
+            live: self.state.live,
             cue: self.state.cue.clone(),
             overlay_enabled: self.state.overlay_enabled,
             companion_position: self.state.companion_position,
@@ -581,6 +586,12 @@ impl Engine {
         self.user_name = name;
         self.changed();
         Ok(())
+    }
+
+    /// Continues session numbering from `previous`, so a session in this
+    /// engine never reuses an ID that late work for the old one still holds.
+    pub fn continue_sessions_from(&mut self, previous: &Engine) {
+        self.generation = self.generation.max(previous.generation);
     }
 
     pub fn set_sensitivity(&mut self, value: Sensitivity) {
@@ -1974,5 +1985,20 @@ mod tests {
         assert!(payload.get("transcript").is_none());
         assert!(payload.get("saved").is_none());
         assert!(payload["cue"]["question"].is_string());
+    }
+
+    #[test]
+    fn a_replacement_engine_never_reuses_an_earlier_session_id() {
+        let mut demo = Engine::default();
+        demo.start().unwrap();
+        let old = demo.session();
+        let mut next = Engine::live();
+        next.continue_sessions_from(&demo);
+        next.start().unwrap();
+        next.advance(2_000);
+        assert_ne!(next.session(), old);
+        assert!(next.ingest(old, live("w1", 1_000, "Late line.")).is_err());
+        next.ingest(next.session(), live("w1", 1_000, "Current line."))
+            .unwrap();
     }
 }
