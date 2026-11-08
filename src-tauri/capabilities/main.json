@@ -31,6 +31,7 @@
     "allow-cancel-context-import",
     "allow-context-items",
     "allow-remove-context-item",
+    "allow-remove-context-from",
     "allow-download-model",
     "allow-cancel-model-download",
     "allow-remove-model",

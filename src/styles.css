@@ -842,7 +842,14 @@ svg {
   justify-content: space-between;
   gap: 12px 16px;
 }
-.context-heading .secondary-button {
+.context-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+}
+.context-heading .secondary-button,
+.context-actions .text-button {
   min-height: 44px;
 }
 .context-list li .icon-button {

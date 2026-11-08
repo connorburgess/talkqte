@@ -638,6 +638,20 @@ fn remove_context_item(
     Ok(())
 }
 
+/// Removes every note imported from a file; an explicit choice that leaves
+/// nothing of them in memory.
+#[tauri::command]
+fn remove_context_from(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<usize, String> {
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    let removed = runtime.context.remove_all_from(context::Provider::File);
+    runtime.pending_import = None;
+    publish_context(&app, &runtime);
+    Ok(removed)
+}
+
 /// A live session's parts: the engine session it feeds, the microphone start
 /// capturing for it, and its runner once capture has begun.
 struct Live {
@@ -905,6 +919,7 @@ pub fn run() {
             cancel_context_import,
             context_items,
             remove_context_item,
+            remove_context_from,
             download_model,
             cancel_model_download,
             remove_model,

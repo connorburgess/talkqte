@@ -152,6 +152,11 @@ mockIPC(
         await emit('context:changed', await preview.contextItemsNow());
         return outcome;
       }
+      case 'remove_context_from': {
+        const removed = preview.removeAllContext();
+        await emit('context:changed', await preview.contextItemsNow());
+        return removed;
+      }
       case 'remove_context_item':
         preview.command(
           'remove_context_item',
