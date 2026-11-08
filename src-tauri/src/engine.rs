@@ -64,7 +64,6 @@ pub enum QuestionSize {
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Response {
-    Save,
     Dismiss,
 }
 
@@ -103,7 +102,6 @@ pub struct Snapshot {
     pub duration_ms: u64,
     pub transcript: Vec<Segment>,
     pub cue: Option<Cue>,
-    pub saved: Vec<Cue>,
     pub notes: String,
     pub sensitivity: Sensitivity,
     pub overlay_enabled: bool,
@@ -178,7 +176,6 @@ impl Engine {
                 duration_ms: demo.duration_ms,
                 transcript: vec![],
                 cue: None,
-                saved: vec![],
                 notes: String::new(),
                 sensitivity: Sensitivity::Balanced,
                 overlay_enabled: true,
@@ -550,20 +547,14 @@ impl Engine {
     }
 
     pub fn respond(&mut self, id: &str, response: Response) -> Result<(), String> {
-        let cue = self.state.cue.as_ref().filter(|cue| cue.id == id).ok_or(
-            "That question has already passed. Your saved questions are still in the notebook.",
-        )?;
-        if matches!(response, Response::Save)
-            && !self
-                .state
-                .saved
-                .iter()
-                // Demo replay repeats the same line; live sources may reuse
-                // an ID for different speech in a later session.
-                .any(|saved| saved.source_id == cue.source_id && saved.evidence == cue.evidence)
-        {
-            self.state.saved.push(cue.clone());
-        }
+        // Dismiss is the only response: an unused suggestion is let go, never
+        // kept as a note or an action item.
+        let Response::Dismiss = response;
+        self.state
+            .cue
+            .as_ref()
+            .filter(|cue| cue.id == id)
+            .ok_or("That question has already passed.")?;
         self.state.cue = None;
         self.cooldown_until = self.state.elapsed_ms + self.cooldown();
         self.changed();
@@ -654,18 +645,9 @@ impl Engine {
             "Fictional demo transcript; not derived from microphone audio."
         };
         let mut out = format!(
-            "# {}\n\n{source}\n\n## Notes\n\n{}\n\n## Saved questions\n\n",
+            "# {}\n\n{source}\n\n## Notes\n\n{}\n",
             self.state.title, self.state.notes
         );
-        if self.state.saved.is_empty() {
-            out.push_str("No saved questions.\n");
-        }
-        for cue in &self.state.saved {
-            out.push_str(&format!(
-                "- {}\n  Context: {}\n",
-                cue.question, cue.evidence
-            ));
-        }
         out.push_str(if self.live_input {
             "\n## Transcript\n\n"
         } else {
@@ -1428,7 +1410,7 @@ mod tests {
     }
 
     #[test]
-    fn a_reused_live_id_in_a_later_session_can_still_be_saved() {
+    fn a_reused_live_id_in_a_later_session_raises_a_new_question() {
         let mut e = live_session();
         e.ingest(
             e.session(),
@@ -1436,15 +1418,22 @@ mod tests {
         )
         .unwrap();
         let first = e.state.cue.as_ref().unwrap().id.clone();
-        e.respond(&first, Response::Save).unwrap();
+        e.respond(&first, Response::Dismiss).unwrap();
         e.end();
         e.start().unwrap();
         e.advance(10_000);
         e.ingest(e.session(), live("w1", 9_000, "We should finish soon."))
             .unwrap();
         let second = e.state.cue.as_ref().unwrap().id.clone();
-        e.respond(&second, Response::Save).unwrap();
-        assert_eq!(e.state.saved.len(), 2);
+        assert_ne!(second, first);
+        e.respond(&second, Response::Dismiss).unwrap();
+        assert!(e.state.cue.is_none());
+    }
+
+    #[test]
+    fn only_dismiss_is_a_valid_response() {
+        assert!(serde_json::from_str::<Response>("\"dismiss\"").is_ok());
+        assert!(serde_json::from_str::<Response>("\"save\"").is_err());
     }
 
     #[test]
@@ -2157,10 +2146,10 @@ mod tests {
     }
 
     #[test]
-    fn saved_question_survives_expiry_and_replay_without_duplicates() {
+    fn notes_survive_expiry_and_replay_and_a_passed_question_cannot_be_answered() {
         let mut e = with_cue();
         let id = e.state.cue.as_ref().unwrap().id.clone();
-        e.respond(&id, Response::Save).unwrap();
+        e.respond(&id, Response::Dismiss).unwrap();
         e.update_notes("Ask about a large-print version.".into())
             .unwrap();
         e.advance(100_000);
@@ -2168,10 +2157,10 @@ mod tests {
         e.advance(5_000);
         let new_id = e.state.cue.as_ref().unwrap().id.clone();
         assert_ne!(new_id, id);
-        assert!(e.respond(&id, Response::Save).is_err());
-        e.respond(&new_id, Response::Save).unwrap();
-        assert_eq!(e.state.saved.len(), 1);
+        assert!(e.respond(&id, Response::Dismiss).is_err());
+        e.respond(&new_id, Response::Dismiss).unwrap();
         assert!(e.markdown().contains("Ask about a large-print version."));
+        assert!(!e.markdown().contains("Saved questions"));
     }
 
     #[test]
@@ -2184,7 +2173,7 @@ mod tests {
         e.resume().unwrap();
         e.advance(18_000);
         assert!(e.state.cue.is_none());
-        assert!(e.respond("1:s2", Response::Save).is_err());
+        assert!(e.respond("1:s2", Response::Dismiss).is_err());
     }
 
     #[test]
@@ -2226,8 +2215,7 @@ mod tests {
         e.advance(u64::MAX);
         assert_eq!(e.state.status, Status::Ended);
         assert!(e.state.cue.is_some());
-        e.respond("1:s2", Response::Save).unwrap();
-        assert_eq!(e.state.saved.len(), 1);
+        e.respond("1:s2", Response::Dismiss).unwrap();
         e.start().unwrap();
         e.advance(5_000);
         assert!(e.inspect_cue("1:s2", true).is_err());
@@ -2248,8 +2236,7 @@ mod tests {
         let mut e = with_cue();
         e.pause().unwrap();
         e.inspect_cue("1:s2", true).unwrap();
-        e.respond("1:s2", Response::Save).unwrap();
-        assert_eq!(e.state.saved.len(), 1);
+        e.respond("1:s2", Response::Dismiss).unwrap();
         assert_eq!(e.state.status, Status::Paused);
         e.resume().unwrap();
         e.advance(32_000);
@@ -2274,11 +2261,10 @@ mod tests {
     }
 
     #[test]
-    fn dismiss_does_not_save_and_does_not_allow_double_response() {
+    fn dismiss_does_not_allow_a_double_response() {
         let mut e = with_cue();
         e.respond("1:s2", Response::Dismiss).unwrap();
-        assert!(e.state.saved.is_empty());
-        assert!(e.respond("1:s2", Response::Save).is_err());
+        assert!(e.respond("1:s2", Response::Dismiss).is_err());
     }
 
     #[test]
@@ -2306,7 +2292,6 @@ mod tests {
         let payload = serde_json::to_value(e.cue_snapshot()).unwrap();
         assert!(payload.get("notes").is_none());
         assert!(payload.get("transcript").is_none());
-        assert!(payload.get("saved").is_none());
         assert!(payload.get("userName").is_none());
         assert!(payload["cue"]["question"].is_string());
     }

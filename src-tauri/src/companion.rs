@@ -187,12 +187,11 @@ mod tests {
         );
         engine.resume().unwrap();
         let id = engine.state.cue.as_ref().unwrap().id.clone();
-        engine.respond(&id, Response::Save).unwrap();
+        engine.respond(&id, Response::Dismiss).unwrap();
         assert_eq!(
             Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
             Mode::Compact
         );
-        assert_eq!(engine.state.saved.len(), 1);
         engine.set_overlay(false);
         assert_eq!(
             Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),

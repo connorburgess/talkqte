@@ -1,6 +1,6 @@
 // Browser-only visual development adapter. This is not the desktop session engine.
 import demo from '../demo.json';
-import type { Commands, Cue, LiveStatus, ModelStatus, Snapshot } from './types';
+import type { Commands, LiveStatus, ModelStatus, Snapshot } from './types';
 
 const state: Snapshot = {
   revision: 0,
@@ -12,7 +12,6 @@ const state: Snapshot = {
   durationMs: demo.durationMs,
   transcript: [],
   cue: null,
-  saved: [],
   notes: '',
   sensitivity: 'balanced',
   userName: null,
@@ -145,11 +144,7 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
       const cue = state.cue;
       if (!cue || cue.id !== id)
         throw new Error('That question has already passed.');
-      if (
-        response === 'save' &&
-        !state.saved.some((saved: Cue) => saved.sourceId === cue.sourceId)
-      )
-        state.saved.push(cue);
+      void response; // Dismiss is the only response.
       state.cue = null;
       cooldown = state.elapsedMs + quietMs();
       break;
@@ -207,7 +202,7 @@ export function modelStatus(): ModelStatus {
   };
 }
 export function exportPreview() {
-  reviewedExport = `# ${state.title}\n\nFictional demo transcript; not derived from microphone audio.\n\n## Notes\n\n${state.notes}\n\n## Saved questions\n\n${state.saved.map((cue) => `- ${cue.question}\n  Context: ${cue.evidence}`).join('\n') || 'No saved questions.'}\n\n## Demo transcript\n\n${state.transcript.map((segment) => `**${segment.speaker}:** ${segment.text}`).join('\n\n')}\n`;
+  reviewedExport = `# ${state.title}\n\nFictional demo transcript; not derived from microphone audio.\n\n## Notes\n\n${state.notes}\n\n## Demo transcript\n\n${state.transcript.map((segment) => `**${segment.speaker}:** ${segment.text}`).join('\n\n')}\n`;
   return reviewedExport;
 }
 export function exportMarkdown() {

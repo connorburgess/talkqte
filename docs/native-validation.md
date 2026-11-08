@@ -30,6 +30,8 @@ Ad-hoc signing is only a local development check. It is not Developer ID signing
 
 ## Observed results
 
+These are dated records. The Save question control they mention was removed later; questions are now dismissed or expire, and nothing is kept.
+
 | Check | Result and limit |
 | --- | --- |
 | Frontend and native bundle build; strict bundle signature verification | Passed for the source above. |

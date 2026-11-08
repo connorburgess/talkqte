@@ -88,7 +88,7 @@ Prove that audio capture, local transcription, and the floating prompt can coexi
 
 ## First usable version
 
-- [ ] Minimal session view centered on the current cue and its controls; optional notes remain a prototype utility, with no Save action or saved-cue archive.
+- [x] Minimal session view centered on the current cue and its controls; optional notes remain a prototype utility, with no Save action or saved-cue archive. The companion shows one question with Why? and Dismiss; the notebook keeps notes and the reviewed export; the saved-cue archive and its export section are removed.
 - [ ] One cue at a time, expiry, cooldown, pause, and adjustable sensitivity.
 - [ ] Initial cues for missing owners, vague deadlines, and explicit open questions.
 - [ ] Suppress questions answered by the conversation before display, and cancel stale or redundant prompts. Phrase rules now cover answers, repeats, elapsed time, and sentences that open by changing the topic; reliable judgment of meaning remains in the cue intelligence plan.
