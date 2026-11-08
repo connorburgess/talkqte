@@ -1,6 +1,6 @@
-# First supported setup and budgets (proposal)
+# First supported setup and budgets
 
-Status: proposal for the owner to agree, 9 November 2026. Nothing here is a support claim or a measured guarantee. The [product readiness plan](product-readiness.md) asks for budgets on named Macs before the benchmark. This page proposes them, using the synthetic measurements so far as a starting point, so later results can pass or fail against a fixed target.
+Status: agreed by the owner as the target set, 9 November 2026. These are targets, not support claims or measured guarantees; they are confirmed only by the runs listed at the end. The [product readiness plan](product-readiness.md) asks for budgets on named Macs before the benchmark. This page proposes them, using the synthetic measurements so far as a starting point, so later results can pass or fail against a fixed target.
 
 ## Proposed first supported setup
 
@@ -35,8 +35,8 @@ Measure on the lowest supported Mac, on battery and on power, with a fictional t
 - Who owns releases and support, pricing, and acquisition targets. These remain open in the readiness plan.
 - Intel Macs, Windows, Linux, and phones. Each platform gets its own matrix in the [platform plan](platforms.md).
 
-## To confirm this proposal
+## To confirm the targets
 
-1. The owner agrees or adjusts the setup and targets above.
+1. Agreed by the owner on 9 November 2026.
 2. Get access to an M1 Mac with 8 GB, and add a 60-minute synthetic replay plus a battery measurement method.
 3. Re-measure after pause-based chunking, and once the companion window and real capture are connected.
