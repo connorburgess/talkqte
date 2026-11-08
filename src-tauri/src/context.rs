@@ -1,17 +1,18 @@
-//! Source-aware prior context: notes a user explicitly imports from a
-//! connected note-taker (Granola first) or a file, kept separate from live
-//! meeting evidence. This is the adapter contract and in-memory store only.
-//! No provider is connected, nothing is fetched over the network, and
-//! nothing is written back.
+//! Source-aware prior context: notes a user explicitly selects and imports
+//! from a connected note-taker (Granola first) or a file, kept separate from
+//! live meeting evidence. This is the adapter contract and an in-memory
+//! store only. No provider is connected, nothing is fetched over the network
+//! or stored on disk, and nothing is written back.
 
 use serde::Serialize;
 use std::time::Duration;
 
-/// Most items kept at once, and the most text per item. Prior context is a
-/// small selection, not a copy of someone's notes.
+/// Most notes kept at once, the most text per excerpt, and the longest
+/// title. Prior context is a small selection, not a copy of someone's notes.
 pub const MAX_ITEMS: usize = 20;
 pub const MAX_EXCERPT_CHARS: usize = 2_000;
-/// Attempts for one import, including the first.
+pub const MAX_TITLE_CHARS: usize = 200;
+/// Attempts for one fetch, including the first.
 pub const MAX_ATTEMPTS: u32 = 3;
 /// The longest wait honored between attempts, even if a provider asks for more.
 pub const MAX_RETRY_WAIT: Duration = Duration::from_secs(30);
@@ -57,6 +58,7 @@ pub struct ContextItem {
     pub provider: Provider,
     /// The provider's identifier for the note.
     pub source_id: String,
+    /// At most `MAX_TITLE_CHARS`; "Untitled note" when empty.
     pub title: String,
     /// The note's own date, YYYY-MM-DD, shown beside it.
     pub source_date: String,
@@ -88,18 +90,69 @@ pub trait NoteSource {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum ImportOutcome {
-    /// Items added or updated, and items unchanged because their revision
-    /// was not newer.
-    Imported {
-        added: usize,
-        updated: usize,
-        unchanged: usize,
-    },
-    /// The source returned nothing for the selection; nothing changed.
-    Empty,
+pub enum FetchError {
+    /// The connection cannot import notes, whatever its status.
+    NotSupported,
     Cancelled,
     Failed(ConnectionStatus),
+}
+
+/// Fetches the user's selection with bounded retries, outside any lock on
+/// the store. Only interrupted requests and rate limits are retried, waiting
+/// at most `MAX_RETRY_WAIT`; expired or revoked access stops at once.
+/// `cancelled` is checked before each attempt and after each fetch. `wait`
+/// pauses and returns false if the user cancelled during the pause, so a
+/// long wait can be cut short.
+pub fn fetch_selection(
+    source: &mut dyn NoteSource,
+    selection: &[String],
+    cancelled: &dyn Fn() -> bool,
+    wait: &mut dyn FnMut(Duration) -> bool,
+) -> Result<Vec<ContextItem>, FetchError> {
+    if !source.capabilities().import_notes {
+        return Err(FetchError::NotSupported);
+    }
+    let mut attempt = 1;
+    loop {
+        if cancelled() {
+            return Err(FetchError::Cancelled);
+        }
+        let result = source.fetch(selection);
+        // A cancel during the request discards what it returned.
+        if cancelled() {
+            return Err(FetchError::Cancelled);
+        }
+        let error = match result {
+            Ok(items) => return Ok(items),
+            Err(error) => error,
+        };
+        let delay = match &error {
+            SourceError::Interrupted => Duration::from_secs(1 << (attempt - 1)),
+            SourceError::RateLimited { retry_after } => *retry_after,
+            _ => return Err(FetchError::Failed(status_for(&error))),
+        };
+        if attempt >= MAX_ATTEMPTS || delay > MAX_RETRY_WAIT {
+            return Err(FetchError::Failed(status_for(&error)));
+        }
+        if !wait(delay) {
+            return Err(FetchError::Cancelled);
+        }
+        attempt += 1;
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct MergeOutcome {
+    pub added: usize,
+    /// Replaced by a newer revision.
+    pub updated: usize,
+    /// Already imported at the same or a newer revision.
+    pub unchanged: usize,
+    /// Not imported because the store already holds `MAX_ITEMS` notes.
+    pub over_limit: usize,
+    /// Dropped because they were not selected, came from another provider,
+    /// or lacked a valid ID, date, or text.
+    pub rejected: usize,
 }
 
 /// Imported prior context for this app session, held in memory only.
@@ -113,78 +166,40 @@ impl ContextStore {
         &self.items
     }
 
-    /// Imports the user's selection with bounded retries. Only interrupted
-    /// requests and rate limits are retried, waiting at most
-    /// `MAX_RETRY_WAIT`; expired or revoked access stops at once. `cancelled`
-    /// is checked before every attempt and wait, and `wait` performs the
-    /// pause so tests need not sleep.
-    pub fn import(
+    /// Merges fetched notes. Only notes from `provider` whose IDs are in the
+    /// user's `selection` are accepted. A repeated import replaces a note
+    /// only with a newer revision, so it never duplicates or rolls one back.
+    pub fn merge(
         &mut self,
-        source: &mut dyn NoteSource,
+        provider: Provider,
         selection: &[String],
-        cancelled: &dyn Fn() -> bool,
-        wait: &mut dyn FnMut(Duration),
-    ) -> ImportOutcome {
-        if !source.capabilities().import_notes {
-            return ImportOutcome::Failed(ConnectionStatus::Unavailable);
-        }
-        let mut attempt = 1;
-        let fetched = loop {
-            if cancelled() {
-                return ImportOutcome::Cancelled;
-            }
-            match source.fetch(selection) {
-                Ok(items) => break items,
-                Err(error) => {
-                    let delay = match &error {
-                        SourceError::Interrupted => Duration::from_secs(1 << (attempt - 1)),
-                        SourceError::RateLimited { retry_after } => *retry_after,
-                        _ => return ImportOutcome::Failed(status_for(&error)),
-                    };
-                    if attempt >= MAX_ATTEMPTS || delay > MAX_RETRY_WAIT {
-                        return ImportOutcome::Failed(status_for(&error));
-                    }
-                    if cancelled() {
-                        return ImportOutcome::Cancelled;
-                    }
-                    wait(delay);
-                    attempt += 1;
-                }
-            }
-        };
-        let provider = source.provider();
-        let valid: Vec<ContextItem> = fetched
-            .into_iter()
-            .filter_map(|item| validated(item, provider))
-            .collect();
-        if valid.is_empty() {
-            return ImportOutcome::Empty;
-        }
-        let (mut added, mut updated, mut unchanged) = (0, 0, 0);
-        for item in valid {
+        fetched: Vec<ContextItem>,
+    ) -> MergeOutcome {
+        let mut outcome = MergeOutcome::default();
+        for item in fetched {
+            let Some(item) = validated(item, provider)
+                .filter(|item| selection.iter().any(|id| id.trim() == item.source_id))
+            else {
+                outcome.rejected += 1;
+                continue;
+            };
             let kept = self.items.iter().position(|kept| {
                 kept.provider == item.provider && kept.source_id == item.source_id
             });
             match kept {
-                // A repeated import replaces only with a newer revision, so it
-                // never duplicates a note or rolls it back.
                 Some(index) if item.revision > self.items[index].revision => {
                     self.items[index] = item;
-                    updated += 1;
+                    outcome.updated += 1;
                 }
-                Some(_) => unchanged += 1,
+                Some(_) => outcome.unchanged += 1,
                 None if self.items.len() < MAX_ITEMS => {
                     self.items.push(item);
-                    added += 1;
+                    outcome.added += 1;
                 }
-                None => unchanged += 1,
+                None => outcome.over_limit += 1,
             }
         }
-        ImportOutcome::Imported {
-            added,
-            updated,
-            unchanged,
-        }
+        outcome
     }
 
     /// Removes one imported note.
@@ -195,8 +210,10 @@ impl ContextStore {
         self.items.len() != before
     }
 
-    /// Disconnecting a provider deletes every copy imported from it.
-    pub fn disconnect(&mut self, provider: Provider) -> usize {
+    /// Removes every note imported from a provider. Disconnecting stops
+    /// future access but keeps imported copies; this is the separate choice
+    /// to remove them, as PRIVACY.md requires.
+    pub fn remove_all_from(&mut self, provider: Provider) -> usize {
         let before = self.items.len();
         self.items.retain(|item| item.provider != provider);
         before - self.items.len()
@@ -214,29 +231,54 @@ fn status_for(error: &SourceError) -> ConnectionStatus {
     }
 }
 
-/// Accepts an item only if it came from this source and has an ID, a valid
-/// date, and some text; trims the excerpt to the limit.
+/// A real calendar date in YYYY-MM-DD form.
+fn valid_date(date: &str) -> bool {
+    let parts: Vec<&str> = date.split('-').collect();
+    let [year, month, day] = parts.as_slice() else {
+        return false;
+    };
+    let number = |text: &str, digits: usize| {
+        if text.len() == digits && text.chars().all(|c| c.is_ascii_digit()) {
+            text.parse::<u32>().ok()
+        } else {
+            None
+        }
+    };
+    let (Some(year), Some(month), Some(day)) = (number(year, 4), number(month, 2), number(day, 2))
+    else {
+        return false;
+    };
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    year >= 1900 && (1..=days).contains(&day)
+}
+
+/// Accepts an item only if it came from this provider and has a clean ID, a
+/// real date, and some text; trims the ID, title, and excerpt.
 fn validated(mut item: ContextItem, provider: Provider) -> Option<ContextItem> {
-    let date_ok = item.source_date.len() == 10
-        && item
-            .source_date
-            .chars()
-            .enumerate()
-            .all(|(index, character)| match index {
-                4 | 7 => character == '-',
-                _ => character.is_ascii_digit(),
-            });
+    item.source_id = item.source_id.trim().to_string();
     item.excerpt = item
         .excerpt
         .trim()
         .chars()
         .take(MAX_EXCERPT_CHARS)
         .collect();
-    item.title = item.title.trim().chars().take(200).collect();
-    (item.provider == provider
-        && !item.source_id.trim().is_empty()
+    item.title = item.title.trim().chars().take(MAX_TITLE_CHARS).collect();
+    if item.title.is_empty() {
+        item.title = "Untitled note".into();
+    }
+    let id_ok = !item.source_id.is_empty()
         && item.source_id.len() <= 128
-        && date_ok
+        && !item.source_id.chars().any(char::is_control);
+    (item.provider == provider
+        && id_ok
+        && valid_date(&item.source_date)
         && !item.excerpt.is_empty())
     .then_some(item)
 }
@@ -246,7 +288,7 @@ mod tests {
     use super::*;
     use std::cell::Cell;
 
-    /// Fictional notes, as a Granola adapter might map them.
+    /// A fictional note, as a Granola adapter might map it.
     fn note(id: &str, revision: u64) -> ContextItem {
         ContextItem {
             provider: Provider::Granola,
@@ -258,6 +300,10 @@ mod tests {
                     .into(),
             revision,
         }
+    }
+
+    fn ids(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|id| id.to_string()).collect()
     }
 
     /// Replays scripted responses, one per fetch.
@@ -293,27 +339,27 @@ mod tests {
         }
     }
 
-    fn run(store: &mut ContextStore, source: &mut Scripted) -> (ImportOutcome, Vec<Duration>) {
+    fn fetch(source: &mut Scripted) -> (Result<Vec<ContextItem>, FetchError>, Vec<Duration>) {
         let mut waits = vec![];
-        let outcome = store.import(source, &["n1".into()], &|| false, &mut |delay| {
-            waits.push(delay)
+        let result = fetch_selection(source, &ids(&["n1"]), &|| false, &mut |delay| {
+            waits.push(delay);
+            true
         });
-        (outcome, waits)
+        (result, waits)
     }
 
     #[test]
     fn a_selected_note_is_imported_with_its_source_and_date() {
         let mut store = ContextStore::default();
-        let (outcome, _) = run(
-            &mut store,
-            &mut Scripted::new(vec![Ok(vec![note("n1", 1)])]),
-        );
+        let fetched = fetch(&mut Scripted::new(vec![Ok(vec![note("n1", 1)])]))
+            .0
+            .unwrap();
+        let outcome = store.merge(Provider::Granola, &ids(&["n1"]), fetched);
         assert_eq!(
             outcome,
-            ImportOutcome::Imported {
+            MergeOutcome {
                 added: 1,
-                updated: 0,
-                unchanged: 0
+                ..MergeOutcome::default()
             }
         );
         let item = &store.items()[0];
@@ -324,48 +370,28 @@ mod tests {
     }
 
     #[test]
+    fn notes_the_user_did_not_select_are_rejected() {
+        let mut store = ContextStore::default();
+        let outcome = store.merge(
+            Provider::Granola,
+            &ids(&["n1"]),
+            vec![note("n1", 1), note("n2", 1)],
+        );
+        assert_eq!((outcome.added, outcome.rejected), (1, 1));
+        assert_eq!(store.items().len(), 1);
+    }
+
+    #[test]
     fn repeated_imports_never_duplicate_or_roll_back_a_note() {
         let mut store = ContextStore::default();
-        run(
-            &mut store,
-            &mut Scripted::new(vec![Ok(vec![note("n1", 2)])]),
-        );
-        let (same, _) = run(
-            &mut store,
-            &mut Scripted::new(vec![Ok(vec![note("n1", 2)])]),
-        );
-        let (older, _) = run(
-            &mut store,
-            &mut Scripted::new(vec![Ok(vec![note("n1", 1)])]),
-        );
-        let (newer, _) = run(
-            &mut store,
-            &mut Scripted::new(vec![Ok(vec![note("n1", 3)])]),
-        );
-        assert_eq!(
-            same,
-            ImportOutcome::Imported {
-                added: 0,
-                updated: 0,
-                unchanged: 1
-            }
-        );
-        assert_eq!(
-            older,
-            ImportOutcome::Imported {
-                added: 0,
-                updated: 0,
-                unchanged: 1
-            }
-        );
-        assert_eq!(
-            newer,
-            ImportOutcome::Imported {
-                added: 0,
-                updated: 1,
-                unchanged: 0
-            }
-        );
+        let selection = ids(&["n1"]);
+        store.merge(Provider::Granola, &selection, vec![note("n1", 2)]);
+        let same = store.merge(Provider::Granola, &selection, vec![note("n1", 2)]);
+        let older = store.merge(Provider::Granola, &selection, vec![note("n1", 1)]);
+        let newer = store.merge(Provider::Granola, &selection, vec![note("n1", 3)]);
+        assert_eq!(same.unchanged, 1);
+        assert_eq!(older.unchanged, 1);
+        assert_eq!(newer.updated, 1);
         assert_eq!((store.items().len(), store.items()[0].revision), (1, 3));
     }
 
@@ -376,8 +402,8 @@ mod tests {
             (SourceError::Revoked, ConnectionStatus::Revoked),
         ] {
             let mut source = Scripted::new(vec![Err(error)]);
-            let (outcome, waits) = run(&mut ContextStore::default(), &mut source);
-            assert_eq!(outcome, ImportOutcome::Failed(status));
+            let (result, waits) = fetch(&mut source);
+            assert_eq!(result, Err(FetchError::Failed(status)));
             assert_eq!((source.calls, waits.len()), (1, 0));
         }
     }
@@ -389,15 +415,15 @@ mod tests {
             Err(SourceError::Interrupted),
             Ok(vec![note("n1", 1)]),
         ]);
-        let (outcome, waits) = run(&mut ContextStore::default(), &mut source);
-        assert!(matches!(outcome, ImportOutcome::Imported { added: 1, .. }));
+        let (result, waits) = fetch(&mut source);
+        assert_eq!(result.unwrap().len(), 1);
         assert_eq!(waits, [Duration::from_secs(1), Duration::from_secs(2)]);
 
         let mut source = Scripted::new(vec![Err(SourceError::Interrupted); 3]);
-        let (outcome, _) = run(&mut ContextStore::default(), &mut source);
+        let (result, _) = fetch(&mut source);
         assert_eq!(
-            outcome,
-            ImportOutcome::Failed(ConnectionStatus::Unavailable)
+            result,
+            Err(FetchError::Failed(ConnectionStatus::Unavailable))
         );
         assert_eq!(source.calls, MAX_ATTEMPTS as usize);
     }
@@ -408,98 +434,122 @@ mod tests {
             retry_after: Duration::from_secs(5),
         };
         let mut source = Scripted::new(vec![Err(short), Ok(vec![note("n1", 1)])]);
-        let (outcome, waits) = run(&mut ContextStore::default(), &mut source);
-        assert!(matches!(outcome, ImportOutcome::Imported { .. }));
+        let (result, waits) = fetch(&mut source);
+        assert!(result.is_ok());
         assert_eq!(waits, [Duration::from_secs(5)]);
 
         let long = SourceError::RateLimited {
             retry_after: Duration::from_secs(600),
         };
-        let mut source = Scripted::new(vec![Err(long)]);
-        let (outcome, waits) = run(&mut ContextStore::default(), &mut source);
-        assert_eq!(
-            outcome,
-            ImportOutcome::Failed(ConnectionStatus::RateLimited { retry_after_s: 600 })
-        );
+        let (result, waits) = fetch(&mut Scripted::new(vec![Err(long)]));
+        let status = ConnectionStatus::RateLimited { retry_after_s: 600 };
+        assert_eq!(result, Err(FetchError::Failed(status)));
         assert!(waits.is_empty());
     }
 
     #[test]
-    fn cancelling_stops_before_the_next_attempt_or_wait() {
+    fn cancelling_stops_a_wait_and_discards_a_fetch_in_progress() {
+        // Cancelled during the wait: no further attempt.
         let mut source =
             Scripted::new(vec![Err(SourceError::Interrupted), Ok(vec![note("n1", 1)])]);
-        let calls = Cell::new(0);
+        let result = fetch_selection(&mut source, &ids(&["n1"]), &|| false, &mut |_| false);
+        assert_eq!((result, source.calls), (Err(FetchError::Cancelled), 1));
+
+        // Cancelled while the request was running: its results are discarded.
+        let checks = Cell::new(0);
         let cancelled = || {
-            calls.set(calls.get() + 1);
-            calls.get() > 1 // cancel after the first attempt starts
+            checks.set(checks.get() + 1);
+            checks.get() > 1
         };
-        let mut store = ContextStore::default();
-        let outcome = store.import(&mut source, &[], &cancelled, &mut |_| {
-            panic!("no wait after cancel")
-        });
-        assert_eq!(outcome, ImportOutcome::Cancelled);
-        assert!(store.items().is_empty());
-        assert_eq!(source.calls, 1);
+        let mut source = Scripted::new(vec![Ok(vec![note("n1", 1)])]);
+        let result = fetch_selection(&mut source, &ids(&["n1"]), &cancelled, &mut |_| true);
+        assert_eq!(result, Err(FetchError::Cancelled));
     }
 
     #[test]
-    fn empty_and_invalid_results_change_nothing() {
+    fn invalid_notes_are_counted_and_change_nothing() {
         let mut store = ContextStore::default();
-        let (outcome, _) = run(&mut store, &mut Scripted::new(vec![Ok(vec![])]));
-        assert_eq!(outcome, ImportOutcome::Empty);
-        let mut bad_date = note("n1", 1);
-        bad_date.source_date = "30/10/2026".into();
-        let mut blank = note("n2", 1);
+        let selection = ids(&["n1", "n2", "n3", "n4", "n\u{7}5"]);
+        let mut impossible_date = note("n1", 1);
+        impossible_date.source_date = "2026-13-45".into();
+        let mut wrong_format = note("n2", 1);
+        wrong_format.source_date = "30/10/2026".into();
+        let mut blank = note("n3", 1);
         blank.excerpt = "   ".into();
-        let mut other_provider = note("n3", 1);
+        let mut other_provider = note("n4", 1);
         other_provider.provider = Provider::File;
-        let (outcome, _) = run(
-            &mut store,
-            &mut Scripted::new(vec![Ok(vec![bad_date, blank, other_provider])]),
+        let control = note("n\u{7}5", 1);
+        let outcome = store.merge(
+            Provider::Granola,
+            &selection,
+            vec![
+                impossible_date,
+                wrong_format,
+                blank,
+                other_provider,
+                control,
+            ],
         );
-        assert_eq!(outcome, ImportOutcome::Empty);
+        assert_eq!(
+            outcome,
+            MergeOutcome {
+                rejected: 5,
+                ..MergeOutcome::default()
+            }
+        );
         assert!(store.items().is_empty());
+        assert!(valid_date("2024-02-29") && !valid_date("2026-02-29") && !valid_date("0000-00-00"));
     }
 
     #[test]
-    fn excerpts_and_the_store_stay_small() {
+    fn ids_are_trimmed_so_one_note_is_never_kept_twice() {
+        let mut store = ContextStore::default();
+        store.merge(Provider::Granola, &ids(&["n1"]), vec![note(" n1 ", 1)]);
+        let again = store.merge(Provider::Granola, &ids(&["n1"]), vec![note("n1", 1)]);
+        assert_eq!((again.unchanged, store.items().len()), (1, 1));
+        let mut untitled = note("n2", 1);
+        untitled.title = " ".into();
+        store.merge(Provider::Granola, &ids(&["n2"]), vec![untitled]);
+        assert_eq!(store.items()[1].title, "Untitled note");
+    }
+
+    #[test]
+    fn excerpts_and_the_store_stay_small_and_the_limit_is_reported() {
         let mut long = note("n1", 1);
         long.excerpt = "a".repeat(MAX_EXCERPT_CHARS + 500);
         let mut store = ContextStore::default();
-        run(&mut store, &mut Scripted::new(vec![Ok(vec![long])]));
+        store.merge(Provider::Granola, &ids(&["n1"]), vec![long]);
         assert_eq!(store.items()[0].excerpt.chars().count(), MAX_EXCERPT_CHARS);
-        let many: Vec<_> = (0..MAX_ITEMS + 5)
-            .map(|n| note(&format!("m{n}"), 1))
-            .collect();
-        run(&mut store, &mut Scripted::new(vec![Ok(many)]));
+        let names: Vec<String> = (0..MAX_ITEMS + 5).map(|n| format!("m{n}")).collect();
+        let many = names.iter().map(|id| note(id, 1)).collect();
+        let outcome = store.merge(Provider::Granola, &names, many);
+        assert_eq!((outcome.added, outcome.over_limit), (MAX_ITEMS - 1, 6));
         assert_eq!(store.items().len(), MAX_ITEMS);
     }
 
     #[test]
-    fn removing_and_disconnecting_delete_the_imported_copies() {
+    fn removing_a_note_or_a_providers_notes_is_an_explicit_choice() {
         let mut store = ContextStore::default();
-        run(
-            &mut store,
-            &mut Scripted::new(vec![Ok(vec![note("n1", 1), note("n2", 1)])]),
+        store.merge(
+            Provider::Granola,
+            &ids(&["n1", "n2"]),
+            vec![note("n1", 1), note("n2", 1)],
         );
         assert!(store.remove(Provider::Granola, "n1"));
         assert!(!store.remove(Provider::Granola, "n1"));
-        assert_eq!(store.disconnect(Provider::Granola), 1);
+        assert_eq!(store.remove_all_from(Provider::File), 0);
+        assert_eq!(store.remove_all_from(Provider::Granola), 1);
         assert!(store.items().is_empty());
     }
 
     #[test]
-    fn a_source_without_import_capability_is_refused() {
+    fn a_source_without_import_capability_is_not_supported() {
         let mut source = Scripted::new(vec![Ok(vec![note("n1", 1)])]);
         source.capabilities = Capabilities {
             live_input: true,
             ..Capabilities::default()
         };
-        let (outcome, _) = run(&mut ContextStore::default(), &mut source);
-        assert_eq!(
-            outcome,
-            ImportOutcome::Failed(ConnectionStatus::Unavailable)
-        );
-        assert_eq!(source.calls, 0);
+        let (result, _) = fetch(&mut source);
+        assert_eq!((result, source.calls), (Err(FetchError::NotSupported), 0));
     }
 }
