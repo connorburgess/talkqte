@@ -1,0 +1,61 @@
+# Speech model delivery plan
+
+Status: plan, 9 November 2026. Nothing here is implemented. The app has no model download, no settings for transcription, and does not transcribe meetings. The developer-only `local-whisper` feature reads a model file a developer supplies; see the [local transcription check](local-transcription.md).
+
+## Decisions
+
+| Question              | Decision                                                                                                                                                                                                                                                                        | Why                                                                                                                                                                                                                                                                                                 |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| How the model arrives | An optional step during setup offers the local speech model, with its size and what it is for shown first. Choosing it is not required. The fictional demo, settings, and everything except transcription work without it. The same download stays available later in Settings. | People can try TalkQTE without a large download, and nobody receives a model they did not choose. Bundling it in the installer would add the model's size to every download.                                                                                                                        |
+| Default model         | `tiny.en` (74 MB). `base.en` (141 MB) becomes a "more accurate" option once accuracy is measured.                                                                                                                                                                               | On the same fictional two-voice meeting, both raised and withdrew the same question at the same moments. `base.en` used about 85% more processor time (4.4 s against 2.4 s for 30 s of audio) and about 50% more memory (about 327 MB against about 214 MB). Text accuracy has not been scored yet. |
+| Where it is hosted    | A copy on the project's GitHub Releases, with the upstream [whisper.cpp model repository](https://huggingface.co/ggerganov/whisper.cpp) as a fallback. Both are checked against the same pinned SHA-256.                                                                        | The project controls the primary copy and its availability, and the fallback avoids a single point of failure. Pinning the checksum in the app means the source cannot change what runs.                                                                                                            |
+| Your own cloud model  | Later, an optional cloud transcription backend that uses the user's own API key.                                                                                                                                                                                                | See [Bring your own key](#bring-your-own-key-later).                                                                                                                                                                                                                                                |
+
+Measured on an Apple M5 Pro with macOS 26.4, using a debug build, the network denied, and 5-second chunks. Two runs per model gave the same results. This is one synthetic clip on one machine, not a performance budget.
+
+## Requirements for the download
+
+- **Consent and clarity:** show the model's name, size, the free disk space it needs, and that it is used only on this Mac. The download is the only network step. It sends no account, transcript, or audio, only an ordinary file request.
+- **Integrity:** the app ships with the SHA-256 of every model it supports. A file is moved into place only after its checksum matches; otherwise it is deleted and the user is told. An unverified model is never loaded.
+- **Interruptions:** download to a temporary file in the app's own storage, resume or restart after a dropped connection, and show progress with Cancel. A partial file never counts as installed.
+- **Space:** check free space before starting and leave a margin. A full disk produces a clear message, not a broken install.
+- **Storage:** keep models in the app's storage outside any document folder, and never in a synced or shared location chosen without the user's consent. Settings shows installed models, their sizes, and Remove.
+- **Offline use:** once installed, transcription works with no network. This is already checked in the developer replay with all network access denied.
+- **Failure behavior:** a missing, removed, or corrupt model turns transcription off with an explanation and an offer to download again. Nothing falls back silently to another model or to a cloud service.
+
+## Updates and compatibility
+
+- **What the app accepts:** each app version lists the models and checksums it accepts. A newer app that needs a different model downloads it with the same consent step. The old one is kept until the new one is verified, then removed.
+- **Format changes:** if a whisper.cpp update changes the file format, the app keeps the matching model rather than loading an incompatible one. Updates do not happen during a call.
+- **Removal and clean-up:** uninstalling or choosing Remove deletes the model files. Temporary partial downloads are cleaned up on the next launch.
+
+## Bring your own key (later)
+
+The transcription worker already accepts any recognizer through its `Transcriber` interface, so a cloud backend fits without changing how cues work. A future option could let a user choose a cloud speech or frontier model and enter their own API key. Rules for that option:
+
+- **Off by default:** it is a separate, explicit choice from the local model.
+- **The user's own key:** the key belongs to the user. It is stored in the macOS Keychain, never in logs, files, or the interface, and the user can remove it at any time. TalkQTE never supplies or shares a key.
+- **Disclosure:** before enabling it, the app says plainly that meeting audio leaves the Mac and goes to the named provider, and links that provider's data terms.
+- **No silent fallback:** if the key fails or the service is unavailable, transcription stops with a message.
+- **No paid runs in development:** no paid API is called during development or testing without the owner's explicit approval.
+
+Comparable meeting tools process audio in the cloud. Granola's help center says it sends microphone and system audio to its transcription provider ([Granola transcription docs](https://docs.granola.ai/help-center/taking-notes/transcription)). Neither Granola nor Fireflies publishes its speech-to-text vendor in the sources reviewed. Local transcription by default, with an optional own-key cloud path, is a deliberate difference to validate with users, not an established advantage.
+
+## Licensing
+
+whisper.cpp and the Whisper model weights are MIT-licensed, and `whisper-rs` is released under the Unlicense. Builds that include local transcription ship the whisper.cpp license notice, and the model download screen links the model's license.
+
+## Acceptance checks for the implementation
+
+1. A fresh setup without the model runs the fictional demo, and transcription shows as not installed.
+2. Choosing the model downloads, verifies, and enables it. Transcription then works with the network turned off.
+3. A corrupted file, a checksum mismatch, a dropped connection, Cancel, and a full disk each leave no installed model, show a clear message, and allow a retry.
+4. Remove deletes the files and turns transcription off. Uninstall leaves no model behind.
+5. An app update that changes the model keeps the old one until the new one is verified.
+6. Nothing in logs or temporary files contains audio or transcripts.
+
+## Next steps
+
+- Score text accuracy for `tiny.en` and `base.en` against the script of several fictional clips, including faster speech and background noise, before offering `base.en`.
+- Implement the setup and Settings download flow against the checks above.
+- Publish the GitHub Releases copy with its checksum when the first build that uses it is prepared.

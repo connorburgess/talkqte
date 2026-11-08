@@ -107,7 +107,7 @@ These are short, clean synthetic clips with two system voices on one machine. It
 ## Still needed
 
 - Starting and stopping a worker with the app's own session controls, and showing a live session in the companion.
-- Model delivery: where the model comes from, its integrity check, and its size. See the roadmap.
+- Model delivery: planned in the [model delivery plan](model-delivery.md); not implemented.
 - A display for live sessions: `Engine::live()` has no fixed duration, so the UI must not show its duration as an end time.
 - Sustained-session measurements of delay, memory growth, CPU use, and dropped audio.
 
