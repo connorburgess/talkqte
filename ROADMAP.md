@@ -81,7 +81,7 @@ See the [review findings, current gaps, and experiment](docs/research.md). No us
 Prove that audio capture, local transcription, and the floating prompt can coexist with a real meeting app before expanding the dashboard.
 
 - [ ] Start and stop microphone and system-audio capture with explicit permission.
-- [ ] Transcribe a synthetic meeting locally without network access after model setup.
+- [x] Transcribe a synthetic meeting locally without network access after model setup. A real-time developer replay of a fictional two-voice clip with a feature-gated Whisper backend; not yet wired into the app or capture.
 - [ ] Measure transcript delay, memory growth, CPU use, and dropped audio.
 - [ ] Show a dismissible prompt without taking keyboard focus from the meeting.
 - [ ] Confirm stop/pause and device-change behavior, including headphones.

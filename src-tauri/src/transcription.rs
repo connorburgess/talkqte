@@ -72,6 +72,8 @@ pub struct Worker {
     sender: Option<SyncSender<AudioChunk>>,
     cancelled: Arc<AtomicBool>,
     dropped: AtomicU64,
+    queued: AtomicU64,
+    completed: Arc<AtomicU64>,
     finished: Option<Receiver<Stats>>,
 }
 
@@ -90,16 +92,28 @@ impl Worker {
         let cancelled = Arc::new(AtomicBool::new(false));
         let flag = cancelled.clone();
         let worker = NEXT_WORKER.fetch_add(1, Ordering::Relaxed);
+        let completed = Arc::new(AtomicU64::new(0));
+        let finished_chunks = completed.clone();
         std::thread::Builder::new()
             .name("talkqte-transcription".into())
             .spawn(move || {
-                let _ = done.send(run(session, worker, receiver, flag, transcriber, sink));
+                let _ = done.send(run(
+                    session,
+                    worker,
+                    receiver,
+                    flag,
+                    finished_chunks,
+                    transcriber,
+                    sink,
+                ));
             })
             .expect("transcription worker thread starts");
         Self {
             sender: Some(sender),
             cancelled,
             dropped: AtomicU64::new(0),
+            queued: AtomicU64::new(0),
+            completed,
             finished: Some(finished),
         }
     }
@@ -124,12 +138,24 @@ impl Worker {
             }
         };
         match refused {
-            None => Ok(()),
+            None => {
+                self.queued.fetch_add(1, Ordering::Relaxed);
+                Ok(())
+            }
             Some(chunk) => {
                 self.dropped.fetch_add(1, Ordering::Relaxed);
                 Err(chunk)
             }
         }
+    }
+
+    /// Chunks accepted by `submit` that the worker has not finished, whether
+    /// waiting or being transcribed. A growing backlog means recognition is
+    /// falling behind the audio.
+    pub fn backlog(&self) -> u64 {
+        self.queued
+            .load(Ordering::Relaxed)
+            .saturating_sub(self.completed.load(Ordering::Acquire))
     }
 
     /// Cancels without waiting: no further results are delivered, and
@@ -179,6 +205,7 @@ fn run<T: Transcriber, S: FnMut(u64, Segment) -> Result<(), String>>(
     worker: u64,
     receiver: Receiver<AudioChunk>,
     cancelled: Arc<AtomicBool>,
+    completed: Arc<AtomicU64>,
     mut transcriber: T,
     mut sink: S,
 ) -> Stats {
@@ -195,6 +222,7 @@ fn run<T: Transcriber, S: FnMut(u64, Segment) -> Result<(), String>>(
             Ok(items) => items,
             Err(_) => {
                 stats.failures += 1;
+                completed.fetch_add(1, Ordering::Release);
                 continue;
             }
         };
@@ -223,6 +251,7 @@ fn run<T: Transcriber, S: FnMut(u64, Segment) -> Result<(), String>>(
                 Err(_) => stats.rejected += 1,
             }
         }
+        completed.fetch_add(1, Ordering::Release);
     }
     stats
 }
@@ -371,6 +400,35 @@ mod tests {
             let _ = open.send(());
         }
         assert_eq!(worker.stop().dropped, 6 - accepted as u64);
+    }
+
+    #[test]
+    fn backlog_counts_accepted_chunks_until_the_worker_finishes_them() {
+        let engine = running_engine();
+        let session = engine.lock().unwrap().session();
+        let (started, recognizing) = mpsc::channel();
+        let (open, gate) = mpsc::channel();
+        let lines = vec![Ok(vec![(0, "Hello.")]), Err("model unavailable")];
+        let script = Script {
+            started: Some(started),
+            gate: Some(gate),
+            ..script(lines)
+        };
+        let (sink, outcomes) = into_engine(&engine);
+        let worker = Worker::start(session, 4, script, sink);
+        assert_eq!(worker.backlog(), 0);
+        assert!(worker.submit(chunk(60_000)).is_ok());
+        assert!(worker.submit(chunk(61_000)).is_ok());
+        recognizing.recv().unwrap();
+        assert_eq!(worker.backlog(), 2, "one in progress, one waiting");
+        open.send(()).unwrap();
+        assert!(outcomes.recv().unwrap());
+        recognizing.recv().unwrap();
+        open.send(()).unwrap(); // The second call fails; it still completes.
+        while worker.backlog() > 0 {
+            std::thread::yield_now();
+        }
+        assert_eq!(worker.stop().failures, 1);
     }
 
     #[test]

@@ -38,6 +38,51 @@ TALKQTE_WHISPER_CLIP="/absolute/path/to/synthetic.wav" \
 
 Without both variables the test is skipped. It sends the clip through the real worker into a live engine session. It passes when the recognizer produces lines without errors, an owner line raises "Who will take the first draft?", and that question's source is a recognized line. On macOS, run the built test binary under `sandbox-exec -p '(version 1)(allow default)(deny network*)'` to check that no network access is needed.
 
+## Real-time replay
+
+`examples/replay_clip.rs` replays a clip into a live session in real time. Each chunk is handed to the worker once that much audio time has passed, while the engine clock follows real time as in the app. The replay prints:
+
+- when a cue is shown, and whether it expired, was withdrawn, or was cleared by End;
+- the worker's counts and its largest backlog.
+
+It prints no transcript text. Clips over 32 MiB are refused.
+
+With `--end-at-ms`, the session ends at that moment. The check fails unless audio was still queued or being transcribed at End, so an End between chunks cannot pass vacuously. Work already in progress is then allowed to finish, so late lines meet the engine's own refusal. The check fails if anything changes after End.
+
+```sh
+cd src-tauri
+cargo run --features local-whisper --example replay_clip -- \
+  --model "$HOME/.local/share/talkqte-models/ggml-tiny.en.bin" \
+  --clip /tmp/talkqte-meeting.wav --chunk-ms 5000 [--end-at-ms 10000]
+```
+
+A fictional two-voice meeting clip, with 1.5 seconds of silence between lines:
+
+```sh
+cd /tmp && i=0
+while IFS='|' read -r voice line; do
+  i=$((i+1)); say -v "$voice" -o "line$i.aiff" "$line"
+  afconvert -f WAVE -d LEI16@16000 -c 1 "line$i.aiff" "line$i.wav"
+done <<'EOF'
+Samantha|Let's plan the welcome guide for new garden visitors.
+Daniel|Someone can take the first draft of the welcome guide.
+Samantha|It should cover where to find the tools and how to water the seedlings.
+Daniel|We should have it ready soon.
+Samantha|Jordan will take the first draft.
+Daniel|Let's have it ready by Friday.
+Samantha|We could either print the guide or put a small sign by the gate.
+Daniel|Let's go with the sign.
+EOF
+python3 -I -c '
+import wave
+with wave.open("talkqte-meeting.wav", "wb") as out:
+    out.setnchannels(1); out.setsampwidth(2); out.setframerate(16000)
+    for n in range(1, 9):
+        with wave.open(f"line{n}.wav") as part:
+            out.writeframes(part.readframes(part.getnframes()) + bytes(48000))
+'
+```
+
 ## Recorded result
 
 Fictional three-sentence clip (about 8 seconds: an owner, a timing, and a decision line), `tiny.en` model, Apple M5 Pro, macOS 26.4, debug build, network denied by `sandbox-exec`. Three runs:
@@ -49,12 +94,19 @@ Fictional three-sentence clip (about 8 seconds: an owner, a timing, and a decisi
 | Submit to first line in the engine          | 150–158 ms                                                             |
 | Peak memory of the test process             | about 210 MB                                                           |
 
-This is one short, clean, single-voice synthetic clip on one machine. It does not measure accuracy on real meetings, noisy audio, overlapping speakers, sustained sessions, or other hardware, and it is not a latency or resource budget.
+Real-time replay of the 30.4-second two-voice meeting clip in 5-second chunks, same machine and model, network denied, debug build:
+
+| Run                        | Result                                                                                                                                                                                                                                                                                                                                                             |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Full clip                  | "Who will take the first draft?" shown 5.2 s in, after the first chunk, sourced to the recognized owner line. Withdrawn at 20.2 s with 2.3 s of display time left, after "Jordan will take the first draft." All 9 recognized lines accepted; no errors or drops; largest backlog 1 chunk. The cooldown after the answer kept the timing and decision lines quiet. |
+| End at 10 s                | End came while one chunk was being transcribed and cleared the question. That chunk's 2 late lines were refused by the engine, and nothing changed after End: no new lines, same revision.                                                                                                                                                                         |
+| End between chunks (7.5 s) | Refused as a vacuous check, as designed.                                                                                                                                                                                                                                                                                                                           |
+
+These are short, clean synthetic clips with two system voices on one machine. It does not measure accuracy on real meetings, noisy audio, overlapping speakers, sustained sessions, or other hardware, and it is not a latency or resource budget.
 
 ## Still needed
 
-- A synthetic clip in which a later line answers the question, to check withdrawal end to end.
-- A replay command that starts and stops a worker with a session, so End during transcription can be checked in the app.
+- Starting and stopping a worker with the app's own session controls, and showing a live session in the companion.
 - Model delivery: where the model comes from, its integrity check, and its size. See the roadmap.
 - A display for live sessions: `Engine::live()` has no fixed duration, so the UI must not show its duration as an end time.
 - Sustained-session measurements of delay, memory growth, CPU use, and dropped audio.
