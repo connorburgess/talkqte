@@ -33,7 +33,7 @@ The current notebook is a prototype surface, not a requirement to build a meetin
 - Capture and sharing require explicit actions and visible state.
 - Meeting content is private; public demos and tests use fictional data.
 - Describe implemented behavior accurately. A demo must never imply that audio is being captured.
-- Build in public with Apache-2.0, human DCO sign-offs, and feature pull requests.
+- Build in public under the Sustainable Use License, with free personal/internal-business use and separate commercial licensing. Follow the contributor agreement, human sign-off, and pull-request policies; preserve prior Apache-2.0 grants.
 
 ## Future direct-address behavior
 

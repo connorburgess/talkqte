@@ -25,7 +25,7 @@ export function checkCommit(commit) {
   const failures = [];
   if (!signoffs.includes(author))
     failures.push(
-      `${commit.slice(0, 12)} needs a DCO sign-off matching its author.`,
+      `${commit.slice(0, 12)} needs a contribution sign-off matching its author.`,
     );
   if (hasToolCredit(message))
     failures.push(`${commit.slice(0, 12)} contains a tool attribution credit.`);

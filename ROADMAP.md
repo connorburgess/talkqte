@@ -6,7 +6,7 @@ This is a development plan. Unchecked items are not implemented.
 
 - [x] Create the public repository and choose TalkQTE as the working name.
 - [x] Choose Rust + Tauri + React, with macOS as the first target.
-- [x] Document privacy requirements, DCO sign-offs, contribution rules, and feature-branch workflow.
+- [x] Document privacy requirements, contribution sign-offs, licensing and contributor terms, and feature-branch workflow.
 - [x] Add automated contribution metadata, frontend, Rust, and desktop build checks.
 - [ ] Configure required branch checks and dedicated secret scanning.
 - [ ] Enable external automated review when the prototype is ready for it; currently deferred.

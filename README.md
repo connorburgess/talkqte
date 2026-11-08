@@ -52,6 +52,16 @@ These are development targets. The prototype does not yet listen to meetings or 
 
 ## Contributing
 
-Small fixes and documentation improvements are welcome. Discuss larger changes in an issue first. After the initial repository bootstrap, changes go through pull requests. Every contribution commit needs a [DCO](DCO) sign-off (`git commit -s`).
+Small fixes and documentation improvements are welcome. Discuss larger changes in an issue first. After the initial repository bootstrap, changes go through pull requests. Read the [contribution guide](CONTRIBUTING.md) for commit sign-offs and the short [contributor agreement](CONTRIBUTOR_LICENSE_AGREEMENT.md).
 
-Code is licensed under [Apache-2.0](LICENSE). There is no separate contributor license agreement.
+## License
+
+TalkQTE is **source-available** under the [Sustainable Use License 1.0](LICENSE).
+
+- Personal use and ordinary internal workplace use are free, including using TalkQTE in your own consulting work.
+- You can inspect and modify the source, and share copies free of charge for noncommercial purposes while preserving the required notices.
+- Selling TalkQTE, white-labeling it for customers, incorporating its implementation into a commercial product, or offering it as a paid hosted service requires a separate commercial agreement.
+
+Using your notes in paid work or connecting a permitted TalkQTE installation to another note-taker does not by itself require a commercial agreement. This is not an OSI-approved open-source license. Previously published Apache-2.0 material keeps its existing permissions.
+
+See the [licensing guide](LICENSING.md) for examples, prior-version rights, and commercial inquiries. The license text governs.

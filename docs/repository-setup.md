@@ -8,7 +8,7 @@ Bootstrap project instructions, docs, and tooling on `main`. Subsequent work use
 
 The [Checks workflow](../.github/workflows/checks.yml) runs on pull requests and updates to `main`, with read-only repository permissions and pinned action revisions. It defines:
 
-- **Contribution metadata:** every PR commit needs a DCO trailer matching its author. Common tool-attribution credits in commits and PR text are rejected, including after PR text edits. The check does not verify a human's legal identity.
+- **Contribution metadata:** every PR commit needs a sign-off trailer matching its author. Common tool-attribution credits in commits and PR text are rejected, including after PR text edits. The check does not verify a human's legal identity or acceptance of the contributor agreement; the maintainer must review each contributor's acceptance before merging.
 - **Frontend and browser behavior:** contribution-check regression tests, formatting, TypeScript/build, and Playwright checks in Chromium and WebKit.
 - **macOS Rust and desktop build:** Rust formatting, unit tests, Clippy with warnings denied, and an unsigned development app build using the pinned Rust toolchain.
 

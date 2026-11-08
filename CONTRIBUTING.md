@@ -26,7 +26,7 @@ On Linux, Playwright may also need system dependencies: `npx playwright install 
 
 Rust tests cover question expiry, pause, stale responses, saved-question replay, note limits, and the restricted overlay payload. Playwright exercises the notebook in Chromium and WebKit, including export review, keyboard navigation, and a narrow layout with reduced motion. Browser tests do not prove native overlay behavior. Check the actual macOS app when changing native commands, permissions, or windows.
 
-Pull-request checks also require an author-matching DCO trailer on each contribution commit and reject common tool-attribution credits in commit messages and PR text. These automated checks complement human review; they do not establish a contributor's legal identity or catch every possible credit format.
+Pull-request checks also require an author-matching sign-off trailer on each contribution commit and reject common tool-attribution credits in commit messages and PR text. These automated checks complement human review; they do not establish a contributor's legal identity, verify contributor-agreement acceptance, or catch every possible credit format.
 
 Use only the bundled fictional demo for public evidence. Test data and notes are memory-only; restarting the app clears them. The local export is the only implemented way to keep notebook content.
 
@@ -40,13 +40,13 @@ When responding to a finding, name the finding, explain the fix or reason for le
 
 ## Sign off your commits
 
-Every contribution commit must include a `Signed-off-by:` line certifying the [Developer Certificate of Origin 1.1](DCO). Use your real name and an email address you control. A GitHub-provided `noreply` address is welcome for privacy; use the same identity for author and sign-off.
+Every contribution commit must include a `Signed-off-by:` line matching its author. By signing off, you confirm that you created the contribution or have the right and any necessary employer authorization to submit it under the applicable contribution terms. Use your real name and an email address you control. A GitHub-provided `noreply` address is welcome for privacy; use the same identity for author and sign-off.
 
 ```sh
 git commit -s -m "Keep a saved question after the prompt expires"
 ```
 
-The sign-off records your right to submit the contribution under its license. It is different from cryptographically signing a commit. There is no separate CLA. Contributions are accepted under [Apache-2.0](LICENSE).
+The sign-off records contribution origin and is different from cryptographically signing a commit. New contributions are distributed under the [Sustainable Use License](LICENSE), subject to any preserved third-party terms, and require the contributor agreement below. A sign-off alone does not accept that agreement. Historical DCO sign-offs remain associated with their original commits; the unchanged [DCO 1.1 text](LICENSES/DCO-1.1.txt) is retained for reference and is no longer the current sign-off policy.
 
 If you forgot the sign-off on your own most recent unshared commit:
 
@@ -55,6 +55,18 @@ git commit --amend --no-edit -s
 ```
 
 Do not rewrite someone else's commits or add a certification on their behalf. Coordinate before rewriting a branch that other people use. Your commit identity and sign-off become part of public Git history.
+
+## Contributor agreement
+
+Read the short [Contributor License Agreement](CONTRIBUTOR_LICENSE_AGREEMENT.md). You retain copyright and give Connor Burgess permission to license your contribution under other terms, including commercial terms. This supports the project's free personal/internal-business use and separate commercial licensing. It is not a copyright assignment.
+
+For each PR, every contributor other than the project steward must personally post the following statement in their own PR description or comment, linking the agreement revision they read:
+
+> I have read and agree to the TalkQTE Contributor License Agreement at [link to the agreement revision] for my contributions in this pull request.
+
+Use a GitHub permalink to the agreement at a specific commit, and confirm you have any necessary employer authorization. Do not accept for another contributor. The maintainer must verify acceptance from every contributor before merging and retain the public record. The metadata check only verifies sign-offs; it does not automate this review. The steward does not need to grant rights to themself.
+
+This agreement does not apply retroactively. Do not assume that an earlier DCO sign-off grants commercial relicensing permission. Preserve third-party notices and disclose imported material and its license in the PR.
 
 ## Public data and evidence
 
@@ -67,7 +79,7 @@ Do not rewrite someone else's commits or add a certification on their behalf. Co
 
 ## Authorship and presentation
 
-The human contributor is responsible for their change. Do not add AI co-author trailers, credits, generated-with footers, or session links to commits, PRs, issues, comments, documentation, releases, or app assets. Human DCO sign-offs remain required. Preserve required dependency notices.
+The human contributor is responsible for their change. Do not add AI co-author trailers, credits, generated-with footers, or session links to commits, PRs, issues, comments, documentation, releases, or app assets. Human contributor sign-offs remain required. Preserve required dependency notices.
 
 ## Security and conduct
 
