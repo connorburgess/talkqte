@@ -40,6 +40,27 @@ pub const SPACE_MARGIN: u64 = 512 * 1024 * 1024;
 /// that makes progress does not count, so a slow connection keeps resuming.
 pub const ATTEMPTS: usize = 3;
 const PART_SUFFIX: &str = ".part";
+/// The wait after a failed attempt that received nothing, doubling each time.
+const STALL_WAIT: std::time::Duration = if cfg!(test) {
+    std::time::Duration::from_millis(20)
+} else {
+    std::time::Duration::from_secs(2)
+};
+
+/// Waits `STALL_WAIT × 2^(failures − 1)`, checking `cancel` every 50 ms.
+/// Returns true if the download was cancelled during the wait.
+fn wait_or_cancel(failures: usize, cancel: &AtomicBool) -> bool {
+    let total = STALL_WAIT * (1 << (failures.saturating_sub(1)).min(4)) as u32;
+    let step = std::time::Duration::from_millis(50).min(total);
+    let started = std::time::Instant::now();
+    while started.elapsed() < total {
+        if cancel.load(Ordering::Acquire) {
+            return true;
+        }
+        std::thread::sleep(step);
+    }
+    cancel.load(Ordering::Acquire)
+}
 
 /// One response from a source, starting at the requested offset or, if the
 /// server ignored the range, at the beginning.
@@ -188,8 +209,15 @@ pub fn download(
                     Fetched::Interrupted(why) => {
                         reason = why;
                         let after = fs::metadata(&part).map(|meta| meta.len()).unwrap_or(0);
-                        if after <= before {
+                        // Any change, including a restart from zero by a
+                        // server that ignores ranges, counts as progress.
+                        if after == before {
                             stalled += 1;
+                            // A busy or rate-limited server gets time before
+                            // the next try; Cancel still ends the wait.
+                            if stalled < ATTEMPTS && wait_or_cancel(stalled, cancel) {
+                                return Err(Failure::Cancelled);
+                            }
                         }
                         continue;
                     }
@@ -372,6 +400,7 @@ mod tests {
         cut_after: Mutex<Vec<Option<usize>>>,
         honor_range: bool,
         requests: Mutex<Vec<(String, u64)>>,
+        times: Mutex<Vec<std::time::Instant>>,
     }
 
     impl Fake {
@@ -381,6 +410,7 @@ mod tests {
                 cut_after: Mutex::new(vec![]),
                 honor_range: true,
                 requests: Mutex::new(vec![]),
+                times: Mutex::new(vec![]),
             }
         }
     }
@@ -400,6 +430,7 @@ mod tests {
     impl Fetch for Fake {
         fn get(&self, url: &str, offset: u64) -> Result<Response, String> {
             self.requests.lock().unwrap().push((url.into(), offset));
+            self.times.lock().unwrap().push(std::time::Instant::now());
             let index: usize = url.trim_start_matches("test://").parse().unwrap();
             let file = self.files.get(index).ok_or("unreachable")?;
             let start = if self.honor_range { offset as usize } else { 0 };
@@ -652,6 +683,46 @@ mod tests {
         assert_eq!(fake.requests.lock().unwrap().len(), ATTEMPTS);
         assert!(leftovers(dir.path()).is_empty());
         assert!(failure.message().contains("Nothing was installed"));
+    }
+
+    #[test]
+    fn failed_attempts_wait_longer_each_time() {
+        let dir = dir();
+        let spec = real_spec(&["test://7"]);
+        let fake = Fake::new(vec![]);
+        let failure = download(
+            dir.path(),
+            &spec,
+            &fake,
+            plenty,
+            |_, _| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(matches!(failure, Failure::Unavailable(_)));
+        let times = fake.times.lock().unwrap();
+        assert_eq!(times.len(), ATTEMPTS);
+        let (first, second) = (times[1] - times[0], times[2] - times[1]);
+        assert!(first >= STALL_WAIT, "{first:?}");
+        assert!(second >= STALL_WAIT * 2, "doubles: {second:?}");
+    }
+
+    #[test]
+    fn cancel_during_a_wait_ends_the_download_and_leaves_nothing() {
+        let dir = dir();
+        let spec = real_spec(&["test://7"]);
+        let fake = Fake::new(vec![]);
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let setter = cancel.clone();
+        let waiter = std::thread::spawn(move || {
+            std::thread::sleep(STALL_WAIT / 2);
+            setter.store(true, Ordering::Release);
+        });
+        let result = download(dir.path(), &spec, &fake, plenty, |_, _| {}, &cancel);
+        waiter.join().unwrap();
+        assert_eq!(result.unwrap_err(), Failure::Cancelled);
+        assert_eq!(fake.requests.lock().unwrap().len(), 1, "no second attempt");
+        assert!(leftovers(dir.path()).is_empty());
     }
 
     #[test]
