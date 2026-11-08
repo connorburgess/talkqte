@@ -351,7 +351,12 @@ test('the speech model downloads only when chosen, shows progress, and can be ca
   await expect(
     page.getByRole('button', { name: 'Start live session' }),
   ).toHaveCount(0);
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  // The notebook points to setup instead of hiding live sessions entirely,
+  // and takes keyboard focus to that section.
+  await page.getByRole('button', { name: 'Set up live session' }).click();
+  const heading = page.getByRole('heading', { name: 'Live transcription' });
+  await expect(heading).toBeFocused();
+  await expect(heading).toBeInViewport();
   const section = page.locator('.model-download');
   await expect(section).toContainText('78 MB');
   await expect(section).toContainText('see your IP address');
@@ -362,6 +367,12 @@ test('the speech model downloads only when chosen, shows progress, and can be ca
   await expect(
     page.getByRole('progressbar', { name: 'Model download' }),
   ).toBeVisible();
+  // While it downloads, the notebook link leads back to the progress.
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await page.getByRole('button', { name: 'View download progress' }).click();
+  await expect(
+    page.getByRole('progressbar', { name: 'Model download' }),
+  ).toBeInViewport();
   await page.getByRole('button', { name: 'Cancel download' }).click();
   await expect(section.getByRole('alert')).toHaveText(
     'Download cancelled. Nothing was installed.',
@@ -374,9 +385,21 @@ test('the speech model downloads only when chosen, shows progress, and can be ca
   await expect(
     page.getByRole('button', { name: 'Start live session' }),
   ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Set up live session' }),
+  ).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Remove model' }).click();
   await expect(
     page.getByRole('button', { name: 'Download speech model' }),
   ).toBeVisible();
+});
+
+test('the live setup link fits narrow windows', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 700 });
+  await nativePage(page, '?model');
+  await page.getByRole('button', { name: 'Set up live session' }).waitFor();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(320);
 });
