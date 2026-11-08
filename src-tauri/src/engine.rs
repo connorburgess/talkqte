@@ -130,6 +130,9 @@ pub struct Engine {
     cooldown_until: u64,
     /// Whether this session's transcript includes ingested (non-demo) lines.
     live_input: bool,
+    /// The user's name for this app session, used to recognize questions
+    /// addressed to them. Never stored or sent anywhere.
+    user_name: Option<String>,
     /// When each question type was last shown in this session.
     last_shown: Vec<(String, u64)>,
     /// A cue type created since the last publish, with its previous time.
@@ -181,6 +184,7 @@ impl Engine {
             cue_deadline: 0,
             cooldown_until: 0,
             live_input: false,
+            user_name: None,
             last_shown: vec![],
             unshown: None,
         }
@@ -393,6 +397,33 @@ impl Engine {
                 withdrawn_for_topic = true;
             }
         }
+        // A question asked of the user by name takes priority over an unread
+        // suggestion, ignores the cooldown, and shows the question itself.
+        // Questions for someone else, or for no one in particular, stay quiet.
+        if let Some(asked) = self
+            .user_name
+            .as_deref()
+            .and_then(|name| asked_of(name, &segment.text))
+        {
+            if !self.state.cue.as_ref().is_some_and(|cue| cue.held) && now - segment.at_ms < CUE_MS
+            {
+                self.unshown = None;
+                self.cue_deadline = segment.at_ms + CUE_MS;
+                self.state.cue = Some(Cue {
+                    id: format!("{}:{}", self.generation, segment.id),
+                    kind: ASKED.into(),
+                    question: asked,
+                    evidence: segment.text,
+                    source_id: segment.id,
+                    remaining_ms: self.cue_deadline - now,
+                    total_ms: CUE_MS,
+                    held: false,
+                    expanded: false,
+                    resolved_by: None,
+                });
+            }
+            return;
+        }
         // Skip stale suggestions after a suspended app catches up.
         if self.state.cue.is_none()
             && segment.at_ms >= self.cooldown_until
@@ -512,6 +543,28 @@ impl Engine {
         Ok(())
     }
 
+    /// Sets or clears the name used to recognize questions addressed to the
+    /// user. Kept in memory for this app session only.
+    pub fn set_user_name(&mut self, name: Option<String>) -> Result<(), String> {
+        let name = name
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty());
+        if let Some(name) = &name {
+            let valid = name.chars().count() <= 40
+                && name
+                    .chars()
+                    .all(|character| character.is_alphabetic() || " '-’".contains(character));
+            if !valid {
+                return Err(
+                    "Use letters, spaces, apostrophes, or hyphens, up to 40 characters.".into(),
+                );
+            }
+        }
+        self.user_name = name;
+        self.changed();
+        Ok(())
+    }
+
     pub fn set_sensitivity(&mut self, value: Sensitivity) {
         self.state.sensitivity = value;
         self.changed();
@@ -590,6 +643,43 @@ fn suggest(text: &str) -> Vec<(&'static str, &'static str)> {
         found.push(("Decision", "How will we choose between those options?"));
     }
     found
+}
+
+/// The cue kind for a question addressed to the user by name.
+pub const ASKED: &str = "Asked you";
+
+/// Returns the question when a line asks it of `name` directly: the name
+/// opens the sentence ("Robin, can you take the draft?") or closes it
+/// ("What do you think, Robin?"). A question naming someone else, or no one,
+/// returns None, as does a statement.
+fn asked_of(name: &str, text: &str) -> Option<String> {
+    let normal = |word: &str| {
+        word.replace(['’', '‘'], "'")
+            .trim_matches(|character: char| !character.is_alphanumeric() && character != '\'')
+            .to_lowercase()
+    };
+    let name: Vec<String> = name.split_whitespace().map(normal).collect();
+    text.split_inclusive(['.', '?', '!'])
+        .map(str::trim)
+        .find(|sentence| {
+            let words: Vec<String> = sentence.split_whitespace().map(normal).collect();
+            let question = sentence.ends_with('?')
+                || words
+                    .iter()
+                    .any(|word| QUESTION_OPENERS.contains(&word.as_str()));
+            // The name must be set off by a comma as the opening or closing words.
+            let opens = sentence.split_once(',').is_some_and(|(head, _)| {
+                head.split_whitespace().map(normal).collect::<Vec<_>>() == name
+            });
+            let closes = sentence
+                .trim_end_matches(['?', '.', '!'])
+                .rsplit_once(',')
+                .is_some_and(|(_, tail)| {
+                    tail.split_whitespace().map(normal).collect::<Vec<_>>() == name
+                });
+            question && (opens || closes)
+        })
+        .map(|sentence| sentence.chars().take(200).collect())
 }
 
 /// Words that make a statement negative; such statements never answer a
@@ -1361,6 +1451,97 @@ mod tests {
             (cue.kind.as_str(), cue.source_id.as_str()),
             ("Timing", "t2")
         );
+    }
+
+    #[test]
+    fn a_question_asked_of_the_user_by_name_is_shown_and_takes_priority() {
+        for line in [
+            "Robin, can you take the first draft?",
+            "What do you think, Robin?",
+            "robin, could you check the gate code.",
+        ] {
+            let mut e = play(&[(1_000, "Someone can take the first draft."), (4_000, line)]);
+            e.set_user_name(Some(" Robin ".into())).unwrap();
+            e.advance(1_000);
+            assert_eq!(e.state.cue.as_ref().unwrap().kind, "Owner");
+            e.advance(3_000);
+            let cue = e.state.cue.as_ref().expect("the direct question");
+            assert_eq!(
+                (cue.kind.as_str(), cue.source_id.as_str()),
+                (ASKED, "t2"),
+                "{line}"
+            );
+            assert!(
+                line.contains(cue.question.trim_end_matches(['?', '.'])),
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn questions_for_someone_else_or_no_one_stay_quiet() {
+        for line in [
+            "Alex, can you take the first draft?",
+            "Can anyone check the gate code?",
+            "What do you think?",
+            "Robin will take the first draft.",
+            "I asked Robin, can you believe it.",
+            "Robinson, can you check the gate?",
+        ] {
+            let mut e = play(&[(1_000, line)]);
+            e.set_user_name(Some("Robin".into())).unwrap();
+            e.advance(1_000);
+            assert!(
+                e.state.cue.as_ref().is_none_or(|cue| cue.kind != ASKED),
+                "asked after: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn without_a_name_no_question_is_treated_as_addressed() {
+        let mut e = play(&[(1_000, "Robin, can you take the first draft?")]);
+        e.advance(1_000);
+        assert!(e.state.cue.is_none());
+    }
+
+    #[test]
+    fn a_direct_question_ignores_the_cooldown_but_not_a_question_being_read() {
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (3_000, "Robin, can you take it?"),
+        ]);
+        e.set_user_name(Some("Robin".into())).unwrap();
+        e.advance(1_000);
+        let first = e.state.cue.as_ref().unwrap().id.clone();
+        e.inspect_cue(&first, true).unwrap();
+        e.advance(2_000);
+        assert_eq!(
+            e.state.cue.as_ref().unwrap().id,
+            first,
+            "the read question stays"
+        );
+
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (3_000, "Robin, can you take it?"),
+        ]);
+        e.set_user_name(Some("Robin".into())).unwrap();
+        e.advance(1_000);
+        let first = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&first, Response::Dismiss).unwrap(); // starts a cooldown
+        e.advance(2_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
+    }
+
+    #[test]
+    fn invalid_names_are_rejected_and_an_empty_name_clears() {
+        let mut e = Engine::default();
+        assert!(e.set_user_name(Some("Robin<script>".into())).is_err());
+        assert!(e.set_user_name(Some("x".repeat(41))).is_err());
+        e.set_user_name(Some("Mary-Kate O'Neil".into())).unwrap();
+        e.set_user_name(Some("   ".into())).unwrap();
+        assert!(e.user_name.is_none());
     }
 
     #[test]
