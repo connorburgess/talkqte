@@ -396,6 +396,8 @@ impl Engine {
         // A question being read stays, and this line may raise a new one.
         let spoken_at = segment.at_ms;
         let mut withdrawn_for_topic = false;
+        // Where an explicit correction ends in this line, if it has one.
+        let correction = corrects(&segment.text);
         // A direct question is preserved while the user answers, so a topic
         // phrase does not clear it.
         if topic_shift(&segment.text)
@@ -413,6 +415,33 @@ impl Engine {
                 self.unshown = None;
                 withdrawn_for_topic = true;
             }
+        } else if correction.is_some() {
+            // A speaker taking back what they just said makes an unread
+            // question raised from that line stale. Only a cue from the same
+            // speaker's line immediately before, within CORRECTION_MS, counts,
+            // because a correction may refer to anything else. A question
+            // being read stays, and so does one asked of the user, which the
+            // user may still want to answer.
+            let previous = self
+                .state
+                .transcript
+                .len()
+                .checked_sub(2)
+                .and_then(|index| self.state.transcript.get(index));
+            let taken_back = self.state.cue.as_ref().is_some_and(|cue| {
+                !cue.held
+                    && cue.kind != ASKED
+                    && previous.is_some_and(|line| {
+                        line.id == cue.source_id
+                            && line.speaker == segment.speaker
+                            && segment.at_ms.saturating_sub(line.at_ms) <= CORRECTION_MS
+                    })
+            });
+            if taken_back {
+                self.state.cue = None;
+                self.forget_unshown();
+                withdrawn_for_topic = true;
+            }
         }
         // A question asked of the user by name takes priority over an unread
         // suggestion, ignores the cooldown, and shows the question itself.
@@ -421,7 +450,7 @@ impl Engine {
             .state
             .user_name
             .as_deref()
-            .and_then(|name| asked_of(name, &segment.text))
+            .and_then(|name| asked_of(name, &segment.text[correction.unwrap_or(0)..]))
         {
             if !self.state.cue.as_ref().is_some_and(|cue| cue.held) && now - segment.at_ms < CUE_MS
             {
@@ -448,10 +477,12 @@ impl Engine {
         // Once the user has given their name, a question put to someone else
         // by name is theirs to answer and already says who is meant, so that
         // sentence raises no suggestion. Other sentences in the line still can.
+        // Nothing said before a correction in the same line raises a cue.
+        let after_correction = &segment.text[correction.unwrap_or(0)..];
         let suggestible = if let Some(name) = self.state.user_name.as_deref() {
-            text_not_put_to_others(name, &segment.text)
+            text_not_put_to_others(name, after_correction)
         } else {
-            segment.text.clone()
+            after_correction.to_string()
         };
         // Skip stale suggestions after a suspended app catches up.
         if self.state.cue.is_none()
@@ -1012,6 +1043,93 @@ fn topic_shift(text: &str) -> bool {
                     words.starts_with(&opening.iter().map(|w| w.to_string()).collect::<Vec<_>>())
                 })
         })
+}
+
+/// How soon after a line a correction can take it back.
+const CORRECTION_MS: u64 = 10_000;
+
+/// Finds an explicit correction that opens a statement and stands as its own
+/// clause: "Sorry, I misspoke.", "Scratch that, …", "Correction: …",
+/// "Never mind — …". Returns the byte offset just after the correction phrase
+/// and its punctuation, so what follows can still be heard. A bare
+/// "Actually", a question, or a phrase that runs on into the sentence
+/// ("Never mind the cost", "Correction fluid") does not count.
+fn corrects(text: &str) -> Option<usize> {
+    const PHRASES: [&[&str]; 6] = [
+        &["i", "misspoke"],
+        &["scratch", "that"],
+        &["correction"],
+        &["i", "take", "that", "back"],
+        &["never", "mind"],
+        &["let", "me", "correct", "that"],
+    ];
+    // Words said before a correction.
+    const LEAD_INS: [&str; 6] = ["sorry", "oh", "wait", "actually", "no", "um"];
+    const DASHES: [&str; 3] = ["—", "–", "-"];
+    let mut sentence_start = 0;
+    for sentence in text.split_inclusive(['.', '?', '!', ';']) {
+        let offset = sentence_start;
+        sentence_start += sentence.len();
+        if sentence.trim_end().ends_with('?') {
+            continue;
+        }
+        // Tokens with their byte ranges; a lone dash is punctuation, not a word.
+        let mut tokens: Vec<(usize, usize, &str)> = vec![];
+        let mut cursor = 0;
+        for token in sentence.split_whitespace() {
+            let at = cursor + sentence[cursor..].find(token).unwrap_or(0);
+            cursor = at + token.len();
+            tokens.push((at, cursor, token));
+        }
+        let normal = |token: &str| {
+            token
+                .replace(['’', '‘'], "'")
+                .trim_matches(|character: char| !character.is_alphanumeric() && character != '\'')
+                .to_lowercase()
+        };
+        let words: Vec<(usize, String)> = tokens
+            .iter()
+            .enumerate()
+            .map(|(index, (_, _, token))| (index, normal(token)))
+            .filter(|(_, word)| !word.is_empty())
+            .collect();
+        let start = words
+            .iter()
+            .take_while(|(_, word)| LEAD_INS.contains(&word.as_str()))
+            .count();
+        for phrase in PHRASES {
+            let last = start + phrase.len() - 1;
+            if words.len() <= last
+                || !words[start..=last]
+                    .iter()
+                    .zip(phrase.iter())
+                    .all(|((_, word), part)| word == part)
+            {
+                continue;
+            }
+            let token = words[last].0;
+            let raw = tokens[token].2.trim_end_matches(['"', '”', '’']);
+            let next_is_dash = tokens
+                .get(token + 1)
+                .is_some_and(|(_, _, next)| DASHES.contains(next));
+            let closes = if phrase == ["correction"] {
+                raw.ends_with([':', ','])
+            } else {
+                token + 1 == tokens.len()
+                    || next_is_dash
+                    || raw.ends_with([',', '.', ':', ';', '!', '—'])
+            };
+            if closes {
+                let end = if next_is_dash {
+                    tokens[token + 1].1
+                } else {
+                    tokens[token].1
+                };
+                return Some(offset + end);
+            }
+        }
+    }
+    None
 }
 
 /// Conservative signs that later conversation answered an open cue.
@@ -2296,6 +2414,124 @@ mod tests {
             live("w1", 1_000, "Sam, can you take the first draft?"),
         )
         .unwrap();
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
+    }
+
+    fn after(first: &str, second: &str, second_speaker: &str, gap_ms: u64) -> Engine {
+        let mut e = live_session();
+        e.ingest(e.session(), live("w1", 9_000, first)).unwrap();
+        e.advance(gap_ms);
+        let mut line = live("w2", 9_000 + gap_ms, second);
+        line.speaker = second_speaker.into();
+        e.ingest(e.session(), line).unwrap();
+        e
+    }
+
+    #[test]
+    fn an_explicit_correction_withdraws_the_question_from_the_line_just_taken_back() {
+        for correction in [
+            "Sorry, I misspoke. The review isn't moving.",
+            "Scratch that, the review stays put.",
+            "Correction: the review stays where it is.",
+            "Never mind.",
+        ] {
+            let e = after("The review is moving soon.", correction, "Speaker 1", 2_000);
+            assert!(e.state.cue.is_none(), "{correction}");
+        }
+    }
+
+    #[test]
+    fn a_correction_of_something_else_leaves_the_question() {
+        // Another speaker, or too long after the line, or a phrase that runs on.
+        for (line, speaker, gap) in [
+            ("Scratch that, the room is booked.", "Speaker 2", 2_000),
+            ("Scratch that.", "Speaker 1", 12_000),
+            ("Actually, that sounds great.", "Speaker 1", 2_000),
+            ("Did I misspeak earlier?", "Speaker 1", 2_000),
+            ("Correction fluid is on the shelf.", "Speaker 1", 2_000),
+            ("No, never mind the cost, it is fine.", "Speaker 1", 2_000),
+            (
+                "I was wrong about the vendor last week.",
+                "Speaker 1",
+                2_000,
+            ),
+        ] {
+            let e = after("The review is moving soon.", line, speaker, gap);
+            assert!(e.state.cue.is_some(), "{line}");
+        }
+    }
+
+    #[test]
+    fn what_follows_a_correction_can_still_raise_a_question() {
+        let mut e = live_session();
+        e.ingest(
+            e.session(),
+            live("w1", 9_000, "Scratch that, someone can take it."),
+        )
+        .unwrap();
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Owner");
+        assert_eq!(
+            corrects("Never mind — Alex has it."),
+            Some("Never mind —".len())
+        );
+        assert_eq!(corrects("Um — never mind."), Some("Um — never mind.".len()));
+    }
+
+    #[test]
+    fn a_question_to_the_user_taken_back_in_the_same_line_is_not_asked() {
+        let mut e = live_session();
+        e.set_user_name(Some("Sam".into())).unwrap();
+        let line = "Sam, can you take the draft? Never mind, Alex has it.";
+        e.ingest(e.session(), live("w1", 9_000, line)).unwrap();
+        assert!(e.state.cue.as_ref().is_none_or(|cue| cue.kind != ASKED));
+    }
+
+    #[test]
+    fn live_transcripts_cannot_tell_who_corrected() {
+        // Whisper labels every line "Speaker", so any correction right after
+        // the line counts; this documents that limit.
+        let mut e = live_session();
+        let mut first = live("w1", 9_000, "The review is moving soon.");
+        first.speaker = "Speaker".into();
+        e.ingest(e.session(), first).unwrap();
+        e.advance(2_000);
+        let mut second = live("w2", 11_000, "Never mind.");
+        second.speaker = "Speaker".into();
+        e.ingest(e.session(), second).unwrap();
+        assert!(e.state.cue.is_none());
+    }
+
+    #[test]
+    fn words_taken_back_in_the_same_line_raise_no_question() {
+        let mut e = live_session();
+        let line = "The review is moving soon. Scratch that, it is staying put.";
+        e.ingest(e.session(), live("w1", 9_000, line)).unwrap();
+        assert!(e.state.cue.is_none());
+    }
+
+    #[test]
+    fn a_correction_leaves_a_question_being_read_or_asked_of_the_user() {
+        let mut e = live_session();
+        e.ingest(e.session(), live("w1", 9_000, "The review is moving soon."))
+            .unwrap();
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.inspect_cue(&id, true).unwrap();
+        e.advance(2_000);
+        e.ingest(e.session(), live("w2", 11_000, "Scratch that."))
+            .unwrap();
+        assert!(e.state.cue.as_ref().is_some_and(|cue| cue.held));
+
+        let mut e = live_session();
+        e.set_user_name(Some("Sam".into())).unwrap();
+        e.ingest(
+            e.session(),
+            live("w1", 9_000, "Sam, can you take the draft?"),
+        )
+        .unwrap();
+        e.advance(2_000);
+        e.ingest(e.session(), live("w2", 11_000, "Never mind."))
+            .unwrap();
+        // Kept on purpose: the user may still want to answer.
         assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
     }
 }
