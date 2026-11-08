@@ -24,8 +24,8 @@
         "label": "cue",
         "title": "TalkQTE companion",
         "url": "index.html?window=cue",
-        "width": 380,
-        "height": 88,
+        "width": 320,
+        "height": 76,
         "resizable": false,
         "decorations": false,
         "alwaysOnTop": true,
@@ -33,7 +33,7 @@
         "focus": false,
         "focusable": false,
         "visible": false,
-        "backgroundColor": "#203c32"
+        "backgroundColor": "#f8f8f2"
       }
     ],
     "security": {
