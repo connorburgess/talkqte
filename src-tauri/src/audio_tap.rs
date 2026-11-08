@@ -49,6 +49,7 @@ pub fn tap(device_rate: u32, channels: u16, chunk_ms: u64) -> (TapInput, Chunker
             emitted: 0,
             overruns,
             counted_overruns: 0,
+            gap_applied: 0,
             device_rate: device_rate.max(1),
         },
     )
@@ -103,6 +104,8 @@ pub struct Chunker {
     overruns: Arc<Overruns>,
     /// Dropped device samples already accounted for as a gap.
     counted_overruns: u64,
+    /// 16 kHz samples of gap already added to `emitted`.
+    gap_applied: u64,
     device_rate: u32,
 }
 
@@ -111,10 +114,17 @@ impl Chunker {
     /// complete chunks. `session_start_ms` is the session time at which the
     /// tap started, so chunk times line up with the engine's clock.
     pub fn drain(&mut self, session_start_ms: u64) -> Vec<AudioChunk> {
-        // Everything still queued was captured before any samples dropped
-        // since the last drain, because a full ring drops the newest audio.
-        while let Ok(sample) = self.consumer.pop() {
-            self.resampler.push(sample, &mut self.pending);
+        // Read the drop count before the queue length. While the ring is full
+        // the callback cannot add samples, so every drop counted here came
+        // after every sample queued now. Samples that arrive during this
+        // drain wait for the next one, behind their own drops.
+        let dropped_total = self.overruns.get();
+        let queued = self.consumer.slots();
+        for _ in 0..queued {
+            match self.consumer.pop() {
+                Ok(sample) => self.resampler.push(sample, &mut self.pending),
+                Err(_) => break,
+            }
         }
         let mut chunks = vec![];
         while self.pending.len() >= self.chunk_samples {
@@ -122,15 +132,17 @@ impl Chunker {
             chunks.push(self.chunk(session_start_ms, samples));
         }
         // Account for dropped audio as a gap, ending the current chunk early so
-        // later chunks keep their true times.
-        let dropped = self.overruns.get() - self.counted_overruns;
-        if dropped > 0 {
-            self.counted_overruns += dropped;
+        // later chunks keep their true times. The gap comes from the running
+        // total, so repeated small drops do not lose fractions of a sample.
+        if dropped_total > self.counted_overruns {
+            self.counted_overruns = dropped_total;
             if !self.pending.is_empty() {
                 let samples = std::mem::take(&mut self.pending);
                 chunks.push(self.chunk(session_start_ms, samples));
             }
-            self.emitted += dropped * SAMPLE_RATE as u64 / self.device_rate as u64;
+            let gap_total = dropped_total * SAMPLE_RATE as u64 / self.device_rate as u64;
+            self.emitted += gap_total - self.gap_applied;
+            self.gap_applied = gap_total;
         }
         chunks
     }
@@ -138,7 +150,14 @@ impl Chunker {
     /// Returns every remaining chunk, including the final partial one, when
     /// capture stops.
     pub fn finish(&mut self, session_start_ms: u64) -> Vec<AudioChunk> {
-        let mut chunks = self.drain(session_start_ms);
+        let mut chunks = vec![];
+        loop {
+            let before = self.consumer.slots();
+            chunks.extend(self.drain(session_start_ms));
+            if before == 0 {
+                break;
+            }
+        }
         let partial = std::mem::take(&mut self.pending);
         if !partial.is_empty() {
             chunks.push(self.chunk(session_start_ms, partial));
@@ -276,6 +295,20 @@ mod tests {
         input.push_interleaved(std::iter::repeat_n(0.1, capacity + 500));
         assert_eq!(chunker.overruns(), 500);
         assert_eq!(chunker.drain(0).len(), RING_SECONDS);
+    }
+
+    #[test]
+    fn repeated_small_drops_keep_their_fractions() {
+        // At 44.1 kHz one dropped sample is 0.36 of an output sample. Forty
+        // separate one-sample drops must add up, not round down to nothing.
+        let (mut input, mut chunker) = tap(44_100, 1, 1_000);
+        let capacity = 44_100 * RING_SECONDS;
+        for _ in 0..40 {
+            input.push_interleaved(std::iter::repeat_n(0.0, capacity + 1)); // one dropped
+            chunker.drain(0);
+        }
+        assert_eq!(chunker.overruns(), 40);
+        assert_eq!(chunker.gap_applied, 40 * SAMPLE_RATE as u64 / 44_100);
     }
 
     #[test]
