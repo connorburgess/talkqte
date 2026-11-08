@@ -2519,4 +2519,31 @@ mod tests {
         // Kept on purpose: the user may still want to answer.
         assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
     }
+
+    /// Pins the demo to the bundled fictional script: the default session
+    /// is that script, playing it yields only its lines, and it never counts
+    /// as live input. That the script is compiled in (`include_str!`) and
+    /// that the app keeps no meeting store are properties of the code, not
+    /// something this test can observe.
+    #[test]
+    fn the_demo_is_the_bundled_fictional_script_and_reads_nothing_else() {
+        let bundled: Demo = serde_json::from_str(include_str!("../../src/demo.json")).unwrap();
+        let e = Engine::default();
+        assert_eq!(e.state.title, bundled.title);
+        assert_eq!(e.demo.segments.len(), bundled.segments.len());
+        assert!(e.demo.segments.len() >= 5, "a real script, not a stub");
+        assert!(!e.live_input);
+        // Playing it through produces only lines from that script.
+        let mut e = e;
+        e.start().unwrap();
+        e.advance(u64::MAX);
+        assert_eq!(e.state.transcript.len(), bundled.segments.len());
+        let scripted: Vec<&str> = bundled.segments.iter().map(|s| s.text.as_str()).collect();
+        assert!(e
+            .state
+            .transcript
+            .iter()
+            .all(|line| scripted.contains(&line.text.as_str())));
+        assert!(!e.live_input);
+    }
 }

@@ -98,7 +98,7 @@ Prove that audio capture, local transcription, and the floating prompt can coexi
 - [ ] Selected-meeting context and a simple meeting goal.
 - [ ] Clear retention controls for any retained content; expand prompt history or Markdown export only for a demonstrated use case.
 - [ ] Accessible keyboard operation and reduced-motion support.
-- [ ] Fictional demo mode that never reads the user's meeting store.
+- [x] Fictional demo mode that never reads the user's meeting store. The demo is the fictional script compiled into the app with `include_str!`, so the demo itself opens no file at run time; an engine test pins it to that script. The app keeps no meeting store ([privacy notes](PRIVACY.md)).
 - [ ] Compare a short fictional meeting workflow with and without TalkQTE: useful context and participation, listening, stale or redundant prompts, and distraction.
 
 The [product goal and first proof](PRODUCT.md#goal-and-first-proof) define what this milestone is trying to establish. Use the [research decision notes](docs/research.md) to connect findings to a specific change and a test; adding a study to the reading list does not establish a product benefit.
