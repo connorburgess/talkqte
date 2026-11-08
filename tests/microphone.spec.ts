@@ -320,3 +320,26 @@ test('the companion labels a live session and its Stop ends the session', async 
     'stop_live_session',
   );
 });
+
+test('your name is applied when you leave the field, and a rejected name explains why', async ({
+  page,
+}) => {
+  await nativePage(page, '?live');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const name = page.getByRole('textbox', { name: 'Name' });
+  // Wide and tall enough to read and tap, not a checkbox-sized box.
+  const box = (await name.boundingBox())!;
+  expect(box.width).toBeGreaterThanOrEqual(160);
+  expect(box.height).toBeGreaterThanOrEqual(44);
+  await name.fill('  Sam ');
+  await name.press('Enter');
+  await expect(name).toHaveValue('Sam');
+  await expect(name).toBeFocused();
+  await name.fill('Sam <b>');
+  await name.press('Enter');
+  await expect(page.getByRole('alert')).toContainText(
+    'Use letters, spaces, apostrophes, or hyphens',
+  );
+  // The field shows the name still in effect, not the rejected one.
+  await expect(name).toHaveValue('Sam');
+});

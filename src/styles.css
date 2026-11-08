@@ -899,11 +899,22 @@ svg {
   color: var(--ink);
   margin-top: 20px;
 }
-.setting input {
+.setting input:not([type='text']) {
   accent-color: var(--forest);
   width: 19px;
   height: 19px;
   flex-shrink: 0;
+}
+.setting input[type='text'] {
+  width: 16rem;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #bfc7b6;
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 16px;
 }
 .coming-next {
   padding-top: 32px;

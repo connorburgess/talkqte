@@ -111,6 +111,9 @@ pub struct Snapshot {
     pub question_size: QuestionSize,
     /// True for a live session fed by transcription rather than the demo.
     pub live: bool,
+    /// The person's name for this session only, used to notice questions
+    /// asked of them. Never saved, and not sent to the companion.
+    pub user_name: Option<String>,
 }
 
 // The floating window never receives the notebook or full transcript.
@@ -137,7 +140,6 @@ pub struct Engine {
     live_input: bool,
     /// The user's name for this app session, used to recognize questions
     /// addressed to them. Never stored or sent anywhere.
-    user_name: Option<String>,
     /// When each question type was last shown in this session.
     last_shown: Vec<(String, u64)>,
     /// A cue type created since the last publish, with its previous time.
@@ -183,6 +185,7 @@ impl Engine {
                 companion_position: CompanionPosition::BottomRight,
                 question_size: QuestionSize::Standard,
                 live: demo.segments.is_empty() && demo.duration_ms == u64::MAX,
+                user_name: None,
             },
             demo,
             generation: 0,
@@ -190,7 +193,6 @@ impl Engine {
             cue_deadline: 0,
             cooldown_until: 0,
             live_input: false,
-            user_name: None,
             last_shown: vec![],
             unshown: None,
         }
@@ -416,6 +418,7 @@ impl Engine {
         // suggestion, ignores the cooldown, and shows the question itself.
         // Questions for someone else, or for no one in particular, stay quiet.
         if let Some(asked) = self
+            .state
             .user_name
             .as_deref()
             .and_then(|name| asked_of(name, &segment.text))
@@ -583,7 +586,7 @@ impl Engine {
                 );
             }
         }
-        self.user_name = name;
+        self.state.user_name = name;
         self.changed();
         Ok(())
     }
@@ -1673,7 +1676,7 @@ mod tests {
         e.set_user_name(Some("Mary-Kate O'Neil".into())).unwrap();
         e.set_user_name(Some("Rene\u{0301}e".into())).unwrap();
         e.set_user_name(Some("   ".into())).unwrap();
-        assert!(e.user_name.is_none());
+        assert!(e.state.user_name.is_none());
     }
 
     /// Runs the current phrase rules on the shared fictional suite that the
@@ -1978,12 +1981,14 @@ mod tests {
     }
 
     #[test]
-    fn overlay_payload_excludes_notes_and_transcript() {
-        let e = with_cue();
+    fn overlay_payload_excludes_notes_transcript_and_name() {
+        let mut e = with_cue();
+        e.set_user_name(Some("Robin".into())).unwrap();
         let payload = serde_json::to_value(e.cue_snapshot()).unwrap();
         assert!(payload.get("notes").is_none());
         assert!(payload.get("transcript").is_none());
         assert!(payload.get("saved").is_none());
+        assert!(payload.get("userName").is_none());
         assert!(payload["cue"]["question"].is_string());
     }
 

@@ -15,6 +15,7 @@ const state: Snapshot = {
   saved: [],
   notes: '',
   sensitivity: 'balanced',
+  userName: null,
   overlayEnabled: true,
   companionPosition: 'bottomRight',
   questionSize: 'standard',
@@ -173,6 +174,10 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
       state.notes = notes;
       break;
     }
+    case 'set_user_name':
+      // Stored only; the preview's scripted questions never use the name.
+      state.userName = (args as Commands['set_user_name']).name?.trim() || null;
+      break;
     case 'set_sensitivity':
       state.sensitivity = (args as Commands['set_sensitivity']).value;
       break;

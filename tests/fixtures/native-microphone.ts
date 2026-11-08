@@ -117,6 +117,15 @@ mockIPC(
           message: null,
         });
         return;
+      case 'set_user_name': {
+        // Stands in for the engine's validation of a session-only name.
+        const { name } = args as Commands['set_user_name'];
+        if (name && !/^[\p{L}' -]{1,40}$/u.test(name))
+          throw new Error(
+            'Use letters, spaces, apostrophes, or hyphens, up to 40 characters.',
+          );
+        return preview.command('set_user_name', { name });
+      }
       case 'live_status':
         return liveAvailable
           ? { available: true, reason: null }
