@@ -1,3 +1,5 @@
+![TalkQTE — a quiet meeting companion](docs/assets/talkqte-banner.png)
+
 # TalkQTE
 
 **AI cues that help you stay grounded and respond in the moment.**
