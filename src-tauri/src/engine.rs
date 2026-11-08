@@ -407,7 +407,10 @@ impl Engine {
         {
             if !self.state.cue.as_ref().is_some_and(|cue| cue.held) && now - segment.at_ms < CUE_MS
             {
-                self.unshown = None;
+                // A suggestion replaced before it was published was never seen.
+                if self.state.cue.take().is_some() {
+                    self.forget_unshown();
+                }
                 self.cue_deadline = segment.at_ms + CUE_MS;
                 self.state.cue = Some(Cue {
                     id: format!("{}:{}", self.generation, segment.id),
@@ -550,10 +553,15 @@ impl Engine {
             .map(|name| name.trim().to_string())
             .filter(|name| !name.is_empty());
         if let Some(name) = &name {
+            // Letters, combining accents, and name punctuation, with at least
+            // one letter.
             let valid = name.chars().count() <= 40
-                && name
-                    .chars()
-                    .all(|character| character.is_alphabetic() || " '-’".contains(character));
+                && name.chars().any(char::is_alphabetic)
+                && name.chars().all(|character| {
+                    character.is_alphabetic()
+                        || ('\u{0300}'..='\u{036F}').contains(&character)
+                        || " '-’".contains(character)
+                });
             if !valid {
                 return Err(
                     "Use letters, spaces, apostrophes, or hyphens, up to 40 characters.".into(),
@@ -653,33 +661,62 @@ pub const ASKED: &str = "Asked you";
 /// ("What do you think, Robin?"). A question naming someone else, or no one,
 /// returns None, as does a statement.
 fn asked_of(name: &str, text: &str) -> Option<String> {
+    // Greetings people say before a name ("Hey Robin, ...").
+    const LEAD_INS: [&str; 6] = ["hey", "hi", "so", "ok", "okay", "alright"];
     let normal = |word: &str| {
         word.replace(['’', '‘'], "'")
             .trim_matches(|character: char| !character.is_alphanumeric() && character != '\'')
             .to_lowercase()
     };
-    let name: Vec<String> = name.split_whitespace().map(normal).collect();
+    let words_of = |part: &str| -> Vec<String> {
+        part.split_whitespace()
+            .map(normal)
+            .filter(|word| !word.is_empty())
+            .collect()
+    };
+    let name = words_of(name);
     text.split_inclusive(['.', '?', '!'])
         .map(str::trim)
         .find(|sentence| {
-            let words: Vec<String> = sentence.split_whitespace().map(normal).collect();
-            let question = sentence.ends_with('?')
-                || words
+            // A comma or a dash sets the name off from the question.
+            let body = sentence
+                .replace(" — ", ", ")
+                .replace(" – ", ", ")
+                .replace(" - ", ", ");
+            let ends_with_mark = body.trim_end().ends_with('?');
+            // "What a great job" is an exclamation, not a question.
+            let opens_question = |words: &[String]| {
+                words
+                    .first()
+                    .is_some_and(|word| QUESTION_OPENERS.contains(&word.as_str()))
+                    && !(words.first().is_some_and(|word| word == "what")
+                        && words.get(1).is_some_and(|word| word == "a" || word == "an"))
+            };
+            // "Robin, can you take the draft?" or "Hey Robin, could you ...".
+            let opens = body.split_once(',').is_some_and(|(head, rest)| {
+                let head = words_of(head);
+                let start = head
                     .iter()
-                    .any(|word| QUESTION_OPENERS.contains(&word.as_str()));
-            // The name must be set off by a comma as the opening or closing words.
-            let opens = sentence.split_once(',').is_some_and(|(head, _)| {
-                head.split_whitespace().map(normal).collect::<Vec<_>>() == name
+                    .take_while(|word| LEAD_INS.contains(&word.as_str()))
+                    .count();
+                head[start..] == name[..] && (ends_with_mark || opens_question(&words_of(rest)))
             });
-            let closes = sentence
+            // "What do you think, Robin?" or "Can you take it, Robin".
+            let closes = body
                 .trim_end_matches(['?', '.', '!'])
                 .rsplit_once(',')
-                .is_some_and(|(_, tail)| {
-                    tail.split_whitespace().map(normal).collect::<Vec<_>>() == name
+                .is_some_and(|(rest, tail)| {
+                    words_of(tail) == name && (ends_with_mark || opens_question(&words_of(rest)))
                 });
-            question && (opens || closes)
+            !name.is_empty() && (opens || closes)
         })
-        .map(|sentence| sentence.chars().take(200).collect())
+        .map(|sentence| {
+            sentence
+                .trim_matches(['"', '“', '”', '‘', '’', '\''])
+                .chars()
+                .take(200)
+                .collect()
+        })
 }
 
 /// Words that make a statement negative; such statements never answer a
@@ -1459,6 +1496,10 @@ mod tests {
             "Robin, can you take the first draft?",
             "What do you think, Robin?",
             "robin, could you check the gate code.",
+            "Hey Robin, can you take the first draft?",
+            "Robin — can you take the first draft?",
+            "Can you take the first draft, Robin",
+            "“Robin, can you take the first draft?”",
         ] {
             let mut e = play(&[(1_000, "Someone can take the first draft."), (4_000, line)]);
             e.set_user_name(Some(" Robin ".into())).unwrap();
@@ -1472,7 +1513,7 @@ mod tests {
                 "{line}"
             );
             assert!(
-                line.contains(cue.question.trim_end_matches(['?', '.'])),
+                !cue.question.starts_with('“') && !cue.question.ends_with('”'),
                 "{line}"
             );
         }
@@ -1487,6 +1528,11 @@ mod tests {
             "Robin will take the first draft.",
             "I asked Robin, can you believe it.",
             "Robinson, can you check the gate?",
+            // Statements that contain question words are not questions.
+            "Robin, the draft is done.",
+            "Robin, this is the final version.",
+            "Robin, what a great job.",
+            "That is great work, Robin.",
         ] {
             let mut e = play(&[(1_000, line)]);
             e.set_user_name(Some("Robin".into())).unwrap();
@@ -1535,11 +1581,43 @@ mod tests {
     }
 
     #[test]
+    fn a_name_that_is_also_a_question_word_does_not_turn_statements_into_questions() {
+        let mut e = play(&[
+            (1_000, "Will, the draft is done."),
+            (2_000, "Will, can you check it?"),
+        ]);
+        e.set_user_name(Some("Will".into())).unwrap();
+        e.advance(1_000);
+        assert!(e.state.cue.is_none());
+        e.advance(1_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
+    }
+
+    #[test]
+    fn a_suggestion_replaced_before_it_was_shown_does_not_count_as_shown() {
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (1_500, "Robin, can you take it?"),
+            (40_000, "Someone can book the hall."),
+        ]);
+        e.set_user_name(Some("Robin".into())).unwrap();
+        e.advance(2_000); // One catch-up tick: the suggestion never reaches the user.
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
+        e.advance(38_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().source_id, "t3");
+    }
+
+    #[test]
     fn invalid_names_are_rejected_and_an_empty_name_clears() {
         let mut e = Engine::default();
         assert!(e.set_user_name(Some("Robin<script>".into())).is_err());
         assert!(e.set_user_name(Some("x".repeat(41))).is_err());
+        assert!(
+            e.set_user_name(Some("- -".into())).is_err(),
+            "needs a letter"
+        );
         e.set_user_name(Some("Mary-Kate O'Neil".into())).unwrap();
+        e.set_user_name(Some("Rene\u{0301}e".into())).unwrap();
         e.set_user_name(Some("   ".into())).unwrap();
         assert!(e.user_name.is_none());
     }
