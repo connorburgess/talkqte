@@ -92,7 +92,7 @@ Prove that audio capture, local transcription, and the floating prompt can coexi
 - [ ] One cue at a time, expiry, cooldown, pause, and adjustable sensitivity.
 - [ ] Initial cues for missing owners, vague deadlines, and explicit open questions.
 - [ ] Suppress questions answered by the conversation before display, and cancel stale or redundant prompts. Phrase rules now cover answers, repeats, elapsed time, and sentences that open by changing the topic; reliable judgment of meaning remains in the cue intelligence plan.
-- [ ] Prioritize questions clearly addressed to the user; remain quiet for another or uncertain addressee. Phrase rules use a session-only name set in Settings. They are checked only on synthetic text, need a comma or dash beside the name, and a question for someone else can still raise an ordinary cue; not yet checked in a live session.
+- [ ] Prioritize questions clearly addressed to the user; remain quiet for another or uncertain addressee. Phrase rules use a session-only name set in Settings. They are checked only on synthetic text and need a comma or dash beside the name. A question put to someone else by name no longer raises a suggestion. Not yet checked in a live session.
 - [ ] Preserve a direct question while the user answers, without competing cues, fabricated answers, response scores, or countdown pressure; keep dismissal available. An "Asked you" question stays for 45 seconds with no countdown shown, and the name is set in Settings for the session. Checked on synthetic text only, not in a live session.
 - [ ] Clear or update cues as context changes; do not automatically archive unused suggestions.
 - [ ] Selected-meeting context and a simple meeting goal.
