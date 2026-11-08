@@ -143,7 +143,7 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
   emit();
 }
 export function exportPreview() {
-  reviewedExport = `# ${state.title}\n\nFictional TalkQTE demo. No audio was captured.\n\n## Notes\n\n${state.notes}\n\n## Saved questions\n\n${state.saved.map((cue) => `- ${cue.question}\n  Context: ${cue.evidence}`).join('\n') || 'No saved questions.'}\n\n## Demo transcript\n\n${state.transcript.map((segment) => `**${segment.speaker}:** ${segment.text}`).join('\n\n')}\n`;
+  reviewedExport = `# ${state.title}\n\nFictional demo transcript; not derived from microphone audio.\n\n## Notes\n\n${state.notes}\n\n## Saved questions\n\n${state.saved.map((cue) => `- ${cue.question}\n  Context: ${cue.evidence}`).join('\n') || 'No saved questions.'}\n\n## Demo transcript\n\n${state.transcript.map((segment) => `**${segment.speaker}:** ${segment.text}`).join('\n\n')}\n`;
   return reviewedExport;
 }
 export function exportMarkdown() {

@@ -207,12 +207,16 @@ pub fn run() {
                     if runtime.engine.state.revision != before {
                         publish(&handle, &runtime);
                     }
-                    let mode = companion::Mode::for_snapshot(&runtime.engine.cue_snapshot());
+                    let cue = runtime.engine.cue_snapshot();
+                    drop(runtime);
+                    microphone::refresh(&handle);
+                    let Ok(microphone) = handle.state::<microphone::Controller>().snapshot() else {
+                        continue;
+                    };
+                    let mode = companion::Mode::for_snapshot(&cue, microphone.status);
                     let needs_placement =
                         mode != runtime_mode || last_placement.elapsed().as_secs() >= 1;
                     runtime_mode = mode;
-                    drop(runtime);
-                    microphone::refresh(&handle);
                     if needs_placement {
                         companion::refresh(&handle);
                         last_placement = Instant::now();
