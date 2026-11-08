@@ -6,14 +6,14 @@ The product goal is timely context that helps someone stay grounded and respond 
 
 ## Development milestones
 
-The direction is **proof of concept → live AI companion → connected workflows → broader platform availability**. macOS comes first, followed by other desktop and mobile platforms where capture and cue presentation can be supported reliably.
+The direction is **proof of concept → live AI companion → connected workflows → broader platform availability**. macOS comes first, Windows is the next planned desktop platform, and iPhone/Android are future companion goals. Ubuntu/Linux is an exploratory track. Each platform must establish reliable conversation access and cue presentation.
 
-| Milestone | Delivery target |
-| --- | --- |
-| Proof of concept, current | Explore the interaction with fictional conversations and a working desktop prototype. |
-| Live AI companion | Connect meeting audio, transcription, grounded cue decisions, and dependable controls. |
-| Connected workflows | Add supported meeting and note-taking integrations with source-aware context and scoped permissions. |
-| Broader availability | Deliver maintained releases, straightforward setup and updates, and validated support across more platforms. |
+| Milestone                 | Delivery target                                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Proof of concept, current | Explore the interaction with fictional conversations and a working desktop prototype.                        |
+| Live AI companion         | Connect meeting audio, transcription, grounded cue decisions, and dependable controls.                       |
+| Connected workflows       | Add supported meeting and note-taking integrations with source-aware context and scoped permissions.         |
+| Broader availability      | Deliver maintained releases, straightforward setup and updates, and validated support across more platforms. |
 
 The [milestone acceptance criteria](docs/initial-rollout.md) define what counts as delivered. The sections below track the detailed work. Feasibility and integration planning can proceed alongside core development; each release advertises only its verified capabilities.
 
@@ -128,7 +128,17 @@ Provider access and capabilities can change; recheck them when implementing each
 - A user-scoped, read-only MCP interface for selected meetings.
 - Action-item export with a review step before creating an external task.
 - Additional local reasoning models after the first cue runtime meets the personal-alpha criteria.
-- Windows support after the platform adapters are proven on macOS.
+
+## Desktop platform expansion
+
+Windows is the next planned desktop platform after the macOS foundation. Parallels provides an initial Windows test environment and a route to explore Ubuntu. VM results apply to the tested guest architecture and virtual devices; they do not establish support for physical PCs or every Linux distribution. See the [platform validation plan](docs/platforms.md).
+
+- [ ] Build, install, and launch the Windows prototype in Parallels; record Windows, architecture, WebView2, and toolchain versions.
+- [ ] Validate Windows companion focus, scaling, keyboard access, full-screen meetings, and screen-sharing behavior.
+- [ ] Prove both sides of a synthetic call, Stop/recovery, and device changes through a Windows capture adapter.
+- [ ] Add Windows build/Rust checks when the build target is established, then validate signed installation and updates on the claimed physical hardware and architectures.
+- [ ] Explore an Ubuntu ARM64 VM: build and run the desktop shell, assess audio and companion behavior, and record the desktop/session configuration.
+- [ ] Decide whether to support a named Linux configuration based on the Ubuntu evidence and maintenance effort. General Linux support remains undecided.
 
 ## Future goal: participate from a phone
 

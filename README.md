@@ -10,11 +10,11 @@ One cue appears in a quiet floating window. You can inspect its context, dismiss
 
 This fictional example illustrates the intended experience, not functionality the current prototype provides:
 
-| In the conversation | TalkQTE could surface |
-| --- | --- |
-| “Can we commit to Friday?” | “Earlier, legal said review takes two days.” |
-| You need to respond | “Will the draft be ready Wednesday?” |
-| Someone resolves the timing | Clear the cue and stay quiet. |
+| In the conversation         | TalkQTE could surface                        |
+| --------------------------- | -------------------------------------------- |
+| “Can we commit to Friday?”  | “Earlier, legal said review takes two days.” |
+| You need to respond         | “Will the draft be ready Wednesday?”         |
+| Someone resolves the timing | Clear the cue and stay quiet.                |
 
 AI is intended to select relevant context, decide whether a cue would help, and recognize when it is no longer useful. Clarification questions are one cue type. Generating more prompts or getting someone to speak more is not the goal.
 
@@ -22,12 +22,12 @@ AI is intended to select relevant context, decide whether a cue would help, and 
 
 **Early development.** The app runs from source on macOS, but it does not yet understand a live meeting or generate AI cues. There is no supported public release.
 
-| Working prototype | Still to build and validate |
-| --- | --- |
-| Fictional conversation replay with fixed, phrase-based questions | AI-selected context and prompts grounded in the conversation |
-| Floating companion, source disclosure, pause, and dismissal | Useful timing, suppression of answered questions, and stale-cue handling |
-| Separate, opt-in macOS microphone activity indicator | Both sides of meeting audio and live transcription |
-| In-memory demo notes and reviewed Markdown export | Reliable meeting use, processing choices, and install/update support |
+| Working prototype                                                | Still to build and validate                                              |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Fictional conversation replay with fixed, phrase-based questions | AI-selected context and prompts grounded in the conversation             |
+| Floating companion, source disclosure, pause, and dismissal      | Useful timing, suppression of answered questions, and stale-cue handling |
+| Separate, opt-in macOS microphone activity indicator             | Both sides of meeting audio and live transcription                       |
+| In-memory demo notes and reviewed Markdown export                | Reliable meeting use, processing choices, and install/update support     |
 
 The microphone indicator measures signal activity only. It does not transcribe, record, or feed the demo. No note-taker integration is implemented. See [current privacy behavior](PRIVACY.md) and the [native validation record](docs/native-validation.md) for the limits of existing checks.
 
@@ -35,14 +35,16 @@ The microphone indicator measures signal activity only. It does not transcribe, 
 
 The direction is to grow from a proof of concept into a dependable AI companion that works with existing meeting tools and becomes available across desktop and mobile platforms.
 
-| Stage | What it delivers |
-| --- | --- |
-| **1. Proof of concept — current** | A fictional conversation demo to explore cue presentation, timing, and controls. |
-| **2. Live AI companion** | Meeting audio, transcription, and relevant AI cues working together reliably on macOS. |
-| **3. Connected workflows** | Supported connections to meeting and note-taking tools, with selected context and clear permissions. |
-| **4. Broader availability** | Easy installation and updates, with expansion to other desktop and mobile platforms as their capture and presentation paths are validated. |
+| Stage                             | What it delivers                                                                                                                                    |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1. Proof of concept — current** | A fictional conversation demo to explore cue presentation, timing, and controls.                                                                    |
+| **2. Live AI companion**          | Meeting audio, transcription, and relevant AI cues working together reliably on macOS.                                                              |
+| **3. Connected workflows**        | Supported connections to meeting and note-taking tools, with selected context and clear permissions.                                                |
+| **4. Broader availability**       | Easy installation and updates, Windows as the next desktop target, and a mobile companion as its live-context and presentation paths are validated. |
 
 These are development milestones, not announced release dates or current capabilities. Integrations, reliability, and platform feasibility are planned alongside the core experience; each supported release must work end to end. See the [development milestones](docs/initial-rollout.md) and [detailed roadmap](ROADMAP.md).
+
+**Platform direction:** macOS first, Windows next. Ubuntu/Linux is an exploratory track. iPhone and Android are future companion goals, including receiving cues while using Google Meet on a phone; same-phone call access still needs to be proven. See the [platform plan](docs/platforms.md) and [mobile feasibility plan](docs/mobile.md).
 
 [Follow development on GitHub](https://github.com/connorburgess/talkqte).
 

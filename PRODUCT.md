@@ -4,7 +4,7 @@
 
 web
 
-The interface runs in a Tauri desktop shell. macOS is the first target. Mobile is a future product goal: join a meeting on a phone and receive useful prompts during the call. Mobile capture and prompt presentation need separate platform validation; see the [mobile plan](docs/mobile.md).
+The interface runs in a Tauri desktop shell. macOS is the first target, with Windows planned next. Ubuntu/Linux is an exploratory validation track; broader Linux support is undecided. iPhone and Android are future companion goals: join a meeting on a phone and receive useful prompts during the call. Mobile conversation access and prompt presentation need separate validation. See the [platform plan](docs/platforms.md) and [mobile plan](docs/mobile.md).
 
 ## Stack
 
@@ -36,7 +36,7 @@ See [research and product decisions](docs/research.md) for the short evidence su
 
 ## Development direction
 
-Progress from the current proof of concept to a live AI meeting companion, then expand supported integrations and platform availability. macOS is the first delivery target. Other desktop and mobile platforms need their own capture, presentation, accessibility, and distribution validation.
+Progress from the current proof of concept to a live AI meeting companion, then expand supported integrations and platform availability. macOS is the first delivery target, followed by Windows. Use Parallels for initial Windows and Ubuntu experiments, recording guest architecture and virtual hardware limits. Ubuntu/Linux remains exploratory. Mobile work starts with cue presentation and a supported live-context source; same-phone capture is a separate feasibility gate. Each platform needs its own capture, presentation, accessibility, and distribution validation.
 
 The public roadmap describes delivered capabilities and the evidence needed to support them. Test-participant selection and internal execution arrangements are not the product audience. Automated fictional scenarios establish reproducible behavior; human evaluation establishes whether cues help participation while preserving listening. See the [development milestones](docs/initial-rollout.md) for scope and acceptance criteria.
 

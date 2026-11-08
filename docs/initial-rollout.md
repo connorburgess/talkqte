@@ -45,12 +45,13 @@ Integration feasibility and adapter design can proceed during core development. 
 
 ## 4. Broader platform availability
 
-**Deliver:** maintained releases that people can install, configure, update, and use alongside their existing tools. Start with macOS, then expand to other desktop and mobile platforms where the live input and cue experience can be supported.
+**Deliver:** maintained releases that people can install, configure, update, and use alongside their existing tools. Start with macOS, then Windows as the next planned desktop platform. Explore Ubuntu/Linux without committing to general distribution support. Develop the iPhone/Android companion around a supported live-context source, with same-phone Google Meet capture as a separate feasibility track. The [platform plan](platforms.md) records the validation sequence.
 
 **Acceptance:**
 
 - Each release names its supported OS, hardware, meeting apps, languages, and limitations.
 - Clean installation, model setup, first use, updates, recovery, and uninstall are tested. Signing and distribution requirements match the advertised delivery route.
+- Windows validation begins in Parallels and extends to the physical hardware and architectures claimed by a release. Ubuntu VM evidence informs a separate Linux support decision.
 - New platforms validate capture, background behavior, cue presentation, accessibility, resource use, and permissions independently. A responsive web layout alone does not establish mobile meeting support.
 - Documentation, privacy choices, release notes, troubleshooting, and a feedback/support route are available before widening distribution.
 - Runtime access, model terms, delivery costs, and support effort are sustainable for the intended release. A development subscription does not automatically establish a distributable inference service.
