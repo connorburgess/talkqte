@@ -173,6 +173,31 @@ impl Worker {
         self.shutdown()
     }
 
+    /// Accepts no more audio, then lets the worker transcribe and deliver
+    /// what is already queued, waiting up to `wait`. If it is not done by
+    /// then, it is cancelled as with `stop`. Use this when capture stops
+    /// normally; use `stop` or `cancel` to discard queued audio.
+    pub fn finish(mut self, wait: Duration) -> Stats {
+        // Closing the queue lets the worker finish once it is empty.
+        self.sender.take();
+        let done = self.finished.take();
+        let mut stats = match done.as_ref().map(|done| done.recv_timeout(wait)) {
+            Some(Ok(stats)) => stats,
+            _ => {
+                self.cancel();
+                match done.map(|done| done.recv_timeout(STOP_WAIT)) {
+                    Some(Ok(stats)) => stats,
+                    _ => Stats {
+                        detached: true,
+                        ..Stats::default()
+                    },
+                }
+            }
+        };
+        stats.dropped = self.dropped.load(Ordering::Relaxed);
+        stats
+    }
+
     fn shutdown(&mut self) -> Stats {
         self.cancel();
         self.sender.take();
@@ -598,6 +623,47 @@ mod tests {
         let stats = worker.stop();
         assert!(stats.detached);
         assert!(begun.elapsed() < STOP_WAIT + Duration::from_secs(1));
+    }
+
+    #[test]
+    fn finish_delivers_queued_audio_before_stopping() {
+        let engine = running_engine();
+        let session = engine.lock().unwrap().session();
+        let lines = vec![
+            Ok(vec![(0, "One.")]),
+            Ok(vec![(0, "Two.")]),
+            Ok(vec![(0, "Three.")]),
+        ];
+        let (sink, _) = into_engine(&engine);
+        let worker = Worker::start(session, 4, script(lines), sink);
+        for n in 0..3 {
+            assert!(worker.submit(chunk(60_000 + n * 1_000)).is_ok());
+        }
+        let stats = worker.finish(Duration::from_secs(5));
+        assert_eq!(
+            (stats.chunks, stats.accepted, stats.detached),
+            (3, 3, false)
+        );
+    }
+
+    #[test]
+    fn finish_gives_up_on_a_hung_recognizer() {
+        let engine = running_engine();
+        let session = engine.lock().unwrap().session();
+        let (started, recognizing) = mpsc::channel();
+        let (_never_opened, gate) = mpsc::channel();
+        let script = Script {
+            started: Some(started),
+            gate: Some(gate),
+            ..script(vec![])
+        };
+        let (sink, _) = into_engine(&engine);
+        let worker = Worker::start(session, 2, script, sink);
+        assert!(worker.submit(chunk(60_000)).is_ok());
+        recognizing.recv().unwrap();
+        let begun = std::time::Instant::now();
+        assert!(worker.finish(Duration::from_millis(200)).detached);
+        assert!(begun.elapsed() < Duration::from_millis(200) + STOP_WAIT + Duration::from_secs(1));
     }
 
     #[test]

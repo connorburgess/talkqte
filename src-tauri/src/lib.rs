@@ -4,6 +4,7 @@ mod companion;
 mod companion_macos;
 pub mod context;
 pub mod engine;
+pub mod live;
 mod microphone;
 pub mod transcription;
 
