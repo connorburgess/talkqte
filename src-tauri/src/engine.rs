@@ -766,7 +766,7 @@ mod tests {
         assert!(e.state.transcript.is_empty());
         e.ingest(e.session(), live("s1", 1_000, "Someone can take it."))
             .unwrap();
-        assert!(e.state.cue.is_none(), "a line from an hour ago is too late");
+        assert!(e.state.cue.is_none(), "a line from hours ago is too late");
         e.ingest(
             e.session(),
             live("w1", e.state.elapsed_ms, "Someone can take it."),

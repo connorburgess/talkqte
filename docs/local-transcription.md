@@ -10,7 +10,24 @@ The optional `local-whisper` Cargo feature adds `LocalWhisper`, a [Transcriber](
 
 ## Run the check
 
-Use a fictional synthetic clip only: 16 kHz, mono, 16-bit PCM WAV, at most 30 seconds. Keep the model and clip outside the repository. The [lab's local Whisper smoke test](https://github.com/connorburgess/talkqte-lab) describes how to obtain the `tiny.en` model and verify its checksum, and how to make a synthetic clip.
+Use a fictional synthetic clip only: 16 kHz, mono, 16-bit PCM WAV, at most 30 seconds. Keep the model and clip outside the repository.
+
+Download the English-only `tiny.en` model from the [upstream whisper.cpp model repository](https://huggingface.co/ggerganov/whisper.cpp) and check it. The reviewed SHA-256 is `921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f`.
+
+```sh
+mkdir -p "$HOME/.local/share/talkqte-models"
+curl --fail --location \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin \
+  --output "$HOME/.local/share/talkqte-models/ggml-tiny.en.bin"
+shasum -a 256 "$HOME/.local/share/talkqte-models/ggml-tiny.en.bin"
+```
+
+On macOS, make a fictional clip with a system voice and convert it:
+
+```sh
+say -o /tmp/talkqte-clip.aiff "Someone can take the first draft of the welcome guide. We should have it ready soon. We could either print the guide or put a small sign with a link by the gate."
+afconvert -f WAVE -d LEI16@16000 -c 1 /tmp/talkqte-clip.aiff /tmp/talkqte-clip.wav
+```
 
 ```sh
 cd src-tauri
@@ -39,6 +56,7 @@ This is one short, clean, single-voice synthetic clip on one machine. It does no
 - A synthetic clip in which a later line answers the question, to check withdrawal end to end.
 - A replay command that starts and stops a worker with a session, so End during transcription can be checked in the app.
 - Model delivery: where the model comes from, its integrity check, and its size. See the roadmap.
+- A display for live sessions: `Engine::live()` has no fixed duration, so the UI must not show its duration as an end time.
 - Sustained-session measurements of delay, memory growth, CPU use, and dropped audio.
 
 whisper.cpp is MIT-licensed and `whisper-rs` is released under the Unlicense. Any distributed build that enables this feature must include the whisper.cpp license notice.

@@ -41,7 +41,8 @@ impl LocalWhisper {
 
 impl Transcriber for LocalWhisper {
     fn transcribe(&mut self, chunk: &AudioChunk) -> Result<Vec<Recognized>, String> {
-        // Whisper needs at least a second of audio; pad short chunks with silence.
+        // Pad chunks shorter than a second with silence; whisper.cpp rejects
+        // very short input.
         let mut padded;
         let samples = if chunk.samples.len() < SAMPLE_RATE {
             padded = chunk.samples.clone();
