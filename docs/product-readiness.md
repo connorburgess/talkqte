@@ -30,7 +30,7 @@ Plan bounded buffers, cancellation, backpressure, and recovery where each pipeli
 
 Evaluate static release artifacts and update metadata before adding a custom service. Tauri's [updater documentation](https://v2.tauri.app/plugin/updater/) supports static JSON and signed update artifacts; this is a feasible starting candidate, not an implemented updater. Plan update deferral during meetings, key custody, interrupted installation recovery, and a tested route to a known-good release. A code rollback must not assume a data migration is reversible.
 
-For any proposed backend, record the unmet need, expected load, data boundary, latency target, cost model, failure behavior, and maintenance owner first. Introduce hosted infrastructure when this evidence warrants it. Revisit bandwidth, rate limits, and support capacity at pilot and wider-release reviews.
+For any proposed backend, record the unmet need, expected load, data boundary, latency target, cost model, failure behavior, and maintenance owner first. Introduce hosted infrastructure when this evidence warrants it. Revisit bandwidth, rate limits, and support capacity at pilot and wider-release reviews; the [operating estimates](operating-estimates.md) record the first measured sizes.
 
 ## Integration readiness
 

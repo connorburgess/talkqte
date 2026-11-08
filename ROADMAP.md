@@ -29,7 +29,7 @@ This track runs alongside the feature milestones below. The goal includes a depe
 - [ ] Verify privacy boundaries, retention/deletion, credential storage, and safe diagnostics for every enabled input or integration.
 - [ ] Define pilot and wider-release acceptance criteria covering user value, accessibility, compatibility, and support readiness.
 - [ ] Compare acquisition and delivery channels with one bounded experiment at a time; start planning direct website delivery and an invited pilot, then evaluate additional channels.
-- [ ] Estimate release/model bandwidth, optional provider costs, and support effort; record when demand would justify additional infrastructure or commercial operations.
+- [ ] Estimate release/model bandwidth, optional provider costs, and support effort; record when demand would justify additional infrastructure or commercial operations. [First estimate](docs/operating-estimates.md): about 82 MB per first download (measured app and model) and no project-paid inference or hosting for the app; support effort needs pilot data.
 
 ## Foundation
 
