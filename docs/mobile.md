@@ -4,7 +4,7 @@ Status: future work. Official documentation reviewed on 2026-11-08. No mobile ca
 
 ## User goal
 
-Join Google Meet from a phone and receive timely prompts during the call, including help keeping track of a question addressed directly to the user. Notes and saved questions should also be useful before and after the meeting.
+Join Google Meet from a phone and receive timely context and prompts that help the user stay grounded and respond during the call, including help keeping track of a question addressed directly to them. Saving and note-taking are secondary ideas requiring a separate use case; the existing note-taker can own the meeting record.
 
 This requires both a supported source of conversation context and a usable prompt surface. Displaying a prompt does not establish access to the meeting's audio. A phone-only experience must not be promised on the strength of desktop capture or browser UI tests.
 
@@ -28,9 +28,9 @@ Google's Meet Media API preview is discontinued, accepts no new signups, and is 
 
 ## Phased implementation
 
-### 1. Notes, review, and selected imports
+### 1. Cue presentation and selected context
 
-Make the notebook usable on a small touch screen, with accessible text, saved questions, editing, and reviewed exports. Start with selected file imports. Add provider-specific access only through supported exports or documented APIs after checking permissions and availability. Do not imply that imported notes are a live transcript.
+Validate a readable cue, source context, and user controls on a small touch screen using fictional input. Selected file imports may supply prior context; keep their source and date visible. Add provider-specific access only through supported exports or documented APIs after checking permissions and availability. Do not imply that imported notes are a live transcript. Preserve existing notebook capabilities where available, but do not make mobile notes, saving, or exports the purpose of this phase without a demonstrated participation use case.
 
 ### 2. A paired live companion
 

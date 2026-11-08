@@ -1,0 +1,61 @@
+# Cue intelligence and feedback
+
+Status: evaluation plan with an optional [fictional Claude Code lab](claude-cue-lab.md), 8 November 2026. No reasoning model is connected to the app, and no production provider, conversational feedback system, or learning pipeline is selected. This supports the [participation goal](../PRODUCT.md#goal-and-first-proof) and [product readiness plan](product-readiness.md).
+
+## What powers the prototype today
+
+Rust's `suggest` function in `src-tauri/src/engine.rs` matches a few phrases in bundled fictional dialogue and returns fixed questions. Rust also controls timing, hold, cooldown, and dismissal. The browser preview has a separate simulation. Neither runs a language model or judges whether later conversation used or resolved a cue. Whisper is planned for transcription, not cue reasoning, and is not installed in the meeting pipeline.
+
+## The decision we want intelligence to help with
+
+Use recent, source-linked context to decide whether assistance is still useful. Staying quiet is a valid result. Generate or display a cue only when it has an identifiable purpose and supported context; do not turn every ambiguity into an interruption.
+
+- Suppress candidates already answered, duplicated, off-topic, superseded by transcript revisions, or too late to help.
+- Re-evaluate after meaningful conversation changes instead of repeatedly sending the entire meeting on a fixed timer.
+- Distinguish “someone asked a similar question” from “the issue is resolved.” An asked question may still be unanswered.
+- Withdraw or mark resolved evidence when appropriate without replacing the text mid-read. Preserve manual dismissal and pause. A hold controls reading time, not whether a known-wrong claim remains valid.
+- Abstain when sources, speaker attribution, or context are insufficient. Keep uncertainty visible in evaluation records.
+
+Keep deterministic lifecycle and permission checks in Rust. A proposed semantic evaluator can return a bounded decision, a short cue if needed, and supporting source IDs. Validate that sources exist and the response matches the expected shape. The model must not control capture, export, file access, or external tools. Compare this design against simple rules before adding it to the live path.
+
+## Learn from the conversation without a Save step
+
+The ongoing conversation can provide possible outcome signals: a similar question was asked, an answer appeared naturally, a participant corrected the context, or the topic moved on. Use those signals first to manage the current session. With uncertain speaker identity, do not label a cue as used by the user.
+
+Keep **observed use**, **resolution**, and **usefulness** distinct. A question can be repeated without helping; a reminder can help someone stay grounded without being spoken; a dismissed cue can have been useful already. Neither silence nor dismissal is an automatic negative training label. Similar speech does not prove that TalkQTE caused it.
+
+Optional, low-effort feedback such as helpful, wrong context, or too late can supplement observed signals, but should not interrupt the call. Compare inferred outcomes against human labels in fictional scenarios before trusting them. Measure missed useful opportunities and incorrectly suppressed cues as well as displayed-cue precision.
+
+Session adaptation, durable personal preferences, and training a shared model are separate decisions. Begin with bounded in-memory context. Persisting outcomes, uploading transcripts, or training on conversations is not implied by using a cue or connecting a note-taker. Follow [PRIVACY.md](../PRIVACY.md) and make any later retention/processing choice explicit. An unused cue should not become a meeting note or action item.
+
+## Subscription-backed lab evaluation
+
+The current evaluation preference is to use an existing individual subscription through an official CLI and avoid separately billed inference APIs. The [fictional lab](claude-cue-lab.md) provides a bounded, explicitly invoked Claude Code runner with Opus 5.5. Cursor CLI with Composer remains an unimplemented alternative comparison. This is not a selected production runtime or an enabled background experiment; the lab's validation record separates offline checks from model trials.
+
+Official documentation checked 8 November 2026:
+
+| Candidate | Documented access | Validation still needed |
+| --- | --- | --- |
+| Claude Code, Opus 5.5 | Claude Code supports [subscription login](https://support.claude.com/en/articles/11145838-use-claude-code-with-your-pro-max-or-ultra-plan) and [scripted prompts](https://code.claude.com/docs/en/headless); [Opus 5.5](https://www.anthropic.com/claude/opus) is offered on paid Claude plans | Actual account/model availability, included allowance, conversational judgment, latency, tool isolation, and retention |
+| Cursor CLI, Composer | [Browser login](https://cursor.com/docs/cli/reference/authentication), [headless mode](https://cursor.com/docs/cli/headless), and [model selection](https://cursor.com/docs/cli/reference/parameters) are documented; [legacy Pro plans](https://cursor.com/docs/account/pricing/legacy-cursor-plans) include monthly usage pools | Actual model access and remaining pool, conversational judgment, latency, tool isolation, and retention; newer plans have different billing |
+| Local reasoning model | No model or implementation selected | Target-Mac quality, memory, energy, latency, licensing, and model delivery; keep transcription and reasoning resource budgets separate |
+
+For a subscription-only experiment, verify the active login and billing mode without exposing credentials. Keep extra/on-demand usage disabled and stop at limits. Claude Code can use an API key from its environment instead of subscription login; its documented `--bare` mode does not use subscription credentials. Do not use that mode for this experiment or silently fall back to API billing. Keep this setup isolated from unrelated development credentials and settings. Subscription usage is finite and shared with other work; listed token rates are not a promise of unlimited or free operation.
+
+Use the vendor's normal sign-in flow and unmodified CLI. Do not extract session tokens or imitate private endpoints. A local CLI still sends selected context to a hosted model; it does not establish on-device inference. Begin with a bounded, user-started fictional replay, disable unnecessary tools and integrations, and verify local session storage and provider data settings before considering real conversations. Direct inference APIs and SDK-based product integration are deferred under the current no-API preference.
+
+## Production remains a separate decision
+
+Keep the semantic evaluator replaceable behind a narrow interface. A subscription experiment can test cue quality, but does not establish a dependable live service, acceptable tail latency, or frictionless onboarding. Do not require a coding subscription as the default distribution path without validating that choice with intended users. The local-first product plan remains the baseline; an optional hosted mode needs an explicit processing decision.
+
+Anthropic's [product integration rules](https://code.claude.com/docs/en/legal-and-compliance) distinguish users signing into an unmodified Claude Code binary themselves from a developer routing everyone through a shared subscription or collecting their credentials. The documented binary integration has commercial terms and authentication conditions to review before distribution. Do not assume a personal lab setup grants a general-purpose hosted inference entitlement. Recheck Cursor's product integration terms before choosing it for distribution as well.
+
+Measure conversational performance directly. Coding benchmarks and model size do not establish whether a model can judge when to stay quiet, and Opus is not automatically the right choice for a time-sensitive cue. A smaller model may earn the live role if it meets the same quality criteria sooner and uses less allowance.
+
+## Smallest useful evaluation
+
+1. Create a fixed fictional suite with useful opportunities, questions answered before display, paraphrased use, irrelevant matches, ambiguous speakers, topic changes, and context reminders that help without being spoken. Label source support, display/suppress decisions, and later outcomes separately.
+2. Compare current rules, human-selected cues, and candidate semantic evaluators on the same inputs. Keep display policy fixed while comparing detection. The model under test must not be the sole judge of usefulness.
+3. Measure false interruptions, missed opportunities, false suppression, source errors, outcome-label accuracy, and whether decisions arrive while still useful. Record cold/warm and tail latency, timeouts, device resources, and subscription allowance consumed. Do not mistake a successful offline judgment for a usable live cue.
+4. Estimate evaluations per meeting from bounded input size, output/reasoning tokens, caching, and retries. Trigger on meaningful conversation changes and deduplicate work. Stop when the plan allowance is unavailable; compare sustainable session capacity with quality and latency before considering any separately billed service.
+5. Select a runtime only after it meets predefined quality, timing, privacy, distribution, and cost criteria. Keep timeout, failure, and unsupported states quiet and understandable. Hosted selection does not silently replace the local-first product boundary.
