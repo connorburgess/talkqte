@@ -90,6 +90,42 @@ test('timed expiry and a remote companion response leave the current notebook co
   await expect(search).toBeFocused();
 });
 
+test('a delayed Save acknowledgement does not take focus back from another notebook control', async ({
+  page,
+}) => {
+  await page.clock.install();
+  await page.route(/:\d+\/$/, async (route) => {
+    if (route.request().resourceType() !== 'document') return route.continue();
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      body: (await response.text()).replace(
+        '/src/main.tsx',
+        '/tests/fixtures/native-microphone.ts',
+      ),
+    });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
+  await page.clock.runFor(5_200);
+  await page.evaluate(() => window.questionTest.holdNextResponse());
+  const question = page.getByRole('region', { name: 'Suggested question' });
+  await question.getByRole('button', { name: 'Save question' }).focus();
+  await page.keyboard.press('Enter');
+  // The shared snapshot removes the card before the command acknowledges it.
+  await expect(question).toHaveCount(0);
+  await expect(page.getByText('Question saved to your notebook.')).toBeHidden();
+  const search = page.getByRole('textbox', { name: 'Search meetings' });
+  await search.focus();
+  await page.evaluate(() => window.questionTest.releaseResponse());
+  await expect(
+    page.getByText('Question saved to your notebook.'),
+  ).toBeVisible();
+  await expect(search).toBeFocused();
+  await page.keyboard.type('garden');
+  await expect(search).toHaveValue('garden');
+});
+
 test('Why reveals the source and keeps a question through later prompts and playback completion', async ({
   page,
 }) => {

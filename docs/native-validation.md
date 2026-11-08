@@ -1,6 +1,6 @@
 # Native companion validation
 
-Checked 8 November 2026 against source [`526d0cc`](https://github.com/connorburgess/talkqte/commit/526d0ccdcf00ac790a722ff76140c958d3a8b3a4), on macOS 26.4 (25E246), Apple silicon. This is a limited development smoke check, not a supported-platform, accessibility, or focus guarantee.
+Baseline checked 8 November 2026 against source [`526d0cc`](https://github.com/connorburgess/talkqte/commit/526d0ccdcf00ac790a722ff76140c958d3a8b3a4), on macOS 26.4 (25E246), Apple silicon. This is a limited development smoke check, not a supported-platform, accessibility, or focus guarantee.
 
 ## Build and boundaries
 
@@ -34,13 +34,21 @@ Ad-hoc signing is only a local development check. It is not Developer ID signing
 | --- | --- |
 | Frontend and native bundle build; strict bundle signature verification | Passed for the source above. |
 | Rust tests | All 30 passed, including placement bounds at scaled/negative display origins, small work areas, context expansion anchors, held-question lifecycle, and microphone tests with fake streams. These do not observe a real display or microphone. |
-| Notes focus during timed question arrival | The native accessibility observation reported the same Meeting notes field focused before and after the first question arrived at approximately 0:15. This checks focus within the notebook, not the active application across the desktop. |
+| Notes focus during timed question arrival | The native accessibility observation reported the same Meeting notes field focused before playback and again with the first question present at approximately 0:15. The cue is scheduled at 0:05; this observation did not measure its arrival latency. This checks focus within the notebook, not the active application across the desktop. |
 | Keyboard disclosure and save | From Meeting notes, Tab reached Why?/Hide context. Return opened and collapsed the source, keeping focus on the disclosure. Tab reached Save question; Return saved the held question and exact fictional source while playback was paused. After Save removed the card, the accessibility observation reported document focus; a deliberate post-action focus destination was not verified. |
 | Appearance controls through native IPC | Settings accepted bottom-right, top-center, top-left, and top-right choices and larger text. The held question survived returning to the notebook. This confirms settings and notebook state, not the companion's physical position, size, or visibility. |
 
-The observation tool returned the notebook window even after selecting the nonfocusable companion in the native Window menu. Its app-specific focus result also does not identify the desktop's active application. Those observations cannot prove companion placement or cross-app focus. A scratch-editor attempt therefore remains inconclusive. An earlier preview session ended unexpectedly alongside other preview apps; its cause was not established and it is not recorded as a reproduced application crash.
+The observation tool returned the notebook window even after selecting the nonfocusable companion in the native Window menu. Its app-specific focus result also does not identify the desktop's active application. Those observations cannot prove companion placement or cross-app focus. A scratch-editor attempt therefore remains inconclusive.
 
-No native adapter defect was reproduced in this pass. That is not evidence that the pending cases below pass.
+No native adapter defect was reproduced in this pass. The notebook focus issue found here was fixed as described below. Neither result establishes that the pending cases pass.
+
+## Keyboard focus follow-up
+
+The same isolated build procedure was repeated with application code at [`38cb37d`](https://github.com/connorburgess/talkqte/commit/38cb37dd56ecfbf5cc50e47d44a475850fd77b49), based on main after the prompt-motion change. The debug bundle and strict signature check passed; the microphone remained Off.
+
+In the rebuilt native app, Tab from Meeting notes reached the source disclosure. Return collapsed the source while retaining disclosure focus. Tab then reached Save question, and Return saved the paused question and returned focus to Meeting notes. On a separate demo replay, keyboard Dismiss also removed the paused question and returned focus to Meeting notes. This verifies the notebook regression on this Mac; it does not verify another app retaining focus.
+
+Browser regressions cover keyboard Save and Dismiss, retaining source-disclosure focus when collapsing, returning a transcript reader to the selected Transcript tab, and leaving focus untouched for timed expiry or a response from another window. A mocked-IPC test delays the Save acknowledgement after the shared snapshot removes the question: moving to Search meetings during that delay must keep search focused when the acknowledgement arrives. The browser tests begin from an explicitly focused control rather than changing the browser or operating system's button-tabbing preference.
 
 ## Remaining manual acceptance checks
 
