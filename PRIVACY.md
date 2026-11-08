@@ -1,8 +1,18 @@
 # Privacy design
 
-TalkQTE is not implemented yet. This document defines intended behavior and acceptance criteria, not an assurance about a released product.
+TalkQTE is an early desktop prototype, not a released meeting recorder. Current behavior and future requirements are separated below.
 
-## Core requirements
+## Current prototype
+
+- The app plays bundled fictional dialogue. It has no microphone capture, system-audio capture, Whisper model, external model connection, account system, or telemetry integration.
+- The transcript, your notes, and saved questions live in process memory. Ending or replaying the demo preserves notes and saved questions; quitting the app clears them. There is no database, recovery, retention scheduler, or encrypted notebook.
+- A Markdown export is the only implemented persistence. You review the generated text, then choose the file destination in a native save dialog. The saved file contains exactly that preview, even if the demo advances while the dialog is open. The destination may be a folder synchronized by other software; exported files are outside TalkQTE's control.
+- The floating window receives only the current question, its source excerpt, and the state needed to display it. It cannot invoke note editing or export commands.
+- The app has no automatic upload feature. The development server uses loopback connections, and installing dependencies requires network access. The browser preview downloads exports through the browser and is not a separate production service.
+
+Do not use this prototype for real or sensitive meeting data. Closing the app loses unsaved notes, and there is no implemented storage protection beyond the operating system's process boundaries.
+
+## Requirements for meeting capture
 
 - Capture begins only after an explicit action. Show whether the microphone, system audio, or both are active.
 - Provide a visible pause/stop control and an accessible shortcut. Stopping capture releases the devices.
@@ -18,13 +28,13 @@ Local processing does not make data inaccessible to the device owner, an adminis
 
 These defaults remain open to product feedback:
 
-| Data | Proposed default |
-| --- | --- |
-| Raw audio | Memory only; discard after transcription |
-| Full transcripts | Delete after 30 days; offer session-only, 7 days, 30 days, and keep until deleted |
-| Explicitly saved notes, decisions, and questions | Keep until the user deletes them |
-| Temporary analysis and search indexes | Follow the retention of their source data |
-| External exports | User-controlled copies; local deletion cannot revoke them |
+| Data                                             | Proposed default                                                                  |
+| ------------------------------------------------ | --------------------------------------------------------------------------------- |
+| Raw audio                                        | Memory only; discard after transcription                                          |
+| Full transcripts                                 | Delete after 30 days; offer session-only, 7 days, 30 days, and keep until deleted |
+| Explicitly saved notes, decisions, and questions | Keep until the user deletes them                                                  |
+| Temporary analysis and search indexes            | Follow the retention of their source data                                         |
+| External exports                                 | User-controlled copies; local deletion cannot revoke them                         |
 
 Show a transcript's expiry before a meeting starts. Keeping notes must not silently keep the entire transcript. If a saved note contains a selected quote, make clear that the quote is retained with the note.
 
@@ -34,10 +44,10 @@ A private-session option should discard its transcript and temporary analysis wh
 
 ## Screen sharing
 
-Provide a quick hide-overlay action. Investigate capture-exclusion support, but do not promise an invisible overlay on every meeting app or capture method. Test full-screen sharing and window sharing separately.
+The desktop settings include a floating-window toggle, and pausing or ending the demo hides the overlay. Capture exclusion is not implemented. Do not assume the overlay is invisible to screen sharing. Cross-app focus, Spaces, full-screen meetings, and different sharing methods still require native testing.
 
 ## Optional integrations
 
-Begin with user-initiated Markdown/text export. Future calendar access should be read-only and calendar-scoped. Any future MCP interface should expose only user-selected meetings and tools. Sending notes to an external model or service changes where those notes are processed and must be disclosed before connection.
+The prototype supports user-initiated Markdown export to a chosen file; it has no provider connection or import feature. Future calendar access should be read-only and calendar-scoped. Any future MCP interface should expose only user-selected meetings and tools. Sending notes to an external model or service changes where those notes are processed and must be disclosed before connection.
 
 Future connections to Granola and other note-takers must let users select the content and direction of transfer. Show retention choices for imported copies; deleting a TalkQTE copy must not silently delete its original in another app. Disconnecting must stop future access and offer a separate choice to remove imported data. Exported copies remain subject to the destination's access and retention rules.
