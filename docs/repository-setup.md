@@ -4,15 +4,17 @@
 
 Bootstrap project instructions, docs, and tooling on `main`. Subsequent work uses feature branches and pull requests. Owner branches begin with `cb/`; titles describe the behavior or outcome. Do not automatically merge feature PRs.
 
-## Checks to establish before the first feature merge
+## Automated checks
 
-- DCO validation for every contribution commit, matching the human author's identity.
-- A no-attribution check for commit metadata and PR title/body, rerun when the PR text changes.
-- Secret and private-data scanning, including public fixtures and build artifacts.
-- Rust formatting, Clippy, meaningful tests, and a native build on supported targets.
-- Frontend formatting/lint, typechecking, build, and behavioral UI checks once the frontend exists.
+The [Checks workflow](../.github/workflows/checks.yml) runs on pull requests and updates to `main`, with read-only repository permissions and pinned action revisions. It defines:
 
-These checks are planned, not enabled by this document. Add them with the runnable scaffold and configure branch rules after the check names exist. Protect `main` against force pushes and deletion and require the applicable checks. Do not require an impossible self-approval while the project has one maintainer.
+- **Contribution metadata:** every PR commit needs a DCO trailer matching its author. Common tool-attribution credits in commits and PR text are rejected, including after PR text edits. The check does not verify a human's legal identity.
+- **Frontend and browser behavior:** contribution-check regression tests, formatting, TypeScript/build, and Playwright checks in Chromium and WebKit.
+- **macOS Rust and desktop build:** Rust formatting, unit tests, Clippy with warnings denied, and an unsigned development app build using the pinned Rust toolchain.
+
+Native tests currently exercise the engine; the app build is not an automated interactive window test. A successful browser run does not establish macOS focus or screen-sharing behavior.
+
+Dedicated secret scanning and branch-rule enforcement remain to be configured. Public fixtures and build artifacts still require manual privacy review. Once the check names exist, protect `main` against force pushes and deletion and require the applicable checks. Do not require an impossible self-approval while the project has one maintainer.
 
 ## External automated review
 

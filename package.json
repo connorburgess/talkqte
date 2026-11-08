@@ -12,9 +12,10 @@
     "desktop": "tauri dev",
     "test": "playwright test",
     "test:e2e": "playwright test",
+    "test:contributions": "node --test scripts/check-contributions.test.mjs",
     "check": "tsc -b && playwright test",
     "format": "prettier --write .",
-    "format:check": "prettier --check src tests *.json *.ts index.html"
+    "format:check": "prettier --check src tests scripts .github/workflows *.json *.ts index.html"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",
