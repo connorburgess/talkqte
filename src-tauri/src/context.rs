@@ -204,15 +204,16 @@ impl ContextStore {
 
     /// Removes one imported note.
     pub fn remove(&mut self, provider: Provider, source_id: &str) -> bool {
+        let source_id = source_id.trim();
         let before = self.items.len();
         self.items
             .retain(|item| !(item.provider == provider && item.source_id == source_id));
         self.items.len() != before
     }
 
-    /// Removes every note imported from a provider. Disconnecting stops
-    /// future access but keeps imported copies; this is the separate choice
-    /// to remove them, as PRIVACY.md requires.
+    /// Removes every note imported from a provider. This is a separate
+    /// choice from disconnecting, which must only stop future access, as
+    /// PRIVACY.md requires.
     pub fn remove_all_from(&mut self, provider: Provider) -> usize {
         let before = self.items.len();
         self.items.retain(|item| item.provider != provider);
@@ -229,6 +230,15 @@ fn status_for(error: &SourceError) -> ConnectionStatus {
         },
         SourceError::Interrupted | SourceError::Unavailable => ConnectionStatus::Unavailable,
     }
+}
+
+/// Invisible formatting characters (zero-width and direction overrides)
+/// that would make two IDs look the same.
+fn invisible(character: char) -> bool {
+    matches!(
+        character,
+        '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{FEFF}'
+    )
 }
 
 /// A real calendar date in YYYY-MM-DD form.
@@ -275,7 +285,10 @@ fn validated(mut item: ContextItem, provider: Provider) -> Option<ContextItem> {
     }
     let id_ok = !item.source_id.is_empty()
         && item.source_id.len() <= 128
-        && !item.source_id.chars().any(char::is_control);
+        && !item
+            .source_id
+            .chars()
+            .any(|c| c.is_control() || invisible(c));
     (item.provider == provider
         && id_ok
         && valid_date(&item.source_date)
@@ -469,7 +482,7 @@ mod tests {
     #[test]
     fn invalid_notes_are_counted_and_change_nothing() {
         let mut store = ContextStore::default();
-        let selection = ids(&["n1", "n2", "n3", "n4", "n\u{7}5"]);
+        let selection = ids(&["n1", "n2", "n3", "n4", "n\u{7}5", "n\u{200B}6"]);
         let mut impossible_date = note("n1", 1);
         impossible_date.source_date = "2026-13-45".into();
         let mut wrong_format = note("n2", 1);
@@ -479,6 +492,7 @@ mod tests {
         let mut other_provider = note("n4", 1);
         other_provider.provider = Provider::File;
         let control = note("n\u{7}5", 1);
+        let zero_width = note("n\u{200B}6", 1);
         let outcome = store.merge(
             Provider::Granola,
             &selection,
@@ -488,12 +502,13 @@ mod tests {
                 blank,
                 other_provider,
                 control,
+                zero_width,
             ],
         );
         assert_eq!(
             outcome,
             MergeOutcome {
-                rejected: 5,
+                rejected: 6,
                 ..MergeOutcome::default()
             }
         );
@@ -535,7 +550,7 @@ mod tests {
             &ids(&["n1", "n2"]),
             vec![note("n1", 1), note("n2", 1)],
         );
-        assert!(store.remove(Provider::Granola, "n1"));
+        assert!(store.remove(Provider::Granola, " n1 "));
         assert!(!store.remove(Provider::Granola, "n1"));
         assert_eq!(store.remove_all_from(Provider::File), 0);
         assert_eq!(store.remove_all_from(Provider::Granola), 1);

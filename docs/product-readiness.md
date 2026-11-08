@@ -59,8 +59,8 @@ Fetching happens outside the in-memory store, which keeps at most 20 notes. Beha
 - **Expired or revoked access:** stops at once, with no retry.
 - **Interrupted requests:** retried up to three attempts, waiting 1 s and then 2 s.
 - **Rate limits:** a provider's wait is honored up to 30 seconds, never longer.
-- **Cancellation:** cuts a wait short and discards the results of a request already in progress.
-- **Removal:** removing a note deletes its copy. Removing all of a provider's notes is a separate choice from disconnecting, as [PRIVACY.md](../PRIVACY.md) requires.
+- **Cancellation:** discards the results of a request already in progress, and cuts a wait short when the caller's wait checks for a cancel.
+- **Removal:** removing a note deletes its copy. Removing all of a provider's notes is its own action, separate from disconnecting, which must only stop future access, as [PRIVACY.md](../PRIVACY.md) requires. No disconnect operation exists yet.
 
 There are no adapter fixtures in a real provider format, no adapter, authentication, network request, or user interface, and imported notes are not yet shown or used for cues.
 
