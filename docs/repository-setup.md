@@ -4,33 +4,23 @@
 
 Bootstrap project instructions, docs, and tooling on `main`. Subsequent work uses feature branches and pull requests. Owner branches begin with `cb/`; titles describe the behavior or outcome. Do not automatically merge feature PRs.
 
-## Checks to establish before the first feature merge
+## Automated checks
 
-- DCO validation for every contribution commit, matching the human author's identity.
-- A no-attribution check for commit metadata and PR title/body, rerun when the PR text changes.
-- Secret and private-data scanning, including public fixtures and build artifacts.
-- Rust formatting, Clippy, meaningful tests, and a native build on supported targets.
-- Frontend formatting/lint, typechecking, build, and behavioral UI checks once the frontend exists.
+The [Checks workflow](../.github/workflows/checks.yml) runs on pull requests and updates to `main`, with read-only repository permissions and pinned action revisions. It defines:
 
-These checks are planned, not enabled by this document. Add them with the runnable scaffold and configure branch rules after the check names exist. Protect `main` against force pushes and deletion and require the applicable checks. Do not require an impossible self-approval while the project has one maintainer.
+- **Contribution metadata:** every PR commit needs a DCO trailer matching its author. Common tool-attribution credits in commits and PR text are rejected, including after PR text edits. The check does not verify a human's legal identity.
+- **Frontend and browser behavior:** contribution-check regression tests, formatting, TypeScript/build, and Playwright checks in Chromium and WebKit.
+- **macOS Rust and desktop build:** Rust formatting, unit tests, Clippy with warnings denied, and an unsigned development app build using the pinned Rust toolchain.
 
-## Graphide
+Native tests currently exercise the engine; the app build is not an automated interactive window test. A successful browser run does not establish macOS focus or screen-sharing behavior.
 
-Graphide Review must be installed or granted access to this repository on GitHub and then enabled in its dashboard. A repository file alone does not enable it. Keep access limited to the repositories the owner selected.
+Dedicated secret scanning and branch-rule enforcement remain to be configured. Public fixtures and build artifacts still require manual privacy review. Once the check names exist, protect `main` against force pushes and deletion and require the applicable checks. Do not require an impossible self-approval while the project has one maintainer.
 
-Recommended starting settings:
+## External automated review
 
-- Review enabled for TalkQTE.
-- One automatic review per PR, then request additional review after substantive fixes when useful.
-- Check Rust/native analysis support using an actual PR before relying on it.
-- Focus reviews on capture lifecycle, bounded buffers, threading, IPC validation, retention, and outbound data paths.
-- No real meeting fixtures or recordings in any review environment.
+Graphide review is deferred while the initial prototype takes shape. Keep automatic reviews off until the maintainer explicitly enables them. Creating a PR does not authorize changing review settings or starting a paid service.
 
-The published allowance is the first 150 reviews per GitHub App installation, shared by its enabled repositories. It is not a monthly allowance or a fresh allowance per repository. Reviews pause after it is exhausted; do not enable paid services without an explicit decision.
-
-As of initial setup, review enablement has not been confirmed. Sign-in or account-owner action may be required.
-
-Sources: [connection setup](https://graphide.com/docs/connect/), [review settings](https://graphide.com/docs/review/), [free allowance](https://graphide.com/docs/review/free-reviews/).
+When review is enabled, limit access to selected public repositories and verify Rust/native analysis on an actual PR. Focus on capture lifecycle, bounded buffers, threading, IPC validation, retention, and outbound data paths. Never provide real meeting fixtures or recordings to a review service.
 
 ## Handling findings
 
