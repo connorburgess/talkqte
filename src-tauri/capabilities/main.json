@@ -16,6 +16,9 @@
     "allow-set-sensitivity",
     "allow-set-overlay",
     "allow-export-markdown",
-    "allow-export-preview"
+    "allow-export-preview",
+    "allow-microphone-snapshot",
+    "allow-start-microphone",
+    "allow-stop-microphone"
   ]
 }

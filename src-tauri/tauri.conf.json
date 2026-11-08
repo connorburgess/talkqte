@@ -47,6 +47,9 @@
     "targets": ["app"],
     "category": "Productivity",
     "shortDescription": "Timely questions for better conversations",
-    "macOS": { "minimumSystemVersion": "13.0" }
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "entitlements": "Entitlements.plist"
+    }
   }
 }

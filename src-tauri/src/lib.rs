@@ -1,5 +1,6 @@
 mod companion;
 mod engine;
+mod microphone;
 
 use engine::{Engine, Response, Sensitivity};
 use std::{sync::Mutex, time::Instant};
@@ -173,6 +174,7 @@ pub fn run() {
             export: None,
         })))
         .manage(companion::WindowState::default())
+        .manage(microphone::Controller::default())
         .invoke_handler(tauri::generate_handler![
             snapshot,
             start_demo,
@@ -184,7 +186,10 @@ pub fn run() {
             set_sensitivity,
             set_overlay,
             export_preview,
-            export_markdown
+            export_markdown,
+            microphone::microphone_snapshot,
+            microphone::start_microphone,
+            microphone::stop_microphone
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -207,6 +212,7 @@ pub fn run() {
                         mode != runtime_mode || last_placement.elapsed().as_secs() >= 1;
                     runtime_mode = mode;
                     drop(runtime);
+                    microphone::refresh(&handle);
                     if needs_placement {
                         companion::refresh(&handle);
                         last_placement = Instant::now();
@@ -230,6 +236,14 @@ pub fn run() {
                 window.app_handle().exit(0);
             }
         })
-        .run(tauri::generate_context!())
-        .expect("TalkQTE could not start");
+        .build(tauri::generate_context!())
+        .expect("TalkQTE could not start")
+        .run(|app, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                microphone::stop_on_exit(app);
+            }
+        });
 }

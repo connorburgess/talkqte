@@ -12,6 +12,9 @@ fn main() {
             "set_overlay",
             "export_markdown",
             "export_preview",
+            "microphone_snapshot",
+            "start_microphone",
+            "stop_microphone",
         ]),
     ))
     .expect("Tauri build configuration failed");
