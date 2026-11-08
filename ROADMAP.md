@@ -82,7 +82,7 @@ Prove that audio capture, local transcription, and the floating prompt can coexi
 
 - [ ] Start and stop microphone and system-audio capture with explicit permission.
 - [x] Transcribe a synthetic meeting locally without network access after model setup. A real-time developer replay of a fictional two-voice clip with a feature-gated Whisper backend; not yet wired into the app or capture.
-- [ ] Measure transcript delay, memory growth, CPU use, and dropped audio.
+- [x] Measure transcript delay, memory growth, CPU use, and dropped audio. A 10-minute synthetic replay measured these ([results](docs/local-transcription.md#sustained-session)); live capture and the companion are not yet included.
 - [ ] Show a dismissible prompt without taking keyboard focus from the meeting.
 - [ ] Confirm stop/pause and device-change behavior, including headphones.
 
