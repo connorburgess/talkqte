@@ -19,6 +19,7 @@ This is a development plan. Unchecked items are not implemented.
 - [x] Preserve manual notes and saved questions during replay; keep them in memory until quit.
 - [x] Preview Markdown and save exactly the reviewed content to a chosen destination.
 - [x] Separate native question window with a restricted command and event surface.
+- [x] Compact complete questions, source disclosure that holds a question for reading, larger text, and optional near-camera placement.
 - [x] Browser checks for keyboard navigation, narrow layout, and reduced motion.
 - [x] Separate, explicit macOS microphone activity monitoring with a Stop control and no retained audio.
 - [ ] Verify real microphone permission, device release, signal activity, and disconnect behavior on macOS.
@@ -50,6 +51,8 @@ Prove that audio capture, local transcription, and the floating prompt can coexi
 - [ ] Accessible keyboard operation and reduced-motion support.
 - [ ] Fictional demo mode that never reads the user's meeting store.
 - [ ] Compare a short fictional meeting workflow with and without TalkQTE: useful questions, stale or redundant prompts, and distraction.
+
+The [product goal and first proof](PRODUCT.md#goal-and-first-proof) define what this milestone is trying to establish. Use the [research decision notes](docs/research.md) to connect findings to a specific change and a test; adding a study to the reading list does not establish a product benefit.
 
 ## Future goal: work with other note-taking apps
 

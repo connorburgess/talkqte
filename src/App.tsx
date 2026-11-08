@@ -75,7 +75,9 @@ function FloatingQuestion() {
   const microphoneControl = microphone.active || (!mic && !!microphone.error);
   const active =
     state?.overlayEnabled &&
-    (microphoneControl || ['running', 'paused'].includes(state.status));
+    (microphoneControl ||
+      state.cue ||
+      ['running', 'paused'].includes(state.status));
   const paused = state?.status === 'paused';
   return (
     <main className="floating-surface" aria-label="Meeting companion">
@@ -107,7 +109,9 @@ function FloatingQuestion() {
                         : microphoneLabel(mic)
                     : paused
                       ? 'Demo paused · Scripted'
-                      : 'Demo running · Scripted'}
+                      : state.status === 'ended'
+                        ? 'Demo ended · Question kept'
+                        : 'Demo running · Scripted'}
                 </span>
               </div>
               {microphoneControl ? (
@@ -124,7 +128,7 @@ function FloatingQuestion() {
                 >
                   Stop mic
                 </button>
-              ) : (
+              ) : state.status !== 'ended' ? (
                 <button
                   className="companion-control"
                   aria-label={paused ? 'Resume demo' : 'Pause demo'}
@@ -138,7 +142,7 @@ function FloatingQuestion() {
                 >
                   <span>{paused ? 'Resume' : 'Pause'}</span>
                 </button>
-              )}
+              ) : null}
               <button
                 className="companion-control"
                 aria-label="Hide companion"
@@ -153,11 +157,21 @@ function FloatingQuestion() {
                 <span>Hide</span>
               </button>
             </header>
-            {state?.cue && !paused && (
+            {state?.cue && (
               <Question
+                key={state.cue.id}
                 cue={state.cue}
-                paused={state.status !== 'running'}
+                size={state.questionSize}
+                announce={false}
                 busy={busy}
+                onInspect={(expanded) =>
+                  void run(() =>
+                    bridge.command('inspect_cue', {
+                      id: state.cue!.id,
+                      expanded,
+                    }),
+                  )
+                }
                 onRespond={(response) =>
                   void run(() =>
                     bridge.command('respond_to_cue', {
@@ -625,10 +639,19 @@ function Notebook() {
                 </div>
                 {state.cue ? (
                   <Question
+                    key={state.cue.id}
                     cue={state.cue}
-                    paused={state.status === 'paused'}
+                    size={state.questionSize}
                     busy={busy}
                     onRespond={respond}
+                    onInspect={(expanded) =>
+                      void run(() =>
+                        bridge.command('inspect_cue', {
+                          id: state.cue!.id,
+                          expanded,
+                        }),
+                      )
+                    }
                   />
                 ) : (
                   <div className="question-idle">
@@ -666,7 +689,7 @@ function Notebook() {
                   onClick={() => setView('settings')}
                 >
                   <Settings size={14} />
-                  Adjust question timing
+                  Question appearance & timing
                 </button>
               </aside>
             </div>
@@ -714,6 +737,74 @@ function Notebook() {
             </p>
             <section className="setting">
               <div>
+                <h2>Glance view</h2>
+                <p>
+                  One complete question, with context tucked away. Open “Why?”
+                  to see the source and keep the question until you save or
+                  dismiss it.
+                </p>
+                <p
+                  className={`appearance-example question-${state.questionSize}`}
+                >
+                  Who will take the first draft?
+                </p>
+              </div>
+              <div className="setting-control">
+                <label htmlFor="question-size">Question text</label>
+                <select
+                  id="question-size"
+                  value={state.questionSize}
+                  disabled={busy}
+                  onChange={(e) =>
+                    void run(() =>
+                      bridge.command('set_question_size', {
+                        value: e.target.value as Snapshot['questionSize'],
+                      }),
+                    )
+                  }
+                >
+                  <option value="standard">Standard</option>
+                  <option value="large">Larger</option>
+                </select>
+              </div>
+            </section>
+            <section className="setting">
+              <div>
+                <h2>Companion position</h2>
+                <p>
+                  Place the question near your camera if that feels comfortable.
+                  The desktop companion follows the notebook’s display; move the
+                  notebook to the display you want to use.
+                </p>
+                <p className="small">
+                  No camera access or video changes. Appearance choices last
+                  until you quit.
+                  {!bridge.desktop && ' Position applies in the desktop app.'}
+                </p>
+              </div>
+              <div className="setting-control">
+                <label htmlFor="companion-position">Position</label>
+                <select
+                  id="companion-position"
+                  value={state.companionPosition}
+                  disabled={busy}
+                  onChange={(e) =>
+                    void run(() =>
+                      bridge.command('set_companion_position', {
+                        value: e.target.value as Snapshot['companionPosition'],
+                      }),
+                    )
+                  }
+                >
+                  <option value="bottomRight">Bottom right</option>
+                  <option value="topCenter">Top center · near camera</option>
+                  <option value="topLeft">Top left</option>
+                  <option value="topRight">Top right</option>
+                </select>
+              </div>
+            </section>
+            <section className="setting">
+              <div>
                 <h2>Question timing</h2>
                 <p>
                   Balanced leaves at least 10 seconds between questions. Quiet
@@ -743,7 +834,7 @@ function Notebook() {
                 <h2>Floating question window</h2>
                 <p>
                   {bridge.desktop
-                    ? 'Keep a small companion at the bottom-right during the demo or microphone check. Stop microphone controls take priority while it is on. Hide only hides the window; it does not stop the microphone.'
+                    ? 'Keep a small companion in your chosen position during the demo or microphone check. Stop microphone controls take priority while it is on. Hide only hides the window; it does not stop the microphone. For keyboard controls, use the question in your notebook.'
                     : 'Available in the desktop app. The browser preview shows questions inside the notebook.'}
                 </p>
                 <p className="small">

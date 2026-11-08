@@ -4,7 +4,7 @@ mod companion_macos;
 mod engine;
 mod microphone;
 
-use engine::{Engine, Response, Sensitivity};
+use engine::{CompanionPosition, Engine, QuestionSize, Response, Sensitivity};
 use std::{sync::Mutex, time::Instant};
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
@@ -91,6 +91,37 @@ fn respond_to_cue(
     response: Response,
 ) -> Result<(), String> {
     change(&app, &state, |e| e.respond(&id, response))
+}
+#[tauri::command]
+fn inspect_cue(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    id: String,
+    expanded: bool,
+) -> Result<(), String> {
+    change(&app, &state, |e| e.inspect_cue(&id, expanded))
+}
+#[tauri::command]
+fn set_companion_position(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    value: CompanionPosition,
+) -> Result<(), String> {
+    change(&app, &state, |e| {
+        e.set_companion_position(value);
+        Ok(())
+    })
+}
+#[tauri::command]
+fn set_question_size(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    value: QuestionSize,
+) -> Result<(), String> {
+    change(&app, &state, |e| {
+        e.set_question_size(value);
+        Ok(())
+    })
 }
 #[tauri::command]
 fn update_notes(
@@ -187,6 +218,9 @@ pub fn run() {
             resume_demo,
             end_demo,
             respond_to_cue,
+            inspect_cue,
+            set_companion_position,
+            set_question_size,
             update_notes,
             set_sensitivity,
             set_overlay,

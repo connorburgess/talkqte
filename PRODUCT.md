@@ -18,6 +18,18 @@ Help a meeting participant notice a useful clarification while the conversation 
 
 The initial audience includes people who want a little help participating and people who already use Granola or Fireflies for their meeting record. Keep saved questions and minimal prompt history; the existing note-taker can remain the primary record.
 
+## Goal and first proof
+
+**Help someone ask a relevant clarification while keeping up with the conversation.** A question that arrives after the topic has moved on, repeats an answer, or makes listening harder is a product failure even if its wording is good.
+
+The first technical goal is a macOS companion that can receive both sides of a synthetic call, transcribe locally, and show one controllable question without taking focus from the meeting. The current fictional demo and separate microphone activity monitor do not meet that goal yet. See the [technical milestone](ROADMAP.md#first-technical-milestone).
+
+The first product proof is a comparison of short fictional conversations with and without prompts. Record whether a question was useful, timely, already answered, or distracting; check whether people still understood the conversation and could ignore, hold, save, or dismiss the prompt. Include cases where staying quiet is correct. Agree on acceptance criteria before evaluating a candidate, and record misses as well as useful prompts. A higher prompt count or more saves alone is not success.
+
+This keeps the next work focused on live input, relevance, timing, and user control. Broader meeting management, summaries, and integrations follow only when they support that experience. Camera-facing gaze is an optional presentation preference, not the product goal or a measure of successful participation.
+
+See [research and product decisions](docs/research.md) for the short evidence summary, what we use, and wording suitable for the website.
+
 ## Operating context
 
 The app accompanies a meeting in another application. Its small prompt window must not take keyboard focus. Keep the resting companion quiet and minimal; use rounded surfaces, readable type, and clearly named controls when a question appears. A dashboard supports reviewing saved questions and optional notes before and after meetings.

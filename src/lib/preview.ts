@@ -15,6 +15,8 @@ const state: Snapshot = {
   notes: '',
   sensitivity: 'balanced',
   overlayEnabled: true,
+  companionPosition: 'bottomRight',
+  questionSize: 'standard',
 };
 const listeners = new Set<(state: Snapshot) => void>();
 const prompts: Record<string, [string, string]> = {
@@ -41,7 +43,7 @@ function tick() {
   state.elapsedMs = Math.min(state.durationMs, state.elapsedMs + delta);
   if (state.cue) {
     state.cue.remainingMs = Math.max(0, deadline - state.elapsedMs);
-    if (!state.cue.remainingMs) {
+    if (!state.cue.remainingMs && !state.cue.held) {
       state.cue = null;
       cooldown = deadline + quietMs();
     }
@@ -65,12 +67,14 @@ function tick() {
         sourceId: segment.id,
         remainingMs: deadline - state.elapsedMs,
         totalMs: 18_000,
+        held: false,
+        expanded: false,
       };
     }
   }
   if (state.elapsedMs >= state.durationMs) {
     state.status = 'ended';
-    state.cue = null;
+    if (!state.cue?.held) state.cue = null;
   }
   emit();
 }
@@ -115,7 +119,7 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
     case 'respond_to_cue': {
       const { id, response } = args as Commands['respond_to_cue'];
       const cue = state.cue;
-      if (!cue || cue.id !== id || state.status !== 'running')
+      if (!cue || cue.id !== id)
         throw new Error('That question has already passed.');
       if (
         response === 'save' &&
@@ -126,6 +130,22 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
       cooldown = state.elapsedMs + quietMs();
       break;
     }
+    case 'inspect_cue': {
+      const { id, expanded } = args as Commands['inspect_cue'];
+      if (!state.cue || state.cue.id !== id)
+        throw new Error('That question has already passed.');
+      state.cue.expanded = expanded;
+      state.cue.held = true;
+      break;
+    }
+    case 'set_companion_position':
+      state.companionPosition = (
+        args as Commands['set_companion_position']
+      ).value;
+      break;
+    case 'set_question_size':
+      state.questionSize = (args as Commands['set_question_size']).value;
+      break;
     case 'update_notes': {
       const { notes } = args as Commands['update_notes'];
       if ([...notes].length > 20_000)

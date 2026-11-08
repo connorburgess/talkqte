@@ -24,10 +24,13 @@ npm run desktop
 Choose **Try demo** to play a fictional community-garden conversation. The notebook lets you:
 
 - See transcript segments arrive and receive one timed question at a time.
-- Save or dismiss a question, pause/resume the demo, and adjust the gap between questions.
+- Read a compact question by default. Open **Why?** for its source and keep it available while you read, then save or dismiss it.
+- Pause/resume the demo, keep using question controls while paused, and adjust the gap between questions.
 - Write notes and replay the demo while keeping saved questions and notes in memory.
 - Review the exact Markdown export before choosing a file destination.
-- Use a bottom-right desktop companion that stays compact between questions, expands for a prompt, and offers pause and hide controls.
+- Use a desktop companion that stays compact between questions. In Settings, choose larger question text or optional near-camera placement; the default remains bottom-right on the notebook's display.
+
+An opened question stays available after its original expiry and when demo playback finishes, with an earlier-question label when appropriate. Hiding its context keeps the hold; Save, Dismiss, explicitly ending the demo, or replaying clears it. Untouched questions still pass quietly. Appearance settings last until you quit. The passive companion does not take keyboard focus; use the notebook for keyboard question controls. Glance view does not access the camera or alter video. See the [design choices, supporting studies, and evidence limits](docs/glance-mode.md).
 
 **The prototype does not save your notebook when you quit.** Export anything you want to keep. The demo captures no audio, downloads no models, and requires no API credentials. Suggestions use a few phrase rules, not a language model.
 
@@ -54,7 +57,10 @@ These are development targets. The activity monitor does not yet transcribe meet
 
 ## Project decisions
 
+- [Product goal and first proof](PRODUCT.md#goal-and-first-proof)
+- [Research summary and product decisions](docs/research.md)
 - [Architecture and stack](docs/architecture.md)
+- [Glance view design and research](docs/glance-mode.md)
 - [Privacy design](PRIVACY.md)
 - [Contribution guide](CONTRIBUTING.md)
 - [Practices drawn from existing projects](docs/contribution-baseline.md)

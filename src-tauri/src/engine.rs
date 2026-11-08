@@ -37,6 +37,22 @@ pub enum Sensitivity {
     Quiet,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CompanionPosition {
+    BottomRight,
+    TopCenter,
+    TopLeft,
+    TopRight,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum QuestionSize {
+    Standard,
+    Large,
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Response {
@@ -54,6 +70,8 @@ pub struct Cue {
     pub source_id: String,
     pub remaining_ms: u64,
     pub total_ms: u64,
+    pub held: bool,
+    pub expanded: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -71,6 +89,8 @@ pub struct Snapshot {
     pub notes: String,
     pub sensitivity: Sensitivity,
     pub overlay_enabled: bool,
+    pub companion_position: CompanionPosition,
+    pub question_size: QuestionSize,
 }
 
 // The floating window never receives the notebook or full transcript.
@@ -81,6 +101,8 @@ pub struct CueSnapshot {
     pub status: Status,
     pub cue: Option<Cue>,
     pub overlay_enabled: bool,
+    pub companion_position: CompanionPosition,
+    pub question_size: QuestionSize,
 }
 
 pub struct Engine {
@@ -110,6 +132,8 @@ impl Default for Engine {
                 notes: String::new(),
                 sensitivity: Sensitivity::Balanced,
                 overlay_enabled: true,
+                companion_position: CompanionPosition::BottomRight,
+                question_size: QuestionSize::Standard,
             },
             demo,
             generation: 0,
@@ -127,6 +151,8 @@ impl Engine {
             status: self.state.status,
             cue: self.state.cue.clone(),
             overlay_enabled: self.state.overlay_enabled,
+            companion_position: self.state.companion_position,
+            question_size: self.state.question_size,
         }
     }
 
@@ -185,7 +211,7 @@ impl Engine {
         let now = self.state.elapsed_ms;
         if let Some(cue) = self.state.cue.as_mut() {
             cue.remaining_ms = self.cue_deadline.saturating_sub(now);
-            if cue.remaining_ms == 0 {
+            if cue.remaining_ms == 0 && !cue.held {
                 self.state.cue = None;
                 self.cooldown_until = self.cue_deadline + self.cooldown();
             }
@@ -212,13 +238,19 @@ impl Engine {
                         source_id: segment.id,
                         remaining_ms: self.cue_deadline - now,
                         total_ms: CUE_MS,
+                        held: false,
+                        expanded: false,
                     });
                 }
             }
         }
         if now >= self.demo.duration_ms {
             self.state.status = Status::Ended;
-            self.state.cue = None;
+            // A deliberately opened question stays readable after playback ends.
+            // Explicit End demo and Replay still clear it.
+            if !self.state.cue.as_ref().is_some_and(|cue| cue.held) {
+                self.state.cue = None;
+            }
         }
         self.changed();
     }
@@ -231,9 +263,6 @@ impl Engine {
     }
 
     pub fn respond(&mut self, id: &str, response: Response) -> Result<(), String> {
-        if self.state.status != Status::Running {
-            return Err("Resume the demo before responding to a question.".into());
-        }
         let cue = self.state.cue.as_ref().filter(|cue| cue.id == id).ok_or(
             "That question has already passed. Your saved questions are still in the notebook.",
         )?;
@@ -250,6 +279,30 @@ impl Engine {
         self.cooldown_until = self.state.elapsed_ms + self.cooldown();
         self.changed();
         Ok(())
+    }
+
+    pub fn inspect_cue(&mut self, id: &str, expanded: bool) -> Result<(), String> {
+        let cue = self
+            .state
+            .cue
+            .as_mut()
+            .filter(|cue| cue.id == id)
+            .ok_or("That question has already passed.")?;
+        cue.expanded = expanded;
+        // Collapsing context must not remove the question under the user's eyes.
+        cue.held = true;
+        self.changed();
+        Ok(())
+    }
+
+    pub fn set_companion_position(&mut self, value: CompanionPosition) {
+        self.state.companion_position = value;
+        self.changed();
+    }
+
+    pub fn set_question_size(&mut self, value: QuestionSize) {
+        self.state.question_size = value;
+        self.changed();
     }
 
     pub fn update_notes(&mut self, notes: String) -> Result<(), String> {
@@ -412,7 +465,6 @@ mod tests {
         e.advance(60_000);
         assert_eq!(e.state.elapsed_ms, 5_000);
         assert_eq!(e.state.cue.as_ref().unwrap().remaining_ms, 18_000);
-        assert!(e.respond("1:s2", Response::Save).is_err());
         e.resume().unwrap();
         e.advance(18_000);
         assert!(e.state.cue.is_none());
@@ -428,6 +480,81 @@ mod tests {
         assert!(e.state.cue.is_none());
         e.advance(32_000);
         assert_eq!(e.state.cue.as_ref().unwrap().kind, "Decision");
+    }
+
+    #[test]
+    fn inspecting_keeps_the_same_question_while_the_transcript_continues() {
+        let mut e = with_cue();
+        e.inspect_cue("1:s2", true).unwrap();
+        e.advance(70_000);
+        let cue = e.state.cue.as_ref().unwrap();
+        assert_eq!(cue.id, "1:s2");
+        assert!(cue.expanded && cue.held);
+        assert_eq!(cue.remaining_ms, 0);
+        assert_eq!(e.state.transcript.len(), 6);
+        // Collapsing cannot expire the content the user just opened.
+        e.inspect_cue("1:s2", false).unwrap();
+        assert!(!e.state.cue.as_ref().unwrap().expanded);
+        e.advance(1_000);
+        assert!(e.state.cue.as_ref().unwrap().held);
+        e.respond("1:s2", Response::Dismiss).unwrap();
+        e.advance(1_000);
+        assert!(e.state.cue.is_none()); // No backlog of skipped questions.
+        assert!(e.inspect_cue("1:s2", true).is_err());
+    }
+
+    #[test]
+    fn reading_survives_playback_end_but_explicit_end_and_replay_clear_it() {
+        let mut e = with_cue();
+        e.inspect_cue("1:s2", true).unwrap();
+        e.advance(u64::MAX);
+        assert_eq!(e.state.status, Status::Ended);
+        assert!(e.state.cue.is_some());
+        e.respond("1:s2", Response::Save).unwrap();
+        assert_eq!(e.state.saved.len(), 1);
+        e.start().unwrap();
+        e.advance(5_000);
+        assert!(e.inspect_cue("1:s2", true).is_err());
+        assert!(!e.state.cue.as_ref().unwrap().held);
+        e.inspect_cue("2:s2", true).unwrap();
+        e.end();
+        assert!(e.state.cue.is_none());
+        e.start().unwrap();
+        e.advance(5_000);
+        e.inspect_cue("3:s2", true).unwrap();
+        e.advance(u64::MAX);
+        e.start().unwrap();
+        assert!(e.state.cue.is_none());
+    }
+
+    #[test]
+    fn paused_questions_remain_actionable_and_expired_ids_cannot_be_held() {
+        let mut e = with_cue();
+        e.pause().unwrap();
+        e.inspect_cue("1:s2", true).unwrap();
+        e.respond("1:s2", Response::Save).unwrap();
+        assert_eq!(e.state.saved.len(), 1);
+        assert_eq!(e.state.status, Status::Paused);
+        e.resume().unwrap();
+        e.advance(32_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Timing");
+        assert!(e.inspect_cue("1:s2", false).is_err());
+        assert!(!e.state.cue.as_ref().unwrap().held);
+    }
+
+    #[test]
+    fn appearance_is_shared_with_companion_and_retained_across_demo_replay() {
+        let mut e = Engine::default();
+        assert_eq!(e.state.companion_position, CompanionPosition::BottomRight);
+        assert_eq!(e.state.question_size, QuestionSize::Standard);
+        e.set_companion_position(CompanionPosition::TopCenter);
+        e.set_question_size(QuestionSize::Large);
+        e.start().unwrap();
+        e.end();
+        e.start().unwrap();
+        let snapshot = e.cue_snapshot();
+        assert_eq!(snapshot.companion_position, CompanionPosition::TopCenter);
+        assert_eq!(snapshot.question_size, QuestionSize::Large);
     }
 
     #[test]

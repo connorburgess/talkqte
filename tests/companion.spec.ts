@@ -59,7 +59,6 @@ test('companion stays compact between questions and preserves a paused question'
     page.getByRole('heading', { name: 'Who will take the first draft?' }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Pause demo' }).click();
-  await page.setViewportSize({ width: 320, height: 76 });
   await page.clock.runFor(30_000);
   await expect(page.getByRole('status')).toHaveText('Demo paused · Scripted');
   await expect(page.getByRole('button', { name: 'Resume demo' })).toHaveText(
@@ -68,7 +67,7 @@ test('companion stays compact between questions and preserves a paused question'
   await expectCompanionToFit(page);
   await expect(
     page.getByRole('region', { name: 'Suggested question' }),
-  ).toHaveCount(0);
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Resume demo' }).click();
   await page.setViewportSize({ width: 420, height: 420 });
   await expect(
