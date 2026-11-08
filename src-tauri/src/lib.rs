@@ -9,6 +9,7 @@ struct Runtime {
     engine: Engine,
     last_tick: Instant,
     export: Option<String>,
+    overlay_visible: bool,
 }
 
 impl Runtime {
@@ -23,7 +24,7 @@ impl Runtime {
 struct AppState(Mutex<Runtime>);
 
 // Emit while holding the state lock, preserving revision order across commands/ticks.
-fn publish(app: &tauri::AppHandle, runtime: &Runtime) {
+fn publish(app: &tauri::AppHandle, runtime: &mut Runtime) {
     let _ = app.emit_to("main", "session:changed", &runtime.engine.state);
     let cue_state = runtime.engine.cue_snapshot();
     let _ = app.emit_to("cue", "cue:changed", &cue_state);
@@ -31,11 +32,18 @@ fn publish(app: &tauri::AppHandle, runtime: &Runtime) {
         let should_show = cue_state.overlay_enabled
             && cue_state.status == Status::Running
             && cue_state.cue.is_some();
-        // show() does not request keyboard focus. This window is configured non-focusable.
-        if should_show && !window.is_visible().unwrap_or(false) {
-            let _ = window.show();
-        } else if !should_show {
-            let _ = window.hide();
+        // Native visibility getters wait for the main thread. Never call one while
+        // holding the engine lock: a command on that thread may need this lock.
+        // Track requested visibility instead; show/hide enqueue non-blocking updates.
+        if should_show != runtime.overlay_visible {
+            let result = if should_show {
+                window.show()
+            } else {
+                window.hide()
+            };
+            if result.is_ok() {
+                runtime.overlay_visible = should_show;
+            }
         }
     }
 }
@@ -51,7 +59,7 @@ fn change(
         .map_err(|_| "The demo is unavailable. Please restart TalkQTE.")?;
     runtime.sync();
     let result = action(&mut runtime.engine);
-    publish(app, &runtime);
+    publish(app, &mut runtime);
     result
 }
 
@@ -179,6 +187,7 @@ pub fn run() {
             engine: Engine::default(),
             last_tick: Instant::now(),
             export: None,
+            overlay_visible: false,
         })))
         .invoke_handler(tauri::generate_handler![
             snapshot,
@@ -215,7 +224,7 @@ pub fn run() {
                 let before = runtime.engine.state.revision;
                 runtime.sync();
                 if runtime.engine.state.revision != before {
-                    publish(&handle, &runtime);
+                    publish(&handle, &mut runtime);
                 }
             });
             Ok(())
