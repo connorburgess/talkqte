@@ -406,7 +406,9 @@ fn suggest(text: &str) -> Option<(&'static str, &'static str)> {
 }
 
 /// Conservative signs that later conversation answered an open cue.
-/// Questions ("Who will take it?") and negated statements never resolve one.
+/// A missed answer only leaves a question up until it expires; a false match
+/// pulls away a useful one. So anything that reads as a question, a hedge, or
+/// a negation never counts, and only "I" or a capitalized name can be an owner.
 fn resolves(kind: &str, text: &str) -> bool {
     const WEEKDAYS: [&str; 7] = [
         "monday",
@@ -432,64 +434,99 @@ fn resolves(kind: &str, text: &str) -> bool {
         "december",
     ];
     const TASKS: [&str; 6] = ["take", "draft", "write", "handle", "own", "lead"];
-    // Pronouns and indefinite subjects do not name an owner.
-    const NOT_OWNERS: [&str; 14] = [
-        "who", "someone", "somebody", "anyone", "anybody", "nobody", "everyone", "it", "that",
-        "this", "we", "they", "you", "which",
+    const NEGATIONS: [&str; 10] = [
+        "not", "never", "no", "nobody", "nothing", "none", "neither", "nor", "cannot", "wont",
     ];
-    // Any earlier negation in the sentence ("won't be ready by Friday").
-    let negated = |words: &[String], index: usize| {
-        words[..index]
-            .iter()
-            .any(|word| word == "not" || word == "never" || word.ends_with("n't"))
-    };
+    // Transcripts often drop "?", so a sentence that opens like a question
+    // or is hedged does not count either.
+    const QUESTION_OPENERS: [&str; 20] = [
+        "should", "shall", "can", "could", "will", "would", "do", "does", "did", "is", "are",
+        "was", "were", "what", "who", "when", "which", "how", "why", "where",
+    ];
+    const HEDGES: [&str; 5] = ["maybe", "perhaps", "might", "probably", "possibly"];
+    // Capitalized words that do not name a person.
+    const NOT_OWNERS: [&str; 16] = [
+        "it",
+        "that",
+        "this",
+        "we",
+        "they",
+        "you",
+        "he",
+        "she",
+        "what",
+        "which",
+        "who",
+        "someone",
+        "somebody",
+        "anyone",
+        "everybody",
+        "everyone",
+    ];
     text.split_inclusive(['.', '?', '!', ';'])
         .filter(|sentence| !sentence.trim_end().ends_with('?'))
         .any(|sentence| {
-            let mut words: Vec<String> = Vec::new();
-            for word in sentence.split_whitespace() {
-                let word = word
-                    .replace('’', "'")
+            // (lowercase word, written with a capital letter)
+            let mut words: Vec<(String, bool)> = Vec::new();
+            for raw in sentence.split_whitespace() {
+                let raw = raw
+                    .replace(['’', '‘'], "'")
                     .trim_matches(|character: char| {
                         !character.is_alphanumeric() && character != '\''
                     })
                     .trim_matches('\'')
-                    .to_lowercase();
+                    .to_string();
+                let capital = raw.chars().next().is_some_and(char::is_uppercase);
+                let word = raw.to_lowercase();
                 // "I'll take" reads as "I will take".
                 match word.strip_suffix("'ll") {
                     Some(subject) if !subject.is_empty() => {
-                        words.push(subject.into());
-                        words.push("will".into());
+                        words.push((subject.into(), capital));
+                        words.push(("will".into(), false));
                     }
-                    _ if !word.is_empty() => words.push(word),
+                    _ if !word.is_empty() => words.push((word, capital)),
                     _ => {}
                 }
             }
-            let at = |index: usize| words.get(index).map(String::as_str).unwrap_or("");
+            if words.is_empty()
+                || QUESTION_OPENERS.contains(&words[0].0.as_str())
+                || words.iter().any(|(word, _)| {
+                    NEGATIONS.contains(&word.as_str())
+                        || word.ends_with("n't")
+                        || HEDGES.contains(&word.as_str())
+                })
+            {
+                return false;
+            }
+            let at = |index: usize| {
+                words
+                    .get(index)
+                    .map(|(word, _)| word.as_str())
+                    .unwrap_or("")
+            };
             (0..words.len()).any(|index| match kind {
                 "Owner" => {
+                    let (subject, capital) = &words[index];
                     matches!(at(index + 1), "will" | "can")
                         && TASKS.contains(&at(index + 2))
-                        && at(index).chars().all(char::is_alphabetic)
-                        && !NOT_OWNERS.contains(&at(index))
-                        && !negated(&words, index)
+                        && (subject == "i"
+                            || (*capital
+                                && subject.chars().all(char::is_alphabetic)
+                                && !NOT_OWNERS.contains(&subject.as_str())))
                 }
                 "Timing" => {
-                    (at(index) == "tomorrow"
-                        || (matches!(at(index), "by" | "on" | "before" | "until")
+                    at(index) == "tomorrow"
+                        || (matches!(at(index), "by" | "before" | "until")
                             && (WEEKDAYS.contains(&at(index + 1))
-                                || MONTHS.contains(&at(index + 1))
-                                || at(index + 1) == "tomorrow")))
-                        && !negated(&words, index)
+                                || MONTHS.contains(&at(index + 1))))
                 }
                 "Decision" => {
                     // "Let's go with the sign", not "I'll go with you".
-                    ((at(index) == "go"
+                    (at(index) == "go"
                         && at(index + 1) == "with"
                         && !matches!(at(index + 2), "you" | "me" | "us" | "them" | "him" | "her"))
                         || at(index) == "decided"
-                        || at(index) == "chose")
-                        && !negated(&words, index)
+                        || at(index) == "chose"
                 }
                 _ => false,
             })
@@ -547,6 +584,7 @@ mod tests {
                 "Someone can take the first draft.",
                 "Sure, I’ll draft it tonight.",
             ),
+            ("Someone can take the first draft.", "OK, I‘ll take it."),
             ("We should finish soon.", "Let's have it ready by Friday."),
             ("We should finish soon.", "I can bring it tomorrow."),
             (
@@ -602,6 +640,57 @@ mod tests {
             (
                 "We could either print it or use a sign.",
                 "Let's go with the sign?",
+            ),
+            // Found in review: negations, non-person owners, unmarked questions.
+            ("We should finish soon.", "We cannot finish by Friday."),
+            ("We should finish soon.", "We wont make it by Friday."),
+            ("We should finish soon.", "No way we finish by Friday."),
+            ("We should finish soon.", "By Friday is not realistic."),
+            ("We should finish soon.", "Tomorrow doesn't work for me."),
+            (
+                "We should finish soon.",
+                "Can we do it by Friday, or is that too tight.",
+            ),
+            ("We should finish soon.", "I talked to Sam on Monday."),
+            (
+                "We could either print it or use a sign.",
+                "Nobody decided anything yet.",
+            ),
+            (
+                "We could either print it or use a sign.",
+                "Nothing was decided.",
+            ),
+            (
+                "We could either print it or use a sign.",
+                "Should we go with the sign.",
+            ),
+            (
+                "Someone can take the first draft.",
+                "The draft will take a week.",
+            ),
+            (
+                "Someone can take the first draft.",
+                "No one will take the first draft.",
+            ),
+            (
+                "Someone can take the first draft.",
+                "None of us can take it.",
+            ),
+            (
+                "Someone can take the first draft.",
+                "What will take longest is the layout.",
+            ),
+            (
+                "Someone can take the first draft.",
+                "Somebody else will draft it.",
+            ),
+            (
+                "Someone can take the first draft.",
+                "Everybody can write a section.",
+            ),
+            (
+                "Someone can take the first draft.",
+                "Maybe Jordan can take it.",
             ),
             // A different issue's answer leaves this one open.
             (
