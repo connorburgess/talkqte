@@ -31,7 +31,9 @@ export function microphoneLabel(state: MicrophoneSnapshot | null) {
 export function useMicrophone() {
   const [state, setState] = useState<MicrophoneSnapshot | null>(null);
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [pendingCommand, setPendingCommand] = useState<
+    'start_microphone' | 'stop_microphone' | null
+  >(null);
   const pending = useRef(false);
   useEffect(() => {
     if (!desktop) return;
@@ -73,7 +75,7 @@ export function useMicrophone() {
   async function run(command: 'start_microphone' | 'stop_microphone') {
     if (!desktop || pending.current) return;
     pending.current = true;
-    setBusy(true);
+    setPendingCommand(command);
     setError('');
     try {
       // Command acceptance does not mean capture started or teardown finished.
@@ -83,13 +85,14 @@ export function useMicrophone() {
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally {
       pending.current = false;
-      setBusy(false);
+      setPendingCommand(null);
     }
   }
   return {
     state,
     error,
-    busy,
+    busy: pendingCommand !== null,
+    stopPending: pendingCommand === 'stop_microphone',
     active: !!state && state.status !== 'off',
     start: () => run('start_microphone'),
     stop: () => run('stop_microphone'),

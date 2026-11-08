@@ -51,6 +51,9 @@ export function MicrophoneControl({ microphone }: { microphone: Microphone }) {
           microphone to release it.
         </p>
       )}
+      {microphone.stopPending && state?.status !== 'stopping' && (
+        <p aria-live="polite">Stop requested… waiting for microphone.</p>
+      )}
       {(error || state?.message) && (
         <p
           className="microphone-message"

@@ -96,13 +96,15 @@ function FloatingQuestion() {
                       }
                     />
                   )}
-                  {microphoneControl ? 'Microphone only' : 'TalkQTE'}
+                  {microphoneControl ? 'Mic only' : 'TalkQTE'}
                 </strong>
                 <span role="status">
                   {microphoneControl
-                    ? !mic
-                      ? 'Status unavailable'
-                      : microphoneLabel(mic)
+                    ? microphone.stopPending && mic?.status !== 'stopping'
+                      ? 'Stop requested…'
+                      : !mic
+                        ? 'Status unavailable'
+                        : microphoneLabel(mic)
                     : paused
                       ? 'Demo paused · Scripted'
                       : 'Demo running · Scripted'}

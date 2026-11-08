@@ -16,6 +16,8 @@ let microphone: MicrophoneSnapshot = {
 let session: Snapshot;
 let resolveSnapshot: ((value: MicrophoneSnapshot) => void) | undefined;
 let rejectStop = false;
+let delayStop = false;
+let releaseStop: (() => void) | undefined;
 const calls: string[] = [];
 const delayed = new URLSearchParams(location.search).has('delay-microphone');
 Object.defineProperty(window, 'isTauri', { value: true, configurable: true });
@@ -45,6 +47,12 @@ mockIPC(
         });
         return;
       case 'stop_microphone':
+        if (delayStop) {
+          delayStop = false;
+          await new Promise<void>((resolve) => {
+            releaseStop = resolve;
+          });
+        }
         if (rejectStop) {
           rejectStop = false;
           throw new Error(
@@ -85,6 +93,8 @@ declare global {
       calls: string[];
       resolveSnapshot: (value: MicrophoneSnapshot) => void;
       rejectNextStop: () => void;
+      holdNextStop: () => void;
+      releaseStop: () => void;
     };
   }
 }
@@ -95,5 +105,9 @@ window.microphoneTest = {
   rejectNextStop: () => {
     rejectStop = true;
   },
+  holdNextStop: () => {
+    delayStop = true;
+  },
+  releaseStop: () => releaseStop?.(),
 };
 await import('../../src/main');

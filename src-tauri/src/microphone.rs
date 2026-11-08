@@ -536,12 +536,23 @@ mod tests {
                 .unwrap();
         });
         let result = read_rx.recv_timeout(Duration::from_secs(1));
+        let stopper = controller.clone();
+        let (stop_tx, stop_rx) = mpsc::channel();
+        let stop = thread::spawn(move || {
+            stop_tx.send(stopper.request_stop().unwrap()).unwrap();
+        });
+        assert!(matches!(stop_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
         release_tx.send(()).unwrap();
         start.join().unwrap();
         read.join().unwrap();
         assert_eq!(result.unwrap(), (None, true));
-        assert_eq!(controller.try_status(), Some(Status::Starting));
-        finish(&controller, controller.request_stop().unwrap());
+        let update = stop_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        stop.join().unwrap();
+        assert_eq!(update.snapshot.status, Status::Stopping);
+        assert_eq!(controller.try_status(), Some(Status::Stopping));
+        assert!(controller.begin_start().is_err());
+        finish(&controller, update);
+        assert_eq!(controller.try_status(), Some(Status::Off));
     }
 
     #[test]

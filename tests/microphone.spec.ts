@@ -128,6 +128,24 @@ test('a failed stop command never reports the microphone as off', async ({
   await expect(panel.getByRole('alert')).toHaveCount(0);
 });
 
+test('a queued stop acknowledges the request without claiming native cleanup has started', async ({
+  page,
+}) => {
+  await nativePage(page);
+  const panel = page.getByRole('region', { name: 'Microphone', exact: true });
+  await panel.getByRole('button', { name: 'Start microphone' }).click();
+  await page.evaluate(() => window.microphoneTest.holdNextStop());
+  await panel.getByRole('button', { name: 'Stop microphone' }).click();
+  await expect(panel).toContainText('Stop requested… waiting for microphone.');
+  await expect(panel.getByRole('status')).toHaveText('Starting…');
+  await expect(panel.getByRole('button')).toBeDisabled();
+  await page.evaluate(() => window.microphoneTest.releaseStop());
+  await expect(panel.getByRole('status')).toHaveText('Stopping…');
+  await expect(panel).not.toContainText('Stop requested…');
+  await signal(page, { status: 'off', canStart: true, message: null });
+  await expect(panel.getByRole('status')).toHaveText('Off');
+});
+
 test('a delayed initial snapshot and older events cannot overwrite the microphone state', async ({
   page,
 }) => {
@@ -163,14 +181,27 @@ test('compact companion can stop microphone activity without starting the demo',
 }) => {
   await page.setViewportSize({ width: 320, height: 76 });
   await nativePage(page, '?window=cue');
+  for (const [state, label] of [
+    [{ status: 'starting', canStart: false }, 'Starting…'],
+    [{ status: 'error', canStart: false }, 'Releasing…'],
+    [{ status: 'error', canStart: true }, 'Unavailable'],
+    [{ status: 'listening', activity: 'quiet', canStart: false }, 'On'],
+  ] as const) {
+    await signal(page, state);
+    await expect(page.getByRole('status')).toHaveText(label);
+    expect(
+      await page.locator('main').evaluate((element) => ({
+        width: element.scrollWidth,
+        height: element.scrollHeight,
+      })),
+    ).toEqual({ width: 320, height: 76 });
+  }
   await signal(page, {
     status: 'listening',
     activity: 'active',
     canStart: false,
   });
-  await expect(
-    page.getByText('Microphone only', { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText('Mic only', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Pause demo' })).toHaveCount(0);
   for (const button of await page.getByRole('button').all()) {
     const bounds = await button.boundingBox();
@@ -195,7 +226,13 @@ test('compact companion can stop microphone activity without starting the demo',
   await expect(
     page.getByRole('button', { name: 'Stop microphone' }),
   ).toBeVisible();
+  await page.evaluate(() => window.microphoneTest.holdNextStop());
   await page.getByRole('button', { name: 'Stop microphone' }).click();
+  await expect(page.getByRole('status')).toHaveText('Stop requested…');
+  expect(
+    await page.locator('main').evaluate((element) => element.scrollHeight),
+  ).toBeLessThanOrEqual(76);
+  await page.evaluate(() => window.microphoneTest.releaseStop());
   await expect(
     page.getByRole('button', { name: 'Stop microphone' }),
   ).toBeDisabled();
