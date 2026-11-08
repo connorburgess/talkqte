@@ -186,6 +186,7 @@ function FloatingQuestion() {
                 key={state.cue.id}
                 cue={state.cue}
                 size={state.questionSize}
+                live={state.live}
                 announce={false}
                 busy={busy}
                 onInspect={(expanded) =>
@@ -717,7 +718,9 @@ function Notebook() {
                         <MessageCircle size={25} />
                         <h2>A conversation starts here.</h2>
                         <p>
-                          Try the demo to watch the fictional transcript arrive.
+                          {state.live
+                            ? 'Lines from your microphone appear here a few seconds after they are spoken.'
+                            : 'Try the demo to watch the fictional transcript arrive.'}
                         </p>
                       </div>
                     )}
@@ -735,6 +738,7 @@ function Notebook() {
                     key={state.cue.id}
                     cue={state.cue}
                     size={state.questionSize}
+                    live={state.live}
                     busy={busy}
                     onDismiss={dismiss}
                     onInspect={(expanded) =>
@@ -762,7 +766,9 @@ function Notebook() {
                       {state.status === 'ready'
                         ? 'When something could use a little clarity, a question will appear here.'
                         : state.status === 'ended'
-                          ? 'Your notes are still here. Export them before closing the app.'
+                          ? state.live
+                            ? 'Your notes stay here until you close the app.'
+                            : 'Your notes are still here. Export them before closing the app.'
                           : 'Questions pass quietly. You can keep listening without responding.'}
                     </p>
                     {state.status === 'ready' && (
@@ -774,8 +780,9 @@ function Notebook() {
                   </div>
                 )}
                 <p className="companion-footnote">
-                  Suggestions in this demo use simple phrase rules. Use a cue in
-                  the conversation or let it pass.
+                  {state.live
+                    ? 'Suggestions use simple phrase rules on what was transcribed. Use a cue in the conversation or let it pass.'
+                    : 'Suggestions in this demo use simple phrase rules. Use a cue in the conversation or let it pass.'}
                 </p>
                 <button
                   className="text-button companion-settings"
@@ -789,8 +796,9 @@ function Notebook() {
             <footer className="notebook-footer">
               <ShieldCheck size={15} />
               <p>
-                This demo stays in memory. Export anything you want to keep
-                before closing.
+                {state.live
+                  ? 'This live session stays in memory and is never saved or exported.'
+                  : 'This demo stays in memory. Export anything you want to keep before closing.'}
               </p>
             </footer>
           </div>

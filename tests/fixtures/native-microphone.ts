@@ -22,11 +22,60 @@ let delayQuestionResponse = false;
 let releaseQuestionResponse: (() => void) | undefined;
 const calls: string[] = [];
 const delayed = new URLSearchParams(location.search).has('delay-microphone');
+// With ?live, the build reports local transcription as available.
+const liveAvailable = new URLSearchParams(location.search).has('live');
 Object.defineProperty(window, 'isTauri', { value: true, configurable: true });
 
 async function send(value: Partial<MicrophoneSnapshot>) {
   microphone = { ...microphone, revision: microphone.revision + 1, ...value };
   await emit('microphone:changed', microphone);
+}
+
+// Stands in for the Rust live session: no device, model, or transcription.
+async function publish(value: Partial<Snapshot>) {
+  session = {
+    ...session,
+    ...value,
+    revision: Math.max(session.revision, 1_000) + 1,
+  };
+  await emit('session:changed', session);
+  await emit('cue:changed', session);
+}
+async function startLive() {
+  await publish({
+    live: true,
+    status: 'running',
+    title: 'Live session',
+    description: 'Transcript lines from a local transcription source.',
+    elapsedMs: 0,
+    // Rust sends u64::MAX for a live session, which has no end.
+    durationMs: 18_446_744_073_709_552_000,
+    transcript: [],
+    cue: null,
+  });
+  await send({ status: 'listening', activity: 'active', canStart: false });
+}
+async function say(text: string, question?: string) {
+  const id = `t1-0-${session.transcript.length}`;
+  const atMs = session.elapsedMs + 1_000;
+  await publish({
+    elapsedMs: atMs,
+    transcript: [...session.transcript, { id, atMs, speaker: 'Speaker', text }],
+    cue: question
+      ? {
+          id: `live:${id}`,
+          kind: 'Owner',
+          question,
+          evidence: text,
+          sourceId: id,
+          remainingMs: 18_000,
+          totalMs: 18_000,
+          held: false,
+          expanded: false,
+          resolvedBy: null,
+        }
+      : session.cue,
+  });
 }
 
 mockIPC(
@@ -68,7 +117,23 @@ mockIPC(
           message: null,
         });
         return;
+      case 'live_status':
+        return liveAvailable
+          ? { available: true, reason: null }
+          : {
+              available: false,
+              reason: 'This build does not include local transcription.',
+            };
+      case 'start_live_session':
+        await startLive();
+        return;
+      case 'stop_live_session':
+        await send({ status: 'stopping', canStart: false, activity: 'quiet' });
+        await publish({ status: 'ended', cue: null });
+        return;
       case 'export_preview':
+        if (session.live)
+          throw new Error('Live sessions are not saved or exported.');
         return preview.exportPreview();
       case 'export_markdown':
         return true;
@@ -103,6 +168,7 @@ declare global {
       holdNextResponse: () => void;
       releaseResponse: () => void;
     };
+    liveTest: { start: typeof startLive; say: typeof say };
     microphoneTest: {
       send: typeof send;
       calls: string[];
@@ -119,6 +185,7 @@ window.questionTest = {
   },
   releaseResponse: () => releaseQuestionResponse?.(),
 };
+window.liveTest = { start: startLive, say };
 window.microphoneTest = {
   send,
   calls,

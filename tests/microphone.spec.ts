@@ -4,7 +4,7 @@ import type { MicrophoneSnapshot } from '../src/lib/microphone';
 async function nativePage(page: Page, query = '') {
   await page.clock.install();
   await page.route(
-    /\/\?(?:window=cue|delay-microphone).*|:\d+\/$/,
+    /\/\?(?:window=cue|delay-microphone|live).*|:\d+\/$/,
     async (route) => {
       if (route.request().resourceType() !== 'document')
         return route.continue();
@@ -241,4 +241,78 @@ test('compact companion can stop microphone activity without starting the demo',
   await expect(
     page.getByRole('button', { name: 'Stop microphone' }),
   ).toHaveCount(0);
+});
+
+test('a live session is labelled live, has no end time, and cannot be exported', async ({
+  page,
+}) => {
+  await nativePage(page, '?live');
+  await page.getByRole('button', { name: 'Start live session' }).click();
+  const strip = page.getByRole('region', { name: 'Demo controls' });
+  await expect(strip).toContainText('Live session in progress');
+  await expect(strip).not.toContainText('/');
+  await expect(
+    page.getByRole('button', { name: 'Pause', exact: true }),
+  ).toHaveCount(0);
+  const panel = page.getByRole('region', { name: 'Microphone', exact: true });
+  await expect(panel).toContainText('transcribed on this device');
+  await expect(panel).not.toContainText('Activity check only');
+  await expect(
+    page.getByRole('button', { name: 'Export', exact: true }),
+  ).toBeDisabled();
+  await page.evaluate(() =>
+    window.liveTest.say(
+      'Someone can take the first draft.',
+      'Who will take the first draft?',
+    ),
+  );
+  const question = page.getByRole('region', { name: 'Suggested question' });
+  await expect(question).toContainText('Live question · Owner');
+  await question.getByRole('button', { name: 'Why?' }).click();
+  await expect(question).toContainText('From the live transcript');
+  await expect(question).not.toContainText('fictional');
+  await page.getByRole('button', { name: 'Stop live session' }).click();
+  await expect(strip).toContainText('Live session ended');
+  await expect(
+    page.getByRole('button', { name: 'Try demo', exact: true }),
+  ).toBeVisible();
+  expect(await page.evaluate(() => window.microphoneTest.calls)).toContain(
+    'stop_live_session',
+  );
+});
+
+test('without local transcription, the notebook offers no live session and says why', async ({
+  page,
+}) => {
+  await nativePage(page);
+  await expect(
+    page.getByRole('button', { name: 'Try demo', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Start live session' }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(
+    page.getByText('This build does not include local transcription.'),
+  ).toBeVisible();
+});
+
+test('the companion labels a live session and its Stop ends the session', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 76 });
+  await nativePage(page, '?window=cue&live');
+  await page.evaluate(() => window.liveTest.start());
+  await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText(
+    'Listening · On this device',
+  );
+  await expect(page.getByRole('button', { name: 'Pause demo' })).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Stop microphone' }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Stop live session' }).click();
+  expect(await page.evaluate(() => window.microphoneTest.calls)).toContain(
+    'stop_live_session',
+  );
 });
