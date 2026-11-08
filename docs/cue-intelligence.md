@@ -1,6 +1,6 @@
 # Cue intelligence and feedback
 
-Status: proposed evaluation plan, 8 November 2026. No reasoning model, provider, conversational feedback system, or learning pipeline is implemented or selected. This supports the [participation goal](../PRODUCT.md#goal-and-first-proof) and [product readiness plan](product-readiness.md).
+Status: evaluation plan with an optional [fictional Claude Code lab](claude-cue-lab.md), 8 November 2026. No reasoning model is connected to the app, and no production provider, conversational feedback system, or learning pipeline is selected. This supports the [participation goal](../PRODUCT.md#goal-and-first-proof) and [product readiness plan](product-readiness.md).
 
 ## What powers the prototype today
 
@@ -30,7 +30,7 @@ Session adaptation, durable personal preferences, and training a shared model ar
 
 ## Subscription-backed lab evaluation
 
-The current evaluation preference is to use an existing individual subscription through an official CLI and avoid separately billed inference APIs. Start with fictional examples in an ordinary Claude Code session; Opus 5.5 is the first candidate to assess. Cursor CLI with Composer is an alternative comparison. This is a lab plan, not a selected production runtime or an enabled background experiment. No inference was run to prepare it.
+The current evaluation preference is to use an existing individual subscription through an official CLI and avoid separately billed inference APIs. The [fictional lab](claude-cue-lab.md) provides a bounded, explicitly invoked Claude Code runner with Opus 5.5. Cursor CLI with Composer remains an unimplemented alternative comparison. This is not a selected production runtime or an enabled background experiment; the lab's validation record separates offline checks from model trials.
 
 Official documentation checked 8 November 2026:
 
