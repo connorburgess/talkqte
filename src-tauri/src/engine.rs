@@ -138,8 +138,26 @@ pub struct Engine {
 
 impl Default for Engine {
     fn default() -> Self {
-        let demo: Demo = serde_json::from_str(include_str!("../../src/demo.json"))
-            .expect("bundled fictional demo is valid");
+        Self::from_demo(
+            serde_json::from_str(include_str!("../../src/demo.json"))
+                .expect("bundled fictional demo is valid"),
+        )
+    }
+}
+
+impl Engine {
+    /// A session with no scripted demo lines, for transcript input through
+    /// `ingest`. It runs until ended.
+    pub fn live() -> Self {
+        Self::from_demo(Demo {
+            title: "Live session".into(),
+            description: "Transcript lines from a local transcription source.".into(),
+            duration_ms: u64::MAX,
+            segments: vec![],
+        })
+    }
+
+    fn from_demo(demo: Demo) -> Self {
         Self {
             state: Snapshot {
                 revision: 0,
@@ -167,9 +185,7 @@ impl Default for Engine {
             unshown: None,
         }
     }
-}
 
-impl Engine {
     pub fn cue_snapshot(&self) -> CueSnapshot {
         CueSnapshot {
             revision: self.state.revision,
@@ -739,6 +755,24 @@ mod tests {
         engine.demo.duration_ms = 600_000;
         engine.advance(10_000);
         engine
+    }
+
+    #[test]
+    fn a_live_session_has_no_scripted_lines_and_does_not_end_on_its_own() {
+        let mut e = Engine::live();
+        e.start().unwrap();
+        e.advance(10 * 60 * 60 * 1_000);
+        assert_eq!(e.state.status, Status::Running);
+        assert!(e.state.transcript.is_empty());
+        e.ingest(e.session(), live("s1", 1_000, "Someone can take it."))
+            .unwrap();
+        assert!(e.state.cue.is_none(), "a line from an hour ago is too late");
+        e.ingest(
+            e.session(),
+            live("w1", e.state.elapsed_ms, "Someone can take it."),
+        )
+        .unwrap();
+        assert_eq!(e.state.cue.as_ref().unwrap().source_id, "w1");
     }
 
     #[test]
