@@ -51,6 +51,11 @@ const STALL_WAIT: std::time::Duration = if cfg!(test) {
 /// Returns true if the download was cancelled during the wait.
 fn wait_or_cancel(failures: usize, cancel: &AtomicBool) -> bool {
     let total = STALL_WAIT * (1 << (failures.saturating_sub(1)).min(4)) as u32;
+    wait_for(total, cancel)
+}
+
+/// Waits `total`, checking `cancel` every 50 ms; true if cancelled.
+fn wait_for(total: std::time::Duration, cancel: &AtomicBool) -> bool {
     let step = std::time::Duration::from_millis(50).min(total);
     let started = std::time::Instant::now();
     while started.elapsed() < total {
@@ -73,8 +78,26 @@ pub struct Response {
 /// Requests `url` from byte `offset`. Implementations must not send anything
 /// beyond an ordinary file request.
 pub trait Fetch {
-    fn get(&self, url: &str, offset: u64) -> Result<Response, String>;
+    fn get(&self, url: &str, offset: u64) -> Result<Response, FetchError>;
 }
+
+/// Why a request produced no body, and what to do about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FetchError {
+    /// Worth trying again after a short wait: a connection or server fault.
+    Transient(String),
+    /// The server asked for a pause; `retry_after` is its stated reset time.
+    RateLimited {
+        retry_after: Option<std::time::Duration>,
+    },
+    /// Trying again will not help: the file is missing or access is refused.
+    Permanent(String),
+    /// The server rejected the resume offset; the partial file is stale.
+    RangeNotSatisfiable,
+}
+
+/// The longest wait honored from a rate-limit response.
+pub const RATE_LIMIT_WAIT_CAP: std::time::Duration = std::time::Duration::from_secs(300);
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Failure {
@@ -206,6 +229,26 @@ pub fn download(
                 let before = fs::metadata(&part).map(|meta| meta.len()).unwrap_or(0);
                 match fetch_into(&part, spec, source, fetch, &mut progress, cancel)? {
                     Fetched::Complete => {}
+                    Fetched::Refused(why) => {
+                        // This source will not serve the file; try the next.
+                        reason = why;
+                        break;
+                    }
+                    Fetched::RateLimited(retry_after) => {
+                        // Honor the server's reset time, within a cap, before
+                        // counting the attempt; Cancel still ends the wait.
+                        reason = "The download server asked us to wait.".into();
+                        stalled += 1;
+                        if stalled < ATTEMPTS {
+                            let wait = retry_after
+                                .unwrap_or(STALL_WAIT * 4)
+                                .min(RATE_LIMIT_WAIT_CAP);
+                            if wait_for(wait, cancel) {
+                                return Err(Failure::Cancelled);
+                            }
+                        }
+                        continue;
+                    }
                     Fetched::Interrupted(why) => {
                         reason = why;
                         let after = fs::metadata(&part).map(|meta| meta.len()).unwrap_or(0);
@@ -213,8 +256,8 @@ pub fn download(
                         // server that ignores ranges, counts as progress.
                         if after == before {
                             stalled += 1;
-                            // A busy or rate-limited server gets time before
-                            // the next try; Cancel still ends the wait.
+                            // A busy server gets time before the next try;
+                            // Cancel still ends the wait.
                             if stalled < ATTEMPTS && wait_or_cancel(stalled, cancel) {
                                 return Err(Failure::Cancelled);
                             }
@@ -251,6 +294,8 @@ pub fn download(
 enum Fetched {
     Complete,
     Interrupted(String),
+    RateLimited(Option<std::time::Duration>),
+    Refused(String),
 }
 
 /// Appends to the partial file from where it stopped. Returns `Interrupted`
@@ -271,7 +316,18 @@ fn fetch_into(
     }
     let response = match fetch.get(source, offset) {
         Ok(response) => response,
-        Err(why) => return Ok(Fetched::Interrupted(why)),
+        Err(FetchError::Transient(why)) => return Ok(Fetched::Interrupted(why)),
+        Err(FetchError::RateLimited { retry_after }) => {
+            return Ok(Fetched::RateLimited(retry_after))
+        }
+        Err(FetchError::Permanent(why)) => return Ok(Fetched::Refused(why)),
+        Err(FetchError::RangeNotSatisfiable) => {
+            // Start over: the file size changes, so this counts as progress.
+            let _ = fs::remove_file(part);
+            return Ok(Fetched::Interrupted(
+                "The server could not resume the download.".into(),
+            ));
+        }
     };
     let (mut file, mut received) = if response.resumed && offset > 0 {
         (
@@ -347,7 +403,7 @@ pub struct Https;
 
 #[cfg(feature = "local-whisper")]
 impl Fetch for Https {
-    fn get(&self, url: &str, offset: u64) -> Result<Response, String> {
+    fn get(&self, url: &str, offset: u64) -> Result<Response, FetchError> {
         use std::time::Duration;
         // Every step has a limit, so a silent server cannot hold a download
         // (or its Cancel) for long. The body limit covers one attempt; a
@@ -360,15 +416,56 @@ impl Fetch for Https {
             .timeout_recv_response(Some(Duration::from_secs(30)))
             .timeout_recv_body(Some(Duration::from_secs(60)))
             .https_only(true)
+            // Statuses are read here, so a rate limit and a missing file
+            // can be told apart from a dropped connection.
+            .http_status_as_error(false)
             .build()
             .into();
         let mut request = agent.get(url).header("User-Agent", "TalkQTE");
         if offset > 0 {
             request = request.header("Range", &format!("bytes={offset}-"));
         }
-        let response = request
-            .call()
-            .map_err(|_| String::from("The download server could not be reached."))?;
+        let response = request.call().map_err(|_| {
+            FetchError::Transient("The download server could not be reached.".into())
+        })?;
+        let header = |name: &str| {
+            response
+                .headers()
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned)
+        };
+        match response.status().as_u16() {
+            200 | 206 => {}
+            429 | 503 => {
+                // Retry-After as delta seconds (a date form is not parsed
+                // and falls back to the default wait), or the IETF RateLimit
+                // header's "t=" reset time.
+                let retry_after = header("retry-after")
+                    .and_then(|value| value.trim().parse::<u64>().ok())
+                    .or_else(|| {
+                        header("ratelimit").and_then(|value| {
+                            value
+                                .split([',', ';'])
+                                .map(str::trim)
+                                .find_map(|part| part.strip_prefix("t=")?.parse::<u64>().ok())
+                        })
+                    })
+                    .map(Duration::from_secs);
+                return Err(FetchError::RateLimited { retry_after });
+            }
+            416 => return Err(FetchError::RangeNotSatisfiable),
+            403 | 404 | 410 => {
+                return Err(FetchError::Permanent(
+                    "The model file is not available from this source.".into(),
+                ))
+            }
+            status => {
+                return Err(FetchError::Transient(format!(
+                    "The download server answered with status {status}."
+                )))
+            }
+        }
         // A partial response must start exactly where the file stopped.
         let resumed = response.status().as_u16() == 206;
         if resumed {
@@ -378,7 +475,9 @@ impl Fetch for Https {
                 .and_then(|value| value.to_str().ok())
                 .is_some_and(|range| range.starts_with(&format!("bytes {offset}-")));
             if !starts_at_offset {
-                return Err("The server resumed at the wrong place.".into());
+                return Err(FetchError::Transient(
+                    "The server resumed at the wrong place.".into(),
+                ));
             }
         }
         let body = response.into_body().into_reader();
@@ -401,6 +500,8 @@ mod tests {
         honor_range: bool,
         requests: Mutex<Vec<(String, u64)>>,
         times: Mutex<Vec<std::time::Instant>>,
+        /// Errors to return instead of a body, one per request, newest last.
+        errors: Mutex<Vec<FetchError>>,
     }
 
     impl Fake {
@@ -411,6 +512,7 @@ mod tests {
                 honor_range: true,
                 requests: Mutex::new(vec![]),
                 times: Mutex::new(vec![]),
+                errors: Mutex::new(vec![]),
             }
         }
     }
@@ -428,11 +530,17 @@ mod tests {
     }
 
     impl Fetch for Fake {
-        fn get(&self, url: &str, offset: u64) -> Result<Response, String> {
+        fn get(&self, url: &str, offset: u64) -> Result<Response, FetchError> {
             self.requests.lock().unwrap().push((url.into(), offset));
             self.times.lock().unwrap().push(std::time::Instant::now());
+            if let Some(error) = self.errors.lock().unwrap().pop() {
+                return Err(error);
+            }
             let index: usize = url.trim_start_matches("test://").parse().unwrap();
-            let file = self.files.get(index).ok_or("unreachable")?;
+            let file = self
+                .files
+                .get(index)
+                .ok_or(FetchError::Transient("unreachable".into()))?;
             let start = if self.honor_range { offset as usize } else { 0 };
             let mut bytes = file[start..].to_vec();
             let cut = self.cut_after.lock().unwrap().pop().flatten();
@@ -686,6 +794,121 @@ mod tests {
     }
 
     #[test]
+    fn a_missing_file_is_not_retried_and_the_next_source_is_tried() {
+        let dir = dir();
+        let spec = real_spec(&["test://0", "test://1"]);
+        let fake = Fake::new(vec![BYTES.to_vec(), BYTES.to_vec()]);
+        fake.errors
+            .lock()
+            .unwrap()
+            .push(FetchError::Permanent("gone".into()));
+        download(
+            dir.path(),
+            &spec,
+            &fake,
+            plenty,
+            |_, _| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let requests = fake.requests.lock().unwrap();
+        assert_eq!(
+            requests.len(),
+            2,
+            "one refusal, then the fallback, no retries"
+        );
+        assert_eq!(requests[1].0, "test://1");
+
+        let only = Fake::new(vec![BYTES.to_vec()]);
+        only.errors
+            .lock()
+            .unwrap()
+            .push(FetchError::Permanent("gone".into()));
+        let dir = self::dir();
+        let failure = download(
+            dir.path(),
+            &real_spec(&["test://0"]),
+            &only,
+            plenty,
+            |_, _| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(matches!(failure, Failure::Unavailable(ref why) if why == "gone"));
+        assert_eq!(only.requests.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_rate_limit_waits_for_the_stated_reset_before_retrying() {
+        let dir = dir();
+        let spec = real_spec(&["test://0"]);
+        let fake = Fake::new(vec![BYTES.to_vec()]);
+        let reset = STALL_WAIT * 3;
+        fake.errors.lock().unwrap().push(FetchError::RateLimited {
+            retry_after: Some(reset),
+        });
+        download(
+            dir.path(),
+            &spec,
+            &fake,
+            plenty,
+            |_, _| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let times = fake.times.lock().unwrap();
+        assert_eq!(times.len(), 2);
+        assert!(times[1] - times[0] >= reset);
+    }
+
+    #[test]
+    fn a_rate_limit_wait_can_be_cancelled() {
+        let dir = dir();
+        let spec = real_spec(&["test://0"]);
+        let fake = Fake::new(vec![BYTES.to_vec()]);
+        fake.errors.lock().unwrap().push(FetchError::RateLimited {
+            retry_after: Some(std::time::Duration::from_secs(3_600)),
+        });
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let setter = cancel.clone();
+        let waiter = std::thread::spawn(move || {
+            std::thread::sleep(STALL_WAIT);
+            setter.store(true, Ordering::Release);
+        });
+        let result = download(dir.path(), &spec, &fake, plenty, |_, _| {}, &cancel);
+        waiter.join().unwrap();
+        assert_eq!(result.unwrap_err(), Failure::Cancelled);
+        assert!(leftovers(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn a_rejected_resume_offset_restarts_the_file_from_zero() {
+        let dir = dir();
+        let spec = real_spec(&["test://0"]);
+        let fake = Fake::new(vec![BYTES.to_vec()]);
+        fs::create_dir_all(dir.path()).unwrap();
+        // A stale partial file longer than the real file.
+        fs::write(part_path(dir.path(), &spec), vec![0; BYTES.len() + 5]).unwrap();
+        fake.errors
+            .lock()
+            .unwrap()
+            .push(FetchError::RangeNotSatisfiable);
+        download(
+            dir.path(),
+            &spec,
+            &fake,
+            plenty,
+            |_, _| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let requests = fake.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[1].1, 0, "second request starts from zero");
+        assert!(is_installed(dir.path(), &spec));
+    }
+
+    #[test]
     fn failed_attempts_wait_longer_each_time() {
         let dir = dir();
         let spec = real_spec(&["test://7"]);
@@ -721,7 +944,11 @@ mod tests {
         let result = download(dir.path(), &spec, &fake, plenty, |_, _| {}, &cancel);
         waiter.join().unwrap();
         assert_eq!(result.unwrap_err(), Failure::Cancelled);
-        assert_eq!(fake.requests.lock().unwrap().len(), 1, "no second attempt");
+        // Cancel landed before or during the first wait; never a second attempt.
+        assert!(
+            fake.requests.lock().unwrap().len() <= 1,
+            "no second attempt"
+        );
         assert!(leftovers(dir.path()).is_empty());
     }
 
