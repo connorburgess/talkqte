@@ -4,6 +4,19 @@ This is a development plan. Unchecked items are not implemented.
 
 The product goal is timely context that helps someone stay grounded and respond during the conversation. Clarification questions are the first bounded cue type. Saving and note-taking are secondary use cases to validate, not required proof of value. Current public presentation should explain a clearly labeled fictional concept and invite people to follow development; recruitment and downloads remain later stages.
 
+## Development milestones
+
+The direction is **proof of concept → live AI companion → connected workflows → broader platform availability**. macOS comes first, Windows is the next planned desktop platform, and iPhone/Android are future companion goals. Ubuntu/Linux is an exploratory track. Each platform must establish reliable conversation access and cue presentation.
+
+| Milestone                 | Delivery target                                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Proof of concept, current | Explore the interaction with fictional conversations and a working desktop prototype.                        |
+| Live AI companion         | Connect meeting audio, transcription, grounded cue decisions, and dependable controls.                       |
+| Connected workflows       | Add supported meeting and note-taking integrations with source-aware context and scoped permissions.         |
+| Broader availability      | Deliver maintained releases, straightforward setup and updates, and validated support across more platforms. |
+
+The [milestone acceptance criteria](docs/initial-rollout.md) define what counts as delivered. The sections below track the detailed work. Feasibility and integration planning can proceed alongside core development; each release advertises only its verified capabilities.
+
 ## Production, integrations, and distribution
 
 This track runs alongside the feature milestones below. The goal includes a dependable, supportable product that people can discover, install, connect to existing tools, and update with minimal friction. Use the [product readiness plan](docs/product-readiness.md) to choose the next release blocker and record evidence; a demo or successful build alone does not establish readiness.
@@ -31,8 +44,8 @@ This track runs alongside the feature milestones below. The goal includes a depe
 
 - [x] Fictional meeting playback with a notebook and arriving transcript segments.
 - [x] Rust-owned question expiry, cooldown, pause, and timing sensitivity.
-- [x] Phrase-based owner, deadline, and decision questions, with save and dismiss actions.
-- [x] Preserve manual notes and saved questions during replay; keep them in memory until quit.
+- [x] Phrase-based owner, deadline, and decision questions, with source disclosure and dismissal.
+- [x] Preserve optional manual notes during replay; keep them in memory until quit.
 - [x] Preview Markdown and save exactly the reviewed content to a chosen destination.
 - [x] Separate native question window with a restricted command and event surface.
 - [x] Compact complete questions, source disclosure that holds a question for reading, larger text, and optional near-camera placement.
@@ -73,13 +86,13 @@ Prove that audio capture, local transcription, and the floating prompt can coexi
 
 ## First usable version
 
-- [ ] Minimal session view centered on the current cue and its controls; saved questions and notes remain optional prototype capabilities.
+- [ ] Minimal session view centered on the current cue and its controls; optional notes remain a prototype utility, with no Save action or saved-cue archive.
 - [ ] One cue at a time, expiry, cooldown, pause, and adjustable sensitivity.
 - [ ] Initial cues for missing owners, vague deadlines, and explicit open questions.
 - [ ] Suppress questions answered by the conversation before display, and cancel stale or redundant prompts.
 - [ ] Prioritize questions clearly addressed to the user; remain quiet for another or uncertain addressee.
-- [ ] Preserve a direct question while the user answers, without competing cues, fabricated answers, response scores, or countdown pressure; keep save and dismiss available.
-- [ ] Mark a cue resolved; validate a separate use case before expanding saving or making it part of the core flow.
+- [ ] Preserve a direct question while the user answers, without competing cues, fabricated answers, response scores, or countdown pressure; keep dismissal available.
+- [ ] Clear or update cues as context changes; do not automatically archive unused suggestions.
 - [ ] Selected-meeting context and a simple meeting goal.
 - [ ] Clear retention controls for any retained content; expand prompt history or Markdown export only for a demonstrated use case.
 - [ ] Accessible keyboard operation and reduced-motion support.
@@ -115,8 +128,18 @@ Provider access and capabilities can change; recheck them when implementing each
 - Read-only calendar integration and pre-meeting context from selected notes.
 - A user-scoped, read-only MCP interface for selected meetings.
 - Action-item export with a review step before creating an external task.
-- Optional local language-model suggestions and source-linked meeting questions.
-- Windows support after the platform adapters are proven on macOS.
+- Additional local reasoning models after the first cue runtime meets the personal-alpha criteria.
+
+## Desktop platform expansion
+
+Windows is the next planned desktop platform after the macOS foundation. Parallels provides an initial Windows test environment and a route to explore Ubuntu. VM results apply to the tested guest architecture and virtual devices; they do not establish support for physical PCs or every Linux distribution. See the [platform validation plan](docs/platforms.md).
+
+- [ ] Build, install, and launch the Windows prototype in Parallels; record Windows, architecture, WebView2, and toolchain versions.
+- [ ] Validate Windows companion focus, scaling, keyboard access, full-screen meetings, and screen-sharing behavior.
+- [ ] Prove both sides of a synthetic call, Stop/recovery, and device changes through a Windows capture adapter.
+- [ ] Add Windows build/Rust checks when the build target is established, then validate signed installation and updates on the claimed physical hardware and architectures.
+- [ ] Explore an Ubuntu ARM64 VM: build and run the desktop shell, assess audio and companion behavior, and record the desktop/session configuration.
+- [ ] Decide whether to support a named Linux configuration based on the Ubuntu evidence and maintenance effort. General Linux support remains undecided.
 
 ## Future goal: participate from a phone
 

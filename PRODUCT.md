@@ -4,7 +4,7 @@
 
 web
 
-The interface runs in a Tauri desktop shell. macOS is the first target. Mobile is a future product goal: join a meeting on a phone and receive useful prompts during the call. Mobile capture and prompt presentation need separate platform validation; see the [mobile plan](docs/mobile.md).
+The interface runs in a Tauri desktop shell. macOS is the first target, with Windows planned next. Ubuntu/Linux is an exploratory validation track; broader Linux support is undecided. iPhone and Android are future companion goals: join a meeting on a phone and receive useful prompts during the call. Mobile conversation access and prompt presentation need separate validation. See the [platform plan](docs/platforms.md) and [mobile plan](docs/mobile.md).
 
 ## Stack
 
@@ -14,9 +14,9 @@ Rust application core, Tauri 2, React, TypeScript, and CSS. Local Whisper is the
 
 Stay grounded. Respond in the moment.
 
-Help a meeting participant follow what is happening and use relevant context to respond while the moment still matters. A clarification question is one possible prompt; a concise source-backed reminder or response prompt may also support participation. These broader cue types are product directions to validate, not implemented capabilities. TalkQTE should work on its own or alongside an existing note-taker without requiring a new notes workflow.
+Use AI to help a meeting participant follow what is happening and surface relevant context to respond while the moment still matters. A clarification question is one possible prompt; a concise source-backed reminder or response prompt may also support participation. These broader cue types are product directions to validate, not implemented capabilities. TalkQTE should work on its own or alongside an existing note-taker without requiring a new notes workflow.
 
-The initial audience includes people who want a little help participating and people who already use Granola or Fireflies for their meeting record. The existing note-taker can remain the primary record. Saving prompts and note-taking are secondary capabilities whose value needs a demonstrated use case; they are not the core product promise or required end of the experience. This direction does not remove existing Save, notes, or export functionality.
+The initial audience includes people who want a little help participating and people who already use Granola or Fireflies for their meeting record. The existing note-taker can remain the primary record. The live cue has context disclosure and dismissal, with no Save action or saved-question workflow. Optional notes and export remain prototype utilities; they are not the product promise.
 
 The intended flow is relevant context, an opportunity to respond, then the cue clears when no longer useful. An existing note-taker owns the record of what was actually said or decided; TalkQTE should not ask the user to save the same conversation again. An unused suggestion is not a meeting fact, decision, or action item and should not be automatically written into that record. There is no established need for a saved-prompt archive.
 
@@ -34,6 +34,12 @@ This keeps the next work focused on live input, relevance, timing, and user cont
 
 See [research and product decisions](docs/research.md) for the short evidence summary, what we use, and wording suitable for the website.
 
+## Development direction
+
+Progress from the current proof of concept to a live AI meeting companion, then expand supported integrations and platform availability. macOS is the first delivery target, followed by Windows. Use Parallels for initial Windows and Ubuntu experiments, recording guest architecture and virtual hardware limits. Ubuntu/Linux remains exploratory. Mobile work starts with cue presentation and a supported live-context source; same-phone capture is a separate feasibility gate. Each platform needs its own capture, presentation, accessibility, and distribution validation.
+
+The public roadmap describes delivered capabilities and the evidence needed to support them. Test-participant selection and internal execution arrangements are not the product audience. Automated fictional scenarios establish reproducible behavior; human evaluation establishes whether cues help participation while preserving listening. See the [development milestones](docs/initial-rollout.md) for scope and acceptance criteria.
+
 ## Whole-product readiness
 
 The [product readiness plan](docs/product-readiness.md) connects the feature roadmap to production engineering, Granola and other integrations, onboarding, privacy and security, distribution, support, and sustainable operating costs. A working demo establishes only part of readiness.
@@ -44,7 +50,7 @@ For the local-first core, scaling includes resource use on supported devices, re
 
 ## Operating context
 
-The app accompanies a meeting in another application. Its small prompt window must not take keyboard focus. Keep the resting companion quiet and minimal; use rounded surfaces, readable type, and clearly named controls when a cue appears. The current notebook supports saved questions and optional notes; it is an existing prototype capability, not a required step in the intended experience.
+The app accompanies a meeting in another application. Its small prompt window must not take keyboard focus. Keep the resting companion quiet and minimal; use rounded surfaces, readable type, and clearly named controls when a cue appears. The current notebook supports the fictional demo and optional notes; it is not a required step in the intended live experience.
 
 The current notebook is a prototype surface, not a requirement to build a meeting-management product. Additional saving, archives, summaries, and CRM work need a specific use case that supports participation. Integration readiness continues alongside the core work, with selected prior context as the first Granola candidate.
 
@@ -54,7 +60,7 @@ The current notebook is a prototype surface, not a requirement to build a meetin
 - Ground context and response prompts in inspectable sources. Do not invent facts, commitments, or an answer on the user's behalf.
 - Let the conversation answer first. Cancel a candidate that is resolved before display, and remove a displayed question when it becomes stale or redundant. These checks are not implemented in the current phrase-based demo.
 - Timing should preserve relevance without countdown pressure, scores, or a demand to respond.
-- Keep the rules-first approach until observed misses or false prompts justify a more complex method.
+- AI should select useful context and prompts, including when to stay quiet. Compare candidate reasoning against simple baselines and human-labeled fictional cases. The current phrase rules are a demo scaffold, not the intended product intelligence.
 - Plan production operation, integration, installation, updates, and support alongside the feature they enable; distinguish planned readiness from verified capability.
 - Capture and sharing require explicit actions and visible state.
 - Meeting content is private; public demos and tests use fictional data.
@@ -65,7 +71,7 @@ The current notebook is a prototype surface, not a requirement to build a meetin
 
 When the conversation clearly asks the user a question, prioritize that question over a general clarifying suggestion. Use explicit addressee evidence and the user's selected identity; a question addressed to someone else or an ambiguous addressee should stay quiet.
 
-Keep the question visible while the user is answering, without a competing suggestion or an expiring countdown pressuring them to respond. Let the user dismiss or save it at any time. Do not fabricate an answer, assign a response score, or penalize silence. Direct-address detection and answer-aware timing are future work, not behavior provided by the current phrase-based demo.
+Keep the question visible while the user is answering, without a competing suggestion or an expiring countdown pressuring them to respond. Let the user dismiss it at any time. Do not fabricate an answer, assign a response score, or penalize silence. Direct-address detection and answer-aware timing are future work, not behavior provided by the current phrase-based demo.
 
 ## Brand commitments
 

@@ -158,12 +158,6 @@ svg {
 .sidebar :focus-visible {
   outline-color: #e4edcd;
 }
-.nav-count {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-  color: #c5d4c8;
-  font-size: 12px;
-}
 .sidebar-bottom {
   margin-top: auto;
 }
@@ -795,15 +789,6 @@ svg {
   min-height: 48px;
   padding: 10px 14px;
 }
-.save-question {
-  border: 1px solid #dae4cf;
-  background: #dae4cf;
-  color: #203c32;
-  flex: 1;
-}
-.save-question:hover:not(:disabled) {
-  background: #f0f3e9;
-}
 .dismiss-question {
   border: 1px solid #6d8b7e;
   color: #dce5da;
@@ -811,41 +796,6 @@ svg {
 }
 .dismiss-question:hover:not(:disabled) {
   background: #39584a;
-}
-.saved-questions.compact {
-  margin-top: 22px;
-}
-.saved-questions.compact > h2 {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 16px;
-  margin-bottom: 13px;
-}
-.saved-questions.compact > h2 > span {
-  color: var(--muted);
-  font-weight: 400;
-  font-size: 13px;
-  margin-left: auto;
-}
-.saved-question {
-  display: flex;
-  gap: 12px;
-  padding: 17px 0;
-  border-bottom: 1px solid var(--line);
-}
-.saved-question > svg {
-  color: #5a714e;
-  margin-top: 1px;
-}
-.saved-question h3 {
-  font-size: 16px;
-}
-.saved-question p {
-  font-size: 15px;
-  color: var(--muted);
-  margin-top: 5px;
-  max-width: 65ch;
 }
 .transcript {
   padding-top: 18px;
@@ -887,9 +837,6 @@ svg {
   margin-top: 13px;
   color: var(--muted);
 }
-.secondary-page > .saved-questions {
-  margin: 34px 0;
-}
 .empty-inline {
   padding: 38px 0;
   color: var(--muted);
@@ -901,10 +848,6 @@ svg {
 .empty-inline p {
   max-width: 50ch;
   font-size: 16px;
-}
-.back-link {
-  display: flex;
-  margin-top: 30px;
 }
 .settings-page h1 {
   font-size: 28px;
@@ -1041,7 +984,7 @@ svg {
   font-size: 26px;
 }
 .floating-surface {
-  background: var(--paper);
+  background: var(--forest);
   color: #f2f5e9;
   display: flex;
   flex-direction: column;
@@ -1188,9 +1131,6 @@ svg {
   .question-actions {
     justify-content: flex-start;
   }
-  .save-question {
-    flex: 0 1 auto;
-  }
   .companion-footnote {
     padding-top: 9px;
   }
@@ -1235,9 +1175,6 @@ svg {
     font-size: 0;
     gap: 0;
     padding: 9px;
-  }
-  .nav-count {
-    display: none;
   }
   .sidebar-bottom {
     margin: 0;

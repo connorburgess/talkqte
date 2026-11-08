@@ -1,3 +1,5 @@
+<!-- PR title: type(optional-scope): describe the result. See CONTRIBUTING.md. -->
+
 ## Change
 
 <!-- Explain the problem and resulting behavior. Link a related issue if useful. -->
@@ -10,6 +12,7 @@ Use only fictional data in screenshots or examples. -->
 
 ## Checklist
 
+- [ ] The PR title and new contribution commit subjects use the documented Conventional Commit format.
 - [ ] Each contribution commit has an author-matching human sign-off (`git commit -s`).
 - [ ] Every contributor other than the project steward has personally accepted the contributor agreement as described in CONTRIBUTING.md, with a link to the agreement revision. Maintainer verification is required before merging.
 - [ ] The change includes no private meeting data, recordings, credentials, or personal screenshots.

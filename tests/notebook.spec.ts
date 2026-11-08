@@ -8,26 +8,36 @@ test.beforeEach(async ({ page }) => {
   ).toBeVisible();
 });
 
-test('saves a question, preserves it on replay, and never duplicates it', async ({
+test('dismisses a cue without turning it into a saved question', async ({
   page,
 }) => {
   await page.getByRole('button', { name: 'Try demo', exact: true }).click();
   await page.clock.runFor(5200);
-  await page
-    .getByRole('button', { name: 'Save question', exact: true })
-    .click();
   await expect(
-    page
-      .getByRole('region', { name: 'Saved questions', exact: true })
-      .getByText('Who will take the first draft?'),
+    page.getByRole('heading', { name: 'Who will take the first draft?' }),
   ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save question' })).toHaveCount(
+    0,
+  );
+  await expect(
+    page.getByRole('button', { name: 'Saved questions' }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
+  await expect(
+    page.getByRole('region', { name: 'Suggested question' }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Review your export' });
+  await expect(dialog.locator('pre')).not.toContainText(
+    'Who will take the first draft?',
+  );
+  await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'End demo', exact: true }).click();
   await page.getByRole('button', { name: 'Replay demo', exact: true }).click();
   await page.clock.runFor(5200);
-  await page
-    .getByRole('button', { name: 'Save question', exact: true })
-    .click();
-  await expect(page.locator('.saved-question')).toHaveCount(1);
+  await expect(
+    page.getByRole('heading', { name: 'Who will take the first draft?' }),
+  ).toBeVisible();
 });
 
 test('pause freezes a question, resume lets it expire without saving it', async ({
@@ -38,7 +48,7 @@ test('pause freezes a question, resume lets it expire without saving it', async 
   await page.getByRole('button', { name: 'Pause', exact: true }).click();
   await page.clock.runFor(30_000);
   await expect(
-    page.getByRole('button', { name: 'Save question', exact: true }),
+    page.getByRole('button', { name: 'Dismiss', exact: true }),
   ).toBeEnabled();
   await expect(
     page.getByRole('heading', { name: 'Who will take the first draft?' }),
@@ -48,7 +58,6 @@ test('pause freezes a question, resume lets it expire without saving it', async 
   await expect(
     page.getByRole('region', { name: 'Suggested question' }),
   ).toHaveCount(0);
-  await expect(page.locator('.saved-question')).toHaveCount(0);
 });
 
 test('export saves exactly the reviewed text even as the demo moves on', async ({
@@ -108,7 +117,7 @@ test('narrow layout keeps the demo and question controls usable with reduced mot
   await page.getByRole('button', { name: 'Try demo', exact: true }).click();
   await page.clock.runFor(5200);
   await expect(
-    page.getByRole('button', { name: 'Save question', exact: true }),
+    page.getByRole('button', { name: 'Dismiss', exact: true }),
   ).toBeVisible();
   expect(
     await page.evaluate(
@@ -141,13 +150,7 @@ for (const width of [320, 880]) {
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
-    for (const name of [
-      'Export',
-      'Pause',
-      'End demo',
-      'Save question',
-      'Dismiss',
-    ]) {
+    for (const name of ['Export', 'Pause', 'End demo', 'Dismiss']) {
       const button = page.getByRole('button', { name, exact: true });
       const bounds = await button.boundingBox();
       expect(bounds!.width, name).toBeGreaterThanOrEqual(44);
@@ -157,12 +160,10 @@ for (const width of [320, 880]) {
         name,
       ).toBe(true);
     }
-    await page
-      .getByRole('button', { name: 'Save question', exact: true })
-      .click();
+    await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
     await expect(
-      page.getByRole('region', { name: 'Saved questions', exact: true }),
-    ).toContainText('How will we choose between those options?');
+      page.getByRole('region', { name: 'Suggested question' }),
+    ).toHaveCount(0);
   });
 }
 

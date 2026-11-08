@@ -105,9 +105,6 @@ test('reduced motion shows the complete question and source without animation', 
   ).toBe(0);
   await question.getByRole('button', { name: 'Hide context' }).click();
   await expect(question.locator('blockquote')).toBeHidden();
-  await question.getByRole('button', { name: 'Save question' }).click();
+  await question.getByRole('button', { name: 'Dismiss' }).click();
   await expect(question).toHaveCount(0);
-  await expect(page.locator('.saved-question')).toContainText(
-    'Who will take the first draft?',
-  );
 });

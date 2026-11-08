@@ -1,78 +1,92 @@
-![TalkQTE — a quiet meeting companion](docs/assets/talkqte-banner.png)
-
 # TalkQTE
 
-A privacy-focused meeting companion for timely context and participation.
+**AI cues that help you stay grounded and respond in the moment.**
 
-Built in public with Rust, Tauri, and React. **Early development:** a runnable desktop prototype is available from source. It plays a fictional meeting and includes an opt-in macOS microphone activity monitor. Live meeting transcription, system-audio capture, and persistent storage are not implemented yet. There is no signed release.
+TalkQTE is a small meeting companion being built to follow the conversation and surface useful context while it still matters. That might be a reminder of an earlier constraint, a point worth clarifying, or a prompt to help you respond. The aim is to help you keep up without pulling you away from listening.
 
-## The idea
+One cue appears in a quiet floating window. You can inspect its context, dismiss it, or let it pass. There is no Save step or queue of questions to manage. Your existing note-taker can remain the record of what was actually said.
 
-Stay grounded. Respond in the moment. The aim is to supply relevant context and prompts while the conversation is still on that topic. A clarification question is one possible cue. The intended flow is context, an opportunity to respond, then the cue clears. Your existing note-taker can remain the record of what was said or decided; saving a prompt is not part of the core experience.
+## The experience we are working toward
 
-The current prototype uses fictional dialogue and phrase rules; broader context assistance is the intended direction. Follow development on GitHub.
+This fictional example illustrates the intended experience, not functionality the current prototype provides:
 
-Prompts should help you participate without stealing focus or demanding a response. TalkQTE is intended to work independently or alongside tools such as Granola and Fireflies; provider integrations are future work. The visual style is still being explored.
+| In the conversation         | TalkQTE could surface                        |
+| --------------------------- | -------------------------------------------- |
+| “Can we commit to Friday?”  | “Earlier, legal said review takes two days.” |
+| You need to respond         | “Will the draft be ready Wednesday?”         |
+| Someone resolves the timing | Clear the cue and stay quiet.                |
 
-## Try the prototype
+AI is intended to select relevant context, decide whether a cue would help, and recognize when it is no longer useful. Clarification questions are one cue type. Generating more prompts or getting someone to speak more is not the goal.
 
-On macOS, install Node.js 22, Rust 1.97.1, and Xcode Command Line Tools. See [Tauri's prerequisites](https://v2.tauri.app/start/prerequisites/) for native build requirements.
+## Where it stands today
+
+**Early development.** The app runs from source on macOS, but it does not yet understand a live meeting or generate AI cues. There is no supported public release.
+
+| Working prototype                                                | Still to build and validate                                              |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Fictional conversation replay with fixed, phrase-based questions | AI-selected context and prompts grounded in the conversation             |
+| Floating companion, source disclosure, pause, and dismissal      | Useful timing, suppression of answered questions, and stale-cue handling |
+| Separate, opt-in macOS microphone activity indicator             | Both sides of meeting audio and live transcription                       |
+| In-memory demo notes and reviewed Markdown export                | Reliable meeting use, processing choices, and install/update support     |
+
+The microphone indicator measures signal activity only. It does not transcribe, record, or feed the demo. No note-taker integration is implemented. See [current privacy behavior](PRIVACY.md) and the [native validation record](docs/native-validation.md) for the limits of existing checks.
+
+## Where we are heading
+
+The direction is to grow from a proof of concept into a dependable AI companion that works with existing meeting tools and becomes available across desktop and mobile platforms.
+
+| Stage                             | What it delivers                                                                                                                                    |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1. Proof of concept — current** | A fictional conversation demo to explore cue presentation, timing, and controls.                                                                    |
+| **2. Live AI companion**          | Meeting audio, transcription, and relevant AI cues working together reliably on macOS.                                                              |
+| **3. Connected workflows**        | Supported connections to meeting and note-taking tools, with selected context and clear permissions.                                                |
+| **4. Broader availability**       | Easy installation and updates, Windows as the next desktop target, and a mobile companion as its live-context and presentation paths are validated. |
+
+These are development milestones, not announced release dates or current capabilities. Integrations, reliability, and platform feasibility are planned alongside the core experience; each supported release must work end to end. See the [development milestones](docs/initial-rollout.md) and [detailed roadmap](ROADMAP.md).
+
+**Platform direction:** macOS first, Windows next. Ubuntu/Linux is an exploratory track. iPhone and Android are future companion goals, including receiving cues while using Google Meet on a phone; same-phone call access still needs to be proven. See the [platform plan](docs/platforms.md) and [mobile feasibility plan](docs/mobile.md).
+
+[Follow development on GitHub](https://github.com/connorburgess/talkqte).
+
+## Run the current prototype
+
+The stack is Rust, Tauri 2, React, and TypeScript. Local Whisper is planned for transcription; it is not wired into the app. The AI cue runtime is still being evaluated, and a lab model is not automatically the production choice.
+
+On macOS, install Node.js 22, Rust 1.97.1, and Xcode Command Line Tools. See [Tauri's prerequisites](https://v2.tauri.app/start/prerequisites/).
 
 ```sh
 npm ci
 npm run desktop
 ```
 
-Choose **Try demo** to play a fictional community-garden conversation. The notebook lets you:
+Choose **Try demo** for the fictional community-garden conversation. It requires no capture permission, model download, or API credentials. Open **Why?** to inspect a question's source and keep it available while reading; **Dismiss** clears it. Untouched questions pass quietly. New questions expand briefly, with a reduced-motion alternative. Settings provides text size, timing, and companion placement.
 
-- See transcript segments arrive and receive one timed question at a time.
-- Read a compact question by default. Open **Why?** for its source and keep it available while you read, then save or dismiss it.
-- New questions expand briefly once, and opening **Why?** reveals the source. Reduced-motion preferences show both immediately.
-- Pause/resume the demo, keep using question controls while paused, and adjust the gap between questions.
-- Write notes and replay the demo while keeping saved questions and notes in memory.
-- Review the exact Markdown export before choosing a file destination.
-- Use a desktop companion that stays compact between questions. In Settings, choose larger question text or optional near-camera placement; the default remains bottom-right on the notebook's display.
+The companion is configured not to take keyboard focus; use the notebook for keyboard controls. Dismissal there returns focus to notes or the selected Transcript tab unless you have already moved elsewhere. Cross-app focus and native placement still have [pending checks](docs/native-validation.md). See [Glance view](docs/glance-mode.md) for the current hold and expiry behavior.
 
-An opened question stays available after its original expiry and when demo playback finishes, with an earlier-question label when appropriate. Hiding its context keeps the hold; Save, Dismiss, explicitly ending the demo, or replaying clears it. Untouched questions still pass quietly. Appearance settings last until you quit. The companion is configured not to take keyboard focus; use the notebook for keyboard question controls. Save or Dismiss in the notebook returns focus to notes, or the selected Transcript tab, unless you have already moved to another control or application. Cross-app focus and native placement still need verification; see the [native validation record](docs/native-validation.md). Glance view does not access the camera or alter video. See the [design choices, supporting studies, and evidence limits](docs/glance-mode.md).
+**Demo notes are kept in memory until you quit.** Review and export anything you want to retain. Optional notes and export support prototype exploration; saving generated cues is not part of the live flow.
 
-**The prototype does not save your notebook when you quit.** Export anything you want to keep. The demo captures no audio, downloads no models, and requires no API credentials. Suggestions use a few phrase rules, not a language model.
+<details>
+<summary>Microphone activity and development commands</summary>
 
-### Check microphone activity
+Choose **Start microphone** explicitly and grant macOS permission if prompted. **Stop microphone** releases the input device; the stopping state remains until release completes. Pausing or ending the fictional demo does not stop monitoring. Hiding the companion only hides its window. The monitor does not retain samples, upload audio, hear the other side of a call through system audio, or generate cues. The browser preview cannot monitor a microphone. Real permission, device-disconnect, and audio-operation checks remain pending.
 
-The native macOS app has separate microphone controls. Start monitoring explicitly, then grant the operating system's microphone permission if prompted. The indicator reports coarse signal activity from the current default microphone. Noise can trigger it; it does not detect speech, identify a meeting, or generate questions from audio.
+`npm run dev` serves a separate browser simulation at `http://127.0.0.1:1420`. `npm test` runs browser behavior checks; `npm run build` builds the frontend. Browser checks do not verify Rust IPC or native windows.
 
-Choose **Stop microphone** to release the input device. The app shows a stopping state until release completes. Pausing or ending the fictional demo does not stop microphone monitoring; hiding the companion only hides its window. Monitoring does not start automatically and does not retain samples, create recordings, or upload audio. It does not hear the other side of a call through system audio. The browser preview cannot monitor a microphone.
+`APPLE_SIGNING_IDENTITY=- npm run tauri -- build --debug --bundles app` builds an ad-hoc-signed local development app. It is not a Developer ID-signed or notarized release.
 
-Synthetic lifecycle tests and a macOS build cover the adapter, but real microphone permission, device-disconnect, and audio-operation checks still need explicit native testing. See [PRIVACY.md](PRIVACY.md) for current behavior and limitations.
-
-For UI development, `npm run dev` starts a browser preview at `http://127.0.0.1:1420`. It uses a separate simulated adapter and cannot verify native window behavior. For packaged macOS testing, `APPLE_SIGNING_IDENTITY=- npm run tauri -- build --debug --bundles app` builds an ad-hoc-signed development app with the microphone entitlement. This is not a Developer ID-signed or notarized release.
-
-## Intended first usable version
-
-- macOS desktop app with a small floating cue window and clear context and response controls.
-- Local Whisper transcription, with no transcription API key required.
-- Microphone and system-audio capture, started explicitly by the user.
-- Clarification prompts for missing owners, vague deadlines, and unanswered questions as the first bounded slice; source-backed context reminders need separate validation.
-- A clear pause control, adjustable prompt frequency, and keyboard access.
-- Clear privacy and retention choices for any saved content. Saving, note-taking, and export are secondary use cases to validate; public demos use fictional data.
-
-These are development targets. The activity monitor does not yet transcribe meetings or supply live prompts, and the prototype has no retention controls. See [ROADMAP.md](ROADMAP.md) and the [current privacy behavior](PRIVACY.md).
+</details>
 
 ## Fictional cue lab
 
 An optional developer lab evaluates one bundled fictional scenario through Claude Code with Opus 5.5 using an existing subscription. It explores when to stay quiet or resolve a cue; it is separate from the phrase-based app and does not process real calls. `npm run lab:claude` lists cases without inference. Read the [lab setup and billing checks](docs/claude-cue-lab.md) before explicitly running a case; separately billed inference APIs are not supported.
 
-## Project decisions
+## Project context
 
-- [Product goal and first proof](PRODUCT.md#goal-and-first-proof)
-- [Cue intelligence, feedback, and runtime candidates](docs/cue-intelligence.md)
-- [Research summary and product decisions](docs/research.md)
-- [Architecture and stack](docs/architecture.md)
-- [Glance view design and research](docs/glance-mode.md)
-- [Privacy design](PRIVACY.md)
-- [Contribution guide](CONTRIBUTING.md)
-- [Practices drawn from existing projects](docs/contribution-baseline.md)
-- [Review and repository setup](docs/repository-setup.md)
+- [Product goal](PRODUCT.md) and [development milestones](docs/initial-rollout.md)
+- [Cue intelligence and evaluation](docs/cue-intelligence.md)
+- [Architecture](docs/architecture.md), [product readiness](docs/product-readiness.md), and [roadmap](ROADMAP.md)
+- [Research and evidence limits](docs/research.md)
+- [Privacy](PRIVACY.md) and [licensing](LICENSING.md)
 
 ## Contributing
 

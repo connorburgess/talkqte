@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import { Bookmark, ChevronDown, ChevronUp, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import type { Cue, CueSnapshot } from '../lib/types';
 
 export function Question({
@@ -7,14 +7,14 @@ export function Question({
   size,
   announce = true,
   busy,
-  onRespond,
+  onDismiss,
   onInspect,
 }: {
   cue: Cue;
   size: CueSnapshot['questionSize'];
   announce?: boolean;
   busy: boolean;
-  onRespond: (response: 'save' | 'dismiss') => void;
+  onDismiss: () => void;
   onInspect: (expanded: boolean) => void;
 }) {
   const contextId = useId();
@@ -44,22 +44,15 @@ export function Question({
       {cue.held && (
         <p className="question-held">
           {cue.remainingMs === 0
-            ? 'Earlier in the demo. Kept here until you save or dismiss.'
-            : 'Kept here until you save or dismiss.'}
+            ? 'Earlier in the demo. Kept here until you dismiss it.'
+            : 'Kept here until you dismiss it.'}
         </p>
       )}
       <div className="question-actions">
         <button
-          className="save-question"
-          disabled={busy}
-          onClick={() => onRespond('save')}
-        >
-          <Bookmark size={16} /> Save question
-        </button>
-        <button
           className="dismiss-question"
           disabled={busy}
-          onClick={() => onRespond('dismiss')}
+          onClick={onDismiss}
         >
           <X size={16} /> Dismiss
         </button>

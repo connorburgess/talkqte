@@ -8,6 +8,12 @@ Join Google Meet from a phone and receive timely context and prompts that help t
 
 This requires both a supported source of conversation context and a usable prompt surface. Displaying a prompt does not establish access to the meeting's audio. A phone-only experience must not be promised on the strength of desktop capture or browser UI tests.
 
+## What the first mobile experience could be
+
+The desired end state is to open TalkQTE, join Google Meet on the same phone, and receive useful cues during that call. The first feasible slice may instead be a foreground phone companion receiving cues from a paired desktop that already has authorized access to the meeting. That is useful evidence for presentation and pairing, but it does not complete the phone-only goal.
+
+Investigate a supported live transcript or meeting integration alongside native capture. A prior-note import cannot substitute for the current conversation. For every candidate, prove both where the live context comes from and how the cue remains usable while Meet is active. Keep macOS and Windows delivery moving while these mobile questions are unresolved.
+
 ## Keep the stack, separate the platform adapters
 
 Tauri supports native mobile plugins in Swift for iOS and Kotlin or Java for Android. Retain the Rust-owned question lifecycle and narrow UI commands described in the [architecture](architecture.md), while implementing capture, presentation, permissions, and lifecycle handling through separate platform adapters. Desktop window behavior must not be assumed to work across mobile apps. [Tauri mobile plugin documentation](https://v2.tauri.app/develop/plugins/develop-mobile/)
@@ -53,7 +59,7 @@ Evaluate Android overlays and other supported platform surfaces independently fr
 - Demonstrate both speakers' context without disrupting Meet's audio. Report unsupported capture and connection loss clearly; an active stream receiving policy-induced silence is not success.
 - Verify pairing consent, session scoping, revoked access, deletion, and denial paths. Inspect network traffic and logs for unintended meeting data.
 - Show one readable prompt without covering essential meeting controls. Verify touch targets, screen-reader behavior, text scaling, and dismissal.
-- Test direct-address priority with fictional names: a question clearly addressed to the user takes precedence; another or uncertain addressee stays quiet. Keep the question available while answering without a competing cue, fabricated answer, response score, or countdown pressure. Dismiss and save remain available.
+- Test direct-address priority with fictional names: a question clearly addressed to the user takes precedence; another or uncertain addressee stays quiet. Keep the question available while answering without a competing cue, fabricated answer, response score, or countdown pressure. Dismiss remains available; saving cues is not part of the live flow.
 - Preserve Rust-owned timing decisions across suspension and reconnect. Reject expired, duplicate, or out-of-order updates; a stale question must not reappear as a new prompt.
 - Measure end-to-end prompt latency, battery use, thermal behavior, and resource growth during sustained synthetic calls. Publish measured limits for tested configurations, not platform-wide guarantees.
 - Verify screen-sharing exposure separately. Do not claim the prompt is invisible to other participants without testing the relevant sharing mode.
