@@ -73,75 +73,72 @@ function FloatingQuestion() {
   const paused = state?.status === 'paused';
   return (
     <main className="floating-surface" aria-label="Meeting companion">
-      {active ? (
-        <>
-          <header className="companion-bar">
-            <MessageCircle
-              className="companion-mark"
-              size={25}
-              aria-hidden="true"
-            />
-            <div className="companion-status">
-              <strong>TalkQTE</strong>
-              <span role="status">
-                {paused ? 'Demo paused' : 'Demo running'} · No audio
-              </span>
-            </div>
-            <button
-              className="companion-control"
-              aria-label={paused ? 'Resume demo' : 'Pause demo'}
-              title={paused ? 'Resume demo' : 'Pause demo'}
-              disabled={busy}
-              onClick={() =>
-                void run(() =>
-                  bridge.command(paused ? 'resume_demo' : 'pause_demo'),
-                )
-              }
-            >
-              {paused ? <Play size={18} /> : <Pause size={18} />}
-            </button>
-            <button
-              className="companion-control"
-              aria-label="Hide companion"
-              title="Hide companion"
-              disabled={busy}
-              onClick={() =>
-                void run(() =>
-                  bridge.command('set_overlay', { enabled: false }),
-                )
-              }
-            >
-              <X size={18} />
-            </button>
-          </header>
-          {state?.cue && !paused && (
-            <Question
-              cue={state.cue}
-              paused={state.status !== 'running'}
-              busy={busy}
-              onRespond={(response) =>
-                void run(() =>
-                  bridge.command('respond_to_cue', {
-                    id: state.cue!.id,
-                    response,
-                  }),
-                )
-              }
-            />
-          )}
-        </>
-      ) : (
-        <p className="floating-empty">
-          {state?.overlayEnabled === false
-            ? 'Companion hidden. Show it again in Settings.'
-            : 'Start the demo from your notebook.'}
-        </p>
-      )}
-      {error && (
-        <p role="alert" className="floating-error">
-          {error}
-        </p>
-      )}
+      <div className="companion-shell">
+        {active ? (
+          <>
+            <header className="companion-bar">
+              <div className="companion-status">
+                <strong>TalkQTE</strong>
+                <span role="status">
+                  {paused ? 'Demo paused' : 'Demo running'} · No audio
+                </span>
+              </div>
+              <button
+                className="companion-control"
+                aria-label={paused ? 'Resume demo' : 'Pause demo'}
+                title={paused ? 'Resume demo' : 'Pause demo'}
+                disabled={busy}
+                onClick={() =>
+                  void run(() =>
+                    bridge.command(paused ? 'resume_demo' : 'pause_demo'),
+                  )
+                }
+              >
+                <span>{paused ? 'Resume' : 'Pause'}</span>
+              </button>
+              <button
+                className="companion-control"
+                aria-label="Hide companion"
+                title="Hide companion"
+                disabled={busy}
+                onClick={() =>
+                  void run(() =>
+                    bridge.command('set_overlay', { enabled: false }),
+                  )
+                }
+              >
+                <span>Hide</span>
+              </button>
+            </header>
+            {state?.cue && !paused && (
+              <Question
+                cue={state.cue}
+                paused={state.status !== 'running'}
+                busy={busy}
+                onRespond={(response) =>
+                  void run(() =>
+                    bridge.command('respond_to_cue', {
+                      id: state.cue!.id,
+                      response,
+                    }),
+                  )
+                }
+              />
+            )}
+          </>
+        ) : (
+          <p className="floating-empty">
+            {state?.overlayEnabled === false
+              ? 'Companion hidden. Show it again in Settings.'
+              : 'Start the demo from your notebook.'}
+          </p>
+        )}
+        {error && (
+          <p role="alert" className="floating-error">
+            {error}
+          </p>
+        )}
+      </div>
     </main>
   );
 }

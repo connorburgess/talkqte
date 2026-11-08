@@ -43,8 +43,9 @@ fn frame(origin: (i32, i32), area: (u32, u32), scale: f64, mode: Mode) -> Frame 
         1.0
     };
     let margin = (20.0 * scale).round() as u32;
-    let width = ((380.0 * scale).round() as u32).min(area.0.saturating_sub(2 * margin).max(1));
-    let height = ((if mode == Mode::Question { 350.0 } else { 88.0 } * scale).round() as u32)
+    let width = ((if mode == Mode::Question { 420.0 } else { 320.0 } * scale).round() as u32)
+        .min(area.0.saturating_sub(2 * margin).max(1));
+    let height = ((if mode == Mode::Question { 420.0 } else { 76.0 } * scale).round() as u32)
         .min(area.1.saturating_sub(2 * margin).max(1));
     Frame {
         x: (i64::from(origin.0) + i64::from(area.0.saturating_sub(width + margin)))
@@ -140,9 +141,13 @@ mod tests {
     fn expands_upward_above_the_dock_on_scaled_negative_origin_display() {
         let compact = frame((-2560, 50), (2560, 1330), 2.0, Mode::Compact);
         let question = frame((-2560, 50), (2560, 1330), 2.0, Mode::Question);
-        assert_eq!(compact.x, -800);
-        assert_eq!(compact.y, 1164);
-        assert_eq!(question.x, compact.x);
+        assert_eq!(compact.x, -680);
+        assert_eq!(compact.y, 1188);
+        assert!(question.width > compact.width);
+        assert_eq!(
+            question.x + question.width as i32,
+            compact.x + compact.width as i32
+        );
         assert_eq!(
             question.y + question.height as i32,
             compact.y + compact.height as i32

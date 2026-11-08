@@ -18,9 +18,6 @@ export function Question({
         <span>
           <MessageCircle size={16} /> {cue.kind}
         </span>
-        <span className="countdown">
-          {paused ? 'Paused' : `${Math.ceil(cue.remainingMs / 1000)}s`}
-        </span>
       </div>
       <h2 aria-live="polite">{cue.question}</h2>
       <p className="evidence">“{cue.evidence}”</p>
@@ -39,9 +36,6 @@ export function Question({
         >
           <X size={16} /> Dismiss
         </button>
-      </div>
-      <div className="time-track" aria-hidden="true">
-        <div style={{ width: `${(100 * cue.remainingMs) / cue.totalMs}%` }} />
       </div>
     </section>
   );

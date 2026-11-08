@@ -114,15 +114,56 @@ test('narrow layout keeps the demo and question controls usable with reduced mot
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
-  await expect(page.locator('.time-track > div')).toHaveCSS(
-    'transition-duration',
-    '0s',
-  );
+  await expect(
+    page.getByRole('button', { name: 'Dismiss', exact: true }),
+  ).toHaveCSS('transition-duration', '0s');
   await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
   await expect(
     page.getByRole('region', { name: 'Suggested question' }),
   ).toHaveCount(0);
 });
+
+for (const width of [320, 880]) {
+  test(`notebook controls remain readable and comfortably sized at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await page.getByRole('button', { name: 'Try demo', exact: true }).click();
+    await page.clock.runFor(72_000);
+    await expect(
+      page.getByRole('heading', {
+        name: 'How will we choose between those options?',
+      }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    for (const name of [
+      'Export',
+      'Pause',
+      'End demo',
+      'Save question',
+      'Dismiss',
+    ]) {
+      const button = page.getByRole('button', { name, exact: true });
+      const bounds = await button.boundingBox();
+      expect(bounds!.width, name).toBeGreaterThanOrEqual(44);
+      expect(bounds!.height, name).toBeGreaterThanOrEqual(44);
+      expect(
+        await button.evaluate((el) => el.scrollWidth <= el.clientWidth),
+        name,
+      ).toBe(true);
+    }
+    await page
+      .getByRole('button', { name: 'Save question', exact: true })
+      .click();
+    await expect(
+      page.getByRole('region', { name: 'Saved questions', exact: true }),
+    ).toContainText('How will we choose between those options?');
+  });
+}
 
 test('keyboard users can change notebook tabs and close the export preview', async ({
   page,
