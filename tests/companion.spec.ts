@@ -10,6 +10,21 @@ async function sessionAction(page: Page, name: 'start_demo' | 'end_demo') {
   }, name);
 }
 
+async function expectCompanionToFit(page: Page) {
+  const bounds = await page.evaluate(() => ({
+    width: document.documentElement.scrollWidth,
+    height: document.querySelector('main')!.scrollHeight,
+    viewportWidth: innerWidth,
+    viewportHeight: innerHeight,
+  }));
+  expect(bounds.width, 'companion width').toBeLessThanOrEqual(
+    bounds.viewportWidth,
+  );
+  expect(bounds.height, 'companion height').toBeLessThanOrEqual(
+    bounds.viewportHeight,
+  );
+}
+
 test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 420, height: 420 });
   await page.clock.install();
@@ -37,13 +52,7 @@ test('companion stays compact between questions and preserves a paused question'
     expect(bounds!.width).toBeGreaterThanOrEqual(44);
     expect(bounds!.height).toBeGreaterThanOrEqual(44);
   }
-  expect(
-    await page.evaluate(
-      () =>
-        document.documentElement.scrollWidth <= innerWidth &&
-        document.querySelector('main')!.scrollHeight <= innerHeight,
-    ),
-  ).toBe(true);
+  await expectCompanionToFit(page);
   await page.clock.runFor(5_200);
   await page.setViewportSize({ width: 420, height: 420 });
   await expect(
@@ -56,9 +65,7 @@ test('companion stays compact between questions and preserves a paused question'
   await expect(page.getByRole('button', { name: 'Resume demo' })).toHaveText(
     'Resume',
   );
-  expect(
-    await page.locator('main').evaluate((el) => el.scrollHeight <= innerHeight),
-  ).toBe(true);
+  await expectCompanionToFit(page);
   await expect(
     page.getByRole('region', { name: 'Suggested question' }),
   ).toHaveCount(0);
@@ -98,13 +105,7 @@ test('question controls remain usable with reduced motion and longer wrapping', 
   await expect(
     page.getByRole('button', { name: 'Dismiss', exact: true }),
   ).toBeVisible();
-  expect(
-    await page.evaluate(
-      () =>
-        document.documentElement.scrollWidth <= innerWidth &&
-        document.querySelector('main')!.scrollHeight <= innerHeight,
-    ),
-  ).toBe(true);
+  await expectCompanionToFit(page);
   await expect(
     page.getByRole('button', { name: 'Dismiss', exact: true }),
   ).toHaveCSS('transition-duration', '0s');

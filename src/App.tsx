@@ -94,7 +94,6 @@ function FloatingQuestion() {
                   )
                 }
               >
-                {paused ? <Play size={14} /> : <Pause size={14} />}
                 <span>{paused ? 'Resume' : 'Pause'}</span>
               </button>
               <button
