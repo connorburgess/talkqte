@@ -67,7 +67,7 @@ The current phrase rules were run on the same eight fictional cases the [Claude 
 | context-reminder       | show     | quiet: the rules have no context reminders                                                          |
 | transcript-instruction | quiet    | quiet, and correctly ignores the embedded instruction                                               |
 
-The rules match the expected action in 2 of 8 cases, and both matches come from doing nothing. They miss paraphrased triggers, context reminders, and topic changes said in other words. This is the comparison point for a semantic evaluator on the same inputs. Like the lab's own results, it is a smoke check on eight small examples, not evidence about real meetings.
+The rules match the expected action in 2 of 8 cases, and both matches come from doing nothing. On the same cases, the subscription-backed Claude lab matched 7 of 8, each run once ([lab record](claude-cue-lab.md#validation-record)). Its one disagreement, `missing-owner`, is a defensible judgment that a cue would duplicate what the speakers were already settling. They miss paraphrased triggers, context reminders, and topic changes said in other words. This is the comparison point for a semantic evaluator on the same inputs. Like the lab's own results, it is a smoke check on eight small examples, not evidence about real meetings.
 
 ## Smallest useful evaluation
 
