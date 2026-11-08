@@ -104,6 +104,7 @@ An optional developer lab evaluates one bundled fictional scenario through Claud
 - [Product goal](PRODUCT.md) and [development milestones](docs/initial-rollout.md)
 - [Cue intelligence and evaluation](docs/cue-intelligence.md)
 - [Architecture](docs/architecture.md), [product readiness](docs/product-readiness.md), and [roadmap](ROADMAP.md)
+- [Troubleshooting](docs/troubleshooting.md): what each message in the prototype means and what to do
 - [Research and evidence limits](docs/research.md)
 - [Privacy](PRIVACY.md) and [licensing](LICENSING.md)
 
