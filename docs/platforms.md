@@ -36,6 +36,12 @@ Configuration: Windows 11 Arm (build 26300) with 4 virtual CPUs and 12 GiB memor
 
 Not checked or not available: microphone monitoring (reports unsupported off macOS), companion placement, focus, display scaling, accessibility, full-screen meetings, and screen sharing. Also not covered: installer, signing, release builds (the debug build opens a console window), x64, and physical PCs. This result covers one Arm VM configuration only.
 
+### Companion check, 9 November 2026
+
+In the same Windows 11 Arm VM, commit `81aa840` built successfully with `npm ci`, the frontend build, 93 Rust tests, and a Tauri debug build. In the logged-in desktop session, UI Automation started the fictional demo and found its question. The notebook's **Why?** button accepted keyboard focus, and Enter opened its context. The app and companion windows reported 192 DPI through `GetDpiForWindow`; a separate 150% scaling check was not performed.
+
+The Notepad foreground comparison was inconclusive: the automation did not establish that its test Notepad was foreground before the question arrived. The initial automation cleanup forced the app process to exit. A separate idle-app check closed the notebook through its UI Automation window control and observed the app process exit within five seconds; exit after a running demo remains unverified. These results do not establish cross-app focus behavior, general keyboard accessibility, or support on other Windows configurations.
+
 ## Ubuntu exploration
 
 Parallels supports Ubuntu guests and documents installation from an ARM image on Apple silicon. Start with a supported Ubuntu LTS guest; record its exact version, architecture, desktop environment, display session, and audio configuration. [Ubuntu installation guide](https://kb.parallels.com/en/128445)
@@ -56,6 +62,10 @@ Configuration: Ubuntu 26.04 LTS ARM64 (kernel 7.0) in Parallels 27.1.0 with matc
 | Launch and fictional demo     | In the logged-in GNOME Wayland session, the app stayed running and exposed its `TalkQTE` window to the accessibility interface (AT-SPI). Through AT-SPI, **Try demo** showed “Who will take the first draft?” and **End demo** worked; the app exited cleanly on SIGTERM. |
 
 Wayland reports window positions as 0,0 to the accessibility interface, so this check could not confirm where the companion appears or whether it stays on top. Next: check companion placement, focus and stacking under Wayland, keyboard access and the screen reader, and both-side synthetic audio. General Linux support remains undecided.
+
+### Companion accessibility check, 9 November 2026
+
+In the same Ubuntu ARM64 GNOME Wayland VM, the fictional demo on commit `b05b4dc` exposed both the notebook and companion as AT-SPI frames (1024 × 736 and 320 × 76). Both reported position `(0, 0)`, so these coordinates do not establish actual placement or stacking. The fictional question appeared; the **Why?** and **Dismiss** buttons reported focusable and accepted AT-SPI focus. A synthesized Return key did not open context, so keyboard activation remains unverified; this check cannot distinguish an application issue from Wayland input synthesis restrictions. The demo ended and the test process exited on SIGTERM. No screen-reader, physical keyboard, cross-app focus, or stacking result is claimed.
 
 ## Mobile validation
 
