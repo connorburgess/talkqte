@@ -45,6 +45,14 @@ CI runs only the offline tests using fake CLI responses. Live model requests are
 
 ## Validation record
 
-On 8 November 2026, all 11 offline tests passed, repository formatting passed, and Claude Code 2.1.318 returned a subscription login through the isolated check. No live model result is recorded yet. The remaining acceptance step is one explicitly initiated fictional case after verifying included-usage billing, followed by human inspection of its evidence and decision.
+On 8 November 2026, all 11 offline tests passed, repository formatting passed, and Claude Code 2.1.318 returned a subscription login through the isolated check. After confirmation that paid extra usage was disabled, one live fictional case completed:
+
+| Case | Model / CLI | Observed result | Request wall time |
+| --- | --- | --- | --- |
+| `already-answered` | `claude-opus-5-5` / 2.1.318 | `quiet`, no cue, `not_observed` use; cited `e1` and `e2`, matching the expected labels | 3,615 ms |
+
+Inspection of the fixture supports this decision: the first line leaves the checklist owner open, and the second explicitly assigns it to Maya. The runner verified subscription authentication and the returned model ID. Reported usage was 2 input tokens, 1,205 cache-creation input tokens, 0 cache-read input tokens, and 116 output tokens; these counters do not establish the account's remaining allowance or constitute a billing receipt.
+
+This timing includes the inference CLI's startup and response, excluding the separate version/authentication checks. Only this case has a recorded live result. The other seven cases, repeated latency, comparison against rules, and useful participation during a conversation remain unvalidated.
 
 Record any live trial's selected fixture, model, CLI version, outcome, and latency separately; do not describe the entire suite as evaluated after a single trial. Keep account information and raw provider/session output outside the repository.
