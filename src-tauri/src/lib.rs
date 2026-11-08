@@ -1,6 +1,7 @@
 mod companion;
 #[cfg(target_os = "macos")]
 mod companion_macos;
+pub mod context;
 pub mod engine;
 mod microphone;
 pub mod transcription;

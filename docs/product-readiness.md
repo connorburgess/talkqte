@@ -50,6 +50,20 @@ These pages establish documented options, not working TalkQTE integrations. The 
 
 Define the smallest source-aware adapter contract with the first slice: provider/source identity, source date, selected content, revision, capability, and connection status. Keep authentication and provider mapping behind the existing native boundary. Use fictional fixtures for repeated imports, expired/revoked credentials, empty results, rate limits, interrupted requests, and deletion/disconnect. Specify bounded retries and cancellation. For live sources, add duplicate/out-of-order events and transcript revisions before enabling them.
 
+The first version of this contract is `src-tauri/src/context.rs`. Each imported note carries its provider, source ID, title, date, a selected excerpt of up to 2,000 characters, and a revision. Each connection reports separate import, live-input, and writeback capabilities, and a status: not connected, connected, expired, revoked, rate limited, or unavailable. An in-memory store keeps at most 20 notes.
+
+Fictional failure tests cover:
+
+- **Repeated imports:** they replace a note only with a newer revision, so a note is never duplicated or rolled back.
+- **Expired or revoked access:** this stops at once, with no retry.
+- **Interrupted requests:** these retry up to three attempts, waiting 1 s and then 2 s.
+- **Rate limits:** a provider's wait is honored up to 30 seconds, never longer.
+- **Cancellation:** it stops before the next attempt or wait.
+- **Empty or invalid results:** these change nothing.
+- **Removal and disconnect:** both delete the imported copies.
+
+No provider adapter, authentication, network request, or user interface exists yet, and imported notes are not yet shown or used for cues.
+
 An integration is ready only after a user can connect, understand access, select context, recover from a failure, disconnect, and manage imported copies. A mock is preparation; account-level validation and the full user flow are separate release gates. Any writeback needs a verified endpoint plus reviewed content and destination.
 
 ## Distribution and first use
