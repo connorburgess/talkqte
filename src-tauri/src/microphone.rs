@@ -12,7 +12,9 @@ use std::{
 };
 use tauri::{Emitter, Manager};
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used by the macOS adapter only.
 const MAX_METER_SAMPLES: usize = 4_096;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used by the macOS adapter only.
 const ACTIVITY_POWER: f32 = 0.0001; // Approximate -40 dBFS RMS; not speech detection.
 const ACTIVITY_HOLD: Duration = Duration::from_millis(600);
 const INPUT_TIMEOUT: Duration = Duration::from_secs(3);
@@ -58,7 +60,9 @@ impl Default for Snapshot {
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Failure {
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used by the macOS adapter only.
     Permission,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used by the macOS adapter only.
     NoDevice,
     Unsupported,
     Device,
@@ -87,6 +91,7 @@ pub(super) struct Meter {
 impl Meter {
     // The callback does bounded arithmetic and atomic writes only. It never
     // allocates, locks, logs, emits UI events, or retains a sample.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used by the macOS adapter only.
     fn observe(&self, samples: impl Iterator<Item = f32>) {
         let mut power = 0.0;
         let mut count = 0;
