@@ -1622,6 +1622,69 @@ mod tests {
         assert!(e.user_name.is_none());
     }
 
+    /// Runs the current phrase rules on the shared fictional suite that the
+    /// cue lab also uses, and prints each case's action beside its label.
+    /// The recorded baseline makes any change in rule behavior visible.
+    #[test]
+    fn rules_baseline_on_the_shared_fictional_suite() {
+        let suite: serde_json::Value =
+            serde_json::from_str(include_str!("../../scripts/fixtures/cue-lab.json")).unwrap();
+        let mut results = vec![];
+        for case in suite.as_array().unwrap() {
+            let mut e = Engine::live();
+            e.start().unwrap();
+            let events = case["events"].as_array().unwrap();
+            let existing = !case["existingCue"].is_null();
+            let mut action = "quiet";
+            for (index, event) in events.iter().enumerate() {
+                let at = 1_000 + index as u64 * 2_000;
+                e.advance(at - e.state.elapsed_ms);
+                let text = event["text"].as_str().unwrap();
+                let before = e.state.cue.clone();
+                e.ingest(e.session(), live(event["id"].as_str().unwrap(), at, text))
+                    .unwrap();
+                if let (Some(cue), None) = (&before, &e.state.cue) {
+                    action = if resolves(&cue.kind, text) {
+                        "resolved"
+                    } else {
+                        "withdraw"
+                    };
+                }
+            }
+            if !existing && e.state.cue.is_some() {
+                action = "show";
+            }
+            // For a case that starts with a visible cue, the rules can only
+            // take part if the first line raised one.
+            if existing && action == "quiet" && e.state.cue.is_none() {
+                action = "no cue raised";
+            }
+            let expected = case["expected"]["action"].as_str().unwrap();
+            eprintln!(
+                "{:24} rules={action:14} expected={expected}",
+                case["id"].as_str().unwrap()
+            );
+            results.push((case["id"].as_str().unwrap().to_string(), action));
+        }
+        // Recorded 9 November 2026. Update it deliberately when the rules
+        // change, and record the new comparison in docs/cue-intelligence.md.
+        let baseline = [
+            ("missing-owner", "quiet"),
+            ("already-answered", "quiet"),
+            ("visible-cue-resolved", "no cue raised"),
+            ("asked-but-unanswered", "no cue raised"),
+            ("topic-moved-on", "quiet"),
+            ("uncertain-speaker", "no cue raised"),
+            ("context-reminder", "quiet"),
+            ("transcript-instruction", "quiet"),
+        ];
+        let baseline: Vec<(String, &str)> = baseline
+            .iter()
+            .map(|(id, action)| (id.to_string(), *action))
+            .collect();
+        assert_eq!(results, baseline);
+    }
+
     #[test]
     fn a_question_answered_while_catching_up_is_never_shown() {
         let mut e = play(&[
