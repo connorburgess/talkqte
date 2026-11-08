@@ -22,6 +22,8 @@ The initial audience includes people who want a little help participating and pe
 
 **Help someone ask a relevant clarification while keeping up with the conversation.** A question that arrives after the topic has moved on, repeats an answer, or makes listening harder is a product failure even if its wording is good.
 
+**Deliver the defined feature set as a dependable product that people can discover, install, use with their existing tools, and keep up to date with minimal friction.** Production reliability, scalability, integration readiness, distribution, and ongoing support are part of the goal from the start. Plan and validate them alongside feature development rather than leaving them until the prototype feels complete.
+
 The first technical goal is a macOS companion that can receive both sides of a synthetic call, transcribe locally, and show one controllable question without taking focus from the meeting. The current fictional demo and separate microphone activity monitor do not meet that goal yet. See the [technical milestone](ROADMAP.md#first-technical-milestone).
 
 The first product proof is a comparison of short fictional conversations with and without prompts. Record whether a question was useful, timely, already answered, or distracting; check whether people still understood the conversation and could ignore, hold, save, or dismiss the prompt. Include cases where staying quiet is correct. Agree on acceptance criteria before evaluating a candidate, and record misses as well as useful prompts. A higher prompt count or more saves alone is not success.
@@ -29,6 +31,14 @@ The first product proof is a comparison of short fictional conversations with an
 This keeps the next work focused on live input, relevance, timing, and user control. Broader meeting management, summaries, and integrations follow only when they support that experience. Camera-facing gaze is an optional presentation preference, not the product goal or a measure of successful participation.
 
 See [research and product decisions](docs/research.md) for the short evidence summary, what we use, and wording suitable for the website.
+
+## Whole-product readiness
+
+The [product readiness plan](docs/product-readiness.md) connects the feature roadmap to production engineering, Granola and other integrations, onboarding, privacy and security, distribution, support, and sustainable operating costs. A working demo establishes only part of readiness.
+
+For each meaningful feature or milestone, identify its user outcome, production failure cases, performance or capacity limits, integration implications, and path into a supported release. Record an acceptance check and the next unresolved dependency. Choose bounded work across these areas according to the next release blocker; do not let either feature work or speculative infrastructure consume the whole roadmap.
+
+For the local-first core, scaling includes resource use on supported devices, reliable model and application delivery, compatible upgrades, and support effort as adoption grows. Add services or a more complex architecture only when a measured need and operating plan justify them. Frictionless use preserves explicit capture and sharing choices, clear permissions, and an easy way to stop or disconnect.
 
 ## Operating context
 
@@ -42,6 +52,7 @@ The current notebook is a prototype surface, not a requirement to build a meetin
 - Let the conversation answer first. Cancel a candidate that is resolved before display, and remove a displayed question when it becomes stale or redundant. These checks are not implemented in the current phrase-based demo.
 - Timing should preserve relevance without countdown pressure, scores, or a demand to respond.
 - Keep the rules-first approach until observed misses or false prompts justify a more complex method.
+- Plan production operation, integration, installation, updates, and support alongside the feature they enable; distinguish planned readiness from verified capability.
 - Capture and sharing require explicit actions and visible state.
 - Meeting content is private; public demos and tests use fictional data.
 - Describe implemented behavior accurately. A demo must never imply that audio is being captured.
@@ -61,7 +72,7 @@ Focus, low distraction, and compatibility are product hypotheses to test. Relate
 
 ## Integration priorities
 
-Evaluate Granola first, Fireflies second, and others when actual demand justifies them. Treat reading previous notes, receiving a live transcript, and writing results back as separate capabilities. Verify each against supported interfaces and user access before promising it. See the dated capability notes in [ROADMAP.md](ROADMAP.md#future-goal-work-with-other-note-taking-apps).
+Plan and validate integration boundaries now, alongside the core experience. Evaluate Granola first, Fireflies second, and others when actual demand justifies them. Treat reading previous notes, receiving a live transcript, and writing results back as separate capabilities. Verify supported interfaces, account access, authentication, data handling, and failure recovery before promising a connection. Keep the core useful when a provider is unavailable. See the [readiness plan](docs/product-readiness.md#integration-readiness) and dated capability notes in [ROADMAP.md](ROADMAP.md#future-goal-work-with-other-note-taking-apps).
 
 ## Smallest useful comparison
 
