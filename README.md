@@ -25,6 +25,7 @@ Choose **Try demo** to play a fictional community-garden conversation. The noteb
 
 - See transcript segments arrive and receive one timed question at a time.
 - Read a compact question by default. Open **Why?** for its source and keep it available while you read, then save or dismiss it.
+- New questions expand briefly once, and opening **Why?** reveals the source. Reduced-motion preferences show both immediately.
 - Pause/resume the demo, keep using question controls while paused, and adjust the gap between questions.
 - Write notes and replay the demo while keeping saved questions and notes in memory.
 - Review the exact Markdown export before choosing a file destination.
