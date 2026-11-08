@@ -8,7 +8,7 @@ The optional `local-whisper` Cargo feature adds `LocalWhisper`, a [Transcriber](
 
 `Engine::live()` creates a session with no scripted demo lines, for transcript input through `Engine::ingest`.
 
-The app looks for the model at `TALKQTE_WHISPER_MODEL`, or at `models/ggml-tiny.en.bin` in its data folder, where **Download speech model** in Settings puts it after checking its SHA-256. **Start live session** loads it before opening the microphone, so a missing or unreadable model is reported without starting capture. The capture callback feeds the [audio tap](architecture.md); a runner thread moves 3-second chunks to the worker every 250 ms and the worker's lines go to `Engine::ingest`. Stop releases the microphone first, then transcribes what was queued, waiting up to 10 seconds. If the microphone is refused or fails, the session ends.
+The app looks for the model at `TALKQTE_WHISPER_MODEL`, or at `models/ggml-tiny.en.bin` in its data folder, where **Download speech model** in Settings puts it after checking its SHA-256. **Start live session** loads it before opening the microphone, so a missing or unreadable model is reported without starting capture. The capture callback feeds the [audio tap](architecture.md); a runner thread moves chunks of 1–3 seconds, cut at pauses where possible, to the worker every 250 ms and the worker's lines go to `Engine::ingest`. Stop releases the microphone first, then transcribes what was queued, waiting up to 10 seconds. If the microphone is refused or fails, the session ends.
 
 ## Run the check
 
@@ -126,13 +126,27 @@ Chunk length sets the delay. On the 30-second meeting clip:
 | 3 s   | 3.13 s         | 6.2 s          | 18.1 s             |
 | 5 s   | 5.16 s         | 5.3 s          | 20.2 s             |
 
-Shorter chunks deliver lines sooner, but fixed-length chunks cut words at their edges, which delayed the first question slightly. Splitting chunks at pauses in speech would keep the lower delay without cutting words; that is the next improvement to evaluate.
+Shorter chunks deliver lines sooner, but fixed-length chunks cut words at their edges, which delayed the first question slightly.
+
+### Pause-based chunks
+
+The audio tap can end a chunk at the first pause after a minimum length instead of always at the full length: `Chunker::cut_at_pauses`. A pause is 200 ms of 20 ms frames below a tenth of the chunk's median sound level so far, after some sound. Only earlier frames count, so a later loud sound does not change an earlier cut and the cut does not depend on how often the chunker drains. A full-length chunk in which every sample is below 0.003 is skipped rather than transcribed, and counted; soft speech above that still reaches the recognizer. Live sessions use a 1-second minimum and a 3-second maximum.
+
+`replay_clip --chunk-ms 3000 --pause-min-ms 1000` feeds the clip through the tap and drains it every 250 ms, as a live session does. In fixed mode the replay hands each chunk over the moment its audio has arrived, without the tap, so the comparison slightly favors fixed chunks. Two runs of each on the meeting clip, 9 November 2026, with the same model, Mac, and debug build:
+
+| Chunks       | Delay (median) | Delay (95th percentile) | Question shown | Question withdrawn | Lines |
+| ------------ | -------------- | ----------------------- | -------------- | ------------------ | ----- |
+| Fixed 3 s    | 3.18 s, 3.17 s | 3.21 s, 3.21 s          | 6.30 s, 6.30 s | 18.2 s, 18.3 s     | 12    |
+| Pause, 1–3 s | 3.12 s, 3.12 s | 3.33 s, 3.37 s          | 5.96 s, 5.99 s | 18.4 s, 18.5 s     | 12    |
+
+Pause cuts showed the question about 0.3 s sooner, with about the same median delay; the 95th percentile was about 0.15 s worse, and the withdrawal came about 0.2 s later. This clip's speakers rarely pause within 3 seconds, so most chunks still reach the maximum. An earlier version that also trimmed silence before speech lowered the median delay to 2.3 s but showed the question 1.2 s later, because each window then started at the speech and ended later; it was dropped. Whether pause cuts reduce cut words was not scored.
 
 These figures describe one clean synthetic voice pair on one Mac. They do not include capture, the companion window, the other side of a call, noise, or other hardware, and they are inputs to the budget proposal, not budgets. It does not measure accuracy on real meetings, noisy audio, overlapping speakers, sustained sessions, or other hardware, and it is not a latency or resource budget.
 
 ## Still needed
 
 - Model delivery: the Settings download is built; the first-run setup step and update path are not. See the [model delivery plan](model-delivery.md#what-is-implemented).
+- Pause detection and silence skipping in real rooms: the pause threshold is relative to the chunk's median sound level, the silence floor is fixed, and both were checked only on clean synthetic speech.
 - A live session on real hardware: permission, release on Stop and End, and delay with the companion showing.
 - Sustained-session measurements of delay, memory growth, CPU use, and dropped audio.
 

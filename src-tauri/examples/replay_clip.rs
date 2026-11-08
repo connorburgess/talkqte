@@ -4,6 +4,11 @@
 //!
 //!   cargo run --features local-whisper --example replay_clip -- \
 //!     --model /path/ggml-tiny.en.bin --clip /path/clip.wav [--chunk-ms 4000] [--end-at-ms N]
+//!     [--pause-min-ms N]
+//!
+//! With `--pause-min-ms`, audio goes through the app's audio tap, drained
+//! every 250 ms as in a live session, and chunks end at the first pause after
+//! N ms; `--chunk-ms` is then the longest a chunk can be.
 //!
 //! Prints only cue questions, source IDs, counts, and timings, never
 //! transcript text. Reads the clip and model; writes nothing.
@@ -14,6 +19,7 @@ use std::{
     time::{Duration, Instant},
 };
 use talkqte_lib::{
+    audio_tap::tap,
     engine::Engine,
     transcription::{whisper::LocalWhisper, AudioChunk, Worker, SAMPLE_RATE},
 };
@@ -24,6 +30,7 @@ struct Args {
     chunk_ms: u64,
     end_at_ms: Option<u64>,
     report_every_ms: u64,
+    pause_min_ms: Option<u64>,
 }
 
 fn args() -> Result<Args, String> {
@@ -32,6 +39,7 @@ fn args() -> Result<Args, String> {
     let mut chunk_ms = 4_000;
     let mut end_at_ms = None;
     let mut report_every_ms = 60_000;
+    let mut pause_min_ms = None;
     let mut list = std::env::args().skip(1);
     while let Some(flag) = list.next() {
         let value = list.next().ok_or(format!("{flag} needs a value"))?;
@@ -43,6 +51,13 @@ fn args() -> Result<Args, String> {
                 report_every_ms = value
                     .parse()
                     .map_err(|_| "--report-every-ms must be a number")?
+            }
+            "--pause-min-ms" => {
+                pause_min_ms = Some(
+                    value
+                        .parse()
+                        .map_err(|_| "--pause-min-ms must be a number")?,
+                )
             }
             "--end-at-ms" => {
                 end_at_ms = Some(value.parse().map_err(|_| "--end-at-ms must be a number")?)
@@ -57,6 +72,7 @@ fn args() -> Result<Args, String> {
         model: model.ok_or("--model is required")?,
         clip: clip.ok_or("--clip is required")?,
         chunk_ms,
+        pause_min_ms,
         end_at_ms,
         report_every_ms: report_every_ms.max(1_000),
     })
@@ -145,16 +161,54 @@ fn run() -> Result<(), String> {
     );
     let chunk_samples = (args.chunk_ms as usize * SAMPLE_RATE) / 1_000;
     let mut next_chunk = 0usize;
+    // In tap mode, audio "arrives" in 100 ms blocks and the tap cuts chunks.
+    let mut tapped = args.pause_min_ms.map(|min_ms| {
+        let (input, mut chunker) = tap(SAMPLE_RATE as u32, 1, args.chunk_ms);
+        chunker.cut_at_pauses(min_ms);
+        (input, chunker, 0usize, false)
+    });
+    // Drain as often as a live session does.
+    let mut last_drain = 0u64;
     let mut shown: Option<String> = None;
     let mut last_remaining_ms = 0;
     let mut max_backlog = 0;
-    println!("clip_ms={clip_ms} chunk_ms={}", args.chunk_ms);
+    println!(
+        "clip_ms={clip_ms} chunk_ms={} pause_min_ms={:?}",
+        args.chunk_ms, args.pause_min_ms
+    );
     let ended = loop {
         let now_ms = begun.elapsed().as_millis() as u64;
         // Hand over each chunk once its audio has "arrived" in real time.
+        let drain_due = now_ms >= last_drain + talkqte_lib::live::DRAIN_EVERY.as_millis() as u64;
+        if let Some((input, chunker, fed, finished)) = tapped.as_mut().filter(|_| drain_due) {
+            last_drain = now_ms;
+            let arrived = (now_ms as usize * SAMPLE_RATE / 1_000).min(samples.len());
+            for block in samples[*fed..arrived].chunks(SAMPLE_RATE / 10) {
+                input.push_interleaved(block.iter().copied());
+            }
+            *fed = arrived;
+            let mut chunks = chunker.drain(0);
+            if *fed == samples.len() && !*finished {
+                chunks.extend(chunker.finish(0));
+                *finished = true;
+            }
+            for chunk in chunks {
+                println!(
+                    "t={now_ms}ms chunk at {}ms of {}ms",
+                    chunk.start_ms,
+                    chunk.samples.len() * 1_000 / SAMPLE_RATE
+                );
+                if worker.submit(chunk).is_err() {
+                    println!("t={now_ms}ms chunk dropped");
+                }
+            }
+        }
         let chunk_start = next_chunk * chunk_samples;
         let chunk_end = (chunk_start + chunk_samples).min(samples.len());
-        if chunk_start < samples.len() && now_ms >= chunk_end as u64 * 1_000 / SAMPLE_RATE as u64 {
+        if tapped.is_none()
+            && chunk_start < samples.len()
+            && now_ms >= chunk_end as u64 * 1_000 / SAMPLE_RATE as u64
+        {
             let chunk = AudioChunk {
                 start_ms: chunk_start as u64 * 1_000 / SAMPLE_RATE as u64,
                 samples: samples[chunk_start..chunk_end].to_vec(),
@@ -218,7 +272,10 @@ fn run() -> Result<(), String> {
             ));
         }
         drop(engine);
-        let done_feeding = next_chunk * chunk_samples >= samples.len();
+        let done_feeding = match &tapped {
+            Some((_, _, _, finished)) => *finished,
+            None => next_chunk * chunk_samples >= samples.len(),
+        };
         if (done_feeding && worker.backlog() == 0 && now_ms > clip_ms + 1_000)
             || now_ms > clip_ms + 60_000
         {
