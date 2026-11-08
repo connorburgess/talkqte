@@ -50,6 +50,14 @@ In the rebuilt native app, Tab from Meeting notes reached the source disclosure.
 
 Browser regressions cover keyboard Save and Dismiss, retaining source-disclosure focus when collapsing, returning a transcript reader to the selected Transcript tab, and leaving focus untouched for timed expiry or a response from another window. A mocked-IPC test delays the Save acknowledgement after the shared snapshot removes the question: moving to Search meetings during that delay must keep search focused when the acknowledgement arrives. The browser tests begin from an explicitly focused control rather than changing the browser or operating system's button-tabbing preference.
 
+### Browser focus appearance
+
+These matching Chromium renders use the bundled fictional demo and identical synthetic notes after keyboard Save. Before is source [`37197f3`](https://github.com/connorburgess/talkqte/commit/37197f31c5e9a58de3bba7c77ca92353d787d7e8); after is [`9724e7e`](https://github.com/connorburgess/talkqte/commit/9724e7e034a745e27e8893032eb97f19d213fa13). The capture check confirmed document focus before and Meeting notes focus after. These images show browser focus styling only; the separate native observations are described above.
+
+| Before: editor loses focus after Save | After: focus returns to Meeting notes |
+| --- | --- |
+| ![Fictional notebook after Save with no editor focus outline](assets/notebook-focus-before.png) | ![The same fictional notebook after Save with Meeting notes outlined as focused](assets/notebook-focus-after.png) |
+
 ## Remaining manual acceptance checks
 
 All **six groups below remain pending**. Use a fresh isolated preview, fictional content, and a known build commit. Record the OS, display arrangement and scale, app used for the check, exact steps, expected result, and observed result. Keep private desktop evidence outside the repository. A screenshot cropped to the app can show appearance but cannot prove its position on a display or which application has focus.
