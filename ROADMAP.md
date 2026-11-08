@@ -36,23 +36,26 @@ Prove that audio capture, local transcription, and the floating prompt can coexi
 
 ## First usable version
 
-- [ ] Meeting notebook with live transcript and manual notes.
+- [ ] Minimal session view with the current question, saved questions, and optional notes.
 - [ ] One question at a time, expiry, cooldown, pause, and adjustable sensitivity.
 - [ ] Initial cues for missing owners, vague deadlines, and explicit open questions.
+- [ ] Suppress questions answered by the conversation before display, and cancel stale or redundant prompts.
 - [ ] Prioritize questions clearly addressed to the user; remain quiet for another or uncertain addressee.
 - [ ] Preserve a direct question while the user answers, without competing cues, fabricated answers, response scores, or countdown pressure; keep save and dismiss available.
 - [ ] Save a question for later; mark a question resolved.
 - [ ] Selected-meeting context and a simple meeting goal.
-- [ ] Local search, Markdown export, and clear retention controls.
+- [ ] Minimal prompt history, Markdown export, and clear retention controls.
 - [ ] Accessible keyboard operation and reduced-motion support.
 - [ ] Fictional demo mode that never reads the user's meeting store.
+- [ ] Compare a short fictional meeting workflow with and without TalkQTE: useful questions, stale or redundant prompts, and distraction.
 
 ## Future goal: work with other note-taking apps
 
-TalkQTE should complement Granola and other meeting note-takers. Users should be able to bring selected notes into TalkQTE as context for timely questions and take saved questions, notes, and decisions back to their existing tools. This is future work, after the first usable version.
+TalkQTE should complement an existing note-taking workflow. Evaluate Granola first, Fireflies second, and others when actual demand justifies them. Keep the existing note-taker as the primary meeting record. This is future work, after the clarification experience is useful.
 
 - [ ] Import selected Granola notes through supported exports or documented APIs, after verifying access and plan requirements.
-- [ ] Support other note-takers through common file formats first, with dedicated adapters where supported integrations add value.
+- [ ] Evaluate Fireflies' documented beta live transcript API separately from completed-note import and export.
+- [ ] Support other note-takers through common file formats when needed, adding dedicated adapters only for demonstrated use cases.
 - [ ] Use imported notes as selected meeting context without requiring a second recording of the original meeting.
 - [ ] Export selected notes, questions, and action items with a preview of the content and destination.
 - [ ] Preserve source references and handle repeated imports without silently duplicating or overwriting user edits.
@@ -60,8 +63,16 @@ TalkQTE should complement Granola and other meeting note-takers. Users should be
 
 Start with one-way import and export. Consider live context and two-way synchronization only where documented interfaces support them and conflict/deletion behavior is defined. No integration or live transcript access is available or promised yet.
 
+Capability review, 2026-11-08:
+
+- Granola documents [note and transcript access](https://docs.granola.ai/introduction) and [Business or Enterprise API access](https://docs.granola.ai/help-center/sharing/integrations/granola-api). Plan the first connection around selected previous-meeting context while TalkQTE handles live input separately. The reviewed interfaces do not establish a supported live transcript stream or permission to write notes back.
+- Fireflies documents a [beta Realtime API](https://docs.fireflies.ai/realtime-api/overview) for live transcript events and a [connection guide](https://docs.fireflies.ai/realtime-api/getting-started) requiring an API token and meeting/transcript ID. Actual account access, timing, reliability, and privacy behavior still need testing before committing to support.
+
+Provider access and capabilities can change; recheck them when implementing each connection.
+
 ## Other later candidates
 
+- Broader archives, local search, and summaries only after the prompt experience is useful.
 - Read-only calendar integration and pre-meeting context from selected notes.
 - A user-scoped, read-only MCP interface for selected meetings.
 - Action-item export with a review step before creating an external task.

@@ -44,7 +44,7 @@ A private-session option should discard its transcript and temporary analysis wh
 
 ## Screen sharing
 
-The desktop settings include a floating-window toggle, and pausing or ending the demo hides the overlay. Capture exclusion is not implemented. Do not assume the overlay is invisible to screen sharing. Cross-app focus, Spaces, full-screen meetings, and different sharing methods still require native testing.
+The desktop settings include a floating-window toggle. Pausing the demo collapses the question into a compact paused companion; ending the demo or choosing Hide removes the companion. Capture exclusion is not implemented. Do not assume the overlay is invisible to screen sharing. Cross-app focus, Spaces, full-screen meetings, and different sharing methods still require native testing.
 
 ## Optional integrations
 
