@@ -247,6 +247,12 @@ export function connectContext(receive: (items: ContextItem[]) => void) {
     contextListeners.delete(receive);
   };
 }
+export function removeAllContext(): number {
+  const removed = contextItems.length;
+  contextItems = [];
+  emitContext();
+  return removed;
+}
 export function contextItemsNow(): ContextItem[] {
   return structuredClone(contextItems);
 }

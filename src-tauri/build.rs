@@ -26,6 +26,7 @@ fn main() {
             "cancel_context_import",
             "context_items",
             "remove_context_item",
+            "remove_context_from",
             "download_model",
             "cancel_model_download",
             "remove_model",

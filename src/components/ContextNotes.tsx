@@ -85,15 +85,37 @@ export function ContextNotes({
             memory, never exported
           </span>
         </div>
-        <button
-          ref={addButton}
-          className="secondary-button"
-          disabled={busy || working}
-          onClick={pick}
-        >
-          <FileText size={15} />
-          Add notes from a file
-        </button>
+        <div className="context-actions">
+          {items.length > 0 && (
+            <button
+              className="text-button"
+              disabled={busy || working}
+              onClick={() =>
+                void run(async () => {
+                  // This button unmounts with the list; focus moves to Add.
+                  returnFocus.current = true;
+                  const removed = await bridge.removeAllContext();
+                  onNotice(
+                    removed === 1
+                      ? '1 imported note removed.'
+                      : `${removed} imported notes removed.`,
+                  );
+                })
+              }
+            >
+              Remove all
+            </button>
+          )}
+          <button
+            ref={addButton}
+            className="secondary-button"
+            disabled={busy || working}
+            onClick={pick}
+          >
+            <FileText size={15} />
+            Add notes from a file
+          </button>
+        </div>
       </div>
       {items.length > 0 ? (
         <ul className="context-list">

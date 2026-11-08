@@ -240,6 +240,18 @@ test('prior notes from a file are chosen, shown apart from the conversation, rem
   await expect(
     page.getByRole('status').filter({ hasText: 'already imported' }),
   ).toHaveCount(1);
+  // Remove all clears every imported note at once.
+  await panel.getByRole('button', { name: 'Remove all' }).click();
+  await expect(panel.getByRole('listitem')).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: 'Remove all' })).toHaveCount(
+    0,
+  );
+  await expect(
+    panel.getByRole('button', { name: 'Add notes from a file' }),
+  ).toBeFocused();
+  await expect(
+    page.getByRole('status').filter({ hasText: '1 imported note removed.' }),
+  ).toHaveCount(1);
   // Escape in the chooser leaves nothing pending and returns focus.
   await panel.getByRole('button', { name: 'Add notes from a file' }).click();
   await expect(dialog).toBeVisible();
@@ -248,5 +260,5 @@ test('prior notes from a file are chosen, shown apart from the conversation, rem
   await expect(
     panel.getByRole('button', { name: 'Add notes from a file' }),
   ).toBeFocused();
-  await expect(panel.getByRole('listitem')).toHaveCount(1);
+  await expect(panel.getByRole('listitem')).toHaveCount(0);
 });

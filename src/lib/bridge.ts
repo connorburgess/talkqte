@@ -80,6 +80,12 @@ export async function importContextNotes(ids: string[]) {
   return invoke<MergeOutcome>('import_context_notes', { ids });
 }
 
+/** Removes every imported note; returns how many were removed. */
+export async function removeAllContext() {
+  if (preview) return (await preview).removeAllContext();
+  return invoke<number>('remove_context_from');
+}
+
 /** Reports the imported prior notes and their later changes. */
 export async function watchContext(receive: (items: ContextItem[]) => void) {
   if (preview) return (await preview).connectContext(receive);
