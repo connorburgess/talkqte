@@ -12,7 +12,9 @@ export async function connect<T extends CueSnapshot>(
   receive: (snapshot: T) => void,
 ) {
   if (preview)
-    return (await preview).connect(receive as unknown as (value: Snapshot) => void);
+    return (await preview).connect(
+      receive as unknown as (value: Snapshot) => void,
+    );
   const unlisten = await listen<T>(
     floating ? 'cue:changed' : 'session:changed',
     ({ payload }) => receive(payload),
