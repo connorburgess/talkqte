@@ -44,7 +44,7 @@ fn frame(origin: (i32, i32), area: (u32, u32), scale: f64, mode: Mode) -> Frame 
     };
     let margin = (20.0 * scale).round() as u32;
     let width = ((380.0 * scale).round() as u32).min(area.0.saturating_sub(2 * margin).max(1));
-    let height = ((if mode == Mode::Question { 390.0 } else { 88.0 } * scale).round() as u32)
+    let height = ((if mode == Mode::Question { 350.0 } else { 88.0 } * scale).round() as u32)
         .min(area.1.saturating_sub(2 * margin).max(1));
     Frame {
         x: (i64::from(origin.0) + i64::from(area.0.saturating_sub(width + margin)))

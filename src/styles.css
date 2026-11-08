@@ -965,12 +965,16 @@ svg {
 }
 .floating-surface .question {
   border-radius: 0;
+  min-height: calc(100vh - 88px);
+  display: flex;
+  flex-direction: column;
 }
 .floating-surface .question h2 {
   font-size: 22px;
 }
 .floating-surface .question-actions {
-  margin-top: 18px;
+  margin-top: auto;
+  padding-top: 18px;
 }
 .floating-surface .question-actions button {
   font-size: 12px;

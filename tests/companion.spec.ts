@@ -11,7 +11,7 @@ async function sessionAction(page: Page, name: 'start_demo' | 'end_demo') {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.setViewportSize({ width: 380, height: 390 });
+  await page.setViewportSize({ width: 380, height: 350 });
   await page.clock.install();
   await page.goto('/?window=cue');
   await expect(
@@ -34,7 +34,7 @@ test('companion stays compact between questions and preserves a paused question'
     ),
   ).toBe(true);
   await page.clock.runFor(5_200);
-  await page.setViewportSize({ width: 380, height: 390 });
+  await page.setViewportSize({ width: 380, height: 350 });
   await expect(
     page.getByRole('heading', { name: 'Who will take the first draft?' }),
   ).toBeVisible();
@@ -75,7 +75,7 @@ test('question controls remain usable with reduced motion and longer wrapping', 
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.clock.runFor(42_000);
+  await page.clock.runFor(72_000);
   await expect(
     page.getByRole('button', { name: 'Dismiss', exact: true }),
   ).toBeVisible();
