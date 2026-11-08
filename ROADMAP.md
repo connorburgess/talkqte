@@ -93,7 +93,7 @@ Prove that audio capture, local transcription, and the floating prompt can coexi
 - [ ] Initial cues for missing owners, vague deadlines, and explicit open questions.
 - [ ] Suppress questions answered by the conversation before display, and cancel stale or redundant prompts. Phrase rules now cover answers, repeats, elapsed time, and sentences that open by changing the topic; reliable judgment of meaning remains in the cue intelligence plan.
 - [ ] Prioritize questions clearly addressed to the user; remain quiet for another or uncertain addressee.
-- [ ] Preserve a direct question while the user answers, without competing cues, fabricated answers, response scores, or countdown pressure; keep dismissal available.
+- [ ] Preserve a direct question while the user answers, without competing cues, fabricated answers, response scores, or countdown pressure; keep dismissal available. The engine now keeps an "Asked you" question for 45 seconds; the app cannot set the user's name yet.
 - [ ] Clear or update cues as context changes; do not automatically archive unused suggestions.
 - [ ] Selected-meeting context and a simple meeting goal.
 - [ ] Clear retention controls for any retained content; expand prompt history or Markdown export only for a demonstrated use case.
