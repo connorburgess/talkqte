@@ -28,7 +28,7 @@ The app accompanies a meeting in another application. Its small prompt window mu
 
 ## Brand commitments
 
-TalkQTE is the product name; talkqte is the repository name. Quick-time events inspire the timing of prompts. The interface need not imitate an arcade game. Marketing describes a privacy-focused meeting companion.
+TalkQTE is the product name; talkqte is the repository name. Marketing describes a privacy-focused meeting companion for timely questions and clearer notes.
 
 ## First implementation
 

@@ -1,7 +1,7 @@
 [package]
 name = "talkqte"
 version = "0.1.0"
-description = "A privacy-focused meeting companion inspired by quick-time events"
+description = "A privacy-focused meeting companion for timely questions and clearer notes"
 edition = "2021"
 license = "Apache-2.0"
 rust-version = "1.85"

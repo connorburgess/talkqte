@@ -1,6 +1,6 @@
 # TalkQTE
 
-A privacy-focused meeting companion that suggests timely questions, inspired by quick-time events.
+A privacy-focused meeting companion for timely questions and clearer notes.
 
 Built in public with Rust, Tauri, and React. **Early development:** a runnable desktop prototype is available from source. It plays a fictional meeting; audio capture, Whisper transcription, and persistent storage are not implemented yet. There is no signed release.
 
@@ -8,7 +8,7 @@ Built in public with Rust, Tauri, and React. **Early development:** a runnable d
 
 Listen during a meeting, notice a point that needs clarification, and show one useful question while it is still relevant. Save the important bits in a meeting notebook afterward.
 
-Quick-time events inspire the timing and interaction. The visual style is still being explored. Prompts should help you participate without stealing focus or demanding a response.
+Prompts should help you participate without stealing focus or demanding a response. The visual style is still being explored.
 
 ## Try the prototype
 
