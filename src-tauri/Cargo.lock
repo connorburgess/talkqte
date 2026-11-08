@@ -2748,6 +2748,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "rtrb"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5974e397833d890f2f74963408e0d4a6cd8eda2f6a445ae06750291b5d7a997e"
+
+[[package]]
 name = "rustc-hash"
 version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3270,6 +3276,7 @@ dependencies = [
  "objc2",
  "objc2-app-kit",
  "objc2-av-foundation",
+ "rtrb",
  "serde",
  "serde_json",
  "tauri",
