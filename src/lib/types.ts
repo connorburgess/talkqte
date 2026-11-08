@@ -33,7 +33,6 @@ export interface Snapshot extends CueSnapshot {
   elapsedMs: number;
   durationMs: number;
   transcript: Segment[];
-  saved: Cue[];
   notes: string;
   sensitivity: 'balanced' | 'quiet';
   /** Session-only; used to notice questions asked of the user by name. */
@@ -44,7 +43,7 @@ export type Commands = {
   pause_demo: undefined;
   resume_demo: undefined;
   end_demo: undefined;
-  respond_to_cue: { id: string; response: 'save' | 'dismiss' };
+  respond_to_cue: { id: string; response: 'dismiss' };
   inspect_cue: { id: string; expanded: boolean };
   set_companion_position: { value: CueSnapshot['companionPosition'] };
   set_question_size: { value: CueSnapshot['questionSize'] };

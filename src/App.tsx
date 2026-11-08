@@ -916,8 +916,7 @@ function Notebook() {
                 <h2>Glance view</h2>
                 <p>
                   One complete question, with context tucked away. Open “Why?”
-                  to see the source and keep the question until you save or
-                  dismiss it.
+                  to see the source and keep the question until you dismiss it.
                 </p>
                 <p
                   className={`appearance-example question-${state.questionSize}`}
