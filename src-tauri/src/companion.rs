@@ -73,10 +73,10 @@ pub fn refresh(app: &tauri::AppHandle) {
             let Ok(runtime) = state.0.lock() else { return };
             runtime.engine.cue_snapshot()
         }; // Release the engine lock before every native window operation.
-        let Ok(microphone) = handle.state::<Microphone>().snapshot() else {
+        let Some(microphone) = handle.state::<Microphone>().try_status() else {
             return;
         };
-        let mode = Mode::for_snapshot(&cue, microphone.status);
+        let mode = Mode::for_snapshot(&cue, microphone);
         let Some(window) = handle.get_webview_window("cue") else {
             return;
         };

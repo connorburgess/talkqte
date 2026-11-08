@@ -210,10 +210,11 @@ pub fn run() {
                     let cue = runtime.engine.cue_snapshot();
                     drop(runtime);
                     microphone::refresh(&handle);
-                    let Ok(microphone) = handle.state::<microphone::Controller>().snapshot() else {
+                    let Some(microphone) = handle.state::<microphone::Controller>().try_status()
+                    else {
                         continue;
                     };
-                    let mode = companion::Mode::for_snapshot(&cue, microphone.status);
+                    let mode = companion::Mode::for_snapshot(&cue, microphone);
                     let needs_placement =
                         mode != runtime_mode || last_placement.elapsed().as_secs() >= 1;
                     runtime_mode = mode;

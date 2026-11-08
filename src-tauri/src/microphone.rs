@@ -158,6 +158,11 @@ impl Update {
 pub struct Controller(Arc<Mutex<State>>);
 
 impl Controller {
+    // Timer and window placement must never wait behind native stream startup.
+    pub fn try_status(&self) -> Option<Status> {
+        self.0.try_lock().ok().map(|state| state.snapshot.status)
+    }
+
     pub fn snapshot(&self) -> Result<Snapshot, String> {
         self.0
             .lock()
@@ -468,6 +473,57 @@ mod tests {
         controller.begin_start().unwrap();
         assert!(controller.begin_start().is_err());
         assert_eq!(controller.snapshot().unwrap().status, Status::Starting);
+    }
+
+    #[test]
+    fn window_and_timer_status_reads_skip_a_blocked_native_start() {
+        use std::{sync::mpsc, thread};
+        struct BlockedStart {
+            entered: mpsc::Sender<()>,
+            release: Mutex<mpsc::Receiver<()>>,
+        }
+        impl CaptureStream for BlockedStart {
+            fn play(&self) -> Result<(), Failure> {
+                self.entered.send(()).unwrap();
+                self.release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+                Ok(())
+            }
+        }
+        let controller = Controller::default();
+        let (generation, _) = controller.begin_start().unwrap();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let starter = controller.clone();
+        let start = thread::spawn(move || {
+            starter.complete_start(
+                generation,
+                Arc::new(Meter::default()),
+                Ok(Box::new(BlockedStart {
+                    entered: entered_tx,
+                    release: Mutex::new(release_rx),
+                })),
+                Instant::now(),
+            )
+        });
+        entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        let reader = controller.clone();
+        let (read_tx, read_rx) = mpsc::channel();
+        let read = thread::spawn(move || {
+            read_tx
+                .send((reader.try_status(), reader.poll(Instant::now()).is_none()))
+                .unwrap();
+        });
+        let result = read_rx.recv_timeout(Duration::from_secs(1));
+        release_tx.send(()).unwrap();
+        start.join().unwrap();
+        read.join().unwrap();
+        assert_eq!(result.unwrap(), (None, true));
+        assert_eq!(controller.try_status(), Some(Status::Starting));
+        finish(&controller, controller.request_stop().unwrap());
     }
 
     #[test]
