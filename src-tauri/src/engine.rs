@@ -126,6 +126,8 @@ pub struct Engine {
     next_segment: usize,
     cue_deadline: u64,
     cooldown_until: u64,
+    /// Whether this session's transcript includes ingested (non-demo) lines.
+    live_input: bool,
 }
 
 impl Default for Engine {
@@ -154,6 +156,7 @@ impl Default for Engine {
             next_segment: 0,
             cue_deadline: 0,
             cooldown_until: 0,
+            live_input: false,
         }
     }
 }
@@ -179,6 +182,7 @@ impl Engine {
             return Err("End the current demo before replaying it.".into());
         }
         self.generation += 1;
+        self.live_input = false;
         self.next_segment = 0;
         self.cooldown_until = 0;
         self.state.elapsed_ms = 0;
@@ -291,6 +295,11 @@ impl Engine {
             .transcript
             .iter()
             .any(|existing| existing.id == segment.id)
+            || self
+                .demo
+                .segments
+                .iter()
+                .any(|scripted| scripted.id == segment.id)
         {
             return Err("That transcript segment was already received.".into());
         }
@@ -311,6 +320,7 @@ impl Engine {
             speaker: speaker.into(),
             ..segment
         };
+        self.live_input = true;
         self.consume(segment, now);
         self.changed();
         Ok(())
@@ -379,7 +389,9 @@ impl Engine {
                 .state
                 .saved
                 .iter()
-                .any(|saved| saved.source_id == cue.source_id)
+                // Demo replay repeats the same line; live sources may reuse
+                // an ID for different speech in a later session.
+                .any(|saved| saved.source_id == cue.source_id && saved.evidence == cue.evidence)
         {
             self.state.saved.push(cue.clone());
         }
@@ -433,7 +445,16 @@ impl Engine {
     }
 
     pub fn markdown(&self) -> String {
-        let mut out = format!("# {}\n\nFictional demo transcript; not derived from microphone audio.\n\n## Notes\n\n{}\n\n## Saved questions\n\n", self.state.title, self.state.notes);
+        // Never label supplied transcript lines as fictional demo content.
+        let source = if self.live_input {
+            "Transcript includes lines from a transcription source, not only the fictional demo."
+        } else {
+            "Fictional demo transcript; not derived from microphone audio."
+        };
+        let mut out = format!(
+            "# {}\n\n{source}\n\n## Notes\n\n{}\n\n## Saved questions\n\n",
+            self.state.title, self.state.notes
+        );
         if self.state.saved.is_empty() {
             out.push_str("No saved questions.\n");
         }
@@ -443,7 +464,11 @@ impl Engine {
                 cue.question, cue.evidence
             ));
         }
-        out.push_str("\n## Demo transcript\n\n");
+        out.push_str(if self.live_input {
+            "\n## Transcript\n\n"
+        } else {
+            "\n## Demo transcript\n\n"
+        });
         for segment in &self.state.transcript {
             out.push_str(&format!("**{}:** {}\n\n", segment.speaker, segment.text));
         }
@@ -768,6 +793,48 @@ mod tests {
         .unwrap();
         assert!(e.state.cue.is_none());
         assert_eq!(e.state.transcript.len(), 1);
+    }
+
+    #[test]
+    fn a_reused_live_id_in_a_later_session_can_still_be_saved() {
+        let mut e = live_session();
+        e.ingest(
+            e.session(),
+            live("w1", 9_000, "Someone can take the first draft."),
+        )
+        .unwrap();
+        let first = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&first, Response::Save).unwrap();
+        e.end();
+        e.start().unwrap();
+        e.advance(10_000);
+        e.ingest(e.session(), live("w1", 9_000, "We should finish soon."))
+            .unwrap();
+        let second = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&second, Response::Save).unwrap();
+        assert_eq!(e.state.saved.len(), 2);
+    }
+
+    #[test]
+    fn live_ids_cannot_reuse_a_scripted_demo_id() {
+        let mut e = Engine::default();
+        e.start().unwrap();
+        e.advance(2_000);
+        assert!(e.ingest(e.session(), live("s5", 2_000, "Hello.")).is_err());
+        e.ingest(e.session(), live("w1", 2_000, "Hello.")).unwrap();
+    }
+
+    #[test]
+    fn export_stops_calling_supplied_lines_fictional() {
+        let mut e = live_session();
+        assert!(e.markdown().contains("Fictional demo transcript"));
+        e.ingest(e.session(), live("w1", 9_000, "Hello.")).unwrap();
+        let markdown = e.markdown();
+        assert!(!markdown.contains("Fictional demo transcript"));
+        assert!(markdown.contains("## Transcript\n\n**Speaker 1:** Hello."));
+        e.end();
+        e.start().unwrap();
+        assert!(e.markdown().contains("## Demo transcript"));
     }
 
     #[test]
