@@ -48,14 +48,14 @@ The output is a feasibility record and a decision about a bounded Linux support 
 
 Configuration: Ubuntu 26.04 LTS ARM64 (kernel 7.0) in Parallels 27.1.0 with matching guest tools, 2 virtual CPUs and 4 GiB memory. GNOME Shell 50 provides only a Wayland session. Built from app commit `b05b4dc` as an ordinary user with Rust 1.97.1 and Node.js 22.23.4, after installing `build-essential`, `pkg-config`, `libwebkit2gtk-4.1-dev` (WebKitGTK 2.52.6), `libayatana-appindicator3-dev`, `librsvg2-dev`, `libasound2-dev`, `libssl-dev`, and `libxdo-dev`.
 
-| Check                         | Result                                                                                                        |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Frontend build and Rust tests | Passed; 30 Rust tests.                                                                                        |
-| Native build                  | A native aarch64 ELF executable.                                                                              |
-| Compiler warnings             | The same macOS-only dead-code warnings as Windows; the same fix is expected to apply but was not re-run here. |
-| Launch and fictional demo     | Not run: no desktop session was logged in on the VM.                                                          |
+| Check                         | Result                                                                                                                                                                                                                                                                    |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend build and Rust tests | Passed; 30 Rust tests.                                                                                                                                                                                                                                                    |
+| Native build                  | A native aarch64 ELF executable.                                                                                                                                                                                                                                          |
+| Compiler warnings             | The same macOS-only dead-code warnings as Windows; the same fix is expected to apply but was not re-run here.                                                                                                                                                             |
+| Launch and fictional demo     | In the logged-in GNOME Wayland session, the app stayed running and exposed its `TalkQTE` window to the accessibility interface (AT-SPI). Through AT-SPI, **Try demo** showed “Who will take the first draft?” and **End demo** worked; the app exited cleanly on SIGTERM. |
 
-Next: log in to a desktop session, then launch the demo. Record how the companion behaves on Wayland, which limits how apps place their own windows and keep them on top, and check accessibility and both-side audio. General Linux support remains undecided.
+Wayland reports window positions as 0,0 to the accessibility interface, so this check could not confirm where the companion appears or whether it stays on top. Next: check companion placement, focus and stacking under Wayland, keyboard access and the screen reader, and both-side synthetic audio. General Linux support remains undecided.
 
 ## Mobile validation
 
