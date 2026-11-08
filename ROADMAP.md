@@ -39,6 +39,8 @@ Prove that audio capture, local transcription, and the floating prompt can coexi
 - [ ] Meeting notebook with live transcript and manual notes.
 - [ ] One question at a time, expiry, cooldown, pause, and adjustable sensitivity.
 - [ ] Initial cues for missing owners, vague deadlines, and explicit open questions.
+- [ ] Prioritize questions clearly addressed to the user; remain quiet for another or uncertain addressee.
+- [ ] Preserve a direct question while the user answers, without competing cues, fabricated answers, response scores, or countdown pressure; keep save and dismiss available.
 - [ ] Save a question for later; mark a question resolved.
 - [ ] Selected-meeting context and a simple meeting goal.
 - [ ] Local search, Markdown export, and clear retention controls.
@@ -65,5 +67,15 @@ Start with one-way import and export. Consider live context and two-way synchron
 - Action-item export with a review step before creating an external task.
 - Optional local language-model suggestions and source-linked meeting questions.
 - Windows support after the platform adapters are proven on macOS.
+
+## Future goal: participate from a phone
+
+Support joining Google Meet on a phone and receiving prompts during the call. Obtaining the conversation and presenting a prompt are separate capabilities; neither is implemented on mobile. See the [mobile feasibility and acceptance plan](docs/mobile.md).
+
+- [ ] Adapt the notebook for mobile notes, review, and explicitly selected imports and exports.
+- [ ] Prove a foreground mobile companion receiving an authenticated, explicitly paired live session feed.
+- [ ] Validate Meet's own picture-in-picture alongside the companion where the device and app support it.
+- [ ] Investigate same-phone capture on real devices, with explicit unsupported states when either side of the call is unavailable.
+- [ ] Test platform-specific prompt surfaces, background behavior, accessibility, battery use, and permission denial before making capability claims.
 
 Whisper transcribes speech; it does not produce reliable summaries or understand meeting intent on its own. Semantic summaries and conversational search need a separate model or an explicitly limited rules-based implementation.

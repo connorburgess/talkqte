@@ -4,7 +4,7 @@
 
 web
 
-The interface runs in a Tauri desktop shell. macOS is the first target; other desktop platforms are future work.
+The interface runs in a Tauri desktop shell. macOS is the first target. Mobile is a future product goal: join a meeting on a phone and receive useful prompts during the call. Mobile capture and prompt presentation need separate platform validation; see the [mobile plan](docs/mobile.md).
 
 ## Stack
 
@@ -25,6 +25,12 @@ The app accompanies a meeting in another application. Its small prompt window mu
 - Meeting content is private; public demos and tests use fictional data.
 - Describe implemented behavior accurately. A demo must never imply that audio is being captured.
 - Build in public with Apache-2.0, human DCO sign-offs, and feature pull requests.
+
+## Future direct-address behavior
+
+When the conversation clearly asks the user a question, prioritize that question over a general clarifying suggestion. Use explicit addressee evidence and the user's selected identity; a question addressed to someone else or an ambiguous addressee should stay quiet.
+
+Keep the question visible while the user is answering, without a competing suggestion or an expiring countdown pressuring them to respond. Let the user dismiss or save it at any time. Do not fabricate an answer, assign a response score, or penalize silence. Direct-address detection and answer-aware timing are future work, not behavior provided by the current phrase-based demo.
 
 ## Brand commitments
 
