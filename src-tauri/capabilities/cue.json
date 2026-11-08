@@ -1,13 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "cue",
-  "description": "The prompt window can read the prompt and dismiss or save it; it cannot export or change notes.",
+  "description": "The companion can read the prompt, save or dismiss it, pause or resume the demo, and hide itself; it cannot export or change notes.",
   "windows": ["cue"],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "allow-snapshot",
     "allow-respond-to-cue",
-    "allow-set-overlay"
+    "allow-set-overlay",
+    "allow-pause-demo",
+    "allow-resume-demo"
   ]
 }

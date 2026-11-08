@@ -1,6 +1,7 @@
+mod companion;
 mod engine;
 
-use engine::{Engine, Response, Sensitivity, Status};
+use engine::{Engine, Response, Sensitivity};
 use std::{sync::Mutex, time::Instant};
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
@@ -9,7 +10,6 @@ struct Runtime {
     engine: Engine,
     last_tick: Instant,
     export: Option<String>,
-    overlay_visible: bool,
 }
 
 impl Runtime {
@@ -24,28 +24,10 @@ impl Runtime {
 struct AppState(Mutex<Runtime>);
 
 // Emit while holding the state lock, preserving revision order across commands/ticks.
-fn publish(app: &tauri::AppHandle, runtime: &mut Runtime) {
+fn publish(app: &tauri::AppHandle, runtime: &Runtime) {
     let _ = app.emit_to("main", "session:changed", &runtime.engine.state);
     let cue_state = runtime.engine.cue_snapshot();
     let _ = app.emit_to("cue", "cue:changed", &cue_state);
-    if let Some(window) = app.get_webview_window("cue") {
-        let should_show = cue_state.overlay_enabled
-            && cue_state.status == Status::Running
-            && cue_state.cue.is_some();
-        // Native visibility getters wait for the main thread. Never call one while
-        // holding the engine lock: a command on that thread may need this lock.
-        // Track requested visibility instead; show/hide enqueue non-blocking updates.
-        if should_show != runtime.overlay_visible {
-            let result = if should_show {
-                window.show()
-            } else {
-                window.hide()
-            };
-            if result.is_ok() {
-                runtime.overlay_visible = should_show;
-            }
-        }
-    }
 }
 
 fn change(
@@ -59,7 +41,9 @@ fn change(
         .map_err(|_| "The demo is unavailable. Please restart TalkQTE.")?;
     runtime.sync();
     let result = action(&mut runtime.engine);
-    publish(app, &mut runtime);
+    publish(app, &runtime);
+    drop(runtime);
+    companion::refresh(app);
     result
 }
 
@@ -187,8 +171,8 @@ pub fn run() {
             engine: Engine::default(),
             last_tick: Instant::now(),
             export: None,
-            overlay_visible: false,
         })))
+        .manage(companion::WindowState::default())
         .invoke_handler(tauri::generate_handler![
             snapshot,
             start_demo,
@@ -203,33 +187,43 @@ pub fn run() {
             export_markdown
         ])
         .setup(|app| {
-            if let Some(window) = app.get_webview_window("cue") {
-                if let Some(monitor) = window.current_monitor()? {
-                    let scale = monitor.scale_factor();
-                    let position = monitor.position();
-                    let size = monitor.size();
-                    window.set_position(tauri::PhysicalPosition::new(
-                        position.x + size.width as i32 - (404.0 * scale) as i32,
-                        position.y + (64.0 * scale) as i32,
-                    ))?;
-                }
-            }
             let handle = app.handle().clone();
-            std::thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_millis(200));
-                let state = handle.state::<AppState>();
-                let Ok(mut runtime) = state.0.lock() else {
-                    break;
-                };
-                let before = runtime.engine.state.revision;
-                runtime.sync();
-                if runtime.engine.state.revision != before {
-                    publish(&handle, &mut runtime);
+            std::thread::spawn(move || {
+                let mut last_placement = Instant::now();
+                let mut runtime_mode = companion::Mode::Hidden;
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                    let state = handle.state::<AppState>();
+                    let Ok(mut runtime) = state.0.lock() else {
+                        break;
+                    };
+                    let before = runtime.engine.state.revision;
+                    runtime.sync();
+                    if runtime.engine.state.revision != before {
+                        publish(&handle, &runtime);
+                    }
+                    let mode = companion::Mode::for_snapshot(&runtime.engine.cue_snapshot());
+                    let needs_placement =
+                        mode != runtime_mode || last_placement.elapsed().as_secs() >= 1;
+                    runtime_mode = mode;
+                    drop(runtime);
+                    if needs_placement {
+                        companion::refresh(&handle);
+                        last_placement = Instant::now();
+                    }
                 }
             });
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == "main"
+                && matches!(
+                    event,
+                    tauri::WindowEvent::Moved(_) | tauri::WindowEvent::ScaleFactorChanged { .. }
+                )
+            {
+                companion::refresh(window.app_handle());
+            }
             if window.label() == "main"
                 && matches!(event, tauri::WindowEvent::CloseRequested { .. })
             {

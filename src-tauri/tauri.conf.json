@@ -22,10 +22,10 @@
       },
       {
         "label": "cue",
-        "title": "TalkQTE question",
+        "title": "TalkQTE companion",
         "url": "index.html?window=cue",
         "width": 380,
-        "height": 330,
+        "height": 88,
         "resizable": false,
         "decorations": false,
         "alwaysOnTop": true,
