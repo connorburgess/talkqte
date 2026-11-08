@@ -1035,7 +1035,7 @@ function Notebook() {
                       <p>
                         {model.status === 'installed'
                           ? `${model.name} is installed on this device (${megabytes(model.sizeBytes)}).`
-                          : `Download ${model.name} (${megabytes(model.sizeBytes)}) from the whisper.cpp model repository (MIT license). It needs about ${megabytes(model.neededBytes)} free. This is the only network request: it sends nothing about you, your meetings, or your audio. The file is checked against a pinned checksum before use.`}
+                          : `Download ${model.name} (${megabytes(model.sizeBytes)}) over HTTPS from the whisper.cpp repository on Hugging Face (MIT license). It needs about ${megabytes(model.neededBytes)} free. Hugging Face sees your IP address and a file request; no account, audio, transcript, or notes are sent. The file is checked against a pinned checksum before use.`}
                       </p>
                       {model.status === 'downloading' && (
                         <progress

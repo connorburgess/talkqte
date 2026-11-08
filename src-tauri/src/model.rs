@@ -24,18 +24,20 @@ pub struct Spec {
 }
 
 /// The default local model. The project's own release copy is not yet
-/// published, so the upstream whisper.cpp repository is the only source.
+/// published, so the upstream whisper.cpp repository on Hugging Face is the
+/// only source, pinned to a fixed revision rather than a moving branch.
 pub const TINY_EN: Spec = Spec {
     name: "tiny.en",
     file: "ggml-tiny.en.bin",
     bytes: 77_704_715,
     sha256: "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
-    sources: &["https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin"],
+    sources: &["https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en.bin"],
 };
 
 /// Free space kept beyond the model itself, so a download never fills a disk.
 pub const SPACE_MARGIN: u64 = 512 * 1024 * 1024;
-/// Attempts per source, resuming from what was already received.
+/// Attempts per source that receive nothing new before giving up. An attempt
+/// that makes progress does not count, so a slow connection keeps resuming.
 pub const ATTEMPTS: usize = 3;
 const PART_SUFFIX: &str = ".part";
 
@@ -175,14 +177,20 @@ pub fn download(
         for source in spec.sources {
             // Each source starts afresh, so one copy is never mixed with another.
             let _ = fs::remove_file(&part);
-            for _ in 0..ATTEMPTS {
+            let (mut stalled, mut fresh_retry) = (0, false);
+            while stalled < ATTEMPTS {
                 if cancel.load(Ordering::Acquire) {
                     return Err(Failure::Cancelled);
                 }
+                let before = fs::metadata(&part).map(|meta| meta.len()).unwrap_or(0);
                 match fetch_into(&part, spec, source, fetch, &mut progress, cancel)? {
                     Fetched::Complete => {}
                     Fetched::Interrupted(why) => {
                         reason = why;
+                        let after = fs::metadata(&part).map(|meta| meta.len()).unwrap_or(0);
+                        if after <= before {
+                            stalled += 1;
+                        }
                         continue;
                     }
                 }
@@ -192,6 +200,11 @@ pub fn download(
                 if !matches {
                     reason = "The downloaded file did not match the expected checksum.".into();
                     let _ = fs::remove_file(&part);
+                    // One clean retry, in case a resume joined two versions.
+                    if !fresh_retry {
+                        fresh_retry = true;
+                        continue;
+                    }
                     break;
                 }
                 let target = installed_path(dir, spec);
@@ -224,6 +237,10 @@ fn fetch_into(
 ) -> Result<Fetched, Failure> {
     let storage = |error: io::Error| Failure::Storage(error.to_string());
     let offset = fs::metadata(part).map(|meta| meta.len()).unwrap_or(0);
+    if offset == spec.bytes {
+        // Everything arrived before the connection failed; check it as is.
+        return Ok(Fetched::Complete);
+    }
     let response = match fetch.get(source, offset) {
         Ok(response) => response,
         Err(why) => return Ok(Fetched::Interrupted(why)),
@@ -303,9 +320,17 @@ pub struct Https;
 #[cfg(feature = "local-whisper")]
 impl Fetch for Https {
     fn get(&self, url: &str, offset: u64) -> Result<Response, String> {
+        use std::time::Duration;
+        // Every step has a limit, so a silent server cannot hold a download
+        // (or its Cancel) for long. The body limit covers one attempt; a
+        // slow connection resumes in the next, which does not count as a
+        // failure while it makes progress.
         let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_connect(Some(std::time::Duration::from_secs(15)))
-            .timeout_recv_body(Some(std::time::Duration::from_secs(30)))
+            .timeout_resolve(Some(Duration::from_secs(15)))
+            .timeout_connect(Some(Duration::from_secs(15)))
+            .timeout_send_request(Some(Duration::from_secs(15)))
+            .timeout_recv_response(Some(Duration::from_secs(30)))
+            .timeout_recv_body(Some(Duration::from_secs(60)))
             .https_only(true)
             .build()
             .into();
@@ -316,7 +341,18 @@ impl Fetch for Https {
         let response = request
             .call()
             .map_err(|_| String::from("The download server could not be reached."))?;
+        // A partial response must start exactly where the file stopped.
         let resumed = response.status().as_u16() == 206;
+        if resumed {
+            let starts_at_offset = response
+                .headers()
+                .get("content-range")
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|range| range.starts_with(&format!("bytes {offset}-")));
+            if !starts_at_offset {
+                return Err("The server resumed at the wrong place.".into());
+            }
+        }
         let body = response.into_body().into_reader();
         Ok(Response {
             resumed,
@@ -485,6 +521,60 @@ mod tests {
                 .map(|(_, offset)| *offset)
                 .collect::<Vec<_>>(),
             vec![0, 10]
+        );
+        assert!(is_installed(dir.path(), &spec));
+    }
+
+    #[test]
+    fn a_slow_connection_keeps_resuming_while_it_makes_progress() {
+        let dir = dir();
+        let spec = real_spec(&["test://0"]);
+        let fake = Fake::new(vec![BYTES.to_vec()]);
+        // Eight short responses in a row, more than ATTEMPTS, each adding bytes.
+        *fake.cut_after.lock().unwrap() = vec![
+            None,
+            Some(4),
+            Some(4),
+            Some(4),
+            Some(4),
+            Some(4),
+            Some(4),
+            Some(4),
+            Some(4),
+        ];
+        download(
+            dir.path(),
+            &spec,
+            &fake,
+            plenty,
+            |_, _| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert!(fake.requests.lock().unwrap().len() > ATTEMPTS);
+        assert!(is_installed(dir.path(), &spec));
+    }
+
+    #[test]
+    fn a_failure_after_the_last_byte_still_installs_the_complete_file() {
+        let dir = dir();
+        let spec = real_spec(&["test://0"]);
+        let fake = Fake::new(vec![BYTES.to_vec()]);
+        // All bytes arrive, then the connection errors instead of closing.
+        *fake.cut_after.lock().unwrap() = vec![Some(BYTES.len())];
+        download(
+            dir.path(),
+            &spec,
+            &fake,
+            plenty,
+            |_, _| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(
+            fake.requests.lock().unwrap().len(),
+            1,
+            "no request past the end"
         );
         assert!(is_installed(dir.path(), &spec));
     }

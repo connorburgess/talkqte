@@ -379,6 +379,32 @@ fn model_status(app: tauri::AppHandle, download: tauri::State<ModelDownload>) ->
     status
 }
 
+/// Puts the download status back to what is on disk when the download
+/// thread ends for any reason, including a panic.
+#[cfg(feature = "local-whisper")]
+struct DownloadDone {
+    app: tauri::AppHandle,
+    message: Option<String>,
+}
+
+#[cfg(feature = "local-whisper")]
+impl Drop for DownloadDone {
+    fn drop(&mut self) {
+        let message = self.message.take().or_else(|| {
+            std::thread::panicking()
+                .then(|| "The download stopped unexpectedly. Nothing was installed.".into())
+        });
+        let app = self.app.clone();
+        set_model_status(&self.app, |status| {
+            let revision = status.revision;
+            *status = ModelStatus {
+                message,
+                ..model_status_now(&app, revision)
+            };
+        });
+    }
+}
+
 /// Downloads the pinned speech model after the person chose to. The request
 /// carries no account, audio, or transcript; the file is checked against
 /// its pinned SHA-256 before it is installed.
@@ -396,6 +422,7 @@ fn download_model(
     {
         let dir = models_dir(&app).ok_or("The app's storage folder is unavailable.")?;
         {
+            // Checked and set under one lock, so two downloads never overlap.
             let mut status = download
                 .status
                 .lock()
@@ -408,13 +435,19 @@ fn download_model(
                 status: "downloading",
                 ..model_status_now(&app, revision)
             };
+            download.cancel.store(false, Ordering::Release);
         }
-        download.cancel.store(false, Ordering::Release);
         set_model_status(&app, |_| {});
         let cancel = download.cancel.clone();
-        std::thread::Builder::new()
+        let thread_app = app.clone();
+        let spawned = std::thread::Builder::new()
             .name("talkqte-model-download".into())
             .spawn(move || {
+                let app = thread_app;
+                let mut done = DownloadDone {
+                    app: app.clone(),
+                    message: None,
+                };
                 let mut last_percent = 0;
                 let result = model::download(
                     &dir,
@@ -430,22 +463,29 @@ fn download_model(
                     },
                     &cancel,
                 );
-                set_model_status(&app, |status| {
-                    let revision = status.revision;
-                    *status = ModelStatus {
-                        message: result.err().map(|failure| failure.message()),
-                        ..model_status_now(&app, revision)
-                    };
-                });
-            })
-            .map_err(|_| "Could not start the download.")?;
+                done.message = result.err().map(|failure| failure.message());
+            });
+        if spawned.is_err() {
+            set_model_status(&app, |status| {
+                let revision = status.revision;
+                *status = model_status_now(&app, revision);
+            });
+            return Err("Could not start the download.".into());
+        }
         Ok(())
     }
 }
 
+/// Asks a running download to stop. It stops at its next read, within the
+/// fetcher's time limits, and then reports that nothing was installed.
 #[tauri::command]
-fn cancel_model_download(download: tauri::State<ModelDownload>) {
+fn cancel_model_download(app: tauri::AppHandle, download: tauri::State<ModelDownload>) {
     download.cancel.store(true, Ordering::Release);
+    set_model_status(&app, |status| {
+        if status.status == "downloading" {
+            status.message = Some("Cancelling…".into());
+        }
+    });
 }
 
 /// Deletes the downloaded model; a live session must be stopped first.
@@ -461,19 +501,19 @@ fn remove_model(
     }) {
         return Err("Stop the live session before removing the model.".into());
     }
-    if download
+    let dir = models_dir(&app).ok_or("The app's storage folder is unavailable.")?;
+    // Held throughout, so a download cannot start while the file is removed.
+    let mut status = download
         .status
         .lock()
-        .is_ok_and(|status| status.status == "downloading")
-    {
+        .map_err(|_| "The download is unavailable.")?;
+    if status.status == "downloading" {
         return Err("Cancel the download before removing the model.".into());
     }
-    let dir = models_dir(&app).ok_or("The app's storage folder is unavailable.")?;
     model::remove(&dir, &model::TINY_EN).map_err(|_| "The model could not be removed.")?;
-    set_model_status(&app, |status| {
-        let revision = status.revision;
-        *status = model_status_now(&app, revision);
-    });
+    let revision = status.revision + 1;
+    *status = model_status_now(&app, revision);
+    let _ = app.emit_to("main", "model:changed", status.clone());
     Ok(())
 }
 
