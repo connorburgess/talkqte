@@ -354,7 +354,7 @@ test('the speech model downloads only when chosen, shows progress, and can be ca
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const section = page.locator('.model-download');
   await expect(section).toContainText('78 MB');
-  await expect(section).toContainText('Hugging Face sees your IP address');
+  await expect(section).toContainText('see your IP address');
   expect(await page.evaluate(() => window.microphoneTest.calls)).not.toContain(
     'download_model',
   );

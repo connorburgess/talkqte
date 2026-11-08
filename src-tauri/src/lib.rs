@@ -329,6 +329,16 @@ pub struct ModelDownload {
     cancel: Arc<AtomicBool>,
 }
 
+impl ModelDownload {
+    /// The status, even after a panic while it was held: the guard in the
+    /// download thread must always be able to reset it.
+    fn lock(&self) -> std::sync::MutexGuard<'_, ModelStatus> {
+        self.status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
 fn model_status_now(app: &tauri::AppHandle, revision: u64) -> ModelStatus {
     let spec = model::TINY_EN;
     let status = if !cfg!(feature = "local-whisper") {
@@ -354,9 +364,7 @@ fn model_status_now(app: &tauri::AppHandle, revision: u64) -> ModelStatus {
 /// Updates the download status and tells the main window.
 fn set_model_status(app: &tauri::AppHandle, update: impl FnOnce(&mut ModelStatus)) {
     let download = app.state::<ModelDownload>();
-    let Ok(mut status) = download.status.lock() else {
-        return;
-    };
+    let mut status = download.lock();
     update(&mut status);
     status.revision += 1;
     let _ = app.emit_to("main", "model:changed", status.clone());
@@ -364,11 +372,7 @@ fn set_model_status(app: &tauri::AppHandle, update: impl FnOnce(&mut ModelStatus
 
 #[tauri::command]
 fn model_status(app: tauri::AppHandle, download: tauri::State<ModelDownload>) -> ModelStatus {
-    let mut status = download
-        .status
-        .lock()
-        .map(|s| s.clone())
-        .unwrap_or_default();
+    let mut status = download.lock().clone();
     if status.status != "downloading" {
         let message = status.message.take();
         status = ModelStatus {
@@ -423,10 +427,7 @@ fn download_model(
         let dir = models_dir(&app).ok_or("The app's storage folder is unavailable.")?;
         {
             // Checked and set under one lock, so two downloads never overlap.
-            let mut status = download
-                .status
-                .lock()
-                .map_err(|_| "The download is unavailable.")?;
+            let mut status = download.lock();
             if status.status == "downloading" {
                 return Err("The model is already downloading.".into());
             }
@@ -503,10 +504,7 @@ fn remove_model(
     }
     let dir = models_dir(&app).ok_or("The app's storage folder is unavailable.")?;
     // Held throughout, so a download cannot start while the file is removed.
-    let mut status = download
-        .status
-        .lock()
-        .map_err(|_| "The download is unavailable.")?;
+    let mut status = download.lock();
     if status.status == "downloading" {
         return Err("Cancel the download before removing the model.".into());
     }
