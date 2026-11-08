@@ -115,6 +115,9 @@ test('the browser preview never offers a live microphone session', async ({
   await expect(
     page.getByRole('button', { name: 'Start live session' }),
   ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Set up live session' }),
+  ).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(
     page.getByRole('heading', { name: 'Live transcription' }),

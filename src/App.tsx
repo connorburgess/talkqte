@@ -232,6 +232,15 @@ function Notebook() {
   const { state, error, setError, busy, run } = useSession<Snapshot>();
   const microphone = useMicrophone();
   const [view, setView] = useState<'notebook' | 'settings'>('notebook');
+  // Set when a link opens Settings at the live transcription section.
+  const [focusLiveSetup, setFocusLiveSetup] = useState(false);
+  useEffect(() => {
+    if (view !== 'settings' || !focusLiveSetup) return;
+    const heading = document.getElementById('live-transcription');
+    heading?.scrollIntoView({ block: 'start' });
+    heading?.focus();
+    setFocusLiveSetup(false);
+  }, [view, focusLiveSetup]);
   const [tab, setTab] = useState<'notes' | 'transcript'>('notes');
   const [search, setSearch] = useState('');
   const [notes, setNotes] = useState('');
@@ -639,6 +648,21 @@ function Notebook() {
                         Start live session
                       </button>
                     )}
+                    {!liveStatus?.available &&
+                      (model?.status === 'missing' ||
+                        model?.status === 'downloading') && (
+                        <button
+                          className="text-button"
+                          onClick={() => {
+                            setFocusLiveSetup(true);
+                            setView('settings');
+                          }}
+                        >
+                          {model.status === 'downloading'
+                            ? 'View download progress'
+                            : 'Set up live session'}
+                        </button>
+                      )}
                     <button
                       className="primary-button"
                       disabled={busy}
@@ -1010,7 +1034,9 @@ function Notebook() {
             </section>
             <section className="setting">
               <div>
-                <h2>Live transcription</h2>
+                <h2 id="live-transcription" tabIndex={-1}>
+                  Live transcription
+                </h2>
                 <p>
                   Start live session in the notebook to get questions from what
                   your microphone hears. A speech model transcribes on this
