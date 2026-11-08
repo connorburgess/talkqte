@@ -38,6 +38,24 @@ TALKQTE_WHISPER_CLIP="/absolute/path/to/synthetic.wav" \
 
 Without both variables the test is skipped. It sends the clip through the real worker into a live engine session. It passes when the recognizer produces lines without errors, an owner line raises "Who will take the first draft?", and that question's source is a recognized line. On macOS, run the built test binary under `sandbox-exec -p '(version 1)(allow default)(deny network*)'` to check that no network access is needed.
 
+## Real-time replay
+
+`examples/replay_clip.rs` replays a clip into a live session in real time. Each chunk of audio is handed to the worker once that much time has passed, while the engine clock advances as in the app. It prints when a cue is shown, when it clears and how much time it had left, and the worker counts. It prints no transcript text. With `--end-at-ms`, it ends the session partway through and fails if anything changes afterwards.
+
+```sh
+cd src-tauri
+cargo run --features local-whisper --example replay_clip -- \
+  --model "$HOME/.local/share/talkqte-models/ggml-tiny.en.bin" \
+  --clip /tmp/talkqte-answer.wav --chunk-ms 5000 [--end-at-ms 7000]
+```
+
+A clip in which a later line answers the question:
+
+```sh
+say -o /tmp/talkqte-answer.aiff "Someone can take the first draft of the welcome guide. [[slnc 3000]] It should cover where to find the tools. [[slnc 3000]] Jordan will take the first draft. [[slnc 2000]] Great, thanks."
+afconvert -f WAVE -d LEI16@16000 -c 1 /tmp/talkqte-answer.aiff /tmp/talkqte-answer.wav
+```
+
 ## Recorded result
 
 Fictional three-sentence clip (about 8 seconds: an owner, a timing, and a decision line), `tiny.en` model, Apple M5 Pro, macOS 26.4, debug build, network denied by `sandbox-exec`. Three runs:
@@ -49,12 +67,18 @@ Fictional three-sentence clip (about 8 seconds: an owner, a timing, and a decisi
 | Submit to first line in the engine          | 150–158 ms                                                             |
 | Peak memory of the test process             | about 210 MB                                                           |
 
-This is one short, clean, single-voice synthetic clip on one machine. It does not measure accuracy on real meetings, noisy audio, overlapping speakers, sustained sessions, or other hardware, and it is not a latency or resource budget.
+Real-time replay of the 14.7-second answer clip in 5-second chunks, same machine and model, network denied, debug build:
+
+| Run              | Result                                                                                                                                                                                                                                                        |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Full clip, twice | "Who will take the first draft?" shown 5.2–5.3 s into the replay, after the first chunk, sourced to the recognized owner line. Withdrawn 14.9 s in, with about 3.2 s of its time left, after "Jordan will take the first draft." 4 lines, no errors or drops. |
+| End at 7 s       | Question shown at 5.2 s; End at 7.0 s cleared it. The worker stopped without detaching, and nothing changed afterwards: no new lines, revision unchanged.                                                                                                     |
+
+These are short, clean, single-voice synthetic clips on one machine. It does not measure accuracy on real meetings, noisy audio, overlapping speakers, sustained sessions, or other hardware, and it is not a latency or resource budget.
 
 ## Still needed
 
-- A synthetic clip in which a later line answers the question, to check withdrawal end to end.
-- A replay command that starts and stops a worker with a session, so End during transcription can be checked in the app.
+- Starting and stopping a worker with the app's own session controls, and showing a live session in the companion.
 - Model delivery: where the model comes from, its integrity check, and its size. See the roadmap.
 - A display for live sessions: `Engine::live()` has no fixed duration, so the UI must not show its duration as an end time.
 - Sustained-session measurements of delay, memory growth, CPU use, and dropped audio.
