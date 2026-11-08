@@ -24,6 +24,16 @@ pub enum Provider {
     File,
 }
 
+impl Provider {
+    /// A stable short name for keys and labels.
+    pub fn id(&self) -> &'static str {
+        match self {
+            Provider::Granola => "granola",
+            Provider::File => "file",
+        }
+    }
+}
+
 /// What a connection can do. Import, live input, and writeback are separate
 /// capabilities, verified separately; a successful import proves none of the
 /// others.

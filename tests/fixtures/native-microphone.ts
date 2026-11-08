@@ -89,6 +89,7 @@ async function say(text: string, question?: string) {
           held: false,
           expanded: false,
           resolvedBy: null,
+          note: null,
         }
       : session.cue,
   });
