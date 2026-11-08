@@ -1041,7 +1041,7 @@ svg {
   font-size: 26px;
 }
 .floating-surface {
-  background: var(--paper);
+  background: var(--forest);
   color: #f2f5e9;
   display: flex;
   flex-direction: column;
