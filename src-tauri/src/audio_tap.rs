@@ -38,6 +38,8 @@ pub fn tap(device_rate: u32, channels: u16, chunk_ms: u64) -> (TapInput, Chunker
             producer,
             channels: channels.max(1) as usize,
             overruns: overruns.clone(),
+            frame_sum: 0.0,
+            frame_samples: 0,
         },
         Chunker {
             consumer,
@@ -46,6 +48,8 @@ pub fn tap(device_rate: u32, channels: u16, chunk_ms: u64) -> (TapInput, Chunker
             chunk_samples: (SAMPLE_RATE as u64 * chunk_ms / 1_000).max(1) as usize,
             emitted: 0,
             overruns,
+            counted_overruns: 0,
+            device_rate: device_rate.max(1),
         },
     )
 }
@@ -55,27 +59,33 @@ pub struct TapInput {
     producer: Producer<f32>,
     channels: usize,
     overruns: Arc<Overruns>,
+    /// A frame split across two callbacks continues in the next one.
+    frame_sum: f32,
+    frame_samples: usize,
 }
 
 impl TapInput {
     /// Downmixes interleaved samples to mono and queues them. Samples that do
-    /// not fit are dropped and counted, never waited for.
+    /// not fit are dropped and counted, never waited for. Pass a non-allocating
+    /// iterator, such as a mapped slice from the capture callback.
     pub fn push_interleaved(&mut self, samples: impl Iterator<Item = f32>) {
-        let mut sum = 0.0;
-        let mut in_frame = 0;
         for sample in samples {
-            sum += if sample.is_finite() {
+            self.frame_sum += if sample.is_finite() {
                 sample.clamp(-1.0, 1.0)
             } else {
                 0.0
             };
-            in_frame += 1;
-            if in_frame == self.channels {
-                if self.producer.push(sum / self.channels as f32).is_err() {
+            self.frame_samples += 1;
+            if self.frame_samples == self.channels {
+                if self
+                    .producer
+                    .push(self.frame_sum / self.channels as f32)
+                    .is_err()
+                {
                     self.overruns.0.fetch_add(1, Ordering::Relaxed);
                 }
-                sum = 0.0;
-                in_frame = 0;
+                self.frame_sum = 0.0;
+                self.frame_samples = 0;
             }
         }
     }
@@ -87,9 +97,13 @@ pub struct Chunker {
     resampler: Resampler,
     pending: Vec<f32>,
     chunk_samples: usize,
-    /// 16 kHz samples already emitted, which sets each chunk's start time.
+    /// 16 kHz samples already emitted, plus gaps for dropped audio, which
+    /// sets each chunk's start time.
     emitted: u64,
     overruns: Arc<Overruns>,
+    /// Dropped device samples already accounted for as a gap.
+    counted_overruns: u64,
+    device_rate: u32,
 }
 
 impl Chunker {
@@ -97,24 +111,39 @@ impl Chunker {
     /// complete chunks. `session_start_ms` is the session time at which the
     /// tap started, so chunk times line up with the engine's clock.
     pub fn drain(&mut self, session_start_ms: u64) -> Vec<AudioChunk> {
+        // Everything still queued was captured before any samples dropped
+        // since the last drain, because a full ring drops the newest audio.
         while let Ok(sample) = self.consumer.pop() {
             self.resampler.push(sample, &mut self.pending);
         }
         let mut chunks = vec![];
         while self.pending.len() >= self.chunk_samples {
-            let rest = self.pending.split_off(self.chunk_samples);
-            let samples = std::mem::replace(&mut self.pending, rest);
+            let samples: Vec<f32> = self.pending.drain(..self.chunk_samples).collect();
             chunks.push(self.chunk(session_start_ms, samples));
+        }
+        // Account for dropped audio as a gap, ending the current chunk early so
+        // later chunks keep their true times.
+        let dropped = self.overruns.get() - self.counted_overruns;
+        if dropped > 0 {
+            self.counted_overruns += dropped;
+            if !self.pending.is_empty() {
+                let samples = std::mem::take(&mut self.pending);
+                chunks.push(self.chunk(session_start_ms, samples));
+            }
+            self.emitted += dropped * SAMPLE_RATE as u64 / self.device_rate as u64;
         }
         chunks
     }
 
-    /// Returns the final partial chunk, if any, when capture stops.
-    pub fn finish(&mut self, session_start_ms: u64) -> Option<AudioChunk> {
+    /// Returns every remaining chunk, including the final partial one, when
+    /// capture stops.
+    pub fn finish(&mut self, session_start_ms: u64) -> Vec<AudioChunk> {
         let mut chunks = self.drain(session_start_ms);
         let partial = std::mem::take(&mut self.pending);
-        chunks.extend((!partial.is_empty()).then(|| self.chunk(session_start_ms, partial)));
-        chunks.into_iter().last()
+        if !partial.is_empty() {
+            chunks.push(self.chunk(session_start_ms, partial));
+        }
+        chunks
     }
 
     pub fn overruns(&self) -> u64 {
@@ -129,9 +158,10 @@ impl Chunker {
 }
 
 /// Converts mono audio at the device rate to 16 kHz. Each output sample
-/// averages the input samples that fall within its period (a box filter,
-/// which reduces aliasing when downsampling), and upsampling interpolates
-/// linearly. Adequate for speech recognition; not a high-fidelity resampler.
+/// averages the input samples that fall within its period, which gives only
+/// minimal anti-aliasing when downsampling; upsampling interpolates linearly.
+/// Checked to work for speech recognition on synthetic speech; not a
+/// high-fidelity resampler.
 struct Resampler {
     /// Input samples per output sample.
     step: f64,
@@ -259,13 +289,37 @@ mod tests {
     }
 
     #[test]
-    fn finish_returns_the_last_partial_chunk_once() {
+    fn finish_returns_every_remaining_chunk_once() {
         let (mut input, mut chunker) = tap(16_000, 1, 1_000);
         input.push_interleaved(std::iter::repeat_n(0.0, 24_000));
-        assert_eq!(chunker.drain(0).len(), 1);
-        let last = chunker.finish(0).expect("half a second remains");
-        assert_eq!((last.start_ms, last.samples.len()), (1_000, 8_000));
-        assert!(chunker.finish(0).is_none());
+        // Nothing drained yet: a full chunk and a partial one remain.
+        let rest = chunker.finish(0);
+        let summary: Vec<_> = rest.iter().map(|c| (c.start_ms, c.samples.len())).collect();
+        assert_eq!(summary, [(0, 16_000), (1_000, 8_000)]);
+        assert!(chunker.finish(0).is_empty());
+    }
+
+    #[test]
+    fn a_frame_split_across_callbacks_is_kept() {
+        let (mut input, mut chunker) = tap(16_000, 2, 1_000);
+        let stereo = vec![0.5; 32_000];
+        input.push_interleaved(stereo[..3].iter().copied());
+        input.push_interleaved(stereo[3..].iter().copied());
+        let chunks = chunker.drain(0);
+        assert_eq!((chunks.len(), chunks[0].samples.len()), (1, 16_000));
+    }
+
+    #[test]
+    fn dropped_audio_leaves_a_gap_so_later_chunks_keep_their_times() {
+        let (mut input, mut chunker) = tap(16_000, 1, 1_000);
+        let capacity = 16_000 * RING_SECONDS;
+        // Fill the ring and drop one second, then drain and continue.
+        input.push_interleaved(std::iter::repeat_n(0.0, capacity + 16_000));
+        let first = chunker.drain(0);
+        assert_eq!(first.last().unwrap().start_ms, 3_000);
+        input.push_interleaved(std::iter::repeat_n(0.0, 16_000));
+        let next = chunker.drain(0);
+        assert_eq!(next[0].start_ms, 5_000, "one dropped second is skipped");
     }
 
     #[test]
