@@ -27,7 +27,7 @@ The main webview receives session snapshots. The floating webview receives only 
 
 `src-tauri/src/companion.rs` owns the floating window's compact, question, and context states. It defaults to the bottom-right of the notebook display's work area, with optional top-center, top-left, and top-right presets and a primary-display fallback. Rust-owned, session-only appearance settings travel with both snapshots. Native window queries run on the main thread after releasing the engine lock. Placement is checked on notebook moves and once per second so display and Dock changes can be handled without querying window state in the engine's critical section. Only changed layouts are applied. The window is configured not to take focus; keyboard question controls remain in the notebook. Full-screen apps, Spaces, native assistive access, and screen sharing still require separate verification. Automatic meeting detection is not implemented.
 
-Glance view initially hides the evidence excerpt. The ID-validated `inspect_cue` command updates shared disclosure state and marks the current question held in Rust. Playback and transcript updates continue, but expiry cannot remove a held question and later suggestions do not replace it. Collapsing context retains the hold. The original deadline still supplies an earlier-question label; it is not semantic resolution. Save and Dismiss remain valid whenever that same question exists, including pause and natural playback completion. Explicit End demo and Replay clear it. Untouched questions retain the existing expiry/cooldown policy. Skipped questions are never replayed from a backlog. See [design and evidence](glance-mode.md).
+Glance view initially hides the evidence excerpt. The ID-validated `inspect_cue` command updates shared disclosure state and marks the current question held in Rust. Playback and transcript updates continue, but expiry cannot remove a held question and later suggestions do not replace it. Collapsing context retains the hold. The original deadline still supplies an earlier-question label; it is not semantic resolution. Dismiss remains available in the UI whenever that same question exists, including pause and natural playback completion. Explicit End demo and Replay clear it. Untouched questions retain the existing expiry/cooldown policy. Skipped questions are never replayed from a backlog. See [design and evidence](glance-mode.md).
 
 On macOS, `src-tauri/src/companion_macos.rs` selects a native titled frame with full-size content before the window is created. AppKit supplies its rounded outer corners while the webview remains opaque. Setup hides the title and standard window buttons before the companion first appears, using public AppKit APIs on the main thread. This keeps platform window details out of the lifecycle and rendering code; other platforms retain the borderless configuration. Compact and expanded native windows have been visually checked on macOS; this does not verify cross-app keyboard focus or Spaces behavior. The [native validation record](native-validation.md) separates observed notebook behavior, geometry tests, and pending companion checks.
 
@@ -56,7 +56,7 @@ Native capture adapters
         |
 bounded audio buffers
         |
-Whisper worker -> transcript segments -> prompt rules -> question lifecycle
+Whisper worker -> transcript segments -> cue evaluator -> cue lifecycle
                          |                                  |
                   private storage                    Tauri events
                                                             |
@@ -68,7 +68,7 @@ Whisper worker -> transcript segments -> prompt rules -> question lifecycle
 - Rust owns prompt expiry, cooldowns, persistence, retention, and session boundaries.
 - React owns rendering, keyboard interactions, and presentation. It accesses native behavior only through narrowly scoped, validated commands.
 - Local Whisper may use whisper.cpp through Rust bindings. This is a Rust application with a native inference dependency, not a promise of an entirely Rust dependency tree.
-- Any future language model is a separate optional component. Whisper alone does not supply semantic understanding or summaries.
+- AI cue reasoning is a separate planned evaluator behind a narrow interface. Rust retains lifecycle and permission control; the model returns bounded decisions with source references. No production runtime is selected. Whisper transcribes speech and does not provide cue reasoning. See [cue intelligence](cue-intelligence.md).
 
 ## Future integration boundary
 

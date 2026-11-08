@@ -71,11 +71,16 @@ Target first use: understand the purpose and compatibility, install, try the fic
 
 When a later stage is approved, use one bounded acquisition/onboarding experiment at a time. Record the audience, channel hypothesis, supported build, success criteria, observed setup friction, and next decision. Start with participant feedback and manual observations; analytics, forms, paid promotion, and outreach are separate product/execution decisions. Do not collect meeting content to measure conversion.
 
+## Development milestones
+
+Follow the progression from [proof of concept to live AI, connected workflows, and broader availability](initial-rollout.md). Plan reliability, integration, accessibility, and distribution alongside the core experience. A supported macOS release does not have to wait for every later integration or platform; each release must fully deliver the slice it advertises.
+
 ## Release stages and acceptance
 
 1. **Development (current):** explain the intended experience with a fictional concept preview and a follow-development link. Establish the support matrix, budgets, integration contract, and install/update plan alongside core development. Prepare a reproducible synthetic validation suite; do not turn release planning into premature recruitment or a download offer.
-2. **Invited pilot:** verify the advertised feature slice end to end, including clean installation, first use, interruption recovery, privacy, accessibility, and a support route. Set acceptance criteria before inviting participants. Test updates between candidate versions before widening the pilot. Include integration tests if the pilot promises a connection.
-3. **Wider distribution:** demonstrate useful context and participation without unacceptable listening cost, reliable supported operation, recovery from a failed release, sustainable delivery/support costs, and accurate download/help material. Publish limitations and release notes. Expand channels based on observed fit.
+2. **Live macOS alpha:** complete the supported live slice, including an explicitly chosen AI processing path, dependable Stop/recovery, and repeated meeting-use evaluation. Keep synthetic test evidence separate from observations of usefulness. Apply the [milestone acceptance criteria](initial-rollout.md).
+3. **Optional invited pilot:** verify the advertised feature slice end to end, including clean installation, first use, interruption recovery, privacy, accessibility, and a support route. Set acceptance criteria before inviting participants. Test updates between candidate versions before widening the pilot. Include integration tests if the pilot promises a connection.
+4. **Wider distribution:** demonstrate useful context and participation without unacceptable listening cost, reliable supported operation, recovery from a failed release, sustainable delivery/support costs, and accurate download/help material. Publish limitations and release notes. Expand channels based on observed fit.
 
 The roadmap's full future feature set need not block a clearly scoped pilot. Each release must deliver its advertised slice completely. Windows, mobile, enterprise deployment, additional providers, and commercial packaging each need their own demand and feasibility decision; planning them is not a promise of support.
 
