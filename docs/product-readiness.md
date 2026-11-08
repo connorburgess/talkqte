@@ -20,7 +20,7 @@ The current public objective is to explain the idea with a clearly labeled ficti
 | Support and operation                 | Known limitations, release notes, troubleshooting, a support route, and a response plan for failed releases | Rehearse a failed update/provider outage; offer user-reviewed diagnostics without meeting content; assign a release/support owner                                                  |
 | Sustainability                        | A viable cost and maintenance model as usage grows                                                          | Estimate artifact/model download bandwidth, storage, signing/release operations, optional provider costs, and support effort; review dependency/model terms before distribution    |
 
-Budgets, minimum supported hardware, release ownership, pricing, and channel targets remain open decisions. Define them for the intended pilot before declaring a candidate ready. More downloads or feature count alone do not prove user value or operational readiness.
+Budgets and minimum supported hardware have a [proposal awaiting agreement](budgets.md). Release ownership, pricing, and channel targets remain open decisions. Define them for the intended pilot before declaring a candidate ready. More downloads or feature count alone do not prove user value or operational readiness.
 
 ## Production and scaling approach
 

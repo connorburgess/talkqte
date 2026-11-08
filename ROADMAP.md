@@ -21,7 +21,7 @@ The [milestone acceptance criteria](docs/initial-rollout.md) define what counts 
 
 This track runs alongside the feature milestones below. The goal includes a dependable, supportable product that people can discover, install, connect to existing tools, and update with minimal friction. Use the [product readiness plan](docs/product-readiness.md) to choose the next release blocker and record evidence; a demo or successful build alone does not establish readiness.
 
-- [ ] Define the first supported macOS/hardware/meeting-app matrix and measurable latency, resource, and recovery budgets.
+- [ ] Define the first supported macOS/hardware/meeting-app matrix and measurable latency, resource, and recovery budgets. A [proposal](docs/budgets.md) awaits agreement.
 - [ ] Establish a Granola capability and authentication decision, source-aware context contract, and fictional adapter fixtures; verify import, live input, and writeback separately.
 - [x] Plan model delivery, integrity, interrupted downloads, offline use, and application/model compatibility. See the [model delivery plan](docs/model-delivery.md); implementation and accuracy scoring remain.
 - [ ] Prove a signed, notarized installation and a recoverable upgrade on a clean supported Mac; include data migration and update deferral during calls.
