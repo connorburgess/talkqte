@@ -55,6 +55,8 @@ Test the in-conversation interaction before investing in automatic detection. Th
 - [ ] Check whether the **Why?** hold is discoverable or needs a separate Hold action.
 - [ ] Check the notebook's keyboard route, native VoiceOver, reading time, and announcement preferences with users' normal setups.
 - [ ] Test content, timing, and placement separately; keep a simpler manual interaction if automation does not add value.
+- [ ] Label fictional examples of cue use, natural resolution, correction, and topic changes; validate conversation-based outcome signals without equating use with usefulness or dismissal with failure.
+- [ ] Compare rules with semantic cue suppression and resolution using the [intelligence evaluation plan](docs/cue-intelligence.md); start with an explicitly initiated subscription-backed fictional lab, without separately billed inference APIs. Measure false suppression, latency, privacy boundaries, and allowance use before choosing a model/runtime.
 
 See the [review findings, current gaps, and experiment](docs/research.md). No user-outcome study has been completed.
 
@@ -119,7 +121,7 @@ Provider access and capabilities can change; recheck them when implementing each
 
 Support joining Google Meet on a phone and receiving prompts during the call. Obtaining the conversation and presenting a prompt are separate capabilities; neither is implemented on mobile. See the [mobile feasibility and acceptance plan](docs/mobile.md).
 
-- [ ] Adapt the notebook for mobile notes, review, and explicitly selected imports and exports.
+- [ ] Validate a readable mobile cue and its controls with fictional context; selected imports may support context, while notes and saving need a separate demonstrated use case.
 - [ ] Prove a foreground mobile companion receiving an authenticated, explicitly paired live session feed.
 - [ ] Validate Meet's own picture-in-picture alongside the companion where the device and app support it.
 - [ ] Investigate same-phone capture on real devices, with explicit unsupported states when either side of the call is unavailable.

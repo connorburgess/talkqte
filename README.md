@@ -61,6 +61,7 @@ These are development targets. The activity monitor does not yet transcribe meet
 ## Project decisions
 
 - [Product goal and first proof](PRODUCT.md#goal-and-first-proof)
+- [Cue intelligence, feedback, and runtime candidates](docs/cue-intelligence.md)
 - [Research summary and product decisions](docs/research.md)
 - [Architecture and stack](docs/architecture.md)
 - [Glance view design and research](docs/glance-mode.md)
