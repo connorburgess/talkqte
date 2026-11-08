@@ -37,7 +37,7 @@ Choose **Stop microphone** to release the input device. The app shows a stopping
 
 Synthetic lifecycle tests and a macOS build cover the adapter, but real microphone permission, device-disconnect, and audio-operation checks still need explicit native testing. See [PRIVACY.md](PRIVACY.md) for current behavior and limitations.
 
-For UI development, `npm run dev` starts a browser preview at `http://127.0.0.1:1420`. It uses a separate simulated adapter and cannot verify native window behavior. `npm run tauri -- build --debug --bundles app` builds an unsigned macOS development app.
+For UI development, `npm run dev` starts a browser preview at `http://127.0.0.1:1420`. It uses a separate simulated adapter and cannot verify native window behavior. For packaged macOS testing, `APPLE_SIGNING_IDENTITY=- npm run tauri -- build --debug --bundles app` builds an ad-hoc-signed development app with the microphone entitlement. This is not a Developer ID-signed or notarized release.
 
 ## Intended first usable version
 
