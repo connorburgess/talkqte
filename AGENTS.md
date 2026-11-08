@@ -12,7 +12,7 @@
 
 - Initial repository bootstrap may be pushed to `main`. After bootstrap, feature work, fixes, and documentation changes go through branches and pull requests.
 - The owner's branches use `cb/<short-description>`, such as `cb/meeting-capture`. Other contributors may use their own prefix.
-- Use plain-language commit and PR titles that explain the behavior or result.
+- Use Conventional Commit titles for new contribution commits and PRs: `type(optional-scope): describe the result`. Use lowercase types, optional area scopes, and plain-language descriptions. Keep related tests with their implementation and separate unrelated changes. See CONTRIBUTING.md for types and examples. Apply this going forward; do not rewrite published history just to add prefixes. Generated merge commits are exempt.
 - Sign off each contribution commit with the human contributor's identity (`git commit -s`) under the origin policy in CONTRIBUTING.md. This is not a tool credit or a DCO 1.1 certification. Before merging third-party contributions, verify each contributor's explicit acceptance of CONTRIBUTOR_LICENSE_AGREEMENT.md; never accept on their behalf.
 - Keep PRs focused. Report checks actually run, and clearly state what could not be verified.
 - Do not enable automatic merging or bypass required checks without an explicit instruction.

@@ -38,12 +38,48 @@ Keep each PR focused on one outcome. Explain the problem, resulting behavior, an
 
 When responding to a finding, name the finding, explain the fix or reason for leaving it, and link the commit. Reference CI only with the specific run, jobs, and commit. Do not reply to an all-clear or continue a back-and-forth with a reviewer bot.
 
+## Commit and pull-request titles
+
+Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) for new contribution commits and PR titles:
+
+```text
+type(optional-scope): describe the result
+```
+
+Use lowercase types and a short, plain-language description. Scope is optional; include it when it helps identify the area, such as `companion`, `capture`, `cues`, or `roadmap`.
+
+| Type | Use for |
+| --- | --- |
+| `feat` | New or deliberately changed user-facing behavior |
+| `fix` | Correcting a defect |
+| `docs` | Documentation changes |
+| `refactor` | Restructuring code without changing behavior |
+| `test` | Test-only changes |
+| `chore` | Repository maintenance that fits none of the above |
+
+Use `build`, `ci`, `perf`, `style`, or `revert` when they describe the change more precisely. `style` means code formatting, not a visual UI change. Mark a breaking change with `!` before the colon and explain the impact and migration in the body.
+
+Examples:
+
+```text
+fix(companion): remove the light window border
+feat(cues): simplify live cue controls
+docs(roadmap): describe progression to broader availability
+ci: check contribution metadata
+```
+
+Keep each commit coherent and independently reviewable. Include relevant tests with the behavior they verify; separate unrelated documentation or maintenance. Avoid `WIP`, `updates`, and `fix stuff` as final subjects. The body should explain why the change is needed when the subject and diff are insufficient.
+
+Use the same title format for the PR, describing its overall outcome. Its description covers the problem, resulting behavior, and verification; a title prefix does not replace that explanation. Choose the main type when a focused PR also includes supporting tests or documentation.
+
+Apply the convention going forward. Do not rewrite published history just to add prefixes; generated merge commits are exempt. Keep the required human contribution sign-off on every contribution commit. Title prefixes are a documented convention; the existing metadata check enforces sign-offs and attribution rules, not title syntax.
+
 ## Sign off your commits
 
 Every contribution commit must include a `Signed-off-by:` line matching its author. By signing off, you confirm that you created the contribution or have the right and any necessary employer authorization to submit it under the applicable contribution terms. Use your real name and an email address you control. A GitHub-provided `noreply` address is welcome for privacy; use the same identity for author and sign-off.
 
 ```sh
-git commit -s -m "Keep a saved question after the prompt expires"
+git commit -s -m "fix(companion): remove the light window border"
 ```
 
 The sign-off records contribution origin and is different from cryptographically signing a commit. New contributions are distributed under the [Sustainable Use License](LICENSE), subject to any preserved third-party terms, and require the contributor agreement below. A sign-off alone does not accept that agreement. Historical DCO sign-offs remain associated with their original commits; the unchanged [DCO 1.1 text](LICENSES/DCO-1.1.txt) is retained for reference and is no longer the current sign-off policy.
