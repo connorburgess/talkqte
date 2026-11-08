@@ -230,6 +230,42 @@ mod tests {
     }
 
     #[test]
+    fn importing_the_same_file_again_keeps_each_note_once_and_a_newer_revision_replaces() {
+        let ids = vec!["n1".to_string(), "n2".to_string()];
+        let mut store = ContextStore::default();
+        let mut source = FileSource::parse(EXAMPLE).unwrap();
+        let first = fetch_selection(&mut source, &ids, &|| false, &mut |_| true).unwrap();
+        let outcome = store.merge(Provider::File, &ids, first);
+        assert_eq!(outcome.added, 2);
+        // The same file again: nothing is duplicated or changed.
+        let mut again = FileSource::parse(EXAMPLE).unwrap();
+        let second = fetch_selection(&mut again, &ids, &|| false, &mut |_| true).unwrap();
+        let outcome = store.merge(Provider::File, &ids, second);
+        assert_eq!((outcome.added, outcome.unchanged), (0, 2));
+        assert_eq!(store.items().len(), 2);
+        // A newer revision of one note replaces it; an older one is ignored.
+        let newer = EXAMPLE.replace(
+            r#"{"id":"n1","title":"Garden welcome guide","date":"2026-10-28","text":"Draft a one-page guide. Robin suggested a map of the tool shed.""#,
+            r#"{"id":"n1","title":"Garden welcome guide","date":"2026-10-28","revision":2,"text":"Draft a one-page guide with a map of the tool shed.""#,
+        );
+        let mut newer = FileSource::parse(&newer).unwrap();
+        let third = fetch_selection(&mut newer, &ids, &|| false, &mut |_| true).unwrap();
+        let outcome = store.merge(Provider::File, &ids, third);
+        assert_eq!((outcome.updated, outcome.unchanged), (1, 1));
+        let n1 = store.items().iter().find(|i| i.source_id == "n1").unwrap();
+        assert_eq!(n1.revision, 2);
+        assert!(n1.excerpt.contains("with a map"));
+        assert_eq!(n1.source_date, "2026-10-28", "the source reference stays");
+        let mut older = FileSource::parse(EXAMPLE).unwrap();
+        let fourth = fetch_selection(&mut older, &ids, &|| false, &mut |_| true).unwrap();
+        let outcome = store.merge(Provider::File, &ids, fourth);
+        assert_eq!(
+            outcome.unchanged, 2,
+            "an older revision never rolls a note back"
+        );
+    }
+
+    #[test]
     fn a_repeated_id_in_one_file_is_listed_once() {
         let text = r#"{"notes":[
             {"id":"n1","date":"2026-01-01","text":"first"},

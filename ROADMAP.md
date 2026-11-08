@@ -112,7 +112,7 @@ TalkQTE should complement an existing note-taking workflow. Evaluate Granola fir
 - [ ] Support other note-takers through common file formats when needed, adding dedicated adapters only for demonstrated use cases.
 - [ ] Use imported notes as selected meeting context without requiring a second recording of the original meeting. First slice: notes imported from a fictional JSON file through the context contract, shown beside the notebook with source and date, removable, never exported; no question uses them yet, and no note-taker is connected.
 - [ ] Export selected notes, questions, and action items with a preview of the content and destination.
-- [ ] Preserve source references and handle repeated imports without silently duplicating or overwriting user edits.
+- [x] Preserve source references and handle repeated imports without silently duplicating or overwriting user edits. Each imported note keeps its provider, source ID, and date; the date and source are shown beside it. Importing the same notes again reports them as already imported and keeps one copy; a newer revision replaces a note and an older one never rolls it back. Imported notes cannot be edited in TalkQTE, so there are no user edits to overwrite. The revision rules are checked with the file source in an engine test, and the repeat notice in a browser test; the Granola path is not built.
 - [ ] Give each connection explicit permissions and disconnect controls; apply retention rules to imported copies.
 
 Start with one-way import and export. Consider live context and two-way synchronization only where documented interfaces support them and conflict/deletion behavior is defined. No integration or live transcript access is available or promised yet.
