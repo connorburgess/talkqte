@@ -1,4 +1,6 @@
 mod companion;
+#[cfg(target_os = "macos")]
+mod companion_macos;
 mod engine;
 mod microphone;
 
@@ -166,6 +168,9 @@ async fn export_markdown(
 }
 
 pub fn run() {
+    let context = tauri::generate_context!();
+    #[cfg(target_os = "macos")]
+    let context = companion_macos::configure(context);
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState(Mutex::new(Runtime {
@@ -192,6 +197,8 @@ pub fn run() {
             microphone::stop_microphone
         ])
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            companion_macos::hide_controls(app)?;
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let mut last_placement = Instant::now();
@@ -241,7 +248,7 @@ pub fn run() {
                 window.app_handle().exit(0);
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("TalkQTE could not start")
         .run(|app, event| {
             if matches!(

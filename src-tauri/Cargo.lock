@@ -3156,6 +3156,7 @@ dependencies = [
  "block2",
  "cpal",
  "objc2",
+ "objc2-app-kit",
  "objc2-av-foundation",
  "serde",
  "serde_json",
