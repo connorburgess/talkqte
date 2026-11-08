@@ -16,6 +16,14 @@ use std::sync::{
 
 /// Seconds of device audio the ring can hold before samples are dropped.
 pub const RING_SECONDS: usize = 4;
+/// Level frames used to find pauses: 20 ms of 16 kHz audio.
+const FRAME: usize = SAMPLE_RATE / 50;
+/// How long a pause must last before a chunk may end in it.
+pub const PAUSE_MS: u64 = 200;
+/// A frame below this level always counts as quiet.
+const QUIET_FLOOR: f32 = 0.003;
+/// A frame at least this loud counts as sound worth transcribing.
+const SOUND_FLOOR: f32 = 0.01;
 
 /// Shared counter of samples dropped because the ring was full.
 #[derive(Default)]
@@ -52,6 +60,8 @@ pub fn tap(device_rate: u32, channels: u16, chunk_ms: u64) -> (TapInput, Chunker
             counted_overruns: 0,
             gap_applied: 0,
             device_rate: device_rate.max(1),
+            min_samples: None,
+            skipped: 0,
         },
     )
 }
@@ -108,9 +118,78 @@ pub struct Chunker {
     /// 16 kHz samples of gap already added to `emitted`.
     gap_applied: u64,
     device_rate: u32,
+    /// With pause cuts on, the shortest chunk that may end at a pause.
+    min_samples: Option<usize>,
+    skipped: u64,
 }
 
 impl Chunker {
+    /// Ends a chunk at the first pause after `min_ms` of audio, instead of
+    /// always at the full chunk length, which becomes the longest a chunk can
+    /// be. Words are less often cut in half, and a line can reach the
+    /// recognizer sooner. A pause is `PAUSE_MS` of audio below a tenth of the
+    /// chunk's typical (median) sound level so far, after some sound. A
+    /// full-length chunk in which every sample is below the quiet floor is
+    /// skipped rather than transcribed and counted in `skipped`; later
+    /// chunks keep their session times.
+    pub fn cut_at_pauses(&mut self, min_ms: u64) {
+        let min = (SAMPLE_RATE as u64 * min_ms / 1_000) as usize;
+        self.min_samples = Some(min.max(FRAME).min(self.chunk_samples));
+    }
+
+    /// The next cut of pending audio, if one is due.
+    fn next_cut(&self) -> Option<Cut> {
+        let Some(min) = self.min_samples else {
+            return (self.pending.len() >= self.chunk_samples)
+                .then_some(Cut::Keep(self.chunk_samples));
+        };
+        let limit = self.pending.len().min(self.chunk_samples);
+        let needed = (PAUSE_MS as usize * SAMPLE_RATE / 1_000).div_ceil(FRAME);
+        // Each frame is judged against the typical level of the sound before
+        // it: the median, so one loud thump cannot make ordinary speech look
+        // like a pause. Only earlier frames count, so the cut does not depend
+        // on how often the chunker drains.
+        let (mut loudest, mut run) = (0.0f32, 0);
+        let mut sounds: Vec<f32> = Vec::new();
+        for (index, frame) in self.pending[..limit].chunks_exact(FRAME).enumerate() {
+            let level = (frame.iter().map(|x| x * x).sum::<f32>() / FRAME as f32).sqrt();
+            loudest = loudest.max(level);
+            let typical = if sounds.is_empty() {
+                level
+            } else {
+                let mut sorted = sounds.clone();
+                sorted.sort_unstable_by(f32::total_cmp);
+                sorted[sorted.len() / 2]
+            };
+            if level < (typical * 0.1).max(QUIET_FLOOR) {
+                run += 1;
+            } else {
+                run = 0;
+            }
+            if level >= SOUND_FLOOR {
+                sounds.push(level);
+            }
+            let end = (index + 1) * FRAME;
+            if loudest >= SOUND_FLOOR && run >= needed && end >= min {
+                return Some(Cut::Keep(end));
+            }
+        }
+        if self.pending.len() < self.chunk_samples {
+            return None;
+        }
+        // Only true silence is skipped, judged over the whole chunk, so soft
+        // speech still reaches the recognizer.
+        let silent = self.chunk_samples >= FRAME
+            && self.pending[..self.chunk_samples]
+                .iter()
+                .all(|sample| sample.abs() < QUIET_FLOOR);
+        Some(if silent {
+            Cut::Skip(self.chunk_samples)
+        } else {
+            Cut::Keep(self.chunk_samples)
+        })
+    }
+
     /// Moves everything queued so far through the resampler and returns any
     /// complete chunks. `session_start_ms` is the session time at which the
     /// tap started, so chunk times line up with the engine's clock.
@@ -128,9 +207,18 @@ impl Chunker {
             }
         }
         let mut chunks = vec![];
-        while self.pending.len() >= self.chunk_samples {
-            let samples: Vec<f32> = self.pending.drain(..self.chunk_samples).collect();
-            chunks.push(self.chunk(session_start_ms, samples));
+        while let Some(cut) = self.next_cut() {
+            match cut {
+                Cut::Keep(length) => {
+                    let samples: Vec<f32> = self.pending.drain(..length).collect();
+                    chunks.push(self.chunk(session_start_ms, samples));
+                }
+                Cut::Skip(length) => {
+                    self.pending.drain(..length);
+                    self.emitted += length as u64;
+                    self.skipped += 1;
+                }
+            }
         }
         // Account for dropped audio as a gap, ending the current chunk early so
         // later chunks keep their true times. The gap comes from the running
@@ -172,11 +260,22 @@ impl Chunker {
         self.overruns.get()
     }
 
+    /// Silent chunks skipped instead of transcribed.
+    pub fn skipped(&self) -> u64 {
+        self.skipped
+    }
+
     fn chunk(&mut self, session_start_ms: u64, samples: Vec<f32>) -> AudioChunk {
         let start_ms = session_start_ms + self.emitted * 1_000 / SAMPLE_RATE as u64;
         self.emitted += samples.len() as u64;
         AudioChunk { start_ms, samples }
     }
+}
+
+/// Where to cut pending audio: hand a chunk on, or skip silence.
+enum Cut {
+    Keep(usize),
+    Skip(usize),
 }
 
 /// Converts mono audio at the device rate to 16 kHz. Each output sample
@@ -387,6 +486,159 @@ mod tests {
         assert_eq!(chunks.len(), 200);
         assert_eq!(chunks.last().unwrap().start_ms, 597_000);
         assert!(chunks.iter().all(|chunk| chunk.samples.len() == 48_000));
+    }
+
+    /// A tone for each `(seconds, loud)` part, silence otherwise, at 16 kHz.
+    fn speech_like(parts: &[(f32, bool)]) -> Vec<f32> {
+        parts
+            .iter()
+            .flat_map(|&(seconds, loud)| {
+                let tone = tone(SAMPLE_RATE as u32, 220.0, seconds);
+                tone.into_iter()
+                    .map(move |x| if loud { x * 0.3 } else { 0.0 })
+            })
+            .collect()
+    }
+
+    fn feed(input: &mut TapInput, chunker: &mut Chunker, audio: &[f32]) -> Vec<AudioChunk> {
+        let mut chunks = vec![];
+        for block in audio.chunks(SAMPLE_RATE / 10) {
+            input.push_interleaved(block.iter().copied());
+            chunks.extend(chunker.drain(0));
+        }
+        chunks
+    }
+
+    #[test]
+    fn a_pause_after_the_minimum_ends_the_chunk_there() {
+        let (mut input, mut chunker) = tap(16_000, 1, 4_000);
+        chunker.cut_at_pauses(1_000);
+        let audio = speech_like(&[(1.2, true), (0.4, false), (1.5, true), (0.4, false)]);
+        let chunks = feed(&mut input, &mut chunker, &audio);
+        assert_eq!(chunks.len(), 2, "one chunk per spoken part");
+        // The first ends 200 ms into its pause; the second starts there.
+        assert_eq!(chunks[0].samples.len(), 1_400 * SAMPLE_RATE / 1_000);
+        assert_eq!(chunks[1].start_ms, 1_400);
+        // The rest of the first pause, the second part, and 200 ms of its pause.
+        assert_eq!(chunks[1].samples.len(), 1_900 * SAMPLE_RATE / 1_000);
+    }
+
+    #[test]
+    fn a_pause_before_the_minimum_does_not_cut_a_short_chunk() {
+        let (mut input, mut chunker) = tap(16_000, 1, 4_000);
+        chunker.cut_at_pauses(1_000);
+        let audio = speech_like(&[(0.4, true), (0.3, false), (1.0, true), (0.3, false)]);
+        let chunks = feed(&mut input, &mut chunker, &audio);
+        assert_eq!(chunks.len(), 1);
+        assert!(
+            chunks[0].samples.len() >= SAMPLE_RATE,
+            "at least the minimum"
+        );
+    }
+
+    #[test]
+    fn without_pauses_chunks_still_end_at_the_full_length() {
+        let (mut input, mut chunker) = tap(16_000, 1, 2_000);
+        chunker.cut_at_pauses(500);
+        let chunks = feed(&mut input, &mut chunker, &speech_like(&[(4.0, true)]));
+        let lengths: Vec<usize> = chunks.iter().map(|chunk| chunk.samples.len()).collect();
+        assert_eq!(lengths, vec![2 * SAMPLE_RATE; 2]);
+    }
+
+    #[test]
+    fn silence_is_skipped_but_later_speech_keeps_its_time() {
+        let (mut input, mut chunker) = tap(16_000, 1, 2_000);
+        chunker.cut_at_pauses(500);
+        // Five silent seconds, then speech without a pause.
+        let chunks = feed(
+            &mut input,
+            &mut chunker,
+            &speech_like(&[(5.0, false), (2.5, true)]),
+        );
+        // The two silent chunks are skipped; the one with speech keeps its time.
+        assert!(!chunks.is_empty());
+        assert_eq!(chunks[0].start_ms, 4_000);
+        assert_eq!(chunker.skipped(), 2);
+        assert!(chunks
+            .iter()
+            .all(|chunk| chunk.samples.iter().any(|x| x.abs() > 0.1)));
+    }
+
+    #[test]
+    fn a_later_loud_sound_does_not_turn_earlier_speech_into_a_pause() {
+        let quiet: Vec<f32> = tone(SAMPLE_RATE as u32, 220.0, 1.5)
+            .iter()
+            .map(|x| x * 0.04)
+            .collect();
+        let thump: Vec<f32> = tone(SAMPLE_RATE as u32, 220.0, 0.1)
+            .iter()
+            .map(|x| x * 0.9)
+            .collect();
+        let audio: Vec<f32> = quiet.iter().chain(&thump).chain(&quiet).copied().collect();
+        for block_ms in [100, 250, 1_000] {
+            let (mut input, mut chunker) = tap(16_000, 1, 3_000);
+            chunker.cut_at_pauses(1_000);
+            let mut chunks = vec![];
+            for block in audio.chunks(SAMPLE_RATE * block_ms / 1_000) {
+                input.push_interleaved(block.iter().copied());
+                chunks.extend(chunker.drain(0));
+            }
+            // Continuous speech with no pause: only the full-length cut.
+            assert_eq!(chunks.len(), 1, "drained every {block_ms} ms");
+            assert_eq!(chunks[0].samples.len(), 3 * SAMPLE_RATE);
+        }
+    }
+
+    #[test]
+    fn a_tiny_chunk_length_with_pause_cuts_does_not_panic() {
+        let (mut input, mut chunker) = tap(16_000, 1, 10);
+        chunker.cut_at_pauses(1_000);
+        let chunks = feed(&mut input, &mut chunker, &speech_like(&[(0.2, true)]));
+        // Every 10 ms of speech still arrives; nothing is skipped.
+        assert_eq!(chunks.len(), 20);
+        assert_eq!(chunker.skipped(), 0);
+    }
+
+    #[test]
+    fn soft_speech_is_transcribed_not_skipped() {
+        let (mut input, mut chunker) = tap(16_000, 1, 2_000);
+        chunker.cut_at_pauses(500);
+        // Peaks around 0.008, below the level counted as sound.
+        let soft: Vec<f32> = tone(SAMPLE_RATE as u32, 220.0, 4.0)
+            .iter()
+            .map(|x| x * 0.008)
+            .collect();
+        let chunks = feed(&mut input, &mut chunker, &soft);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunker.skipped(), 0);
+    }
+
+    #[test]
+    fn pause_cuts_keep_session_times_exact() {
+        let (mut input, mut chunker) = tap(48_000, 2, 3_000);
+        chunker.cut_at_pauses(800);
+        let mono = speech_like(&[
+            (1.0, true),
+            (0.5, false),
+            (2.0, true),
+            (0.5, false),
+            (0.9, true),
+        ]);
+        // Upsample by repetition to 48 kHz stereo; timing must still match.
+        let device: Vec<f32> = mono.iter().flat_map(|&x| [x; 6]).collect();
+        let mut chunks = vec![];
+        for block in device.chunks(9_600) {
+            input.push_interleaved(block.iter().copied());
+            chunks.extend(chunker.drain(5_000));
+        }
+        chunks.extend(chunker.finish(5_000));
+        // One chunk per spoken part, each ending 200 ms into its pause; the
+        // rest of each pause starts the next chunk.
+        let spans: Vec<(u64, u64)> = chunks
+            .iter()
+            .map(|c| (c.start_ms, (c.samples.len() * 1_000 / SAMPLE_RATE) as u64))
+            .collect();
+        assert_eq!(spans, vec![(5_000, 1_200), (6_200, 2_500), (8_700, 1_200)]);
     }
 
     /// Runs only with the `local-whisper` feature and TALKQTE_WHISPER_MODEL

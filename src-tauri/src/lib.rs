@@ -515,6 +515,12 @@ fn remove_model(
     Ok(())
 }
 
+/// The longest live chunk, and the shortest that may end at a pause.
+#[cfg(feature = "local-whisper")]
+const LIVE_CHUNK_MS: u64 = 3_000;
+#[cfg(feature = "local-whisper")]
+const LIVE_PAUSE_MIN_MS: u64 = 1_000;
+
 /// A live session's parts: the engine session it feeds, the microphone start
 /// capturing for it, and its runner once capture has begun.
 struct Live {
@@ -616,7 +622,10 @@ async fn start_live_session(
         let handle = app.clone();
         let controller = microphone.inner().clone();
         let stopper = controller.clone();
-        let on_tap: microphone::OnTap = Box::new(move |generation, chunker| {
+        let on_tap: microphone::OnTap = Box::new(move |generation, mut chunker| {
+            // Chunks end at the first pause after a second, or at the
+            // longest length, so words are cut less often and arrive sooner.
+            chunker.cut_at_pauses(LIVE_PAUSE_MIN_MS);
             let sink_app = handle.clone();
             let sink = move |session, segment| {
                 let state = sink_app.state::<AppState>();
@@ -659,7 +668,13 @@ async fn start_live_session(
                 microphone::stop_blocking(&handle, stopper, generation);
             }
         });
-        match microphone::start(app.clone(), controller.clone(), Some((3_000, on_tap))).await {
+        match microphone::start(
+            app.clone(),
+            controller.clone(),
+            Some((LIVE_CHUNK_MS, on_tap)),
+        )
+        .await
+        {
             Ok(generation) => {
                 let orphaned = state.0.lock().map_or(true, |mut runtime| {
                     match runtime.live.as_mut().filter(|live| live.session == session) {
