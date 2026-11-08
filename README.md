@@ -1,3 +1,5 @@
+![TalkQTE — a quiet meeting companion](docs/assets/talkqte-banner.png)
+
 # TalkQTE
 
 A privacy-focused meeting companion for timely questions and clearer notes.
