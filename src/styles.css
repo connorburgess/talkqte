@@ -698,6 +698,19 @@ svg {
   padding: 24px 22px 18px;
   border-radius: var(--radius-question);
   overflow: hidden;
+  transform-origin: top center;
+  animation: question-open 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* Cue identity owns mounting; timer updates must not repeat the entrance. */
+@keyframes question-open {
+  from {
+    transform: scale(0.96);
+    opacity: 0.8;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 .question-meta {
   color: #c2d4c5;
@@ -753,6 +766,17 @@ svg {
 }
 .question-context {
   padding: 8px 0 4px;
+}
+.question-context:not([hidden]) {
+  animation: question-context-open 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes question-context-open {
+  from {
+    clip-path: inset(0 0 100% 0);
+  }
+  to {
+    clip-path: inset(0);
+  }
 }
 .question-actions {
   display: flex;
