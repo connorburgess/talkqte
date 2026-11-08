@@ -1,3 +1,4 @@
+pub mod audio_tap;
 mod companion;
 #[cfg(target_os = "macos")]
 mod companion_macos;
