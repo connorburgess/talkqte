@@ -2,6 +2,20 @@
 
 This is a development plan. Unchecked items are not implemented.
 
+## Production, integrations, and distribution
+
+This track runs alongside the feature milestones below. The goal includes a dependable, supportable product that people can discover, install, connect to existing tools, and update with minimal friction. Use the [product readiness plan](docs/product-readiness.md) to choose the next release blocker and record evidence; a demo or successful build alone does not establish readiness.
+
+- [ ] Define the first supported macOS/hardware/meeting-app matrix and measurable latency, resource, and recovery budgets.
+- [ ] Establish a Granola capability and authentication decision, source-aware context contract, and fictional adapter fixtures; verify import, live input, and writeback separately.
+- [ ] Plan model delivery, integrity, interrupted downloads, offline use, and application/model compatibility.
+- [ ] Prove a signed, notarized installation and a recoverable upgrade on a clean supported Mac; include data migration and update deferral during calls.
+- [ ] Test the path from the website to first useful use without development tools, unnecessary accounts, or unexplained permissions.
+- [ ] Verify privacy boundaries, retention/deletion, credential storage, and safe diagnostics for every enabled input or integration.
+- [ ] Define pilot and wider-release acceptance criteria covering user value, accessibility, compatibility, and support readiness.
+- [ ] Compare acquisition and delivery channels with one bounded experiment at a time; start planning direct website delivery and an invited pilot, then evaluate additional channels.
+- [ ] Estimate release/model bandwidth, optional provider costs, and support effort; record when demand would justify additional infrastructure or commercial operations.
+
 ## Foundation
 
 - [x] Create the public repository and choose TalkQTE as the working name.
@@ -68,7 +82,7 @@ The [product goal and first proof](PRODUCT.md#goal-and-first-proof) define what 
 
 ## Future goal: work with other note-taking apps
 
-TalkQTE should complement an existing note-taking workflow. Evaluate Granola first, Fireflies second, and others when actual demand justifies them. Keep the existing note-taker as the primary meeting record. This is future work, after the clarification experience is useful.
+TalkQTE should complement an existing note-taking workflow. Evaluate Granola first, Fireflies second, and others when actual demand justifies them. Keep the existing note-taker as the primary meeting record. Capability research, adapter contracts, authentication planning, and fictional failure tests begin alongside the core work. Ship each connection only when its end-to-end usefulness and production behavior are verified; no connection is implemented yet.
 
 - [ ] Import selected Granola notes through supported exports or documented APIs, after verifying access and plan requirements.
 - [ ] Evaluate Fireflies' documented beta live transcript API separately from completed-note import and export.

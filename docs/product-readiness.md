@@ -1,0 +1,81 @@
+# Product readiness plan
+
+Status: planning baseline, 8 November 2026. These are requirements and experiments, not implemented capabilities or a release announcement. The [roadmap](../ROADMAP.md) tracks delivery; [PRODUCT.md](../PRODUCT.md#goal-and-first-proof) defines the user outcome.
+
+TalkQTE should become a dependable meeting companion that people can discover, install, use alongside existing tools, and keep up to date with minimal friction. Work toward the defined feature set and whole-product readiness together. A pleasant fictional demo, an integration mock, or a successful build proves only its own narrow behavior.
+
+## Areas every release must account for
+
+| Area | What readiness means | Next evidence to collect |
+| --- | --- | --- |
+| User value and scope | Useful clarification while preserving listening; stable controls and a clear supported use case | Matched fictional conversations with and without assistance; record useful, stale, wrong, and distracting questions |
+| Reliability and scale | Bounded memory and work queues; responsive stop/cancel; sustained operation alongside a call | Set latency, memory, CPU/energy, and recovery budgets on named Macs before the benchmark; test long sessions, overload, device changes, and interrupted work |
+| Compatibility and accessibility | Explicit supported OS, hardware, meeting apps, languages, and assistive setups | Native focus, Spaces, full-screen, sharing, keyboard, VoiceOver, and permission-denial checks; unsupported cases remain visible |
+| Integrations | Supported, scoped connections with provenance, understandable errors, and independent core operation | Granola capability/authentication decision and a fictional end-to-end adapter test, followed by an explicitly authorized account check |
+| Privacy, security, and data lifecycle | Clear input/processing state, protected credentials, chosen retention, reliable deletion, and safe exports | Follow data from capture/import through storage, logs, diagnostics, deletion, and export; test boundaries and failure cases against [PRIVACY.md](../PRIVACY.md) |
+| Installation, models, and updates | An ordinary user can install, try, upgrade, recover, and uninstall without a development environment | Clean-machine install and upgrade tests; interrupted model downloads, integrity checks, low disk space, compatible model versions, and recovery without losing saved work |
+| Discovery and onboarding | An accurate promise, a clear next action, and a short path to a useful first experience | Observe invited users from the website through a fictional demo and an explicitly enabled supported session; record time, abandonment, and help needed |
+| Support and operation | Known limitations, release notes, troubleshooting, a support route, and a response plan for failed releases | Rehearse a failed update/provider outage; offer user-reviewed diagnostics without meeting content; assign a release/support owner |
+| Sustainability | A viable cost and maintenance model as usage grows | Estimate artifact/model download bandwidth, storage, signing/release operations, optional provider costs, and support effort; review dependency/model terms before distribution |
+
+Budgets, minimum supported hardware, release ownership, pricing, and channel targets remain open decisions. Define them for the intended pilot before declaring a candidate ready. More downloads or feature count alone do not prove user value or operational readiness.
+
+## Production and scaling approach
+
+Keep the accepted [Rust/Tauri boundaries](architecture.md). The core meeting workflow is planned to run locally. Scaling therefore starts with predictable device resource use, a tested compatibility matrix, dependable delivery of app/model files, and manageable support demand.
+
+Plan bounded buffers, cancellation, backpressure, and recovery where each pipeline stage is introduced. Version persisted data and model interfaces when those features are implemented, with migration and recovery tests. Avoid silent cloud fallback when local processing fails. Measure stable-transcript and still-useful-question latency separately.
+
+Evaluate static release artifacts and update metadata before adding a custom service. Tauri's [updater documentation](https://v2.tauri.app/plugin/updater/) supports static JSON and signed update artifacts; this is a feasible starting candidate, not an implemented updater. Plan update deferral during meetings, key custody, interrupted installation recovery, and a tested route to a known-good release. A code rollback must not assume a data migration is reversible.
+
+For any proposed backend, record the unmet need, expected load, data boundary, latency target, cost model, failure behavior, and maintenance owner first. Introduce hosted infrastructure when this evidence warrants it. Revisit bandwidth, rate limits, and support capacity at pilot and wider-release reviews.
+
+## Integration readiness
+
+Start planning now. Keep previous-note import, live transcript input, and provider writeback as independent capabilities. A successful read does not validate live input or mutation support.
+
+The first Granola slice should let a user select a small prior-note context, see its source and date, and remove it. It must remain distinguishable from live meeting evidence. Keep the existing note-taker as the primary record; the local core should remain usable when disconnected.
+
+| Candidate | Official documentation checked on 8 November 2026 | Decision still needed |
+| --- | --- | --- |
+| Granola API | [Scoped note/transcript/summary access](https://docs.granola.ai/help-center/sharing/integrations/granola-api); API-key creation is documented for Business/Enterprise | Intended users' entitlement, least-privilege scopes, native credential handling, and supported read endpoints |
+| Granola MCP | [Individual-user OAuth and custom-client requirements](https://docs.granola.ai/help-center/sharing/integrations/mcp); available tools depend on plan and workspace settings | Whether a native client offers a simpler supported connection than an API key or selected export; verify exact tools and account behavior |
+| Fireflies live input | [Beta WebSocket transcript events](https://docs.fireflies.ai/realtime-api/overview) with a token and transcript ID | Actual access, quotas, event ordering/revisions, latency, and reconnect behavior |
+
+These pages establish documented options, not working TalkQTE integrations. The reviewed Granola pages do not establish a live transcript stream or provider writeback path. Recheck official interfaces when implementing; do not depend on scraping another app's private store.
+
+Define the smallest source-aware adapter contract with the first slice: provider/source identity, source date, selected content, revision, capability, and connection status. Keep authentication and provider mapping behind the existing native boundary. Use fictional fixtures for repeated imports, expired/revoked credentials, empty results, rate limits, interrupted requests, and deletion/disconnect. Specify bounded retries and cancellation. For live sources, add duplicate/out-of-order events and transcript revisions before enabling them.
+
+An integration is ready only after a user can connect, understand access, select context, recover from a failure, disconnect, and manage imported copies. A mock is preparation; account-level validation and the full user flow are separate release gates. Any writeback needs a verified endpoint plus reviewed content and destination.
+
+## Distribution and first use
+
+Plan both how people find TalkQTE and how they receive a maintained application.
+
+| Channel | Initial role | Gate before using it |
+| --- | --- | --- |
+| talkqte.com and versioned release downloads | Primary candidate for an accurate introduction, compatibility information, demo, and a direct download | Tested installable artifact, clear release status, release notes, privacy information, and support path; retain coming-soon copy until then |
+| Invited pilot and relevant Mac/meeting-workflow communities | Learn whether the promise, setup, and first useful experience work for the intended audience | Consent to participate, a bounded supported scenario, a feedback route, and an explicit outreach decision |
+| Granola/Fireflies ecosystem content or partnerships | Reach people with an existing note-taking workflow | A verified integration and honest provider-specific guidance; no implied endorsement or partnership |
+| Homebrew Cask | Possible convenient installation route for users who prefer it | Stable maintained artifacts and eligibility review against [Homebrew's acceptance requirements](https://docs.brew.sh/Acceptable-Casks); listing is not guaranteed |
+| Mac App Store | Potential additional discovery and installation route | Separate feasibility check for sandboxed capture, companion behavior, model delivery, and review requirements; [Tauri's store guide](https://v2.tauri.app/distribute/app-store/) requires sandbox configuration |
+
+For direct macOS delivery, plan Developer ID signing and notarization using the [Tauri macOS signing guide](https://v2.tauri.app/distribute/sign/macos/), then test the downloaded artifact on a clean machine. The current ad-hoc development bundle is not this proof. Keep signing credentials outside the repository.
+
+Target first use: understand the purpose and compatibility, install, try the fictional demo without an account or capture permission, then explicitly enable a supported input when ready. Explain model size and storage before downloading; make progress, retry, and cancellation clear. Ask for OS permissions when the chosen action needs them, explain denial recovery, and make Stop easy to find. Keep provider connections optional.
+
+Use one bounded acquisition/onboarding experiment at a time. Record the audience, channel hypothesis, supported build, success criteria, observed setup friction, and next decision. Start with participant feedback and manual observations; analytics, forms, paid promotion, and outreach are separate product/execution decisions. Do not collect meeting content to measure conversion.
+
+## Release stages and acceptance
+
+1. **Development:** preserve honest demo labels; establish the support matrix, budgets, integration contract, and install/update plan alongside core development. Prepare a reproducible synthetic validation suite.
+2. **Invited pilot:** verify the advertised feature slice end to end, including clean installation, first use, interruption recovery, privacy, accessibility, and a support route. Set acceptance criteria before inviting participants. Test updates between candidate versions before widening the pilot. Include integration tests if the pilot promises a connection.
+3. **Wider distribution:** demonstrate useful clarification without unacceptable listening cost, reliable supported operation, recovery from a failed release, sustainable delivery/support costs, and accurate download/help material. Publish limitations and release notes. Expand channels based on observed fit.
+
+The roadmap's full future feature set need not block a clearly scoped pilot. Each release must deliver its advertised slice completely. Windows, mobile, enterprise deployment, additional providers, and commercial packaging each need their own demand and feasibility decision; planning them is not a promise of support.
+
+## How ongoing work uses this plan
+
+At each planning pass, read the current product goal, roadmap, research notes, and this plan. Identify the most important unmet readiness condition for the next milestone, then choose a small task with observable evidence. Record which area it advances, the acceptance check, dependencies, and remaining gap in the relevant PR or roadmap entry. A feature PR need not solve every area; consequential gaps must become named follow-up work.
+
+The next planning deliverables are a pilot support matrix with resource budgets, a Granola connection/capability decision, and a clean-install-to-first-use plan covering signed delivery and updates. Technical feasibility and human-cued interaction validation can proceed alongside them. Review coverage across all areas at milestone boundaries so integration, operations, and distribution keep moving as features grow.

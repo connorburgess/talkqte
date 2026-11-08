@@ -34,6 +34,7 @@ Technical documentation may name a dependency or model when necessary to explain
 
 ## Engineering
 
+- Before selecting work, read PRODUCT.md, ROADMAP.md, and [docs/product-readiness.md](docs/product-readiness.md). Plan production reliability, scale, integrations, onboarding, distribution, and support alongside the defined feature set. For meaningful milestones, record the next readiness blocker and a concrete acceptance check; do not equate a demo with a shippable product.
 - Update README.md in the same change when user-visible behavior, setup, usage, or limitations make it inaccurate. Leave it unchanged for unrelated internal work.
 - Read [docs/architecture.md](docs/architecture.md) before changing the app boundaries.
 - Rust owns capture, transcription, persistence, and timing decisions. React renders UI through narrow, validated commands and events.
