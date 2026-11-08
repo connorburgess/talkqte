@@ -381,14 +381,16 @@ impl Engine {
         }
         // An explicit move to another topic makes an unread question stale.
         // A question being read stays, and this line may raise a new one.
-        let shifted = topic_shift(&segment.text);
         let spoken_at = segment.at_ms;
-        if shifted {
-            // A question type is not a repeat on a new topic.
+        let mut withdrawn_for_topic = false;
+        if topic_shift(&segment.text) && !self.state.cue.as_ref().is_some_and(|cue| cue.held) {
+            // A question type is not a repeat on a new topic. While the user
+            // is reading a question, keep the history so a dismissed
+            // question cannot come straight back.
             self.last_shown.clear();
-            if self.state.cue.as_ref().is_some_and(|cue| !cue.held) {
-                self.state.cue = None;
+            if self.state.cue.take().is_some() {
                 self.unshown = None;
+                withdrawn_for_topic = true;
             }
         }
         // Skip stale suggestions after a suspended app catches up.
@@ -431,9 +433,9 @@ impl Engine {
                 });
             }
         }
-        // After a topic change that raised nothing, leave a pause as after
-        // any other withdrawal.
-        if shifted && self.state.cue.is_none() {
+        // After a topic change withdrew a question and raised nothing, leave
+        // a pause as after any other withdrawal.
+        if withdrawn_for_topic && self.state.cue.is_none() {
             self.cooldown_until = self.cooldown_until.max(spoken_at + self.cooldown());
         }
     }
@@ -652,7 +654,12 @@ fn topic_shift(text: &str) -> bool {
                         || word.ends_with("n't")
                         || HEDGES.contains(&word.as_str())
                 });
+            // Moving to the next slide or page continues the same topic.
+            let presentation = words.windows(2).any(|pair| {
+                pair[0] == "next" && matches!(pair[1].as_str(), "slide" | "page" | "screen")
+            });
             !excluded
+                && !presentation
                 && OPENINGS.iter().any(|opening| {
                     words.starts_with(&opening.iter().map(|w| w.to_string()).collect::<Vec<_>>())
                 })
@@ -1269,6 +1276,8 @@ mod tests {
             "The next item on the list is the budget, and someone needs to own it.",
             "Let's talk about who takes the first draft.",
             "The next step is printing.",
+            "Moving on to the next slide, the draft needs an owner.",
+            "Let's move on to the next page.",
         ] {
             let mut e = play(&[(1_000, "Someone can take the first draft."), (4_000, line)]);
             e.advance(4_000);
@@ -1282,9 +1291,36 @@ mod tests {
             (1_000, "Someone can take the first draft."),
             (4_000, "Moving on, someone can book the hall."),
         ]);
-        e.advance(4_000);
+        e.advance(1_000); // The first question is shown.
+        assert_eq!(e.state.cue.as_ref().unwrap().source_id, "t1");
+        e.advance(3_000);
         let cue = e.state.cue.as_ref().expect("a question for the new topic");
         assert_eq!((cue.kind.as_str(), cue.source_id.as_str()), ("Owner", "t2"));
+    }
+
+    #[test]
+    fn a_topic_change_with_no_question_open_leaves_no_pause() {
+        let mut e = play(&[(1_000, "Moving on."), (2_000, "Someone can book the hall.")]);
+        e.advance(2_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().source_id, "t2");
+    }
+
+    #[test]
+    fn a_topic_change_while_reading_keeps_the_repeat_history() {
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (4_000, "Moving on."),
+            (20_000, "Someone can book the hall."),
+        ]);
+        e.advance(1_000);
+        e.inspect_cue("1:t1", true).unwrap();
+        e.advance(3_000);
+        e.respond("1:t1", Response::Dismiss).unwrap();
+        e.advance(16_000);
+        assert!(
+            e.state.cue.is_none(),
+            "the dismissed question type does not return at once"
+        );
     }
 
     #[test]
