@@ -280,6 +280,12 @@ impl Controller {
         if generation.is_some_and(|generation| generation != state.generation) {
             return Ok(None);
         }
+        // A start that already failed has nothing to stop; leave its error
+        // (such as refused access) visible instead of replacing it with Off.
+        if generation.is_some() && state.capture.is_none() && state.snapshot.status == Status::Error
+        {
+            return Ok(None);
+        }
         state.generation += 1;
         let retired = state.capture.take().map(|capture| capture._stream);
         state.cleanup_pending |= retired.is_some();
@@ -865,6 +871,14 @@ mod tests {
             Instant::now(),
         );
         assert_eq!(controller.try_is_live(generation), Some(false));
+        // Ending the live session afterwards keeps the reason visible.
+        assert!(controller
+            .request_stop_of(Some(generation))
+            .unwrap()
+            .is_none());
+        let snapshot = controller.snapshot().unwrap();
+        assert_eq!(snapshot.status, Status::Error);
+        assert!(snapshot.message.is_some());
     }
 
     #[test]
