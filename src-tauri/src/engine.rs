@@ -445,6 +445,14 @@ impl Engine {
             }
             return;
         }
+        // Once the user has given their name, a question put to someone else
+        // by name is theirs to answer and already says who is meant, so that
+        // sentence raises no suggestion. Other sentences in the line still can.
+        let suggestible = if let Some(name) = self.state.user_name.as_deref() {
+            text_not_put_to_others(name, &segment.text)
+        } else {
+            segment.text.clone()
+        };
         // Skip stale suggestions after a suspended app catches up.
         if self.state.cue.is_none()
             && segment.at_ms >= self.cooldown_until
@@ -457,7 +465,7 @@ impl Engine {
                     .iter()
                     .any(|(shown, at)| shown == kind && segment.at_ms < at + REPEAT_MS)
             };
-            if let Some((kind, question)) = suggest(&segment.text)
+            if let Some((kind, question)) = suggest(&suggestible)
                 .into_iter()
                 .find(|(kind, _)| !repeated(kind))
             {
@@ -741,6 +749,195 @@ fn asked_of(name: &str, text: &str) -> Option<String> {
                 .take(200)
                 .collect()
         })
+}
+
+/// The line without sentences that put a question to another named person:
+/// "Alex, can you take the first draft?" or "Who will take it, Alex?". Used
+/// only once the user's name is known. A name is one capitalized word set off
+/// by a comma; common openers, time words, months, and words for a group that
+/// includes the user ("Everyone,") do not count, and neither does any word
+/// that could be the user ("Sam" or "Sammy" for "Sam Lee"). This matches on
+/// capital letters, so some matches will be wrong ("Budget, someone can…?");
+/// missing a name is the safe direction, leaving the line treated as before.
+fn text_not_put_to_others(user_name: &str, text: &str) -> String {
+    text.split_inclusive(['.', '?', '!'])
+        .filter(|sentence| !asked_of_someone(user_name, sentence.trim()))
+        .collect()
+}
+
+fn asked_of_someone(user_name: &str, sentence: &str) -> bool {
+    let user_words: Vec<String> = user_name
+        .split_whitespace()
+        .map(|word| word.to_lowercase())
+        .collect();
+    // A first name, surname, or a nickname built on either may be the user.
+    let could_be_user = |word: &str| {
+        let word = word.to_lowercase();
+        user_words
+            .iter()
+            .any(|own| own.starts_with(&word) || word.starts_with(own.as_str()))
+    };
+    const NOT_NAMES: &[&str] = &[
+        // Openers and fillers.
+        "hey",
+        "hi",
+        "hello",
+        "so",
+        "ok",
+        "okay",
+        "alright",
+        "well",
+        "now",
+        "right",
+        "yes",
+        "yeah",
+        "no",
+        "and",
+        "but",
+        "also",
+        "then",
+        "great",
+        "sure",
+        "thanks",
+        "please",
+        "look",
+        "listen",
+        "actually",
+        "sorry",
+        "honestly",
+        "anyway",
+        "anyways",
+        "basically",
+        "wait",
+        "oh",
+        "um",
+        "uh",
+        "hmm",
+        "cool",
+        "fine",
+        "good",
+        "perfect",
+        "otherwise",
+        "besides",
+        "plus",
+        "still",
+        "first",
+        "second",
+        "finally",
+        "really",
+        "seriously",
+        "personally",
+        "realistically",
+        "fyi",
+        "btw",
+        "agreed",
+        "true",
+        "exactly",
+        "i",
+        "you",
+        // Groups that include the user.
+        "everyone",
+        "everybody",
+        "folks",
+        "guys",
+        "team",
+        "all",
+        "people",
+        "both",
+        // Days.
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+        "today",
+        "tomorrow",
+        "tonight",
+        "yesterday",
+        "later",
+        "next",
+        "lastly",
+        "meanwhile",
+        "hopefully",
+        "ideally",
+        "absolutely",
+        "however",
+        "obviously",
+        "definitely",
+        "quick",
+        "nice",
+        "ah",
+        "er",
+        "y'all",
+    ];
+    const MONTHS: &[&str] = &[
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+    ];
+    const LEAD_INS: &[&str] = &["hey", "hi", "hello"];
+    let clean = |word: &str| {
+        word.trim_matches(|character: char| !character.is_alphanumeric() && character != '\'')
+            .to_string()
+    };
+    // Exactly one capitalized word that is not a common opener, after an
+    // optional greeting.
+    let names_someone = |part: &str| {
+        let words: Vec<String> = part
+            .split_whitespace()
+            .map(clean)
+            .filter(|word| !word.is_empty())
+            .collect();
+        let start = words
+            .iter()
+            .take_while(|word| LEAD_INS.contains(&word.to_lowercase().as_str()))
+            .count();
+        let rest = &words[start..];
+        rest.len() == 1
+            && rest[0].chars().next().is_some_and(char::is_uppercase)
+            && rest[0]
+                .chars()
+                .all(|character| character.is_alphabetic() || character == '\'')
+            && !NOT_NAMES.contains(&rest[0].to_lowercase().as_str())
+            && !MONTHS.contains(&rest[0].to_lowercase().as_str())
+            && !could_be_user(&rest[0])
+    };
+    let words_of = |part: &str| -> Vec<String> {
+        part.split_whitespace()
+            .map(|word| clean(word).to_lowercase())
+            .filter(|word| !word.is_empty())
+            .collect()
+    };
+    // "What a relief" is an exclamation, not a question.
+    let opens_question = |part: &str| {
+        let words = words_of(part);
+        words
+            .first()
+            .is_some_and(|word| QUESTION_OPENERS.contains(&word.as_str()))
+            && !(words.first().is_some_and(|word| word == "what")
+                && words.get(1).is_some_and(|word| word == "a" || word == "an"))
+    };
+    let question = sentence.trim_end().ends_with('?');
+    let opens = sentence.split_once(',').is_some_and(|(head, rest)| {
+        names_someone(head) && !rest.trim().is_empty() && (question || opens_question(rest))
+    });
+    let closes = question
+        && sentence
+            .trim_end_matches(['?', '.', '!'])
+            .rsplit_once(',')
+            .is_some_and(|(rest, tail)| names_someone(tail) && opens_question(rest));
+    opens || closes
 }
 
 /// Words that make a statement negative; such statements never answer a
@@ -2005,5 +2202,96 @@ mod tests {
         assert!(next.ingest(old, live("w1", 1_000, "Late line.")).is_err());
         next.ingest(next.session(), live("w1", 1_000, "Current line."))
             .unwrap();
+    }
+
+    fn named_session() -> Engine {
+        let mut e = live_session();
+        e.set_user_name(Some("Sam".into())).unwrap();
+        e.advance(2_000);
+        e
+    }
+
+    #[test]
+    fn a_question_put_to_someone_else_by_name_raises_no_suggestion() {
+        for line in [
+            "Alex, can you take the first draft?",
+            "Hey Jordan, could someone take the first draft?",
+            "Can someone take the first draft, Alex?",
+        ] {
+            let mut e = named_session();
+            e.ingest(e.session(), live("w1", 1_000, line)).unwrap();
+            assert!(e.state.cue.is_none(), "{line}");
+        }
+    }
+
+    #[test]
+    fn only_the_sentence_put_to_someone_else_is_quiet() {
+        let mut e = named_session();
+        let line = "Alex, can you send the deck? Someone can take the first draft.";
+        e.ingest(e.session(), live("w1", 1_000, line)).unwrap();
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Owner");
+    }
+
+    #[test]
+    fn openers_days_groups_and_phrases_are_not_names() {
+        for line in [
+            "Someone can take the first draft.",
+            "Everyone, someone can take the first draft?",
+            "So, someone can take the first draft?",
+            "Honestly, can we get it done soon?",
+            "Monday, someone can take the first draft?",
+            "On Monday, someone can take the first draft?",
+            "In March, either we hire or we cut scope?",
+            "People, someone can take the first draft?",
+            "Could we ship it soon — Thursday?",
+            "Alex, what a relief it will be done soon.",
+            "Tomorrow, someone can take the first draft?",
+            "Hopefully, we can get it done soon?",
+            "Y'all, someone can take the first draft?",
+        ] {
+            let mut e = named_session();
+            e.ingest(e.session(), live("w1", 1_000, line)).unwrap();
+            assert!(e.state.cue.is_some(), "{line}");
+        }
+    }
+
+    #[test]
+    fn part_of_the_users_name_or_a_nickname_is_never_someone_else() {
+        for line in [
+            "Sam, can we get it done soon?",
+            "Sammy, can we get it done soon?",
+            "Lee, can we get it done soon?",
+        ] {
+            let mut e = live_session();
+            e.set_user_name(Some("Sam Lee".into())).unwrap();
+            e.advance(2_000);
+            e.ingest(e.session(), live("w1", 1_000, line)).unwrap();
+            assert!(e.state.cue.is_some(), "{line}");
+        }
+    }
+
+    #[test]
+    fn without_the_users_name_a_named_question_is_treated_as_before() {
+        let mut e = live_session();
+        e.advance(2_000);
+        e.ingest(
+            e.session(),
+            live("w1", 1_000, "Alex, someone can take the first draft?"),
+        )
+        .unwrap();
+        assert!(e.state.cue.is_some());
+    }
+
+    #[test]
+    fn a_question_to_the_user_still_becomes_asked_you() {
+        let mut e = live_session();
+        e.set_user_name(Some("Sam".into())).unwrap();
+        e.advance(2_000);
+        e.ingest(
+            e.session(),
+            live("w1", 1_000, "Sam, can you take the first draft?"),
+        )
+        .unwrap();
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
     }
 }
