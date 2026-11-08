@@ -33,7 +33,7 @@ The browser preview uses `src/lib/preview.ts`, a development-only simulation. It
 
 ### Microphone activity on macOS
 
-`src-tauri/src/microphone.rs` owns a separate, default-off microphone monitor. Only the main window can invoke `start_microphone`; the main and companion windows can invoke `microphone_snapshot` and `stop_microphone`. The `microphone:changed` event contains only a revision, status (`off`, `starting`, `listening`, `stopping`, or `error`), coarse activity (`quiet` or `active`), and an optional public error message. Consumers must ignore older revisions. No samples, device names, or precise levels are sent to webviews.
+`src-tauri/src/microphone.rs` owns a separate, default-off microphone monitor. Only the main window can invoke `start_microphone`; the main and companion windows can invoke `microphone_snapshot` and `stop_microphone`. The `microphone:changed` event contains only a revision, status (`off`, `starting`, `listening`, `stopping`, or `error`), a `canStart` flag, coarse activity (`quiet` or `active`), and an optional public error message. `canStart` is true only when monitoring is off or a failed stream has finished cleanup; cleanup completion emits a newer revision so the UI can enable retry. Consumers must ignore older revisions. No samples, device names, or precise levels are sent to webviews.
 
 The native adapter checks AVFoundation microphone authorization and requests permission only after the explicit start command. Once authorized, a worker creates a CPAL input stream for the current default microphone in its native format. Status remains `starting` until samples arrive. Cancelling a pending start invalidates its generation, so a late permission result cannot restart monitoring. Stop and app exit request stream release on a worker. The stop command accepts the request immediately; `stopping` remains visible until teardown completes, then an event reports `off`. New starts are rejected during teardown, including cleanup after an error; errors require an explicit retry. There is no automatic device switching or automatic restart.
 
@@ -41,7 +41,7 @@ The audio callback inspects at most 4,096 samples per buffer and writes only ato
 
 Microphone monitoring is independent of fictional demo playback; pausing or ending the demo does not stop the microphone. It does not capture system output, other apps' audio, or both sides of a call. It does not transcribe, record, retain audio, use a model, or send audio over the network. The browser preview does not request microphone permission. Synthetic tests cover signal, lifecycle, and deliberately blocked stream teardown behavior without opening a real device; permission prompts, device changes, and real-device operation still need opt-in native verification.
 
-The macOS bundle includes `NSMicrophoneUsageDescription` and the audio-input entitlement. Development checks must inspect the built bundle and must not invoke microphone start automatically.
+The macOS bundle includes `NSMicrophoneUsageDescription`; the audio-input entitlement is configured in `Entitlements.plist` and is embedded when signing. For a local bundle check, use `APPLE_SIGNING_IDENTITY=- npm run tauri -- build --debug --bundles app` to ad-hoc sign with the configured entitlement. An unsigned development build is not evidence that entitlements were applied. Inspect the built bundle and signature without invoking microphone start automatically. Ad-hoc signing is not Developer ID signing or notarization.
 
 ### Planned meeting pipeline
 

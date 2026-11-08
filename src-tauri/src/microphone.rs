@@ -39,6 +39,7 @@ pub enum Activity {
 pub struct Snapshot {
     pub revision: u64,
     pub status: Status,
+    pub can_start: bool,
     pub activity: Activity,
     pub message: Option<String>,
 }
@@ -48,6 +49,7 @@ impl Default for Snapshot {
         Self {
             revision: 0,
             status: Status::Off,
+            can_start: true,
             activity: Activity::Quiet,
             message: None,
         }
@@ -130,6 +132,8 @@ impl State {
     fn update(&mut self, status: Status, activity: Activity, message: Option<&str>) {
         self.snapshot.revision += 1;
         self.snapshot.status = status;
+        self.snapshot.can_start =
+            matches!(status, Status::Off | Status::Error) && !self.cleanup_pending;
         self.snapshot.activity = activity;
         self.snapshot.message = message.map(str::to_owned);
     }
@@ -210,8 +214,8 @@ impl Controller {
                 // Start is serialized with cancellation. This runs on a worker,
                 // and the audio callback never attempts to acquire this lock.
                 if let Err(failure) = stream.play() {
-                    state.update(Status::Error, Activity::Quiet, Some(failure.message()));
                     state.cleanup_pending = true;
+                    state.update(Status::Error, Activity::Quiet, Some(failure.message()));
                     return Some(Update {
                         snapshot: state.snapshot.clone(),
                         retired: Some(stream),
@@ -267,6 +271,10 @@ impl Controller {
         state.cleanup_pending = false;
         if state.snapshot.status == Status::Stopping {
             state.update(Status::Off, Activity::Quiet, None);
+            Some(state.snapshot.clone())
+        } else if state.snapshot.status == Status::Error {
+            state.snapshot.revision += 1;
+            state.snapshot.can_start = true;
             Some(state.snapshot.clone())
         } else {
             None
@@ -569,8 +577,14 @@ mod tests {
             let update = controller.poll(now + INPUT_TIMEOUT).unwrap();
             assert_eq!(update.snapshot.status, Status::Error);
             assert_eq!(update.snapshot.activity, Activity::Quiet);
+            assert!(!update.snapshot.can_start);
+            let error_revision = update.snapshot.revision;
             assert_eq!(drops.load(Ordering::SeqCst), 0);
-            finish(&controller, update);
+            drop(update.retired);
+            let released = controller.cleanup_finished().unwrap();
+            assert_eq!(released.status, Status::Error);
+            assert!(released.can_start);
+            assert!(released.revision > error_revision);
             assert_eq!(drops.load(Ordering::SeqCst), 1);
             assert!(controller.poll(now + INPUT_TIMEOUT).is_none());
         }
@@ -649,6 +663,7 @@ mod tests {
             let cleanup = thread::spawn(move || finish(&cleaner, update));
             entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
             assert_eq!(drops.load(Ordering::SeqCst), 0);
+            assert!(!controller.snapshot().unwrap().can_start);
             assert!(controller.begin_start().is_err());
             assert!(controller.poll(now).is_none());
             // Repeated stop, including during error cleanup, cannot claim Off.
@@ -661,6 +676,7 @@ mod tests {
             cleanup.join().unwrap();
             assert_eq!(drops.load(Ordering::SeqCst), 1);
             assert_eq!(controller.snapshot().unwrap().status, Status::Off);
+            assert!(controller.snapshot().unwrap().can_start);
             assert!(controller.begin_start().is_ok());
         }
     }
