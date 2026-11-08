@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 const CUE_MS: u64 = 18_000;
+/// A question type shown within this window is not asked again.
+const REPEAT_MS: u64 = 120_000;
 const MAX_NOTE_CHARS: usize = 20_000;
 const MAX_SEGMENT_CHARS: usize = 1_000;
 const MAX_SPEAKER_CHARS: usize = 80;
@@ -128,6 +130,8 @@ pub struct Engine {
     cooldown_until: u64,
     /// Whether this session's transcript includes ingested (non-demo) lines.
     live_input: bool,
+    /// When each question type was last shown in this session.
+    last_shown: Vec<(String, u64)>,
 }
 
 impl Default for Engine {
@@ -157,6 +161,7 @@ impl Default for Engine {
             cue_deadline: 0,
             cooldown_until: 0,
             live_input: false,
+            last_shown: vec![],
         }
     }
 }
@@ -183,6 +188,7 @@ impl Engine {
         }
         self.generation += 1;
         self.live_input = false;
+        self.last_shown.clear();
         self.next_segment = 0;
         self.cooldown_until = 0;
         self.state.elapsed_ms = 0;
@@ -355,7 +361,18 @@ impl Engine {
             && segment.at_ms >= self.cooldown_until
             && now - segment.at_ms < CUE_MS
         {
-            if let Some((kind, question)) = suggest(&segment.text) {
+            // The same fixed question shortly after it was shown is redundant,
+            // whether it was answered, dismissed, or ignored.
+            let repeated = |kind: &str| {
+                self.last_shown
+                    .iter()
+                    .any(|(shown, at)| shown == kind && segment.at_ms < at + REPEAT_MS)
+            };
+            if let Some((kind, question)) =
+                suggest(&segment.text).filter(|(kind, _)| !repeated(kind))
+            {
+                self.last_shown.retain(|(shown, _)| shown != kind);
+                self.last_shown.push((kind.into(), segment.at_ms));
                 self.cue_deadline = segment.at_ms + CUE_MS;
                 self.state.cue = Some(Cue {
                     id: format!("{}:{}", self.generation, segment.id),
@@ -989,6 +1006,58 @@ mod tests {
         assert!(e.state.cue.is_none());
         e.advance(18_000);
         assert_eq!(e.state.cue.as_ref().unwrap().kind, "Decision");
+    }
+
+    #[test]
+    fn the_same_question_is_not_asked_again_soon_after_it_was_shown() {
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (40_000, "Someone can take the second draft."),
+            (60_000, "We should finish soon."),
+            (125_000, "Someone can take the layout."),
+        ]);
+        e.demo.duration_ms = 200_000;
+        e.advance(1_000);
+        let first = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&first, Response::Dismiss).unwrap();
+        e.advance(39_000);
+        assert!(
+            e.state.cue.is_none(),
+            "same owner question within two minutes"
+        );
+        e.advance(20_000);
+        assert_eq!(
+            e.state.cue.as_ref().unwrap().kind,
+            "Timing",
+            "other types unaffected"
+        );
+        e.advance(65_000);
+        let cue = e.state.cue.as_ref().expect("asked again after the window");
+        assert_eq!((cue.kind.as_str(), cue.source_id.as_str()), ("Owner", "t4"));
+    }
+
+    #[test]
+    fn a_suppressed_repeat_does_not_extend_the_window() {
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (100_000, "Someone can take the second draft."),
+            (122_000, "Someone can take the layout."),
+        ]);
+        e.demo.duration_ms = 200_000;
+        e.advance(122_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().source_id, "t3");
+    }
+
+    #[test]
+    fn replay_forgets_which_questions_were_shown() {
+        let mut e = Engine::default();
+        e.start().unwrap();
+        e.advance(5_000);
+        assert!(e.state.cue.is_some());
+        e.end();
+        e.start().unwrap();
+        e.advance(5_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Owner");
     }
 
     #[test]
