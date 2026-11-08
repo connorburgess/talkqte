@@ -10,7 +10,7 @@ Held questions do not block transcript playback or replace their text with later
 
 Settings offers standard or larger question text and bottom-right, top-center, top-left, or top-right companion placement. Bottom-right remains the default. Top-center is an optional near-camera starting point, not automatic camera detection or calibration. The companion follows the notebook's display and stays within its work area; move the notebook to choose another display. Appearance choices last for this app session, including demo replays, and reset on quit.
 
-The companion remains passive and does not take keyboard focus. The same question, disclosure, Save/Dismiss actions, and settings are available through the notebook's keyboard controls. Native VoiceOver and cross-app focus behavior need further testing. No camera permission, gaze tracking, video alteration, or new microphone behavior is involved.
+The companion is configured to remain passive and not take keyboard focus. The same question, disclosure, Save/Dismiss actions, and settings are available through the notebook. A native notebook smoke check covered question arrival, keyboard disclosure, and saving while paused; it does not establish cross-app focus or complete keyboard accessibility. Native placement, VoiceOver, and cross-app behavior remain pending in the [native validation record](native-validation.md). No camera permission, gaze tracking, video alteration, or new microphone behavior is involved.
 
 ## Prototype appearance
 

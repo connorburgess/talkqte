@@ -18,6 +18,8 @@ let resolveSnapshot: ((value: MicrophoneSnapshot) => void) | undefined;
 let rejectStop = false;
 let delayStop = false;
 let releaseStop: (() => void) | undefined;
+let delayQuestionResponse = false;
+let releaseQuestionResponse: (() => void) | undefined;
 const calls: string[] = [];
 const delayed = new URLSearchParams(location.search).has('delay-microphone');
 Object.defineProperty(window, 'isTauri', { value: true, configurable: true });
@@ -70,6 +72,15 @@ mockIPC(
         return preview.exportPreview();
       case 'export_markdown':
         return true;
+      case 'respond_to_cue':
+        preview.command(command, args as Commands['respond_to_cue']);
+        if (delayQuestionResponse) {
+          delayQuestionResponse = false;
+          await new Promise<void>((resolve) => {
+            releaseQuestionResponse = resolve;
+          });
+        }
+        return;
       default:
         return preview.command(
           command as keyof Commands,
@@ -88,6 +99,10 @@ preview.connect((value) => {
 
 declare global {
   interface Window {
+    questionTest: {
+      holdNextResponse: () => void;
+      releaseResponse: () => void;
+    };
     microphoneTest: {
       send: typeof send;
       calls: string[];
@@ -98,6 +113,12 @@ declare global {
     };
   }
 }
+window.questionTest = {
+  holdNextResponse: () => {
+    delayQuestionResponse = true;
+  },
+  releaseResponse: () => releaseQuestionResponse?.(),
+};
 window.microphoneTest = {
   send,
   calls,
