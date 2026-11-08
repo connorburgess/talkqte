@@ -6,7 +6,26 @@ TalkQTE is in early development. Reproducible bug reports, accessibility feedbac
 
 Read the [roadmap](ROADMAP.md) and [architecture decision](docs/architecture.md). Open an issue for a substantial feature or architectural change so we can agree on scope. Small fixes can go directly to a PR.
 
-The application has not been scaffolded yet. Build and test commands will be documented alongside the first runnable implementation; there are no implied passing application checks at this stage.
+## Run and check the prototype
+
+Use Node.js 22, Rust 1.97.1, and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for macOS. Install dependencies with `npm ci`, then run `npm run desktop`. `npm run dev` runs only the browser preview, using a simulated session adapter rather than the Rust backend.
+
+```sh
+npm run format:check
+npm run build
+npx playwright install chromium webkit
+npm test
+cargo fmt --manifest-path src-tauri/Cargo.toml --check
+cargo test --manifest-path src-tauri/Cargo.toml --locked
+cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+npm run tauri -- build --debug --bundles app
+```
+
+On Linux, Playwright may also need system dependencies: `npx playwright install --with-deps chromium webkit`. The native app currently targets macOS; a browser test on another platform does not establish native support there.
+
+Rust tests cover question expiry, pause, stale responses, saved-question replay, note limits, and the restricted overlay payload. Playwright exercises the notebook in Chromium and WebKit, including export review, keyboard navigation, and a narrow layout with reduced motion. Browser tests do not prove native overlay behavior. Check the actual macOS app when changing native commands, permissions, or windows.
+
+Use only the bundled fictional demo for public evidence. Test data and notes are memory-only; restarting the app clears them. The local export is the only implemented way to keep notebook content.
 
 ## Branch and review workflow
 

@@ -14,23 +14,11 @@ Bootstrap project instructions, docs, and tooling on `main`. Subsequent work use
 
 These checks are planned, not enabled by this document. Add them with the runnable scaffold and configure branch rules after the check names exist. Protect `main` against force pushes and deletion and require the applicable checks. Do not require an impossible self-approval while the project has one maintainer.
 
-## Graphide
+## External automated review
 
-Graphide Review must be installed or granted access to this repository on GitHub and then enabled in its dashboard. A repository file alone does not enable it. Keep access limited to the repositories the owner selected.
+Graphide review is deferred while the initial prototype takes shape. Keep automatic reviews off until the maintainer explicitly enables them. Creating a PR does not authorize changing review settings or starting a paid service.
 
-Recommended starting settings:
-
-- Review enabled for TalkQTE.
-- One automatic review per PR, then request additional review after substantive fixes when useful.
-- Check Rust/native analysis support using an actual PR before relying on it.
-- Focus reviews on capture lifecycle, bounded buffers, threading, IPC validation, retention, and outbound data paths.
-- No real meeting fixtures or recordings in any review environment.
-
-The published allowance is the first 150 reviews per GitHub App installation, shared by its enabled repositories. It is not a monthly allowance or a fresh allowance per repository. Reviews pause after it is exhausted; do not enable paid services without an explicit decision.
-
-As of initial setup, review enablement has not been confirmed. Sign-in or account-owner action may be required.
-
-Sources: [connection setup](https://graphide.com/docs/connect/), [review settings](https://graphide.com/docs/review/), [free allowance](https://graphide.com/docs/review/free-reviews/).
+When review is enabled, limit access to selected public repositories and verify Rust/native analysis on an actual PR. Focus on capture lifecycle, bounded buffers, threading, IPC validation, retention, and outbound data paths. Never provide real meeting fixtures or recordings to a review service.
 
 ## Handling findings
 

@@ -8,7 +8,20 @@ This is a development plan. Unchecked items are not implemented.
 - [x] Choose Rust + Tauri + React, with macOS as the first target.
 - [x] Document privacy requirements, DCO sign-offs, contribution rules, and feature-branch workflow.
 - [ ] Add required automated contribution and application checks.
-- [ ] Enable Graphide review for this repository.
+- [ ] Enable external automated review when the prototype is ready for it; currently deferred.
+
+## Runnable prototype
+
+- [x] Fictional meeting playback with a notebook and arriving transcript segments.
+- [x] Rust-owned question expiry, cooldown, pause, and timing sensitivity.
+- [x] Phrase-based owner, deadline, and decision questions, with save and dismiss actions.
+- [x] Preserve manual notes and saved questions during replay; keep them in memory until quit.
+- [x] Preview Markdown and save exactly the reviewed content to a chosen destination.
+- [x] Separate native question window with a restricted command and event surface.
+- [x] Browser checks for keyboard navigation, narrow layout, and reduced motion.
+- [ ] Verify cross-app focus, Spaces, full-screen meetings, and screen-sharing behavior on macOS.
+
+This prototype plays synthetic text. It does not capture or transcribe audio, persist a notebook, or integrate with other services.
 
 ## First technical milestone
 
