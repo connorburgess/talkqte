@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 const CUE_MS: u64 = 18_000;
+/// A question type shown within this window is not asked again.
+const REPEAT_MS: u64 = 120_000;
 const MAX_NOTE_CHARS: usize = 20_000;
 const MAX_SEGMENT_CHARS: usize = 1_000;
 const MAX_SPEAKER_CHARS: usize = 80;
@@ -128,6 +130,10 @@ pub struct Engine {
     cooldown_until: u64,
     /// Whether this session's transcript includes ingested (non-demo) lines.
     live_input: bool,
+    /// When each question type was last shown in this session.
+    last_shown: Vec<(String, u64)>,
+    /// A cue type created since the last publish, with its previous time.
+    unshown: Option<(String, Option<u64>)>,
 }
 
 impl Default for Engine {
@@ -157,6 +163,8 @@ impl Default for Engine {
             cue_deadline: 0,
             cooldown_until: 0,
             live_input: false,
+            last_shown: vec![],
+            unshown: None,
         }
     }
 }
@@ -174,6 +182,8 @@ impl Engine {
     }
 
     fn changed(&mut self) {
+        // Publishing the state shows any cue created since the last change.
+        self.unshown = None;
         self.state.revision += 1;
     }
 
@@ -183,6 +193,7 @@ impl Engine {
         }
         self.generation += 1;
         self.live_input = false;
+        self.last_shown.clear();
         self.next_segment = 0;
         self.cooldown_until = 0;
         self.state.elapsed_ms = 0;
@@ -248,6 +259,7 @@ impl Engine {
             // Explicit End demo and Replay still clear it.
             if !self.state.cue.as_ref().is_some_and(|cue| cue.held) {
                 self.state.cue = None;
+                self.forget_unshown();
             }
         }
         self.changed();
@@ -346,6 +358,7 @@ impl Engine {
                 } else {
                     self.state.cue = None;
                     self.cooldown_until = segment.at_ms + self.cooldown();
+                    self.forget_unshown();
                 }
                 return;
             }
@@ -355,7 +368,26 @@ impl Engine {
             && segment.at_ms >= self.cooldown_until
             && now - segment.at_ms < CUE_MS
         {
-            if let Some((kind, question)) = suggest(&segment.text) {
+            // The same fixed question shortly after it was shown is redundant,
+            // whether it was answered, dismissed, or ignored.
+            let repeated = |kind: &str| {
+                self.last_shown
+                    .iter()
+                    .any(|(shown, at)| shown == kind && segment.at_ms < at + REPEAT_MS)
+            };
+            if let Some((kind, question)) = suggest(&segment.text)
+                .into_iter()
+                .find(|(kind, _)| !repeated(kind))
+            {
+                // Remember the previous time in case this cue is withdrawn
+                // before the user ever sees it.
+                let previous = self
+                    .last_shown
+                    .iter()
+                    .position(|(shown, _)| shown == kind)
+                    .map(|index| self.last_shown.remove(index).1);
+                self.unshown = Some((kind.into(), previous));
+                self.last_shown.push((kind.into(), segment.at_ms));
                 self.cue_deadline = segment.at_ms + CUE_MS;
                 self.state.cue = Some(Cue {
                     id: format!("{}:{}", self.generation, segment.id),
@@ -369,6 +401,17 @@ impl Engine {
                     expanded: false,
                     resolved_by: None,
                 });
+            }
+        }
+    }
+
+    /// A cue created and removed before the next publish was never seen, so
+    /// it must not count as shown.
+    fn forget_unshown(&mut self) {
+        if let Some((kind, previous)) = self.unshown.take() {
+            self.last_shown.retain(|(shown, _)| *shown != kind);
+            if let Some(at) = previous {
+                self.last_shown.push((kind, at));
             }
         }
     }
@@ -476,7 +519,7 @@ impl Engine {
     }
 }
 
-fn suggest(text: &str) -> Option<(&'static str, &'static str)> {
+fn suggest(text: &str) -> Vec<(&'static str, &'static str)> {
     // Match complete words, not fragments such as "cannot" or "monsoon".
     // Keep apostrophes inside words so "can't" never becomes "can".
     let words: Vec<_> = text
@@ -487,6 +530,9 @@ fn suggest(text: &str) -> Option<(&'static str, &'static str)> {
         .filter(|word| !word.is_empty())
         .collect();
     let is_word = |word: &str, expected: &str| word.eq_ignore_ascii_case(expected);
+    // Every matching type, in priority order, so a suppressed repeat of one
+    // type does not hide another in the same line.
+    let mut found = Vec::new();
     if text.split(['.', '?', '!', ';']).any(|sentence| {
         let sentence_words: Vec<_> = sentence
             .split_whitespace()
@@ -496,18 +542,19 @@ fn suggest(text: &str) -> Option<(&'static str, &'static str)> {
             .windows(2)
             .any(|pair| is_word(pair[0], "someone") && is_word(pair[1], "can"))
     }) {
-        Some(("Owner", "Who will take the first draft?"))
-    } else if words.iter().any(|word| is_word(word, "soon")) {
-        Some(("Timing", "What date should we aim for?"))
-    } else if words
+        found.push(("Owner", "Who will take the first draft?"));
+    }
+    if words.iter().any(|word| is_word(word, "soon")) {
+        found.push(("Timing", "What date should we aim for?"));
+    }
+    if words
         .iter()
         .position(|word| is_word(word, "either"))
         .is_some_and(|index| words[index + 1..].iter().any(|word| is_word(word, "or")))
     {
-        Some(("Decision", "How will we choose between those options?"))
-    } else {
-        None
+        found.push(("Decision", "How will we choose between those options?"));
     }
+    found
 }
 
 /// Conservative signs that later conversation answered an open cue.
@@ -989,6 +1036,84 @@ mod tests {
         assert!(e.state.cue.is_none());
         e.advance(18_000);
         assert_eq!(e.state.cue.as_ref().unwrap().kind, "Decision");
+    }
+
+    #[test]
+    fn the_same_question_is_not_asked_again_soon_after_it_was_shown() {
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (40_000, "Someone can take the second draft."),
+            (60_000, "We should finish soon."),
+            (125_000, "Someone can take the layout."),
+        ]);
+        e.demo.duration_ms = 200_000;
+        e.advance(1_000);
+        let first = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&first, Response::Dismiss).unwrap();
+        e.advance(39_000);
+        assert!(
+            e.state.cue.is_none(),
+            "same owner question within two minutes"
+        );
+        e.advance(20_000);
+        assert_eq!(
+            e.state.cue.as_ref().unwrap().kind,
+            "Timing",
+            "other types unaffected"
+        );
+        e.advance(65_000);
+        let cue = e.state.cue.as_ref().expect("asked again after the window");
+        assert_eq!((cue.kind.as_str(), cue.source_id.as_str()), ("Owner", "t4"));
+    }
+
+    #[test]
+    fn a_suppressed_repeat_does_not_extend_the_window() {
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (100_000, "Someone can take the second draft."),
+            (122_000, "Someone can take the layout."),
+        ]);
+        e.demo.duration_ms = 200_000;
+        e.advance(122_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().source_id, "t3");
+    }
+
+    #[test]
+    fn a_question_answered_before_it_was_ever_shown_does_not_block_the_next() {
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (2_000, "Jordan will take it."),
+            (30_000, "Someone can take the layout."),
+        ]);
+        e.advance(3_000); // One late tick: raised and answered, never shown.
+        assert!(e.state.cue.is_none());
+        e.advance(27_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().source_id, "t3");
+    }
+
+    #[test]
+    fn a_suppressed_type_does_not_hide_another_type_in_the_same_line() {
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (40_000, "Someone can do it soon."),
+        ]);
+        e.advance(1_000);
+        let first = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&first, Response::Dismiss).unwrap();
+        e.advance(39_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Timing");
+    }
+
+    #[test]
+    fn replay_forgets_which_questions_were_shown() {
+        let mut e = Engine::default();
+        e.start().unwrap();
+        e.advance(5_000);
+        assert!(e.state.cue.is_some());
+        e.end();
+        e.start().unwrap();
+        e.advance(5_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Owner");
     }
 
     #[test]
