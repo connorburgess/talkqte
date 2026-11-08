@@ -6,10 +6,17 @@ pub mod context;
 pub mod engine;
 pub mod live;
 mod microphone;
+pub mod model;
 pub mod transcription;
 
 use engine::{CompanionPosition, Engine, QuestionSize, Response, Sensitivity};
-use std::{sync::Mutex, time::Instant};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::Instant,
+};
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
@@ -258,16 +265,19 @@ async fn export_markdown(
     .map_err(|_| "Could not open the save dialog.")?
 }
 
-/// Where the local speech model is expected: `TALKQTE_WHISPER_MODEL`, or the
-/// app's data folder. Nothing is downloaded here.
-fn model_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+/// The app's own folder for downloaded models.
+fn models_dir(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    app.path().app_data_dir().ok().map(|dir| dir.join("models"))
+}
+
+/// Where the local speech model is loaded from: `TALKQTE_WHISPER_MODEL`, a
+/// developer-supplied file that is not checksum-checked, or the downloaded
+/// model in the app's data folder, which is.
+fn model_path(app: &tauri::AppHandle) -> Option<(std::path::PathBuf, bool)> {
     if let Some(path) = std::env::var_os("TALKQTE_WHISPER_MODEL") {
-        return Some(path.into());
+        return Some((path.into(), false));
     }
-    app.path()
-        .app_data_dir()
-        .ok()
-        .map(|dir| dir.join("models").join("ggml-tiny.en.bin"))
+    models_dir(app).map(|dir| (model::installed_path(&dir, &model::TINY_EN), true))
 }
 
 #[derive(serde::Serialize)]
@@ -281,7 +291,14 @@ struct LiveStatus {
 fn live_status(app: tauri::AppHandle) -> LiveStatus {
     let reason = if !cfg!(feature = "local-whisper") {
         Some("This build does not include local transcription.")
-    } else if !model_path(&app).is_some_and(|path| path.is_file()) {
+    } else if !model_path(&app).is_some_and(|(path, pinned)| {
+        if pinned {
+            path.parent()
+                .is_some_and(|dir| model::is_installed(dir, &model::TINY_EN))
+        } else {
+            path.is_file()
+        }
+    }) {
         Some("The local speech model is not installed.")
     } else {
         None
@@ -290,6 +307,212 @@ fn live_status(app: tauri::AppHandle) -> LiveStatus {
         available: reason.is_none(),
         reason,
     }
+}
+
+/// What the notebook shows about the optional model download.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelStatus {
+    revision: u64,
+    /// `unavailable`, `developer`, `missing`, `downloading`, or `installed`.
+    status: &'static str,
+    name: &'static str,
+    size_bytes: u64,
+    needed_bytes: u64,
+    received: u64,
+    message: Option<String>,
+}
+
+#[derive(Default)]
+pub struct ModelDownload {
+    status: Mutex<ModelStatus>,
+    cancel: Arc<AtomicBool>,
+}
+
+impl ModelDownload {
+    /// The status, even after a panic while it was held: the guard in the
+    /// download thread must always be able to reset it.
+    fn lock(&self) -> std::sync::MutexGuard<'_, ModelStatus> {
+        self.status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+fn model_status_now(app: &tauri::AppHandle, revision: u64) -> ModelStatus {
+    let spec = model::TINY_EN;
+    let status = if !cfg!(feature = "local-whisper") {
+        "unavailable"
+    } else if std::env::var_os("TALKQTE_WHISPER_MODEL").is_some() {
+        "developer"
+    } else if models_dir(app).is_some_and(|dir| model::is_installed(&dir, &spec)) {
+        "installed"
+    } else {
+        "missing"
+    };
+    ModelStatus {
+        revision,
+        status,
+        name: spec.name,
+        size_bytes: spec.bytes,
+        needed_bytes: spec.bytes + model::SPACE_MARGIN,
+        received: 0,
+        message: None,
+    }
+}
+
+/// Updates the download status and tells the main window.
+fn set_model_status(app: &tauri::AppHandle, update: impl FnOnce(&mut ModelStatus)) {
+    let download = app.state::<ModelDownload>();
+    let mut status = download.lock();
+    update(&mut status);
+    status.revision += 1;
+    let _ = app.emit_to("main", "model:changed", status.clone());
+}
+
+#[tauri::command]
+fn model_status(app: tauri::AppHandle, download: tauri::State<ModelDownload>) -> ModelStatus {
+    let mut status = download.lock().clone();
+    if status.status != "downloading" {
+        let message = status.message.take();
+        status = ModelStatus {
+            message,
+            ..model_status_now(&app, status.revision)
+        };
+    }
+    status
+}
+
+/// Puts the download status back to what is on disk when the download
+/// thread ends for any reason, including a panic.
+#[cfg(feature = "local-whisper")]
+struct DownloadDone {
+    app: tauri::AppHandle,
+    message: Option<String>,
+}
+
+#[cfg(feature = "local-whisper")]
+impl Drop for DownloadDone {
+    fn drop(&mut self) {
+        let message = self.message.take().or_else(|| {
+            std::thread::panicking()
+                .then(|| "The download stopped unexpectedly. Nothing was installed.".into())
+        });
+        let app = self.app.clone();
+        set_model_status(&self.app, |status| {
+            let revision = status.revision;
+            *status = ModelStatus {
+                message,
+                ..model_status_now(&app, revision)
+            };
+        });
+    }
+}
+
+/// Downloads the pinned speech model after the person chose to. The request
+/// carries no account, audio, or transcript; the file is checked against
+/// its pinned SHA-256 before it is installed.
+#[tauri::command]
+fn download_model(
+    app: tauri::AppHandle,
+    download: tauri::State<ModelDownload>,
+) -> Result<(), String> {
+    #[cfg(not(feature = "local-whisper"))]
+    {
+        let _ = (app, download);
+        Err("This build does not include local transcription.".into())
+    }
+    #[cfg(feature = "local-whisper")]
+    {
+        let dir = models_dir(&app).ok_or("The app's storage folder is unavailable.")?;
+        {
+            // Checked and set under one lock, so two downloads never overlap.
+            let mut status = download.lock();
+            if status.status == "downloading" {
+                return Err("The model is already downloading.".into());
+            }
+            let revision = status.revision;
+            *status = ModelStatus {
+                status: "downloading",
+                ..model_status_now(&app, revision)
+            };
+            download.cancel.store(false, Ordering::Release);
+        }
+        set_model_status(&app, |_| {});
+        let cancel = download.cancel.clone();
+        let thread_app = app.clone();
+        let spawned = std::thread::Builder::new()
+            .name("talkqte-model-download".into())
+            .spawn(move || {
+                let app = thread_app;
+                let mut done = DownloadDone {
+                    app: app.clone(),
+                    message: None,
+                };
+                let mut last_percent = 0;
+                let result = model::download(
+                    &dir,
+                    &model::TINY_EN,
+                    &model::Https,
+                    model::available_space,
+                    |received, total| {
+                        let percent = received * 100 / total.max(1);
+                        if percent != last_percent {
+                            last_percent = percent;
+                            set_model_status(&app, |status| status.received = received);
+                        }
+                    },
+                    &cancel,
+                );
+                done.message = result.err().map(|failure| failure.message());
+            });
+        if spawned.is_err() {
+            set_model_status(&app, |status| {
+                let revision = status.revision;
+                *status = model_status_now(&app, revision);
+            });
+            return Err("Could not start the download.".into());
+        }
+        Ok(())
+    }
+}
+
+/// Asks a running download to stop. It stops at its next read, within the
+/// fetcher's time limits, and then reports that nothing was installed.
+#[tauri::command]
+fn cancel_model_download(app: tauri::AppHandle, download: tauri::State<ModelDownload>) {
+    download.cancel.store(true, Ordering::Release);
+    set_model_status(&app, |status| {
+        if status.status == "downloading" {
+            status.message = Some("Cancelling…".into());
+        }
+    });
+}
+
+/// Deletes the downloaded model; a live session must be stopped first.
+#[tauri::command]
+fn remove_model(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    download: tauri::State<ModelDownload>,
+) -> Result<(), String> {
+    if state.0.lock().is_ok_and(|runtime| {
+        runtime.live.is_some()
+            || (runtime.engine.state.live && runtime.engine.state.status == engine::Status::Running)
+    }) {
+        return Err("Stop the live session before removing the model.".into());
+    }
+    let dir = models_dir(&app).ok_or("The app's storage folder is unavailable.")?;
+    // Held throughout, so a download cannot start while the file is removed.
+    let mut status = download.lock();
+    if status.status == "downloading" {
+        return Err("Cancel the download before removing the model.".into());
+    }
+    model::remove(&dir, &model::TINY_EN).map_err(|_| "The model could not be removed.")?;
+    let revision = status.revision + 1;
+    *status = model_status_now(&app, revision);
+    let _ = app.emit_to("main", "model:changed", status.clone());
+    Ok(())
 }
 
 /// A live session's parts: the engine session it feeds, the microphone start
@@ -341,20 +564,24 @@ async fn start_live_session(
     }
     #[cfg(feature = "local-whisper")]
     {
-        let model = model_path(&app)
-            .filter(|path| path.is_file())
+        let (model, pinned) = model_path(&app)
+            .filter(|(path, _)| path.is_file())
             .ok_or("The local speech model is not installed.")?;
         if state.0.lock().is_ok_and(|runtime| runtime.live.is_some()) {
             return Err("A live session is already running.".into());
         }
         // Load the model before capture starts, so a bad file is reported
         // here and the microphone never opens for nothing.
+        // A downloaded model is checked against its pinned checksum first.
         let recognizer = tauri::async_runtime::spawn_blocking(move || {
+            if pinned {
+                model::verify(&model, &model::TINY_EN)?;
+            }
             transcription::whisper::LocalWhisper::load(&model, 4)
+                .map_err(|_| "Could not load the local speech model.".to_string())
         })
         .await
-        .map_err(|_| "Could not load the local speech model.")?
-        .map_err(|_| "Could not load the local speech model.")?;
+        .map_err(|_| "Could not load the local speech model.")??;
         let session = {
             let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
             runtime.sync();
@@ -520,6 +747,7 @@ pub fn run() {
         })))
         .manage(companion::WindowState::default())
         .manage(microphone::Controller::default())
+        .manage(ModelDownload::default())
         .invoke_handler(tauri::generate_handler![
             snapshot,
             start_demo,
@@ -537,6 +765,10 @@ pub fn run() {
             export_preview,
             export_markdown,
             live_status,
+            model_status,
+            download_model,
+            cancel_model_download,
+            remove_model,
             start_live_session,
             stop_live_session,
             microphone::microphone_snapshot,
@@ -546,6 +778,10 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             companion_macos::hide_controls(app)?;
+            // A download interrupted by quitting never counts as installed.
+            if let Some(dir) = models_dir(app.handle()) {
+                model::clean_partials(&dir);
+            }
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let mut last_placement = Instant::now();

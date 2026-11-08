@@ -1,6 +1,12 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { Commands, CueSnapshot, LiveStatus, Snapshot } from './types';
+import type {
+  Commands,
+  CueSnapshot,
+  LiveStatus,
+  ModelStatus,
+  Snapshot,
+} from './types';
 
 export const desktop = isTauri();
 // The preview adapter is for browser development only. The desktop always uses Rust.
@@ -40,6 +46,24 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
 export async function liveStatus() {
   if (preview) return (await preview).liveStatus();
   return invoke<LiveStatus>('live_status');
+}
+
+/** Reports the optional speech model download and its later changes. */
+export async function watchModel(receive: (status: ModelStatus) => void) {
+  if (preview) {
+    receive((await preview).modelStatus());
+    return () => {};
+  }
+  const unlisten = await listen<ModelStatus>('model:changed', ({ payload }) =>
+    receive(payload),
+  );
+  try {
+    receive(await invoke<ModelStatus>('model_status'));
+  } catch (error) {
+    unlisten();
+    throw error;
+  }
+  return unlisten;
 }
 
 export async function exportPreview() {

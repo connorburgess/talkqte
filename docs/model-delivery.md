@@ -1,6 +1,6 @@
 # Speech model delivery plan
 
-Status: plan, 9 November 2026. Nothing here is implemented. The app has no model download, no settings for transcription, and does not transcribe meetings. The developer-only `local-whisper` feature reads a model file a developer supplies; see the [local transcription check](local-transcription.md).
+Status: plan, 9 November 2026; download implemented in Settings for `local-whisper` builds. See [What is implemented](#what-is-implemented) for what is built and what is not.
 
 ## Decisions
 
@@ -45,6 +45,20 @@ Comparable meeting tools process audio in the cloud. Granola's help center says 
 
 whisper.cpp and the Whisper model weights are MIT-licensed, and `whisper-rs` is released under the Unlicense. Builds that include local transcription ship the whisper.cpp license notice, and the model download screen links the model's license.
 
+## What is implemented
+
+`src-tauri/src/model.rs` and the Settings section **Live transcription**, in builds with the `local-whisper` feature:
+
+- **Consent:** **Download speech model** shows the name, size, free space needed (size plus 512 MB), the host (Hugging Face, which sees the IP address and a file request), and that no account, audio, transcript, or notes are sent. The license is named in text; links in the notebook do not open a browser yet. Nothing downloads until it is chosen.
+- **Integrity:** the app pins `tiny.en`'s size and SHA-256. The file is written to a hidden `.part` file and renamed into place only after the checksum matches; a mismatch deletes it and tries the next source. Starting a live session checks the checksum again before loading the model.
+- **Source:** the upstream file is pinned to revision `5359861c` rather than a moving branch, and a resumed response must start where the file stopped.
+- **Interruptions:** a dropped connection resumes with a range request. Attempts that make progress do not count against the three allowed per source, so a slow connection keeps going; each step has a time limit, so a silent server is given up within about a minute and Cancel takes effect by then. A checksum mismatch is retried once from scratch before the next source. A server that ignores ranges restarts the file cleanly. Progress is shown with Cancel. Cancel, failure, or quitting leaves no partial file; leftovers are removed at launch.
+- **Space:** free space is checked before any request.
+- **Removal:** **Remove model** deletes the file, refused while a live session or a download is running.
+- **Developer override:** `TALKQTE_WHISPER_MODEL` still loads a developer-supplied file without checksum checks, for comparing models.
+
+Not yet built: the project's own GitHub Releases copy (the upstream repository is the only source until a release is prepared), a first-run setup step (no onboarding flow exists yet; the offer is in Settings), keeping an old model while a new one is verified during an app update, and removal on uninstall (macOS apps removed by dragging to the Trash leave their data folder). Tests use a simulated server for success, resume, a server ignoring ranges, a checksum mismatch with fallback, an unreachable source, Cancel, too little space, a damaged installed file, and leftover partial files. One manual test makes a ranged HTTPS request to the real source to confirm the pinned size.
+
 ## Acceptance checks for the implementation
 
 1. A fresh setup without the model runs the fictional demo, and transcription shows as not installed.
@@ -57,5 +71,5 @@ whisper.cpp and the Whisper model weights are MIT-licensed, and `whisper-rs` is 
 ## Next steps
 
 - Score text accuracy for `tiny.en` and `base.en` against the script of several fictional clips, including faster speech and background noise, before offering `base.en`.
-- Implement the setup and Settings download flow against the checks above.
+- Add the first-run setup offer and the update path; check the Settings flow on a clean Mac.
 - Publish the GitHub Releases copy with its checksum when the first build that uses it is prepared.

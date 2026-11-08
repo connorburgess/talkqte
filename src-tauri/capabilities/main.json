@@ -25,6 +25,10 @@
     "allow-start-microphone",
     "allow-stop-microphone",
     "allow-live-status",
+    "allow-model-status",
+    "allow-download-model",
+    "allow-cancel-model-download",
+    "allow-remove-model",
     "allow-start-live-session",
     "allow-stop-live-session"
   ]

@@ -23,7 +23,7 @@ This track runs alongside the feature milestones below. The goal includes a depe
 
 - [x] Define the first supported macOS/hardware/meeting-app matrix and measurable latency, resource, and recovery budgets. [Agreed](docs/budgets.md) on 9 November 2026; confirmation runs on an M1 Mac and with live capture remain.
 - [ ] Establish a Granola capability and authentication decision, source-aware context contract, and fictional adapter fixtures; verify import, live input, and writeback separately. The contract and fictional failure tests exist. The owner's free plan points to MCP with the user's own sign-in (notes from the last 30 days); client permission, tools, provider-format fixtures, and account verification remain.
-- [x] Plan model delivery, integrity, interrupted downloads, offline use, and application/model compatibility. See the [model delivery plan](docs/model-delivery.md); implementation and accuracy scoring remain.
+- [x] Plan model delivery, integrity, interrupted downloads, offline use, and application/model compatibility. See the [model delivery plan](docs/model-delivery.md). The Settings download is built for `local-whisper` builds; the setup step, update path, and accuracy scoring remain.
 - [ ] Prove a signed, notarized installation and a recoverable upgrade on a clean supported Mac; include data migration and update deferral during calls.
 - [ ] Test the path from the website to first useful use without development tools, unnecessary accounts, or unexplained permissions.
 - [ ] Verify privacy boundaries, retention/deletion, credential storage, and safe diagnostics for every enabled input or integration.

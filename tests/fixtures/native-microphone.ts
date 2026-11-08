@@ -4,7 +4,7 @@ import { mockIPC } from '@tauri-apps/api/mocks';
 import { emit } from '@tauri-apps/api/event';
 import * as preview from '../../src/lib/preview';
 import type { MicrophoneSnapshot } from '../../src/lib/microphone';
-import type { Commands, Snapshot } from '../../src/lib/types';
+import type { Commands, ModelStatus, Snapshot } from '../../src/lib/types';
 
 let microphone: MicrophoneSnapshot = {
   revision: 0,
@@ -24,6 +24,22 @@ const calls: string[] = [];
 const delayed = new URLSearchParams(location.search).has('delay-microphone');
 // With ?live, the build reports local transcription as available.
 const liveAvailable = new URLSearchParams(location.search).has('live');
+// With ?model, the build has local transcription but no model yet.
+const modelBuild = new URLSearchParams(location.search).has('model');
+let model: ModelStatus = {
+  revision: 0,
+  status: modelBuild ? 'missing' : 'unavailable',
+  name: 'tiny.en',
+  sizeBytes: 77_704_715,
+  neededBytes: 77_704_715 + 512 * 1024 * 1024,
+  received: 0,
+  message: null,
+};
+let releaseDownload: ((outcome: 'done' | 'cancelled') => void) | undefined;
+async function sendModel(value: Partial<ModelStatus>) {
+  model = { ...model, revision: model.revision + 1, ...value };
+  await emit('model:changed', model);
+}
 Object.defineProperty(window, 'isTauri', { value: true, configurable: true });
 
 async function send(value: Partial<MicrophoneSnapshot>) {
@@ -126,8 +142,34 @@ mockIPC(
           );
         return preview.command('set_user_name', { name });
       }
+      case 'model_status':
+        return structuredClone(model);
+      case 'download_model':
+        // Stands in for the Rust download: no network or file.
+        await sendModel({ status: 'downloading', received: 0, message: null });
+        await sendModel({ received: 30_000_000 });
+        void new Promise<'done' | 'cancelled'>((resolve) => {
+          releaseDownload = resolve;
+        }).then((outcome) =>
+          sendModel(
+            outcome === 'done'
+              ? { status: 'installed', received: 0 }
+              : {
+                  status: 'missing',
+                  received: 0,
+                  message: 'Download cancelled. Nothing was installed.',
+                },
+          ),
+        );
+        return;
+      case 'cancel_model_download':
+        releaseDownload?.('cancelled');
+        return;
+      case 'remove_model':
+        await sendModel({ status: 'missing', message: null });
+        return;
       case 'live_status':
-        return liveAvailable
+        return liveAvailable || model.status === 'installed'
           ? { available: true, reason: null }
           : {
               available: false,
@@ -178,6 +220,7 @@ declare global {
       releaseResponse: () => void;
     };
     liveTest: { start: typeof startLive; say: typeof say };
+    modelTest: { finish: () => void };
     microphoneTest: {
       send: typeof send;
       calls: string[];
@@ -195,6 +238,7 @@ window.questionTest = {
   releaseResponse: () => releaseQuestionResponse?.(),
 };
 window.liveTest = { start: startLive, say };
+window.modelTest = { finish: () => releaseDownload?.('done') };
 window.microphoneTest = {
   send,
   calls,

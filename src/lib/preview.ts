@@ -1,6 +1,6 @@
 // Browser-only visual development adapter. This is not the desktop session engine.
 import demo from '../demo.json';
-import type { Commands, Cue, LiveStatus, Snapshot } from './types';
+import type { Commands, Cue, LiveStatus, ModelStatus, Snapshot } from './types';
 
 const state: Snapshot = {
   revision: 0,
@@ -126,6 +126,9 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
       break;
     case 'start_live_session':
     case 'stop_live_session':
+    case 'download_model':
+    case 'cancel_model_download':
+    case 'remove_model':
       throw new Error('Live sessions are available in the desktop app.');
     case 'pause_demo':
       state.status = 'paused';
@@ -190,6 +193,18 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
 // The browser preview never opens the microphone or transcribes.
 export function liveStatus(): LiveStatus {
   return { available: false, reason: 'Available in the desktop app.' };
+}
+// The preview never downloads anything.
+export function modelStatus(): ModelStatus {
+  return {
+    revision: 0,
+    status: 'unavailable',
+    name: 'tiny.en',
+    sizeBytes: 77_704_715,
+    neededBytes: 77_704_715 + 512 * 1024 * 1024,
+    received: 0,
+    message: null,
+  };
 }
 export function exportPreview() {
   reviewedExport = `# ${state.title}\n\nFictional demo transcript; not derived from microphone audio.\n\n## Notes\n\n${state.notes}\n\n## Saved questions\n\n${state.saved.map((cue) => `- ${cue.question}\n  Context: ${cue.evidence}`).join('\n') || 'No saved questions.'}\n\n## Demo transcript\n\n${state.transcript.map((segment) => `**${segment.speaker}:** ${segment.text}`).join('\n\n')}\n`;
