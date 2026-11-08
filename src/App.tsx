@@ -68,21 +68,74 @@ function useSession<T extends CueSnapshot>() {
 
 function FloatingQuestion() {
   const { state, error, busy, run } = useSession<CueSnapshot>();
+  const active =
+    state?.overlayEnabled && ['running', 'paused'].includes(state.status);
+  const paused = state?.status === 'paused';
   return (
-    <main className="floating-surface">
-      {state?.cue ? (
-        <Question
-          cue={state.cue}
-          paused={state.status !== 'running'}
-          busy={busy}
-          onRespond={(response) =>
-            void run(() =>
-              bridge.command('respond_to_cue', { id: state.cue!.id, response }),
-            )
-          }
-        />
+    <main className="floating-surface" aria-label="Meeting companion">
+      {active ? (
+        <>
+          <header className="companion-bar">
+            <MessageCircle
+              className="companion-mark"
+              size={25}
+              aria-hidden="true"
+            />
+            <div className="companion-status">
+              <strong>TalkQTE</strong>
+              <span role="status">
+                {paused ? 'Demo paused' : 'Demo running'} · No audio
+              </span>
+            </div>
+            <button
+              className="companion-control"
+              aria-label={paused ? 'Resume demo' : 'Pause demo'}
+              title={paused ? 'Resume demo' : 'Pause demo'}
+              disabled={busy}
+              onClick={() =>
+                void run(() =>
+                  bridge.command(paused ? 'resume_demo' : 'pause_demo'),
+                )
+              }
+            >
+              {paused ? <Play size={18} /> : <Pause size={18} />}
+            </button>
+            <button
+              className="companion-control"
+              aria-label="Hide companion"
+              title="Hide companion"
+              disabled={busy}
+              onClick={() =>
+                void run(() =>
+                  bridge.command('set_overlay', { enabled: false }),
+                )
+              }
+            >
+              <X size={18} />
+            </button>
+          </header>
+          {state?.cue && !paused && (
+            <Question
+              cue={state.cue}
+              paused={state.status !== 'running'}
+              busy={busy}
+              onRespond={(response) =>
+                void run(() =>
+                  bridge.command('respond_to_cue', {
+                    id: state.cue!.id,
+                    response,
+                  }),
+                )
+              }
+            />
+          )}
+        </>
       ) : (
-        <p className="floating-empty">A little room to think.</p>
+        <p className="floating-empty">
+          {state?.overlayEnabled === false
+            ? 'Companion hidden. Show it again in Settings.'
+            : 'Start the demo from your notebook.'}
+        </p>
       )}
       {error && (
         <p role="alert" className="floating-error">
@@ -648,7 +701,7 @@ function Notebook() {
                 <h2>Floating question window</h2>
                 <p>
                   {bridge.desktop
-                    ? 'Show a small window above the notebook while a question is active. You can always respond from the notebook.'
+                    ? 'Keep a small companion at the bottom-right during the demo. It expands for a question and has pause and hide controls. You can always respond from the notebook.'
                     : 'Available in the desktop app. The browser preview shows questions inside the notebook.'}
                 </p>
                 <p className="small">

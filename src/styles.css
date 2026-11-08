@@ -916,16 +916,65 @@ svg {
 }
 .floating-surface {
   background: var(--forest);
-  min-height: 100vh;
+  color: #f2f5e9;
+  height: 100vh;
+  overflow-y: auto;
+}
+.companion-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 88px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #476357;
+}
+.companion-mark {
+  color: #cfddb7;
+  flex-shrink: 0;
+}
+.companion-status {
+  display: grid;
+  gap: 3px;
+  flex: 1;
+}
+.companion-status strong {
+  font-size: 16px;
+  font-weight: 600;
+}
+.companion-status span {
+  color: #c5d5c7;
+  font-size: 11px;
+}
+.companion-control {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 36px;
+  border: 1px solid #6d8b7e;
+  background: transparent;
+  color: #f2f5e9;
+  border-radius: 6px;
+}
+.companion-control:hover:not(:disabled) {
+  background: #39584a;
+}
+.floating-surface button:focus-visible {
+  outline: 2px solid #e4edcd;
+  outline-offset: 2px;
 }
 .floating-surface .question {
   border-radius: 0;
+  min-height: calc(100vh - 88px);
+  display: flex;
+  flex-direction: column;
 }
 .floating-surface .question h2 {
   font-size: 22px;
 }
 .floating-surface .question-actions {
-  margin-top: 18px;
+  margin-top: auto;
+  padding-top: 18px;
 }
 .floating-surface .question-actions button {
   font-size: 12px;
