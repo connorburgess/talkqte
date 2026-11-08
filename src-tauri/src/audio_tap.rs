@@ -3,7 +3,8 @@
 //! the callback. The callback side downmixes to mono and pushes into a
 //! fixed-size lock-free ring; when the ring is full, samples are dropped and
 //! counted. The chunker side, on its own thread, resamples to 16 kHz and
-//! produces fixed-length chunks on the session clock. Nothing is written to
+//! produces chunks of a set length on the session clock; a drop ends the
+//! current chunk early and leaves a gap. Nothing is written to
 //! disk or kept after a chunk is handed on.
 
 use crate::transcription::{AudioChunk, SAMPLE_RATE};
@@ -22,7 +23,7 @@ pub struct Overruns(AtomicU64);
 
 impl Overruns {
     pub fn get(&self) -> u64 {
-        self.0.load(Ordering::Relaxed)
+        self.0.load(Ordering::Acquire)
     }
 }
 
@@ -83,7 +84,7 @@ impl TapInput {
                     .push(self.frame_sum / self.channels as f32)
                     .is_err()
                 {
-                    self.overruns.0.fetch_add(1, Ordering::Relaxed);
+                    self.overruns.0.fetch_add(1, Ordering::Release);
                 }
                 self.frame_sum = 0.0;
                 self.frame_samples = 0;
@@ -302,14 +303,31 @@ mod tests {
     #[test]
     fn repeated_small_drops_keep_their_fractions() {
         // At 44.1 kHz one dropped sample is 0.36 of an output sample. Forty
-        // separate one-sample drops must add up, not round down to nothing.
+        // separate one-sample drops must add up rather than round to nothing,
+        // so the next chunk starts later by their total.
         let (mut input, mut chunker) = tap(44_100, 1, 1_000);
         let capacity = 44_100 * RING_SECONDS;
+        let mut emitted_ms = 0;
         for _ in 0..40 {
             input.push_interleaved(std::iter::repeat_n(0.0, capacity + 1)); // one dropped
-            chunker.drain(0);
+            for chunk in chunker.drain(0) {
+                emitted_ms =
+                    chunk.start_ms + chunk.samples.len() as u64 * 1_000 / SAMPLE_RATE as u64;
+            }
         }
+        input.push_interleaved(std::iter::repeat_n(0.0, 44_100));
+        let next = chunker.drain(0).remove(0);
+        // 40 dropped samples at 44.1 kHz are 0.9 ms; rounding each one down
+        // separately would add nothing at all.
+        let gap_ms = 40 * 1_000 / 44_100;
+        assert!(
+            next.start_ms >= emitted_ms + gap_ms,
+            "{} vs {}",
+            next.start_ms,
+            emitted_ms
+        );
         assert_eq!(chunker.overruns(), 40);
+        // At the sample level, the gap is the total's share, not 40 x 0.
         assert_eq!(chunker.gap_applied, 40 * SAMPLE_RATE as u64 / 44_100);
     }
 
