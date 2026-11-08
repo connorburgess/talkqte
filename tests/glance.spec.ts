@@ -1,40 +1,33 @@
 import { expect, test } from '@playwright/test';
 
-for (const response of ['Save question', 'Dismiss'] as const) {
-  test(`keyboard ${response} returns to notes after removing a paused question`, async ({
-    page,
-  }) => {
-    await page.clock.install();
-    await page.goto('/');
-    await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-    await page.clock.runFor(5_200);
-    await page.getByRole('button', { name: 'Pause', exact: true }).click();
-    const question = page.getByRole('region', { name: 'Suggested question' });
-    const notes = page.getByRole('textbox', { name: 'Meeting notes' });
-    // Native Tab navigation is checked separately; begin at the control so
-    // this regression does not depend on the browser's tab-to-buttons setting.
-    await question.getByRole('button', { name: 'Why?' }).focus();
-    await page.keyboard.press('Enter');
-    await expect(
-      question.getByRole('button', { name: 'Hide context' }),
-    ).toBeFocused();
-    await page.keyboard.press('Enter');
-    await expect(question.getByRole('button', { name: 'Why?' })).toBeFocused();
-    await expect(question.locator('blockquote')).toBeHidden();
-    await question.getByRole('button', { name: response }).focus();
-    await expect(
-      question.getByRole('button', { name: response }),
-    ).toBeFocused();
-    await page.keyboard.press('Enter');
-    await expect(question).toHaveCount(0);
-    await expect(notes).toBeFocused();
-    await page.keyboard.type('Fictional follow-up note.');
-    await expect(notes).toHaveValue('Fictional follow-up note.');
-    await expect(page.locator('.saved-question')).toHaveCount(
-      response === 'Save question' ? 1 : 0,
-    );
-  });
-}
+test('keyboard Dismiss returns to notes after removing a paused question', async ({
+  page,
+}) => {
+  await page.clock.install();
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
+  await page.clock.runFor(5_200);
+  await page.getByRole('button', { name: 'Pause', exact: true }).click();
+  const question = page.getByRole('region', { name: 'Suggested question' });
+  const notes = page.getByRole('textbox', { name: 'Meeting notes' });
+  // Native Tab navigation is checked separately; begin at the control so
+  // this regression does not depend on the browser's tab-to-buttons setting.
+  await question.getByRole('button', { name: 'Why?' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(
+    question.getByRole('button', { name: 'Hide context' }),
+  ).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(question.getByRole('button', { name: 'Why?' })).toBeFocused();
+  await expect(question.locator('blockquote')).toBeHidden();
+  await question.getByRole('button', { name: 'Dismiss' }).focus();
+  await expect(question.getByRole('button', { name: 'Dismiss' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(question).toHaveCount(0);
+  await expect(notes).toBeFocused();
+  await page.keyboard.type('Fictional follow-up note.');
+  await expect(notes).toHaveValue('Fictional follow-up note.');
+});
 
 test('a transcript reader returns to the selected tab after dismissing a question', async ({
   page,
@@ -90,7 +83,7 @@ test('timed expiry and a remote companion response leave the current notebook co
   await expect(search).toBeFocused();
 });
 
-test('a delayed Save acknowledgement does not take focus back from another notebook control', async ({
+test('a delayed Dismiss acknowledgement does not take focus back from another notebook control', async ({
   page,
 }) => {
   await page.clock.install();
@@ -110,17 +103,15 @@ test('a delayed Save acknowledgement does not take focus back from another noteb
   await page.clock.runFor(5_200);
   await page.evaluate(() => window.questionTest.holdNextResponse());
   const question = page.getByRole('region', { name: 'Suggested question' });
-  await question.getByRole('button', { name: 'Save question' }).focus();
+  await question.getByRole('button', { name: 'Dismiss' }).focus();
   await page.keyboard.press('Enter');
   // The shared snapshot removes the card before the command acknowledges it.
   await expect(question).toHaveCount(0);
-  await expect(page.getByText('Question saved to your notebook.')).toBeHidden();
+  await expect(page.getByText('Question dismissed.')).toBeHidden();
   const search = page.getByRole('textbox', { name: 'Search meetings' });
   await search.focus();
   await page.evaluate(() => window.questionTest.releaseResponse());
-  await expect(
-    page.getByText('Question saved to your notebook.'),
-  ).toBeVisible();
+  await expect(page.getByText('Question dismissed.')).toBeVisible();
   await expect(search).toBeFocused();
   await page.keyboard.type('garden');
   await expect(search).toHaveValue('garden');
@@ -160,11 +151,8 @@ test('Why reveals the source and keeps a question through later prompts and play
   await expect(question.getByRole('heading')).toHaveText(
     'Who will take the first draft?',
   );
-  await question.getByRole('button', { name: 'Save question' }).click();
+  await question.getByRole('button', { name: 'Dismiss' }).click();
   await expect(question).toHaveCount(0);
-  await expect(page.locator('.saved-question')).toContainText(
-    'Who will take the first draft?',
-  );
 });
 
 test('appearance controls are discoverable, apply to questions, and survive demo replay', async ({

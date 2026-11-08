@@ -73,7 +73,7 @@ test('companion stays compact between questions and preserves a paused question'
   await expect(
     page.getByRole('heading', { name: 'Who will take the first draft?' }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Save question' }).click();
+  await page.getByRole('button', { name: 'Dismiss' }).click();
   await expect(
     page.getByRole('region', { name: 'Suggested question' }),
   ).toHaveCount(0);

@@ -3,8 +3,6 @@ import {
   ArrowDownToLine,
   ArrowUpRight,
   BookOpen,
-  Bookmark,
-  Check,
   ChevronRight,
   CircleHelp,
   FileText,
@@ -172,11 +170,11 @@ function FloatingQuestion() {
                     }),
                   )
                 }
-                onRespond={(response) =>
+                onDismiss={() =>
                   void run(() =>
                     bridge.command('respond_to_cue', {
                       id: state.cue!.id,
-                      response,
+                      response: 'dismiss',
                     }),
                   )
                 }
@@ -203,9 +201,7 @@ function FloatingQuestion() {
 function Notebook() {
   const { state, error, setError, busy, run } = useSession<Snapshot>();
   const microphone = useMicrophone();
-  const [view, setView] = useState<'notebook' | 'saved' | 'settings'>(
-    'notebook',
-  );
+  const [view, setView] = useState<'notebook' | 'settings'>('notebook');
   const [tab, setTab] = useState<'notes' | 'transcript'>('notes');
   const [search, setSearch] = useState('');
   const [notes, setNotes] = useState('');
@@ -245,17 +241,16 @@ function Notebook() {
   const matches = `${state.title} ${state.description} demo`
     .toLowerCase()
     .includes(search.toLowerCase().trim());
-  const respond = (response: 'save' | 'dismiss') => {
+  const dismiss = () => {
     if (!state.cue) return;
     const actionFocus = document.activeElement;
     void run(async () => {
-      await bridge.command('respond_to_cue', { id: state.cue!.id, response });
-      setNotice(
-        response === 'save'
-          ? 'Question saved to your notebook.'
-          : 'Question dismissed.',
-      );
-      // Only this notebook's explicit response restores focus. Passive expiry
+      await bridge.command('respond_to_cue', {
+        id: state.cue!.id,
+        response: 'dismiss',
+      });
+      setNotice('Question dismissed.');
+      // Only this notebook's explicit dismissal restores focus. Passive expiry
       // and companion events must not move it, nor a reply after the user has
       // already moved to another control or application.
       if (
@@ -295,15 +290,6 @@ function Notebook() {
           >
             <BookOpen size={19} />
             Notebook
-          </button>
-          <button
-            className={view === 'saved' ? 'nav-item selected' : 'nav-item'}
-            aria-current={view === 'saved' ? 'page' : undefined}
-            onClick={() => setView('saved')}
-          >
-            <Bookmark size={19} />
-            Saved questions
-            <span className="nav-count">{state.saved.length}</span>
           </button>
         </nav>
         <div className="sidebar-bottom">
@@ -398,13 +384,7 @@ function Notebook() {
         <header className="toolbar">
           <div className="breadcrumb">
             <BookOpen size={16} />
-            <span>
-              {view === 'notebook'
-                ? 'Notebook'
-                : view === 'saved'
-                  ? 'Saved questions'
-                  : 'Settings'}
-            </span>
+            <span>{view === 'notebook' ? 'Notebook' : 'Settings'}</span>
             {view === 'notebook' && (
               <>
                 <ChevronRight size={14} />
@@ -582,10 +562,7 @@ function Notebook() {
                   >
                     <div className="note-intro">
                       <h2>Leave with a little more clarity.</h2>
-                      <p>
-                        Jot down what matters. Save a question when you want to
-                        come back to it.
-                      </p>
+                      <p>Jot down what matters, if you need to.</p>
                     </div>
                     <label className="visually-hidden" htmlFor="meeting-notes">
                       Meeting notes
@@ -609,7 +586,6 @@ function Notebook() {
                       <span>Kept in memory for this session</span>
                       <span>{notes.length.toLocaleString()} / 20,000</span>
                     </div>
-                    <SavedQuestions saved={state.saved} compact />
                   </div>
                 ) : (
                   <div
@@ -658,7 +634,7 @@ function Notebook() {
                     cue={state.cue}
                     size={state.questionSize}
                     busy={busy}
-                    onRespond={respond}
+                    onDismiss={dismiss}
                     onInspect={(expanded) =>
                       void run(() =>
                         bridge.command('inspect_cue', {
@@ -684,7 +660,7 @@ function Notebook() {
                       {state.status === 'ready'
                         ? 'When something could use a little clarity, a question will appear here.'
                         : state.status === 'ended'
-                          ? 'Your saved questions and notes are still here. Export them before closing the app.'
+                          ? 'Your notes are still here. Export them before closing the app.'
                           : 'Questions pass quietly. You can keep listening without responding.'}
                     </p>
                     {state.status === 'ready' && (
@@ -696,8 +672,8 @@ function Notebook() {
                   </div>
                 )}
                 <p className="companion-footnote">
-                  Suggestions in this demo use simple phrase rules. Save what
-                  helps; let the rest pass.
+                  Suggestions in this demo use simple phrase rules. Use a cue in
+                  the conversation or let it pass.
                 </p>
                 <button
                   className="text-button companion-settings"
@@ -718,32 +694,6 @@ function Notebook() {
           </div>
         )}
 
-        {view === 'saved' && (
-          <div className="secondary-page">
-            <h1>Saved questions</h1>
-            <p className="page-description">
-              A place for the things worth coming back to.
-            </p>
-            <SavedQuestions saved={state.saved} />
-            {state.saved.length > 0 && (
-              <button
-                className="secondary-button"
-                onClick={prepareExport}
-                disabled={busy}
-              >
-                <ArrowUpRight size={16} />
-                Review export
-              </button>
-            )}
-            <button
-              className="text-button back-link"
-              onClick={() => setView('notebook')}
-            >
-              Back to the notebook
-              <ChevronRight size={15} />
-            </button>
-          </div>
-        )}
         {view === 'settings' && (
           <div className="secondary-page settings-page">
             <h1>Make room for your conversation.</h1>
@@ -876,9 +826,9 @@ function Notebook() {
                 <h2>Your data in this prototype</h2>
                 <p>
                   The optional microphone check retains no audio and does not
-                  transcribe. Notes and saved questions exist in memory until
-                  you close the app. Exports contain exactly the text you review
-                  and are saved to the location you choose.
+                  transcribe. Notes exist in memory until you close the app.
+                  Exports contain exactly the text you review and are saved to
+                  the location you choose.
                 </p>
               </div>
               <ShieldCheck size={24} />
@@ -948,52 +898,6 @@ function Notebook() {
         </div>
       </dialog>
     </div>
-  );
-}
-
-function SavedQuestions({
-  saved,
-  compact = false,
-}: {
-  saved: Snapshot['saved'];
-  compact?: boolean;
-}) {
-  return (
-    <section
-      className={compact ? 'saved-questions compact' : 'saved-questions'}
-      aria-label="Saved questions"
-    >
-      {compact && (
-        <h2>
-          <Bookmark size={16} />
-          Saved questions <span>{saved.length}</span>
-        </h2>
-      )}
-      {saved.length ? (
-        saved.map((cue) => (
-          <article className="saved-question" key={cue.sourceId}>
-            <Check size={17} />
-            <div>
-              <h3>{cue.question}</h3>
-              <p>{cue.evidence}</p>
-            </div>
-          </article>
-        ))
-      ) : compact ? (
-        <p className="muted small">
-          Useful questions will land here when you save them.
-        </p>
-      ) : (
-        <div className="empty-inline">
-          <Bookmark size={28} />
-          <h2>Keep a question for later.</h2>
-          <p>
-            Try the demo and save a suggestion. It will stay here even after the
-            moment passes.
-          </p>
-        </div>
-      )}
-    </section>
   );
 }
 
