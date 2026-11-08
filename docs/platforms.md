@@ -23,16 +23,16 @@ The first acceptance gate is a reproducible Windows build and fictional demo in 
 
 ### First VM result, 8 November 2026
 
-Configuration: Windows 11 Arm (build 26300), Parallels 27.1.0 host with 27.0.3 guest tools, WebView2 157.0.4341.42. Built from app commit `b05b4dc` with Visual Studio 2022 Build Tools (MSVC 14.44, ARM64 C++ tools, Windows 11 SDK 26100), Rust 1.97.1 (`aarch64-pc-windows-msvc`), and Node.js 22.23.4. Commands: `npm ci`, `npm run build`, `cargo test --locked`, and `npm run tauri -- build --debug --no-bundle`.
+Configuration: Windows 11 Arm (build 26300) with 4 virtual CPUs and 12 GiB memory, Parallels 27.1.0 host with 27.0.3 guest tools, WebView2 157.0.4341.42. Built from app commit `b05b4dc` with Visual Studio 2022 Build Tools (MSVC 14.44, ARM64 C++ tools, Windows 11 SDK 26100), Rust 1.97.1 (`aarch64-pc-windows-msvc`), and Node.js 22.23.4. Commands: `npm ci`, `npm run build`, `cargo test --locked`, and `npm run tauri -- build --debug --no-bundle`.
 
-| Check                         | Result                                                                                                                            |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Frontend build and Rust tests | Passed; 30 Rust tests, the same count as macOS.                                                                                   |
-| Native build                  | A native ARM64 executable (PE machine `0xAA64`), not emulated.                                                                    |
-| Launch                        | The main window opened and stayed responsive with a WebView2 child process; it closed cleanly.                                    |
-| Fictional demo                | Through Windows UI Automation, **Try demo** started playback, “Who will take the first draft?” appeared, and **End demo** worked. |
-| Missing Windows icon          | The build stopped until `src-tauri/icons/icon.ico` existed. Added from the existing PNG.                                          |
-| Compiler warnings             | macOS-only microphone code produced dead-code warnings, which fail the CI lint. Now allowed off macOS only.                       |
+| Check                         | Result                                                                                                                                                         |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend build and Rust tests | Passed; 30 Rust tests, the same count as macOS.                                                                                                                |
+| Native build                  | A native ARM64 executable (PE machine `0xAA64`), not emulated.                                                                                                 |
+| Launch                        | The main window opened and stayed responsive with a WebView2 child process; it closed cleanly.                                                                 |
+| Fictional demo                | Through Windows UI Automation, **Try demo** started playback, “Who will take the first draft?” appeared, and **End demo** worked.                              |
+| Missing Windows icon          | The build stopped until `src-tauri/icons/icon.ico` existed. Added from the existing PNG.                                                                       |
+| Compiler warnings             | macOS-only microphone code produced dead-code warnings, which would fail `clippy -D warnings` there (CI lints Rust only on macOS). Now allowed off macOS only. |
 
 Not checked or not available: microphone monitoring (reports unsupported off macOS), companion placement, focus, display scaling, accessibility, full-screen meetings, and screen sharing. Also not covered: installer, signing, release builds (the debug build opens a console window), x64, and physical PCs. This result covers one Arm VM configuration only.
 
@@ -48,14 +48,14 @@ The output is a feasibility record and a decision about a bounded Linux support 
 
 Configuration: Ubuntu 26.04 LTS ARM64 (kernel 7.0) in Parallels 27.1.0 with matching guest tools, 2 virtual CPUs and 4 GiB memory. GNOME Shell 50 provides only a Wayland session. Built from app commit `b05b4dc` as an ordinary user with Rust 1.97.1 and Node.js 22.23.4, after installing `build-essential`, `pkg-config`, `libwebkit2gtk-4.1-dev` (WebKitGTK 2.52.6), `libayatana-appindicator3-dev`, `librsvg2-dev`, `libasound2-dev`, `libssl-dev`, and `libxdo-dev`.
 
-| Check                         | Result                                                                   |
-| ----------------------------- | ------------------------------------------------------------------------ |
-| Frontend build and Rust tests | Passed; 30 Rust tests.                                                   |
-| Native build                  | A native aarch64 ELF executable.                                         |
-| Compiler warnings             | The same macOS-only dead-code warnings as Windows; the same fix applies. |
-| Launch and fictional demo     | Not run: no desktop session was logged in on the VM.                     |
+| Check                         | Result                                                                                                        |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Frontend build and Rust tests | Passed; 30 Rust tests.                                                                                        |
+| Native build                  | A native aarch64 ELF executable.                                                                              |
+| Compiler warnings             | The same macOS-only dead-code warnings as Windows; the same fix is expected to apply but was not re-run here. |
+| Launch and fictional demo     | Not run: no desktop session was logged in on the VM.                                                          |
 
-Next: log in to a desktop session, then launch the demo. Record how the companion behaves on Wayland, which limits how apps place their own windows and keep them on top. Note whether X11 is unavailable on this release, and check accessibility and both-side audio. General Linux support remains undecided.
+Next: log in to a desktop session, then launch the demo. Record how the companion behaves on Wayland, which limits how apps place their own windows and keep them on top, and check accessibility and both-side audio. General Linux support remains undecided.
 
 ## Mobile validation
 
