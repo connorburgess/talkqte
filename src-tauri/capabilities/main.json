@@ -17,6 +17,7 @@
     "allow-set-question-size",
     "allow-update-notes",
     "allow-set-sensitivity",
+    "allow-set-user-name",
     "allow-set-overlay",
     "allow-export-markdown",
     "allow-export-preview",

@@ -232,6 +232,7 @@ function Notebook() {
   const [tab, setTab] = useState<'notes' | 'transcript'>('notes');
   const [search, setSearch] = useState('');
   const [notes, setNotes] = useState('');
+  const [userName, setUserName] = useState('');
   const initialized = useRef(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
@@ -244,6 +245,7 @@ function Notebook() {
     if (state && !initialized.current) {
       initialized.current = true;
       setNotes(state.notes);
+      setUserName(state.userName ?? '');
     }
   }, [state]);
   useEffect(() => {
@@ -301,6 +303,23 @@ function Notebook() {
         (notesEditor.current ?? transcriptTab.current)?.focus();
       }
     });
+  };
+  // Saving the name leaves other controls enabled and focus where it is. A
+  // rejected name puts the field back to the name in effect.
+  const saveName = () => {
+    const next = userName.trim();
+    const current = state.userName ?? '';
+    if (next === current) {
+      setUserName(current);
+      return;
+    }
+    bridge
+      .command('set_user_name', { name: next || null })
+      .then(() => setUserName(next))
+      .catch((e: unknown) => {
+        setError(e instanceof Error ? e.message : String(e));
+        setUserName(current);
+      });
   };
   const prepareExport = () =>
     void run(async () => {
@@ -812,6 +831,33 @@ function Notebook() {
             <p className="page-description">
               A few controls to keep questions on your terms.
             </p>
+            <section className="setting">
+              <div>
+                <h2>Your name</h2>
+                <p>
+                  In a live session, when someone asks you something by name,
+                  such as “Sam, can you take the draft?”, the question is shown
+                  as Asked you and stays while you answer. Questions for other
+                  people stay quiet. Your name is kept only until you close the
+                  app.
+                </p>
+              </div>
+              <div className="setting-control">
+                <label htmlFor="user-name">Name</label>
+                <input
+                  id="user-name"
+                  value={userName}
+                  maxLength={40}
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(e) => setUserName(e.target.value)}
+                  onBlur={saveName}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') saveName();
+                  }}
+                />
+              </div>
+            </section>
             <section className="setting">
               <div>
                 <h2>Glance view</h2>

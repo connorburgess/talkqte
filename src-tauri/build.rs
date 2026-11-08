@@ -12,6 +12,7 @@ fn main() {
             "set_question_size",
             "update_notes",
             "set_sensitivity",
+            "set_user_name",
             "set_overlay",
             "export_markdown",
             "export_preview",

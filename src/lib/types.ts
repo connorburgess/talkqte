@@ -36,6 +36,8 @@ export interface Snapshot extends CueSnapshot {
   saved: Cue[];
   notes: string;
   sensitivity: 'balanced' | 'quiet';
+  /** Session-only; used to notice questions asked of the user by name. */
+  userName: string | null;
 }
 export type Commands = {
   start_demo: undefined;
@@ -48,6 +50,7 @@ export type Commands = {
   set_question_size: { value: CueSnapshot['questionSize'] };
   update_notes: { notes: string };
   set_sensitivity: { value: Snapshot['sensitivity'] };
+  set_user_name: { name: string | null };
   set_overlay: { enabled: boolean };
   start_live_session: undefined;
   stop_live_session: undefined;
