@@ -118,6 +118,20 @@ A 10-minute replay of the two-voice meeting clip repeated 20 times, in real time
 | Memory                     | About 238 MB in the first two minutes, then steady at 197–204 MB to the end; no growth across 10 minutes                                                                                      |
 | CPU                        | 42.7 s of processor time over 600 s, about 7% of one core                                                                                                                                     |
 
+#### Sustained session with pause-based chunks
+
+The same 10-minute replay, 9 November 2026, fed through the audio tap with the live session's settings (chunks of 1–3 seconds cut at pauses, drained every 250 ms), once as a release build and once as a debug build. Memory and CPU were sampled with `ps` every 60 seconds.
+
+| Measure                    | Release build                                                                                              | Debug build                                           |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Audio handled              | 607.9 s in 260 chunks: 256 lines accepted, 0 dropped, 0 recognizer failures, 0 refused                     | Same counts                                           |
+| Backlog                    | Never more than 1 chunk                                                                                    | Never more than 1 chunk                               |
+| Speech-to-transcript delay | Median 3.13 s, 95th percentile 3.39 s, maximum 3.43 s                                                      | Median 3.14 s, 95th percentile 3.40 s, maximum 3.43 s |
+| Memory                     | 241 MB in the first two minutes, 199 MB at minute 3, then about 4 MB a minute more, to 227 MB at minute 10 | 258 MB steady to minute 8, 220–224 MB after           |
+| CPU                        | 91.2 s of processor time over 600 s, about 15% of one core                                                 | 94.0 s over 600 s, about 16% of one core              |
+
+Against the 5-second fixed chunks above, pause-based chunks meet the delay target but cost about twice the processor time, because more and shorter chunks mean more recognizer calls per minute; 15.2% of one M5 Pro core is at or just over the whole CPU budget, and the lowest supported Mac is slower. Memory also drifted upward by about 14% between minutes 3 and 10 in the release run, which the 5-second run did not show; a longer run is needed to tell drift from settling. Options to weigh in the confirmation runs the budgets still need: a longer minimum chunk (for example 2 s), fewer recognizer threads, or a different trade between delay and CPU on the lowest supported Mac.
+
 Chunk length sets the delay. On the 30-second meeting clip:
 
 | Chunk | Delay (median) | Question shown | Question withdrawn |
