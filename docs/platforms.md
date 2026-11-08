@@ -40,7 +40,7 @@ Not checked or not available: microphone monitoring (reports unsupported off mac
 
 In the same Windows 11 Arm VM, commit `81aa840` built successfully with `npm ci`, the frontend build, 93 Rust tests, and a Tauri debug build. In the logged-in desktop session, UI Automation started the fictional demo and found its question. The notebook's **Why?** button accepted keyboard focus, and Enter opened its context. The app and companion windows reported 192 DPI through `GetDpiForWindow`; a separate 150% scaling check was not performed.
 
-The Notepad foreground comparison was inconclusive: the automation did not establish that its test Notepad was foreground before the question arrived. The initial automation cleanup forced the app process to exit. A separate idle-app check closed the notebook through its UI Automation window control and observed the app process exit cleanly; exit after a running demo remains unverified. These results do not establish cross-app focus behavior, general keyboard accessibility, or support on other Windows configurations.
+The Notepad foreground comparison was inconclusive: the automation did not establish that its test Notepad was foreground before the question arrived. The initial automation cleanup forced the app process to exit. A separate idle-app check closed the notebook through its UI Automation window control and observed the app process exit within five seconds; exit after a running demo remains unverified. These results do not establish cross-app focus behavior, general keyboard accessibility, or support on other Windows configurations.
 
 ## Ubuntu exploration
 
