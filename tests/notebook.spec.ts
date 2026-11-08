@@ -201,3 +201,44 @@ test('keyboard users can change notebook tabs and close the export preview', asy
     page.getByRole('button', { name: 'Export', exact: true }),
   ).toBeFocused();
 });
+
+test('prior notes from a file are chosen, shown apart from the conversation, removable, and never exported', async ({
+  page,
+}) => {
+  const panel = page.getByRole('region', { name: 'Prior context' });
+  await expect(panel).toContainText('not from this conversation');
+  await panel.getByRole('button', { name: 'Add notes from a file' }).click();
+  const dialog = page.getByRole('dialog', { name: /Choose notes/ });
+  await expect(dialog).toContainText('garden-notes.json');
+  await expect(dialog.getByRole('checkbox')).toHaveCount(3);
+  await expect(dialog.getByRole('button', { name: /Import/ })).toBeDisabled();
+  await dialog.getByRole('checkbox', { name: /Garden welcome guide/ }).check();
+  await dialog.getByRole('checkbox', { name: /Visitor questions/ }).check();
+  await dialog.getByRole('button', { name: 'Import 2 selected' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(panel.getByRole('listitem')).toHaveCount(2);
+  await expect(panel).toContainText('2026-10-28 · From a file');
+  await expect(panel).toContainText(
+    'Visitors asked where to find watering cans',
+  );
+  await panel
+    .getByRole('button', { name: 'Remove Visitor questions (2026-11-02)' })
+    .click();
+  await expect(panel.getByRole('listitem')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  const exportDialog = page.getByRole('dialog', { name: 'Review your export' });
+  await expect(exportDialog.locator('pre')).not.toContainText('tool shed');
+  await page.keyboard.press('Escape');
+  await expect(
+    page.getByRole('region', { name: 'Suggested question' }),
+  ).toHaveCount(0);
+  // Escape in the chooser leaves nothing pending and returns focus.
+  await panel.getByRole('button', { name: 'Add notes from a file' }).click();
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(
+    panel.getByRole('button', { name: 'Add notes from a file' }),
+  ).toBeFocused();
+  await expect(panel.getByRole('listitem')).toHaveCount(1);
+});

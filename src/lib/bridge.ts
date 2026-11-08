@@ -2,9 +2,12 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type {
   Commands,
+  ContextItem,
   CueSnapshot,
   LiveStatus,
+  MergeOutcome,
   ModelStatus,
+  PickedNotes,
   Snapshot,
 } from './types';
 
@@ -59,6 +62,33 @@ export async function watchModel(receive: (status: ModelStatus) => void) {
   );
   try {
     receive(await invoke<ModelStatus>('model_status'));
+  } catch (error) {
+    unlisten();
+    throw error;
+  }
+  return unlisten;
+}
+
+/** Opens the file chooser and lists a notes file; null if none was chosen. */
+export async function pickContextFile() {
+  if (preview) return (await preview).pickContextFile();
+  return invoke<PickedNotes | null>('pick_context_file');
+}
+
+export async function importContextNotes(ids: string[]) {
+  if (preview) return (await preview).importContextNotes(ids);
+  return invoke<MergeOutcome>('import_context_notes', { ids });
+}
+
+/** Reports the imported prior notes and their later changes. */
+export async function watchContext(receive: (items: ContextItem[]) => void) {
+  if (preview) return (await preview).connectContext(receive);
+  const unlisten = await listen<ContextItem[]>(
+    'context:changed',
+    ({ payload }) => receive(payload),
+  );
+  try {
+    receive(await invoke<ContextItem[]>('context_items'));
   } catch (error) {
     unlisten();
     throw error;

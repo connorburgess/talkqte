@@ -56,7 +56,37 @@ export type Commands = {
   download_model: undefined;
   cancel_model_download: undefined;
   remove_model: undefined;
+  cancel_context_import: undefined;
+  remove_context_item: { sourceId: string };
 };
+/** One prior note the user imported; never mistaken for the conversation. */
+export interface ContextItem {
+  provider: 'granola' | 'file';
+  sourceId: string;
+  title: string;
+  sourceDate: string;
+  excerpt: string;
+  revision: number;
+}
+export interface NoteSummary {
+  sourceId: string;
+  title: string;
+  sourceDate: string;
+  preview: string;
+}
+export interface PickedNotes {
+  fileName: string;
+  notes: NoteSummary[];
+  /** Notes in the file not listed: beyond the limit of 200, or repeated. */
+  skipped: number;
+}
+export interface MergeOutcome {
+  added: number;
+  updated: number;
+  unchanged: number;
+  overLimit: number;
+  rejected: number;
+}
 export interface ModelStatus {
   revision: number;
   status: 'unavailable' | 'developer' | 'missing' | 'downloading' | 'installed';

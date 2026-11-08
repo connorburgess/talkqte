@@ -7,6 +7,7 @@ pub mod engine;
 pub mod live;
 mod microphone;
 pub mod model;
+pub mod notes_file;
 pub mod transcription;
 
 use engine::{CompanionPosition, Engine, QuestionSize, Response, Sensitivity};
@@ -27,6 +28,10 @@ struct Runtime {
     /// The running live session, if any. Finish it outside this lock, because
     /// delivering transcript lines takes the lock.
     live: Option<Live>,
+    /// Prior notes the user imported this session, in memory only.
+    context: context::ContextStore,
+    /// A notes file read and listed, waiting for the user's selection.
+    pending_import: Option<notes_file::FileSource>,
 }
 
 impl Runtime {
@@ -521,6 +526,118 @@ const LIVE_CHUNK_MS: u64 = 3_000;
 #[cfg(feature = "local-whisper")]
 const LIVE_PAUSE_MIN_MS: u64 = 1_000;
 
+/// What the notebook shows about prior notes picked from a file.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PickedNotes {
+    file_name: String,
+    notes: Vec<notes_file::NoteSummary>,
+    /// Notes in the file that are not listed: beyond the limit or repeated.
+    skipped: usize,
+}
+
+fn publish_context(app: &tauri::AppHandle, runtime: &Runtime) {
+    let _ = app.emit_to("main", "context:changed", runtime.context.items());
+}
+
+/// Lets the user choose a notes file, reads it, and lists its notes for
+/// selection. Nothing is imported until `import_context_notes`.
+#[tauri::command]
+async fn pick_context_file(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<PickedNotes>, String> {
+    let picker = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        picker
+            .dialog()
+            .file()
+            .add_filter("TalkQTE notes", &["json"])
+            .blocking_pick_file()
+            .map(|file| {
+                file.into_path()
+                    .map_err(|_| "Choose a local file.".to_string())
+            })
+    })
+    .await
+    .map_err(|_| "Could not open the file chooser.")?;
+    let Some(path) = picked.transpose()? else {
+        return Ok(None);
+    };
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let source = tauri::async_runtime::spawn_blocking(move || notes_file::FileSource::read(&path))
+        .await
+        .map_err(|_| "The file could not be read.")??;
+    let notes = source.summaries();
+    let skipped = source.skipped;
+    // A new pick replaces any file still waiting for a selection.
+    state
+        .0
+        .lock()
+        .map_err(|_| "The notebook is unavailable.")?
+        .pending_import = Some(source);
+    Ok(Some(PickedNotes {
+        file_name,
+        notes,
+        skipped,
+    }))
+}
+
+/// Imports the selected notes from the file read by `pick_context_file`.
+#[tauri::command]
+fn import_context_notes(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    ids: Vec<String>,
+) -> Result<context::MergeOutcome, String> {
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    let mut source = runtime
+        .pending_import
+        .take()
+        .ok_or("Choose a notes file first.")?;
+    let fetched = context::fetch_selection(&mut source, &ids, &|| false, &mut |_| true)
+        .map_err(|_| "The notes could not be read.")?;
+    let outcome = runtime
+        .context
+        .merge(context::Provider::File, &ids, fetched);
+    publish_context(&app, &runtime);
+    Ok(outcome)
+}
+
+#[tauri::command]
+fn cancel_context_import(state: tauri::State<AppState>) {
+    if let Ok(mut runtime) = state.0.lock() {
+        runtime.pending_import = None;
+    }
+}
+
+#[tauri::command]
+fn context_items(state: tauri::State<AppState>) -> Result<Vec<context::ContextItem>, String> {
+    state
+        .0
+        .lock()
+        .map(|runtime| runtime.context.items().to_vec())
+        .map_err(|_| "The notebook is unavailable.".into())
+}
+
+/// Removes one imported note; an explicit choice, separate from anything else.
+#[tauri::command]
+fn remove_context_item(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    source_id: String,
+) -> Result<(), String> {
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    if !runtime.context.remove(context::Provider::File, &source_id) {
+        return Err("That note is no longer imported.".into());
+    }
+    publish_context(&app, &runtime);
+    Ok(())
+}
+
 /// A live session's parts: the engine session it feeds, the microphone start
 /// capturing for it, and its runner once capture has begun.
 struct Live {
@@ -759,6 +876,8 @@ pub fn run() {
             last_tick: Instant::now(),
             export: None,
             live: None,
+            context: context::ContextStore::default(),
+            pending_import: None,
         })))
         .manage(companion::WindowState::default())
         .manage(microphone::Controller::default())
@@ -781,6 +900,11 @@ pub fn run() {
             export_markdown,
             live_status,
             model_status,
+            pick_context_file,
+            import_context_notes,
+            cancel_context_import,
+            context_items,
+            remove_context_item,
             download_model,
             cancel_model_download,
             remove_model,

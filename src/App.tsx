@@ -19,6 +19,7 @@ import {
 import * as bridge from './lib/bridge';
 import {
   clockTime,
+  type ContextItem,
   type CueSnapshot,
   type LiveStatus,
   type ModelStatus,
@@ -28,6 +29,7 @@ import {
 const megabytes = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
 import { Question } from './components/Question';
 import { MicrophoneControl } from './components/MicrophoneControl';
+import { ContextNotes } from './components/ContextNotes';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
 
 const floating = new URLSearchParams(location.search).get('window') === 'cue';
@@ -250,6 +252,24 @@ function Notebook() {
   const [notice, setNotice] = useState('');
   const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
   const [model, setModel] = useState<ModelStatus | null>(null);
+  const [contextItems, setContextItems] = useState<ContextItem[]>([]);
+  useEffect(() => {
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    bridge
+      .watchContext((items) => {
+        if (!disposed) setContextItems(Array.isArray(items) ? items : []);
+      })
+      .then((unsubscribe) => {
+        if (disposed) unsubscribe();
+        else stop = unsubscribe;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, []);
   const modal = useRef<HTMLDialogElement>(null);
   const exportButton = useRef<HTMLButtonElement>(null);
   const notesEditor = useRef<HTMLTextAreaElement>(null);
@@ -866,6 +886,12 @@ function Notebook() {
                 </button>
               </aside>
             </div>
+            <ContextNotes
+              items={contextItems}
+              busy={busy}
+              onError={setError}
+              onNotice={setNotice}
+            />
             <footer className="notebook-footer">
               <ShieldCheck size={15} />
               <p>
