@@ -2,7 +2,7 @@
 
 A privacy-focused meeting companion for timely questions and clearer notes.
 
-Built in public with Rust, Tauri, and React. **Early development:** a runnable desktop prototype is available from source. It plays a fictional meeting; audio capture, Whisper transcription, and persistent storage are not implemented yet. There is no signed release.
+Built in public with Rust, Tauri, and React. **Early development:** a runnable desktop prototype is available from source. It plays a fictional meeting and includes an opt-in macOS microphone activity monitor. Live meeting transcription, system-audio capture, and persistent storage are not implemented yet. There is no signed release.
 
 ## The idea
 
@@ -29,6 +29,14 @@ Choose **Try demo** to play a fictional community-garden conversation. The noteb
 
 **The prototype does not save your notebook when you quit.** Export anything you want to keep. The demo captures no audio, downloads no models, and requires no API credentials. Suggestions use a few phrase rules, not a language model.
 
+### Check microphone activity
+
+The native macOS app has separate microphone controls. Start monitoring explicitly, then grant the operating system's microphone permission if prompted. The indicator reports coarse signal activity from the current default microphone. Noise can trigger it; it does not detect speech, identify a meeting, or generate questions from audio.
+
+Choose **Stop microphone** to release the input device. The app shows a stopping state until release completes. Pausing or ending the fictional demo does not stop microphone monitoring; hiding the companion only hides its window. Monitoring does not start automatically and does not retain samples, create recordings, or upload audio. It does not hear the other side of a call through system audio. The browser preview cannot monitor a microphone.
+
+Synthetic lifecycle tests and a macOS build cover the adapter, but real microphone permission, device-disconnect, and audio-operation checks still need explicit native testing. See [PRIVACY.md](PRIVACY.md) for current behavior and limitations.
+
 For UI development, `npm run dev` starts a browser preview at `http://127.0.0.1:1420`. It uses a separate simulated adapter and cannot verify native window behavior. `npm run tauri -- build --debug --bundles app` builds an unsigned macOS development app.
 
 ## Intended first usable version
@@ -40,7 +48,7 @@ For UI development, `npm run dev` starts a browser preview at `http://127.0.0.1:
 - A clear pause control, adjustable prompt frequency, and keyboard access.
 - Private local storage and explicit export, using fictional data for every public demo.
 
-These are development targets. The prototype does not yet listen to meetings or provide retention controls. See [ROADMAP.md](ROADMAP.md) and the [current privacy behavior](PRIVACY.md).
+These are development targets. The activity monitor does not yet transcribe meetings or supply live prompts, and the prototype has no retention controls. See [ROADMAP.md](ROADMAP.md) and the [current privacy behavior](PRIVACY.md).
 
 ## Project decisions
 

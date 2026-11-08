@@ -1,16 +1,19 @@
 # Privacy design
 
-TalkQTE is an early desktop prototype, not a released meeting recorder. Current behavior and future requirements are separated below.
+TalkQTE is an early desktop prototype with an optional microphone activity check, not a released meeting recorder. Current behavior and future requirements are separated below.
 
 ## Current prototype
 
-- The app plays bundled fictional dialogue. It has no microphone capture, system-audio capture, Whisper model, external model connection, account system, or telemetry integration.
+- The demo plays bundled fictional dialogue and generates questions only from that text. It does not use microphone audio. There is no system-audio capture, Whisper model, external model connection, account system, or telemetry integration.
+- The macOS app can separately monitor activity from the default microphone after an explicit start action and operating-system permission. It processes samples only to produce a coarse quiet/active indicator. Samples are not retained, recorded, logged, uploaded, or sent to the interface. It detects signal level, not speech, meeting participation, or the other side of a call.
+- Monitoring starts off. Stop releases the input device on a worker, with a stopping state until release finishes; restarting is blocked during cleanup. A pending permission result cannot restart a cancelled session. Monitoring does not automatically restart or switch devices after an error. Pausing or ending the demo and hiding the companion do not stop microphone monitoring. Use Stop microphone or quit the app.
 - The transcript, your notes, and saved questions live in process memory. Ending or replaying the demo preserves notes and saved questions; quitting the app clears them. There is no database, recovery, retention scheduler, or encrypted notebook.
 - A Markdown export is the only implemented persistence. You review the generated text, then choose the file destination in a native save dialog. The saved file contains exactly that preview, even if the demo advances while the dialog is open. The destination may be a folder synchronized by other software; exported files are outside TalkQTE's control.
 - The floating window receives only the current question, its source excerpt, and the state needed to display it. It cannot invoke note editing or export commands.
+- Both windows receive microphone status and coarse activity, without samples, device names, or precise levels. Only the main window can start monitoring; the companion can stop it. The browser preview never requests microphone permission.
 - The app has no automatic upload feature. The development server uses loopback connections, and installing dependencies requires network access. The browser preview downloads exports through the browser and is not a separate production service.
 
-Do not use this prototype for real or sensitive meeting data. Closing the app loses unsaved notes, and there is no implemented storage protection beyond the operating system's process boundaries.
+Do not use this prototype for real or sensitive meeting data. Closing the app loses unsaved notes, and there is no implemented storage protection beyond the operating system's process boundaries. Real-device microphone operation, permission prompts, and disconnect behavior still need explicit native testing; synthetic tests do not prove those platform behaviors.
 
 ## Requirements for meeting capture
 
