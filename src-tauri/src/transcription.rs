@@ -200,15 +200,16 @@ fn run<T: Transcriber, S: FnMut(u64, Segment) -> Result<(), String>>(
         };
         // The engine refuses out-of-order lines, so deliver in time order.
         items.sort_by_key(|item| item.offset_ms);
+        // Count lines outside the chunk before delivery, so the count does
+        // not depend on whether a stop arrives mid-delivery.
         let length_ms = (chunk.samples.len() * 1_000 / SAMPLE_RATE) as u64;
+        let recognized_lines = items.len();
+        items.retain(|item| item.offset_ms <= length_ms);
+        stats.out_of_range += (recognized_lines - items.len()) as u64;
         for item in items {
             // A stop during inference or delivery discards what is left.
             if stopped() {
                 return stats;
-            }
-            if item.offset_ms > length_ms {
-                stats.out_of_range += 1;
-                continue;
             }
             let segment = Segment {
                 id: format!("t{session}-{worker}-{next_id}"),
