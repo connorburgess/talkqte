@@ -150,8 +150,10 @@ impl Chunker {
     /// Returns every remaining chunk, including the final partial one, when
     /// capture stops.
     pub fn finish(&mut self, session_start_ms: u64) -> Vec<AudioChunk> {
+        // Capture should already have stopped. If the callback is still
+        // pushing, stop after a few passes rather than chase it forever.
         let mut chunks = vec![];
-        loop {
+        for _ in 0..4 {
             let before = self.consumer.slots();
             chunks.extend(self.drain(session_start_ms));
             if before == 0 {
