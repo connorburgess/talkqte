@@ -27,6 +27,9 @@ See the [cue intelligence plan](cue-intelligence.md) for bounded evaluation, run
 - Native focus, Spaces/full-screen, screen sharing, keyboard access, readability, and reduced motion are checked on the supported setup.
 - Meeting-use evaluation considers relevance, timing, missed opportunities, and the ability to keep listening. A passing build or a large number of generated cues is insufficient.
 
+**Next real-audio prerequisite:** run local transcription in a Rust-owned worker that feeds `Engine::ingest` with the session ID captured at start. The worker needs bounded queues, cancellation on Stop/End, and no inference in the audio callback.
+**Acceptance check:** on a named Mac, play a synthetic two-speaker clip in which one line leaves an owner open and a later line names one. With the network denied and no stored audio, the companion shows the question with the first line as its source and withdraws it after the answering line. A Stop issued mid-transcription results in no further transcript or cue updates. Record transcript delay and worker memory. Until then, only engine tests and the lab's cached-transcript probe exercise this path.
+
 The next engineering work is the bounded cue evaluator and both-side capture/transcription feasibility. These can proceed alongside each other before connecting the full live path. Rust retains lifecycle and permission control; model choice follows measured quality, timing, privacy, and operating constraints.
 
 ## 3. Connected workflows

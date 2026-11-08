@@ -1,7 +1,7 @@
 mod companion;
 #[cfg(target_os = "macos")]
 mod companion_macos;
-mod engine;
+pub mod engine;
 mod microphone;
 
 use engine::{CompanionPosition, Engine, QuestionSize, Response, Sensitivity};
