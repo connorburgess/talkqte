@@ -232,6 +232,14 @@ test('prior notes from a file are chosen, shown apart from the conversation, rem
   await expect(
     page.getByRole('region', { name: 'Suggested question' }),
   ).toHaveCount(0);
+  // Importing the same notes again does not duplicate them.
+  await panel.getByRole('button', { name: 'Add notes from a file' }).click();
+  await dialog.getByRole('checkbox', { name: /Garden welcome guide/ }).check();
+  await dialog.getByRole('button', { name: 'Import 1 selected' }).click();
+  await expect(panel.getByRole('listitem')).toHaveCount(1);
+  await expect(
+    page.getByRole('status').filter({ hasText: 'already imported' }),
+  ).toHaveCount(1);
   // Escape in the chooser leaves nothing pending and returns focus.
   await panel.getByRole('button', { name: 'Add notes from a file' }).click();
   await expect(dialog).toBeVisible();
