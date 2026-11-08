@@ -48,4 +48,6 @@ The desktop settings include a floating-window toggle, and pausing or ending the
 
 ## Optional integrations
 
-Begin with user-initiated Markdown/text export. Future calendar access should be read-only and calendar-scoped. Any future MCP interface should expose only user-selected meetings and tools. Sending notes to an external model or service changes where those notes are processed and must be disclosed before connection.
+The prototype supports user-initiated Markdown export to a chosen file; it has no provider connection or import feature. Future calendar access should be read-only and calendar-scoped. Any future MCP interface should expose only user-selected meetings and tools. Sending notes to an external model or service changes where those notes are processed and must be disclosed before connection.
+
+Future connections to Granola and other note-takers must let users select the content and direction of transfer. Show retention choices for imported copies; deleting a TalkQTE copy must not silently delete its original in another app. Disconnecting must stop future access and offer a separate choice to remove imported data. Exported copies remain subject to the destination's access and retention rules.

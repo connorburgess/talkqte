@@ -45,10 +45,22 @@ Prove that audio capture, local transcription, and the floating prompt can coexi
 - [ ] Accessible keyboard operation and reduced-motion support.
 - [ ] Fictional demo mode that never reads the user's meeting store.
 
-## Later candidates
+## Future goal: work with other note-taking apps
+
+TalkQTE should complement Granola and other meeting note-takers. Users should be able to bring selected notes into TalkQTE as context for timely questions and take saved questions, notes, and decisions back to their existing tools. This is future work, after the first usable version.
+
+- [ ] Import selected Granola notes through supported exports or documented APIs, after verifying access and plan requirements.
+- [ ] Support other note-takers through common file formats first, with dedicated adapters where supported integrations add value.
+- [ ] Use imported notes as selected meeting context without requiring a second recording of the original meeting.
+- [ ] Export selected notes, questions, and action items with a preview of the content and destination.
+- [ ] Preserve source references and handle repeated imports without silently duplicating or overwriting user edits.
+- [ ] Give each connection explicit permissions and disconnect controls; apply retention rules to imported copies.
+
+Start with one-way import and export. Consider live context and two-way synchronization only where documented interfaces support them and conflict/deletion behavior is defined. No integration or live transcript access is available or promised yet.
+
+## Other later candidates
 
 - Read-only calendar integration and pre-meeting context from selected notes.
-- Granola import through supported export or API paths.
 - A user-scoped, read-only MCP interface for selected meetings.
 - Action-item export with a review step before creating an external task.
 - Optional local language-model suggestions and source-linked meeting questions.

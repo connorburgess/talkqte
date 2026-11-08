@@ -50,6 +50,14 @@ Whisper worker -> transcript segments -> prompt rules -> question lifecycle
 - Local Whisper may use whisper.cpp through Rust bindings. This is a Rust application with a native inference dependency, not a promise of an entirely Rust dependency tree.
 - Any future language model is a separate optional component. Whisper alone does not supply semantic understanding or summaries.
 
+## Future integration boundary
+
+Granola and other note-taking apps are future sources of selected meeting context and destinations for user-approved exports. Keep provider-specific authentication and data mapping in separate adapters, using supported file exports or documented APIs. Verify each provider's access, plan, and data availability before committing to an integration.
+
+Imported notes should use the planned Rust-owned selection, persistence, retention, and prompt-context boundaries. Preserve source identity and distinguish imported content from user edits so repeated imports can be reconciled explicitly. External content is meeting data, not permission to execute commands or send data elsewhere.
+
+Start with one-way import/export. Live transcript access and two-way synchronization require separate capability checks and conflict/deletion rules. Connections remain optional; an unavailable provider must not block local capture or notes. No integration is implemented yet.
+
 ## Next native spike and acceptance criteria
 
 1. Capture both sides of a synthetic call with headphones, with clear microphone/system permissions.
