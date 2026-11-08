@@ -27,7 +27,7 @@ This track runs alongside the feature milestones below. The goal includes a depe
 - [ ] Prove a signed, notarized installation and a recoverable upgrade on a clean supported Mac; include data migration and update deferral during calls.
 - [ ] Test the path from the website to first useful use without development tools, unnecessary accounts, or unexplained permissions.
 - [ ] Verify privacy boundaries, retention/deletion, credential storage, and safe diagnostics for every enabled input or integration.
-- [ ] Define pilot and wider-release acceptance criteria covering user value, accessibility, compatibility, and support readiness.
+- [ ] Define pilot and wider-release acceptance criteria covering user value, accessibility, compatibility, and support readiness. [Proposed criteria](docs/pilot-acceptance.md) with pass/fail checks and current status, awaiting the owner's agreement.
 - [ ] Compare acquisition and delivery channels with one bounded experiment at a time; start planning direct website delivery and an invited pilot, then evaluate additional channels.
 - [ ] Estimate release/model bandwidth, optional provider costs, and support effort; record when demand would justify additional infrastructure or commercial operations. [First estimate](docs/operating-estimates.md): about 82 MB per first download (measured app and model) and no project-paid inference or hosting for the app; support effort needs pilot data.
 
