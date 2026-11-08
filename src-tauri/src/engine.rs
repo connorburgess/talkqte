@@ -379,6 +379,12 @@ impl Engine {
                 return;
             }
         }
+        // An explicit move to another topic makes an unread question stale.
+        // A question being read stays, and this line may raise a new one.
+        if self.state.cue.as_ref().is_some_and(|cue| !cue.held) && topic_shift(&segment.text) {
+            self.state.cue = None;
+            self.forget_unshown();
+        }
         // Skip stale suggestions after a suspended app catches up.
         if self.state.cue.is_none()
             && segment.at_ms >= self.cooldown_until
@@ -571,6 +577,50 @@ fn suggest(text: &str) -> Vec<(&'static str, &'static str)> {
         found.push(("Decision", "How will we choose between those options?"));
     }
     found
+}
+
+/// An explicit statement that the conversation is moving to another topic,
+/// such as "Moving on to the budget" or "Next item". Questions ("Should we
+/// move on?") and negations ("We're not moving on yet") do not count.
+fn topic_shift(text: &str) -> bool {
+    const PHRASES: [&[&str]; 9] = [
+        &["moving", "on"],
+        &["move", "on", "to"],
+        &["next", "item"],
+        &["next", "topic"],
+        &["let's", "talk", "about"],
+        &["switching", "to"],
+        &["on", "another", "note"],
+        &["change", "of", "topic"],
+        &["changing", "topics"],
+    ];
+    const QUESTION_OPENERS: [&str; 8] =
+        ["should", "shall", "can", "could", "do", "are", "is", "what"];
+    text.split_inclusive(['.', '?', '!', ';', ':'])
+        .filter(|sentence| !sentence.trim_end().ends_with('?'))
+        .any(|sentence| {
+            let words: Vec<String> = sentence
+                .split_whitespace()
+                .map(|word| {
+                    word.replace(['’', '‘'], "'")
+                        .trim_matches(|character: char| {
+                            !character.is_alphanumeric() && character != '\''
+                        })
+                        .to_lowercase()
+                })
+                .filter(|word| !word.is_empty())
+                .collect();
+            let negated = words.iter().any(|word| {
+                matches!(word.as_str(), "not" | "never" | "no") || word.ends_with("n't")
+            });
+            !negated
+                && words
+                    .first()
+                    .is_none_or(|first| !QUESTION_OPENERS.contains(&first.as_str()))
+                && PHRASES
+                    .iter()
+                    .any(|phrase| words.windows(phrase.len()).any(|window| window == *phrase))
+        })
 }
 
 /// Conservative signs that later conversation answered an open cue.
@@ -1148,6 +1198,66 @@ mod tests {
         e.start().unwrap();
         e.advance(5_000);
         assert_eq!(e.state.cue.as_ref().unwrap().kind, "Owner");
+    }
+
+    #[test]
+    fn an_explicit_topic_change_withdraws_an_unread_question() {
+        for change in [
+            "Moving on to the budget.",
+            "OK, next item.",
+            "Let's talk about the opening hours.",
+            "On another note, the gate is fixed.",
+        ] {
+            let mut e = play(&[
+                (1_000, "Someone can take the first draft."),
+                (4_000, change),
+            ]);
+            e.advance(1_000);
+            assert!(e.state.cue.is_some());
+            e.advance(3_000);
+            assert!(e.state.cue.is_none(), "still shown after: {change}");
+        }
+    }
+
+    #[test]
+    fn questions_negations_and_ordinary_lines_are_not_topic_changes() {
+        for line in [
+            "Should we move on to the budget?",
+            "Can we move on to the budget.",
+            "We're not moving on yet.",
+            "Let's not talk about the budget.",
+            "The next step is printing.",
+        ] {
+            let mut e = play(&[(1_000, "Someone can take the first draft."), (4_000, line)]);
+            e.advance(4_000);
+            assert!(e.state.cue.is_some(), "withdrawn after: {line}");
+        }
+    }
+
+    #[test]
+    fn a_question_being_read_survives_a_topic_change() {
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (4_000, "Moving on."),
+        ]);
+        e.advance(1_000);
+        e.inspect_cue("1:t1", true).unwrap();
+        e.advance(3_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().id, "1:t1");
+    }
+
+    #[test]
+    fn the_line_that_changes_topic_can_raise_its_own_question() {
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (4_000, "Moving on, we should send the invites soon."),
+        ]);
+        e.advance(4_000);
+        let cue = e.state.cue.as_ref().unwrap();
+        assert_eq!(
+            (cue.kind.as_str(), cue.source_id.as_str()),
+            ("Timing", "t2")
+        );
     }
 
     #[test]
