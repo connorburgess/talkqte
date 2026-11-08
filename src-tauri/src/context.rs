@@ -141,7 +141,8 @@ pub fn fetch_selection(
     }
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MergeOutcome {
     pub added: usize,
     /// Replaced by a newer revision.

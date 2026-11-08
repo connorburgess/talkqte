@@ -142,6 +142,23 @@ mockIPC(
           );
         return preview.command('set_user_name', { name });
       }
+      case 'context_items':
+        return [];
+      case 'pick_context_file':
+        return preview.pickContextFile();
+      case 'import_context_notes': {
+        const { ids } = args as { ids: string[] };
+        const outcome = preview.importContextNotes(ids);
+        await emit('context:changed', await preview.contextItemsNow());
+        return outcome;
+      }
+      case 'remove_context_item':
+        preview.command(
+          'remove_context_item',
+          args as Commands['remove_context_item'],
+        );
+        await emit('context:changed', await preview.contextItemsNow());
+        return;
       case 'model_status':
         return structuredClone(model);
       case 'download_model':

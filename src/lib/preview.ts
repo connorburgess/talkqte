@@ -1,6 +1,14 @@
 // Browser-only visual development adapter. This is not the desktop session engine.
 import demo from '../demo.json';
-import type { Commands, LiveStatus, ModelStatus, Snapshot } from './types';
+import type {
+  Commands,
+  ContextItem,
+  LiveStatus,
+  MergeOutcome,
+  ModelStatus,
+  PickedNotes,
+  Snapshot,
+} from './types';
 
 const state: Snapshot = {
   revision: 0,
@@ -123,6 +131,14 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
       state.cue = null;
       state.status = 'running';
       break;
+    case 'cancel_context_import':
+      break;
+    case 'remove_context_item': {
+      const { sourceId } = args as Commands['remove_context_item'];
+      contextItems = contextItems.filter((item) => item.sourceId !== sourceId);
+      emitContext();
+      break;
+    }
     case 'start_live_session':
     case 'stop_live_session':
     case 'download_model':
@@ -188,6 +204,83 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
 // The browser preview never opens the microphone or transcribes.
 export function liveStatus(): LiveStatus {
   return { available: false, reason: 'Available in the desktop app.' };
+}
+// A fictional notes file stands in for the desktop file chooser.
+const exampleNotes: ContextItem[] = [
+  {
+    provider: 'file',
+    sourceId: 'g1',
+    title: 'Garden welcome guide',
+    sourceDate: '2026-10-28',
+    excerpt:
+      'Draft a one-page guide. Robin suggested a map of the tool shed and a note on watering times.',
+    revision: 1,
+  },
+  {
+    provider: 'file',
+    sourceId: 'g2',
+    title: 'Visitor questions',
+    sourceDate: '2026-11-02',
+    excerpt:
+      'Visitors asked where to find watering cans and who to ask for help.',
+    revision: 1,
+  },
+  {
+    provider: 'file',
+    sourceId: 'g3',
+    title: 'Sign at the gate',
+    sourceDate: '2026-11-05',
+    excerpt: 'A small sign with a link might be cheaper than printing.',
+    revision: 1,
+  },
+];
+let contextItems: ContextItem[] = [];
+const contextListeners = new Set<(items: ContextItem[]) => void>();
+function emitContext() {
+  for (const receive of contextListeners)
+    receive(structuredClone(contextItems));
+}
+export function connectContext(receive: (items: ContextItem[]) => void) {
+  contextListeners.add(receive);
+  receive(structuredClone(contextItems));
+  return () => {
+    contextListeners.delete(receive);
+  };
+}
+export function contextItemsNow(): ContextItem[] {
+  return structuredClone(contextItems);
+}
+export function pickContextFile(): PickedNotes {
+  return {
+    fileName: 'garden-notes.json',
+    skipped: 0,
+    notes: exampleNotes.map((note) => ({
+      sourceId: note.sourceId,
+      title: note.title,
+      sourceDate: note.sourceDate,
+      preview: note.excerpt,
+    })),
+  };
+}
+export function importContextNotes(ids: string[]): MergeOutcome {
+  const outcome: MergeOutcome = {
+    added: 0,
+    updated: 0,
+    unchanged: 0,
+    overLimit: 0,
+    rejected: 0,
+  };
+  for (const note of exampleNotes) {
+    if (!ids.includes(note.sourceId)) continue;
+    if (contextItems.some((item) => item.sourceId === note.sourceId))
+      outcome.unchanged++;
+    else {
+      contextItems.push(structuredClone(note));
+      outcome.added++;
+    }
+  }
+  emitContext();
+  return outcome;
 }
 // The preview never downloads anything.
 export function modelStatus(): ModelStatus {
