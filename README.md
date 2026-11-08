@@ -25,7 +25,7 @@ Choose **Try demo** to play a fictional community-garden conversation. The noteb
 - Save or dismiss a question, pause/resume the demo, and adjust the gap between questions.
 - Write notes and replay the demo while keeping saved questions and notes in memory.
 - Review the exact Markdown export before choosing a file destination.
-- Toggle a separate floating question window in the desktop app.
+- Use a bottom-right desktop companion that stays compact between questions, expands for a prompt, and offers pause and hide controls.
 
 **The prototype does not save your notebook when you quit.** Export anything you want to keep. The demo captures no audio, downloads no models, and requires no API credentials. Suggestions use a few phrase rules, not a language model.
 

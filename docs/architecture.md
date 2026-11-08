@@ -25,6 +25,8 @@ Tauri does not turn native audio capture into a solved problem. Its system webvi
 
 The main webview receives session snapshots. The floating webview receives only the current question and display state, and has a smaller Tauri command capability. Revisions keep late snapshots from replacing newer UI state. React sends note edits through an ordered command queue; export preparation waits for those edits.
 
+`src-tauri/src/companion.rs` owns the floating window's compact and expanded states. It anchors above the bottom-right of the notebook display's work area, with a primary-display fallback. Native window queries run on the main thread after releasing the engine lock. Placement is checked on notebook moves and once per second so display and Dock changes can be handled without querying window state in the engine's critical section. Only changed layouts are applied. The window is configured not to take focus; full-screen apps, Spaces, and screen sharing still require separate verification. Automatic meeting detection is not implemented.
+
 Export preparation stores a Markdown snapshot in Rust. The subsequent native save dialog writes that exact snapshot, not a new version assembled after the user reviews it. The frontend cannot supply an arbitrary filesystem destination to the export command.
 
 The browser preview uses `src/lib/preview.ts`, a development-only simulation. Its UI tests complement the Rust engine tests; they do not test Rust IPC, native dialogs, or native windows. There is currently no capture adapter, inference worker, database, or integration adapter.
