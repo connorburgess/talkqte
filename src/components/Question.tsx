@@ -39,12 +39,14 @@ export function Question({
         aria-expanded={cue.expanded}
         aria-controls={contextId}
         aria-disabled={busy}
+        aria-label={cue.expanded ? 'Hide context' : undefined}
+        title={cue.expanded ? 'Hide context' : undefined}
         onClick={() => {
           if (!busy) onInspect(!cue.expanded);
         }}
       >
-        {cue.expanded ? 'Hide context' : 'Why?'}
-        {cue.expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        {cue.expanded ? <ChevronUp size={18} /> : 'Why?'}
+        {!cue.expanded && <ChevronDown size={16} />}
       </button>
       <div id={contextId} hidden={!cue.expanded} className="question-context">
         <p>
@@ -83,15 +85,16 @@ export function Question({
           </p>
         )
       )}
-      <div className="question-actions">
-        <button
-          className="dismiss-question"
-          disabled={busy}
-          onClick={onDismiss}
-        >
-          <X size={16} /> Dismiss
-        </button>
-      </div>
+      {/* Last in reading order; drawn in the corner. */}
+      <button
+        className="dismiss-question"
+        aria-label="Dismiss"
+        title="Dismiss"
+        disabled={busy}
+        onClick={onDismiss}
+      >
+        <X size={18} />
+      </button>
     </section>
   );
 }

@@ -687,6 +687,7 @@ svg {
   text-decoration: none;
 }
 .question {
+  position: relative;
   background: var(--forest);
   color: #f4f4e9;
   padding: 24px 22px 18px;
@@ -712,6 +713,7 @@ svg {
   margin-top: 10px;
 }
 .question h2 {
+  padding-right: 40px; /* room for the corner Dismiss */
   font-size: 24px;
   font-weight: 700;
   letter-spacing: -0.015em;
@@ -749,6 +751,13 @@ svg {
 .question-disclosure:hover:not(:disabled) {
   color: #dae4cf;
 }
+.question-disclosure[aria-expanded='true'] {
+  width: 46px;
+  min-height: 46px;
+  justify-content: center;
+  text-decoration: none;
+  color: #c5d5c7;
+}
 .question-context > p,
 .question-held {
   color: #c5d5c7;
@@ -775,29 +784,24 @@ svg {
     clip-path: inset(0);
   }
 }
-.question-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 24px 0 4px;
-  flex-wrap: wrap;
-}
-.question-actions button {
+/* A light corner control: the question is the focus, not the way out. */
+.dismiss-question {
+  position: absolute;
+  top: 10px;
+  right: 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  font-size: 15px;
-  font-weight: 700;
-  min-height: 48px;
-  padding: 10px 14px;
-}
-.dismiss-question {
-  border: 1px solid #6d8b7e;
-  color: #dce5da;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: #c5d5c7;
   background: transparent;
 }
 .dismiss-question:hover:not(:disabled) {
+  color: #f4f4e9;
   background: #39584a;
 }
 .transcript {
@@ -1185,10 +1189,6 @@ svg {
   display: flex;
   flex-direction: column;
 }
-.floating-surface .question-actions {
-  margin-top: auto;
-  padding-top: 16px;
-}
 .floating-error,
 .floating-empty {
   color: #e9d0bf;
@@ -1254,9 +1254,6 @@ svg {
   }
   .question-idle > p {
     margin-top: 5px;
-  }
-  .question-actions {
-    justify-content: flex-start;
   }
   .companion-footnote {
     padding-top: 9px;
