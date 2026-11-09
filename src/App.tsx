@@ -248,6 +248,11 @@ function FloatingQuestion() {
                     }),
                   )
                 }
+                onKeep={() =>
+                  void run(() =>
+                    bridge.command('keep_line', { id: state.cue!.id }),
+                  )
+                }
               />
             )}
           </>
@@ -398,9 +403,30 @@ function Notebook() {
   const exportButton = useRef<HTMLButtonElement>(null);
   const notesEditor = useRef<HTMLTextAreaElement>(null);
   const transcriptTab = useRef<HTMLButtonElement>(null);
+  // The notes last sent to or published by the engine. The engine changes
+  // notes on its own only by appending a kept line, so that is the only
+  // change the editor takes from a snapshot; a snapshot that lags typing is
+  // ignored, and nothing typed meanwhile is lost.
+  const engineNotes = useRef('');
+  useEffect(() => {
+    if (!state || !initialized.current) return;
+    if (state.notes === engineNotes.current) return;
+    if (!state.notes.startsWith(engineNotes.current)) return;
+    const added = state.notes.slice(engineNotes.current.length);
+    if (!/^\n?\[\d{2}:\d{2}\] [^]*”\n$/.test(added)) return;
+    engineNotes.current = state.notes;
+    setNotes((current) =>
+      current === state.notes
+        ? current
+        : current.length === 0 || current.endsWith('\n')
+          ? current + added.replace(/^\n/, '')
+          : `${current}\n${added.replace(/^\n/, '')}`,
+    );
+  }, [state]);
   useEffect(() => {
     if (state && !initialized.current) {
       initialized.current = true;
+      engineNotes.current = state.notes;
       setNotes(state.notes);
       setUserName(state.userName ?? '');
       setFocus(state.focus.join('\n'));
@@ -465,6 +491,15 @@ function Notebook() {
   const matches = `${state.title} ${state.description} demo`
     .toLowerCase()
     .includes(search.toLowerCase().trim());
+  // Keeps a quoted line in the notes; the cue then goes like a dismissal.
+  const keepLine = () => {
+    if (!state.cue) return;
+    void run(async () => {
+      await bridge.command('keep_line', { id: state.cue!.id });
+      setNotice('Line kept in your notes.');
+      notesEditor.current?.focus();
+    });
+  };
   const dismiss = () => {
     if (!state.cue) return;
     const actionFocus = document.activeElement;
@@ -533,6 +568,7 @@ function Notebook() {
   };
   const prepareExport = () =>
     void run(async () => {
+      engineNotes.current = notes;
       await bridge.command('update_notes', { notes });
       setPreview(await bridge.exportPreview());
     });
@@ -944,6 +980,7 @@ function Notebook() {
                       onChange={(e) => {
                         const value = e.target.value;
                         setNotes(value);
+                        engineNotes.current = value;
                         void bridge
                           .command('update_notes', { notes: value })
                           .catch((e: unknown) => setError(String(e)));
@@ -1007,6 +1044,7 @@ function Notebook() {
                     live={state.live}
                     busy={busy}
                     onDismiss={dismiss}
+                    onKeep={keepLine}
                     onInspect={(expanded) =>
                       void run(() =>
                         bridge.command('inspect_cue', {

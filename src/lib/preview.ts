@@ -57,8 +57,10 @@ function tick() {
   if (state.cue) {
     state.cue.remainingMs = Math.max(0, deadline - state.elapsedMs);
     if (!state.cue.remainingMs && !state.cue.held) {
+      // A quote leaves no pause behind it: it asked for nothing.
+      const quote = state.cue.kind === 'Said';
       state.cue = null;
-      cooldown = deadline + quietMs();
+      if (!quote) cooldown = deadline + quietMs();
     }
   }
   for (const segment of demo.segments.slice(state.transcript.length)) {
@@ -74,6 +76,25 @@ function tick() {
       else {
         state.cue = null;
         cooldown = segment.atMs + quietMs();
+        // The words that answered it are quoted in its place.
+        const quote = saidLine(segment.text);
+        if (quote) {
+          deadline = segment.atMs + 18_000;
+          state.cue = {
+            id: `${generation}:${segment.id}`,
+            kind: 'Said',
+            question: quote,
+            evidence: segment.text,
+            sourceId: segment.id,
+            remainingMs: deadline - state.elapsedMs,
+            totalMs: 18_000,
+            held: false,
+            expanded: false,
+            resolvedBy: null,
+            note: null,
+            aboutFocus: false,
+          };
+        }
       }
       continue;
     }
@@ -207,8 +228,24 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
       if (!cue || cue.id !== id)
         throw new Error('That question has already passed.');
       void response; // Dismiss is the only response.
+      const quote = cue.kind === 'Said';
       state.cue = null;
-      cooldown = state.elapsedMs + quietMs();
+      if (!quote) cooldown = state.elapsedMs + quietMs();
+      break;
+    }
+    case 'keep_line': {
+      const { id } = args as Commands['keep_line'];
+      if (!state.cue || state.cue.id !== id)
+        throw new Error('That line has already passed.');
+      if (state.cue.kind !== 'Said')
+        throw new Error('Only a quoted line can be kept.');
+      const line = state.transcript.find((s) => s.id === state.cue!.sourceId);
+      const atMs = line?.atMs ?? state.elapsedMs;
+      const stamp = `${String(Math.floor(atMs / 60_000)).padStart(2, '0')}:${String(Math.floor(atMs / 1000) % 60).padStart(2, '0')}`;
+      const speaker = line?.speaker ? `${line.speaker}: ` : '';
+      const entry = `[${stamp}] ${speaker}“${state.cue.question}”`;
+      state.notes = `${state.notes}${state.notes && !state.notes.endsWith('\n') ? '\n' : ''}${entry}\n`;
+      state.cue = null;
       break;
     }
     case 'inspect_cue': {
@@ -303,6 +340,27 @@ const exampleNotes: ContextItem[] = [
 let contextItems: ContextItem[] = [];
 // Notes already quoted as a reminder this demo run.
 let shownNotes: string[] = [];
+/** A demo-only subset of the engine's quoted-line rule, enough for the
+ * bundled script: a sentence with a time word and a commitment word, not a
+ * question, not hedged. Months, counts, and "end of" live in the engine. */
+function saidLine(text: string): string | null {
+  const time =
+    /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|tonight|weekend|next (?:week|month)|(?:two|three|four|five|\d+) (?:days?|weeks?))\b/i;
+  const commitment =
+    /\b(by|before|until|from|starting|start|ready|done|finish|finished|send|deliver|takes|take|needs?|due|deadline|back|ship|review|share)\b/i;
+  const hedge = /\b(maybe|perhaps|might|probably|possibly)\b/i;
+  for (const raw of text.split(/(?<=[.?!;])/)) {
+    const sentence = raw.trim();
+    if (!sentence || sentence.endsWith('?')) continue;
+    if (
+      time.test(sentence) &&
+      commitment.test(sentence) &&
+      !hedge.test(sentence)
+    )
+      return sentence.length > 160 ? `${sentence.slice(0, 160)}…` : sentence;
+  }
+  return null;
+}
 /** Words of a note title or focus line that could identify it in conversation. */
 function identifyingTerms(text: string): string[] {
   return [

@@ -88,6 +88,23 @@ test('dismisses a cue without turning it into a saved question', async ({
   ).toBeVisible();
 });
 
+test('keeping a quoted line puts it in the notes with its time and lets the cue go', async ({
+  page,
+}) => {
+  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
+  await page.clock.runFor(51_200);
+  const question = page.getByRole('region', { name: 'Suggested question' });
+  await expect(question).toContainText('Said');
+  await question.getByRole('button', { name: 'Keep this line' }).click();
+  await expect(question).toHaveCount(0);
+  await expect(
+    page.getByRole('textbox', { name: 'Meeting notes' }),
+  ).toHaveValue(
+    /\[00:51\] Robin: “Let's have it ready by Friday and try it with a few new visitors first\.”\n$/,
+  );
+  await expect(page.getByText('Line kept in your notes.')).toBeVisible();
+});
+
 test('pause freezes a question, resume lets it expire without saving it', async ({
   page,
 }) => {

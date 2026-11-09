@@ -10,6 +10,7 @@ export function Question({
   busy,
   onDismiss,
   onInspect,
+  onKeep,
 }: {
   cue: Cue;
   size: CueSnapshot['questionSize'];
@@ -19,6 +20,8 @@ export function Question({
   busy: boolean;
   onDismiss: () => void;
   onInspect: (expanded: boolean) => void;
+  /** Keeps a quoted line in the notebook; only a Said cue offers it. */
+  onKeep?: () => void;
 }) {
   const contextId = useId();
   return (
@@ -26,7 +29,9 @@ export function Question({
       className={`question question-${size}`}
       aria-label="Suggested question"
     >
-      <h2 aria-live={announce ? 'polite' : undefined}>{cue.question}</h2>
+      <h2 aria-live={announce ? 'polite' : undefined}>
+        {cue.kind === 'Said' ? `“${cue.question}”` : cue.question}
+      </h2>
       <p className="question-meta">
         {cue.note
           ? `Reminder from your notes · ${cue.note.sourceDate}`
@@ -84,6 +89,15 @@ export function Question({
               : 'Kept here until you dismiss it.'}
           </p>
         )
+      )}
+      {cue.kind === 'Said' && onKeep && (
+        <button
+          className="text-button keep-line"
+          disabled={busy}
+          onClick={onKeep}
+        >
+          Keep this line
+        </button>
       )}
       {/* Last in reading order; drawn in the corner. */}
       <button

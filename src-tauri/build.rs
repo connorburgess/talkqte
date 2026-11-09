@@ -7,6 +7,7 @@ fn main() {
             "resume_demo",
             "end_demo",
             "respond_to_cue",
+            "keep_line",
             "inspect_cue",
             "set_companion_position",
             "set_question_size",

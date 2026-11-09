@@ -146,6 +146,8 @@ mockIPC(
       }
       case 'context_items':
         return [];
+      case 'keep_line':
+        return preview.command('keep_line', args as Commands['keep_line']);
       case 'granola_status':
         return preview.granolaStatus();
       case 'connect_granola':

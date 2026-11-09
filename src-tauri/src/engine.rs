@@ -127,6 +127,186 @@ pub const MAX_FOCUS_LINES: usize = 5;
 pub const MAX_REMINDERS: usize = 3;
 /// The cue kind that lists the focus lines a conversation never touched.
 pub const STILL_OPEN: &str = "Still open";
+/// The cue kind that quotes a spoken date or commitment, word for word.
+pub const SAID: &str = "Said";
+/// The most characters of a quoted line a Said cue shows.
+const SAID_MAX_CHARS: usize = 160;
+
+/// Words that name a time: a weekday, a relative day, a month before a
+/// number, or a count of days or weeks.
+const TIME_WORDS: &[&str] = &[
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+    "today",
+    "tomorrow",
+    "tonight",
+    "weekend",
+];
+/// Words that make a time a commitment rather than a mention: "by Friday",
+/// "ready by", "starting Monday", "takes two days".
+const COMMITMENT_WORDS: &[&str] = &[
+    "by",
+    "before",
+    "until",
+    "starting",
+    "start",
+    "starts",
+    "ready",
+    "done",
+    "finish",
+    "finished",
+    "send",
+    "sent",
+    "deliver",
+    "delivered",
+    "takes",
+    "need",
+    "needs",
+    "due",
+    "deadline",
+    "ship",
+    "publish",
+];
+/// Verbs that commit only when someone takes them on ("I'll share it
+/// Friday", "we take it back Monday"), not in passing ("back from Paris on
+/// Monday", "share the weekend photos").
+const LOOSE_COMMITMENT_WORDS: &[&str] = &["from", "take", "back", "review", "share", "post"];
+/// What comes before a loose verb when it is a commitment.
+const COMMITTERS: &[&str] = &[
+    "i'll", "we'll", "you'll", "they'll", "she'll", "he'll", "i", "we", "will", "can", "to",
+];
+const MONTH_WORDS: &[&str] = &[
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+];
+const COUNT_WORDS: &[&str] = &[
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "couple", "few",
+];
+
+/// Sentences of a line, split at a full stop, question mark, exclamation
+/// mark, or semicolon followed by a space or the end: "10.30" and "Mr."
+/// stay whole.
+fn sentences(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let bytes: Vec<(usize, char)> = text.char_indices().collect();
+    for (i, &(at, c)) in bytes.iter().enumerate() {
+        if matches!(c, '.' | '?' | '!' | ';')
+            && bytes
+                .get(i + 1)
+                .is_none_or(|&(_, next)| next.is_whitespace())
+        {
+            let end = at + c.len_utf8();
+            out.push(text[start..end].trim());
+            start = end;
+        }
+    }
+    out.push(text[start..].trim());
+    out.into_iter().filter(|s| !s.is_empty()).collect()
+}
+
+/// A number, with or without an ordinal ending: "14", "14th", "3rd".
+fn is_number(word: &str) -> bool {
+    let digits = word
+        .strip_suffix("st")
+        .or_else(|| word.strip_suffix("nd"))
+        .or_else(|| word.strip_suffix("rd"))
+        .or_else(|| word.strip_suffix("th"))
+        .unwrap_or(word);
+    !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
+}
+
+/// The first sentence of a line that commits to a time: a time word and a
+/// commitment word together, not a question, not hedged. Returned word
+/// for word, because the exact words are the point ("ready by Friday" is
+/// not "starting Friday").
+fn said_line(text: &str) -> Option<String> {
+    sentences(text)
+        .into_iter()
+        .filter(|sentence| !sentence.ends_with('?'))
+        .find(|sentence| {
+            let words: Vec<String> = sentence
+                .split(|c: char| !c.is_alphanumeric() && c != '\'')
+                .filter(|w| !w.is_empty())
+                .map(|w| w.to_lowercase())
+                .collect();
+            let has = |list: &[&str]| words.iter().any(|w| list.contains(&w.as_str()));
+            let month_date = words
+                .windows(2)
+                .any(|pair| MONTH_WORDS.contains(&pair[0].as_str()) && is_number(&pair[1]));
+            // "may" is a month only with a date after it; otherwise a hedge.
+            let hedged_may = words
+                .iter()
+                .enumerate()
+                .any(|(i, w)| w == "may" && !words.get(i + 1).is_some_and(|n| is_number(n)));
+            let next_period = words.windows(2).any(|pair| {
+                matches!(pair[0].as_str(), "next" | "this")
+                    && matches!(
+                        pair[1].as_str(),
+                        "week"
+                            | "month"
+                            | "morning"
+                            | "afternoon"
+                            | "evening"
+                            | "monday"
+                            | "tuesday"
+                            | "wednesday"
+                            | "thursday"
+                            | "friday"
+                    )
+            });
+            let count_of_days = words.windows(2).any(|pair| {
+                (COUNT_WORDS.contains(&pair[0].as_str()) || is_number(&pair[0]))
+                    && matches!(
+                        pair[1].as_str(),
+                        "day" | "days" | "week" | "weeks" | "hours"
+                    )
+            });
+            let end_of = words.windows(3).any(|w| {
+                w[0] == "end"
+                    && w[1] == "of"
+                    && matches!(w[2].as_str(), "week" | "month" | "day" | "year" | "the")
+            });
+            let timed = has(TIME_WORDS) || month_date || next_period || count_of_days || end_of;
+            let is_time = |w: &str| TIME_WORDS.contains(&w) || MONTH_WORDS.contains(&w);
+            let loose_commitment = words.iter().enumerate().any(|(i, w)| {
+                LOOSE_COMMITMENT_WORDS.contains(&w.as_str())
+                    && (i > 0 && COMMITTERS.contains(&words[i - 1].as_str())
+                        || words.get(i + 1).is_some_and(|n| is_time(n)))
+            });
+            let question = words
+                .first()
+                .is_some_and(|first| QUESTION_OPENERS.contains(&first.as_str()));
+            timed
+                && (has(COMMITMENT_WORDS) || loose_commitment)
+                && !has(&HEDGES)
+                && !hedged_may
+                && !question
+        })
+        .map(|sentence| {
+            let cut: String = sentence.chars().take(SAID_MAX_CHARS).collect();
+            if cut.chars().count() < sentence.chars().count() {
+                format!("{cut}…")
+            } else {
+                cut
+            }
+        })
+}
 /// How people say a meeting is ending.
 const WRAP_UP: &[&str] = &[
     "before we finish",
@@ -437,8 +617,12 @@ impl Engine {
         if let Some(cue) = self.state.cue.as_mut() {
             cue.remaining_ms = self.cue_deadline.saturating_sub(now);
             if cue.remaining_ms == 0 && !cue.held {
+                // A quote leaves no pause behind it: it asked for nothing.
+                let quote = cue.kind == SAID;
                 self.state.cue = None;
-                self.cooldown_until = self.cue_deadline + self.cooldown();
+                if !quote {
+                    self.cooldown_until = self.cue_deadline + self.cooldown();
+                }
             }
         }
         while let Some(segment) = self.demo.segments.get(self.next_segment) {
@@ -563,6 +747,10 @@ impl Engine {
                     self.state.cue = None;
                     self.cooldown_until = segment.at_ms + self.cooldown();
                     self.forget_unshown();
+                    // The answer itself is worth the exact words: "ready by
+                    // Friday" is not "starting Friday". It shows at once,
+                    // in place of the question it answered.
+                    self.maybe_said(&segment, now, true);
                 }
                 // The answer may also be the wrap-up line.
                 self.maybe_still_open(&segment.id, &segment.text, segment.at_ms, now);
@@ -742,6 +930,17 @@ impl Engine {
                 });
             }
         }
+        // A spoken date or commitment, quoted word for word, after the fixed
+        // questions and before the reminders.
+        if self.state.cue.is_none() {
+            let line = Segment {
+                id: line_id.clone(),
+                at_ms: spoken_at,
+                speaker: String::new(),
+                text: suggestible.clone(),
+            };
+            self.maybe_said(&line, now, false);
+        }
         self.maybe_still_open(&line_id, &line_text, spoken_at, now);
         // A line about an imported note reminds the user of it once, with the
         // note as its source: a context reminder, lowest in priority, under
@@ -831,6 +1030,100 @@ impl Engine {
         });
     }
 
+    /// Quotes a spoken date or commitment from this line, if it has one and
+    /// nothing is on screen. `answering` skips the pause: the line just
+    /// answered a question, and the words that answered it are the point.
+    /// In Focused mode only a line about the focus is quoted. The same
+    /// words are not quoted again within the repeat window. A quote leaves
+    /// no pause when it goes, whether it expired, was dismissed, or was kept.
+    fn maybe_said(&mut self, segment: &Segment, now: u64, answering: bool) {
+        if self.state.cue.is_some() || now - segment.at_ms >= CUE_MS {
+            return;
+        }
+        if !answering && segment.at_ms < self.cooldown_until {
+            return;
+        }
+        let focused = matches!(self.state.sensitivity, Sensitivity::Focused);
+        let about_focus = self.focus_match(&segment.text).is_some();
+        if focused && !about_focus {
+            return;
+        }
+        let Some(quote) = said_line(&segment.text) else {
+            return;
+        };
+        let key = format!("{SAID}:{}", quote.to_lowercase());
+        if self
+            .last_shown
+            .iter()
+            .any(|(shown, at)| *shown == key && segment.at_ms < at + REPEAT_MS)
+        {
+            return;
+        }
+        self.last_shown.push((key.clone(), segment.at_ms));
+        self.unshown = Some((key, None));
+        self.cue_deadline = segment.at_ms + CUE_MS;
+        self.state.cue = Some(Cue {
+            id: format!("{}:{}", self.generation, segment.id),
+            kind: SAID.into(),
+            question: quote,
+            evidence: segment.text.clone(),
+            source_id: segment.id.clone(),
+            remaining_ms: self.cue_deadline - now,
+            total_ms: CUE_MS,
+            held: false,
+            expanded: false,
+            resolved_by: None,
+            note: None,
+            about_focus,
+        });
+    }
+
+    /// Keeps a quoted line in the notebook, with its time and speaker, and
+    /// lets the cue go. An explicit action: nothing is kept otherwise.
+    pub fn keep_line(&mut self, id: &str) -> Result<(), String> {
+        let cue = self
+            .state
+            .cue
+            .as_ref()
+            .filter(|cue| cue.id == id)
+            .ok_or("That line has already passed.")?;
+        if cue.kind != SAID {
+            return Err("Only a quoted line can be kept.".into());
+        }
+        let line = self
+            .state
+            .transcript
+            .iter()
+            .find(|segment| segment.id == cue.source_id);
+        let at_ms = line
+            .map(|segment| segment.at_ms)
+            .unwrap_or(self.state.elapsed_ms);
+        let speaker = line
+            .map(|segment| segment.speaker.trim())
+            .filter(|speaker| !speaker.is_empty())
+            .map(|speaker| format!("{speaker}: "))
+            .unwrap_or_default();
+        let entry = format!(
+            "[{:02}:{:02}] {speaker}“{}”",
+            at_ms / 60_000,
+            at_ms / 1_000 % 60,
+            cue.question
+        );
+        let mut notes = self.state.notes.clone();
+        if !notes.is_empty() && !notes.ends_with('\n') {
+            notes.push('\n');
+        }
+        notes.push_str(&entry);
+        notes.push('\n');
+        if notes.chars().count() > MAX_NOTE_CHARS {
+            return Err("Notes can contain up to 20,000 characters.".into());
+        }
+        self.state.notes = notes;
+        self.state.cue = None;
+        self.changed();
+        Ok(())
+    }
+
     /// A cue created and removed before the next publish was never seen, so
     /// it must not count as shown.
     fn forget_unshown(&mut self) {
@@ -853,13 +1146,18 @@ impl Engine {
         // Dismiss is the only response: an unused suggestion is let go, never
         // kept as a note or an action item.
         let Response::Dismiss = response;
-        self.state
+        let quote = self
+            .state
             .cue
             .as_ref()
             .filter(|cue| cue.id == id)
-            .ok_or("That question has already passed.")?;
+            .ok_or("That question has already passed.")?
+            .kind
+            == SAID;
         self.state.cue = None;
-        self.cooldown_until = self.state.elapsed_ms + self.cooldown();
+        if !quote {
+            self.cooldown_until = self.state.elapsed_ms + self.cooldown();
+        }
         self.changed();
         Ok(())
     }
@@ -2144,7 +2442,11 @@ mod tests {
             e.advance(1_000);
             assert!(e.state.cue.is_some(), "No question for: {prompt}");
             e.advance(3_000);
-            assert!(e.state.cue.is_none(), "Still asking after: {answer}");
+            // The question is gone; an answer that names a time is quoted instead.
+            assert!(
+                e.state.cue.as_ref().is_none_or(|cue| cue.kind == SAID),
+                "Still asking after: {answer}"
+            );
             assert_eq!(e.state.transcript.len(), 2);
             // The answered question cannot be acted on afterwards.
             assert!(e.respond("1:t1", Response::Dismiss).is_err());
@@ -2255,7 +2557,14 @@ mod tests {
         e.advance(37_000);
         assert_eq!(e.state.cue.as_ref().unwrap().kind, "Timing");
         e.advance(14_000); // s5 sets a date at 51 s, before the 55 s expiry.
-        assert!(e.state.cue.is_none());
+                           // The question goes; the words that answered it are quoted instead.
+        let said = e.state.cue.as_ref().expect("the quoted answer");
+        assert_eq!(said.kind, SAID);
+        assert_eq!(
+            said.question,
+            "Let's have it ready by Friday and try it with a few new visitors first."
+        );
+        assert_eq!(said.source_id, "s5");
         e.advance(18_000);
         assert_eq!(e.state.cue.as_ref().unwrap().kind, "Decision");
     }
@@ -2908,6 +3217,95 @@ mod tests {
             shown, MAX_REMINDERS,
             "the fourth and fifth notes are not shown"
         );
+    }
+
+    #[test]
+    fn a_spoken_date_or_commitment_is_quoted_word_for_word() {
+        for line in [
+            "We'll have the draft ready by Friday.",
+            "Legal takes two days, so send it before Thursday.",
+            "I can start on Monday and finish by the end of the month.",
+            "The review is due on March 14.",
+            "Let's deliver it next week.",
+            "We should send the deck by Friday.",
+            "Legal needs it back by March 3rd.",
+            "I'll share the slides Friday.",
+            "I'll send it today at 10.30.",
+        ] {
+            let e = play_statement(line);
+            let cue = e
+                .state
+                .cue
+                .as_ref()
+                .unwrap_or_else(|| panic!("quoted: {line}"));
+            assert_eq!(cue.kind, SAID, "{line}");
+            assert_eq!(cue.question, line, "word for word");
+        }
+        for line in [
+            "Friday was lovely.",
+            "Can you do it by Friday?",
+            "Maybe by Friday, who knows.",
+            "We should finish soon.",
+            "The two days we spent there were fun.",
+            "Can you send it by Friday",
+            "I was back from Paris on Monday.",
+            "Take the Friday slot off the agenda.",
+            "Share the weekend photos when you can.",
+            "We may ship it in two days.",
+            "Send it by Friday. Scratch that, Monday.",
+        ] {
+            let e = play_statement(line);
+            assert!(
+                e.state.cue.as_ref().is_none_or(|cue| cue.kind != SAID),
+                "not quoted: {line}"
+            );
+        }
+        // A long line is cut, and the same words are not quoted twice in a row.
+        let long = format!("We will send it by Friday {}.", "and so on ".repeat(30));
+        let e = play_statement(&long);
+        assert!(e.state.cue.as_ref().unwrap().question.ends_with('…'));
+        let mut e = play(&[
+            (1_000, "We'll have it ready by Friday."),
+            (25_000, "We'll have it ready by Friday."),
+        ]);
+        e.advance(1_000);
+        let first = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&first, Response::Dismiss).unwrap();
+        e.advance(24_000);
+        assert!(e.state.cue.is_none(), "repeated within two minutes");
+    }
+
+    #[test]
+    fn keeping_a_quoted_line_puts_it_in_the_notes_with_its_time_and_lets_it_go() {
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (65_000, "Legal takes two days, so send it by Thursday."),
+        ]);
+        e.update_notes("Ask about parking".into()).unwrap();
+        e.advance(1_000);
+        let question = e.state.cue.as_ref().unwrap().id.clone();
+        assert!(
+            e.keep_line(&question).is_err(),
+            "only a quoted line can be kept"
+        );
+        e.advance(64_000);
+        let said = e.state.cue.as_ref().expect("the quote");
+        assert_eq!(said.kind, SAID);
+        let id = said.id.clone();
+        e.keep_line(&id).unwrap();
+        assert_eq!(
+            e.state.notes,
+            "Ask about parking\n[01:05] Alex: “Legal takes two days, so send it by Thursday.”\n"
+        );
+        assert!(e.state.cue.is_none());
+        assert!(e.keep_line(&id).is_err(), "gone once kept");
+        // In Focused mode only a line about the focus is quoted.
+        let mut e = play(&[(1_000, "We'll have the signage ready by Friday.")]);
+        e.set_focus(vec!["Agree the newsletter launch".into()])
+            .unwrap();
+        e.set_sensitivity(Sensitivity::Focused);
+        e.advance(1_000);
+        assert!(e.state.cue.is_none());
     }
 
     #[test]
