@@ -80,6 +80,48 @@ test('companion stays compact between questions and preserves a paused question'
   await expect(page.getByRole('button', { name: 'Pause demo' })).toBeVisible();
 });
 
+test('a question fits the narrow window used on a small display', async ({
+  page,
+}) => {
+  // The native window is 360 CSS px wide on a display under 1100 logical px.
+  // Measured without the entrance animation, which scales the card briefly.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.setViewportSize({ width: 360, height: 340 });
+  await page.clock.runFor(72_000);
+  const question = page.getByRole('region', { name: 'Suggested question' });
+  await expect(question.getByRole('heading')).toHaveText(
+    'How will we choose between those options?',
+  );
+  const fitsSideways = () =>
+    page.evaluate(() => {
+      const main = document.querySelector('main')!;
+      return main.scrollWidth <= main.clientWidth;
+    });
+  await expectCompanionToFit(page);
+  expect(await fitsSideways()).toBe(true);
+  for (const button of await question.getByRole('button').all()) {
+    const bounds = await button.boundingBox();
+    expect(bounds!.height).toBeGreaterThanOrEqual(44);
+  }
+  await question.getByRole('button', { name: 'Why?' }).click();
+  await page.setViewportSize({ width: 360, height: 460 });
+  await expect(question.locator('blockquote')).toBeVisible();
+  await expectCompanionToFit(page);
+  expect(await fitsSideways()).toBe(true);
+  // Large text in the same narrow window: 400 for a question, 520 with context.
+  await page.evaluate(async () => {
+    const previewPath = '/src/lib/preview.ts';
+    const preview = await import(previewPath);
+    preview.command('set_question_size', { value: 'large' });
+  });
+  await page.setViewportSize({ width: 360, height: 520 });
+  await expectCompanionToFit(page);
+  expect(await fitsSideways()).toBe(true);
+  await question.getByRole('button', { name: 'Hide context' }).click();
+  await page.setViewportSize({ width: 360, height: 400 });
+  await expectCompanionToFit(page);
+});
+
 test('the companion bar is the native drag handle and its controls are not', async ({
   page,
 }) => {
