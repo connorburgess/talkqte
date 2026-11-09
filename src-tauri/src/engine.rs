@@ -2661,7 +2661,8 @@ mod tests {
             ("uncertain-speaker", "no cue raised"),
             ("context-reminder", "quiet"),
             ("transcript-instruction", "quiet"),
-            // Labels added 9 November 2026; not yet run in the Claude lab.
+            // Labels added 9 November 2026; run once each in the Claude lab
+            // the same day (all three matched).
             ("context-corrected", "quiet"),
             ("paraphrased-use", "resolved"),
             ("repeated-trigger", "quiet"),
