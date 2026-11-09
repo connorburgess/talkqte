@@ -261,8 +261,19 @@ test('prior notes from a file are chosen, shown apart from the conversation, rem
   await expect(dialog).toContainText('garden-notes.json');
   await expect(dialog.getByRole('checkbox')).toHaveCount(3);
   await expect(dialog.getByRole('button', { name: /Import/ })).toBeDisabled();
-  await dialog.getByRole('checkbox', { name: /Garden welcome guide/ }).check();
-  await dialog.getByRole('checkbox', { name: /Visitor questions/ }).check();
+  // Nothing is ticked until the person chooses; Select all ticks every note
+  // and turns into Clear all, and one note can still be left out.
+  await dialog.getByRole('button', { name: 'Select all' }).click();
+  await expect(
+    dialog.getByRole('button', { name: 'Import 3 selected' }),
+  ).toBeEnabled();
+  await dialog.getByRole('button', { name: 'Clear all' }).click();
+  await expect(dialog.getByRole('button', { name: /Import/ })).toBeDisabled();
+  await dialog.getByRole('button', { name: 'Select all' }).click();
+  await dialog.getByRole('checkbox', { name: /Sign at the gate/ }).uncheck();
+  await expect(
+    dialog.getByRole('button', { name: 'Select all' }),
+  ).toBeVisible();
   await dialog.getByRole('button', { name: 'Import 2 selected' }).click();
   await expect(dialog).toBeHidden();
   await expect(panel.getByRole('listitem')).toHaveCount(2);

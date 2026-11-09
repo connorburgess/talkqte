@@ -22,6 +22,10 @@ export function ContextNotes({
   const [chosen, setChosen] = useState<string[]>([]);
   const [working, setWorking] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
+  const allChosen =
+    !!picked &&
+    picked.notes.length > 0 &&
+    picked.notes.every((note) => chosen.includes(note.sourceId));
   const addButton = useRef<HTMLButtonElement>(null);
   const returnFocus = useRef(false);
   useEffect(() => {
@@ -187,6 +191,22 @@ export function ContextNotes({
             {picked.skipped} more{' '}
             {picked.skipped === 1 ? 'note is' : 'notes are'} not listed: the
             file has repeated ids or more than 200 notes.
+          </p>
+        )}
+        {picked && picked.notes.length > 1 && (
+          <p className="context-choose-all small">
+            <button
+              type="button"
+              className="text-button"
+              disabled={working}
+              onClick={() =>
+                setChosen(
+                  allChosen ? [] : picked.notes.map((note) => note.sourceId),
+                )
+              }
+            >
+              {allChosen ? 'Clear all' : 'Select all'}
+            </button>
           </p>
         )}
         <ul className="context-choices">
