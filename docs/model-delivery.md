@@ -58,7 +58,7 @@ whisper.cpp and the Whisper model weights are MIT-licensed, and `whisper-rs` is 
 - **Discovery:** when the model is missing, the notebook's session controls show **Set up live session**, which opens Settings, instead of hiding live sessions entirely.
 - **Developer override:** `TALKQTE_WHISPER_MODEL` still loads a developer-supplied file without checksum checks, for comparing models.
 
-Not yet built: the project's own GitHub Releases copy (the upstream repository is the only source until a release is prepared), a first-run setup step (no onboarding flow exists yet; the offer is in Settings), keeping an old model while a new one is verified during an app update, and removal on uninstall (macOS apps removed by dragging to the Trash leave their data folder). Tests use a simulated server for success, resume, a server ignoring ranges, a checksum mismatch with fallback, an unreachable source, Cancel, too little space, a damaged installed file, and leftover partial files. One manual test makes a ranged HTTPS request to the real source to confirm the pinned size.
+Not yet built: the project's own GitHub Releases copy (the upstream repository is the only source until a release is prepared), a first-run setup on a clean Mac checked by hand (the notebook's **Before your first meeting** card, 10 November 2026, offers the name, the focus lines, the model download when the build can use one, and prior notes, and steps aside once the required ones are done or when put away for the session; nothing about it persists between launches, so it returns each launch until then), keeping an old model while a new one is verified during an app update, and removal on uninstall (macOS apps removed by dragging to the Trash leave their data folder). Tests use a simulated server for success, resume, a server ignoring ranges, a checksum mismatch with fallback, an unreachable source, Cancel, too little space, a damaged installed file, and leftover partial files. One manual test makes a ranged HTTPS request to the real source to confirm the pinned size.
 
 ## Acceptance checks for the implementation
 
@@ -72,5 +72,5 @@ Not yet built: the project's own GitHub Releases copy (the upstream repository i
 ## Next steps
 
 - Score text accuracy for `tiny.en` and `base.en` against the script of several fictional clips, including faster speech and background noise, before offering `base.en`.
-- Add the first-run setup offer and the update path; check the Settings flow on a clean Mac.
+- Check the setup card and the Settings flow on a clean Mac; add the update path.
 - Publish the GitHub Releases copy with its checksum when the first build that uses it is prepared.

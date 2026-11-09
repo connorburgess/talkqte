@@ -31,6 +31,7 @@ const megabytes = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
 import { Question } from './components/Question';
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { ContextNotes } from './components/ContextNotes';
+import { SetupCard, type SetupTarget } from './components/SetupCard';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
 
 const floating = new URLSearchParams(location.search).get('window') === 'cue';
@@ -294,6 +295,40 @@ function Notebook() {
   const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
   const [model, setModel] = useState<ModelStatus | null>(null);
   const [contextItems, setContextItems] = useState<ContextItem[]>([]);
+  // The setup card: put away for this app session with Not now, or gone
+  // once the required steps are done.
+  const [setupDismissed, setSetupDismissed] = useState(false);
+  const pendingFocus = useRef<SetupTarget | null>(null);
+  const goToSetup = (target: SetupTarget) => {
+    if (target === 'context') {
+      // The card only shows in the notebook, so the panel is already here.
+      setTab('notes');
+      setTimeout(() => {
+        const add = document.querySelector<HTMLElement>(
+          '[aria-label="Prior context"] button',
+        );
+        add?.scrollIntoView({ block: 'center' });
+        add?.focus();
+      }, 0);
+      return;
+    }
+    pendingFocus.current = target;
+    setView('settings');
+  };
+  useEffect(() => {
+    const target = pendingFocus.current;
+    if (!target) return;
+    pendingFocus.current = null;
+    const element = document.getElementById(
+      target === 'name'
+        ? 'user-name'
+        : target === 'focus'
+          ? 'meeting-focus'
+          : 'live-transcription',
+    );
+    element?.scrollIntoView({ block: 'center' });
+    element?.focus();
+  }, [view, tab]);
   useEffect(() => {
     let disposed = false;
     let stop: (() => void) | undefined;
@@ -525,6 +560,26 @@ function Notebook() {
               </button>
             )}
           </label>
+          {state &&
+            !setupDismissed &&
+            !active &&
+            !(
+              state.userName &&
+              state.focus.length > 0 &&
+              (!model || !['missing', 'downloading'].includes(model.status))
+            ) && (
+              <>
+                <SetupCard
+                  name={state.userName}
+                  focus={state.focus}
+                  model={model}
+                  items={contextItems}
+                  busy={busy}
+                  onGoTo={goToSetup}
+                  onDismiss={() => setSetupDismissed(true)}
+                />
+              </>
+            )}
           <p className="list-label">Start here</p>
           {matches ? (
             <button
