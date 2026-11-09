@@ -26,15 +26,6 @@ export function Question({
       className={`question question-${size}`}
       aria-label="Suggested question"
     >
-      <button
-        className="dismiss-question"
-        aria-label="Dismiss"
-        title="Dismiss"
-        disabled={busy}
-        onClick={onDismiss}
-      >
-        <X size={18} />
-      </button>
       <h2 aria-live={announce ? 'polite' : undefined}>{cue.question}</h2>
       <p className="question-meta">
         {cue.note
@@ -94,6 +85,16 @@ export function Question({
           </p>
         )
       )}
+      {/* Last in reading order; drawn in the corner. */}
+      <button
+        className="dismiss-question"
+        aria-label="Dismiss"
+        title="Dismiss"
+        disabled={busy}
+        onClick={onDismiss}
+      >
+        <X size={18} />
+      </button>
     </section>
   );
 }

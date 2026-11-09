@@ -690,7 +690,7 @@ svg {
   position: relative;
   background: var(--forest);
   color: #f4f4e9;
-  padding: 24px 56px 18px 22px;
+  padding: 24px 22px 18px;
   border-radius: var(--radius-question);
   overflow: hidden;
   transform-origin: top center;
@@ -713,6 +713,7 @@ svg {
   margin-top: 10px;
 }
 .question h2 {
+  padding-right: 40px; /* room for the corner Dismiss */
   font-size: 24px;
   font-weight: 700;
   letter-spacing: -0.015em;
@@ -1253,9 +1254,6 @@ svg {
   }
   .question-idle > p {
     margin-top: 5px;
-  }
-  .question-actions {
-    justify-content: flex-start;
   }
   .companion-footnote {
     padding-top: 9px;

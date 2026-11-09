@@ -4,7 +4,7 @@ Reviewed 8 November 2026. This note records why TalkQTE uses a compact question 
 
 ## What the prototype does
 
-Glance view shows one complete question. **Why?** reveals the exact fictional transcript excerpt that triggered it and holds that same question for reading; while the context is open the same control is a chevron labelled Hide context, and hiding the context does not release the hold. Dismiss is a small cross in the question's corner, so the question itself is the only large element (9 November 2026, after the owner found the full-width Dismiss and the downward growth of the context heavy in a live session; the companion now opens 120 CSS px taller for context instead of 160, and 100 px more when an answer is shown). Dismiss remains available while the demo is paused and after playback finishes. Explicitly ending or replaying the demo clears the current question. Untouched questions still expire quietly; there is no visible countdown, scrolling script, or word-by-word animation.
+Glance view shows one complete question. **Why?** reveals the exact fictional transcript excerpt that triggered it and holds that same question for reading; while the context is open the same control is a chevron labelled Hide context, and hiding the context does not release the hold. Dismiss is a small cross in the question's corner, so the question itself is the only large element (9 November 2026, after the owner found the full-width Dismiss and the downward growth of the context heavy in a live session; the companion keeps its 340 CSS px question height and opens 120 px taller for context instead of 160, and 100 px more when an answer is shown). Dismiss remains available while the demo is paused and after playback finishes. Explicitly ending or replaying the demo clears the current question. Untouched questions still expire quietly; there is no visible countdown, scrolling script, or word-by-word animation.
 
 Held questions do not block transcript playback or replace their text with later suggestions. Once their original time window passes, they are labelled as earlier in the demo. That label is based on elapsed time. When a later line matches a fixed answer pattern, a held question instead says it was answered in the conversation and shows that line in its context; the companion grows to fit. The match is phrase-based, not an understanding of the answer. Skipped suggestions are not queued for later display.
 
@@ -14,13 +14,13 @@ The companion is configured to remain passive and not take keyboard focus. The s
 
 ## Prototype appearance
 
-These browser renderings use only the bundled fictional demo at a 420 × 340 CSS-pixel viewport. The current companion removes the light outer background and Save action. The captures show appearance, not native placement or focus behavior.
+These browser renderings use only the bundled fictional demo at a 420 × 340 CSS-pixel viewport. The current companion keeps the question as its only large element, with Dismiss as a small cross in the corner; the earlier capture shows the full-width Dismiss it replaced. The captures show appearance, not native placement or focus behavior.
 
-| Before                                                                          | Current companion                                                                                           |
-| ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| ![Previous companion with a light rim and Save action](assets/glance-after.png) | ![Current companion with a green edge and context and dismissal controls](assets/companion-simple-cues.jpg) |
+| Before                                                                                                   | Current companion                                                                                     |
+| -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| ![Previous companion with a full-width Dismiss button and a Why? link](assets/companion-simple-cues.jpg) | ![Current companion with a corner Dismiss cross and a Why? link](assets/companion-light-controls.png) |
 
-When a held question is answered by a later line, the companion keeps it and shows the answer. These browser captures use the bundled fictional demo at 51 seconds, a 420 × 600 CSS-pixel viewport, and reduced motion. The native details window grows to the same height; that size has not yet been checked on a Mac display.
+When a held question is answered by a later line, the companion keeps it and shows the answer. These browser captures use the bundled fictional demo at 51 seconds, a 420 × 600 CSS-pixel viewport, and reduced motion; the native window for that state is now 560 px, 40 px less than when they were taken, because the actions row is gone. The native details window grows to that height; that size has not yet been checked on a Mac display.
 
 | Before: held question, no answer shown                                                       | After: answer shown with its source                                                                              |
 | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
