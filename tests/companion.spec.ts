@@ -80,6 +80,20 @@ test('companion stays compact between questions and preserves a paused question'
   await expect(page.getByRole('button', { name: 'Pause demo' })).toBeVisible();
 });
 
+test('the companion bar is the native drag handle and its controls are not', async ({
+  page,
+}) => {
+  const bar = page.locator('header.companion-bar');
+  await expect(bar).toHaveAttribute('data-tauri-drag-region', /.*/);
+  await expect(page.getByRole('status')).toHaveAttribute(
+    'data-tauri-drag-region',
+    /.*/,
+  );
+  for (const button of await bar.getByRole('button').all()) {
+    await expect(button).not.toHaveAttribute('data-tauri-drag-region');
+  }
+});
+
 test('hiding a companion suppresses later questions and ending clears its controls', async ({
   page,
 }) => {

@@ -95,12 +95,15 @@ function FloatingQuestion() {
       <div className="companion-shell">
         {active ? (
           <>
-            <header className="companion-bar">
-              <div className="companion-status">
-                <strong className="companion-title">
+            {/* The bar is the handle: the native window follows a drag on
+                it or on its text, and remembers where it was put. */}
+            <header className="companion-bar" data-tauri-drag-region>
+              <div className="companion-status" data-tauri-drag-region>
+                <strong className="companion-title" data-tauri-drag-region>
                   {mic?.status === 'listening' && (
                     <span
                       className={`status-dot ${mic.activity}`}
+                      data-tauri-drag-region
                       role="img"
                       aria-label={
                         mic.activity === 'active'
@@ -111,7 +114,7 @@ function FloatingQuestion() {
                   )}
                   {microphoneControl ? 'Mic only' : live ? 'Live' : 'TalkQTE'}
                 </strong>
-                <span role="status">
+                <span role="status" data-tauri-drag-region>
                   {live
                     ? mic?.status === 'listening'
                       ? 'Listening · On this device'
@@ -1035,9 +1038,11 @@ function Notebook() {
               <div>
                 <h2>Companion position</h2>
                 <p>
-                  Place the question near your camera if that feels comfortable.
-                  The desktop companion follows the notebook’s display; move the
-                  notebook to the display you want to use.
+                  Place the question near your camera if that feels comfortable,
+                  or drag the companion by its top bar to wherever suits you; it
+                  stays there until you choose a position here. The desktop
+                  companion follows the notebook’s display; move the notebook to
+                  the display you want to use.
                 </p>
                 <p className="small">
                   No camera access or video changes. Appearance choices last
@@ -1064,6 +1069,22 @@ function Notebook() {
                   <option value="topLeft">Top left</option>
                   <option value="topRight">Top right</option>
                 </select>
+                {bridge.desktop && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={busy}
+                    onClick={() =>
+                      void run(() =>
+                        bridge.command('set_companion_position', {
+                          value: state.companionPosition,
+                        }),
+                      )
+                    }
+                  >
+                    Move back here
+                  </button>
+                )}
               </div>
             </section>
             <section className="setting">
