@@ -70,15 +70,16 @@ fn frame(
 const COMPACT_WIDTH: f64 = 320.0;
 
 /// The question window's width in logical pixels for a display of this
-/// logical width. A glance window stays narrow: about 30 to 40 characters a
-/// line at the standard 24 px question size, well inside the 80-character
-/// line WCAG 2.2 SC 1.4.8 treats as the upper bound. A small laptop display
-/// gives up 60 px so the window covers less of the meeting; a large display
-/// gains 60 px so a question wraps to fewer lines.
+/// width of its work area. A glance window stays narrow: about 20 to 30
+/// characters a line at the standard 24 px question size (an estimate from
+/// the font), far inside the 80 characters WCAG 2.2 SC 1.4.8 asks a block
+/// of text to be kept within. A small laptop display gives up 60 px so the
+/// window covers less of the meeting; a large display gains 60 px so a
+/// question wraps to fewer lines.
 fn question_width(display_width: f64) -> f64 {
-    if display_width <= 1100.0 {
+    if display_width < 1100.0 {
         360.0
-    } else if display_width >= 2400.0 {
+    } else if display_width > 2400.0 {
         480.0
     } else {
         420.0
@@ -269,8 +270,12 @@ pub fn refresh(app: &tauri::AppHandle) {
         }
         placement.expected = layout.map(|frame| ((frame.x, frame.y), Instant::now()));
         let result = if let Some(frame) = layout {
+            // Move before the resize so a window that is about to get wider
+            // is never off the display's edge in between, and again after
+            // it, because a resize keeps the bottom edge in place.
             window
-                .set_size(PhysicalSize::new(frame.width, frame.height))
+                .set_position(PhysicalPosition::new(frame.x, frame.y))
+                .and_then(|_| window.set_size(PhysicalSize::new(frame.width, frame.height)))
                 .and_then(|_| window.set_position(PhysicalPosition::new(frame.x, frame.y)))
                 .and_then(|_| window.show())
         } else {
@@ -352,6 +357,10 @@ mod tests {
         assert_eq!(width((2880, 1800), 2.0, Mode::Question), 840);
         assert_eq!(width((2560, 1440), 1.0, Mode::Question), 480);
         assert_eq!(width((5120, 2880), 2.0, Mode::Details), 960);
+        // Exactly at a boundary is the middle size; a fractional scale rounds.
+        assert_eq!(width((1100, 700), 1.0, Mode::Question), 420);
+        assert_eq!(width((2400, 1350), 1.0, Mode::Question), 420);
+        assert_eq!(width((1708, 960), 1.25, Mode::Question), 525);
         // The compact bar does not change, and nothing exceeds the display.
         assert_eq!(width((2560, 1440), 1.0, Mode::Compact), 320);
         assert_eq!(width((300, 200), 1.0, Mode::Question), 260);
