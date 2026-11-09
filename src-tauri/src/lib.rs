@@ -4,6 +4,7 @@ mod companion;
 mod companion_macos;
 pub mod context;
 pub mod engine;
+pub mod granola;
 pub mod live;
 mod microphone;
 pub mod model;
@@ -31,7 +32,11 @@ struct Runtime {
     /// Prior notes the user imported this session, in memory only.
     context: context::ContextStore,
     /// A notes file read and listed, waiting for the user's selection.
-    pending_import: Option<notes_file::FileSource>,
+    pending_import: Option<Box<dyn context::NoteSource + Send>>,
+    /// The Granola session for this app run, once the person has signed in.
+    granola: Option<granola::Connection>,
+    /// Set while a Granola sign-in waits for the browser; cleared to cancel.
+    granola_sign_in: Option<Arc<AtomicBool>>,
 }
 
 impl Runtime {
@@ -611,7 +616,7 @@ async fn pick_context_file(
         .0
         .lock()
         .map_err(|_| "The notebook is unavailable.")?
-        .pending_import = Some(source);
+        .pending_import = Some(Box::new(source));
     Ok(Some(PickedNotes {
         file_name,
         notes,
@@ -627,15 +632,22 @@ fn import_context_notes(
     ids: Vec<String>,
 ) -> Result<context::MergeOutcome, String> {
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-    let mut source = runtime
-        .pending_import
-        .take()
-        .ok_or("Choose a notes file first.")?;
-    let fetched = context::fetch_selection(&mut source, &ids, &|| false, &mut |_| true)
-        .map_err(|_| "The notes could not be read.")?;
-    let outcome = runtime
-        .context
-        .merge(context::Provider::File, &ids, fetched);
+    let mut source = runtime.pending_import.take().ok_or("Choose notes first.")?;
+    let provider = source.provider();
+    let fetched = context::fetch_selection(source.as_mut(), &ids, &|| false, &mut |_| true)
+        .map_err(|error| match error {
+            context::FetchError::Failed(context::ConnectionStatus::Expired) => {
+                "Granola's sign-in has expired; connect again."
+            }
+            context::FetchError::Failed(context::ConnectionStatus::Revoked) => {
+                "Granola withdrew this app's access; connect again if you want to."
+            }
+            context::FetchError::Failed(context::ConnectionStatus::RateLimited { .. }) => {
+                "Granola asked for a pause; try again in a moment."
+            }
+            _ => "The notes could not be read.",
+        })?;
+    let outcome = runtime.context.merge(provider, &ids, fetched);
     publish_context(&app, &mut runtime);
     Ok(outcome)
 }
@@ -664,7 +676,10 @@ fn remove_context_item(
     source_id: String,
 ) -> Result<(), String> {
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-    if !runtime.context.remove(context::Provider::File, &source_id) {
+    let removed = [context::Provider::File, context::Provider::Granola]
+        .into_iter()
+        .any(|provider| runtime.context.remove(provider, &source_id));
+    if !removed {
         return Err("That note is no longer imported.".into());
     }
     publish_context(&app, &mut runtime);
@@ -679,10 +694,141 @@ fn remove_context_from(
     state: tauri::State<AppState>,
 ) -> Result<usize, String> {
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-    let removed = runtime.context.remove_all_from(context::Provider::File);
+    let removed = runtime.context.remove_all_from(context::Provider::File)
+        + runtime.context.remove_all_from(context::Provider::Granola);
     runtime.pending_import = None;
     publish_context(&app, &mut runtime);
     Ok(removed)
+}
+
+/// What the interface may know about the Granola connection: whether one is
+/// open and which tools the server offered. Never account identity.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GranolaStatus {
+    connected: bool,
+    tools: Vec<String>,
+}
+
+fn granola_status_now(runtime: &Runtime) -> GranolaStatus {
+    GranolaStatus {
+        connected: runtime.granola.is_some(),
+        tools: runtime
+            .granola
+            .as_ref()
+            .map(granola::Connection::tool_names)
+            .unwrap_or_default(),
+    }
+}
+
+fn granola_error(error: &context::SourceError) -> String {
+    match error {
+        context::SourceError::Expired => "Granola's sign-in has expired; connect again.".into(),
+        context::SourceError::Revoked => {
+            "Granola withdrew this app's access; connect again if you want to.".into()
+        }
+        context::SourceError::RateLimited { .. } => {
+            "Granola asked for a pause; try again in a moment.".into()
+        }
+        context::SourceError::Interrupted => "Granola could not be reached.".into(),
+        context::SourceError::Unavailable => "Granola's notes are not available right now.".into(),
+    }
+}
+
+/// Signs in to Granola in the person's browser and opens a session. Nothing
+/// is read until they list and choose notes; the tokens stay in memory.
+#[tauri::command]
+async fn connect_granola(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<GranolaStatus, String> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    {
+        let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+        if runtime.granola_sign_in.is_some() {
+            return Err("A Granola sign-in is already in progress.".into());
+        }
+        runtime.granola_sign_in = Some(cancel.clone());
+    }
+    let waiting = cancel.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let tokens = granola::sign_in(
+            &|url| open::that(url).map_err(|_| "The browser could not be opened.".to_string()),
+            &|| waiting.load(Ordering::Relaxed),
+        )?;
+        granola::Connection::open(&tokens).map_err(|error| granola_error(&error))
+    })
+    .await
+    .map_err(|_| "The sign-in could not finish.".to_string());
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    runtime.granola_sign_in = None;
+    let connection = result??;
+    runtime.granola = Some(connection);
+    let _ = &app;
+    Ok(granola_status_now(&runtime))
+}
+
+#[tauri::command]
+fn cancel_granola_sign_in(state: tauri::State<AppState>) {
+    if let Ok(runtime) = state.0.lock() {
+        if let Some(cancel) = &runtime.granola_sign_in {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+#[tauri::command]
+fn granola_status(state: tauri::State<AppState>) -> Result<GranolaStatus, String> {
+    state
+        .0
+        .lock()
+        .map(|runtime| granola_status_now(&runtime))
+        .map_err(|_| "The notebook is unavailable.".into())
+}
+
+/// Lists the signed-in person's recent notes to choose from, the way a
+/// picked file is listed; only the ticked notes are fetched afterwards.
+#[tauri::command]
+async fn list_granola_notes(state: tauri::State<'_, AppState>) -> Result<PickedNotes, String> {
+    let mut connection = state
+        .0
+        .lock()
+        .map_err(|_| "The notebook is unavailable.")?
+        .granola
+        .clone()
+        .ok_or("Connect Granola first.")?;
+    let listed = tauri::async_runtime::spawn_blocking(move || {
+        let listed = connection
+            .list_recent()
+            .map_err(|error| granola_error(&error))?;
+        Ok::<_, String>((listed, connection))
+    })
+    .await
+    .map_err(|_| "Granola's notes could not be listed.".to_string())?;
+    let ((notes, skipped), connection) = listed?;
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    runtime.pending_import = Some(Box::new(connection));
+    Ok(PickedNotes {
+        file_name: "Granola · the last 30 days".into(),
+        notes,
+        skipped,
+    })
+}
+
+/// Forgets the Granola session. Imported notes stay until removed, as they
+/// would for a file; nothing is written back.
+#[tauri::command]
+fn disconnect_granola(state: tauri::State<AppState>) -> Result<GranolaStatus, String> {
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    runtime.granola = None;
+    if runtime
+        .pending_import
+        .as_ref()
+        .is_some_and(|source| source.provider() == context::Provider::Granola)
+    {
+        runtime.pending_import = None;
+    }
+    Ok(granola_status_now(&runtime))
 }
 
 /// A live session's parts: the engine session it feeds, the microphone start
@@ -925,6 +1071,8 @@ pub fn run() {
             live: None,
             context: context::ContextStore::default(),
             pending_import: None,
+            granola: None,
+            granola_sign_in: None,
         })))
         .manage(companion::WindowState::default())
         .manage(microphone::Controller::default())
@@ -954,6 +1102,11 @@ pub fn run() {
             context_items,
             remove_context_item,
             remove_context_from,
+            connect_granola,
+            cancel_granola_sign_in,
+            granola_status,
+            list_granola_notes,
+            disconnect_granola,
             download_model,
             cancel_model_download,
             remove_model,
