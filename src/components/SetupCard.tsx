@@ -2,7 +2,7 @@ import { Check, ChevronRight } from 'lucide-react';
 import type { ContextItem, ModelStatus } from '../lib/types';
 
 /** What the card can send the person to. */
-export type SetupTarget = 'name' | 'focus' | 'context';
+export type SetupTarget = 'name' | 'focus' | 'model' | 'context';
 
 /**
  * The short path to a first useful session: a name, what matters today,
@@ -17,7 +17,6 @@ export function SetupCard({
   items,
   busy,
   onGoTo,
-  onDownload,
   onDismiss,
 }: {
   name: string | null;
@@ -26,7 +25,6 @@ export function SetupCard({
   items: ContextItem[];
   busy: boolean;
   onGoTo: (target: SetupTarget) => void;
-  onDownload: () => void;
   onDismiss: () => void;
 }) {
   const modelStep =
@@ -46,8 +44,8 @@ export function SetupCard({
       title: 'Your name',
       done: !!name,
       detail: name
-        ? `Questions put to ${name} by name will stay longer.`
-        : 'So a question asked of you by name stays while you answer.',
+        ? `In a live session, a question put to ${name} by name stays longer.`
+        : 'So a question asked of you by name in a live session stays while you answer.',
       action: 'Add your name',
       onAction: () => onGoTo('name'),
     },
@@ -58,7 +56,7 @@ export function SetupCard({
       detail:
         focus.length > 0
           ? `${focus.length} ${focus.length === 1 ? 'line' : 'lines'} set.`
-          : 'A few short lines; the companion can then show only those.',
+          : 'A few short lines; with the Focused timing setting the companion shows only those.',
       action: 'Write the focus',
       onAction: () => onGoTo('focus'),
     },
@@ -75,8 +73,9 @@ export function SetupCard({
               model.sizeBytes ? (model.received / model.sizeBytes) * 100 : 0,
             )}%.`
           : `${Math.round(model.sizeBytes / 1_000_000)} MB, fetched once over HTTPS and kept on this device; needed for a live session.`,
-      action: 'Download speech model',
-      onAction: onDownload,
+      // Settings explains the download (size, source, checksum) before it starts.
+      action: 'Set up the speech model',
+      onAction: () => onGoTo('model'),
     });
   }
   steps.push({
@@ -94,7 +93,7 @@ export function SetupCard({
   return (
     <section className="setup-card" aria-labelledby="setup-card-title">
       <div className="meeting-line">
-        <strong id="setup-card-title">Set up in a minute</strong>
+        <strong id="setup-card-title">Before your first meeting</strong>
         <button className="text-button" onClick={onDismiss} disabled={busy}>
           Not now
         </button>

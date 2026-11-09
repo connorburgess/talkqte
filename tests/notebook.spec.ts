@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
 test('the setup card walks a new person to a name and a focus, then steps aside', async ({
   page,
 }) => {
-  const card = page.getByRole('region', { name: 'Set up in a minute' });
+  const card = page.getByRole('region', { name: 'Before your first meeting' });
   await expect(card).toBeVisible();
   await expect(card.getByRole('listitem')).toHaveCount(3); // no speech model in the browser
   await expect(card).toContainText('Your name, to do');
@@ -33,8 +33,22 @@ test('the setup card walks a new person to a name and a focus, then steps aside'
   await expect(card).toHaveCount(0);
 });
 
+test('the setup card sends Choose notes to the prior-context panel without changing view', async ({
+  page,
+}) => {
+  const card = page.getByRole('region', { name: 'Before your first meeting' });
+  await card.getByRole('button', { name: 'Choose notes' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Add notes from a file' }),
+  ).toBeFocused();
+  await expect(card).toBeVisible();
+  // An ordinary tab change afterwards does not move focus anywhere.
+  await page.getByRole('tab', { name: /Transcript/ }).click();
+  await expect(page.getByRole('tab', { name: /Transcript/ })).toBeFocused();
+});
+
 test('the setup card can be put away for the session', async ({ page }) => {
-  const card = page.getByRole('region', { name: 'Set up in a minute' });
+  const card = page.getByRole('region', { name: 'Before your first meeting' });
   await card.getByRole('button', { name: 'Not now' }).click();
   await expect(card).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();

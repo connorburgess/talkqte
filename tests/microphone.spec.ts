@@ -395,6 +395,22 @@ test('the speech model downloads only when chosen, shows progress, and can be ca
   ).toBeVisible();
 });
 
+test('with a model to install, the setup card keeps a speech-model step that leads to Settings', async ({
+  page,
+}) => {
+  await nativePage(page, '?model');
+  const card = page.getByRole('region', { name: 'Before your first meeting' });
+  await expect(card.getByRole('listitem')).toHaveCount(4);
+  await expect(card).toContainText('Speech model, to do');
+  await card.getByRole('button', { name: 'Set up the speech model' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Live transcription' }),
+  ).toBeFocused();
+  await expect(
+    page.getByRole('button', { name: 'Download speech model' }),
+  ).toBeVisible();
+});
+
 test('the live setup link fits narrow windows', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 700 });
   await nativePage(page, '?model');

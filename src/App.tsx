@@ -300,26 +300,32 @@ function Notebook() {
   const [setupDismissed, setSetupDismissed] = useState(false);
   const pendingFocus = useRef<SetupTarget | null>(null);
   const goToSetup = (target: SetupTarget) => {
-    pendingFocus.current = target;
     if (target === 'context') {
-      setView('notebook');
+      // The card only shows in the notebook, so the panel is already here.
       setTab('notes');
-    } else {
-      setView('settings');
+      setTimeout(() => {
+        const add = document.querySelector<HTMLElement>(
+          '[aria-label="Prior context"] button',
+        );
+        add?.scrollIntoView({ block: 'center' });
+        add?.focus();
+      }, 0);
+      return;
     }
+    pendingFocus.current = target;
+    setView('settings');
   };
   useEffect(() => {
     const target = pendingFocus.current;
     if (!target) return;
     pendingFocus.current = null;
-    const element =
+    const element = document.getElementById(
       target === 'name'
-        ? document.getElementById('user-name')
+        ? 'user-name'
         : target === 'focus'
-          ? document.getElementById('meeting-focus')
-          : document.querySelector<HTMLElement>(
-              '[aria-label="Prior context"] button',
-            );
+          ? 'meeting-focus'
+          : 'live-transcription',
+    );
     element?.scrollIntoView({ block: 'center' });
     element?.focus();
   }, [view, tab]);
@@ -556,13 +562,13 @@ function Notebook() {
           </label>
           {state &&
             !setupDismissed &&
+            !active &&
             !(
               state.userName &&
               state.focus.length > 0 &&
               (!model || !['missing', 'downloading'].includes(model.status))
             ) && (
               <>
-                <p className="list-label">Before your first meeting</p>
                 <SetupCard
                   name={state.userName}
                   focus={state.focus}
@@ -570,9 +576,6 @@ function Notebook() {
                   items={contextItems}
                   busy={busy}
                   onGoTo={goToSetup}
-                  onDownload={() =>
-                    void run(() => bridge.command('download_model'))
-                  }
                   onDismiss={() => setSetupDismissed(true)}
                 />
               </>
