@@ -1400,7 +1400,8 @@ svg {
     padding: 7px;
     font-size: 14px;
   }
-  .session-strip {
+  .session-strip,
+  .meeting-focus {
     padding: 12px;
   }
   .session-actions {
@@ -1476,7 +1477,7 @@ svg {
   min-height: 32px;
 }
 
-/* Focus suggestions from Granola, under the focus field in Settings. */
+/* Focus suggestions from Granola, under the focus field in the notebook. */
 .suggest-focus {
   margin-top: 12px;
   padding: 0;
@@ -1496,4 +1497,8 @@ svg {
 }
 .suggest-line input {
   margin-top: 4px;
+  accent-color: var(--forest);
+  width: 19px;
+  height: 19px;
+  flex-shrink: 0;
 }

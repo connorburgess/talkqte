@@ -196,11 +196,16 @@ test('focus lines are written in the notebook, kept for the session, cleared in 
   await expect(page.getByRole('alert')).toContainText(
     '“Team sync” needs a few specific words',
   );
-  // The typed text stays so the line can be fixed in place.
+  // The typed text stays so the line can be fixed in place; Clear straight
+  // from the field does not save the rejected line first, and the field
+  // keeps the keyboard.
   await expect(focus).toHaveValue('Team sync');
+  await focus.fill('Team sync again');
   await box.getByRole('button', { name: 'Clear' }).click();
   await expect(focus).toHaveValue('');
+  await expect(focus).toBeFocused();
   await expect(box.getByRole('button', { name: 'Clear' })).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page
     .getByRole('combobox', { name: 'Question timing' })

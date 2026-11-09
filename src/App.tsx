@@ -308,6 +308,25 @@ function Notebook() {
       .catch(() => setCanSuggest(false));
   }, []);
   const focusField = useRef<HTMLTextAreaElement>(null);
+  // Clear is a mousedown before a click, so the blur that would save the old
+  // text is skipped when it heads for Clear; the field keeps the focus.
+  const clearButton = useRef<HTMLButtonElement>(null);
+  const clearFocus = () => {
+    setFocus('');
+    setSuggestions(null);
+    setTicked([]);
+    void run(() => bridge.command('set_focus', { lines: [] }));
+    setTimeout(() => focusField.current?.focus(), 0);
+  };
+  // The focus as it stood when a live session ended, so the box can say the
+  // lines are left over from it until they change.
+  const [endedFocus, setEndedFocus] = useState<string | null>(null);
+  useEffect(() => {
+    if (!state) return;
+    setEndedFocus(
+      state.live && state.status === 'ended' ? state.focus.join('\n') : null,
+    );
+  }, [state?.live, state?.status]);
   const suggestionList = useRef<HTMLFieldSetElement>(null);
   const currentFocusLines = () =>
     focus
@@ -546,12 +565,6 @@ function Notebook() {
       .finally(() => {
         savingName.current = false;
       });
-  };
-  const clearFocus = () => {
-    setFocus('');
-    setSuggestions(null);
-    setTicked([]);
-    void run(() => bridge.command('set_focus', { lines: [] }));
   };
   const saveFocus = () => {
     const lines = focus
@@ -939,6 +952,7 @@ function Notebook() {
                 </div>
                 {focus.trim().length > 0 && (
                   <button
+                    ref={clearButton}
                     type="button"
                     className="text-button"
                     disabled={busy}
@@ -948,11 +962,13 @@ function Notebook() {
                   </button>
                 )}
               </div>
-              {state.live && !live && focus.trim().length > 0 && (
-                <p className="small muted" role="status">
-                  Written before the session that just ended.
-                </p>
-              )}
+              {endedFocus !== null &&
+                endedFocus.length > 0 &&
+                endedFocus === focus.trim() && (
+                  <p className="small muted" role="status">
+                    Kept from the session that just ended.
+                  </p>
+                )}
               <div className="setting-control">
                 <label htmlFor="meeting-focus">Focus</label>
                 <textarea
@@ -963,7 +979,9 @@ function Notebook() {
                   rows={3}
                   spellCheck={false}
                   onChange={(e) => setFocus(e.target.value)}
-                  onBlur={saveFocus}
+                  onBlur={(e) => {
+                    if (e.relatedTarget !== clearButton.current) saveFocus();
+                  }}
                 />
                 {canSuggest && suggestions === null && (
                   <div className="suggest-focus">
@@ -1379,9 +1397,10 @@ function Notebook() {
                 <p>
                   Balanced leaves at least 10 seconds between questions. Quiet
                   leaves 30 seconds after a question passes. Focused shows only
-                  questions about your focus lines, questions asked of you by
-                  name, and reminders of notes you chose; with no focus lines it
-                  shows just the last two.
+                  questions about your focus lines (written in the notebook’s
+                  This meeting box), questions asked of you by name, and
+                  reminders of notes you chose; with no focus lines it shows
+                  just the last two.
                 </p>
               </div>
               <label className="visually-hidden" htmlFor="sensitivity">
