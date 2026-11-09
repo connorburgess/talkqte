@@ -17,7 +17,7 @@ pub const MAX_ATTEMPTS: u32 = 3;
 /// The longest wait honored between attempts, even if a provider asks for more.
 pub const MAX_RETRY_WAIT: Duration = Duration::from_secs(30);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
     Granola,

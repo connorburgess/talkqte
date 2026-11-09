@@ -19,6 +19,7 @@ use sha2::{Digest, Sha256};
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -142,37 +143,35 @@ pub fn authorize_url(
     )
 }
 
-/// The authorization code and state from the browser's return request, or
-/// the error it reported. Only the request line is read.
-pub fn parse_callback(request_line: &str) -> Result<(String, String), String> {
+/// What the browser's return request carried. Only the request line is read.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Callback {
+    pub code: Option<String>,
+    pub state: Option<String>,
+    pub error: Option<String>,
+}
+
+/// The parts of the sign-in return, or `None` for any other request.
+pub fn parse_callback(request_line: &str) -> Option<Callback> {
     let path = request_line
         .strip_prefix("GET ")
-        .and_then(|rest| rest.split(' ').next())
-        .ok_or("The browser sent something other than the sign-in return.")?;
+        .and_then(|rest| rest.split(' ').next())?;
+    if path != "/callback" && !path.starts_with("/callback?") {
+        return None;
+    }
     let query = path.split_once('?').map(|(_, query)| query).unwrap_or("");
-    let mut code = None;
-    let mut state = None;
-    let mut error = None;
+    let mut callback = Callback::default();
     for pair in query.split('&') {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
         let value = percent_decode(value);
         match key {
-            "code" => code = Some(value),
-            "state" => state = Some(value),
-            "error" => error = Some(value),
+            "code" => callback.code = Some(value),
+            "state" => callback.state = Some(value),
+            "error" => callback.error = Some(value),
             _ => {}
         }
     }
-    if let Some(error) = error {
-        return Err(match error.as_str() {
-            "access_denied" => "Sign-in was cancelled in the browser.".into(),
-            _ => "Granola refused the sign-in.".into(),
-        });
-    }
-    match (code, state) {
-        (Some(code), Some(state)) if !code.is_empty() => Ok((code, state)),
-        _ => Err("The sign-in return was incomplete.".into()),
-    }
+    Some(callback)
 }
 
 fn percent_decode(value: &str) -> String {
@@ -220,16 +219,28 @@ pub fn sign_in(
         .ok_or("Granola did not name an authorization server.")?
         .trim_end_matches('/')
         .to_string();
+    // Only Granola's own hosts may sign the person in or receive the code.
+    if !granola_host(&authorization_server) {
+        return Err("Granola named a sign-in server outside granola.ai; stopping.".into());
+    }
     let server: Value = get_json(
         &agent,
-        &format!("{authorization_server}/.well-known/oauth-authorization-server"),
+        &well_known(&authorization_server, "oauth-authorization-server")
+            .ok_or("Granola's sign-in server address is not as expected.")?,
     )?;
+    if server["issuer"]
+        .as_str()
+        .map(|issuer| issuer.trim_end_matches('/'))
+        != Some(authorization_server.as_str())
+    {
+        return Err("Granola's sign-in metadata does not match its server.".into());
+    }
     let endpoint = |name: &str| -> Result<String, String> {
         server[name]
             .as_str()
-            .filter(|url| url.starts_with("https://"))
+            .filter(|url| granola_host(url))
             .map(str::to_string)
-            .ok_or_else(|| format!("Granola's sign-in metadata has no {name}."))
+            .ok_or_else(|| format!("Granola's sign-in metadata has no {name} on granola.ai."))
     };
     let (authorization_endpoint, token_endpoint, registration_endpoint) = (
         endpoint("authorization_endpoint")?,
@@ -272,10 +283,7 @@ pub fn sign_in(
         &challenge,
         &state,
     ))?;
-    let (code, returned_state) = wait_for_callback(&listener, cancelled)?;
-    if returned_state != state {
-        return Err("The sign-in return did not match this request.".into());
-    }
+    let code = wait_for_callback(&listener, &state, cancelled)?;
     let token = agent
         .post(&token_endpoint)
         .header("Accept", "application/json")
@@ -297,6 +305,29 @@ pub fn sign_in(
         .ok_or("Granola did not return an access token.")?
         .to_string();
     Ok(Tokens { access_token })
+}
+
+/// Whether a URL is https on granola.ai or one of its subdomains.
+fn granola_host(url: &str) -> bool {
+    url.strip_prefix("https://")
+        .and_then(|rest| rest.split(['/', '?', '#']).next())
+        // Credentials in the authority are never expected; refuse them.
+        .filter(|authority| !authority.contains('@'))
+        .map(|host| host.split(':').next().unwrap_or(host).to_lowercase())
+        .is_some_and(|host| host == "granola.ai" || host.ends_with(".granola.ai"))
+}
+
+/// The well-known document for an issuer: after the host and before any
+/// path the issuer carries, as RFC 8414 describes.
+fn well_known(issuer: &str, suffix: &str) -> Option<String> {
+    let rest = issuer.strip_prefix("https://")?;
+    let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
+    let path = path.trim_matches('/');
+    Some(if path.is_empty() {
+        format!("https://{host}/.well-known/{suffix}")
+    } else {
+        format!("https://{host}/.well-known/{suffix}/{path}")
+    })
 }
 
 fn get_json(agent: &ureq::Agent, url: &str) -> Result<Value, String> {
@@ -324,13 +355,15 @@ fn read_json(mut response: ureq::http::Response<ureq::Body>) -> Result<Value, ()
     serde_json::from_str(&text).map_err(|_| ())
 }
 
-/// Waits for the browser to return to the loopback port with a code, replying
-/// with a short page. Other requests (a favicon, a probe) are answered and
-/// ignored.
+/// Waits for the browser to return to the loopback port with the code for
+/// this request, replying with a short page. Other requests (a favicon, a
+/// probe, a return whose state is not ours) are answered and ignored, so a
+/// stray local request cannot end the sign-in.
 fn wait_for_callback(
     listener: &TcpListener,
+    expected_state: &str,
     cancelled: &dyn Fn() -> bool,
-) -> Result<(String, String), String> {
+) -> Result<String, String> {
     let started = Instant::now();
     loop {
         if cancelled() {
@@ -341,7 +374,10 @@ fn wait_for_callback(
         }
         match listener.accept() {
             Ok((mut stream, _)) => {
-                if let Some(result) = answer_callback(&mut stream) {
+                // The accepted socket inherits the listener's non-blocking
+                // mode on some platforms; the read below must wait for bytes.
+                let _ = stream.set_nonblocking(false);
+                if let Some(result) = answer_callback(&mut stream, expected_state) {
                     return result;
                 }
             }
@@ -354,29 +390,50 @@ fn wait_for_callback(
 }
 
 /// Reads one request from the browser and replies. Returns `None` for a
-/// request that is not the sign-in return.
-fn answer_callback(stream: &mut TcpStream) -> Option<Result<(String, String), String>> {
+/// request that is not this sign-in's return.
+fn answer_callback(stream: &mut TcpStream, expected_state: &str) -> Option<Result<String, String>> {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let mut buffer = [0u8; 4096];
     let read = stream.read(&mut buffer).ok()?;
     let request = String::from_utf8_lossy(&buffer[..read]);
     let line = request.lines().next().unwrap_or("");
-    if !line.starts_with("GET /callback") {
-        let _ = stream
-            .write_all(b"HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+    let reply = |stream: &mut TcpStream, status: &str, body: &str| {
+        let _ = stream.write_all(
+            format!(
+                "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .as_bytes(),
+        );
+    };
+    let Some(callback) = parse_callback(line) else {
+        reply(stream, "404 Not Found", "");
+        return None;
+    };
+    if callback.state.as_deref() != Some(expected_state) {
+        reply(
+            stream,
+            "200 OK",
+            "<!doctype html><title>TalkQTE</title><p>This page is not from the current TalkQTE sign-in. You can close it.</p>",
+        );
         return None;
     }
-    let result = parse_callback(line);
-    let body = match &result {
-        Ok(_) => "<!doctype html><title>TalkQTE</title><p>Signed in to Granola. You can return to TalkQTE.</p>",
-        Err(_) => "<!doctype html><title>TalkQTE</title><p>Sign-in did not complete. You can return to TalkQTE.</p>",
+    let result = match (callback.error, callback.code) {
+        (Some(error), _) => Err(if error == "access_denied" {
+            "Sign-in was cancelled in the browser.".to_string()
+        } else {
+            "Granola refused the sign-in.".to_string()
+        }),
+        (None, Some(code)) if !code.is_empty() => Ok(code),
+        _ => Err("The sign-in return was incomplete.".to_string()),
     };
-    let _ = stream.write_all(
-        format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
-            body.len()
-        )
-        .as_bytes(),
+    reply(
+        stream,
+        "200 OK",
+        match &result {
+            Ok(_) => "<!doctype html><title>TalkQTE</title><p>Signed in to Granola. You can return to TalkQTE.</p>",
+            Err(_) => "<!doctype html><title>TalkQTE</title><p>Sign-in did not complete. You can return to TalkQTE.</p>",
+        },
     );
     Some(result)
 }
@@ -390,7 +447,6 @@ struct Tool {
 }
 
 /// An open MCP session with Granola, acting as the signed-in person.
-#[derive(Clone)]
 pub struct Connection {
     agent: ureq::Agent,
     endpoint: String,
@@ -512,7 +568,11 @@ impl Connection {
             .with_config()
             .limit(4 << 20)
             .read_to_string()
-            .map_err(|_| SourceError::Interrupted)?;
+            .map_err(|error| match error {
+                // A reply that can never fit is not worth retrying.
+                ureq::Error::BodyExceedsLimit(_) => SourceError::Unavailable,
+                _ => SourceError::Interrupted,
+            })?;
         let message = if content_type.starts_with("text/event-stream") {
             sse_message(&text, id).ok_or(SourceError::Unavailable)?
         } else {
@@ -526,10 +586,15 @@ impl Connection {
                 SourceError::Unavailable
             });
         }
-        message
+        let result = message
             .get("result")
             .cloned()
-            .ok_or(SourceError::Unavailable)
+            .ok_or(SourceError::Unavailable)?;
+        // A tool that reports failure in its result carries no notes.
+        if result.get("isError") == Some(&Value::Bool(true)) {
+            return Err(SourceError::Unavailable);
+        }
+        Ok(result)
     }
 
     fn request(&self, body: &Value) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {
@@ -709,6 +774,51 @@ fn preview(text: &str) -> String {
     }
 }
 
+/// One session shared by the notebook's connection and the pending import
+/// it fills, so request ids and the server's session id stay one sequence.
+#[derive(Clone, Debug)]
+pub struct Shared(Arc<Mutex<Connection>>);
+
+impl Shared {
+    pub fn new(connection: Connection) -> Self {
+        Self(Arc::new(Mutex::new(connection)))
+    }
+
+    pub fn tool_names(&self) -> Vec<String> {
+        self.0
+            .lock()
+            .map(|connection| connection.tool_names())
+            .unwrap_or_default()
+    }
+
+    pub fn list_recent(&self) -> Result<(Vec<NoteSummary>, usize), SourceError> {
+        self.0
+            .lock()
+            .map_err(|_| SourceError::Unavailable)?
+            .list_recent()
+    }
+}
+
+impl NoteSource for Shared {
+    fn provider(&self) -> Provider {
+        Provider::Granola
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        self.0
+            .lock()
+            .map(|connection| connection.capabilities())
+            .unwrap_or_default()
+    }
+
+    fn fetch(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError> {
+        self.0
+            .lock()
+            .map_err(|_| SourceError::Unavailable)?
+            .fetch(selection)
+    }
+}
+
 impl NoteSource for Connection {
     fn provider(&self) -> Provider {
         Provider::Granola
@@ -751,7 +861,6 @@ impl NoteSource for Connection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
 
     #[test]
     fn pkce_and_the_authorize_url_follow_the_profile() {
@@ -776,23 +885,106 @@ mod tests {
     }
 
     #[test]
-    fn the_browser_return_is_read_from_its_request_line_only() {
+    fn only_granola_hosts_may_sign_the_person_in() {
+        assert!(granola_host("https://mcp-auth.granola.ai/oauth2/token"));
+        assert!(granola_host("https://GRANOLA.AI"));
+        assert!(!granola_host("http://mcp-auth.granola.ai/oauth2/token"));
+        assert!(!granola_host("https://granola.ai.example.com/x"));
+        assert!(!granola_host("https://example.com/?u=granola.ai"));
+        assert!(!granola_host("https://evil.com@mcp-auth.granola.ai/"));
+        assert!(!granola_host("https://notgranola.ai/"));
         assert_eq!(
-            parse_callback("GET /callback?code=abc%20d&state=xyz HTTP/1.1").unwrap(),
-            ("abc d".to_string(), "xyz".to_string())
+            well_known("https://mcp-auth.granola.ai", "oauth-authorization-server").unwrap(),
+            "https://mcp-auth.granola.ai/.well-known/oauth-authorization-server"
         );
-        assert!(
-            parse_callback("GET /callback?error=access_denied&state=x HTTP/1.1")
-                .unwrap_err()
-                .contains("cancelled")
+        assert_eq!(
+            well_known(
+                "https://mcp-auth.granola.ai/tenant/a/",
+                "oauth-authorization-server"
+            )
+            .unwrap(),
+            "https://mcp-auth.granola.ai/.well-known/oauth-authorization-server/tenant/a"
         );
-        assert!(parse_callback("GET /callback?state=x HTTP/1.1").is_err());
-        assert!(parse_callback("POST /callback HTTP/1.1").is_err());
+        assert!(well_known("http://mcp-auth.granola.ai", "x").is_none());
     }
 
-    /// A fictional MCP server on a loopback port: fixed notes, and a status
-    /// to answer with instead when a test asks for a failure.
-    fn fictional_server(status: Option<u16>, sse: bool) -> (String, Arc<Mutex<Vec<String>>>) {
+    #[test]
+    fn the_browser_return_is_read_from_its_request_line_only() {
+        let callback = parse_callback("GET /callback?code=abc%20d&state=xyz HTTP/1.1").unwrap();
+        assert_eq!(
+            (
+                callback.code.as_deref(),
+                callback.state.as_deref(),
+                callback.error
+            ),
+            (Some("abc d"), Some("xyz"), None)
+        );
+        assert_eq!(
+            parse_callback("GET /callback?error=access_denied&state=x HTTP/1.1")
+                .unwrap()
+                .error
+                .as_deref(),
+            Some("access_denied")
+        );
+        assert!(parse_callback("GET /favicon.ico HTTP/1.1").is_none());
+        assert!(parse_callback("POST /callback HTTP/1.1").is_none());
+        assert!(parse_callback("GET /callbackx?code=1 HTTP/1.1").is_none());
+    }
+
+    #[test]
+    fn the_wait_ignores_probes_and_wrong_states_and_takes_the_matching_return() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let browser = std::thread::spawn(move || {
+            let mut pages = vec![];
+            for path in [
+                "/favicon.ico",
+                "/callback?code=forged&state=wrong",
+                "/callback?error=access_denied&state=wrong",
+                "/callback?code=real%2Bcode&state=expected",
+            ] {
+                let mut stream = TcpStream::connect(address).unwrap();
+                stream
+                    .write_all(format!("GET {path} HTTP/1.1\r\nHost: x\r\n\r\n").as_bytes())
+                    .unwrap();
+                let mut reply = String::new();
+                stream.read_to_string(&mut reply).unwrap();
+                pages.push(reply);
+            }
+            pages
+        });
+        let code = wait_for_callback(&listener, "expected", &|| false).unwrap();
+        assert_eq!(code, "real+code");
+        let pages = browser.join().unwrap();
+        assert!(pages[0].starts_with("HTTP/1.1 404"));
+        assert!(pages[1].contains("not from the current TalkQTE sign-in"));
+        assert!(pages[2].contains("not from the current TalkQTE sign-in"));
+        assert!(pages[3].contains("Signed in to Granola"));
+        // A cancel ends the wait without a return.
+        assert!(wait_for_callback(&listener, "expected", &|| true)
+            .unwrap_err()
+            .contains("cancelled"));
+    }
+
+    /// How the fictional server answers: normally (as JSON or an event
+    /// stream), with an HTTP status, with a JSON-RPC error, or with a tool
+    /// result that reports failure.
+    #[derive(Clone, Copy)]
+    enum Answer {
+        Json,
+        EventStream,
+        Status(u16),
+        RpcError(&'static str),
+        ToolError,
+    }
+
+    /// A fictional MCP server on a loopback port with fixed notes; it logs
+    /// each request's head and body.
+    /// The requests a fictional server saw: each one's head and body.
+    type Seen = Arc<Mutex<Vec<(String, String)>>>;
+
+    fn fictional_server(answer: Answer) -> (String, Seen) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}/mcp", listener.local_addr().unwrap());
         let seen = Arc::new(Mutex::new(Vec::new()));
@@ -806,33 +998,41 @@ mod tests {
                     let n = stream.read(&mut buffer[read..]).unwrap_or(0);
                     read += n;
                     let text = String::from_utf8_lossy(&buffer[..read]).into_owned();
-                    if n == 0 || text.contains("\r\n\r\n") {
-                        let (head, body) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
+                    let complete = text.split_once("\r\n\r\n").is_some_and(|(head, body)| {
                         let length: usize = head
                             .lines()
                             .find_map(|line| {
                                 line.to_lowercase()
                                     .strip_prefix("content-length:")
-                                    .map(|v| v.trim().parse().unwrap_or(0))
+                                    .map(|value| value.trim().parse().unwrap_or(0))
                             })
                             .unwrap_or(0);
-                        if body.len() >= length {
-                            break;
-                        }
+                        body.len() >= length
+                    });
+                    if n == 0 || complete {
+                        break;
                     }
                 }
                 let text = String::from_utf8_lossy(&buffer[..read]).into_owned();
                 let (head, body) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
-                log.lock().unwrap().push(head.to_string());
+                log.lock()
+                    .unwrap()
+                    .push((head.to_string(), body.to_string()));
                 let request: Value = serde_json::from_str(body).unwrap_or(Value::Null);
                 let reply = |stream: &mut TcpStream,
                              status: u16,
                              content_type: &str,
                              body: &str,
                              extra: &str| {
-                    let _ = stream.write_all(format!("HTTP/1.1 {status} X\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n{body}", body.len()).as_bytes());
+                    let _ = stream.write_all(
+                        format!(
+                            "HTTP/1.1 {status} X\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n{body}",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    );
                 };
-                if let Some(status) = status {
+                if let Answer::Status(status) = answer {
                     reply(
                         &mut stream,
                         status,
@@ -845,6 +1045,17 @@ mod tests {
                 let id = request["id"].clone();
                 if id.is_null() {
                     reply(&mut stream, 202, "application/json", "", "");
+                    continue;
+                }
+                if let Answer::RpcError(message) = answer {
+                    let message = json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32001, "message": message}});
+                    reply(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &message.to_string(),
+                        "",
+                    );
                     continue;
                 }
                 let notes = json!([
@@ -860,24 +1071,18 @@ mod tests {
                         {"name": "list_meetings", "inputSchema": {"type": "object", "properties": {}}},
                         {"name": "get_meetings", "inputSchema": {"type": "object", "properties": {"meeting_ids": {"type": "array", "items": {"type": "string"}}}}}
                     ]}),
+                    Some("tools/call") if matches!(answer, Answer::ToolError) => {
+                        json!({"isError": true, "content": [{"type": "text", "text": "Something went wrong."}]})
+                    }
+                    // Every note comes back whatever was asked, so the
+                    // client's own selection filter is exercised.
                     Some("tools/call") => {
-                        let wanted = request["params"]["arguments"]["meeting_ids"]
-                            .as_array()
-                            .cloned()
-                            .unwrap_or_default();
-                        let items: Vec<Value> = notes
-                            .as_array()
-                            .unwrap()
-                            .iter()
-                            .filter(|n| wanted.is_empty() || wanted.contains(&n["id"]))
-                            .cloned()
-                            .collect();
-                        json!({"content": [{"type": "text", "text": json!({"meetings": items}).to_string()}]})
+                        json!({"content": [{"type": "text", "text": json!({"meetings": notes}).to_string()}]})
                     }
                     _ => json!({}),
                 };
                 let message = json!({"jsonrpc": "2.0", "id": id, "result": result});
-                if sse {
+                if matches!(answer, Answer::EventStream) {
                     let body = format!("event: message\ndata: {message}\n\n");
                     reply(
                         &mut stream,
@@ -908,8 +1113,8 @@ mod tests {
 
     #[test]
     fn a_session_lists_recent_notes_and_fetches_only_the_selection() {
-        for sse in [false, true] {
-            let (endpoint, seen) = fictional_server(None, sse);
+        for answer in [Answer::Json, Answer::EventStream] {
+            let (endpoint, seen) = fictional_server(answer);
             let mut connection = Connection::open_at(&endpoint, &tokens(), false).unwrap();
             assert_eq!(connection.tool_names(), ["list_meetings", "get_meetings"]);
             assert!(connection.capabilities().import_notes);
@@ -928,53 +1133,90 @@ mod tests {
                 [
                     ("m1", "Garden welcome guide", "2026-10-28"),
                     ("m2", "Visitor questions", "2026-11-02")
-                ],
-                "sse={sse}"
+                ]
             );
             let fetched = connection.fetch(&["m2".into()]).unwrap();
-            assert_eq!(fetched.len(), 1);
+            assert_eq!(fetched.len(), 1, "the client keeps only the selection");
             assert_eq!(fetched[0].provider, Provider::Granola);
+            assert_eq!(fetched[0].source_id, "m2");
             assert_eq!(
                 fetched[0].excerpt,
                 "Visitors asked where to find watering cans."
             );
-            let heads = seen.lock().unwrap().clone();
-            assert!(heads.iter().all(|head| head
+            let seen = seen.lock().unwrap().clone();
+            // initialize, initialized, tools/list, list_meetings, get_meetings.
+            assert_eq!(seen.len(), 5);
+            assert!(seen.iter().all(|(head, _)| head
                 .to_lowercase()
                 .contains("authorization: bearer fictional-token")));
-            // initialize, initialized, tools/list, list_meetings, get_meetings.
-            assert_eq!(heads.len(), 5, "sse={sse}");
-            // The session id the server issued is sent back after the first reply.
-            assert!(heads
-                .last()
-                .unwrap()
-                .to_lowercase()
-                .contains("mcp-session-id: s-1"));
+            assert!(
+                !seen[0].0.to_lowercase().contains("mcp-session-id"),
+                "none before the server issues one"
+            );
+            assert!(seen[4].0.to_lowercase().contains("mcp-session-id: s-1"));
+            let asked: Value = serde_json::from_str(&seen[4].1).unwrap();
+            assert_eq!(asked["params"]["arguments"]["meeting_ids"], json!(["m2"]));
             assert!(!format!("{connection:?}").contains("fictional-token"));
         }
     }
 
     #[test]
-    fn server_statuses_map_to_the_contract_errors() {
-        for (status, expected) in [
-            (401, SourceError::Expired),
-            (403, SourceError::Revoked),
+    fn a_shared_session_keeps_one_sequence_of_request_ids() {
+        let (endpoint, seen) = fictional_server(Answer::Json);
+        let shared = Shared::new(Connection::open_at(&endpoint, &tokens(), false).unwrap());
+        let mut import: Box<dyn NoteSource + Send> = Box::new(shared.clone());
+        shared.list_recent().unwrap();
+        import.fetch(&["m1".into()]).unwrap();
+        shared.list_recent().unwrap();
+        let ids: Vec<u64> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(_, body)| serde_json::from_str::<Value>(body).ok()?["id"].as_u64())
+            .collect();
+        assert_eq!(
+            ids,
+            [1, 2, 3, 4, 5],
+            "no id is reused across the shared session"
+        );
+        assert!(!format!("{shared:?}").contains("fictional-token"));
+    }
+
+    #[test]
+    fn server_failures_map_to_the_contract_errors() {
+        for (answer, expected) in [
+            (Answer::Status(401), SourceError::Expired),
+            (Answer::Status(403), SourceError::Revoked),
             (
-                429,
+                Answer::Status(429),
                 SourceError::RateLimited {
                     retry_after: Duration::from_secs(7),
                 },
             ),
-            (503, SourceError::Unavailable),
+            (Answer::Status(503), SourceError::Unavailable),
+            (
+                Answer::RpcError("Unauthorized: token expired"),
+                SourceError::Expired,
+            ),
+            (Answer::RpcError("Internal error"), SourceError::Unavailable),
         ] {
-            let (endpoint, _) = fictional_server(Some(status), false);
+            let (endpoint, _) = fictional_server(answer);
             assert_eq!(
                 Connection::open_at(&endpoint, &tokens(), false).err(),
-                Some(expected),
-                "{status}"
+                Some(expected)
             );
         }
-        let (endpoint, _) = fictional_server(None, false);
+        let (endpoint, _) = fictional_server(Answer::ToolError);
+        let mut connection = Connection::open_at(&endpoint, &tokens(), false).unwrap();
+        assert_eq!(
+            connection.list_recent().err(),
+            Some(SourceError::Unavailable)
+        );
+        assert_eq!(
+            connection.fetch(&["m1".into()]).err(),
+            Some(SourceError::Unavailable)
+        );
+        let (endpoint, _) = fictional_server(Answer::Json);
         let mut connection = Connection::open_at(&endpoint, &tokens(), false).unwrap();
         drop(connection.tools.pop());
         assert_eq!(

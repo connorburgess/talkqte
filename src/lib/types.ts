@@ -64,7 +64,7 @@ export type Commands = {
   cancel_model_download: undefined;
   remove_model: undefined;
   cancel_context_import: undefined;
-  remove_context_item: { sourceId: string };
+  remove_context_item: { provider: ContextItem['provider']; sourceId: string };
 };
 /** One prior note the user imported; never mistaken for the conversation. */
 export interface ContextItem {

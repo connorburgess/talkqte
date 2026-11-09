@@ -34,7 +34,7 @@ struct Runtime {
     /// A notes file read and listed, waiting for the user's selection.
     pending_import: Option<Box<dyn context::NoteSource + Send>>,
     /// The Granola session for this app run, once the person has signed in.
-    granola: Option<granola::Connection>,
+    granola: Option<granola::Shared>,
     /// Set while a Granola sign-in waits for the browser; cleared to cancel.
     granola_sign_in: Option<Arc<AtomicBool>>,
 }
@@ -626,27 +626,43 @@ async fn pick_context_file(
 
 /// Imports the selected notes from the file read by `pick_context_file`.
 #[tauri::command]
-fn import_context_notes(
+async fn import_context_notes(
     app: tauri::AppHandle,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
     ids: Vec<String>,
 ) -> Result<context::MergeOutcome, String> {
-    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-    let mut source = runtime.pending_import.take().ok_or("Choose notes first.")?;
+    // The fetch may go to a provider, so it runs off the main thread and
+    // outside the lock, with real pauses between retries.
+    let mut source = state
+        .0
+        .lock()
+        .map_err(|_| "The notebook is unavailable.")?
+        .pending_import
+        .take()
+        .ok_or("Choose notes first.")?;
     let provider = source.provider();
-    let fetched = context::fetch_selection(source.as_mut(), &ids, &|| false, &mut |_| true)
-        .map_err(|error| match error {
-            context::FetchError::Failed(context::ConnectionStatus::Expired) => {
-                "Granola's sign-in has expired; connect again."
-            }
-            context::FetchError::Failed(context::ConnectionStatus::Revoked) => {
-                "Granola withdrew this app's access; connect again if you want to."
-            }
-            context::FetchError::Failed(context::ConnectionStatus::RateLimited { .. }) => {
-                "Granola asked for a pause; try again in a moment."
-            }
-            _ => "The notes could not be read.",
-        })?;
+    let selection = ids.clone();
+    let fetched = tauri::async_runtime::spawn_blocking(move || {
+        context::fetch_selection(source.as_mut(), &selection, &|| false, &mut |delay| {
+            std::thread::sleep(delay);
+            true
+        })
+    })
+    .await
+    .map_err(|_| "The notes could not be read.".to_string())?
+    .map_err(|error| match error {
+        context::FetchError::Failed(context::ConnectionStatus::Expired) => {
+            "Granola's sign-in has expired; connect again."
+        }
+        context::FetchError::Failed(context::ConnectionStatus::Revoked) => {
+            "Granola withdrew this app's access; connect again if you want to."
+        }
+        context::FetchError::Failed(context::ConnectionStatus::RateLimited { .. }) => {
+            "Granola asked for a pause; try again in a moment."
+        }
+        _ => "The notes could not be read.",
+    })?;
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
     let outcome = runtime.context.merge(provider, &ids, fetched);
     publish_context(&app, &mut runtime);
     Ok(outcome)
@@ -673,13 +689,11 @@ fn context_items(state: tauri::State<AppState>) -> Result<Vec<context::ContextIt
 fn remove_context_item(
     app: tauri::AppHandle,
     state: tauri::State<AppState>,
+    provider: context::Provider,
     source_id: String,
 ) -> Result<(), String> {
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-    let removed = [context::Provider::File, context::Provider::Granola]
-        .into_iter()
-        .any(|provider| runtime.context.remove(provider, &source_id));
-    if !removed {
+    if !runtime.context.remove(provider, &source_id) {
         return Err("That note is no longer imported.".into());
     }
     publish_context(&app, &mut runtime);
@@ -716,7 +730,7 @@ fn granola_status_now(runtime: &Runtime) -> GranolaStatus {
         tools: runtime
             .granola
             .as_ref()
-            .map(granola::Connection::tool_names)
+            .map(granola::Shared::tool_names)
             .unwrap_or_default(),
     }
 }
@@ -738,10 +752,7 @@ fn granola_error(error: &context::SourceError) -> String {
 /// Signs in to Granola in the person's browser and opens a session. Nothing
 /// is read until they list and choose notes; the tokens stay in memory.
 #[tauri::command]
-async fn connect_granola(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-) -> Result<GranolaStatus, String> {
+async fn connect_granola(state: tauri::State<'_, AppState>) -> Result<GranolaStatus, String> {
     let cancel = Arc::new(AtomicBool::new(false));
     {
         let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
@@ -763,8 +774,11 @@ async fn connect_granola(
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
     runtime.granola_sign_in = None;
     let connection = result??;
-    runtime.granola = Some(connection);
-    let _ = &app;
+    // A cancel that arrived after the browser returned still wins.
+    if cancel.load(Ordering::Relaxed) {
+        return Err("Sign-in cancelled.".into());
+    }
+    runtime.granola = Some(granola::Shared::new(connection));
     Ok(granola_status_now(&runtime))
 }
 
@@ -790,24 +804,25 @@ fn granola_status(state: tauri::State<AppState>) -> Result<GranolaStatus, String
 /// picked file is listed; only the ticked notes are fetched afterwards.
 #[tauri::command]
 async fn list_granola_notes(state: tauri::State<'_, AppState>) -> Result<PickedNotes, String> {
-    let mut connection = state
+    let shared = state
         .0
         .lock()
         .map_err(|_| "The notebook is unavailable.")?
         .granola
         .clone()
         .ok_or("Connect Granola first.")?;
-    let listed = tauri::async_runtime::spawn_blocking(move || {
-        let listed = connection
-            .list_recent()
-            .map_err(|error| granola_error(&error))?;
-        Ok::<_, String>((listed, connection))
+    let listing = shared.clone();
+    let (notes, skipped) = tauri::async_runtime::spawn_blocking(move || {
+        listing.list_recent().map_err(|error| granola_error(&error))
     })
     .await
-    .map_err(|_| "Granola's notes could not be listed.".to_string())?;
-    let ((notes, skipped), connection) = listed?;
+    .map_err(|_| "Granola's notes could not be listed.".to_string())??;
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-    runtime.pending_import = Some(Box::new(connection));
+    // A disconnect while the list was in flight wins: nothing is kept.
+    if runtime.granola.is_none() {
+        return Err("Granola was disconnected.".into());
+    }
+    runtime.pending_import = Some(Box::new(shared));
     Ok(PickedNotes {
         file_name: "Granola · the last 30 days".into(),
         notes,
