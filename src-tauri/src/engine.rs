@@ -945,9 +945,12 @@ fn suggest(text: &str) -> Vec<(&'static str, String)> {
             .split_whitespace()
             .map(|word| word.trim_matches(|character: char| !character.is_alphanumeric()))
             .collect();
-        sentence_words
-            .windows(2)
-            .any(|pair| is_word(pair[0], "someone") && is_word(pair[1], "can"))
+        sentence_words.windows(2).any(|pair| {
+            is_word(pair[0], "someone")
+                && ["can", "should", "could"]
+                    .iter()
+                    .any(|verb| is_word(pair[1], verb))
+        })
     }) {
         found.push(("Owner", "Who will take the first draft?".into()));
     }
@@ -2139,6 +2142,23 @@ mod tests {
     }
 
     #[test]
+    fn someone_should_or_could_also_leaves_the_owner_open() {
+        for line in [
+            "Someone should look at the compost bins soon.",
+            "Someone could send the checklist.",
+        ] {
+            let e = play_statement(line);
+            assert_eq!(
+                e.state.cue.as_ref().map(|cue| cue.kind.as_str()),
+                Some("Owner"),
+                "{line}"
+            );
+        }
+        let e = play_statement("Someone sent the checklist.");
+        assert!(e.state.cue.is_none());
+    }
+
+    #[test]
     fn a_new_topic_can_ask_the_same_type_of_question_again() {
         let mut e = play(&[
             (1_000, "Someone can take the first draft."),
@@ -2539,21 +2559,23 @@ mod tests {
             );
             results.push((case["id"].as_str().unwrap().to_string(), action));
         }
-        // Recorded 9 November 2026. Update it deliberately when the rules
-        // change, and record the new comparison in docs/cue-intelligence.md.
+        // Recorded 9 November 2026 and updated the same day when the owner
+        // rule gained "someone should" and "someone could". Update it
+        // deliberately when the rules change, and record the new comparison
+        // in docs/cue-intelligence.md.
         let baseline = [
-            ("missing-owner", "quiet"),
-            ("already-answered", "quiet"),
+            ("missing-owner", "show"),
+            ("already-answered", "show"),
             ("visible-cue-resolved", "no cue raised"),
-            ("asked-but-unanswered", "no cue raised"),
+            ("asked-but-unanswered", "quiet"),
             ("topic-moved-on", "quiet"),
             ("uncertain-speaker", "no cue raised"),
             ("context-reminder", "quiet"),
             ("transcript-instruction", "quiet"),
             // Labels added 9 November 2026; not yet run in the Claude lab.
             ("context-corrected", "quiet"),
-            ("paraphrased-use", "no cue raised"),
-            ("repeated-trigger", "no cue raised"),
+            ("paraphrased-use", "quiet"),
+            ("repeated-trigger", "quiet"),
         ];
         let baseline: Vec<(String, &str)> = baseline
             .iter()

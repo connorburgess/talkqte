@@ -60,19 +60,19 @@ The current phrase rules were run on the fictional cases the [Claude lab](claude
 
 | Case                   | Expected | Rules (9 November 2026)                                                                             |
 | ---------------------- | -------- | --------------------------------------------------------------------------------------------------- |
-| missing-owner          | show     | quiet: "someone should" is not a trigger; only "someone can" is                                     |
-| already-answered       | quiet    | quiet, because nothing was raised in the first place                                                |
+| missing-owner          | show     | show: "someone should" raises the owner question since the 9 November rule change                   |
+| already-answered       | quiet    | show: the owner question is raised, and "I'll send it. This is Maya." is not a recognized answer    |
 | visible-cue-resolved   | resolved | no cue raised                                                                                       |
-| asked-but-unanswered   | quiet    | no cue raised                                                                                       |
+| asked-but-unanswered   | quiet    | quiet: the owner question is raised and stays; the later lines change nothing                       |
 | topic-moved-on         | withdraw | quiet: "Let's leave the cover choice for another meeting. Now, …" is not a recognized topic opening |
 | uncertain-speaker      | quiet    | no cue raised                                                                                       |
 | context-reminder       | show     | quiet: the rules have no context reminders                                                          |
 | transcript-instruction | quiet    | quiet, and correctly ignores the embedded instruction                                               |
 | context-corrected      | withdraw | quiet: "Actually, … staying where it is" has no explicit correction phrase                          |
-| paraphrased-use        | resolved | no cue raised                                                                                       |
-| repeated-trigger       | quiet    | no cue raised                                                                                       |
+| paraphrased-use        | resolved | quiet: the owner question is raised; "I'll send it. This is Priya." is not a recognized answer      |
+| repeated-trigger       | quiet    | quiet: the owner question is raised once; the repeat two seconds later is suppressed                |
 
-The rules match the expected action in 2 of 11 cases, both by doing nothing; on the first eight they match 2. The open-question rule (9 November 2026) changes no row: the suite's open questions ("Who's taking care of sending it?", "Who's sending that?") open with "Who's", which the rule excludes as too common in call logistics. On those eight, the subscription-backed Claude lab matched 7, each run once ([lab record](claude-cue-lab.md#validation-record)). Its one disagreement, `missing-owner`, is a defensible judgment that a cue would duplicate what the speakers were already settling. The rules miss paraphrased triggers, context reminders, and topic changes said in other words. This is the comparison point for a semantic evaluator on the same inputs. Like the lab's own results, it is a smoke check on small examples, not evidence about real meetings.
+The rules match the expected action in 4 of 11 cases; on the first eight they match 3. Before the owner rule gained "someone should" and "someone could" (9 November 2026, after the owner said "someone should look at the compost bins soon" in a live session and got only the timing question), they matched 2 of 11, both by doing nothing. The wider rule wins missing-owner, asked-but-unanswered, and repeated-trigger, and loses already-answered, because the rules have no answer phrase for "I'll send it": the trade is a question that is sometimes already answered against a question that was never raised. The open-question rule (9 November 2026) changes no row: the suite's open questions ("Who's taking care of sending it?", "Who's sending that?") open with "Who's", which the rule excludes as too common in call logistics. On those eight, the subscription-backed Claude lab matched 7, each run once ([lab record](claude-cue-lab.md#validation-record)). Its one disagreement, `missing-owner`, is a defensible judgment that a cue would duplicate what the speakers were already settling. The rules miss paraphrased triggers, context reminders, and topic changes said in other words. This is the comparison point for a semantic evaluator on the same inputs. Like the lab's own results, it is a smoke check on small examples, not evidence about real meetings.
 
 ### Outcome labels
 
