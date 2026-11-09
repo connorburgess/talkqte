@@ -33,6 +33,7 @@ fn main() {
             "granola_status",
             "list_granola_notes",
             "disconnect_granola",
+            "suggest_granola_focus",
             "download_model",
             "cancel_model_download",
             "remove_model",

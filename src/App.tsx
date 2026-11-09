@@ -286,6 +286,42 @@ function Notebook() {
   const [notes, setNotes] = useState('');
   const [userName, setUserName] = useState('');
   const [focus, setFocus] = useState('');
+  // Granola's assistant can propose focus lines; offered only when the
+  // connection exists and the server lists that tool.
+  const [canSuggest, setCanSuggest] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[] | null>(null);
+  const [ticked, setTicked] = useState<string[]>([]);
+  useEffect(() => {
+    if (view !== 'settings') return;
+    bridge
+      .granolaStatus()
+      .then((status) =>
+        setCanSuggest(
+          status.connected && status.tools.includes('query_granola_meetings'),
+        ),
+      )
+      .catch(() => setCanSuggest(false));
+  }, [view]);
+  const suggestFocus = () =>
+    void run(async () => {
+      const lines = await bridge.suggestGranolaFocus();
+      setSuggestions(lines);
+      setTicked([]);
+      if (lines.length === 0) setNotice('Granola suggested nothing.');
+    });
+  const acceptSuggestions = () =>
+    void run(async () => {
+      const current = focus
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const lines = [...current];
+      for (const line of ticked) if (!lines.includes(line)) lines.push(line);
+      await bridge.command('set_focus', { lines });
+      setFocus(lines.join('\n'));
+      setSuggestions(null);
+      setTicked([]);
+    });
   const initialized = useRef(false);
   // Enter followed by leaving a field saves once, not twice.
   const savingName = useRef(false);
@@ -1089,6 +1125,75 @@ function Notebook() {
                   onChange={(e) => setFocus(e.target.value)}
                   onBlur={saveFocus}
                 />
+                {canSuggest && suggestions === null && (
+                  <div className="suggest-focus">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={busy}
+                      onClick={suggestFocus}
+                    >
+                      Suggest from Granola
+                    </button>
+                    <p className="small muted">
+                      Asks Granola’s assistant one question about your meetings
+                      of the last 30 days and shows its answer for you to tick.
+                      Granola sees the question; nothing else leaves this Mac.
+                    </p>
+                  </div>
+                )}
+                {suggestions !== null && (
+                  <fieldset className="suggest-focus">
+                    <legend>Granola suggests</legend>
+                    {suggestions.length === 0 && (
+                      <p className="small muted">
+                        Nothing came back. Type what matters instead.
+                      </p>
+                    )}
+                    {suggestions.map((line) => (
+                      <label key={line} className="suggest-line">
+                        <input
+                          type="checkbox"
+                          checked={ticked.includes(line)}
+                          onChange={(e) =>
+                            setTicked((current) =>
+                              e.target.checked
+                                ? [...current, line]
+                                : current.filter((seen) => seen !== line),
+                            )
+                          }
+                        />
+                        <span>{line}</span>
+                      </label>
+                    ))}
+                    <div className="dialog-actions">
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={busy}
+                        onClick={() => {
+                          setSuggestions(null);
+                          setTicked([]);
+                        }}
+                      >
+                        Dismiss
+                      </button>
+                      <button
+                        type="button"
+                        className="primary-button"
+                        disabled={busy || ticked.length === 0}
+                        onClick={acceptSuggestions}
+                      >
+                        Add {ticked.length || ''} to the focus
+                      </button>
+                    </div>
+                    <p className="small muted">
+                      A suggestion is Granola’s reading of your notes, not a
+                      fact; it becomes a focus line only when you add it, and
+                      each needs a few specific words.
+                    </p>
+                  </fieldset>
+                )}
               </div>
             </section>
             <section className="setting">

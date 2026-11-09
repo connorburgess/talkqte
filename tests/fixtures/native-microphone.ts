@@ -154,6 +154,8 @@ mockIPC(
         return preview.listGranolaNotes();
       case 'disconnect_granola':
         return preview.disconnectGranola();
+      case 'suggest_granola_focus':
+        return preview.suggestGranolaFocus();
       case 'pick_context_file':
         return preview.pickContextFile();
       case 'import_context_notes': {

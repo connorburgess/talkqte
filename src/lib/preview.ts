@@ -398,6 +398,11 @@ export function connectGranola(): GranolaStatus {
 export function listGranolaNotes(): PickedNotes {
   throw new Error('Connect Granola first.');
 }
+export function suggestGranolaFocus(): string[] {
+  throw new Error(
+    'Granola connects in the desktop app, with your own sign-in.',
+  );
+}
 export function disconnectGranola(): GranolaStatus {
   return { connected: false, tools: [] };
 }

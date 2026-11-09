@@ -444,6 +444,8 @@ fn answer_callback(stream: &mut TcpStream, expected_state: &str) -> Option<Resul
 struct Tool {
     name: String,
     ids_argument: Option<String>,
+    /// The argument its schema names for a free-text question, if any.
+    query_argument: Option<String>,
 }
 
 /// An open MCP session with Granola, acting as the signed-in person.
@@ -536,6 +538,38 @@ impl Connection {
             .collect();
         let skipped = total - summaries.len();
         Ok((summaries, skipped))
+    }
+
+    /// Whether the server offers the assistant that answers questions about
+    /// the person's meetings; absent on some plans.
+    pub fn can_suggest(&self) -> bool {
+        self.tool("query_granola_meetings").is_some()
+    }
+
+    /// Asks Granola's assistant one fixed question about the person's recent
+    /// meetings and returns its answer as candidate focus lines. The answer
+    /// is a suggestion for the person to tick; nothing becomes a focus line
+    /// until they accept it.
+    pub fn suggest_focus(&mut self) -> Result<Vec<String>, SourceError> {
+        let tool = self
+            .tool("query_granola_meetings")
+            .cloned()
+            .ok_or(SourceError::Unavailable)?;
+        let argument = tool.query_argument.unwrap_or_else(|| "query".into());
+        let result = self.call(
+            "tools/call",
+            json!({ "name": tool.name, "arguments": { argument: FOCUS_QUESTION } }),
+        )?;
+        let output = tool_output(&result);
+        let text = match &output {
+            Value::String(text) => text.clone(),
+            other => ["answer", "response", "text", "content", "result"]
+                .iter()
+                .find_map(|key| other.get(*key).and_then(Value::as_str))
+                .map(str::to_string)
+                .unwrap_or_else(|| other.to_string()),
+        };
+        Ok(suggestions_in(&text))
     }
 
     fn notify(&mut self, method: &str) -> Result<(), SourceError> {
@@ -670,7 +704,71 @@ fn tool_from(value: &Value) -> Option<Tool> {
                     .map(|(key, _)| key.clone())
             })
     });
-    Some(Tool { name, ids_argument })
+    let query_argument = properties.and_then(|properties| {
+        ["query", "question", "prompt", "message", "text", "q"]
+            .iter()
+            .find(|candidate| properties.contains_key(**candidate))
+            .map(|candidate| candidate.to_string())
+            .or_else(|| {
+                properties
+                    .iter()
+                    .find(|(_, schema)| schema["type"] == "string")
+                    .map(|(key, _)| key.clone())
+            })
+    });
+    Some(Tool {
+        name,
+        ids_argument,
+        query_argument,
+    })
+}
+
+/// The one question put to Granola's assistant for focus suggestions. It
+/// asks for open matters only, in the person's own meetings, without names,
+/// so a suggestion can become a focus line as it is.
+pub const FOCUS_QUESTION: &str = "From my meetings of the last 30 days, list the decisions still open, the tasks nobody has taken on, and the questions left unanswered. One short line each, at most five lines, no numbering, no people's names, no explanations.";
+/// Suggestions a reply may contribute at most.
+pub const MAX_SUGGESTIONS: usize = 8;
+/// A suggestion longer than a focus line is cut.
+const MAX_SUGGESTION_CHARS: usize = 80;
+
+/// The lines of a free-text reply, without bullets, numbering, or quotes,
+/// deduplicated, cut to a focus line's length, at most `MAX_SUGGESTIONS`.
+pub fn suggestions_in(text: &str) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for raw in text.lines() {
+        let mut line = raw.trim();
+        // "- ", "* ", "• ", "1. ", "1) ", "(1) "
+        line = line
+            .trim_start_matches(['-', '*', '•', '–', '—'])
+            .trim_start();
+        let digits = line
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == '(')
+            .count();
+        if digits > 0 {
+            let rest = &line[digits..];
+            if let Some(rest) = rest.strip_prefix(['.', ')', ':']) {
+                line = rest.trim_start();
+            }
+        }
+        let line = line
+            .trim_matches(['"', '“', '”', '\''])
+            .trim()
+            .trim_end_matches('.')
+            .trim();
+        if line.is_empty() || line.ends_with(':') {
+            continue;
+        }
+        let cut: String = line.chars().take(MAX_SUGGESTION_CHARS).collect();
+        if !lines.iter().any(|seen| seen.eq_ignore_ascii_case(&cut)) {
+            lines.push(cut);
+        }
+        if lines.len() == MAX_SUGGESTIONS {
+            break;
+        }
+    }
+    lines
 }
 
 /// A tool result's content: structured content when the server sends it,
@@ -796,6 +894,19 @@ impl Shared {
             .lock()
             .map_err(|_| SourceError::Unavailable)?
             .list_recent()
+    }
+
+    pub fn can_suggest(&self) -> bool {
+        self.0
+            .lock()
+            .is_ok_and(|connection| connection.can_suggest())
+    }
+
+    pub fn suggest_focus(&self) -> Result<Vec<String>, SourceError> {
+        self.0
+            .lock()
+            .map_err(|_| SourceError::Unavailable)?
+            .suggest_focus()
     }
 }
 
@@ -1069,10 +1180,14 @@ mod tests {
                     }
                     Some("tools/list") => json!({"tools": [
                         {"name": "list_meetings", "inputSchema": {"type": "object", "properties": {}}},
-                        {"name": "get_meetings", "inputSchema": {"type": "object", "properties": {"meeting_ids": {"type": "array", "items": {"type": "string"}}}}}
+                        {"name": "get_meetings", "inputSchema": {"type": "object", "properties": {"meeting_ids": {"type": "array", "items": {"type": "string"}}}}},
+                        {"name": "query_granola_meetings", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}}}
                     ]}),
                     Some("tools/call") if matches!(answer, Answer::ToolError) => {
                         json!({"isError": true, "content": [{"type": "text", "text": "Something went wrong."}]})
+                    }
+                    Some("tools/call") if request["params"]["name"] == "query_granola_meetings" => {
+                        json!({"content": [{"type": "text", "text": "Here is what is still open:\n\n1. Agree the launch plan for the newsletter\n2. Decide who owns the compost bins\n- “Settle the volunteer schedule”\n- Agree the launch plan for the newsletter\n\nLet me know if you want more detail."}]})
                     }
                     // Every note comes back whatever was asked, so the
                     // client's own selection filter is exercised.
@@ -1116,7 +1231,10 @@ mod tests {
         for answer in [Answer::Json, Answer::EventStream] {
             let (endpoint, seen) = fictional_server(answer);
             let mut connection = Connection::open_at(&endpoint, &tokens(), false).unwrap();
-            assert_eq!(connection.tool_names(), ["list_meetings", "get_meetings"]);
+            assert_eq!(
+                connection.tool_names(),
+                ["list_meetings", "get_meetings", "query_granola_meetings"]
+            );
             assert!(connection.capabilities().import_notes);
             assert!(!connection.capabilities().live_input && !connection.capabilities().writeback);
             let (notes, skipped) = connection.list_recent().unwrap();
@@ -1158,6 +1276,41 @@ mod tests {
             assert_eq!(asked["params"]["arguments"]["meeting_ids"], json!(["m2"]));
             assert!(!format!("{connection:?}").contains("fictional-token"));
         }
+    }
+
+    #[test]
+    fn the_assistant_is_asked_one_fixed_question_and_its_lines_become_suggestions() {
+        let (endpoint, seen) = fictional_server(Answer::Json);
+        let mut connection = Connection::open_at(&endpoint, &tokens(), false).unwrap();
+        assert!(connection.can_suggest());
+        let suggestions = connection.suggest_focus().unwrap();
+        assert_eq!(
+            suggestions,
+            [
+                "Agree the launch plan for the newsletter",
+                "Decide who owns the compost bins",
+                "Settle the volunteer schedule",
+                "Let me know if you want more detail"
+            ],
+            "bullets, numbering, quotes, and a repeat are stripped; headings ending in a colon are dropped"
+        );
+        let asked: Value = serde_json::from_str(&seen.lock().unwrap().last().unwrap().1).unwrap();
+        assert_eq!(asked["params"]["name"], "query_granola_meetings");
+        assert_eq!(asked["params"]["arguments"]["query"], FOCUS_QUESTION);
+        // Without the tool there is no suggestion, and the interface knows.
+        drop(connection.tools.pop());
+        assert!(!connection.can_suggest());
+        assert_eq!(
+            connection.suggest_focus().err(),
+            Some(SourceError::Unavailable)
+        );
+        // Long replies are bounded.
+        let many: String = (0..20)
+            .map(|i| format!("{i}. Settle item number {i}\n"))
+            .collect();
+        assert_eq!(suggestions_in(&many).len(), MAX_SUGGESTIONS);
+        assert_eq!(suggestions_in(&"x".repeat(200))[0].chars().count(), 80);
+        assert!(suggestions_in("Open items:\n\n").is_empty());
     }
 
     #[test]
@@ -1218,7 +1371,7 @@ mod tests {
         );
         let (endpoint, _) = fictional_server(Answer::Json);
         let mut connection = Connection::open_at(&endpoint, &tokens(), false).unwrap();
-        drop(connection.tools.pop());
+        connection.tools.retain(|tool| tool.name != "get_meetings");
         assert_eq!(
             connection.fetch(&["m1".into()]).err(),
             Some(SourceError::Unavailable),
