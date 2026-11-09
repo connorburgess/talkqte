@@ -177,8 +177,10 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
     case 'cancel_context_import':
       break;
     case 'remove_context_item': {
-      const { sourceId } = args as Commands['remove_context_item'];
-      contextItems = contextItems.filter((item) => item.sourceId !== sourceId);
+      const { provider, sourceId } = args as Commands['remove_context_item'];
+      contextItems = contextItems.filter(
+        (item) => !(item.provider === provider && item.sourceId === sourceId),
+      );
       emitContext();
       break;
     }

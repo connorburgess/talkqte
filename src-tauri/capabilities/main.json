@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
   "description": "Notebook commands for the local main window only.",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
@@ -32,6 +34,11 @@
     "allow-context-items",
     "allow-remove-context-item",
     "allow-remove-context-from",
+    "allow-connect-granola",
+    "allow-cancel-granola-sign-in",
+    "allow-granola-status",
+    "allow-list-granola-notes",
+    "allow-disconnect-granola",
     "allow-download-model",
     "allow-cancel-model-download",
     "allow-remove-model",

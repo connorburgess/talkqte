@@ -140,6 +140,7 @@ export function ContextNotes({
                 onClick={() =>
                   void run(() =>
                     bridge.command('remove_context_item', {
+                      provider: item.provider,
                       sourceId: item.sourceId,
                     }),
                   )

@@ -1,8 +1,8 @@
 //! Source-aware prior context: notes a user explicitly selects and imports
 //! from a connected note-taker (Granola first) or a file, kept separate from
 //! live meeting evidence. This is the adapter contract and an in-memory
-//! store only. No provider is connected, nothing is fetched over the network
-//! or stored on disk, and nothing is written back.
+//! store. A provider is connected only when the person signs in to it
+//! (`granola.rs`), nothing is stored on disk, and nothing is written back.
 
 use serde::Serialize;
 use std::time::Duration;
@@ -17,7 +17,7 @@ pub const MAX_ATTEMPTS: u32 = 3;
 /// The longest wait honored between attempts, even if a provider asks for more.
 pub const MAX_RETRY_WAIT: Duration = Duration::from_secs(30);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
     Granola,
