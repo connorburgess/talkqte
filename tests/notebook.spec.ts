@@ -109,26 +109,35 @@ test('search has a recoverable empty state and settings explain the prototype', 
   ).toBeVisible();
 });
 
-test('a meeting goal is kept for the session and a goal without identifying words is refused', async ({
+test('focus lines are kept for the session and a line without identifying words is refused', async ({
   page,
 }) => {
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  const goal = page.getByRole('textbox', { name: 'Goal' });
-  await goal.fill('Agree the launch plan for the newsletter');
-  await goal.press('Enter');
+  const focus = page.getByRole('textbox', { name: 'Focus' });
+  await focus.fill(
+    'Agree the launch plan for the newsletter\nDecide who owns the compost bins',
+  );
+  await page.getByRole('textbox', { name: 'Name' }).focus(); // leaving saves
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await expect(page.getByRole('textbox', { name: 'Goal' })).toHaveValue(
-    'Agree the launch plan for the newsletter',
+  await expect(page.getByRole('textbox', { name: 'Focus' })).toHaveValue(
+    'Agree the launch plan for the newsletter\nDecide who owns the compost bins',
   );
-  await page.getByRole('textbox', { name: 'Goal' }).fill('Team sync');
-  await page.getByRole('textbox', { name: 'Goal' }).press('Enter');
+  await page.getByRole('textbox', { name: 'Focus' }).fill('Team sync');
+  await page.getByRole('textbox', { name: 'Name' }).focus();
   await expect(page.getByRole('alert')).toContainText(
-    'Describe the goal in a few specific words',
+    '“Team sync” needs a few specific words',
   );
-  await expect(page.getByRole('textbox', { name: 'Goal' })).toHaveValue(
-    'Agree the launch plan for the newsletter',
+  // The typed text stays so the line can be fixed in place.
+  await expect(page.getByRole('textbox', { name: 'Focus' })).toHaveValue(
+    'Team sync',
   );
+  await page
+    .getByRole('combobox', { name: 'Question timing' })
+    .selectOption('focused');
+  await expect(
+    page.getByRole('combobox', { name: 'Question timing' }),
+  ).toHaveValue('focused');
 });
 
 test('the browser preview never offers a live microphone session', async ({

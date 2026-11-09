@@ -122,6 +122,20 @@ test('a question fits the narrow window used on a small display', async ({
   await expectCompanionToFit(page);
 });
 
+test('the companion switches between only what matters and all questions', async ({
+  page,
+}) => {
+  const focus = page.getByRole('button', { name: 'Show only what matters' });
+  await expect(focus).toHaveAttribute('aria-pressed', 'false');
+  await focus.click();
+  const all = page.getByRole('button', { name: 'Show all questions' });
+  await expect(all).toHaveAttribute('aria-pressed', 'true');
+  await all.click();
+  await expect(
+    page.getByRole('button', { name: 'Show only what matters' }),
+  ).toHaveAttribute('aria-pressed', 'false');
+});
+
 test('the companion bar is the native drag handle and its controls are not', async ({
   page,
 }) => {

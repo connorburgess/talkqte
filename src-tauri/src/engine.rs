@@ -43,6 +43,9 @@ pub enum Status {
 pub enum Sensitivity {
     Balanced,
     Quiet,
+    /// Only questions about the focus lines, questions asked of the user by
+    /// name, and reminders of selected notes.
+    Focused,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
@@ -84,9 +87,10 @@ pub struct Cue {
     pub resolved_by: Option<Resolution>,
     /// Set for a context cue: the imported note it quotes.
     pub note: Option<NoteRef>,
-    /// True when the line uses words from the user's meeting goal: the
-    /// question then skips the pause after another cue and stays longer.
-    pub about_goal: bool,
+    /// True when the line uses words from one of the user's focus lines:
+    /// the question then skips the pause after another cue and stays
+    /// longer, and in Focused mode it is the only kind that appears.
+    pub about_focus: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -115,8 +119,57 @@ const TERMS_NEEDED: usize = 2;
 /// Titles with more terms than this need three matching words, because two
 /// common words then co-occur too easily in ordinary speech.
 const LONG_TITLE_TERMS: usize = 6;
-/// A meeting goal is one short line.
-const MAX_GOAL_CHARS: usize = 80;
+/// A focus line is short, and there are few of them.
+const MAX_FOCUS_CHARS: usize = 80;
+pub const MAX_FOCUS_LINES: usize = 5;
+/// Note reminders a session shows at most, so ten selected notes cannot
+/// become ten interruptions.
+pub const MAX_REMINDERS: usize = 3;
+/// The cue kind that lists the focus lines a conversation never touched.
+pub const STILL_OPEN: &str = "Still open";
+/// How people say a meeting is ending.
+const WRAP_UP: &[&str] = &[
+    "before we finish",
+    "before we wrap",
+    "to wrap up",
+    "wrapping up",
+    "wrap this up",
+    "anything else",
+    "last thing",
+    "before we go",
+    "before we close",
+    "running out of time",
+    "out of time",
+    "final thing",
+];
+
+/// Whether a line sounds like the end of the meeting: a sentence that opens
+/// with one of the phrases, after at most a short lead-in ("OK, so") or a
+/// name ("Robin, anything else?"). "Anything else in the shed?" mid-sentence
+/// does not count.
+fn wraps_up(text: &str) -> bool {
+    text.split(['.', '?', '!', ';']).any(|sentence| {
+        let mut rest = sentence.trim().to_lowercase();
+        // Up to two lead-in words or a vocative, each ending in a comma or
+        // being one of a few interjections.
+        for _ in 0..2 {
+            let Some((head, tail)) = rest.split_once(' ') else {
+                break;
+            };
+            let head = head.trim_end_matches(',');
+            let lead_in = ["ok", "okay", "so", "right", "well", "alright", "and", "now"]
+                .contains(&head)
+                || (rest.split_once(' ').is_some_and(|(h, _)| h.ends_with(','))
+                    && head.chars().all(char::is_alphabetic));
+            if lead_in {
+                rest = tail.trim_start().to_string();
+            } else {
+                break;
+            }
+        }
+        WRAP_UP.iter().any(|phrase| rest.starts_with(phrase))
+    })
+}
 /// Common meeting and function words that never identify a note.
 const NOTE_STOP_WORDS: &[&str] = &[
     "about",
@@ -198,10 +251,12 @@ pub struct Snapshot {
     /// The person's name for this session only, used to notice questions
     /// asked of them. Never saved, and not sent to the companion.
     pub user_name: Option<String>,
-    /// What the user wants from this meeting, for this session only, used to
-    /// let questions about it through sooner. Never saved, and not sent to
-    /// the companion.
-    pub goal: Option<String>,
+    /// What matters in this meeting, as short lines the user typed, for this
+    /// session only: questions about them come through sooner, Focused mode
+    /// shows nothing else, and the ones never touched are listed once near
+    /// the end. Never saved; the companion sees a line only inside that
+    /// Still open list.
+    pub focus: Vec<String>,
 }
 
 // The floating window never receives the notebook or full transcript.
@@ -215,6 +270,8 @@ pub struct CueSnapshot {
     pub overlay_enabled: bool,
     pub companion_position: CompanionPosition,
     pub question_size: QuestionSize,
+    /// So the companion can offer the Focused switch and show its state.
+    pub sensitivity: Sensitivity,
 }
 
 pub struct Engine {
@@ -230,8 +287,14 @@ pub struct Engine {
     /// addressed to them. Never stored or sent anywhere.
     /// When each question type was last shown in this session.
     last_shown: Vec<(String, u64)>,
-    /// Words of the meeting goal that identify it, as for a note title.
-    goal_terms: Vec<String>,
+    /// Words of each focus line that identify it, as for a note title.
+    focus_terms: Vec<Vec<String>>,
+    /// Which focus lines the conversation has touched this session.
+    focus_touched: Vec<bool>,
+    /// Note reminders shown this session, against `MAX_REMINDERS`.
+    reminders_shown: usize,
+    /// Whether the once-per-session list of untouched focus lines was shown.
+    still_open_shown: bool,
     /// Imported notes prepared for matching, and the keys already shown.
     notes: Vec<NoteTerms>,
     shown_notes: Vec<String>,
@@ -278,7 +341,7 @@ impl Engine {
                 question_size: QuestionSize::Standard,
                 live: demo.segments.is_empty() && demo.duration_ms == u64::MAX,
                 user_name: None,
-                goal: None,
+                focus: vec![],
             },
             demo,
             generation: 0,
@@ -287,7 +350,10 @@ impl Engine {
             cooldown_until: 0,
             live_input: false,
             last_shown: vec![],
-            goal_terms: vec![],
+            focus_terms: vec![],
+            focus_touched: vec![],
+            reminders_shown: 0,
+            still_open_shown: false,
             notes: vec![],
             shown_notes: vec![],
             unshown: None,
@@ -303,6 +369,7 @@ impl Engine {
             overlay_enabled: self.state.overlay_enabled,
             companion_position: self.state.companion_position,
             question_size: self.state.question_size,
+            sensitivity: self.state.sensitivity,
         }
     }
 
@@ -320,6 +387,9 @@ impl Engine {
         self.live_input = false;
         self.last_shown.clear();
         self.shown_notes.clear();
+        self.focus_touched = vec![false; self.state.focus.len()];
+        self.reminders_shown = 0;
+        self.still_open_shown = false;
         self.next_segment = 0;
         self.cooldown_until = 0;
         self.state.elapsed_ms = 0;
@@ -471,6 +541,14 @@ impl Engine {
             let excess = self.state.transcript.len() - MAX_TRANSCRIPT_SEGMENTS;
             self.state.transcript.drain(..excess);
         }
+        // Any mention counts as the conversation touching a focus line, even
+        // one put to someone else or taken back: it was raised.
+        if let Some(touched) = self
+            .focus_match(&segment.text)
+            .and_then(|index| self.focus_touched.get_mut(index))
+        {
+            *touched = true;
+        }
         // The conversation answered the open cue. Withdraw it before the
         // user spends attention on it, unless they are reading it; then
         // keep the text in place and say it was answered.
@@ -486,6 +564,8 @@ impl Engine {
                     self.cooldown_until = segment.at_ms + self.cooldown();
                     self.forget_unshown();
                 }
+                // The answer may also be the wrap-up line.
+                self.maybe_still_open(&segment.id, &segment.text, segment.at_ms, now);
                 return;
             }
         }
@@ -540,6 +620,18 @@ impl Engine {
                 withdrawn_for_topic = true;
             }
         }
+        // A wrap-up put to the user ("Robin, anything else before we go?")
+        // is the moment for the Still open list, before it reads as a
+        // question for them.
+        self.maybe_still_open(&segment.id, &segment.text, segment.at_ms, now);
+        if self
+            .state
+            .cue
+            .as_ref()
+            .is_some_and(|cue| cue.kind == STILL_OPEN)
+        {
+            return;
+        }
         // A question asked of the user by name takes priority over an unread
         // suggestion, ignores the cooldown, and shows the question itself.
         // Questions for someone else, or for no one in particular, stay quiet.
@@ -568,7 +660,7 @@ impl Engine {
                     expanded: false,
                     resolved_by: None,
                     note: None,
-                    about_goal: false,
+                    about_focus: false,
                 });
             }
             return;
@@ -583,18 +675,24 @@ impl Engine {
         } else {
             after_correction.to_string()
         };
-        // Kept for the context reminder below; a fixed question may move the
-        // segment's ID into its cue first.
+        // Kept for the reminders below; a fixed question may move the
+        // segment's ID and text into its cue first.
         let line_id = segment.id.clone();
-        // A line that uses the words of the meeting goal may raise a question
+        let line_text = segment.text.clone();
+        // A line that uses the words of a focus line may raise a question
         // during the pause after another cue, and that question stays as long
-        // as one asked of the user. This is a word match on the goal, not a
-        // judgment that the line is about it.
-        let about_goal = self.about_goal(&suggestible);
-        // Skip stale suggestions after a suspended app catches up.
+        // as one asked of the user; in Focused mode only such lines, and
+        // reminders, raise anything. This is a word match on the user's own
+        // words, not a judgment that the line is about them.
+        let about_focus = self.focus_match(&suggestible).is_some();
+        let focused = matches!(self.state.sensitivity, Sensitivity::Focused);
+        // Skip stale suggestions after a suspended app catches up. A focus
+        // question skips the pause left by an unrelated cue; in Focused mode
+        // every question is about the focus, so the pause applies as usual.
         if self.state.cue.is_none()
-            && (segment.at_ms >= self.cooldown_until || about_goal)
+            && (segment.at_ms >= self.cooldown_until || (about_focus && !focused))
             && now - segment.at_ms < CUE_MS
+            && (!focused || about_focus)
         {
             // The same fixed question shortly after it was shown is redundant,
             // whether it was answered, dismissed, or ignored.
@@ -626,7 +724,7 @@ impl Engine {
                     .map(|index| self.last_shown.remove(index).1);
                 self.unshown = Some((key.clone(), previous));
                 self.last_shown.push((key, segment.at_ms));
-                let total_ms = if about_goal { ASKED_MS } else { CUE_MS };
+                let total_ms = if about_focus { ASKED_MS } else { CUE_MS };
                 self.cue_deadline = segment.at_ms + total_ms;
                 self.state.cue = Some(Cue {
                     id: format!("{}:{}", self.generation, segment.id),
@@ -640,10 +738,11 @@ impl Engine {
                     expanded: false,
                     resolved_by: None,
                     note: None,
-                    about_goal,
+                    about_focus,
                 });
             }
         }
+        self.maybe_still_open(&line_id, &line_text, spoken_at, now);
         // A line about an imported note reminds the user of it once, with the
         // note as its source: a context reminder, lowest in priority, under
         // the same expiry and pause as a question. This is a phrase match on
@@ -651,12 +750,15 @@ impl Engine {
         if self.state.cue.is_none()
             && segment.at_ms >= self.cooldown_until
             && now - segment.at_ms < CUE_MS
+            && self.reminders_shown < MAX_REMINDERS
         {
             // Only words not taken back, and not put to someone else, count.
             if let Some(note) = self.note_for(&suggestible).cloned() {
                 // Shown once per session from creation, whether or not the
-                // user got to read it: a reminder is not re-raised later.
+                // user got to read it: a reminder is not re-raised later,
+                // and a session shows at most `MAX_REMINDERS` of them.
                 self.shown_notes.push(note.key.clone());
+                self.reminders_shown += 1;
                 self.unshown = None;
                 self.cue_deadline = segment.at_ms + CUE_MS;
                 self.state.cue = Some(Cue {
@@ -675,7 +777,7 @@ impl Engine {
                         source_date: note.source_date,
                         provider: note.provider,
                     }),
-                    about_goal: false,
+                    about_focus: false,
                 });
             }
         }
@@ -684,6 +786,49 @@ impl Engine {
         if withdrawn_for_topic && self.state.cue.is_none() {
             self.cooldown_until = self.cooldown_until.max(spoken_at + self.cooldown());
         }
+    }
+
+    /// Near the end, once: the focus lines the conversation never touched,
+    /// so a meeting that drifted can still come back to them. A phrase match
+    /// on how people wrap up; nothing else judges the drift. It waits for a
+    /// clear companion and ignores the pause after another cue, in every
+    /// timing setting; a later wrap-up line retries until it has shown.
+    fn maybe_still_open(&mut self, id: &str, text: &str, at_ms: u64, now: u64) {
+        if self.state.cue.is_some()
+            || self.still_open_shown
+            || now - at_ms >= CUE_MS
+            || !wraps_up(text)
+        {
+            return;
+        }
+        let open: Vec<&str> = self
+            .state
+            .focus
+            .iter()
+            .zip(&self.focus_touched)
+            .filter(|(_, touched)| !**touched)
+            .map(|(line, _)| line.as_str())
+            .collect();
+        if open.is_empty() {
+            return;
+        }
+        self.still_open_shown = true;
+        self.unshown = None;
+        self.cue_deadline = at_ms + ASKED_MS;
+        self.state.cue = Some(Cue {
+            id: format!("{}:{}", self.generation, id),
+            kind: STILL_OPEN.into(),
+            question: format!("Not covered: {}", open.join(" · ")),
+            evidence: text.to_string(),
+            source_id: id.to_string(),
+            remaining_ms: self.cue_deadline - now,
+            total_ms: ASKED_MS,
+            held: false,
+            expanded: false,
+            resolved_by: None,
+            note: None,
+            about_focus: true,
+        });
     }
 
     /// A cue created and removed before the next publish was never seen, so
@@ -699,7 +844,7 @@ impl Engine {
 
     fn cooldown(&self) -> u64 {
         match self.state.sensitivity {
-            Sensitivity::Balanced => 10_000,
+            Sensitivity::Balanced | Sensitivity::Focused => 10_000,
             Sensitivity::Quiet => 30_000,
         }
     }
@@ -773,10 +918,11 @@ impl Engine {
         self.shown_notes.retain(|key| keys.contains(&key));
     }
 
-    /// Carries the meeting goal to a replacement engine.
-    pub fn copy_goal_from(&mut self, previous: &Engine) {
-        self.goal_terms = previous.goal_terms.clone();
-        self.state.goal = previous.state.goal.clone();
+    /// Carries the focus lines to a replacement engine.
+    pub fn copy_focus_from(&mut self, previous: &Engine) {
+        self.focus_terms = previous.focus_terms.clone();
+        self.state.focus = previous.state.focus.clone();
+        self.focus_touched = vec![false; self.state.focus.len()];
     }
 
     /// Carries imported notes to a replacement engine.
@@ -810,54 +956,68 @@ impl Engine {
         })
     }
 
-    /// Whether this line uses enough of the goal's words to be about it, by
-    /// the same rule as a note title.
-    fn about_goal(&self, text: &str) -> bool {
-        let needed = if self.goal_terms.len() > LONG_TITLE_TERMS {
-            TERMS_NEEDED + 1
-        } else {
-            TERMS_NEEDED
-        };
-        self.goal_terms.len() >= needed && {
-            let words: Vec<String> = text
-                .split(|character: char| !character.is_alphanumeric() && character != '\'')
-                .filter(|word| !word.is_empty())
-                .map(|word| word.to_lowercase())
-                .collect();
-            self.goal_terms
-                .iter()
-                .filter(|term| words.contains(term))
-                .count()
-                >= needed
-        }
+    /// The first focus line this text uses enough of the words of, by the
+    /// same rule as a note title.
+    fn focus_match(&self, text: &str) -> Option<usize> {
+        let words: Vec<String> = text
+            .split(|character: char| !character.is_alphanumeric() && character != '\'')
+            .filter(|word| !word.is_empty())
+            .map(|word| word.to_lowercase())
+            .collect();
+        self.focus_terms.iter().position(|terms| {
+            let needed = if terms.len() > LONG_TITLE_TERMS {
+                TERMS_NEEDED + 1
+            } else {
+                TERMS_NEEDED
+            };
+            terms.len() >= needed
+                && terms.iter().filter(|term| words.contains(term)).count() >= needed
+        })
     }
 
-    /// Sets or clears the meeting goal. Kept in memory for this app session
-    /// only. A goal needs at least two words that can identify it in
-    /// conversation (five letters or more, not common meeting words), or it
-    /// could never let a question through.
-    pub fn set_goal(&mut self, goal: Option<String>) -> Result<(), String> {
-        let goal = goal
-            .map(|goal| goal.trim().to_string())
-            .filter(|goal| !goal.is_empty());
-        let terms = match &goal {
-            Some(goal) => {
-                if goal.chars().count() > MAX_GOAL_CHARS || goal.chars().any(char::is_control) {
-                    return Err("A meeting goal is one line of up to 80 characters.".into());
-                }
-                let terms = note_terms(goal);
-                if terms.len() < TERMS_NEEDED {
-                    return Err(
-                        "Describe the goal in a few specific words, such as “agree the launch plan for the newsletter”."
-                            .into(),
-                    );
-                }
-                terms
+    /// Replaces the focus lines: what matters in this meeting, one short
+    /// line each, up to `MAX_FOCUS_LINES`. Kept in memory for this app
+    /// session only. Each line needs at least two words that can identify
+    /// it in conversation (five letters or more, not common meeting words),
+    /// or it could never let a question through. Blank lines are dropped.
+    pub fn set_focus(&mut self, lines: Vec<String>) -> Result<(), String> {
+        let lines: Vec<String> = lines
+            .into_iter()
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty())
+            .collect();
+        if lines.len() > MAX_FOCUS_LINES {
+            return Err(format!("Keep the focus to {MAX_FOCUS_LINES} lines."));
+        }
+        let mut terms = Vec::with_capacity(lines.len());
+        for line in &lines {
+            if line.chars().count() > MAX_FOCUS_CHARS || line.chars().any(char::is_control) {
+                return Err(format!(
+                    "Each focus line is up to {MAX_FOCUS_CHARS} characters."
+                ));
             }
-            None => vec![],
-        };
-        self.goal_terms = terms;
-        self.state.goal = goal;
+            let line_terms = note_terms(line);
+            if line_terms.len() < TERMS_NEEDED {
+                return Err(format!(
+                    "“{line}” needs a few specific words, such as “agree the launch plan for the newsletter”."
+                ));
+            }
+            terms.push(line_terms);
+        }
+        // A line kept through an edit keeps whether the conversation touched it.
+        self.focus_touched = lines
+            .iter()
+            .map(|line| {
+                self.state
+                    .focus
+                    .iter()
+                    .position(|old| old == line)
+                    .and_then(|index| self.focus_touched.get(index).copied())
+                    .unwrap_or(false)
+            })
+            .collect();
+        self.focus_terms = terms;
+        self.state.focus = lines;
         self.changed();
         Ok(())
     }
@@ -2414,24 +2574,24 @@ mod tests {
     }
 
     #[test]
-    fn a_question_about_the_meeting_goal_skips_the_pause_and_stays_longer() {
+    fn a_question_about_a_focus_line_skips_the_pause_and_stays_longer() {
         let lines = [
             (1_000, "Someone can take the first draft."),
             (3_000, "We still need to settle the volunteer schedule for the garden either this week or next."),
         ];
         let mut e = play(&lines);
-        e.set_goal(Some("Settle the volunteer schedule".into()))
+        e.set_focus(vec!["Settle the volunteer schedule".into()])
             .unwrap();
         e.advance(1_000);
         let first = e.state.cue.as_ref().unwrap().id.clone();
         e.respond(&first, Response::Dismiss).unwrap(); // starts a 10 s pause
         e.advance(2_000);
-        let cue = e.state.cue.as_ref().expect("the goal question");
+        let cue = e.state.cue.as_ref().expect("the focus question");
         assert_eq!(
             (cue.kind.as_str(), cue.source_id.as_str()),
             ("Decision", "t2")
         );
-        assert!(cue.about_goal);
+        assert!(cue.about_focus);
         assert_eq!(cue.total_ms, 45_000);
         e.advance(40_000);
         assert!(
@@ -2441,7 +2601,7 @@ mod tests {
         e.advance(6_000); // 49 s: past the 48 s deadline
         assert!(e.state.cue.is_none());
 
-        // The same line without a goal waits out the pause like any other.
+        // The same line without a focus waits out the pause like any other.
         let mut e = play(&lines);
         e.advance(1_000);
         let first = e.state.cue.as_ref().unwrap().id.clone();
@@ -2449,7 +2609,7 @@ mod tests {
         e.advance(2_000);
         assert!(e.state.cue.is_none());
 
-        // A line that shares one goal word is not about the goal.
+        // A line that shares one focus word is not about it.
         let mut e = play(&[
             (1_000, "Someone can take the first draft."),
             (
@@ -2457,7 +2617,7 @@ mod tests {
                 "The schedule for the fence is either Monday or Tuesday.",
             ),
         ]);
-        e.set_goal(Some("Settle the volunteer schedule".into()))
+        e.set_focus(vec!["Settle the volunteer schedule".into()])
             .unwrap();
         e.advance(1_000);
         let first = e.state.cue.as_ref().unwrap().id.clone();
@@ -2467,39 +2627,53 @@ mod tests {
     }
 
     #[test]
-    fn a_goal_needs_words_that_can_identify_it() {
+    fn focus_lines_need_identifying_words_and_there_are_at_most_five() {
         let mut e = Engine::default();
-        assert!(e.set_goal(Some("Decide".into())).is_err(), "one word");
+        assert!(e.set_focus(vec!["Decide".into()]).is_err(), "one word");
         assert!(
-            e.set_goal(Some("Sync on the team update".into())).is_err(),
+            e.set_focus(vec!["Sync on the team update".into()]).is_err(),
             "only common meeting words"
         );
-        assert!(e.set_goal(Some("a".repeat(81))).is_err(), "too long");
-        assert!(e.set_goal(Some("line one\nline two".into())).is_err());
-        assert!(e.state.goal.is_none());
-        e.set_goal(Some("  Agree the launch plan for the newsletter  ".into()))
-            .unwrap();
+        assert!(e.set_focus(vec!["a".repeat(81)]).is_err(), "too long");
+        assert!(e.set_focus(vec!["line one\tline two".into()]).is_err());
+        assert!(e
+            .set_focus(
+                (0..6)
+                    .map(|i| format!("settle volunteer schedule {i}"))
+                    .collect()
+            )
+            .is_err());
+        assert!(e.state.focus.is_empty());
+        let error = e
+            .set_focus(vec!["Agree the launch plan".into(), "Sync".into()])
+            .unwrap_err();
+        assert!(error.contains("“Sync”"), "names the line: {error}");
+        e.set_focus(vec![
+            "  Agree the launch plan for the newsletter  ".into(),
+            "".into(),
+            "Decide who owns the compost bins".into(),
+        ])
+        .unwrap();
         assert_eq!(
-            e.state.goal.as_deref(),
-            Some("Agree the launch plan for the newsletter")
+            e.state.focus,
+            [
+                "Agree the launch plan for the newsletter",
+                "Decide who owns the compost bins"
+            ]
         );
-        e.set_goal(Some("   ".into())).unwrap();
-        assert!(e.state.goal.is_none());
-        let eighty = "settle volunteer schedule ".repeat(3) + "ga";
-        assert_eq!(eighty.chars().count(), 80);
-        e.set_goal(Some(eighty.clone())).unwrap();
-        assert_eq!(e.state.goal.as_deref(), Some(eighty.as_str()));
+        e.set_focus(vec!["   ".into()]).unwrap();
+        assert!(e.state.focus.is_empty());
     }
 
     #[test]
-    fn a_long_goal_needs_three_of_its_words_and_the_goal_survives_a_new_engine() {
+    fn a_long_focus_line_needs_three_of_its_words_and_the_focus_survives_a_new_engine() {
         let lines = [
             (1_000, "Someone can take the first draft."),
             (3_000, "The volunteer schedule is either Monday or Tuesday."),
         ];
-        let goal = "Settle the volunteer schedule, budget, signage, compost and newsletter";
+        let line = "Settle the volunteer schedule, budget, signage, compost and newsletter";
         let mut e = play(&lines);
-        e.set_goal(Some(goal.into())).unwrap();
+        e.set_focus(vec![line.into()]).unwrap();
         e.advance(1_000);
         let first = e.state.cue.as_ref().unwrap().id.clone();
         e.respond(&first, Response::Dismiss).unwrap();
@@ -2507,8 +2681,8 @@ mod tests {
         assert!(e.state.cue.is_none(), "two of seven words is not about it");
 
         let mut next = Engine::default();
-        next.copy_goal_from(&e);
-        assert_eq!(next.state.goal.as_deref(), Some(goal));
+        next.copy_focus_from(&e);
+        assert_eq!(next.state.focus, [line]);
         next.demo.segments = vec![Segment {
             id: "t1".into(),
             at_ms: 1_000,
@@ -2524,7 +2698,216 @@ mod tests {
             .cue
             .as_ref()
             .expect("three words, during a Quiet pause");
-        assert!(cue.about_goal);
+        assert!(cue.about_focus);
+    }
+
+    // Stress tests of the focus idea on fictional conversations.
+
+    #[test]
+    fn focused_mode_shows_only_what_matters_but_still_hears_the_user_by_name() {
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (
+                14_000,
+                "We should decide soon, either the sign or the leaflet.",
+            ),
+            (27_000, "Robin, can you take the leaflet?"),
+            (
+                90_000,
+                "We should settle the volunteer schedule either Monday or Tuesday.",
+            ),
+        ]);
+        e.set_focus(vec!["Settle the volunteer schedule".into()])
+            .unwrap();
+        e.set_user_name(Some("Robin".into())).unwrap();
+        e.set_sensitivity(Sensitivity::Focused);
+        e.advance(1_000);
+        assert!(
+            e.state.cue.is_none(),
+            "an owner question off the focus stays quiet"
+        );
+        e.advance(13_000);
+        assert!(
+            e.state.cue.is_none(),
+            "timing and decision questions off the focus stay quiet"
+        );
+        e.advance(13_000);
+        assert_eq!(
+            e.state.cue.as_ref().map(|c| c.kind.as_str()),
+            Some(ASKED),
+            "a question put to the user by name still arrives"
+        );
+        e.advance(48_000);
+        assert!(
+            e.state.cue.is_none(),
+            "the asked question has passed and Focused keeps the usual pause"
+        );
+        e.advance(15_000);
+        let cue = e.state.cue.as_ref().expect("the focus question");
+        assert_eq!(cue.kind, "Decision");
+        assert!(cue.about_focus);
+    }
+
+    #[test]
+    fn a_derailed_meeting_stays_quiet_and_gets_one_still_open_list_when_it_wraps_up() {
+        let mut lines: Vec<(u64, &str)> = vec![
+            (1_000, "Someone can take the first draft of the newsletter."),
+            (12_000, "Did anyone see the match last night?"),
+            (23_000, "Someone can bring snacks soon."),
+            (34_000, "We could go either to the park or the river."),
+            (45_000, "Does anyone have a recommendation for a plumber?"),
+            (56_000, "Someone should look at the compost bins soon."),
+            (67_000, "Anyway, that was a long tangent."),
+        ];
+        lines.push((78_000, "Before we finish, anything else?"));
+        lines.push((90_000, "To wrap up then, thanks everyone."));
+        let mut e = play(&lines);
+        e.set_focus(vec![
+            "Agree the launch plan for the newsletter".into(),
+            "Decide who owns the compost bins".into(),
+        ])
+        .unwrap();
+        e.set_sensitivity(Sensitivity::Focused);
+        for _ in 0..7 {
+            e.advance(11_000);
+            assert!(
+                e.state.cue.is_none(),
+                "quiet through the tangent at {} ms",
+                e.state.elapsed_ms
+            );
+        }
+        e.advance(1_000); // 78 s: the wrap-up line
+        let cue = e.state.cue.as_ref().expect("the still-open list");
+        assert_eq!(cue.kind, STILL_OPEN);
+        assert_eq!(
+            cue.question,
+            "Not covered: Agree the launch plan for the newsletter · Decide who owns the compost bins"
+        );
+        assert_eq!(cue.total_ms, 45_000);
+        assert!(cue.about_focus);
+        let id = cue.id.clone();
+        e.respond(&id, Response::Dismiss).unwrap();
+        e.advance(12_000); // 90 s: a second wrap-up line raises nothing
+        assert!(e.state.cue.is_none());
+
+        // A focus line the conversation did touch is not listed, and the
+        // list appears in Balanced mode as well.
+        let mut e = play(&[
+            (
+                1_000,
+                "The launch plan for the newsletter is either May or June.",
+            ),
+            // The 45 s focus question has passed; the list waits for a clear companion.
+            (60_000, "Last thing before we go: parking."),
+        ]);
+        e.set_focus(vec![
+            "Agree the launch plan for the newsletter".into(),
+            "Decide who owns the compost bins".into(),
+        ])
+        .unwrap();
+        e.advance(1_000);
+        assert!(e
+            .state
+            .cue
+            .as_ref()
+            .is_some_and(|c| c.about_focus && c.kind == "Decision"));
+        e.advance(59_000);
+        assert_eq!(
+            e.state.cue.as_ref().map(|c| c.question.as_str()),
+            Some("Not covered: Decide who owns the compost bins")
+        );
+
+        // Nothing to list means no nudge; and no focus means no nudge.
+        let mut e = play(&[(1_000, "Before we finish, anything else?")]);
+        e.advance(1_000);
+        assert!(e.state.cue.is_none());
+    }
+
+    #[test]
+    fn a_focus_line_put_to_someone_else_still_counts_as_touched_and_edits_keep_touched() {
+        let mut e = play(&[
+            (1_000, "Sam, can you settle the volunteer schedule?"),
+            (20_000, "Robin, anything else before we finish?"),
+        ]);
+        e.set_user_name(Some("Robin".into())).unwrap();
+        e.set_focus(vec![
+            "Settle the volunteer schedule".into(),
+            "Decide who owns the compost bins".into(),
+        ])
+        .unwrap();
+        e.advance(1_000);
+        assert!(e.state.cue.is_none(), "a question for Sam raises nothing");
+        // Editing the list keeps what was touched; a new line starts untouched.
+        e.set_focus(vec![
+            "Agree the newsletter launch".into(),
+            "Settle the volunteer schedule".into(),
+        ])
+        .unwrap();
+        e.advance(19_000);
+        assert_eq!(
+            e.state.cue.as_ref().map(|c| c.question.as_str()),
+            Some("Not covered: Agree the newsletter launch"),
+            "the wrap-up came in a line addressed to the user"
+        );
+        for line in [
+            "Before we finish, anything else?",
+            "OK, so, to wrap up: thanks.",
+            "Robin, anything else before we go?",
+            "Right. Last thing before we close.",
+        ] {
+            assert!(wraps_up(line), "{line}");
+        }
+        for line in [
+            "Is there anything else in the shed?",
+            "We are running out of time on the fence, not the meeting.",
+            "I'll wrap this up tonight and send it.",
+        ] {
+            assert!(!wraps_up(line), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_session_shows_at_most_three_note_reminders() {
+        let mut e = play(&[
+            (1_000, "The garden welcome guide needs a map."),
+            (15_000, "The volunteer schedule has a gap on Wednesday."),
+            (29_000, "The compost budget request is still open."),
+            (43_000, "The signage proposal is ready."),
+            (57_000, "The newsletter launch plan slipped a week."),
+        ]);
+        e.set_notes(
+            [
+                ("n1", "Garden welcome guide"),
+                ("n2", "Volunteer schedule"),
+                ("n3", "Compost budget request"),
+                ("n4", "Signage proposal"),
+                ("n5", "Newsletter launch plan"),
+            ]
+            .iter()
+            .map(|(key, title)| {
+                (
+                    key.to_string(),
+                    title.to_string(),
+                    "2026-11-01".into(),
+                    "file".into(),
+                    format!("About the {}.", title.to_lowercase()),
+                )
+            })
+            .collect(),
+        );
+        let mut shown = 0;
+        for step in 0..5 {
+            e.advance(if step == 0 { 1_000 } else { 14_000 });
+            if let Some(cue) = e.state.cue.clone() {
+                assert_eq!(cue.kind, CONTEXT);
+                shown += 1;
+                e.respond(&cue.id, Response::Dismiss).unwrap();
+            }
+        }
+        assert_eq!(
+            shown, MAX_REMINDERS,
+            "the fourth and fifth notes are not shown"
+        );
     }
 
     #[test]
