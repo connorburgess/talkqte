@@ -92,8 +92,7 @@ fn carry_over(previous: &Engine, mut next: Engine) -> Engine {
     next.set_question_size(state.question_size);
     next.state.notes = state.notes.clone();
     next.state.user_name = state.user_name.clone();
-    next.set_goal(state.goal.clone())
-        .expect("a goal the previous engine accepted");
+    next.copy_goal_from(previous);
     next.copy_notes_from(previous);
     next.continue_sessions_from(previous);
     next

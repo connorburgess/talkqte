@@ -773,6 +773,12 @@ impl Engine {
         self.shown_notes.retain(|key| keys.contains(&key));
     }
 
+    /// Carries the meeting goal to a replacement engine.
+    pub fn copy_goal_from(&mut self, previous: &Engine) {
+        self.goal_terms = previous.goal_terms.clone();
+        self.state.goal = previous.state.goal.clone();
+    }
+
     /// Carries imported notes to a replacement engine.
     pub fn copy_notes_from(&mut self, previous: &Engine) {
         self.notes = previous.notes.clone();
@@ -2372,6 +2378,46 @@ mod tests {
         );
         e.set_goal(Some("   ".into())).unwrap();
         assert!(e.state.goal.is_none());
+        let eighty = "settle volunteer schedule ".repeat(3) + "ga";
+        assert_eq!(eighty.chars().count(), 80);
+        e.set_goal(Some(eighty.clone())).unwrap();
+        assert_eq!(e.state.goal.as_deref(), Some(eighty.as_str()));
+    }
+
+    #[test]
+    fn a_long_goal_needs_three_of_its_words_and_the_goal_survives_a_new_engine() {
+        let lines = [
+            (1_000, "Someone can take the first draft."),
+            (3_000, "The volunteer schedule is either Monday or Tuesday."),
+        ];
+        let goal = "Settle the volunteer schedule, budget, signage, compost and newsletter";
+        let mut e = play(&lines);
+        e.set_goal(Some(goal.into())).unwrap();
+        e.advance(1_000);
+        let first = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&first, Response::Dismiss).unwrap();
+        e.advance(2_000);
+        assert!(e.state.cue.is_none(), "two of seven words is not about it");
+
+        let mut next = Engine::default();
+        next.copy_goal_from(&e);
+        assert_eq!(next.state.goal.as_deref(), Some(goal));
+        next.demo.segments = vec![Segment {
+            id: "t1".into(),
+            at_ms: 1_000,
+            speaker: "Robin".into(),
+            text: "The volunteer schedule and the budget are either Monday or Tuesday.".into(),
+        }];
+        next.start().unwrap();
+        next.set_sensitivity(Sensitivity::Quiet);
+        next.cooldown_until = 20_000;
+        next.advance(1_000);
+        let cue = next
+            .state
+            .cue
+            .as_ref()
+            .expect("three words, during a Quiet pause");
+        assert!(cue.about_goal);
     }
 
     #[test]

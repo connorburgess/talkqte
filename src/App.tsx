@@ -249,6 +249,9 @@ function Notebook() {
   const [userName, setUserName] = useState('');
   const [goal, setGoal] = useState('');
   const initialized = useRef(false);
+  // Enter followed by leaving a field saves once, not twice.
+  const savingName = useRef(false);
+  const savingGoal = useRef(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
@@ -372,12 +375,17 @@ function Notebook() {
       setUserName(current);
       return;
     }
+    if (savingName.current) return;
+    savingName.current = true;
     bridge
       .command('set_user_name', { name: next || null })
       .then(() => setUserName(next))
       .catch((e: unknown) => {
         setError(e instanceof Error ? e.message : String(e));
         setUserName(current);
+      })
+      .finally(() => {
+        savingName.current = false;
       });
   };
   const saveGoal = () => {
@@ -387,12 +395,17 @@ function Notebook() {
       setGoal(current);
       return;
     }
+    if (savingGoal.current) return;
+    savingGoal.current = true;
     bridge
       .command('set_goal', { goal: next || null })
       .then(() => setGoal(next))
       .catch((e: unknown) => {
         setError(e instanceof Error ? e.message : String(e));
         setGoal(current);
+      })
+      .finally(() => {
+        savingGoal.current = false;
       });
   };
   const prepareExport = () =>
@@ -929,7 +942,7 @@ function Notebook() {
             <section className="setting">
               <div>
                 <h2>Your name</h2>
-                <p>
+                <p id="user-name-help">
                   In a live session, when someone asks you something by name,
                   such as “Sam, can you take the draft?”, the question is shown
                   as Asked you and stays while you answer. Questions for other
@@ -941,6 +954,7 @@ function Notebook() {
                 <label htmlFor="user-name">Name</label>
                 <input
                   id="user-name"
+                  aria-describedby="user-name-help"
                   type="text"
                   value={userName}
                   maxLength={40}
@@ -957,19 +971,21 @@ function Notebook() {
             <section className="setting">
               <div>
                 <h2>Meeting goal</h2>
-                <p>
+                <p id="meeting-goal-help">
                   One line on what you want from this meeting, such as “agree
                   the launch plan for the newsletter”. When a line in the
                   conversation uses its words, a question about it comes through
-                  even during the pause after another question and stays as long
-                  as one asked of you by name. It is a word match, not
-                  understanding, and is kept only until you close the app.
+                  even during the pause after another question, with either
+                  timing setting, and stays 45 seconds, the length of a question
+                  asked of you by name. It is a word match, not understanding,
+                  and is kept only until you close the app.
                 </p>
               </div>
               <div className="setting-control">
                 <label htmlFor="meeting-goal">Goal</label>
                 <input
                   id="meeting-goal"
+                  aria-describedby="meeting-goal-help"
                   type="text"
                   value={goal}
                   maxLength={80}
