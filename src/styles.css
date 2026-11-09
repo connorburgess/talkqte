@@ -1445,6 +1445,7 @@ svg {
 .setup-steps .text-button {
   margin-top: 4px;
   min-height: 32px;
+}
 
 /* Focus suggestions from Granola, under the focus field in Settings. */
 .suggest-focus {
