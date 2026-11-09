@@ -80,13 +80,13 @@ fn args() -> Result<Args, String> {
 
 /// Reads a 16-bit PCM, 16 kHz mono WAV file.
 fn read_wav(path: &PathBuf) -> Result<Vec<f32>, String> {
-    // About 17 minutes of 16 kHz 16-bit audio; refuse larger files.
-    const MAX_BYTES: u64 = 32 * 1024 * 1024;
+    // About 70 minutes of 16 kHz 16-bit audio; refuse larger files.
+    const MAX_BYTES: u64 = 128 * 1024 * 1024;
     let size = std::fs::metadata(path)
         .map_err(|_| "the clip could not be read")?
         .len();
     if size > MAX_BYTES {
-        return Err("the clip is larger than 32 MiB".into());
+        return Err("the clip is larger than 128 MiB".into());
     }
     let bytes = std::fs::read(path).map_err(|_| "the clip could not be read")?;
     if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
