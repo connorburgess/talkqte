@@ -200,6 +200,19 @@ export function ContextNotes({
             ))}
         </div>
       </div>
+      {granola.connected && (
+        <p className="muted small connection-terms" role="status">
+          Granola connected as you.{' '}
+          {granola.tools.includes('get_meetings')
+            ? 'TalkQTE may list and read the notes you choose from the last 30 days'
+            : 'This account offers no note access to TalkQTE'}
+          {granola.tools.includes('query_granola_meetings')
+            ? ', and may ask its assistant one question when you press Suggest from Granola'
+            : ''}
+          ; it reads no transcripts and writes nothing back. Disconnect forgets
+          the sign-in; imported notes stay until you remove them.
+        </p>
+      )}
       {signingIn && (
         <p className="muted small" role="status">
           Sign in to Granola in your browser, then return here. Nothing is read
