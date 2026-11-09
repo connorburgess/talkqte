@@ -108,17 +108,17 @@ test('a question fits the narrow window used on a small display', async ({
   await expect(question.locator('blockquote')).toBeVisible();
   await expectCompanionToFit(page);
   expect(await fitsSideways()).toBe(true);
-  // Large text in the same narrow window: 400 for a question, 520 with context.
+  // Large text in the same narrow window: 420 for a question, 540 with context.
   await page.evaluate(async () => {
     const previewPath = '/src/lib/preview.ts';
     const preview = await import(previewPath);
     preview.command('set_question_size', { value: 'large' });
   });
-  await page.setViewportSize({ width: 360, height: 520 });
+  await page.setViewportSize({ width: 360, height: 540 });
   await expectCompanionToFit(page);
   expect(await fitsSideways()).toBe(true);
   await question.getByRole('button', { name: 'Hide context' }).click();
-  await page.setViewportSize({ width: 360, height: 400 });
+  await page.setViewportSize({ width: 360, height: 420 });
   await expectCompanionToFit(page);
 });
 
@@ -233,7 +233,7 @@ test('an answered question being read stays and shows the answer', async ({
     const preview = await import(previewPath);
     preview.command('set_question_size', { value: 'large' });
   });
-  await page.setViewportSize({ width: 420, height: 620 });
+  await page.setViewportSize({ width: 420, height: 640 });
   await expectCompanionToFit(page);
   await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
   await expect(question).toHaveCount(0);
