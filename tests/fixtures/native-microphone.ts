@@ -146,6 +146,14 @@ mockIPC(
       }
       case 'context_items':
         return [];
+      case 'granola_status':
+        return preview.granolaStatus();
+      case 'connect_granola':
+        return preview.connectGranola();
+      case 'list_granola_notes':
+        return preview.listGranolaNotes();
+      case 'disconnect_granola':
+        return preview.disconnectGranola();
       case 'pick_context_file':
         return preview.pickContextFile();
       case 'import_context_notes': {

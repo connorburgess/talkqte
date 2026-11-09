@@ -8,6 +8,7 @@ import type {
   ModelStatus,
   PickedNotes,
   Snapshot,
+  GranolaStatus,
 } from './types';
 
 const state: Snapshot = {
@@ -252,6 +253,8 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
       state.goal = goal;
       break;
     }
+    case 'cancel_granola_sign_in':
+      break;
     case 'set_sensitivity':
       state.sensitivity = (args as Commands['set_sensitivity']).value;
       break;
@@ -379,6 +382,21 @@ export function removeAllContext(): number {
 }
 export function contextItemsNow(): ContextItem[] {
   return structuredClone(contextItems);
+}
+// The browser preview has no account sign-in; Granola connects in the desktop app.
+export function granolaStatus(): GranolaStatus {
+  return { connected: false, tools: [] };
+}
+export function connectGranola(): GranolaStatus {
+  throw new Error(
+    'Granola connects in the desktop app, with your own sign-in.',
+  );
+}
+export function listGranolaNotes(): PickedNotes {
+  throw new Error('Connect Granola first.');
+}
+export function disconnectGranola(): GranolaStatus {
+  return { connected: false, tools: [] };
 }
 export function pickContextFile(): PickedNotes {
   return {

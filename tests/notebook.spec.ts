@@ -224,6 +224,19 @@ test('keyboard users can change notebook tabs and close the export preview', asy
   ).toBeFocused();
 });
 
+test('the browser preview offers no Granola connection and says where it lives', async ({
+  page,
+}) => {
+  const panel = page.getByRole('region', { name: 'Prior context' });
+  await expect(panel.getByRole('button', { name: /Granola/ })).toHaveCount(0);
+  await expect(panel).toContainText(
+    'Connect Granola to choose from your notes',
+  );
+  await expect(
+    panel.getByRole('button', { name: 'Add notes from a file' }),
+  ).toBeVisible();
+});
+
 test('a line about an imported note shows a reminder that names the note as its source', async ({
   page,
 }) => {

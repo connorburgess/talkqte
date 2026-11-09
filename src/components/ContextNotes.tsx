@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { FileText, X } from 'lucide-react';
+import { FileText, Link2, X } from 'lucide-react';
 import * as bridge from '../lib/bridge';
-import type { ContextItem, PickedNotes } from '../lib/types';
+import type { ContextItem, GranolaStatus, PickedNotes } from '../lib/types';
 
 /**
  * Prior notes the user imported from a file for this session. They are shown
@@ -19,6 +19,18 @@ export function ContextNotes({
   onNotice: (message: string) => void;
 }) {
   const [picked, setPicked] = useState<PickedNotes | null>(null);
+  const [granola, setGranola] = useState<GranolaStatus>({
+    connected: false,
+    tools: [],
+  });
+  const [signingIn, setSigningIn] = useState(false);
+  useEffect(() => {
+    // The desktop keeps the session for the app run; the preview has none.
+    bridge
+      .granolaStatus()
+      .then(setGranola)
+      .catch(() => setGranola({ connected: false, tools: [] }));
+  }, []);
   const [chosen, setChosen] = useState<string[]>([]);
   const [working, setWorking] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -65,6 +77,40 @@ export function ContextNotes({
       await bridge.command('cancel_context_import');
       setPicked(null);
     });
+  // Sign-in opens the browser and waits for the return; Cancel sign-in
+  // ends the wait. Nothing is read until the person lists and ticks notes.
+  const connectGranola = () => {
+    setSigningIn(true);
+    void run(async () => {
+      try {
+        const status = await bridge.connectGranola();
+        setGranola(status);
+        onNotice(
+          status.tools.includes('get_meetings')
+            ? 'Granola connected. Choose which recent notes to bring in.'
+            : 'Granola connected, but this account offers no note access.',
+        );
+      } finally {
+        setSigningIn(false);
+      }
+    });
+  };
+  const cancelSignIn = () =>
+    void bridge.command('cancel_granola_sign_in').catch(() => {});
+  const chooseGranola = () =>
+    void run(async () => {
+      const result = await bridge.listGranolaNotes();
+      returnFocus.current = true;
+      setChosen([]);
+      setPicked(result);
+    });
+  const disconnectGranola = () =>
+    void run(async () => {
+      setGranola(await bridge.disconnectGranola());
+      onNotice(
+        'Granola disconnected. Imported notes stay until you remove them.',
+      );
+    });
   const importChosen = () =>
     void run(async () => {
       const outcome = await bridge.importContextNotes(chosen);
@@ -85,8 +131,8 @@ export function ContextNotes({
         <div>
           <strong>Prior context</strong>
           <span className="muted small">
-            Notes you chose from a file · not from this conversation · kept in
-            memory, never exported
+            Notes you chose from a file or from Granola · not from this
+            conversation · kept in memory, never exported
           </span>
         </div>
         <div className="context-actions">
@@ -119,8 +165,47 @@ export function ContextNotes({
             <FileText size={15} />
             Add notes from a file
           </button>
+          {bridge.desktop &&
+            (granola.connected ? (
+              <>
+                <button
+                  className="secondary-button"
+                  disabled={busy || working}
+                  onClick={chooseGranola}
+                >
+                  <Link2 size={15} />
+                  Choose Granola notes
+                </button>
+                <button
+                  className="text-button"
+                  disabled={busy || working}
+                  onClick={disconnectGranola}
+                >
+                  Disconnect Granola
+                </button>
+              </>
+            ) : signingIn ? (
+              <button className="text-button" onClick={cancelSignIn}>
+                Cancel sign-in
+              </button>
+            ) : (
+              <button
+                className="secondary-button"
+                disabled={busy || working}
+                onClick={connectGranola}
+              >
+                <Link2 size={15} />
+                Connect Granola
+              </button>
+            ))}
         </div>
       </div>
+      {signingIn && (
+        <p className="muted small" role="status">
+          Sign in to Granola in your browser, then return here. Nothing is read
+          until you choose notes.
+        </p>
+      )}
       {items.length > 0 ? (
         <ul className="context-list">
           {items.map((item) => (
@@ -128,7 +213,8 @@ export function ContextNotes({
               <div>
                 <strong>{item.title}</strong>
                 <span className="muted small">
-                  {item.sourceDate} · From a file
+                  {item.sourceDate} ·{' '}
+                  {item.provider === 'granola' ? 'From Granola' : 'From a file'}
                 </span>
                 <p>{item.excerpt}</p>
               </div>
@@ -153,8 +239,9 @@ export function ContextNotes({
         </ul>
       ) : (
         <p className="muted small">
-          No prior notes selected. A TalkQTE notes file is a JSON file with a
-          list of notes, each with an id, a date, and text.
+          No prior notes selected. Connect Granola to choose from your notes of
+          the last 30 days, or add a file. A TalkQTE notes file is a JSON file
+          with a list of notes, each with an id, a date, and text.
         </p>
       )}
       <dialog
