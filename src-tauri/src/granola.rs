@@ -498,6 +498,10 @@ impl Connection {
         }
         connection.notify("notifications/initialized")?;
         let listed = connection.call("tools/list", json!({}))?;
+        // Schemas carry no personal data; they are printed whole.
+        if std::env::var_os("TALKQTE_GRANOLA_TRACE").is_some() {
+            eprintln!("granola trace: tools/list: {}", listed);
+        }
         connection.tools = listed["tools"]
             .as_array()
             .map(|tools| tools.iter().filter_map(tool_from).collect())
@@ -525,6 +529,8 @@ impl Connection {
             "tools/call",
             json!({ "name": "list_meetings", "arguments": {} }),
         )?;
+        trace("list_meetings result", &result);
+        trace("list_meetings output", &tool_output(&result));
         let notes = notes_in(&tool_output(&result));
         let total = notes.len();
         let summaries: Vec<NoteSummary> = notes
@@ -561,6 +567,7 @@ impl Connection {
             "tools/call",
             json!({ "name": tool.name, "arguments": { argument: FOCUS_QUESTION } }),
         )?;
+        trace("query_granola_meetings result", &result);
         Ok(suggestions_in(&suggestion_text(&tool_output(&result))))
     }
 
@@ -681,6 +688,36 @@ fn sse_message(text: &str, id: u64) -> Option<Value> {
     found
 }
 
+/// Developer trace, on only when `TALKQTE_GRANOLA_TRACE` is set: the
+/// server's tool schemas (not personal) and the *shape* of each tool reply
+/// with every string replaced by its length and arrays cut to two items,
+/// so the mapping can be fixed for a real account without reading its
+/// notes. Printed to stderr; never written to a file or sent anywhere.
+fn trace(label: &str, value: &Value) {
+    if std::env::var_os("TALKQTE_GRANOLA_TRACE").is_none() {
+        return;
+    }
+    eprintln!("granola trace: {label}: {}", shape(value));
+}
+
+/// The structure of a value with no content: `"<str:12>"` for a string.
+fn shape(value: &Value) -> Value {
+    match value {
+        Value::String(text) => Value::String(format!("<str:{}>", text.chars().count())),
+        Value::Array(items) => {
+            let mut shapes: Vec<Value> = items.iter().take(2).map(shape).collect();
+            if items.len() > 2 {
+                shapes.push(Value::String(format!("<+{} more>", items.len() - 2)));
+            }
+            Value::Array(shapes)
+        }
+        Value::Object(map) => {
+            Value::Object(map.iter().map(|(k, v)| (k.clone(), shape(v))).collect())
+        }
+        other => other.clone(),
+    }
+}
+
 fn tool_from(value: &Value) -> Option<Tool> {
     let name = value["name"].as_str()?.to_string();
     let properties = value["inputSchema"]["properties"].as_object();
@@ -741,6 +778,41 @@ const CHATTER: &[&str] = &[
     "sure",
 ];
 
+/// Text without markup an assistant wraps around its answer: tags such as
+/// `<access_notice>…</access_notice>` go, and so do markdown reference
+/// links such as `[[11]](https://…)` or `[source](https://…)`, which cite a
+/// note rather than say anything.
+fn without_markup(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(open) = rest.find('<') {
+        out.push_str(&rest[..open]);
+        match rest[open..].find('>') {
+            Some(close) => rest = &rest[open + close + 1..],
+            None => {
+                // A lone "<" is text, not a tag.
+                out.push_str(&rest[open..]);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    // Links: a bracketed label followed by a parenthesised target.
+    let mut text = out;
+    while let Some(start) = text.find('[') {
+        let after = &text[start..];
+        let Some(label_end) = after.find("](") else {
+            break;
+        };
+        let Some(target_len) = after[label_end + 2..].find(')') else {
+            break;
+        };
+        let end = start + label_end + 2 + target_len + 1;
+        text.replace_range(start..end, "");
+    }
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Characters that show as nothing or reorder text, which a note could
 /// carry to make a line read differently from what it is.
 fn is_invisible(character: char) -> bool {
@@ -758,6 +830,11 @@ pub fn suggestions_in(text: &str) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     for raw in text.lines() {
         let cleaned: String = raw.chars().filter(|c| !is_invisible(*c)).collect();
+        // A line that opens with a tag is a notice around the answer, not an item.
+        if cleaned.trim_start().starts_with('<') && cleaned.contains('>') {
+            continue;
+        }
+        let cleaned = without_markup(&cleaned);
         let mut line = cleaned.trim();
         // A markdown heading introduces items; it is not one.
         if line.starts_with('#') {
@@ -1021,6 +1098,7 @@ impl NoteSource for Connection {
             "tools/call",
             json!({ "name": tool.name, "arguments": { argument: selection } }),
         )?;
+        trace("get_meetings result", &result);
         Ok(notes_in(&tool_output(&result))
             .into_iter()
             .filter(|note| selection.iter().any(|wanted| wanted == &note.id))
@@ -1411,6 +1489,22 @@ mod tests {
     }
 
     #[test]
+    fn tags_and_citation_links_around_suggestions_are_not_content() {
+        let cited = suggestions_in(
+            "<access_notice>Some notes were excluded because of their date.</access_notice>\n1. Decide the signage budget. [[11]](https://example.test/notes/11)\n2. Confirm the launch date [[2]](https://example.test/notes/2) with the committee.\n- Agree the welcome guide <em>soon</em> [source](https://example.test/x)",
+        );
+        assert_eq!(
+            cited,
+            [
+                "Decide the signage budget",
+                "Confirm the launch date with the committee",
+                "Agree the welcome guide soon",
+            ]
+        );
+        assert_eq!(without_markup("a < b and [x] alone"), "a < b and [x] alone");
+    }
+
+    #[test]
     fn a_shared_session_keeps_one_sequence_of_request_ids() {
         let (endpoint, seen) = fictional_server(Answer::Json);
         let shared = Shared::new(Connection::open_at(&endpoint, &tokens(), false).unwrap());
@@ -1502,6 +1596,18 @@ mod tests {
         assert!(notes_in(&Value::String("not json".into())).is_empty());
         let text_result = json!({"content": [{"type": "text", "text": "[{\"id\": \"a\", \"title\": \"A\", \"date\": \"2026-01-01\", \"text\": \"t\"}]"}]});
         assert_eq!(notes_in(&tool_output(&text_result)).len(), 1);
+    }
+
+    #[test]
+    fn the_trace_shape_carries_structure_but_no_content() {
+        let shaped = shape(
+            &json!({"meetings": [{"id": "m1", "title": "Garden welcome guide", "notes": "Draft a map."}, {"id": "m2"}, {"id": "m3"}], "n": 3}),
+        );
+        assert_eq!(
+            shaped,
+            json!({"meetings": [{"id": "<str:2>", "title": "<str:20>", "notes": "<str:12>"}, {"id": "<str:2>"}, "<+1 more>"], "n": 3})
+        );
+        assert!(!shaped.to_string().contains("Garden"));
     }
 
     #[test]
