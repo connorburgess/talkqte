@@ -830,6 +830,35 @@ async fn list_granola_notes(state: tauri::State<'_, AppState>) -> Result<PickedN
     })
 }
 
+/// Asks Granola's assistant one fixed question about the person's recent
+/// meetings and returns candidate focus lines for them to tick. Only
+/// offered when the server lists the tool; nothing is stored.
+#[tauri::command]
+async fn suggest_granola_focus(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
+    let shared = state
+        .0
+        .lock()
+        .map_err(|_| "The notebook is unavailable.")?
+        .granola
+        .clone()
+        .ok_or("Connect Granola first.")?;
+    if !shared.can_suggest() {
+        return Err(
+            "This Granola account does not offer the assistant that answers questions.".into(),
+        );
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        shared.suggest_focus().map_err(|error| match error {
+            context::SourceError::Interrupted => {
+                "Granola's assistant did not answer in time; try again.".to_string()
+            }
+            other => granola_error(&other),
+        })
+    })
+    .await
+    .map_err(|_| "Granola's suggestions could not be fetched.".to_string())?
+}
+
 /// Forgets the Granola session. Imported notes stay until removed, as they
 /// would for a file; nothing is written back.
 #[tauri::command]
@@ -1122,6 +1151,7 @@ pub fn run() {
             granola_status,
             list_granola_notes,
             disconnect_granola,
+            suggest_granola_focus,
             download_model,
             cancel_model_download,
             remove_model,

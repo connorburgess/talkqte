@@ -40,6 +40,7 @@
     "allow-granola-status",
     "allow-list-granola-notes",
     "allow-disconnect-granola",
+    "allow-suggest-granola-focus",
     "allow-download-model",
     "allow-cancel-model-download",
     "allow-remove-model",

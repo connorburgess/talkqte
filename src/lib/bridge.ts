@@ -93,6 +93,12 @@ export async function listGranolaNotes() {
   return invoke<PickedNotes>('list_granola_notes');
 }
 
+/** Asks Granola's assistant for candidate focus lines; desktop only. */
+export async function suggestGranolaFocus() {
+  if (preview) return (await preview).suggestGranolaFocus();
+  return invoke<string[]>('suggest_granola_focus');
+}
+
 export async function disconnectGranola() {
   if (preview) return (await preview).disconnectGranola();
   return invoke<GranolaStatus>('disconnect_granola');
