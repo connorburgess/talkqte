@@ -25,6 +25,7 @@ import {
   type LiveStatus,
   type ModelStatus,
   type Snapshot,
+  type GranolaStatus,
 } from './lib/types';
 
 const megabytes = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
@@ -296,18 +297,36 @@ function Notebook() {
   const [canSuggest, setCanSuggest] = useState(false);
   const [suggestions, setSuggestions] = useState<string[] | null>(null);
   const [ticked, setTicked] = useState<string[]>([]);
+  const granolaChanged = (status: GranolaStatus) =>
+    setCanSuggest(
+      status.connected && status.tools.includes('query_granola_meetings'),
+    );
   useEffect(() => {
-    if (view !== 'settings') return;
     bridge
       .granolaStatus()
-      .then((status) =>
-        setCanSuggest(
-          status.connected && status.tools.includes('query_granola_meetings'),
-        ),
-      )
+      .then(granolaChanged)
       .catch(() => setCanSuggest(false));
-  }, [view]);
+  }, []);
   const focusField = useRef<HTMLTextAreaElement>(null);
+  // Clear is a mousedown before a click, so the blur that would save the old
+  // text is skipped when it heads for Clear; the field keeps the focus.
+  const clearButton = useRef<HTMLButtonElement>(null);
+  const clearFocus = () => {
+    setFocus('');
+    setSuggestions(null);
+    setTicked([]);
+    void run(() => bridge.command('set_focus', { lines: [] }));
+    setTimeout(() => focusField.current?.focus(), 0);
+  };
+  // The focus as it stood when a live session ended, so the box can say the
+  // lines are left over from it until they change.
+  const [endedFocus, setEndedFocus] = useState<string | null>(null);
+  useEffect(() => {
+    if (!state) return;
+    setEndedFocus(
+      state.live && state.status === 'ended' ? state.focus.join('\n') : null,
+    );
+  }, [state?.live, state?.status]);
   const suggestionList = useRef<HTMLFieldSetElement>(null);
   const currentFocusLines = () =>
     focus
@@ -353,6 +372,14 @@ function Notebook() {
   const [setupDismissed, setSetupDismissed] = useState(false);
   const pendingFocus = useRef<SetupTarget | null>(null);
   const goToSetup = (target: SetupTarget) => {
+    if (target === 'focus') {
+      // The card only shows in the notebook, so the focus box is already here.
+      setTimeout(() => {
+        focusField.current?.scrollIntoView({ block: 'center' });
+        focusField.current?.focus();
+      }, 0);
+      return;
+    }
     if (target === 'context') {
       // The card only shows in the notebook, so the panel is already here.
       setTab('notes');
@@ -373,11 +400,7 @@ function Notebook() {
     if (!target) return;
     pendingFocus.current = null;
     const element = document.getElementById(
-      target === 'name'
-        ? 'user-name'
-        : target === 'focus'
-          ? 'meeting-focus'
-          : 'live-transcription',
+      target === 'name' ? 'user-name' : 'live-transcription',
     );
     element?.scrollIntoView({ block: 'center' });
     element?.focus();
@@ -912,6 +935,139 @@ function Notebook() {
               </div>
             </section>
 
+            <section
+              className="meeting-focus"
+              aria-labelledby="meeting-focus-title"
+            >
+              <div className="meeting-focus-heading">
+                <div>
+                  <h2 id="meeting-focus-title">This meeting</h2>
+                  <p id="meeting-focus-help" className="small muted">
+                    Up to five short lines on what you want to get to, such as
+                    “agree the launch plan for the newsletter”. A question about
+                    one of them comes through even in the pause after another;
+                    when the meeting is wrapping up, the lines never touched are
+                    listed once. Word matches, kept until you quit.
+                  </p>
+                </div>
+                {focus.trim().length > 0 && (
+                  <button
+                    ref={clearButton}
+                    type="button"
+                    className="text-button"
+                    disabled={busy}
+                    onClick={clearFocus}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              {endedFocus !== null &&
+                endedFocus.length > 0 &&
+                endedFocus === focus.trim() && (
+                  <p className="small muted" role="status">
+                    Kept from the session that just ended.
+                  </p>
+                )}
+              <div className="setting-control">
+                <label htmlFor="meeting-focus">Focus</label>
+                <textarea
+                  id="meeting-focus"
+                  ref={focusField}
+                  aria-describedby="meeting-focus-help"
+                  value={focus}
+                  rows={3}
+                  spellCheck={false}
+                  onChange={(e) => setFocus(e.target.value)}
+                  onBlur={(e) => {
+                    if (e.relatedTarget !== clearButton.current) saveFocus();
+                  }}
+                />
+                {canSuggest && suggestions === null && (
+                  <div className="suggest-focus">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={busy}
+                      onClick={suggestFocus}
+                    >
+                      Suggest from Granola
+                    </button>
+                    <p className="small muted">
+                      Asks Granola’s assistant one question about your meetings
+                      of the last 30 days and shows its answer for you to tick.
+                      Granola sees the question; nothing else leaves this Mac.
+                    </p>
+                  </div>
+                )}
+                {suggestions !== null && (
+                  <fieldset
+                    className="suggest-focus"
+                    ref={suggestionList}
+                    tabIndex={-1}
+                  >
+                    <legend>
+                      Granola suggests
+                      {roomForSuggestions < suggestions.length && (
+                        <span className="muted small">
+                          {' '}
+                          · room for {roomForSuggestions} more{' '}
+                          {roomForSuggestions === 1 ? 'line' : 'lines'}
+                        </span>
+                      )}
+                    </legend>
+                    {suggestions.length === 0 && (
+                      <p className="small muted">
+                        Nothing came back. Type what matters instead.
+                      </p>
+                    )}
+                    {suggestions.map((line) => (
+                      <label key={line} className="suggest-line">
+                        <input
+                          type="checkbox"
+                          checked={ticked.includes(line)}
+                          disabled={
+                            !ticked.includes(line) &&
+                            ticked.length >= roomForSuggestions
+                          }
+                          onChange={(e) =>
+                            setTicked((current) =>
+                              e.target.checked
+                                ? [...current, line]
+                                : current.filter((seen) => seen !== line),
+                            )
+                          }
+                        />
+                        <span>{line}</span>
+                      </label>
+                    ))}
+                    <div className="dialog-actions">
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={busy}
+                        onClick={closeSuggestions}
+                      >
+                        Dismiss
+                      </button>
+                      <button
+                        type="button"
+                        className="primary-button"
+                        disabled={busy || ticked.length === 0}
+                        onClick={acceptSuggestions}
+                      >
+                        Add {ticked.length || ''} to the focus
+                      </button>
+                    </div>
+                    <p className="small muted">
+                      A suggestion is Granola’s reading of your notes, not a
+                      fact; it becomes a focus line only when you add it, and
+                      each needs a few specific words.
+                    </p>
+                  </fieldset>
+                )}
+              </div>
+            </section>
             <div className="notebook-grid">
               <section className="editor-section">
                 <div
@@ -1102,6 +1258,7 @@ function Notebook() {
               busy={busy}
               onError={setError}
               onNotice={setNotice}
+              onGranola={granolaChanged}
             />
             <footer className="notebook-footer">
               <ShieldCheck size={15} />
@@ -1147,118 +1304,6 @@ function Notebook() {
                     if (e.key === 'Enter') saveName();
                   }}
                 />
-              </div>
-            </section>
-            <section className="setting">
-              <div>
-                <h2>What matters in this meeting</h2>
-                <p id="meeting-focus-help">
-                  Up to five short lines, one per line, such as “agree the
-                  launch plan for the newsletter”. A question about a line you
-                  wrote comes through even during the pause after another
-                  question and stays 45 seconds; the Focused timing setting
-                  shows nothing else, apart from questions asked of you by name
-                  and reminders of notes you chose. When someone says the
-                  meeting is wrapping up, the lines never touched are listed
-                  once. Word matches, not understanding; kept only until you
-                  close the app.
-                </p>
-              </div>
-              <div className="setting-control">
-                <label htmlFor="meeting-focus">Focus</label>
-                <textarea
-                  id="meeting-focus"
-                  ref={focusField}
-                  aria-describedby="meeting-focus-help"
-                  value={focus}
-                  rows={5}
-                  spellCheck={false}
-                  onChange={(e) => setFocus(e.target.value)}
-                  onBlur={saveFocus}
-                />
-                {canSuggest && suggestions === null && (
-                  <div className="suggest-focus">
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      disabled={busy}
-                      onClick={suggestFocus}
-                    >
-                      Suggest from Granola
-                    </button>
-                    <p className="small muted">
-                      Asks Granola’s assistant one question about your meetings
-                      of the last 30 days and shows its answer for you to tick.
-                      Granola sees the question; nothing else leaves this Mac.
-                    </p>
-                  </div>
-                )}
-                {suggestions !== null && (
-                  <fieldset
-                    className="suggest-focus"
-                    ref={suggestionList}
-                    tabIndex={-1}
-                  >
-                    <legend>
-                      Granola suggests
-                      {roomForSuggestions < suggestions.length && (
-                        <span className="muted small">
-                          {' '}
-                          · room for {roomForSuggestions} more{' '}
-                          {roomForSuggestions === 1 ? 'line' : 'lines'}
-                        </span>
-                      )}
-                    </legend>
-                    {suggestions.length === 0 && (
-                      <p className="small muted">
-                        Nothing came back. Type what matters instead.
-                      </p>
-                    )}
-                    {suggestions.map((line) => (
-                      <label key={line} className="suggest-line">
-                        <input
-                          type="checkbox"
-                          checked={ticked.includes(line)}
-                          disabled={
-                            !ticked.includes(line) &&
-                            ticked.length >= roomForSuggestions
-                          }
-                          onChange={(e) =>
-                            setTicked((current) =>
-                              e.target.checked
-                                ? [...current, line]
-                                : current.filter((seen) => seen !== line),
-                            )
-                          }
-                        />
-                        <span>{line}</span>
-                      </label>
-                    ))}
-                    <div className="dialog-actions">
-                      <button
-                        type="button"
-                        className="secondary-button"
-                        disabled={busy}
-                        onClick={closeSuggestions}
-                      >
-                        Dismiss
-                      </button>
-                      <button
-                        type="button"
-                        className="primary-button"
-                        disabled={busy || ticked.length === 0}
-                        onClick={acceptSuggestions}
-                      >
-                        Add {ticked.length || ''} to the focus
-                      </button>
-                    </div>
-                    <p className="small muted">
-                      A suggestion is Granola’s reading of your notes, not a
-                      fact; it becomes a focus line only when you add it, and
-                      each needs a few specific words.
-                    </p>
-                  </fieldset>
-                )}
               </div>
             </section>
             <section className="setting">
@@ -1352,9 +1397,10 @@ function Notebook() {
                 <p>
                   Balanced leaves at least 10 seconds between questions. Quiet
                   leaves 30 seconds after a question passes. Focused shows only
-                  questions about your focus lines, questions asked of you by
-                  name, and reminders of notes you chose; with no focus lines it
-                  shows just the last two.
+                  questions about your focus lines (written in the notebook’s
+                  This meeting box), questions asked of you by name, and
+                  reminders of notes you chose; with no focus lines it shows
+                  just the last two.
                 </p>
               </div>
               <label className="visually-hidden" htmlFor="sensitivity">

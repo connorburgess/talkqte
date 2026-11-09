@@ -19,16 +19,17 @@ test('the setup card walks a new person to a name and a focus, then steps aside'
   const name = page.getByRole('textbox', { name: 'Name' });
   await expect(name).toBeFocused();
   await name.fill('Robin');
-  await page.getByRole('textbox', { name: 'Focus' }).focus(); // leaving saves the name
+  await page.getByRole('combobox', { name: 'Question timing' }).focus(); // leaving saves the name
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();
   await expect(card).toContainText('Your name, done');
   await expect(card).toContainText('What matters today, to do');
+  // The focus lives in the notebook, beside the session, so the card stays
+  // in view while it is written.
   await card.getByRole('button', { name: 'Write the focus' }).click();
   const focus = page.getByRole('textbox', { name: 'Focus' });
   await expect(focus).toBeFocused();
   await focus.fill('Agree the launch plan for the newsletter');
-  await name.focus(); // leaving saves the focus
-  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await page.getByRole('button', { name: 'Notebook', exact: true }).focus(); // leaving saves the focus
   // Prior notes are optional, so the card has done its job and goes.
   await expect(card).toHaveCount(0);
 });
@@ -174,29 +175,38 @@ test('search has a recoverable empty state and settings explain the prototype', 
   ).toBeVisible();
 });
 
-test('focus lines are kept for the session and a line without identifying words is refused', async ({
+test('focus lines are written in the notebook, kept for the session, cleared in one step, and a line without identifying words is refused', async ({
   page,
 }) => {
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  const focus = page.getByRole('textbox', { name: 'Focus' });
+  const box = page.getByRole('region', { name: 'This meeting' });
+  const focus = box.getByRole('textbox', { name: 'Focus' });
+  await expect(box.getByRole('button', { name: 'Clear' })).toHaveCount(0);
   await focus.fill(
     'Agree the launch plan for the newsletter\nDecide who owns the compost bins',
   );
-  await page.getByRole('textbox', { name: 'Name' }).focus(); // leaving saves
-  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await page.getByRole('button', { name: 'Notebook', exact: true }).focus(); // leaving saves
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await expect(page.getByRole('textbox', { name: 'Focus' })).toHaveValue(
+  await expect(page.getByRole('textbox', { name: 'Focus' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await expect(focus).toHaveValue(
     'Agree the launch plan for the newsletter\nDecide who owns the compost bins',
   );
-  await page.getByRole('textbox', { name: 'Focus' }).fill('Team sync');
-  await page.getByRole('textbox', { name: 'Name' }).focus();
+  await focus.fill('Team sync');
+  await page.getByRole('button', { name: 'Notebook', exact: true }).focus();
   await expect(page.getByRole('alert')).toContainText(
     '“Team sync” needs a few specific words',
   );
-  // The typed text stays so the line can be fixed in place.
-  await expect(page.getByRole('textbox', { name: 'Focus' })).toHaveValue(
-    'Team sync',
-  );
+  // The typed text stays so the line can be fixed in place; Clear straight
+  // from the field does not save the rejected line first, and the field
+  // keeps the keyboard.
+  await expect(focus).toHaveValue('Team sync');
+  await focus.fill('Team sync again');
+  await box.getByRole('button', { name: 'Clear' }).click();
+  await expect(focus).toHaveValue('');
+  await expect(focus).toBeFocused();
+  await expect(box.getByRole('button', { name: 'Clear' })).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page
     .getByRole('combobox', { name: 'Question timing' })
     .selectOption('focused');
