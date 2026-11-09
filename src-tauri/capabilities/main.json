@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
   "description": "Notebook commands for the local main window only.",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
@@ -18,6 +20,7 @@
     "allow-update-notes",
     "allow-set-sensitivity",
     "allow-set-user-name",
+    "allow-set-focus",
     "allow-set-overlay",
     "allow-export-markdown",
     "allow-export-preview",

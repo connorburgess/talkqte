@@ -31,7 +31,7 @@ export function Question({
         {cue.note
           ? `Reminder from your notes · ${cue.note.sourceDate}`
           : `${live ? 'Live question' : 'Demo question'} · ${cue.kind}${
-              cue.aboutGoal ? ' · about your goal' : ''
+              cue.aboutFocus ? ' · about what matters' : ''
             }`}
       </p>
       <button
@@ -57,10 +57,10 @@ export function Question({
               : 'From the fictional transcript'}
         </p>
         <blockquote className="evidence">“{cue.evidence}”</blockquote>
-        {cue.aboutGoal && (
+        {cue.aboutFocus && (
           <p>
-            This line uses words from your meeting goal, so the question came
-            through sooner and stays longer.
+            This line uses words from your focus list, so it came through sooner
+            and stays longer.
           </p>
         )}
         {cue.resolvedBy && (

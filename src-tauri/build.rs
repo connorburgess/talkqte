@@ -13,6 +13,7 @@ fn main() {
             "update_notes",
             "set_sensitivity",
             "set_user_name",
+            "set_focus",
             "set_overlay",
             "export_markdown",
             "export_preview",

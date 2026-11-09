@@ -5,6 +5,7 @@ import {
   BookOpen,
   ChevronRight,
   CircleHelp,
+  Crosshair,
   FileText,
   Leaf,
   MessageCircle,
@@ -175,6 +176,35 @@ function FloatingQuestion() {
                   <span>{paused ? 'Resume' : 'Pause'}</span>
                 </button>
               ) : null}
+              {state && state.status !== 'ended' && (
+                <button
+                  className="companion-control"
+                  aria-label={
+                    state.sensitivity === 'focused'
+                      ? 'Show all questions'
+                      : 'Show only what matters'
+                  }
+                  title={
+                    state.sensitivity === 'focused'
+                      ? 'Show all questions'
+                      : 'Show only what matters'
+                  }
+                  aria-pressed={state.sensitivity === 'focused'}
+                  disabled={busy}
+                  onClick={() =>
+                    void run(() =>
+                      bridge.command('set_sensitivity', {
+                        value:
+                          state.sensitivity === 'focused'
+                            ? 'balanced'
+                            : 'focused',
+                      }),
+                    )
+                  }
+                >
+                  <Crosshair size={16} />
+                </button>
+              )}
               <button
                 className="companion-control"
                 aria-label="Hide companion"
@@ -250,11 +280,11 @@ function Notebook() {
   const [search, setSearch] = useState('');
   const [notes, setNotes] = useState('');
   const [userName, setUserName] = useState('');
-  const [goal, setGoal] = useState('');
+  const [focus, setFocus] = useState('');
   const initialized = useRef(false);
   // Enter followed by leaving a field saves once, not twice.
   const savingName = useRef(false);
-  const savingGoal = useRef(false);
+  const savingFocus = useRef(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
@@ -286,7 +316,7 @@ function Notebook() {
       initialized.current = true;
       setNotes(state.notes);
       setUserName(state.userName ?? '');
-      setGoal(state.goal ?? '');
+      setFocus(state.focus.join('\n'));
     }
   }, [state]);
   const modelState = model?.status;
@@ -391,24 +421,27 @@ function Notebook() {
         savingName.current = false;
       });
   };
-  const saveGoal = () => {
-    const next = goal.trim();
-    const current = state.goal ?? '';
-    if (next === current) {
-      setGoal(current);
+  const saveFocus = () => {
+    const lines = focus
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const current = state.focus;
+    if (lines.join('\n') === current.join('\n')) {
+      setFocus(current.join('\n'));
       return;
     }
-    if (savingGoal.current) return;
-    savingGoal.current = true;
+    if (savingFocus.current) return;
+    savingFocus.current = true;
     bridge
-      .command('set_goal', { goal: next || null })
-      .then(() => setGoal(next))
+      .command('set_focus', { lines })
+      .then(() => setFocus(lines.join('\n')))
       .catch((e: unknown) => {
         setError(e instanceof Error ? e.message : String(e));
-        setGoal(current);
+        setFocus(current.join('\n'));
       })
       .finally(() => {
-        savingGoal.current = false;
+        savingFocus.current = false;
       });
   };
   const prepareExport = () =>
@@ -973,32 +1006,29 @@ function Notebook() {
             </section>
             <section className="setting">
               <div>
-                <h2>Meeting goal</h2>
-                <p id="meeting-goal-help">
-                  One line on what you want from this meeting, such as “agree
-                  the launch plan for the newsletter”. When a line in the
-                  conversation uses its words, a question about it comes through
-                  even during the pause after another question, with either
-                  timing setting, and stays 45 seconds, the length of a question
-                  asked of you by name. It is a word match, not understanding,
-                  and is kept only until you close the app.
+                <h2>What matters in this meeting</h2>
+                <p id="meeting-focus-help">
+                  Up to five short lines, one per line, such as “agree the
+                  launch plan for the newsletter”. A question about a line you
+                  wrote comes through even during the pause after another
+                  question and stays 45 seconds; the Focused timing setting
+                  shows nothing else, apart from questions asked of you by name
+                  and reminders of notes you chose. When someone says the
+                  meeting is wrapping up, the lines never touched are listed
+                  once. Word matches, not understanding; kept only until you
+                  close the app.
                 </p>
               </div>
               <div className="setting-control">
-                <label htmlFor="meeting-goal">Goal</label>
-                <input
-                  id="meeting-goal"
-                  aria-describedby="meeting-goal-help"
-                  type="text"
-                  value={goal}
-                  maxLength={80}
-                  autoComplete="off"
+                <label htmlFor="meeting-focus">Focus</label>
+                <textarea
+                  id="meeting-focus"
+                  aria-describedby="meeting-focus-help"
+                  value={focus}
+                  rows={5}
                   spellCheck={false}
-                  onChange={(e) => setGoal(e.target.value)}
-                  onBlur={saveGoal}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') saveGoal();
-                  }}
+                  onChange={(e) => setFocus(e.target.value)}
+                  onBlur={saveFocus}
                 />
               </div>
             </section>
@@ -1110,6 +1140,7 @@ function Notebook() {
                 }
               >
                 <option value="balanced">Balanced</option>
+                <option value="focused">Focused · only what matters</option>
                 <option value="quiet">Quiet</option>
               </select>
             </section>

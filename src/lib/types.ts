@@ -18,8 +18,8 @@ export interface Cue {
   resolvedBy: { sourceId: string; evidence: string } | null;
   /** Set for a context reminder: the imported note it quotes. */
   note: { title: string; sourceDate: string; provider: string } | null;
-  /** The line uses words from the meeting goal: shown sooner, kept longer. */
-  aboutGoal: boolean;
+  /** The line uses words from a focus line: shown sooner, kept longer. */
+  aboutFocus: boolean;
 }
 export interface CueSnapshot {
   revision: number;
@@ -30,6 +30,7 @@ export interface CueSnapshot {
   overlayEnabled: boolean;
   companionPosition: 'bottomRight' | 'topCenter' | 'topLeft' | 'topRight';
   questionSize: 'standard' | 'large';
+  sensitivity: 'balanced' | 'quiet' | 'focused';
 }
 export interface Snapshot extends CueSnapshot {
   title: string;
@@ -38,11 +39,10 @@ export interface Snapshot extends CueSnapshot {
   durationMs: number;
   transcript: Segment[];
   notes: string;
-  sensitivity: 'balanced' | 'quiet';
   /** Session-only; used to notice questions asked of the user by name. */
   userName: string | null;
-  /** Session-only; lets questions that use its words through sooner. */
-  goal: string | null;
+  /** Session-only: what matters in this meeting, one short line each. */
+  focus: string[];
 }
 export type Commands = {
   start_demo: undefined;
@@ -56,7 +56,7 @@ export type Commands = {
   update_notes: { notes: string };
   set_sensitivity: { value: Snapshot['sensitivity'] };
   set_user_name: { name: string | null };
-  set_goal: { goal: string | null };
+  set_focus: { lines: string[] };
   set_overlay: { enabled: boolean };
   start_live_session: undefined;
   stop_live_session: undefined;

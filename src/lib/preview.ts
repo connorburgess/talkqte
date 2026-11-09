@@ -23,7 +23,7 @@ const state: Snapshot = {
   notes: '',
   sensitivity: 'balanced',
   userName: null,
-  goal: null,
+  focus: [],
   overlayEnabled: true,
   companionPosition: 'bottomRight',
   questionSize: 'standard',
@@ -96,7 +96,7 @@ function tick() {
         expanded: false,
         resolvedBy: null,
         note: null,
-        aboutGoal: false,
+        aboutFocus: false,
       };
     }
     // A line about an imported note reminds the user of it once, with the
@@ -134,7 +134,7 @@ function tick() {
             sourceDate: note.sourceDate,
             provider: 'file',
           },
-          aboutGoal: false,
+          aboutFocus: false,
         };
       }
     }
@@ -235,19 +235,22 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
       // Stored only; the preview's scripted questions never use the name.
       state.userName = (args as Commands['set_user_name']).name?.trim() || null;
       break;
-    case 'set_goal': {
+    case 'set_focus': {
       // Stands in for the engine's checks; the preview's scripted questions
-      // never use the goal.
-      const goal = (args as Commands['set_goal']).goal?.trim() || null;
-      if (goal) {
-        if ([...goal].length > 80 || /[\p{Cc}]/u.test(goal))
-          throw new Error('A meeting goal is one line of up to 80 characters.');
-        if (identifyingTerms(goal).length < 2)
+      // never use the focus lines.
+      const lines = (args as Commands['set_focus']).lines
+        .map((line) => line.trim())
+        .filter(Boolean);
+      if (lines.length > 5) throw new Error('Keep the focus to 5 lines.');
+      for (const line of lines) {
+        if ([...line].length > 80 || /[\p{Cc}]/u.test(line))
+          throw new Error('Each focus line is up to 80 characters.');
+        if (identifyingTerms(line).length < 2)
           throw new Error(
-            'Describe the goal in a few specific words, such as “agree the launch plan for the newsletter”.',
+            `“${line}” needs a few specific words, such as “agree the launch plan for the newsletter”.`,
           );
       }
-      state.goal = goal;
+      state.focus = lines;
       break;
     }
     case 'set_sensitivity':
