@@ -12,18 +12,25 @@ export function ContextNotes({
   busy,
   onError,
   onNotice,
+  onGranola,
 }: {
   items: ContextItem[];
   busy: boolean;
   onError: (message: string) => void;
   onNotice: (message: string) => void;
+  /** Called whenever the Granola connection is known or changes. */
+  onGranola?: (status: GranolaStatus) => void;
 }) {
   const [picked, setPicked] = useState<PickedNotes | null>(null);
   const [pickedFrom, setPickedFrom] = useState<'file' | 'granola'>('file');
-  const [granola, setGranola] = useState<GranolaStatus>({
+  const [granola, setGranolaState] = useState<GranolaStatus>({
     connected: false,
     tools: [],
   });
+  const setGranola = (status: GranolaStatus) => {
+    setGranolaState(status);
+    onGranola?.(status);
+  };
   const [signingIn, setSigningIn] = useState(false);
   useEffect(() => {
     // The desktop keeps the session for the app run; the preview has none.

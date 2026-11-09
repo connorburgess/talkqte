@@ -534,6 +534,29 @@ svg {
   height: 48px;
   width: 48px;
 }
+.meeting-focus {
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid #d5dacb;
+  border-radius: var(--radius-panel);
+  background: #f0f2e9;
+  display: grid;
+  gap: 10px;
+}
+.meeting-focus-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.meeting-focus-heading h2 {
+  margin: 0 0 4px;
+  font-size: 17px;
+}
+.meeting-focus-heading p {
+  margin: 0;
+  max-width: 60ch;
+}
 .notebook-grid {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) minmax(290px, 0.95fr);
