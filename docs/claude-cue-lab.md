@@ -77,6 +77,24 @@ Later on 9 November 2026, with the owner's authorization given that morning, the
 
 Its reasons were specific: for `context-corrected`, that the second line reverses the first so the cue "has lost its basis" without a new date being given; for `paraphrased-use`, that a speaker identifying as Priya saying "I'll send it" answers the ownership question; for `repeated-trigger`, that the second line repeats the need without naming an owner, so a new cue would duplicate the existing one.
 
-Across all eleven cases, run once each, the evaluator matched the expected labels in 10; across the first eight, in 7. In `missing-owner` it stayed quiet. Its reason was that the second line already raises settling the handoff, so a cue would duplicate it. That judgment is defensible, so the case's label should be reviewed rather than counted as a clear failure. Request times were 3.6–5.8 seconds, including CLI startup, which is above the proposed 5-second budget for a visible cue in some cases. Each case ran once, so these results say nothing about consistency across runs, real meetings, or usefulness to a participant. The phrase rules scored 2 of 8 on the same cases ([comparison](cue-intelligence.md#rules-baseline-on-the-shared-suite)).
+Across all eleven cases, run once each, the evaluator matched the expected labels in 10; across the first eight, in 7.
+
+On 10 November 2026, with the owner's authorization for a repeated batch, every case was run twice more under the same conditions (Claude Code 2.1.318, `claude-opus-5-5`, subscription authentication, no API key or provider override, paid extra usage confirmed off by the owner), one invocation each, 22 in all. The three runs of each case agreed on the action every time, including `missing-owner`, which stayed `quiet` three times for the same reason as before. So the single-run comparison holds: 10 of 11 expected actions in each of three passes, with no case flipping between runs. Request wall times over the 22 new runs were 2,969 to 5,505 ms (3,615 to 5,768 ms across all 33), including CLI start-up. The 22 runs reported 27,262 input tokens, nearly all cache creation, and 3,404 output tokens, about 155 output tokens a run; these counters are not a billing receipt and say nothing about the account's remaining allowance.
+
+| Case                     | Expected   | Run 1      | Run 2      | Run 3      | Wall time, runs 1–3          |
+| ------------------------ | ---------- | ---------- | ---------- | ---------- | ---------------------------- |
+| `missing-owner`          | `show`     | `quiet`    | `quiet`    | `quiet`    | 4,096 ms, 4,971 ms, 5,164 ms |
+| `already-answered`       | `quiet`    | `quiet`    | `quiet`    | `quiet`    | 3,615 ms, 3,328 ms, 4,811 ms |
+| `visible-cue-resolved`   | `resolved` | `resolved` | `resolved` | `resolved` | 4,956 ms, 5,192 ms, 3,321 ms |
+| `asked-but-unanswered`   | `quiet`    | `quiet`    | `quiet`    | `quiet`    | 5,298 ms, 5,505 ms, 2,969 ms |
+| `topic-moved-on`         | `withdraw` | `withdraw` | `withdraw` | `withdraw` | 5,182 ms, 4,203 ms, 3,091 ms |
+| `uncertain-speaker`      | `quiet`    | `quiet`    | `quiet`    | `quiet`    | 5,325 ms, 4,597 ms, 5,209 ms |
+| `context-reminder`       | `show`     | `show`     | `show`     | `show`     | 5,768 ms, 4,788 ms, 5,207 ms |
+| `transcript-instruction` | `quiet`    | `quiet`    | `quiet`    | `quiet`    | 5,290 ms, 3,632 ms, 3,417 ms |
+| `context-corrected`      | `withdraw` | `withdraw` | `withdraw` | `withdraw` | 3,703 ms, 4,792 ms, 3,465 ms |
+| `paraphrased-use`        | `resolved` | `resolved` | `resolved` | `resolved` | 4,085 ms, 5,363 ms, 3,061 ms |
+| `repeated-trigger`       | `quiet`    | `quiet`    | `quiet`    | `quiet`    | 4,807 ms, 5,323 ms, 4,173 ms |
+
+What this does and does not show: the evaluator is consistent on these eleven fictional cases, and its one disagreement with the labels is stable rather than noise. It still says nothing about usefulness in a meeting, about speech-to-text errors, or about latency with the app's own context, and eleven cases are too few to estimate a false-suppression rate; that needs a larger suite and real conversations. In `missing-owner` it stayed quiet. Its reason was that the second line already raises settling the handoff, so a cue would duplicate it. That judgment is defensible, so the case's label should be reviewed rather than counted as a clear failure. Request times were 3.6–5.8 seconds, including CLI startup, which is above the proposed 5-second budget for a visible cue in some cases. Each case ran once, so these results say nothing about consistency across runs, real meetings, or usefulness to a participant. The phrase rules scored 2 of 8 on the same cases ([comparison](cue-intelligence.md#rules-baseline-on-the-shared-suite)).
 
 Record any live trial's selected fixture, model, CLI version, outcome, and latency separately; do not describe the entire suite as evaluated after a single trial. Keep account information and raw provider/session output outside the repository.
