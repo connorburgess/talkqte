@@ -1154,9 +1154,10 @@ function Notebook() {
             <section className="coming-next">
               <h2>What comes next</h2>
               <p>
-                Downloading the speech model during setup, full meeting audio,
-                and a notebook that remembers your sessions. Integrations with
-                other note-takers are planned for later.
+                A guided first-run setup that offers the speech model, both
+                sides of a call rather than the microphone alone, and a notebook
+                that remembers your sessions. Integrations with other
+                note-takers are planned for later.
               </p>
               <p className="small muted">
                 These features are not available in this prototype.
