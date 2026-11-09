@@ -53,7 +53,8 @@ fn agent(https_only: bool) -> ureq::Agent {
         .timeout_resolve(Some(Duration::from_secs(15)))
         .timeout_connect(Some(Duration::from_secs(15)))
         .timeout_send_request(Some(Duration::from_secs(15)))
-        .timeout_recv_response(Some(Duration::from_secs(30)))
+        // Long enough for an assistant's answer, not only a file listing.
+        .timeout_recv_response(Some(Duration::from_secs(90)))
         .timeout_recv_body(Some(Duration::from_secs(30)))
         .https_only(https_only)
         .http_status_as_error(false)
@@ -560,16 +561,7 @@ impl Connection {
             "tools/call",
             json!({ "name": tool.name, "arguments": { argument: FOCUS_QUESTION } }),
         )?;
-        let output = tool_output(&result);
-        let text = match &output {
-            Value::String(text) => text.clone(),
-            other => ["answer", "response", "text", "content", "result"]
-                .iter()
-                .find_map(|key| other.get(*key).and_then(Value::as_str))
-                .map(str::to_string)
-                .unwrap_or_else(|| other.to_string()),
-        };
-        Ok(suggestions_in(&text))
+        Ok(suggestions_in(&suggestion_text(&tool_output(&result))))
     }
 
     fn notify(&mut self, method: &str) -> Result<(), SourceError> {
@@ -732,32 +724,82 @@ pub const MAX_SUGGESTIONS: usize = 8;
 /// A suggestion longer than a focus line is cut.
 const MAX_SUGGESTION_CHARS: usize = 80;
 
-/// The lines of a free-text reply, without bullets, numbering, or quotes,
-/// deduplicated, cut to a focus line's length, at most `MAX_SUGGESTIONS`.
+/// Openers of the assistant's chatter around a list, not items in it.
+const CHATTER: &[&str] = &[
+    "here is",
+    "here's",
+    "here are",
+    "let me know",
+    "would you like",
+    "if you want",
+    "if you'd like",
+    "i found",
+    "i couldn't",
+    "i could not",
+    "there are no",
+    "no open",
+    "sure",
+];
+
+/// Characters that show as nothing or reorder text, which a note could
+/// carry to make a line read differently from what it is.
+fn is_invisible(character: char) -> bool {
+    matches!(
+        character,
+        '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{FEFF}'
+    )
+}
+
+/// The lines of a free-text reply, without bullets, numbering, quotes, or
+/// emphasis marks, without the assistant's chatter around them, without
+/// invisible characters, deduplicated, cut to a focus line's length, at
+/// most `MAX_SUGGESTIONS`.
 pub fn suggestions_in(text: &str) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     for raw in text.lines() {
-        let mut line = raw.trim();
-        // "- ", "* ", "• ", "1. ", "1) ", "(1) "
-        line = line
-            .trim_start_matches(['-', '*', '•', '–', '—'])
-            .trim_start();
-        let digits = line
+        let cleaned: String = raw.chars().filter(|c| !is_invisible(*c)).collect();
+        let mut line = cleaned.trim();
+        // A markdown heading introduces items; it is not one.
+        if line.starts_with('#') {
+            continue;
+        }
+        // Markdown bullets and headings: a mark followed by a space.
+        loop {
+            let before = line;
+            for mark in ["- ", "* ", "• ", "· ", "+ ", "▪ ", "– ", "— "] {
+                if let Some(rest) = line.strip_prefix(mark) {
+                    line = rest.trim_start();
+                }
+            }
+            if line == before {
+                break;
+            }
+        }
+        // Numbering such as "1. ", "2) ", "(3) ", only when a space follows,
+        // so "3:30" and "1.5" keep their digits.
+        let unparenthesised = line.trim_start_matches('(');
+        let digits = unparenthesised
             .chars()
-            .take_while(|c| c.is_ascii_digit() || *c == '(')
+            .take_while(char::is_ascii_digit)
             .count();
         if digits > 0 {
-            let rest = &line[digits..];
-            if let Some(rest) = rest.strip_prefix(['.', ')', ':']) {
+            if let Some(rest) = unparenthesised[digits..]
+                .strip_prefix(['.', ')', ':'])
+                .and_then(|rest| rest.strip_prefix(' '))
+            {
                 line = rest.trim_start();
             }
         }
         let line = line
-            .trim_matches(['"', '“', '”', '\''])
+            .trim_matches(['"', '“', '”', '\'', '*', '_'])
             .trim()
             .trim_end_matches('.')
             .trim();
-        if line.is_empty() || line.ends_with(':') {
+        let lower = line.to_lowercase();
+        if line.is_empty()
+            || line.ends_with(':')
+            || CHATTER.iter().any(|opener| lower.starts_with(opener))
+        {
             continue;
         }
         let cut: String = line.chars().take(MAX_SUGGESTION_CHARS).collect();
@@ -769,6 +811,26 @@ pub fn suggestions_in(text: &str) -> Vec<String> {
         }
     }
     lines
+}
+
+/// Suggestion lines from a tool output that is not plain text: an array of
+/// strings, or an object with a text-like field. Anything else yields
+/// nothing rather than a dump of the structure.
+fn suggestion_text(output: &Value) -> String {
+    match output {
+        Value::String(text) => text.clone(),
+        Value::Array(items) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Value::Object(map) => ["answer", "response", "text", "content", "result", "summary"]
+            .iter()
+            .find_map(|key| map.get(*key))
+            .map(suggestion_text)
+            .unwrap_or_default(),
+        _ => String::new(),
+    }
 }
 
 /// A tool result's content: structured content when the server sends it,
@@ -874,36 +936,41 @@ fn preview(text: &str) -> String {
 
 /// One session shared by the notebook's connection and the pending import
 /// it fills, so request ids and the server's session id stay one sequence.
+/// The tool names are read once at connection, so status and capability
+/// checks never wait on a call in flight.
 #[derive(Clone, Debug)]
-pub struct Shared(Arc<Mutex<Connection>>);
+pub struct Shared {
+    connection: Arc<Mutex<Connection>>,
+    tools: Arc<Vec<String>>,
+}
 
 impl Shared {
     pub fn new(connection: Connection) -> Self {
-        Self(Arc::new(Mutex::new(connection)))
+        Self {
+            tools: Arc::new(connection.tool_names()),
+            connection: Arc::new(Mutex::new(connection)),
+        }
     }
 
     pub fn tool_names(&self) -> Vec<String> {
-        self.0
-            .lock()
-            .map(|connection| connection.tool_names())
-            .unwrap_or_default()
+        self.tools.as_ref().clone()
     }
 
     pub fn list_recent(&self) -> Result<(Vec<NoteSummary>, usize), SourceError> {
-        self.0
+        self.connection
             .lock()
             .map_err(|_| SourceError::Unavailable)?
             .list_recent()
     }
 
     pub fn can_suggest(&self) -> bool {
-        self.0
-            .lock()
-            .is_ok_and(|connection| connection.can_suggest())
+        self.tools
+            .iter()
+            .any(|tool| tool == "query_granola_meetings")
     }
 
     pub fn suggest_focus(&self) -> Result<Vec<String>, SourceError> {
-        self.0
+        self.connection
             .lock()
             .map_err(|_| SourceError::Unavailable)?
             .suggest_focus()
@@ -916,14 +983,14 @@ impl NoteSource for Shared {
     }
 
     fn capabilities(&self) -> Capabilities {
-        self.0
-            .lock()
-            .map(|connection| connection.capabilities())
-            .unwrap_or_default()
+        Capabilities {
+            import_notes: self.tools.iter().any(|tool| tool == "get_meetings"),
+            ..Capabilities::default()
+        }
     }
 
     fn fetch(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError> {
-        self.0
+        self.connection
             .lock()
             .map_err(|_| SourceError::Unavailable)?
             .fetch(selection)
@@ -1181,7 +1248,7 @@ mod tests {
                     Some("tools/list") => json!({"tools": [
                         {"name": "list_meetings", "inputSchema": {"type": "object", "properties": {}}},
                         {"name": "get_meetings", "inputSchema": {"type": "object", "properties": {"meeting_ids": {"type": "array", "items": {"type": "string"}}}}},
-                        {"name": "query_granola_meetings", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}}}
+                        {"name": "query_granola_meetings", "inputSchema": {"type": "object", "properties": {"question": {"type": "string"}}}}
                     ]}),
                     Some("tools/call") if matches!(answer, Answer::ToolError) => {
                         json!({"isError": true, "content": [{"type": "text", "text": "Something went wrong."}]})
@@ -1290,13 +1357,43 @@ mod tests {
                 "Agree the launch plan for the newsletter",
                 "Decide who owns the compost bins",
                 "Settle the volunteer schedule",
-                "Let me know if you want more detail"
             ],
-            "bullets, numbering, quotes, and a repeat are stripped; headings ending in a colon are dropped"
+            "bullets, numbering, quotes, and a repeat are stripped; headings ending in a colon and chatter are dropped"
+        );
+        let parsed = suggestions_in(
+            "**Open decisions:**\n## Items\n10. Confirm the 3:30 slot for the visit\n(1) Review the 1.5 million budget line\n-5% cut on signage printing\n· Agree the newsletter launch\n* agree the Newsletter Launch\n\u{202E}Decide the fence colour\nWould you like more?",
+        );
+        assert_eq!(
+            parsed,
+            [
+                "Confirm the 3:30 slot for the visit",
+                "Review the 1.5 million budget line",
+                "-5% cut on signage printing",
+                "Agree the newsletter launch",
+                "Decide the fence colour",
+            ]
+        );
+        assert_eq!(
+            suggestions_in(&suggestion_text(&json!([
+                "Settle the schedule",
+                3,
+                "Agree the plan"
+            ]))),
+            ["Settle the schedule", "Agree the plan"]
+        );
+        assert!(suggestions_in(&suggestion_text(&json!({"meetings": [{"id": "m1"}]}))).is_empty());
+        assert_eq!(
+            suggestions_in(&suggestion_text(
+                &json!({"answer": "- Settle the schedule"})
+            )),
+            ["Settle the schedule"]
         );
         let asked: Value = serde_json::from_str(&seen.lock().unwrap().last().unwrap().1).unwrap();
         assert_eq!(asked["params"]["name"], "query_granola_meetings");
-        assert_eq!(asked["params"]["arguments"]["query"], FOCUS_QUESTION);
+        assert_eq!(
+            asked["params"]["arguments"]["question"], FOCUS_QUESTION,
+            "the argument name comes from the schema"
+        );
         // Without the tool there is no suggestion, and the interface knows.
         drop(connection.tools.pop());
         assert!(!connection.can_suggest());
