@@ -885,6 +885,10 @@ svg {
   color: var(--muted);
   white-space: pre-wrap;
 }
+.context-choose-all {
+  margin: 12px 0 0;
+  text-align: right;
+}
 .context-choices {
   list-style: none;
   padding: 0;
