@@ -1543,7 +1543,11 @@ fn resolves(kind: &str, text: &str) -> bool {
         "november",
         "december",
     ];
-    const TASKS: [&str; 6] = ["take", "draft", "write", "handle", "own", "lead"];
+    // The verbs a volunteer uses: "I'll send it", "Maya can do that".
+    const TASKS: [&str; 12] = [
+        "take", "draft", "write", "handle", "own", "lead", "send", "do", "sort", "book", "check",
+        "look",
+    ];
     // Transcripts often drop "?", so a sentence that opens like a question
     // or is hedged does not count either.
     // Capitalized words that do not name a person.
@@ -1868,6 +1872,42 @@ mod tests {
         }
         assert_eq!(e.state.transcript.len(), 400);
         assert_eq!(e.state.transcript[0].id, "w50");
+    }
+
+    #[test]
+    fn a_volunteer_answers_the_owner_question_with_more_than_take() {
+        for answer in [
+            "I'll send it. This is Maya.",
+            "Maya can do that.",
+            "I'll look at the bins tonight.",
+            "I can sort it.",
+        ] {
+            let mut e = play(&[
+                (1_000, "Someone should send the checklist."),
+                (3_000, answer),
+            ]);
+            e.advance(1_000);
+            assert_eq!(e.state.cue.as_ref().unwrap().kind, "Owner", "{answer}");
+            e.advance(2_000);
+            assert!(e.state.cue.is_none(), "not withdrawn by: {answer}");
+        }
+        for not_an_answer in [
+            "I can't do it this week.",
+            "We can do that later.",
+            "You can check the gate.",
+            "Maybe I'll do it.",
+        ] {
+            let mut e = play(&[
+                (1_000, "Someone should send the checklist."),
+                (3_000, not_an_answer),
+            ]);
+            e.advance(3_000);
+            assert_eq!(
+                e.state.cue.as_ref().map(|cue| cue.kind.as_str()),
+                Some("Owner"),
+                "withdrawn by: {not_an_answer}"
+            );
+        }
     }
 
     #[test]
@@ -2560,12 +2600,14 @@ mod tests {
             results.push((case["id"].as_str().unwrap().to_string(), action));
         }
         // Recorded 9 November 2026 and updated the same day when the owner
-        // rule gained "someone should" and "someone could". Update it
+        // rule gained "someone should" and "someone could", and again when
+        // volunteers could say "send", "do", "sort", "book", "check", or
+        // "look" as well as "take". Update it
         // deliberately when the rules change, and record the new comparison
         // in docs/cue-intelligence.md.
         let baseline = [
             ("missing-owner", "show"),
-            ("already-answered", "show"),
+            ("already-answered", "resolved"),
             ("visible-cue-resolved", "no cue raised"),
             ("asked-but-unanswered", "quiet"),
             ("topic-moved-on", "quiet"),
@@ -2574,7 +2616,7 @@ mod tests {
             ("transcript-instruction", "quiet"),
             // Labels added 9 November 2026; not yet run in the Claude lab.
             ("context-corrected", "quiet"),
-            ("paraphrased-use", "quiet"),
+            ("paraphrased-use", "resolved"),
             ("repeated-trigger", "quiet"),
         ];
         let baseline: Vec<(String, &str)> = baseline
