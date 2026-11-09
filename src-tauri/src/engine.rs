@@ -1515,11 +1515,28 @@ fn corrects(text: &str) -> Option<usize> {
 /// a negation never counts, and only "I" or a capitalized name can be an owner.
 fn resolves(kind: &str, text: &str) -> bool {
     // An open question is answered by any recognized owner, date, or choice.
+    // Only the narrow volunteer verbs count for it: "I'll send it" answers
+    // "Who will send it?", but an open question about anything should not
+    // vanish because someone said they would send an unrelated thing.
     if kind == OPEN {
-        return ["Owner", "Timing", "Decision"]
-            .iter()
-            .any(|fixed| resolves(fixed, text));
+        return resolves_with("Owner", text, &CORE_TASKS)
+            || ["Timing", "Decision"]
+                .iter()
+                .any(|fixed| resolves(fixed, text));
     }
+    resolves_with(kind, text, &TASKS)
+}
+
+/// The verbs a volunteer uses to take a task on: "I'll take it".
+const CORE_TASKS: [&str; 6] = ["take", "draft", "write", "handle", "own", "lead"];
+/// Those, plus verbs for sending, sorting, and booking: "I'll send it",
+/// "Maya can sort that". Not "do", "check", or "look", which say as much
+/// about calendars and availability as about ownership.
+const TASKS: [&str; 9] = [
+    "take", "draft", "write", "handle", "own", "lead", "send", "sort", "book",
+];
+
+fn resolves_with(kind: &str, text: &str, tasks: &[&str]) -> bool {
     const WEEKDAYS: [&str; 7] = [
         "monday",
         "tuesday",
@@ -1543,16 +1560,24 @@ fn resolves(kind: &str, text: &str) -> bool {
         "november",
         "december",
     ];
-    // The verbs a volunteer uses: "I'll send it", "Maya can do that".
-    const TASKS: [&str; 12] = [
-        "take", "draft", "write", "handle", "own", "lead", "send", "do", "sort", "book", "check",
-        "look",
-    ];
     // Transcripts often drop "?", so a sentence that opens like a question
     // or is hedged does not count either.
     // Capitalized words that do not name a person.
-    const NOT_OWNERS: [&str; 16] = [
+    const NOT_OWNERS: [&str; 29] = [
         "it",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+        "tomorrow",
+        "today",
+        "either",
+        "both",
+        "one",
+        "everything",
         "that",
         "this",
         "we",
@@ -1614,7 +1639,7 @@ fn resolves(kind: &str, text: &str) -> bool {
                 "Owner" => {
                     let (subject, capital) = &words[index];
                     matches!(at(index + 1), "will" | "can")
-                        && TASKS.contains(&at(index + 2))
+                        && tasks.contains(&at(index + 2))
                         && (subject == "i"
                             || (*capital
                                 && subject.chars().all(char::is_alphabetic)
@@ -1878,8 +1903,8 @@ mod tests {
     fn a_volunteer_answers_the_owner_question_with_more_than_take() {
         for answer in [
             "I'll send it. This is Maya.",
-            "Maya can do that.",
-            "I'll look at the bins tonight.",
+            "Maya can sort that.",
+            "I'll book the hall tonight.",
             "I can sort it.",
         ] {
             let mut e = play(&[
@@ -1892,10 +1917,16 @@ mod tests {
             assert!(e.state.cue.is_none(), "not withdrawn by: {answer}");
         }
         for not_an_answer in [
-            "I can't do it this week.",
-            "We can do that later.",
-            "You can check the gate.",
-            "Maybe I'll do it.",
+            "I can't send it this week.",
+            "We can send that later.",
+            "You can book the gate.",
+            "Maybe I'll send it.",
+            // Idioms and availability are not ownership.
+            "Monday will do.",
+            "Either will do.",
+            "I'll check my calendar.",
+            "I'll do my best.",
+            "I'll look into whether we need it.",
         ] {
             let mut e = play(&[
                 (1_000, "Someone should send the checklist."),
@@ -1908,6 +1939,22 @@ mod tests {
                 "withdrawn by: {not_an_answer}"
             );
         }
+    }
+
+    #[test]
+    fn an_open_question_is_not_withdrawn_by_an_unrelated_volunteer() {
+        let mut e = play(&[
+            (1_000, "Does anyone have time to review the draft?"),
+            (3_000, "I'll send the invite to Maya."),
+            (5_000, "I'll take it."),
+        ]);
+        e.advance(3_000);
+        assert_eq!(
+            e.state.cue.as_ref().map(|cue| cue.kind.as_str()),
+            Some(OPEN)
+        );
+        e.advance(2_000);
+        assert!(e.state.cue.is_none(), "taking it does answer");
     }
 
     #[test]
