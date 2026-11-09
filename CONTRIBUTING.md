@@ -48,14 +48,14 @@ type(optional-scope): describe the result
 
 Use lowercase types and a short, plain-language description. Scope is optional; include it when it helps identify the area, such as `companion`, `capture`, `cues`, or `roadmap`.
 
-| Type | Use for |
-| --- | --- |
-| `feat` | New or deliberately changed user-facing behavior |
-| `fix` | Correcting a defect |
-| `docs` | Documentation changes |
-| `refactor` | Restructuring code without changing behavior |
-| `test` | Test-only changes |
-| `chore` | Repository maintenance that fits none of the above |
+| Type       | Use for                                            |
+| ---------- | -------------------------------------------------- |
+| `feat`     | New or deliberately changed user-facing behavior   |
+| `fix`      | Correcting a defect                                |
+| `docs`     | Documentation changes                              |
+| `refactor` | Restructuring code without changing behavior       |
+| `test`     | Test-only changes                                  |
+| `chore`    | Repository maintenance that fits none of the above |
 
 Use `build`, `ci`, `perf`, `style`, or `revert` when they describe the change more precisely. `style` means code formatting, not a visual UI change. Mark a breaking change with `!` before the colon and explain the impact and migration in the body.
 
@@ -120,3 +120,7 @@ The human contributor is responsible for their change. Do not add AI co-author t
 ## Security and conduct
 
 See [SECURITY.md](SECURITY.md) for private vulnerability reporting and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations.
+
+## Branch rules
+
+`main` is protected by a repository ruleset: changes arrive through pull requests, the four CI jobs must pass on the pull request's final commit, and the branch cannot be force-pushed or deleted. The loop that merges reviewed pull requests waits for those checks by hand as well; the ruleset makes the same rule hold for anyone.

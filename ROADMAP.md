@@ -37,7 +37,7 @@ This track runs alongside the feature milestones below. The goal includes a depe
 - [x] Choose Rust + Tauri + React, with macOS as the first target.
 - [x] Document privacy requirements, contribution sign-offs, licensing and contributor terms, and feature-branch workflow.
 - [x] Add automated contribution metadata, frontend, Rust, and desktop build checks.
-- [ ] Configure required branch checks and dedicated secret scanning.
+- [x] Configure required branch checks and dedicated secret scanning. Since 10 November 2026 a repository ruleset on `main` requires a pull request and all four CI jobs (macOS Rust and desktop build, Windows Arm Rust and desktop build, Frontend and browser behavior, Contribution metadata) on the exact head, and forbids force-pushes and deletion; repository admins can bypass it so the owner is never locked out. GitHub secret scanning and push protection are on; non-provider patterns and Dependabot security updates are off, by choice, because their pull requests would not carry the contributor sign-off this repository requires.
 - [ ] Enable external automated review when the prototype is ready for it; currently deferred.
 
 ## Runnable prototype
