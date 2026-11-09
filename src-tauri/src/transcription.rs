@@ -381,6 +381,16 @@ mod tests {
     fn recognized_speech_raises_a_sourced_question_and_its_answer_withdraws_it() {
         let engine = running_engine();
         let session = engine.lock().unwrap().session();
+        {
+            // At 66 s the demo is quoting its 51 s line; let that go so the
+            // recognized speech has a clear companion (a quote leaves no pause).
+            let mut engine = engine.lock().unwrap();
+            if let Some(cue) = engine.state.cue.clone() {
+                engine
+                    .respond(&cue.id, crate::engine::Response::Dismiss)
+                    .unwrap();
+            }
+        }
         let (sink, outcomes) = into_engine(&engine);
         let lines = vec![
             Ok(vec![(0, "Someone can take the first draft.")]),

@@ -50,6 +50,7 @@ export type Commands = {
   resume_demo: undefined;
   end_demo: undefined;
   respond_to_cue: { id: string; response: 'dismiss' };
+  keep_line: { id: string };
   inspect_cue: { id: string; expanded: boolean };
   set_companion_position: { value: CueSnapshot['companionPosition'] };
   set_question_size: { value: CueSnapshot['questionSize'] };

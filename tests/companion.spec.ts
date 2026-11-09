@@ -206,7 +206,7 @@ test('questions expire quietly without requiring a response', async ({
   await expect(page.getByRole('status')).toHaveText('Demo running · Scripted');
 });
 
-test('a question answered by the conversation leaves without a response', async ({
+test('a question answered by the conversation leaves, and the words that answered it are quoted', async ({
   page,
 }) => {
   await page.clock.runFor(37_200);
@@ -216,8 +216,22 @@ test('a question answered by the conversation leaves without a response', async 
   ).toBeVisible();
   // The fictional speakers agree on Friday at 51 s, before the cue would expire.
   await page.clock.runFor(14_000);
-  await expect(question).toHaveCount(0);
+  await expect(
+    page.getByRole('heading', { name: 'What date should we aim for?' }),
+  ).toHaveCount(0);
+  await expect(question).toContainText("“Let's have it ready by Friday");
+  await expect(question).toContainText('Said');
+  await expect(
+    question.getByRole('button', { name: 'Keep this line' }),
+  ).toBeVisible();
   await expect(page.getByRole('status')).toHaveText('Demo running · Scripted');
+  // The quote leaves no pause behind it: the 69 s question arrives on time.
+  await page.clock.runFor(18_500);
+  await expect(
+    page.getByRole('heading', {
+      name: 'How will we choose between those options?',
+    }),
+  ).toBeVisible();
 });
 
 test('an answered question being read stays and shows the answer', async ({
