@@ -143,10 +143,32 @@ const WRAP_UP: &[&str] = &[
     "final thing",
 ];
 
-/// Whether a line sounds like the end of the meeting.
+/// Whether a line sounds like the end of the meeting: a sentence that opens
+/// with one of the phrases, after at most a short lead-in ("OK, so") or a
+/// name ("Robin, anything else?"). "Anything else in the shed?" mid-sentence
+/// does not count.
 fn wraps_up(text: &str) -> bool {
-    let lower = text.to_lowercase();
-    WRAP_UP.iter().any(|phrase| lower.contains(phrase))
+    text.split(['.', '?', '!', ';']).any(|sentence| {
+        let mut rest = sentence.trim().to_lowercase();
+        // Up to two lead-in words or a vocative, each ending in a comma or
+        // being one of a few interjections.
+        for _ in 0..2 {
+            let Some((head, tail)) = rest.split_once(' ') else {
+                break;
+            };
+            let head = head.trim_end_matches(',');
+            let lead_in = ["ok", "okay", "so", "right", "well", "alright", "and", "now"]
+                .contains(&head)
+                || (rest.split_once(' ').is_some_and(|(h, _)| h.ends_with(','))
+                    && head.chars().all(char::is_alphabetic));
+            if lead_in {
+                rest = tail.trim_start().to_string();
+            } else {
+                break;
+            }
+        }
+        WRAP_UP.iter().any(|phrase| rest.starts_with(phrase))
+    })
 }
 /// Common meeting and function words that never identify a note.
 const NOTE_STOP_WORDS: &[&str] = &[
@@ -232,7 +254,8 @@ pub struct Snapshot {
     /// What matters in this meeting, as short lines the user typed, for this
     /// session only: questions about them come through sooner, Focused mode
     /// shows nothing else, and the ones never touched are listed once near
-    /// the end. Never saved, and not sent to the companion.
+    /// the end. Never saved; the companion sees a line only inside that
+    /// Still open list.
     pub focus: Vec<String>,
 }
 
@@ -518,6 +541,14 @@ impl Engine {
             let excess = self.state.transcript.len() - MAX_TRANSCRIPT_SEGMENTS;
             self.state.transcript.drain(..excess);
         }
+        // Any mention counts as the conversation touching a focus line, even
+        // one put to someone else or taken back: it was raised.
+        if let Some(touched) = self
+            .focus_match(&segment.text)
+            .and_then(|index| self.focus_touched.get_mut(index))
+        {
+            *touched = true;
+        }
         // The conversation answered the open cue. Withdraw it before the
         // user spends attention on it, unless they are reading it; then
         // keep the text in place and say it was answered.
@@ -533,6 +564,8 @@ impl Engine {
                     self.cooldown_until = segment.at_ms + self.cooldown();
                     self.forget_unshown();
                 }
+                // The answer may also be the wrap-up line.
+                self.maybe_still_open(&segment.id, &segment.text, segment.at_ms, now);
                 return;
             }
         }
@@ -587,6 +620,18 @@ impl Engine {
                 withdrawn_for_topic = true;
             }
         }
+        // A wrap-up put to the user ("Robin, anything else before we go?")
+        // is the moment for the Still open list, before it reads as a
+        // question for them.
+        self.maybe_still_open(&segment.id, &segment.text, segment.at_ms, now);
+        if self
+            .state
+            .cue
+            .as_ref()
+            .is_some_and(|cue| cue.kind == STILL_OPEN)
+        {
+            return;
+        }
         // A question asked of the user by name takes priority over an unread
         // suggestion, ignores the cooldown, and shows the question itself.
         // Questions for someone else, or for no one in particular, stay quiet.
@@ -639,15 +684,13 @@ impl Engine {
         // as one asked of the user; in Focused mode only such lines, and
         // reminders, raise anything. This is a word match on the user's own
         // words, not a judgment that the line is about them.
-        let focus_line = self.focus_match(&suggestible);
-        if let Some(touched) = focus_line.and_then(|index| self.focus_touched.get_mut(index)) {
-            *touched = true;
-        }
-        let about_focus = focus_line.is_some();
+        let about_focus = self.focus_match(&suggestible).is_some();
         let focused = matches!(self.state.sensitivity, Sensitivity::Focused);
-        // Skip stale suggestions after a suspended app catches up.
+        // Skip stale suggestions after a suspended app catches up. A focus
+        // question skips the pause left by an unrelated cue; in Focused mode
+        // every question is about the focus, so the pause applies as usual.
         if self.state.cue.is_none()
-            && (segment.at_ms >= self.cooldown_until || about_focus)
+            && (segment.at_ms >= self.cooldown_until || (about_focus && !focused))
             && now - segment.at_ms < CUE_MS
             && (!focused || about_focus)
         {
@@ -699,42 +742,7 @@ impl Engine {
                 });
             }
         }
-        // Near the end, once: the focus lines the conversation never touched,
-        // so a meeting that drifted can still come back to them. A phrase
-        // match on how people wrap up; nothing else judges the drift.
-        if self.state.cue.is_none()
-            && !self.still_open_shown
-            && now - segment.at_ms < CUE_MS
-            && wraps_up(&line_text)
-        {
-            let open: Vec<&str> = self
-                .state
-                .focus
-                .iter()
-                .zip(&self.focus_touched)
-                .filter(|(_, touched)| !**touched)
-                .map(|(line, _)| line.as_str())
-                .collect();
-            if !open.is_empty() {
-                self.still_open_shown = true;
-                self.unshown = None;
-                self.cue_deadline = segment.at_ms + ASKED_MS;
-                self.state.cue = Some(Cue {
-                    id: format!("{}:{}", self.generation, line_id),
-                    kind: STILL_OPEN.into(),
-                    question: format!("Not covered: {}", open.join(" · ")),
-                    evidence: line_text.clone(),
-                    source_id: line_id.clone(),
-                    remaining_ms: self.cue_deadline - now,
-                    total_ms: ASKED_MS,
-                    held: false,
-                    expanded: false,
-                    resolved_by: None,
-                    note: None,
-                    about_focus: true,
-                });
-            }
-        }
+        self.maybe_still_open(&line_id, &line_text, spoken_at, now);
         // A line about an imported note reminds the user of it once, with the
         // note as its source: a context reminder, lowest in priority, under
         // the same expiry and pause as a question. This is a phrase match on
@@ -778,6 +786,49 @@ impl Engine {
         if withdrawn_for_topic && self.state.cue.is_none() {
             self.cooldown_until = self.cooldown_until.max(spoken_at + self.cooldown());
         }
+    }
+
+    /// Near the end, once: the focus lines the conversation never touched,
+    /// so a meeting that drifted can still come back to them. A phrase match
+    /// on how people wrap up; nothing else judges the drift. It waits for a
+    /// clear companion and ignores the pause after another cue, in every
+    /// timing setting; a later wrap-up line retries until it has shown.
+    fn maybe_still_open(&mut self, id: &str, text: &str, at_ms: u64, now: u64) {
+        if self.state.cue.is_some()
+            || self.still_open_shown
+            || now - at_ms >= CUE_MS
+            || !wraps_up(text)
+        {
+            return;
+        }
+        let open: Vec<&str> = self
+            .state
+            .focus
+            .iter()
+            .zip(&self.focus_touched)
+            .filter(|(_, touched)| !**touched)
+            .map(|(line, _)| line.as_str())
+            .collect();
+        if open.is_empty() {
+            return;
+        }
+        self.still_open_shown = true;
+        self.unshown = None;
+        self.cue_deadline = at_ms + ASKED_MS;
+        self.state.cue = Some(Cue {
+            id: format!("{}:{}", self.generation, id),
+            kind: STILL_OPEN.into(),
+            question: format!("Not covered: {}", open.join(" · ")),
+            evidence: text.to_string(),
+            source_id: id.to_string(),
+            remaining_ms: self.cue_deadline - now,
+            total_ms: ASKED_MS,
+            held: false,
+            expanded: false,
+            resolved_by: None,
+            note: None,
+            about_focus: true,
+        });
     }
 
     /// A cue created and removed before the next publish was never seen, so
@@ -953,7 +1004,18 @@ impl Engine {
             }
             terms.push(line_terms);
         }
-        self.focus_touched = vec![false; lines.len()];
+        // A line kept through an edit keeps whether the conversation touched it.
+        self.focus_touched = lines
+            .iter()
+            .map(|line| {
+                self.state
+                    .focus
+                    .iter()
+                    .position(|old| old == line)
+                    .and_then(|index| self.focus_touched.get(index).copied())
+                    .unwrap_or(false)
+            })
+            .collect();
         self.focus_terms = terms;
         self.state.focus = lines;
         self.changed();
@@ -2651,7 +2713,7 @@ mod tests {
             ),
             (27_000, "Robin, can you take the leaflet?"),
             (
-                75_000,
+                90_000,
                 "We should settle the volunteer schedule either Monday or Tuesday.",
             ),
         ]);
@@ -2676,6 +2738,11 @@ mod tests {
             "a question put to the user by name still arrives"
         );
         e.advance(48_000);
+        assert!(
+            e.state.cue.is_none(),
+            "the asked question has passed and Focused keeps the usual pause"
+        );
+        e.advance(15_000);
         let cue = e.state.cue.as_ref().expect("the focus question");
         assert_eq!(cue.kind, "Decision");
         assert!(cue.about_focus);
@@ -2754,6 +2821,49 @@ mod tests {
         let mut e = play(&[(1_000, "Before we finish, anything else?")]);
         e.advance(1_000);
         assert!(e.state.cue.is_none());
+    }
+
+    #[test]
+    fn a_focus_line_put_to_someone_else_still_counts_as_touched_and_edits_keep_touched() {
+        let mut e = play(&[
+            (1_000, "Sam, can you settle the volunteer schedule?"),
+            (20_000, "Robin, anything else before we finish?"),
+        ]);
+        e.set_user_name(Some("Robin".into())).unwrap();
+        e.set_focus(vec![
+            "Settle the volunteer schedule".into(),
+            "Decide who owns the compost bins".into(),
+        ])
+        .unwrap();
+        e.advance(1_000);
+        assert!(e.state.cue.is_none(), "a question for Sam raises nothing");
+        // Editing the list keeps what was touched; a new line starts untouched.
+        e.set_focus(vec![
+            "Agree the newsletter launch".into(),
+            "Settle the volunteer schedule".into(),
+        ])
+        .unwrap();
+        e.advance(19_000);
+        assert_eq!(
+            e.state.cue.as_ref().map(|c| c.question.as_str()),
+            Some("Not covered: Agree the newsletter launch"),
+            "the wrap-up came in a line addressed to the user"
+        );
+        for line in [
+            "Before we finish, anything else?",
+            "OK, so, to wrap up: thanks.",
+            "Robin, anything else before we go?",
+            "Right. Last thing before we close.",
+        ] {
+            assert!(wraps_up(line), "{line}");
+        }
+        for line in [
+            "Is there anything else in the shed?",
+            "We are running out of time on the fence, not the meeting.",
+            "I'll wrap this up tonight and send it.",
+        ] {
+            assert!(!wraps_up(line), "{line}");
+        }
     }
 
     #[test]

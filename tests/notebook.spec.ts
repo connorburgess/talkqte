@@ -128,8 +128,9 @@ test('focus lines are kept for the session and a line without identifying words 
   await expect(page.getByRole('alert')).toContainText(
     '“Team sync” needs a few specific words',
   );
+  // The typed text stays so the line can be fixed in place.
   await expect(page.getByRole('textbox', { name: 'Focus' })).toHaveValue(
-    'Agree the launch plan for the newsletter\nDecide who owns the compost bins',
+    'Team sync',
   );
   await page
     .getByRole('combobox', { name: 'Question timing' })

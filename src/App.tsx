@@ -91,6 +91,8 @@ function FloatingQuestion() {
       state.cue ||
       ['running', 'paused'].includes(state.status));
   const paused = state?.status === 'paused';
+  // The switch returns to the setting it left, so Quiet is not lost.
+  const beforeFocused = useRef<'balanced' | 'quiet'>('balanced');
   return (
     <main className="floating-surface" aria-label="Meeting companion">
       <div className="companion-shell">
@@ -191,16 +193,18 @@ function FloatingQuestion() {
                   }
                   aria-pressed={state.sensitivity === 'focused'}
                   disabled={busy}
-                  onClick={() =>
+                  onClick={() => {
+                    if (state.sensitivity !== 'focused')
+                      beforeFocused.current = state.sensitivity;
                     void run(() =>
                       bridge.command('set_sensitivity', {
                         value:
                           state.sensitivity === 'focused'
-                            ? 'balanced'
+                            ? beforeFocused.current
                             : 'focused',
                       }),
-                    )
-                  }
+                    );
+                  }}
                 >
                   <Crosshair size={16} />
                 </button>
@@ -435,10 +439,10 @@ function Notebook() {
     savingFocus.current = true;
     bridge
       .command('set_focus', { lines })
-      .then(() => setFocus(lines.join('\n')))
+      // The typed text stays as it is either way: a rejected line is fixed
+      // in place, and an edit made meanwhile is not overwritten.
       .catch((e: unknown) => {
         setError(e instanceof Error ? e.message : String(e));
-        setFocus(current.join('\n'));
       })
       .finally(() => {
         savingFocus.current = false;
@@ -1122,7 +1126,10 @@ function Notebook() {
                 <h2>Question timing</h2>
                 <p>
                   Balanced leaves at least 10 seconds between questions. Quiet
-                  leaves 30 seconds after a question passes.
+                  leaves 30 seconds after a question passes. Focused shows only
+                  questions about your focus lines, questions asked of you by
+                  name, and reminders of notes you chose; with no focus lines it
+                  shows just the last two.
                 </p>
               </div>
               <label className="visually-hidden" htmlFor="sensitivity">

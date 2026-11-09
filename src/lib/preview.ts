@@ -298,7 +298,7 @@ const exampleNotes: ContextItem[] = [
 let contextItems: ContextItem[] = [];
 // Notes already quoted as a reminder this demo run.
 let shownNotes: string[] = [];
-/** Words of a note title or goal that could identify it in conversation. */
+/** Words of a note title or focus line that could identify it in conversation. */
 function identifyingTerms(text: string): string[] {
   return [
     ...new Set(
