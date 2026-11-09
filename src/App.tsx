@@ -247,7 +247,11 @@ function Notebook() {
   const [search, setSearch] = useState('');
   const [notes, setNotes] = useState('');
   const [userName, setUserName] = useState('');
+  const [goal, setGoal] = useState('');
   const initialized = useRef(false);
+  // Enter followed by leaving a field saves once, not twice.
+  const savingName = useRef(false);
+  const savingGoal = useRef(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
@@ -279,6 +283,7 @@ function Notebook() {
       initialized.current = true;
       setNotes(state.notes);
       setUserName(state.userName ?? '');
+      setGoal(state.goal ?? '');
     }
   }, [state]);
   const modelState = model?.status;
@@ -370,12 +375,37 @@ function Notebook() {
       setUserName(current);
       return;
     }
+    if (savingName.current) return;
+    savingName.current = true;
     bridge
       .command('set_user_name', { name: next || null })
       .then(() => setUserName(next))
       .catch((e: unknown) => {
         setError(e instanceof Error ? e.message : String(e));
         setUserName(current);
+      })
+      .finally(() => {
+        savingName.current = false;
+      });
+  };
+  const saveGoal = () => {
+    const next = goal.trim();
+    const current = state.goal ?? '';
+    if (next === current) {
+      setGoal(current);
+      return;
+    }
+    if (savingGoal.current) return;
+    savingGoal.current = true;
+    bridge
+      .command('set_goal', { goal: next || null })
+      .then(() => setGoal(next))
+      .catch((e: unknown) => {
+        setError(e instanceof Error ? e.message : String(e));
+        setGoal(current);
+      })
+      .finally(() => {
+        savingGoal.current = false;
       });
   };
   const prepareExport = () =>
@@ -912,7 +942,7 @@ function Notebook() {
             <section className="setting">
               <div>
                 <h2>Your name</h2>
-                <p>
+                <p id="user-name-help">
                   In a live session, when someone asks you something by name,
                   such as “Sam, can you take the draft?”, the question is shown
                   as Asked you and stays while you answer. Questions for other
@@ -924,6 +954,7 @@ function Notebook() {
                 <label htmlFor="user-name">Name</label>
                 <input
                   id="user-name"
+                  aria-describedby="user-name-help"
                   type="text"
                   value={userName}
                   maxLength={40}
@@ -933,6 +964,37 @@ function Notebook() {
                   onBlur={saveName}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') saveName();
+                  }}
+                />
+              </div>
+            </section>
+            <section className="setting">
+              <div>
+                <h2>Meeting goal</h2>
+                <p id="meeting-goal-help">
+                  One line on what you want from this meeting, such as “agree
+                  the launch plan for the newsletter”. When a line in the
+                  conversation uses its words, a question about it comes through
+                  even during the pause after another question, with either
+                  timing setting, and stays 45 seconds, the length of a question
+                  asked of you by name. It is a word match, not understanding,
+                  and is kept only until you close the app.
+                </p>
+              </div>
+              <div className="setting-control">
+                <label htmlFor="meeting-goal">Goal</label>
+                <input
+                  id="meeting-goal"
+                  aria-describedby="meeting-goal-help"
+                  type="text"
+                  value={goal}
+                  maxLength={80}
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(e) => setGoal(e.target.value)}
+                  onBlur={saveGoal}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') saveGoal();
                   }}
                 />
               </div>

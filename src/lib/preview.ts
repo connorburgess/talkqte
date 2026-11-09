@@ -23,6 +23,7 @@ const state: Snapshot = {
   notes: '',
   sensitivity: 'balanced',
   userName: null,
+  goal: null,
   overlayEnabled: true,
   companionPosition: 'bottomRight',
   questionSize: 'standard',
@@ -95,6 +96,7 @@ function tick() {
         expanded: false,
         resolvedBy: null,
         note: null,
+        aboutGoal: false,
       };
     }
     // A line about an imported note reminds the user of it once, with the
@@ -106,17 +108,7 @@ function tick() {
         .filter(Boolean);
       const note = contextItems.find((item) => {
         if (shownNotes.includes(item.sourceId)) return false;
-        const terms = [
-          ...new Set(
-            item.title
-              .toLowerCase()
-              .split(/[^\p{L}\p{N}']+/u)
-              .filter(
-                (w) =>
-                  w.length >= 5 && /^\p{L}+$/u.test(w) && !STOP_WORDS.has(w),
-              ),
-          ),
-        ];
+        const terms = identifyingTerms(item.title);
         const needed = terms.length > 6 ? 3 : 2;
         return (
           terms.length >= needed &&
@@ -142,6 +134,7 @@ function tick() {
             sourceDate: note.sourceDate,
             provider: 'file',
           },
+          aboutGoal: false,
         };
       }
     }
@@ -242,6 +235,21 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
       // Stored only; the preview's scripted questions never use the name.
       state.userName = (args as Commands['set_user_name']).name?.trim() || null;
       break;
+    case 'set_goal': {
+      // Stands in for the engine's checks; the preview's scripted questions
+      // never use the goal.
+      const goal = (args as Commands['set_goal']).goal?.trim() || null;
+      if (goal) {
+        if ([...goal].length > 80 || /[\p{Cc}]/u.test(goal))
+          throw new Error('A meeting goal is one line of up to 80 characters.');
+        if (identifyingTerms(goal).length < 2)
+          throw new Error(
+            'Describe the goal in a few specific words, such as “agree the launch plan for the newsletter”.',
+          );
+      }
+      state.goal = goal;
+      break;
+    }
     case 'set_sensitivity':
       state.sensitivity = (args as Commands['set_sensitivity']).value;
       break;
@@ -287,6 +295,19 @@ const exampleNotes: ContextItem[] = [
 let contextItems: ContextItem[] = [];
 // Notes already quoted as a reminder this demo run.
 let shownNotes: string[] = [];
+/** Words of a note title or goal that could identify it in conversation. */
+function identifyingTerms(text: string): string[] {
+  return [
+    ...new Set(
+      text
+        .toLowerCase()
+        .split(/[^\p{L}\p{N}']+/u)
+        .filter(
+          (w) => w.length >= 5 && /^\p{L}+$/u.test(w) && !STOP_WORDS.has(w),
+        ),
+    ),
+  ];
+}
 // Mirrors the engine's list of words that never identify a note.
 const STOP_WORDS = new Set([
   'about',

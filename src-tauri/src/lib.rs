@@ -92,6 +92,7 @@ fn carry_over(previous: &Engine, mut next: Engine) -> Engine {
     next.set_question_size(state.question_size);
     next.state.notes = state.notes.clone();
     next.state.user_name = state.user_name.clone();
+    next.copy_goal_from(previous);
     next.copy_notes_from(previous);
     next.continue_sessions_from(previous);
     next
@@ -198,6 +199,14 @@ fn set_user_name(
     name: Option<String>,
 ) -> Result<(), String> {
     change(&app, &state, |e| e.set_user_name(name))
+}
+#[tauri::command]
+fn set_goal(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    goal: Option<String>,
+) -> Result<(), String> {
+    change(&app, &state, |e| e.set_goal(goal))
 }
 #[tauri::command]
 fn set_sensitivity(
@@ -926,6 +935,7 @@ pub fn run() {
             update_notes,
             set_sensitivity,
             set_user_name,
+            set_goal,
             set_overlay,
             export_preview,
             export_markdown,

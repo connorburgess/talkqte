@@ -30,7 +30,9 @@ export function Question({
       <p className="question-meta">
         {cue.note
           ? `Reminder from your notes · ${cue.note.sourceDate}`
-          : `${live ? 'Live question' : 'Demo question'} · ${cue.kind}`}
+          : `${live ? 'Live question' : 'Demo question'} · ${cue.kind}${
+              cue.aboutGoal ? ' · about your goal' : ''
+            }`}
       </p>
       <button
         className="question-disclosure"
@@ -53,6 +55,12 @@ export function Question({
               : 'From the fictional transcript'}
         </p>
         <blockquote className="evidence">“{cue.evidence}”</blockquote>
+        {cue.aboutGoal && (
+          <p>
+            This line uses words from your meeting goal, so the question came
+            through sooner and stays longer.
+          </p>
+        )}
         {cue.resolvedBy && (
           <>
             <p>Answered later</p>
