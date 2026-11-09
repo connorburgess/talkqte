@@ -19,6 +19,7 @@ export function ContextNotes({
   onNotice: (message: string) => void;
 }) {
   const [picked, setPicked] = useState<PickedNotes | null>(null);
+  const [pickedFrom, setPickedFrom] = useState<'file' | 'granola'>('file');
   const [granola, setGranola] = useState<GranolaStatus>({
     connected: false,
     tools: [],
@@ -70,6 +71,7 @@ export function ContextNotes({
       if (!result) return;
       returnFocus.current = true;
       setChosen([]);
+      setPickedFrom('file');
       setPicked(result);
     });
   const cancel = () =>
@@ -102,6 +104,7 @@ export function ContextNotes({
       const result = await bridge.listGranolaNotes();
       returnFocus.current = true;
       setChosen([]);
+      setPickedFrom('granola');
       setPicked(result);
     });
   const disconnectGranola = () =>
@@ -308,6 +311,13 @@ export function ContextNotes({
             >
               {allChosen ? 'Clear all' : 'Select all'}
             </button>
+          </p>
+        )}
+        {picked && picked.notes.length === 0 && (
+          <p className="context-empty" role="status">
+            {pickedFrom === 'granola'
+              ? 'No notes came back from Granola for the last 30 days. If you have meetings there from that time, the listing is not working yet; nothing was imported.'
+              : 'This file has no notes with an id, a date, and text; nothing was imported.'}
           </p>
         )}
         <ul className="context-choices">
