@@ -63,7 +63,7 @@ npm ci
 npm run desktop
 ```
 
-Choose **Try demo** for the fictional community-garden conversation. It requires no capture permission, model download, or API credentials. Open **Why?** to inspect a question's source and keep it available while reading; **Dismiss** clears it. Untouched questions pass quietly. New questions expand briefly, with a reduced-motion alternative. Settings provides text size, timing, companion placement, and a session-only name used to notice questions asked of you in a live session.
+Choose **Try demo** for the fictional community-garden conversation. It requires no capture permission, model download, or API credentials. Open **Why?** to inspect a question's source and keep it available while reading; **Dismiss** clears it. Untouched questions pass quietly. New questions expand briefly, with a reduced-motion alternative. Settings provides text size, timing, companion placement, a session-only name used to notice questions asked of you in a live session, and a one-line meeting goal: when a line uses the goal's words, a question about it comes through even during the pause after another question and stays as long as one asked of you by name. Both are word matches, kept only until you quit.
 
 The companion is configured not to take keyboard focus; use the notebook for keyboard controls. Dismissal there returns focus to notes or the selected Transcript tab unless you have already moved elsewhere. Cross-app focus and native placement still have [pending checks](docs/native-validation.md). See [Glance view](docs/glance-mode.md) for the current hold and expiry behavior.
 

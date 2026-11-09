@@ -23,6 +23,7 @@ const state: Snapshot = {
   notes: '',
   sensitivity: 'balanced',
   userName: null,
+  goal: null,
   overlayEnabled: true,
   companionPosition: 'bottomRight',
   questionSize: 'standard',
@@ -95,6 +96,7 @@ function tick() {
         expanded: false,
         resolvedBy: null,
         note: null,
+        aboutGoal: false,
       };
     }
     // A line about an imported note reminds the user of it once, with the
@@ -142,6 +144,7 @@ function tick() {
             sourceDate: note.sourceDate,
             provider: 'file',
           },
+          aboutGoal: false,
         };
       }
     }
@@ -242,6 +245,21 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
       // Stored only; the preview's scripted questions never use the name.
       state.userName = (args as Commands['set_user_name']).name?.trim() || null;
       break;
+    case 'set_goal': {
+      // Stands in for the engine's checks; the preview's scripted questions
+      // never use the goal.
+      const goal = (args as Commands['set_goal']).goal?.trim() || null;
+      if (goal) {
+        if ([...goal].length > 80 || /[\p{Cc}]/u.test(goal))
+          throw new Error('A meeting goal is one line of up to 80 characters.');
+        if (goalTerms(goal).length < 2)
+          throw new Error(
+            'Describe the goal in a few specific words, such as “agree the launch plan for the newsletter”.',
+          );
+      }
+      state.goal = goal;
+      break;
+    }
     case 'set_sensitivity':
       state.sensitivity = (args as Commands['set_sensitivity']).value;
       break;
@@ -288,6 +306,19 @@ let contextItems: ContextItem[] = [];
 // Notes already quoted as a reminder this demo run.
 let shownNotes: string[] = [];
 // Mirrors the engine's list of words that never identify a note.
+/** Words of a goal that could identify it, by the note-title rule. */
+function goalTerms(goal: string): string[] {
+  return [
+    ...new Set(
+      goal
+        .toLowerCase()
+        .split(/[^\p{L}\p{N}']+/u)
+        .filter(
+          (w) => w.length >= 5 && /^\p{L}+$/u.test(w) && !STOP_WORDS.has(w),
+        ),
+    ),
+  ];
+}
 const STOP_WORDS = new Set([
   'about',
   'after',

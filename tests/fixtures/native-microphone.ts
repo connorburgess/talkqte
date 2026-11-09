@@ -90,6 +90,7 @@ async function say(text: string, question?: string) {
           expanded: false,
           resolvedBy: null,
           note: null,
+          aboutGoal: false,
         }
       : session.cue,
   });

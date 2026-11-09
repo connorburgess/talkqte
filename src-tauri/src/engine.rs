@@ -84,6 +84,9 @@ pub struct Cue {
     pub resolved_by: Option<Resolution>,
     /// Set for a context cue: the imported note it quotes.
     pub note: Option<NoteRef>,
+    /// True when the line uses words from the user's meeting goal: the
+    /// question then skips the pause after another cue and stays longer.
+    pub about_goal: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -112,6 +115,8 @@ const TERMS_NEEDED: usize = 2;
 /// Titles with more terms than this need three matching words, because two
 /// common words then co-occur too easily in ordinary speech.
 const LONG_TITLE_TERMS: usize = 6;
+/// A meeting goal is one short line.
+const MAX_GOAL_CHARS: usize = 80;
 /// Common meeting and function words that never identify a note.
 const NOTE_STOP_WORDS: &[&str] = &[
     "about",
@@ -193,6 +198,10 @@ pub struct Snapshot {
     /// The person's name for this session only, used to notice questions
     /// asked of them. Never saved, and not sent to the companion.
     pub user_name: Option<String>,
+    /// What the user wants from this meeting, for this session only, used to
+    /// let questions about it through sooner. Never saved, and not sent to
+    /// the companion.
+    pub goal: Option<String>,
 }
 
 // The floating window never receives the notebook or full transcript.
@@ -221,6 +230,8 @@ pub struct Engine {
     /// addressed to them. Never stored or sent anywhere.
     /// When each question type was last shown in this session.
     last_shown: Vec<(String, u64)>,
+    /// Words of the meeting goal that identify it, as for a note title.
+    goal_terms: Vec<String>,
     /// Imported notes prepared for matching, and the keys already shown.
     notes: Vec<NoteTerms>,
     shown_notes: Vec<String>,
@@ -267,6 +278,7 @@ impl Engine {
                 question_size: QuestionSize::Standard,
                 live: demo.segments.is_empty() && demo.duration_ms == u64::MAX,
                 user_name: None,
+                goal: None,
             },
             demo,
             generation: 0,
@@ -275,6 +287,7 @@ impl Engine {
             cooldown_until: 0,
             live_input: false,
             last_shown: vec![],
+            goal_terms: vec![],
             notes: vec![],
             shown_notes: vec![],
             unshown: None,
@@ -555,6 +568,7 @@ impl Engine {
                     expanded: false,
                     resolved_by: None,
                     note: None,
+                    about_goal: false,
                 });
             }
             return;
@@ -572,9 +586,14 @@ impl Engine {
         // Kept for the context reminder below; a fixed question may move the
         // segment's ID into its cue first.
         let line_id = segment.id.clone();
+        // A line that uses the words of the meeting goal may raise a question
+        // during the pause after another cue, and that question stays as long
+        // as one asked of the user. This is a word match on the goal, not a
+        // judgment that the line is about it.
+        let about_goal = self.about_goal(&suggestible);
         // Skip stale suggestions after a suspended app catches up.
         if self.state.cue.is_none()
-            && segment.at_ms >= self.cooldown_until
+            && (segment.at_ms >= self.cooldown_until || about_goal)
             && now - segment.at_ms < CUE_MS
         {
             // The same fixed question shortly after it was shown is redundant,
@@ -607,7 +626,8 @@ impl Engine {
                     .map(|index| self.last_shown.remove(index).1);
                 self.unshown = Some((key.clone(), previous));
                 self.last_shown.push((key, segment.at_ms));
-                self.cue_deadline = segment.at_ms + CUE_MS;
+                let total_ms = if about_goal { ASKED_MS } else { CUE_MS };
+                self.cue_deadline = segment.at_ms + total_ms;
                 self.state.cue = Some(Cue {
                     id: format!("{}:{}", self.generation, segment.id),
                     kind: kind.into(),
@@ -615,11 +635,12 @@ impl Engine {
                     evidence: segment.text,
                     source_id: segment.id,
                     remaining_ms: self.cue_deadline - now,
-                    total_ms: CUE_MS,
+                    total_ms,
                     held: false,
                     expanded: false,
                     resolved_by: None,
                     note: None,
+                    about_goal,
                 });
             }
         }
@@ -654,6 +675,7 @@ impl Engine {
                         source_date: note.source_date,
                         provider: note.provider,
                     }),
+                    about_goal: false,
                 });
             }
         }
@@ -780,6 +802,58 @@ impl Engine {
                     .count()
                     >= needed
         })
+    }
+
+    /// Whether this line uses enough of the goal's words to be about it, by
+    /// the same rule as a note title.
+    fn about_goal(&self, text: &str) -> bool {
+        let needed = if self.goal_terms.len() > LONG_TITLE_TERMS {
+            TERMS_NEEDED + 1
+        } else {
+            TERMS_NEEDED
+        };
+        self.goal_terms.len() >= needed && {
+            let words: Vec<String> = text
+                .split(|character: char| !character.is_alphanumeric() && character != '\'')
+                .filter(|word| !word.is_empty())
+                .map(|word| word.to_lowercase())
+                .collect();
+            self.goal_terms
+                .iter()
+                .filter(|term| words.contains(term))
+                .count()
+                >= needed
+        }
+    }
+
+    /// Sets or clears the meeting goal. Kept in memory for this app session
+    /// only. A goal needs at least two words that can identify it in
+    /// conversation (five letters or more, not common meeting words), or it
+    /// could never let a question through.
+    pub fn set_goal(&mut self, goal: Option<String>) -> Result<(), String> {
+        let goal = goal
+            .map(|goal| goal.trim().to_string())
+            .filter(|goal| !goal.is_empty());
+        let terms = match &goal {
+            Some(goal) => {
+                if goal.chars().count() > MAX_GOAL_CHARS || goal.chars().any(char::is_control) {
+                    return Err("A meeting goal is one line of up to 80 characters.".into());
+                }
+                let terms = note_terms(goal);
+                if terms.len() < TERMS_NEEDED {
+                    return Err(
+                        "Describe the goal in a few specific words, such as “agree the launch plan for the newsletter”."
+                            .into(),
+                    );
+                }
+                terms
+            }
+            None => vec![],
+        };
+        self.goal_terms = terms;
+        self.state.goal = goal;
+        self.changed();
+        Ok(())
     }
 
     pub fn set_user_name(&mut self, name: Option<String>) -> Result<(), String> {
@@ -2224,6 +2298,80 @@ mod tests {
         e.respond(&first, Response::Dismiss).unwrap(); // starts a cooldown
         e.advance(2_000);
         assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
+    }
+
+    #[test]
+    fn a_question_about_the_meeting_goal_skips_the_pause_and_stays_longer() {
+        let lines = [
+            (1_000, "Someone can take the first draft."),
+            (3_000, "We still need to settle the volunteer schedule for the garden either this week or next."),
+        ];
+        let mut e = play(&lines);
+        e.set_goal(Some("Settle the volunteer schedule".into()))
+            .unwrap();
+        e.advance(1_000);
+        let first = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&first, Response::Dismiss).unwrap(); // starts a 10 s pause
+        e.advance(2_000);
+        let cue = e.state.cue.as_ref().expect("the goal question");
+        assert_eq!(
+            (cue.kind.as_str(), cue.source_id.as_str()),
+            ("Decision", "t2")
+        );
+        assert!(cue.about_goal);
+        assert_eq!(cue.total_ms, 45_000);
+        e.advance(40_000);
+        assert!(
+            e.state.cue.is_some(),
+            "stays as long as a question asked of the user"
+        );
+        e.advance(6_000); // 49 s: past the 48 s deadline
+        assert!(e.state.cue.is_none());
+
+        // The same line without a goal waits out the pause like any other.
+        let mut e = play(&lines);
+        e.advance(1_000);
+        let first = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&first, Response::Dismiss).unwrap();
+        e.advance(2_000);
+        assert!(e.state.cue.is_none());
+
+        // A line that shares one goal word is not about the goal.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (
+                3_000,
+                "The schedule for the fence is either Monday or Tuesday.",
+            ),
+        ]);
+        e.set_goal(Some("Settle the volunteer schedule".into()))
+            .unwrap();
+        e.advance(1_000);
+        let first = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&first, Response::Dismiss).unwrap();
+        e.advance(2_000);
+        assert!(e.state.cue.is_none());
+    }
+
+    #[test]
+    fn a_goal_needs_words_that_can_identify_it() {
+        let mut e = Engine::default();
+        assert!(e.set_goal(Some("Decide".into())).is_err(), "one word");
+        assert!(
+            e.set_goal(Some("Sync on the team update".into())).is_err(),
+            "only common meeting words"
+        );
+        assert!(e.set_goal(Some("a".repeat(81))).is_err(), "too long");
+        assert!(e.set_goal(Some("line one\nline two".into())).is_err());
+        assert!(e.state.goal.is_none());
+        e.set_goal(Some("  Agree the launch plan for the newsletter  ".into()))
+            .unwrap();
+        assert_eq!(
+            e.state.goal.as_deref(),
+            Some("Agree the launch plan for the newsletter")
+        );
+        e.set_goal(Some("   ".into())).unwrap();
+        assert!(e.state.goal.is_none());
     }
 
     #[test]

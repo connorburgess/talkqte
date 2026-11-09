@@ -109,6 +109,28 @@ test('search has a recoverable empty state and settings explain the prototype', 
   ).toBeVisible();
 });
 
+test('a meeting goal is kept for the session and a goal without identifying words is refused', async ({
+  page,
+}) => {
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const goal = page.getByRole('textbox', { name: 'Goal' });
+  await goal.fill('Agree the launch plan for the newsletter');
+  await goal.press('Enter');
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Goal' })).toHaveValue(
+    'Agree the launch plan for the newsletter',
+  );
+  await page.getByRole('textbox', { name: 'Goal' }).fill('Team sync');
+  await page.getByRole('textbox', { name: 'Goal' }).press('Enter');
+  await expect(page.getByRole('alert')).toContainText(
+    'Describe the goal in a few specific words',
+  );
+  await expect(page.getByRole('textbox', { name: 'Goal' })).toHaveValue(
+    'Agree the launch plan for the newsletter',
+  );
+});
+
 test('the browser preview never offers a live microphone session', async ({
   page,
 }) => {
