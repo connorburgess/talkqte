@@ -4,6 +4,7 @@ import type {
   Commands,
   ContextItem,
   CueSnapshot,
+  GranolaStatus,
   LiveStatus,
   MergeOutcome,
   ModelStatus,
@@ -73,6 +74,28 @@ export async function watchModel(receive: (status: ModelStatus) => void) {
 export async function pickContextFile() {
   if (preview) return (await preview).pickContextFile();
   return invoke<PickedNotes | null>('pick_context_file');
+}
+
+/** Signs in to Granola in the browser and opens a session; desktop only. */
+export async function connectGranola() {
+  if (preview) return (await preview).connectGranola();
+  return invoke<GranolaStatus>('connect_granola');
+}
+
+export async function granolaStatus() {
+  if (preview) return (await preview).granolaStatus();
+  return invoke<GranolaStatus>('granola_status');
+}
+
+/** Lists the signed-in person's recent Granola notes to choose from. */
+export async function listGranolaNotes() {
+  if (preview) return (await preview).listGranolaNotes();
+  return invoke<PickedNotes>('list_granola_notes');
+}
+
+export async function disconnectGranola() {
+  if (preview) return (await preview).disconnectGranola();
+  return invoke<GranolaStatus>('disconnect_granola');
 }
 
 export async function importContextNotes(ids: string[]) {

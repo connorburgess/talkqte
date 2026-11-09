@@ -65,7 +65,13 @@ export type Commands = {
   remove_model: undefined;
   cancel_context_import: undefined;
   remove_context_item: { provider: ContextItem['provider']; sourceId: string };
+  cancel_granola_sign_in: undefined;
 };
+/** What the notebook may know about the Granola connection; never identity. */
+export interface GranolaStatus {
+  connected: boolean;
+  tools: string[];
+}
 /** One prior note the user imported; never mistaken for the conversation. */
 export interface ContextItem {
   provider: 'granola' | 'file';
