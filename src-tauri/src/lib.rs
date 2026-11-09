@@ -173,6 +173,8 @@ fn set_companion_position(
     state: tauri::State<AppState>,
     value: CompanionPosition,
 ) -> Result<(), String> {
+    // A preset replaces wherever the person dragged the window to.
+    companion::reset_drag(&app);
     change(&app, &state, |e| {
         e.set_companion_position(value);
         Ok(())
@@ -1029,6 +1031,11 @@ pub fn run() {
                 )
             {
                 companion::refresh(window.app_handle());
+            }
+            if window.label() == "cue" {
+                if let tauri::WindowEvent::Moved(position) = event {
+                    companion::moved(window.app_handle(), (position.x, position.y));
+                }
             }
             if window.label() == "main"
                 && matches!(event, tauri::WindowEvent::CloseRequested { .. })

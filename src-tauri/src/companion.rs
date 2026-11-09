@@ -5,7 +5,10 @@ use crate::{
     microphone::{Controller as Microphone, Status as MicrophoneStatus},
     AppState,
 };
-use std::sync::Mutex;
+use std::{
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 use tauri::{Manager, PhysicalPosition, PhysicalSize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,6 +53,8 @@ struct Frame {
 
 // Physical coordinates include negative origins for monitors left/above the
 // primary display. Clamp each dimension before anchoring on small work areas.
+/// The preset frame for a mode, as the tests describe it.
+#[cfg(test)]
 fn frame(
     origin: (i32, i32),
     area: (u32, u32),
@@ -57,6 +62,22 @@ fn frame(
     mode: Mode,
     position: CompanionPosition,
     text_size: QuestionSize,
+) -> Frame {
+    frame_at(origin, area, scale, mode, position, text_size, None)
+}
+
+/// The companion's frame for a mode. A position the person dragged the
+/// window to wins over the Settings preset: its top-left corner is kept,
+/// pulled back inside the work area when the window grows or the display
+/// changes.
+fn frame_at(
+    origin: (i32, i32),
+    area: (u32, u32),
+    scale: f64,
+    mode: Mode,
+    position: CompanionPosition,
+    text_size: QuestionSize,
+    dragged: Option<(i32, i32)>,
 ) -> Frame {
     let scale = if scale.is_finite() && scale > 0.0 {
         scale
@@ -92,16 +113,93 @@ fn frame(
     } else {
         top
     };
+    let (x, y) = match dragged {
+        Some((dx, dy)) => (
+            i64::from(dx).clamp(
+                i64::from(origin.0),
+                i64::from(origin.0) + i64::from(area.0.saturating_sub(width)),
+            ),
+            i64::from(dy).clamp(
+                i64::from(origin.1),
+                i64::from(origin.1) + i64::from(area.1.saturating_sub(height)),
+            ),
+        ),
+        None => (
+            i64::from(origin.0) + i64::from(x),
+            i64::from(origin.1) + i64::from(y),
+        ),
+    };
     Frame {
-        x: (i64::from(origin.0) + i64::from(x)).clamp(i32::MIN.into(), i32::MAX.into()) as i32,
-        y: (i64::from(origin.1) + i64::from(y)).clamp(i32::MIN.into(), i32::MAX.into()) as i32,
+        x: x.clamp(i32::MIN.into(), i32::MAX.into()) as i32,
+        y: y.clamp(i32::MIN.into(), i32::MAX.into()) as i32,
         width,
         height,
     }
 }
 
 #[derive(Default)]
-pub struct WindowState(Mutex<Option<(Mode, Option<Frame>)>>);
+pub struct Placement {
+    /// The mode and frame last applied to the window.
+    applied: Option<(Mode, Option<Frame>)>,
+    /// The top-left corner the person dragged the window to, in physical
+    /// pixels, until a Settings preset replaces it. Session only.
+    dragged: Option<(i32, i32)>,
+    /// The position our own move will end at, and when it was requested.
+    /// Moved events until then are the window settling (a resize moves the
+    /// top-left corner first, then the move lands), not a drag; after
+    /// SETTLE_MS without the expected position they count again, so a move
+    /// the system refused cannot swallow later drags.
+    expected: Option<((i32, i32), Instant)>,
+}
+
+/// How long the app's own move may take to land.
+const SETTLE_MS: u64 = 1_000;
+
+#[derive(Default)]
+pub struct WindowState(Mutex<Placement>);
+
+impl Placement {
+    /// Records a Moved event. Returns true when it was a drag by the person.
+    fn note_move(&mut self, position: (i32, i32), now: Instant) -> bool {
+        if let Some((expected, since)) = self.expected {
+            if position == expected {
+                self.expected = None;
+                return false;
+            }
+            if now.duration_since(since) < Duration::from_millis(SETTLE_MS) {
+                return false;
+            }
+            self.expected = None;
+        }
+        let ours = self
+            .applied
+            .and_then(|(_, frame)| frame)
+            .is_some_and(|frame| (frame.x, frame.y) == position);
+        if ours {
+            return false;
+        }
+        self.dragged = Some(position);
+        // Reapply on the next refresh so a grown window stays on the display.
+        self.applied = None;
+        true
+    }
+}
+
+/// The companion window reported a new position. One the app did not ask
+/// for is a drag by the person, and is kept from then on.
+pub fn moved(app: &tauri::AppHandle, position: (i32, i32)) {
+    if let Ok(mut placement) = app.state::<WindowState>().0.lock() {
+        placement.note_move(position, Instant::now());
+    }
+}
+
+/// A Settings preset was chosen: forget the dragged position.
+pub fn reset_drag(app: &tauri::AppHandle) {
+    if let Ok(mut placement) = app.state::<WindowState>().0.lock() {
+        placement.dragged = None;
+        placement.applied = None;
+    }
+}
 
 pub fn refresh(app: &tauri::AppHandle) {
     let handle = app.clone();
@@ -118,6 +216,10 @@ pub fn refresh(app: &tauri::AppHandle) {
         let Some(window) = handle.get_webview_window("cue") else {
             return;
         };
+        let state = handle.state::<WindowState>();
+        let Ok(mut placement) = state.0.lock() else {
+            return;
+        };
         let layout = if mode == Mode::Hidden {
             None
         } else {
@@ -128,22 +230,20 @@ pub fn refresh(app: &tauri::AppHandle) {
                 .or_else(|| window.primary_monitor().ok().flatten());
             let Some(monitor) = monitor else { return };
             let area = monitor.work_area();
-            Some(frame(
+            Some(frame_at(
                 (area.position.x, area.position.y),
                 (area.size.width, area.size.height),
                 monitor.scale_factor(),
                 mode,
                 cue.companion_position,
                 cue.question_size,
+                placement.dragged,
             ))
         };
-        let state = handle.state::<WindowState>();
-        let Ok(mut applied) = state.0.lock() else {
-            return;
-        };
-        if *applied == Some((mode, layout)) {
+        if placement.applied == Some((mode, layout)) {
             return;
         }
+        placement.expected = layout.map(|frame| ((frame.x, frame.y), Instant::now()));
         let result = if let Some(frame) = layout {
             window
                 .set_size(PhysicalSize::new(frame.width, frame.height))
@@ -153,7 +253,7 @@ pub fn refresh(app: &tauri::AppHandle) {
             window.hide()
         };
         if result.is_ok() {
-            *applied = Some((mode, layout));
+            placement.applied = Some((mode, layout));
         }
     });
 }
@@ -207,6 +307,80 @@ mod tests {
             Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
             Mode::Hidden
         );
+    }
+
+    #[test]
+    fn a_dragged_position_is_kept_and_pulled_back_inside_the_display() {
+        let at = |mode, dragged| {
+            frame_at(
+                (0, 0),
+                (1600, 1000),
+                1.0,
+                mode,
+                CompanionPosition::BottomRight,
+                QuestionSize::Standard,
+                dragged,
+            )
+        };
+        // Where the person put it, not the preset corner.
+        let moved = at(Mode::Question, Some((300, 200)));
+        assert_eq!((moved.x, moved.y), (300, 200));
+        assert_ne!((moved.x, moved.y), {
+            let preset = at(Mode::Question, None);
+            (preset.x, preset.y)
+        });
+        // Growing for context near the bottom edge moves it up, not off.
+        let grown = at(Mode::Details, Some((300, 700)));
+        assert_eq!(grown.y + grown.height as i32, 1000);
+        assert_eq!(grown.x, 300);
+        // A position past the right edge, or above the top, is pulled in.
+        let far = at(Mode::Compact, Some((2000, -50)));
+        assert_eq!(far.x + far.width as i32, 1600);
+        assert_eq!(far.y, 0);
+        // A display left of the primary keeps negative coordinates.
+        let left = frame_at(
+            (-1600, -900),
+            (1600, 860),
+            1.0,
+            Mode::Question,
+            CompanionPosition::TopLeft,
+            QuestionSize::Standard,
+            Some((-1700, -950)),
+        );
+        assert_eq!((left.x, left.y), (-1600, -900));
+    }
+
+    #[test]
+    fn only_a_move_the_app_did_not_ask_for_counts_as_a_drag() {
+        let start = Instant::now();
+        let frame = Frame {
+            x: 1160,
+            y: 640,
+            width: 420,
+            height: 340,
+        };
+        let mut placement = Placement {
+            applied: Some((Mode::Question, Some(frame))),
+            dragged: None,
+            expected: Some(((1160, 640), start)),
+        };
+        // A resize moves the corner first; then the move lands. Neither is a drag.
+        assert!(!placement.note_move((1160, 904), start));
+        assert!(!placement.note_move((1160, 640), start + Duration::from_millis(5)));
+        assert_eq!(placement.dragged, None);
+        // Now the person drags it.
+        assert!(placement.note_move((300, 200), start + Duration::from_millis(10)));
+        assert_eq!(placement.dragged, Some((300, 200)));
+        assert_eq!(placement.applied, None, "reapplied on the next refresh");
+        // A move the system refused does not swallow later drags for ever.
+        placement.expected = Some(((0, 0), start));
+        assert!(!placement.note_move((50, 50), start + Duration::from_millis(500)));
+        assert!(placement.note_move((60, 60), start + Duration::from_millis(1_500)));
+        assert_eq!(placement.dragged, Some((60, 60)));
+        // The window reporting the frame it already has is not a drag.
+        placement.applied = Some((Mode::Question, Some(frame)));
+        placement.expected = None;
+        assert!(!placement.note_move((1160, 640), start + Duration::from_millis(2_000)));
     }
 
     #[test]
