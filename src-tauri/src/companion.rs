@@ -68,9 +68,9 @@ fn frame(
     let width = ((if question { 420.0 } else { 320.0 } * scale).round() as u32)
         .min(area.0.saturating_sub(2 * margin).max(1));
     let logical_height = match mode {
-        Mode::Question => 340.0,
-        Mode::Details => 500.0,
-        Mode::AnsweredDetails => 600.0,
+        Mode::Question => 300.0,
+        Mode::Details => 420.0,
+        Mode::AnsweredDetails => 520.0,
         _ => 76.0,
     } + if question && text_size == QuestionSize::Large {
         60.0

@@ -155,8 +155,8 @@ test('an answered question being read stays and shows the answer', async ({
 }) => {
   await page.clock.runFor(37_200);
   await page.getByRole('button', { name: 'Why?' }).click();
-  // The native companion grows to 600 px for context with an answer.
-  await page.setViewportSize({ width: 420, height: 600 });
+  // The native companion grows to 520 px for context with an answer.
+  await page.setViewportSize({ width: 420, height: 520 });
   await page.clock.runFor(14_000);
   const question = page.getByRole('region', { name: 'Suggested question' });
   await expect(
@@ -177,7 +177,7 @@ test('an answered question being read stays and shows the answer', async ({
     const preview = await import(previewPath);
     preview.command('set_question_size', { value: 'large' });
   });
-  await page.setViewportSize({ width: 420, height: 660 });
+  await page.setViewportSize({ width: 420, height: 580 });
   await expectCompanionToFit(page);
   await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
   await expect(question).toHaveCount(0);

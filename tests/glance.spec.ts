@@ -204,7 +204,8 @@ for (const size of ['standard', 'large'] as const) {
     page,
   }) => {
     await page.clock.install();
-    const height = size === 'large' ? 400 : 340;
+    // The native companion's question height: 300 CSS px, 360 with large text.
+    const height = size === 'large' ? 360 : 300;
     await page.setViewportSize({ width: 420, height });
     await page.goto('/?window=cue');
     await expect(
@@ -227,9 +228,10 @@ for (const size of ['standard', 'large'] as const) {
       ),
     ).toBe(true);
     await question.getByRole('button', { name: 'Why?' }).click();
+    // Context opens into a 420 px window (480 with large text), no longer 500.
     await page.setViewportSize({
       width: 420,
-      height: size === 'large' ? 560 : 500,
+      height: size === 'large' ? 480 : 420,
     });
     await expect(question.locator('blockquote')).toBeVisible();
     expect(
