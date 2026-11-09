@@ -338,6 +338,22 @@ test('a line about an imported note shows a reminder that names the note as its 
   ).not.toContainText('tool shed');
 });
 
+test('a chooser with nothing to choose says so instead of showing a blank list', async ({
+  page,
+}) => {
+  await page.goto('/?notes=empty');
+  const panel = page.getByRole('region', { name: 'Prior context' });
+  await panel.getByRole('button', { name: 'Add notes from a file' }).click();
+  const dialog = page.getByRole('dialog', { name: /Choose notes/ });
+  await expect(dialog.getByRole('status')).toContainText(
+    'This file has no notes with an id, a date, and text; nothing was imported.',
+  );
+  await expect(dialog.getByRole('checkbox')).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: /Import/ })).toBeDisabled();
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toBeHidden();
+});
+
 test('prior notes from a file are chosen, shown apart from the conversation, removable, and never exported', async ({
   page,
 }) => {

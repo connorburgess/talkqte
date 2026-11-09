@@ -465,6 +465,10 @@ export function disconnectGranola(): GranolaStatus {
   return { connected: false, tools: [] };
 }
 export function pickContextFile(): PickedNotes {
+  // `?notes=empty` previews a file with nothing to choose.
+  if (new URLSearchParams(location.search).get('notes') === 'empty') {
+    return { fileName: 'empty-notes.json', skipped: 0, notes: [] };
+  }
   return {
     fileName: 'garden-notes.json',
     skipped: 0,
