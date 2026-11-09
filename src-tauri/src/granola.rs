@@ -498,6 +498,10 @@ impl Connection {
         }
         connection.notify("notifications/initialized")?;
         let listed = connection.call("tools/list", json!({}))?;
+        // Schemas carry no personal data; they are printed whole.
+        if std::env::var_os("TALKQTE_GRANOLA_TRACE").is_some() {
+            eprintln!("granola trace: tools/list: {}", listed);
+        }
         connection.tools = listed["tools"]
             .as_array()
             .map(|tools| tools.iter().filter_map(tool_from).collect())
@@ -525,6 +529,8 @@ impl Connection {
             "tools/call",
             json!({ "name": "list_meetings", "arguments": {} }),
         )?;
+        trace("list_meetings result", &result);
+        trace("list_meetings output", &tool_output(&result));
         let notes = notes_in(&tool_output(&result));
         let total = notes.len();
         let summaries: Vec<NoteSummary> = notes
@@ -561,6 +567,7 @@ impl Connection {
             "tools/call",
             json!({ "name": tool.name, "arguments": { argument: FOCUS_QUESTION } }),
         )?;
+        trace("query_granola_meetings result", &result);
         Ok(suggestions_in(&suggestion_text(&tool_output(&result))))
     }
 
@@ -679,6 +686,36 @@ fn sse_message(text: &str, id: u64) -> Option<Value> {
         }
     }
     found
+}
+
+/// Developer trace, on only when `TALKQTE_GRANOLA_TRACE` is set: the
+/// server's tool schemas (not personal) and the *shape* of each tool reply
+/// with every string replaced by its length and arrays cut to two items,
+/// so the mapping can be fixed for a real account without reading its
+/// notes. Printed to stderr; never written to a file or sent anywhere.
+fn trace(label: &str, value: &Value) {
+    if std::env::var_os("TALKQTE_GRANOLA_TRACE").is_none() {
+        return;
+    }
+    eprintln!("granola trace: {label}: {}", shape(value));
+}
+
+/// The structure of a value with no content: `"<str:12>"` for a string.
+fn shape(value: &Value) -> Value {
+    match value {
+        Value::String(text) => Value::String(format!("<str:{}>", text.chars().count())),
+        Value::Array(items) => {
+            let mut shapes: Vec<Value> = items.iter().take(2).map(shape).collect();
+            if items.len() > 2 {
+                shapes.push(Value::String(format!("<+{} more>", items.len() - 2)));
+            }
+            Value::Array(shapes)
+        }
+        Value::Object(map) => {
+            Value::Object(map.iter().map(|(k, v)| (k.clone(), shape(v))).collect())
+        }
+        other => other.clone(),
+    }
 }
 
 fn tool_from(value: &Value) -> Option<Tool> {
@@ -1021,6 +1058,7 @@ impl NoteSource for Connection {
             "tools/call",
             json!({ "name": tool.name, "arguments": { argument: selection } }),
         )?;
+        trace("get_meetings result", &result);
         Ok(notes_in(&tool_output(&result))
             .into_iter()
             .filter(|note| selection.iter().any(|wanted| wanted == &note.id))
@@ -1502,6 +1540,18 @@ mod tests {
         assert!(notes_in(&Value::String("not json".into())).is_empty());
         let text_result = json!({"content": [{"type": "text", "text": "[{\"id\": \"a\", \"title\": \"A\", \"date\": \"2026-01-01\", \"text\": \"t\"}]"}]});
         assert_eq!(notes_in(&tool_output(&text_result)).len(), 1);
+    }
+
+    #[test]
+    fn the_trace_shape_carries_structure_but_no_content() {
+        let shaped = shape(
+            &json!({"meetings": [{"id": "m1", "title": "Garden welcome guide", "notes": "Draft a map."}, {"id": "m2"}, {"id": "m3"}], "n": 3}),
+        );
+        assert_eq!(
+            shaped,
+            json!({"meetings": [{"id": "<str:2>", "title": "<str:20>", "notes": "<str:12>"}, {"id": "<str:2>"}, "<+1 more>"], "n": 3})
+        );
+        assert!(!shaped.to_string().contains("Garden"));
     }
 
     #[test]
