@@ -778,6 +778,41 @@ const CHATTER: &[&str] = &[
     "sure",
 ];
 
+/// Text without markup an assistant wraps around its answer: tags such as
+/// `<access_notice>…</access_notice>` go, and so do markdown reference
+/// links such as `[[11]](https://…)` or `[source](https://…)`, which cite a
+/// note rather than say anything.
+fn without_markup(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(open) = rest.find('<') {
+        out.push_str(&rest[..open]);
+        match rest[open..].find('>') {
+            Some(close) => rest = &rest[open + close + 1..],
+            None => {
+                // A lone "<" is text, not a tag.
+                out.push_str(&rest[open..]);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    // Links: a bracketed label followed by a parenthesised target.
+    let mut text = out;
+    while let Some(start) = text.find('[') {
+        let after = &text[start..];
+        let Some(label_end) = after.find("](") else {
+            break;
+        };
+        let Some(target_len) = after[label_end + 2..].find(')') else {
+            break;
+        };
+        let end = start + label_end + 2 + target_len + 1;
+        text.replace_range(start..end, "");
+    }
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Characters that show as nothing or reorder text, which a note could
 /// carry to make a line read differently from what it is.
 fn is_invisible(character: char) -> bool {
@@ -795,6 +830,11 @@ pub fn suggestions_in(text: &str) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     for raw in text.lines() {
         let cleaned: String = raw.chars().filter(|c| !is_invisible(*c)).collect();
+        // A line that opens with a tag is a notice around the answer, not an item.
+        if cleaned.trim_start().starts_with('<') && cleaned.contains('>') {
+            continue;
+        }
+        let cleaned = without_markup(&cleaned);
         let mut line = cleaned.trim();
         // A markdown heading introduces items; it is not one.
         if line.starts_with('#') {
@@ -1446,6 +1486,22 @@ mod tests {
         assert_eq!(suggestions_in(&many).len(), MAX_SUGGESTIONS);
         assert_eq!(suggestions_in(&"x".repeat(200))[0].chars().count(), 80);
         assert!(suggestions_in("Open items:\n\n").is_empty());
+    }
+
+    #[test]
+    fn tags_and_citation_links_around_suggestions_are_not_content() {
+        let cited = suggestions_in(
+            "<access_notice>Some notes were excluded because of their date.</access_notice>\n1. Decide the signage budget. [[11]](https://example.test/notes/11)\n2. Confirm the launch date [[2]](https://example.test/notes/2) with the committee.\n- Agree the welcome guide <em>soon</em> [source](https://example.test/x)",
+        );
+        assert_eq!(
+            cited,
+            [
+                "Decide the signage budget",
+                "Confirm the launch date with the committee",
+                "Agree the welcome guide soon",
+            ]
+        );
+        assert_eq!(without_markup("a < b and [x] alone"), "a < b and [x] alone");
     }
 
     #[test]
