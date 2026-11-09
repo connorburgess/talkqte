@@ -66,6 +66,25 @@ fn frame(
     frame_at(origin, area, scale, mode, position, text_size, None)
 }
 
+/// The compact bar's width in logical pixels.
+const COMPACT_WIDTH: f64 = 320.0;
+
+/// The question window's width in logical pixels for a display of this
+/// logical width. A glance window stays narrow: about 30 to 40 characters a
+/// line at the standard 24 px question size, well inside the 80-character
+/// line WCAG 2.2 SC 1.4.8 treats as the upper bound. A small laptop display
+/// gives up 60 px so the window covers less of the meeting; a large display
+/// gains 60 px so a question wraps to fewer lines.
+fn question_width(display_width: f64) -> f64 {
+    if display_width <= 1100.0 {
+        360.0
+    } else if display_width >= 2400.0 {
+        480.0
+    } else {
+        420.0
+    }
+}
+
 /// The companion's frame for a mode. A position the person dragged the
 /// window to wins over the Settings preset: its top-left corner is kept,
 /// pulled back inside the work area when the window grows or the display
@@ -86,8 +105,13 @@ fn frame_at(
     };
     let margin = (20.0 * scale).round() as u32;
     let question = matches!(mode, Mode::Question | Mode::Details | Mode::AnsweredDetails);
-    let width = ((if question { 420.0 } else { 320.0 } * scale).round() as u32)
-        .min(area.0.saturating_sub(2 * margin).max(1));
+    let logical_width = if question {
+        question_width(f64::from(area.0) / scale)
+    } else {
+        COMPACT_WIDTH
+    };
+    let width =
+        ((logical_width * scale).round() as u32).min(area.0.saturating_sub(2 * margin).max(1));
     let logical_height = match mode {
         Mode::Question => 340.0,
         Mode::Details => 460.0,
@@ -307,6 +331,30 @@ mod tests {
             Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
             Mode::Hidden
         );
+    }
+
+    #[test]
+    fn the_question_window_width_follows_the_display() {
+        let width = |area: (u32, u32), scale: f64, mode| {
+            frame(
+                (0, 0),
+                area,
+                scale,
+                mode,
+                CompanionPosition::BottomRight,
+                QuestionSize::Standard,
+            )
+            .width
+        };
+        // A small laptop (1024 logical px), a 13-inch Mac at 2x (1440
+        // logical), a 27-inch display at 1x, and a 5K display at 2x.
+        assert_eq!(width((1024, 768), 1.0, Mode::Question), 360);
+        assert_eq!(width((2880, 1800), 2.0, Mode::Question), 840);
+        assert_eq!(width((2560, 1440), 1.0, Mode::Question), 480);
+        assert_eq!(width((5120, 2880), 2.0, Mode::Details), 960);
+        // The compact bar does not change, and nothing exceeds the display.
+        assert_eq!(width((2560, 1440), 1.0, Mode::Compact), 320);
+        assert_eq!(width((300, 200), 1.0, Mode::Question), 260);
     }
 
     #[test]
