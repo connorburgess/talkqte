@@ -340,8 +340,9 @@ const exampleNotes: ContextItem[] = [
 let contextItems: ContextItem[] = [];
 // Notes already quoted as a reminder this demo run.
 let shownNotes: string[] = [];
-/** Mirrors the engine's quoted-line rule for the bundled demo: a sentence
- * with a time word and a commitment word, not a question, not hedged. */
+/** A demo-only subset of the engine's quoted-line rule, enough for the
+ * bundled script: a sentence with a time word and a commitment word, not a
+ * question, not hedged. Months, counts, and "end of" live in the engine. */
 function saidLine(text: string): string | null {
   const time =
     /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|tonight|weekend|next (?:week|month)|(?:two|three|four|five|\d+) (?:days?|weeks?))\b/i;

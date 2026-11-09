@@ -403,22 +403,24 @@ function Notebook() {
   const exportButton = useRef<HTMLButtonElement>(null);
   const notesEditor = useRef<HTMLTextAreaElement>(null);
   const transcriptTab = useRef<HTMLButtonElement>(null);
-  // The notes the engine last published. When the engine appends a kept
-  // line, the editor takes it in without losing anything typed meanwhile.
+  // The notes last sent to or published by the engine. The engine changes
+  // notes on its own only by appending a kept line, so that is the only
+  // change the editor takes from a snapshot; a snapshot that lags typing is
+  // ignored, and nothing typed meanwhile is lost.
   const engineNotes = useRef('');
   useEffect(() => {
     if (!state || !initialized.current) return;
     if (state.notes === engineNotes.current) return;
-    const added = state.notes.startsWith(engineNotes.current)
-      ? state.notes.slice(engineNotes.current.length)
-      : state.notes;
+    if (!state.notes.startsWith(engineNotes.current)) return;
+    const added = state.notes.slice(engineNotes.current.length);
+    if (!/^\n?\[\d{2}:\d{2}\] [^]*”\n$/.test(added)) return;
     engineNotes.current = state.notes;
     setNotes((current) =>
-      current === state.notes || !added
+      current === state.notes
         ? current
         : current.length === 0 || current.endsWith('\n')
-          ? current + added
-          : `${current}\n${added}`,
+          ? current + added.replace(/^\n/, '')
+          : `${current}\n${added.replace(/^\n/, '')}`,
     );
   }, [state]);
   useEffect(() => {
@@ -566,6 +568,7 @@ function Notebook() {
   };
   const prepareExport = () =>
     void run(async () => {
+      engineNotes.current = notes;
       await bridge.command('update_notes', { notes });
       setPreview(await bridge.exportPreview());
     });
@@ -977,6 +980,7 @@ function Notebook() {
                       onChange={(e) => {
                         const value = e.target.value;
                         setNotes(value);
+                        engineNotes.current = value;
                         void bridge
                           .command('update_notes', { notes: value })
                           .catch((e: unknown) => setError(String(e)));

@@ -142,6 +142,7 @@ const TIME_WORDS: &[&str] = &[
     "friday",
     "saturday",
     "sunday",
+    "today",
     "tomorrow",
     "tonight",
     "weekend",
@@ -152,7 +153,6 @@ const COMMITMENT_WORDS: &[&str] = &[
     "by",
     "before",
     "until",
-    "from",
     "starting",
     "start",
     "starts",
@@ -165,17 +165,20 @@ const COMMITMENT_WORDS: &[&str] = &[
     "deliver",
     "delivered",
     "takes",
-    "take",
     "need",
     "needs",
     "due",
     "deadline",
-    "back",
     "ship",
-    "review",
-    "share",
-    "post",
     "publish",
+];
+/// Verbs that commit only when someone takes them on ("I'll share it
+/// Friday", "we take it back Monday"), not in passing ("back from Paris on
+/// Monday", "share the weekend photos").
+const LOOSE_COMMITMENT_WORDS: &[&str] = &["from", "take", "back", "review", "share", "post"];
+/// What comes before a loose verb when it is a commitment.
+const COMMITTERS: &[&str] = &[
+    "i'll", "we'll", "you'll", "they'll", "she'll", "he'll", "i", "we", "will", "can", "to",
 ];
 const MONTH_WORDS: &[&str] = &[
     "january",
@@ -195,14 +198,47 @@ const COUNT_WORDS: &[&str] = &[
     "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "couple", "few",
 ];
 
+/// Sentences of a line, split at a full stop, question mark, exclamation
+/// mark, or semicolon followed by a space or the end: "10.30" and "Mr."
+/// stay whole.
+fn sentences(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let bytes: Vec<(usize, char)> = text.char_indices().collect();
+    for (i, &(at, c)) in bytes.iter().enumerate() {
+        if matches!(c, '.' | '?' | '!' | ';')
+            && bytes
+                .get(i + 1)
+                .is_none_or(|&(_, next)| next.is_whitespace())
+        {
+            let end = at + c.len_utf8();
+            out.push(text[start..end].trim());
+            start = end;
+        }
+    }
+    out.push(text[start..].trim());
+    out.into_iter().filter(|s| !s.is_empty()).collect()
+}
+
+/// A number, with or without an ordinal ending: "14", "14th", "3rd".
+fn is_number(word: &str) -> bool {
+    let digits = word
+        .strip_suffix("st")
+        .or_else(|| word.strip_suffix("nd"))
+        .or_else(|| word.strip_suffix("rd"))
+        .or_else(|| word.strip_suffix("th"))
+        .unwrap_or(word);
+    !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
+}
+
 /// The first sentence of a line that commits to a time: a time word and a
 /// commitment word together, not a question, not hedged. Returned word
 /// for word, because the exact words are the point ("ready by Friday" is
 /// not "starting Friday").
 fn said_line(text: &str) -> Option<String> {
-    text.split_inclusive(['.', '?', '!', ';'])
-        .map(str::trim)
-        .filter(|sentence| !sentence.is_empty() && !sentence.ends_with('?'))
+    sentences(text)
+        .into_iter()
+        .filter(|sentence| !sentence.ends_with('?'))
         .find(|sentence| {
             let words: Vec<String> = sentence
                 .split(|c: char| !c.is_alphanumeric() && c != '\'')
@@ -210,16 +246,23 @@ fn said_line(text: &str) -> Option<String> {
                 .map(|w| w.to_lowercase())
                 .collect();
             let has = |list: &[&str]| words.iter().any(|w| list.contains(&w.as_str()));
-            let month_date = words.windows(2).any(|pair| {
-                MONTH_WORDS.contains(&pair[0].as_str())
-                    && pair[1].chars().all(|c| c.is_ascii_digit())
-            });
+            let month_date = words
+                .windows(2)
+                .any(|pair| MONTH_WORDS.contains(&pair[0].as_str()) && is_number(&pair[1]));
+            // "may" is a month only with a date after it; otherwise a hedge.
+            let hedged_may = words
+                .iter()
+                .enumerate()
+                .any(|(i, w)| w == "may" && !words.get(i + 1).is_some_and(|n| is_number(n)));
             let next_period = words.windows(2).any(|pair| {
-                pair[0] == "next"
+                matches!(pair[0].as_str(), "next" | "this")
                     && matches!(
                         pair[1].as_str(),
                         "week"
                             | "month"
+                            | "morning"
+                            | "afternoon"
+                            | "evening"
                             | "monday"
                             | "tuesday"
                             | "wednesday"
@@ -228,8 +271,7 @@ fn said_line(text: &str) -> Option<String> {
                     )
             });
             let count_of_days = words.windows(2).any(|pair| {
-                (COUNT_WORDS.contains(&pair[0].as_str())
-                    || pair[0].chars().all(|c| c.is_ascii_digit()))
+                (COUNT_WORDS.contains(&pair[0].as_str()) || is_number(&pair[0]))
                     && matches!(
                         pair[1].as_str(),
                         "day" | "days" | "week" | "weeks" | "hours"
@@ -241,7 +283,20 @@ fn said_line(text: &str) -> Option<String> {
                     && matches!(w[2].as_str(), "week" | "month" | "day" | "year" | "the")
             });
             let timed = has(TIME_WORDS) || month_date || next_period || count_of_days || end_of;
-            timed && has(COMMITMENT_WORDS) && !has(&HEDGES) && !has(&QUESTION_OPENERS[..1])
+            let is_time = |w: &str| TIME_WORDS.contains(&w) || MONTH_WORDS.contains(&w);
+            let loose_commitment = words.iter().enumerate().any(|(i, w)| {
+                LOOSE_COMMITMENT_WORDS.contains(&w.as_str())
+                    && (i > 0 && COMMITTERS.contains(&words[i - 1].as_str())
+                        || words.get(i + 1).is_some_and(|n| is_time(n)))
+            });
+            let question = words
+                .first()
+                .is_some_and(|first| QUESTION_OPENERS.contains(&first.as_str()));
+            timed
+                && (has(COMMITMENT_WORDS) || loose_commitment)
+                && !has(&HEDGES)
+                && !hedged_may
+                && !question
         })
         .map(|sentence| {
             let cut: String = sentence.chars().take(SAID_MAX_CHARS).collect();
@@ -882,7 +937,7 @@ impl Engine {
                 id: line_id.clone(),
                 at_ms: spoken_at,
                 speaker: String::new(),
-                text: line_text.clone(),
+                text: suggestible.clone(),
             };
             self.maybe_said(&line, now, false);
         }
@@ -3172,6 +3227,10 @@ mod tests {
             "I can start on Monday and finish by the end of the month.",
             "The review is due on March 14.",
             "Let's deliver it next week.",
+            "We should send the deck by Friday.",
+            "Legal needs it back by March 3rd.",
+            "I'll share the slides Friday.",
+            "I'll send it today at 10.30.",
         ] {
             let e = play_statement(line);
             let cue = e
@@ -3188,6 +3247,12 @@ mod tests {
             "Maybe by Friday, who knows.",
             "We should finish soon.",
             "The two days we spent there were fun.",
+            "Can you send it by Friday",
+            "I was back from Paris on Monday.",
+            "Take the Friday slot off the agenda.",
+            "Share the weekend photos when you can.",
+            "We may ship it in two days.",
+            "Send it by Friday. Scratch that, Monday.",
         ] {
             let e = play_statement(line);
             assert!(
