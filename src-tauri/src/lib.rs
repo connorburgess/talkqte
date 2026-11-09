@@ -848,9 +848,12 @@ async fn suggest_granola_focus(state: tauri::State<'_, AppState>) -> Result<Vec<
         );
     }
     tauri::async_runtime::spawn_blocking(move || {
-        shared
-            .suggest_focus()
-            .map_err(|error| granola_error(&error))
+        shared.suggest_focus().map_err(|error| match error {
+            context::SourceError::Interrupted => {
+                "Granola's assistant did not answer in time; try again.".to_string()
+            }
+            other => granola_error(&other),
+        })
     })
     .await
     .map_err(|_| "Granola's suggestions could not be fetched.".to_string())?

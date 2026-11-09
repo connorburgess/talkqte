@@ -302,25 +302,37 @@ function Notebook() {
       )
       .catch(() => setCanSuggest(false));
   }, [view]);
+  const focusField = useRef<HTMLTextAreaElement>(null);
+  const suggestionList = useRef<HTMLFieldSetElement>(null);
+  const currentFocusLines = () =>
+    focus
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+  // The engine keeps five lines; the ticks are capped to what still fits.
+  const roomForSuggestions = Math.max(0, 5 - currentFocusLines().length);
   const suggestFocus = () =>
     void run(async () => {
       const lines = await bridge.suggestGranolaFocus();
       setSuggestions(lines);
       setTicked([]);
       if (lines.length === 0) setNotice('Granola suggested nothing.');
+      setTimeout(() => suggestionList.current?.focus(), 0);
     });
+  const closeSuggestions = () => {
+    setSuggestions(null);
+    setTicked([]);
+    setTimeout(() => focusField.current?.focus(), 0);
+  };
   const acceptSuggestions = () =>
     void run(async () => {
-      const current = focus
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
-      const lines = [...current];
-      for (const line of ticked) if (!lines.includes(line)) lines.push(line);
+      const lines = currentFocusLines();
+      for (const line of ticked)
+        if (!lines.some((seen) => seen.toLowerCase() === line.toLowerCase()))
+          lines.push(line);
       await bridge.command('set_focus', { lines });
       setFocus(lines.join('\n'));
-      setSuggestions(null);
-      setTicked([]);
+      closeSuggestions();
     });
   const initialized = useRef(false);
   // Enter followed by leaving a field saves once, not twice.
@@ -1118,6 +1130,7 @@ function Notebook() {
                 <label htmlFor="meeting-focus">Focus</label>
                 <textarea
                   id="meeting-focus"
+                  ref={focusField}
                   aria-describedby="meeting-focus-help"
                   value={focus}
                   rows={5}
@@ -1143,8 +1156,21 @@ function Notebook() {
                   </div>
                 )}
                 {suggestions !== null && (
-                  <fieldset className="suggest-focus">
-                    <legend>Granola suggests</legend>
+                  <fieldset
+                    className="suggest-focus"
+                    ref={suggestionList}
+                    tabIndex={-1}
+                  >
+                    <legend>
+                      Granola suggests
+                      {roomForSuggestions < suggestions.length && (
+                        <span className="muted small">
+                          {' '}
+                          · room for {roomForSuggestions} more{' '}
+                          {roomForSuggestions === 1 ? 'line' : 'lines'}
+                        </span>
+                      )}
+                    </legend>
                     {suggestions.length === 0 && (
                       <p className="small muted">
                         Nothing came back. Type what matters instead.
@@ -1155,6 +1181,10 @@ function Notebook() {
                         <input
                           type="checkbox"
                           checked={ticked.includes(line)}
+                          disabled={
+                            !ticked.includes(line) &&
+                            ticked.length >= roomForSuggestions
+                          }
                           onChange={(e) =>
                             setTicked((current) =>
                               e.target.checked
@@ -1171,10 +1201,7 @@ function Notebook() {
                         type="button"
                         className="secondary-button"
                         disabled={busy}
-                        onClick={() => {
-                          setSuggestions(null);
-                          setTicked([]);
-                        }}
+                        onClick={closeSuggestions}
                       >
                         Dismiss
                       </button>
