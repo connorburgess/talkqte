@@ -86,6 +86,11 @@ fn snapshot(
 /// A fresh engine that keeps the person's display choices and notes.
 fn carry_over(previous: &Engine, mut next: Engine) -> Engine {
     let state = &previous.state;
+    // Both windows ignore a snapshot older than the last one they saw, so
+    // a replacement engine must not start its revisions over: the notebook
+    // would keep the old clock and the companion would open for a question
+    // it never receives.
+    next.state.revision = state.revision;
     next.set_sensitivity(state.sensitivity);
     next.set_overlay(state.overlay_enabled);
     next.set_companion_position(state.companion_position);
@@ -1041,4 +1046,25 @@ pub fn run() {
                 microphone::stop_on_exit(app);
             }
         });
+}
+
+#[cfg(test)]
+mod carry_over_tests {
+    use super::*;
+
+    #[test]
+    fn a_replacement_engine_continues_the_revision_count() {
+        let mut previous = Engine::default();
+        previous.start().unwrap();
+        previous.advance(5_200);
+        previous.pause().unwrap();
+        previous.resume().unwrap();
+        previous.end();
+        let before = previous.state.revision;
+        assert!(before >= 4, "the first session published several snapshots");
+        let next = carry_over(&previous, Engine::live());
+        assert!(next.state.revision > before);
+        let again = carry_over(&next, Engine::default());
+        assert!(again.state.revision > next.state.revision);
+    }
 }
