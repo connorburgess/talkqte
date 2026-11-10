@@ -132,6 +132,7 @@ mod tests {
         };
         runtime.engine.start().unwrap();
         runtime.live = Some(Live {
+            operation: None,
             session: runtime.engine.session(),
             microphone: None,
             runner: None,
@@ -360,7 +361,14 @@ mod tests {
         let (mut r, _calls) = runtime();
         let guard = expected(&mut r);
         let review = r.review_processing_scope(&guard, scope(&[])).unwrap();
-        let _live = r.take_live_for_stop().unwrap();
+        let _live = r
+            .prepare_capture_stop(&crate::engine::StopTarget {
+                operation: None,
+                microphone: "0".into(),
+            })
+            .unwrap()
+            .live
+            .unwrap();
         assert_eq!(
             r.approve_processing_scope(&review.id),
             Err(CommandError::ScopeChanged)
@@ -673,6 +681,7 @@ mod tests {
         r.engine = crate::carry_over(&r.engine, next.engine);
         r.engine.start().unwrap();
         r.live = Some(Live {
+            operation: None,
             session: r.engine.session(),
             microphone: None,
             runner: None,
@@ -750,6 +759,7 @@ mod tests {
         };
         r.engine.start().unwrap();
         r.live = Some(Live {
+            operation: None,
             session: r.engine.session(),
             microphone: None,
             runner: None,

@@ -7,6 +7,7 @@ import { ProcessingControl } from '../../src/components/ProcessingControl';
 import {
   noteKey,
   type ExpectedScope,
+  type StopTarget,
   type ProcessingReview,
   type ProcessingScope,
   type ProcessingSnapshot,
@@ -20,6 +21,8 @@ let state: ProcessingSnapshot = {
   scopeRevision: 1,
   phase: 'off',
   capture: 'running',
+  startup: 'idle',
+  stopTarget: { operation: 'fictional-live-1', microphone: '1' },
   approved: null,
   issue: null,
   lastDecision: null,
@@ -51,6 +54,7 @@ let state: ProcessingSnapshot = {
     },
   ],
 };
+let liveMicrophone: string | null = '1';
 const calls: { command: string; args: unknown }[] = [];
 const reviews = new Map<string, ProcessingReview>();
 const holds = new Map<string, () => void>();
@@ -60,6 +64,7 @@ let reviewNumber = 0;
 let delayedSnapshot: (() => void) | undefined;
 let mismatchedReview = false;
 async function send(value: Partial<ProcessingSnapshot>) {
+  if (value.startup === 'loading') liveMicrophone = null;
   state = { ...state, ...value, revision: state.revision + 1 };
   await emit('processing:changed', structuredClone(state));
 }
@@ -160,14 +165,28 @@ mockIPC(
           lastDecision: null,
         });
         return;
-      case 'stop_live_session':
+      case 'stop_capture': {
+        const target = (args as { target: StopTarget }).target;
+        if (target.operation !== state.stopTarget.operation)
+          throw 'capture_changed';
+        // A live startup owns the generation it later reserved. A replacement
+        // standalone capture is independent and must remain running.
+        const ownedMicrophone = liveMicrophone ?? target.microphone;
+        liveMicrophone = null;
         await boundary({
           phase: 'ended',
-          capture: 'stopping',
+          capture:
+            ownedMicrophone !== state.stopTarget.microphone
+              ? state.capture
+              : state.capture === 'off'
+                ? 'off'
+                : 'stopping',
+          startup: state.startup === 'loading' ? 'cancelling' : state.startup,
           approved: null,
           lastDecision: null,
         });
         return;
+      }
       default:
         throw `Unexpected fictional command: ${command}`;
     }
@@ -188,14 +207,26 @@ const control = {
       approved: null,
       issue: 'scopeChanged',
     }),
-  newSession: () =>
-    boundary({
+  newSession: () => {
+    liveMicrophone = '3';
+    return boundary({
       session: 'fictional-garden-next',
+      stopTarget: { operation: 'fictional-live-2', microphone: '3' },
+      startup: 'idle',
       phase: 'off',
       capture: 'running',
       approved: null,
       issue: null,
-    }),
+    });
+  },
+  installCapture: async () => {
+    liveMicrophone = '2';
+    await send({
+      startup: 'idle',
+      capture: 'running',
+      stopTarget: { operation: state.stopTarget.operation, microphone: '2' },
+    });
+  },
   hold: (command: string) => delayed.add(command),
   release: (command: string) => {
     holds.get(command)?.();

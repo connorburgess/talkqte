@@ -165,7 +165,7 @@ impl Update {
 }
 
 #[derive(Clone, Default)]
-pub struct Controller(Arc<Mutex<State>>);
+pub struct Controller(Arc<Mutex<State>>, Arc<AtomicU64>);
 
 impl Controller {
     fn reserve_start(&self, on_reserved: Option<OnReserved>) -> Result<Reservation, String> {
@@ -185,6 +185,17 @@ impl Controller {
         self.0.try_lock().ok().map(|state| state.snapshot.status)
     }
 
+    /// Read authority without waiting behind native device startup. The
+    /// atomic generation is updated under the state lock before device work.
+    /// A busy lock means unknown status, not unknown operation ownership.
+    pub(crate) fn control_snapshot(&self) -> (u64, Option<Snapshot>) {
+        match self.0.try_lock() {
+            Ok(state) => (state.generation, Some(state.snapshot.clone())),
+            Err(_) => (self.1.load(Ordering::Acquire), None),
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn try_snapshot(&self) -> Option<Snapshot> {
         self.0.try_lock().ok().map(|state| state.snapshot.clone())
     }
@@ -210,6 +221,7 @@ impl Controller {
             return Err("Microphone monitoring is already starting or running.".into());
         }
         state.generation += 1;
+        self.1.store(state.generation, Ordering::Release);
         state.update(
             Status::Starting,
             Activity::Quiet,
@@ -308,6 +320,7 @@ impl Controller {
             return Ok(None);
         }
         state.generation += 1;
+        self.1.store(state.generation, Ordering::Release);
         let retired = state.capture.take().map(|capture| capture._stream);
         state.cleanup_pending |= retired.is_some();
         if state.cleanup_pending {
@@ -366,6 +379,7 @@ impl Controller {
             let retired = state.capture.take().map(|capture| capture._stream);
             state.cleanup_pending = true;
             state.generation += 1;
+            self.1.store(state.generation, Ordering::Release);
             state.update(Status::Error, Activity::Quiet, Some(failure.message()));
             return Some(Update {
                 snapshot: state.snapshot.clone(),
@@ -418,6 +432,19 @@ pub fn stop_blocking(app: &tauri::AppHandle, controller: Controller, generation:
     if let Ok(Some(update)) = controller.request_stop_of(Some(generation)) {
         publish_and_cleanup(app, controller, update);
     }
+}
+
+/// Request release of only the captured generation; acknowledgment does not
+/// mean stream teardown has completed. Status events carry that confirmation.
+pub(crate) fn stop_exact(
+    app: &tauri::AppHandle,
+    controller: Controller,
+    generation: u64,
+) -> Result<(), String> {
+    if let Some(update) = controller.request_stop_of(Some(generation))? {
+        publish_and_cleanup(app, controller, update);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -593,6 +620,100 @@ mod tests {
         let now = Instant::now();
         controller.complete_start(generation, meter.clone(), Ok(stream), now);
         (controller, meter, drops, now)
+    }
+
+    #[test]
+    fn unknown_status_still_binds_stop_to_the_observed_generation() {
+        let controller = Controller::default();
+        let (generation, _) = controller.begin_start().unwrap();
+        let locked = controller.0.lock().unwrap();
+        let (observed, snapshot) = controller.control_snapshot();
+        assert_eq!(observed, generation);
+        assert!(snapshot.is_none());
+        drop(locked);
+        let mut runtime = crate::Runtime::default();
+        let target = crate::engine::StopTarget {
+            operation: None,
+            microphone: observed.to_string(),
+        };
+        let plan = runtime.prepare_capture_stop(&target).unwrap();
+        finish(
+            &controller,
+            controller
+                .request_stop_of(Some(plan.microphone))
+                .unwrap()
+                .unwrap(),
+        );
+        let (newer, _) = controller.begin_start().unwrap();
+        assert!(controller
+            .request_stop_of(Some(plan.microphone))
+            .unwrap()
+            .is_none());
+        assert!(controller.is_starting(newer));
+        assert_eq!(controller.control_snapshot().0, newer);
+    }
+
+    #[test]
+    fn scoped_stop_releases_standalone_capture_only_after_cleanup_and_blocks_late_permission() {
+        let (controller, _meter, drops, _) = running();
+        let generation = controller.control_snapshot().0;
+        let mut runtime = crate::Runtime::default();
+        let target = crate::engine::StopTarget {
+            operation: None,
+            microphone: generation.to_string(),
+        };
+        let plan = runtime.prepare_capture_stop(&target).unwrap();
+        assert!(plan.live.is_none());
+        let update = controller
+            .request_stop_of(Some(plan.microphone))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            crate::capture_state(controller.control_snapshot().1),
+            crate::engine::CaptureState::Stopping
+        );
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        assert!(controller.begin_start().is_err());
+        assert!(controller
+            .request_stop_of(Some(plan.microphone))
+            .unwrap()
+            .is_none());
+        finish(&controller, update);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            crate::capture_state(controller.control_snapshot().1),
+            crate::engine::CaptureState::Off
+        );
+        let (late, starts, late_drops) = fake(false);
+        assert!(controller
+            .complete_start(
+                generation,
+                Arc::new(Meter::default()),
+                Ok(late),
+                Instant::now()
+            )
+            .is_none());
+        assert_eq!(starts.load(Ordering::SeqCst), 0);
+        assert_eq!(late_drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn failed_controller_never_claims_capture_release_or_loses_observed_authority() {
+        let controller = Controller::default();
+        let (generation, _) = controller.begin_start().unwrap();
+        let broken = controller.clone();
+        let _ = std::thread::spawn(move || {
+            let _lock = broken.0.lock().unwrap();
+            panic!("fictional controller failure");
+        })
+        .join();
+        let (observed, snapshot) = controller.control_snapshot();
+        assert_eq!(observed, generation);
+        assert_eq!(
+            crate::capture_state(snapshot),
+            crate::engine::CaptureState::Unknown
+        );
+        assert!(controller.request_stop_of(Some(observed)).is_err());
     }
 
     #[test]

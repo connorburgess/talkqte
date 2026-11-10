@@ -14,6 +14,23 @@ pub enum CaptureState {
     Stopping,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StartupState {
+    #[default]
+    Idle,
+    Loading,
+    Cancelling,
+    Unknown,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StopTarget {
+    pub operation: Option<String>,
+    pub microphone: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Phase {
@@ -123,6 +140,8 @@ pub struct ProcessingSnapshot {
     pub scope_revision: u64,
     pub phase: Phase,
     pub capture: CaptureState,
+    pub stop_target: StopTarget,
+    pub startup: StartupState,
     pub processor: Option<ProcessorSummary>,
     pub notes: Vec<NoteSummary>,
     pub approved: Option<Scope>,
@@ -187,6 +206,16 @@ impl ProcessingTracker {
     /// Called under the native runtime lock. The boolean marks an event-worthy
     /// change; polling the clock or reading unchanged status emits nothing.
     pub fn update(&mut self, engine: &Engine, capture: CaptureState) -> (ProcessingSnapshot, bool) {
+        self.update_with_capture_control(engine, capture, StopTarget::default(), StartupState::Idle)
+    }
+
+    pub fn update_with_capture_control(
+        &mut self,
+        engine: &Engine,
+        capture: CaptureState,
+        target: StopTarget,
+        startup: StartupState,
+    ) -> (ProcessingSnapshot, bool) {
         let key = ScopeKey::for_engine(engine);
         let (mut revision, mut scope_revision) =
             self.previous.as_ref().map_or((0, 0), |(old, s)| {
@@ -201,6 +230,8 @@ impl ProcessingTracker {
             scope_revision = 1;
         }
         let mut next = engine.processing_snapshot(capture, scope_revision);
+        next.stop_target = target;
+        next.startup = startup;
         next.revision = revision;
         let changed = self.previous.as_ref().is_none_or(|(_, s)| *s != next);
         if changed {
@@ -302,6 +333,8 @@ impl Engine {
             scope_revision,
             phase,
             capture,
+            stop_target: StopTarget::default(),
+            startup: StartupState::Idle,
             processor: self
                 .evaluation
                 .as_ref()

@@ -3,6 +3,7 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "snapshot",
             "processing_snapshot",
+            "stop_capture",
             "review_processing_scope",
             "approve_processing_scope",
             "cancel_processing_review",
