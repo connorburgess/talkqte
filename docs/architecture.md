@@ -110,7 +110,7 @@ Synchronizing the context store passes complete `ContextItem` values to the engi
 4. Show and dismiss one prompt without stealing keyboard focus. Check Spaces, full-screen meeting windows, and screen sharing separately.
 5. Run without network access after model installation. Verify that no audio or transcript appears in logs, temporary files, or the repository.
 
-Investigate macOS ScreenCaptureKit/Core Audio through maintained native bindings. A small platform bridge remains an option if required. Select the concrete binding after this spike; do not promise system-audio support based on microphone capture alone.
+The [system-audio decision record](system-audio-plan.md) compares ScreenCaptureKit's application-wide audio with Core Audio process taps and their different OS requirements. It proposes a consented, selected-source audio-output-only spike before combining another app's sound with the microphone. A small platform bridge remains an option if required. Select the concrete binding after this spike; do not promise system-audio support based on microphone capture alone. The plan changes no capture behavior or deployment minimum.
 
 ## References
 
