@@ -20,7 +20,10 @@ use sha2::{Digest, Sha256};
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::{Duration, Instant},
 };
 
@@ -208,6 +211,9 @@ pub fn sign_in(
     open_url: &dyn Fn(&str) -> Result<(), String>,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Tokens, String> {
+    if cancelled() {
+        return Err("Sign-in cancelled.".into());
+    }
     let agent = agent(true);
     let origin = RESOURCE
         .strip_suffix("/mcp")
@@ -259,6 +265,9 @@ pub fn sign_in(
         .map_err(|_| "The local sign-in port could not be read.")?
         .port();
     let redirect_uri = format!("http://127.0.0.1:{port}/callback");
+    if cancelled() {
+        return Err("Sign-in cancelled.".into());
+    }
     let registration = agent
         .post(&registration_endpoint)
         .header("Accept", "application/json")
@@ -278,6 +287,9 @@ pub fn sign_in(
         .to_string();
     let (verifier, challenge) = pkce_pair()?;
     let state = base64url(&random_bytes(16)?);
+    if cancelled() {
+        return Err("Sign-in cancelled.".into());
+    }
     open_url(&authorize_url(
         &authorization_endpoint,
         &client_id,
@@ -286,6 +298,9 @@ pub fn sign_in(
         &state,
     ))?;
     let code = wait_for_callback(&listener, &state, cancelled)?;
+    if cancelled() {
+        return Err("Sign-in cancelled.".into());
+    }
     let token = agent
         .post(&token_endpoint)
         .header("Accept", "application/json")
@@ -502,10 +517,7 @@ impl Connection {
         }
         connection.notify("notifications/initialized")?;
         let listed = connection.call("tools/list", json!({}))?;
-        // Schemas carry no personal data; they are printed whole.
-        if std::env::var_os("TALKQTE_GRANOLA_TRACE").is_some() {
-            eprintln!("granola trace: tools/list: {}", listed);
-        }
+        trace("tools/list", &listed);
         connection.tools = listed["tools"]
             .as_array()
             .map(|tools| tools.iter().filter_map(tool_from).collect())
@@ -711,10 +723,10 @@ fn sse_message(text: &str, id: u64) -> Option<Value> {
 }
 
 /// Developer trace, on only when `TALKQTE_GRANOLA_TRACE` is set: the
-/// server's tool schemas (not personal) and the *shape* of each tool reply
-/// with every string replaced by its length and arrays cut to two items,
-/// so the mapping can be fixed for a real account without reading its
-/// notes. Printed to stderr; never written to a file or sent anywhere.
+/// shape of tool schemas and replies. Only fixed structural field names
+/// survive; keys, scalar values, and schema descriptions may contain private
+/// data. Size and depth are bounded. Printed to stderr; the calling terminal
+/// may retain it, so never print raw provider metadata here.
 fn trace(label: &str, value: &Value) {
     if std::env::var_os("TALKQTE_GRANOLA_TRACE").is_none() {
         return;
@@ -890,22 +902,88 @@ fn skeleton(text: &str) -> String {
     out
 }
 
-/// The structure of a value with no content: `"<str:12>"` for a string.
+/// Bounded structure only: arbitrary keys and all scalar content are private.
 fn shape(value: &Value) -> Value {
-    match value {
-        Value::String(text) => Value::String(format!("<str:{}>", text.chars().count())),
-        Value::Array(items) => {
-            let mut shapes: Vec<Value> = items.iter().take(2).map(shape).collect();
-            if items.len() > 2 {
-                shapes.push(Value::String(format!("<+{} more>", items.len() - 2)));
+    fn visit(value: &Value, depth: usize, remaining: &mut usize) -> Value {
+        if depth == 0 || *remaining == 0 {
+            return json!("<truncated>");
+        }
+        *remaining -= 1;
+        match value {
+            Value::String(text) => json!(format!("<str:{}>", text.chars().count())),
+            Value::Number(_) => json!("<number>"),
+            Value::Bool(_) => json!("<boolean>"),
+            Value::Null => Value::Null,
+            Value::Array(items) => {
+                let mut shapes: Vec<Value> = items
+                    .iter()
+                    .take(2)
+                    .map(|item| visit(item, depth - 1, remaining))
+                    .collect();
+                if items.len() > 2 {
+                    shapes.push(json!(format!("<+{} more>", items.len() - 2)));
+                }
+                Value::Array(shapes)
             }
-            Value::Array(shapes)
+            Value::Object(map) => {
+                let mut shaped = serde_json::Map::new();
+                for (index, (key, value)) in map.iter().take(20).enumerate() {
+                    if *remaining == 0 {
+                        shaped.insert("<truncated>".into(), Value::Null);
+                        break;
+                    }
+                    let key = if matches!(
+                        key.as_str(),
+                        "content"
+                            | "structuredContent"
+                            | "text"
+                            | "type"
+                            | "isError"
+                            | "tools"
+                            | "name"
+                            | "inputSchema"
+                            | "properties"
+                            | "items"
+                            | "required"
+                            | "description"
+                            | "additionalProperties"
+                            | "enum"
+                            | "meetings"
+                            | "notes"
+                            | "data"
+                            | "results"
+                            | "id"
+                            | "title"
+                            | "date"
+                            | "meeting_at"
+                            | "created_at"
+                            | "updated_at"
+                            | "updatedAt"
+                            | "summary"
+                            | "private_notes"
+                            | "notes_markdown"
+                            | "notes_plain"
+                            | "pagination"
+                            | "has_more"
+                            | "total_count"
+                            | "remaining_count"
+                            | "next_cursor"
+                            | "status"
+                    ) {
+                        key.clone()
+                    } else {
+                        format!("<field:{index}>")
+                    };
+                    shaped.insert(key, visit(value, depth - 1, remaining));
+                }
+                if map.len() > 20 {
+                    shaped.insert("<more fields>".into(), json!(map.len() - 20));
+                }
+                Value::Object(shaped)
+            }
         }
-        Value::Object(map) => {
-            Value::Object(map.iter().map(|(k, v)| (k.clone(), shape(v))).collect())
-        }
-        other => other.clone(),
     }
+    visit(value, 8, &mut 80)
 }
 
 fn tool_from(value: &Value) -> Option<Tool> {
@@ -1418,40 +1496,80 @@ fn preview(text: &str) -> String {
 /// checks never wait on a call in flight.
 #[derive(Clone, Debug)]
 pub struct Shared {
-    connection: Arc<Mutex<Connection>>,
+    connection: Arc<Mutex<Option<Connection>>>,
     tools: Arc<Vec<String>>,
+    disconnected: Arc<AtomicBool>,
 }
 
 impl Shared {
     pub fn new(connection: Connection) -> Self {
         Self {
             tools: Arc::new(connection.tool_names()),
-            connection: Arc::new(Mutex::new(connection)),
+            connection: Arc::new(Mutex::new(Some(connection))),
+            disconnected: Arc::new(AtomicBool::new(false)),
         }
     }
 
+    /// Retire every clone without waiting for an outstanding HTTP request.
+    /// That request drops its response and credentials when it returns.
+    pub fn disconnect(&self) {
+        self.disconnected.store(true, Ordering::Release);
+        if let Ok(mut connection) = self.connection.try_lock() {
+            *connection = None;
+        }
+    }
+
+    pub fn is_current(&self, current: Option<&Self>) -> bool {
+        !self.disconnected.load(Ordering::Acquire)
+            && current.is_some_and(|current| Arc::ptr_eq(&self.connection, &current.connection))
+    }
+
+    fn with_connection<T>(
+        &self,
+        call: impl FnOnce(&mut Connection) -> Result<T, SourceError>,
+    ) -> Result<T, SourceError> {
+        if self.disconnected.load(Ordering::Acquire) {
+            return Err(SourceError::Revoked);
+        }
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| SourceError::Unavailable)?;
+        // A queued call must recheck after acquiring the request lock.
+        if self.disconnected.load(Ordering::Acquire) {
+            *connection = None;
+            return Err(SourceError::Revoked);
+        }
+        let result = call(connection.as_mut().ok_or(SourceError::Revoked)?);
+        if self.disconnected.load(Ordering::Acquire) {
+            *connection = None;
+            return Err(SourceError::Revoked);
+        }
+        result
+    }
+
     pub fn tool_names(&self) -> Vec<String> {
-        self.tools.as_ref().clone()
+        if self.disconnected.load(Ordering::Acquire) {
+            vec![]
+        } else {
+            self.tools.as_ref().clone()
+        }
     }
 
     pub fn list_recent(&self) -> Result<(Vec<NoteSummary>, usize), SourceError> {
-        self.connection
-            .lock()
-            .map_err(|_| SourceError::Unavailable)?
-            .list_recent()
+        self.with_connection(Connection::list_recent)
     }
 
     pub fn can_suggest(&self) -> bool {
-        self.tools
-            .iter()
-            .any(|tool| tool == "query_granola_meetings")
+        !self.disconnected.load(Ordering::Acquire)
+            && self
+                .tools
+                .iter()
+                .any(|tool| tool == "query_granola_meetings")
     }
 
     pub fn suggest_focus(&self) -> Result<Vec<String>, SourceError> {
-        self.connection
-            .lock()
-            .map_err(|_| SourceError::Unavailable)?
-            .suggest_focus()
+        self.with_connection(Connection::suggest_focus)
     }
 }
 
@@ -1462,16 +1580,14 @@ impl NoteSource for Shared {
 
     fn capabilities(&self) -> Capabilities {
         Capabilities {
-            import_notes: self.tools.iter().any(|tool| tool == "get_meetings"),
+            import_notes: !self.disconnected.load(Ordering::Acquire)
+                && self.tools.iter().any(|tool| tool == "get_meetings"),
             ..Capabilities::default()
         }
     }
 
     fn fetch(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError> {
-        self.connection
-            .lock()
-            .map_err(|_| SourceError::Unavailable)?
-            .fetch(selection)
+        self.with_connection(|connection| connection.fetch(selection))
     }
 }
 
@@ -1691,6 +1807,15 @@ mod tests {
     type Seen = Arc<Mutex<Vec<(String, String)>>>;
 
     fn fictional_server(answer: Answer) -> (String, Seen) {
+        fictional_server_with_gate(answer, None)
+    }
+
+    type ResponseGate = (std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>);
+
+    fn fictional_server_with_gate(
+        answer: Answer,
+        mut gate: Option<ResponseGate>,
+    ) -> (String, Seen) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}/mcp", listener.local_addr().unwrap());
         let seen = Arc::new(Mutex::new(Vec::new()));
@@ -1725,6 +1850,12 @@ mod tests {
                     .unwrap()
                     .push((head.to_string(), body.to_string()));
                 let request: Value = serde_json::from_str(body).unwrap_or(Value::Null);
+                if request["method"] == "tools/call" {
+                    if let Some((started, release)) = gate.take() {
+                        started.send(()).unwrap();
+                        release.recv_timeout(Duration::from_secs(5)).unwrap();
+                    }
+                }
                 let reply = |stream: &mut TcpStream,
                              status: u16,
                              content_type: &str,
@@ -2274,6 +2405,77 @@ The default range is the last thirty days.
     }
 
     #[test]
+    fn disconnect_discards_delayed_results_and_stops_queued_requests() {
+        // Exercise each read path with a response held by the fictional server.
+        for operation in ["list", "suggest", "fetch"] {
+            let (started, received) = std::sync::mpsc::channel();
+            let (release, resume) = std::sync::mpsc::channel();
+            let (endpoint, seen) =
+                fictional_server_with_gate(Answer::Json, Some((started, resume)));
+            let shared = Shared::new(Connection::open_at(&endpoint, &tokens(), false).unwrap());
+            let mut in_flight = shared.clone();
+            let request = std::thread::spawn(move || match operation {
+                "list" => in_flight.list_recent().map(|_| ()),
+                "suggest" => in_flight.suggest_focus().map(|_| ()),
+                _ => in_flight.fetch(&["m1".into()]).map(|_| ()),
+            });
+            received.recv_timeout(Duration::from_secs(5)).unwrap();
+            let queued = shared.clone();
+            let waiting = std::thread::spawn(move || queued.list_recent());
+
+            // Retirement must not wait for the provider or permit an old clone
+            // to become current when a replacement account connects.
+            shared.disconnect();
+            let (new_endpoint, _) = fictional_server(Answer::Json);
+            let replacement =
+                Shared::new(Connection::open_at(&new_endpoint, &tokens(), false).unwrap());
+            assert!(!shared.is_current(Some(&replacement)));
+            assert!(!shared.is_current(Some(&shared)));
+            assert!(replacement.is_current(Some(&replacement.clone())));
+            assert!(!replacement.is_current(None));
+            release.send(()).unwrap();
+            assert_eq!(request.join().unwrap(), Err(SourceError::Revoked));
+            assert_eq!(waiting.join().unwrap().err(), Some(SourceError::Revoked));
+            assert!(!shared.can_suggest());
+            assert!(!shared.capabilities().import_notes);
+            assert!(shared.tool_names().is_empty());
+            assert!(
+                shared.connection.lock().unwrap().is_none(),
+                "retired credentials dropped"
+            );
+            let calls = seen
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(_, body)| {
+                    serde_json::from_str::<Value>(body).unwrap()["method"] == "tools/call"
+                })
+                .count();
+            assert_eq!(calls, 1, "queued request never reached the retired account");
+            assert!(replacement.list_recent().is_ok());
+        }
+    }
+
+    #[test]
+    fn disconnect_drops_idle_credentials_and_all_clones_lose_access() {
+        let (endpoint, seen) = fictional_server(Answer::Json);
+        let shared = Shared::new(Connection::open_at(&endpoint, &tokens(), false).unwrap());
+        let mut retained = shared.clone();
+        shared.disconnect();
+        assert!(shared.connection.lock().unwrap().is_none());
+        assert_eq!(
+            retained.fetch(&["m1".into()]).err(),
+            Some(SourceError::Revoked)
+        );
+        assert_eq!(retained.suggest_focus().err(), Some(SourceError::Revoked));
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            3,
+            "only the initial handshake was sent"
+        );
+    }
+
+    #[test]
     fn server_failures_map_to_the_contract_errors() {
         for (answer, expected) in [
             (Answer::Status(401), SourceError::Expired),
@@ -2352,13 +2554,58 @@ The default range is the last thirty days.
         );
         assert_eq!(
             shaped,
-            json!({"meetings": [{"id": "<str:2>", "title": "<str:20>", "notes": "<str:12>"}, {"id": "<str:2>"}, "<+1 more>"], "n": 3})
+            json!({"meetings": [{"id": "<str:2>", "title": "<str:20>", "notes": "<str:12>"}, {"id": "<str:2>"}, "<+1 more>"], "<field:1>": "<number>"})
         );
         assert_eq!(
             skeleton("<meeting id=\"m-1\" date=\"2026-11-10\">\n<title>Garden day</title> 3 notes</meeting>"),
             "<meeting id=\"x-9\" date=\"9999-99-99\">\n<title>xxxxxx xxx</title> 9 xxxxx</meeting>"
         );
         assert!(!shaped.to_string().contains("Garden"));
+    }
+
+    #[test]
+    fn trace_masks_private_keys_scalars_and_tool_metadata_with_bounded_output() {
+        let value = json!({
+            "Garden private agenda": {"title": "Fictional orchard launch", "count": 873421},
+            "tools": [{"name": "private-tool-name", "description": "fictional-token-secret",
+                "inputSchema": {"properties": {"visitor@example.com": {
+                    "default": "Private seed inventory", "enum": ["Hidden apple variety"],
+                    "enabled": true, "amount": 938271
+                }}}}],
+            "summary": "Private tools and summaries must not be printed verbatim"
+        });
+        let output = shape(&value).to_string();
+        for private in [
+            "Garden",
+            "orchard",
+            "873421",
+            "private-tool-name",
+            "fictional-token-secret",
+            "visitor@example.com",
+            "Private seed",
+            "Hidden apple",
+            "938271",
+            "true",
+        ] {
+            assert!(
+                !output.contains(private),
+                "private content survived: {private}"
+            );
+        }
+        assert!(output.contains("inputSchema"));
+        assert!(output.contains("<number>"));
+        let mut deep = json!("private deepest value");
+        for _ in 0..40 {
+            deep = json!({"content": deep});
+        }
+        let mut wide = serde_json::Map::new();
+        for i in 0..100 {
+            wide.insert(format!("private field {i}"), deep.clone());
+        }
+        let output = shape(&Value::Object(wide)).to_string();
+        assert!(output.len() < 10_000);
+        assert!(output.contains("truncated"));
+        assert!(!output.contains("private"));
     }
 
     #[test]

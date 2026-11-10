@@ -32,10 +32,10 @@ AI is intended to select relevant context, decide whether a cue would help, and 
 | Floating companion, source disclosure, pause, and dismissal                                                                | Useful timing, and semantic suppression of answered questions and stale cues       |
 | Phrase-based withdrawal for answers, corrections, and topic openings; the same question is not repeated within two minutes | Recognizing paraphrased answers, duplicates, and topic changes said in other words |
 | Opt-in microphone activity check; local live session (dev build)                                                           | Both sides of meeting audio, model setup, and real-meeting accuracy                |
-| Prior notes imported from a file you choose, with a once-per-note reminder when the conversation touches a note's title    | A connected note-taker, and evidence that reminders help rather than interrupt     |
+| Selected file-note imports, title-match reminders, and a development Granola connection                                    | Confirmed real-note import, and evidence that reminders help rather than interrupt |
 | In-memory demo notes and reviewed Markdown export                                                                          | Reliable meeting use, processing choices, and install/update support               |
 
-The microphone indicator measures signal activity only. It does not transcribe, record, or feed the demo. A live session is separate: see [Live session](#live-session-developer-build). No note-taker is connected; prior notes come only from a file you choose, and the reminder they can raise is a title-word match, not a judgment of relevance. See [current privacy behavior](PRIVACY.md) and the [native validation record](docs/native-validation.md) for the limits of existing checks.
+The microphone indicator measures signal activity only. It does not transcribe, record, or feed the demo. A live session is separate: see [Live session](#live-session-developer-build). Granola sign-in, listing, and requested focus suggestions have worked in account checks; selected-note import still needs real-account confirmation. Imported-note reminders use title-word matches, not a judgment of relevance. See [current privacy behavior](PRIVACY.md) and the [native validation record](docs/native-validation.md) for the limits of existing checks.
 
 ## Where we are heading
 
@@ -67,7 +67,7 @@ npm run desktop
 
 `npm run dev` serves the same notebook as a browser simulation at `http://127.0.0.1:1420`, with the fictional demo and no microphone. What the notebook, companion, focus list, prior notes, and export do today, with their limits, is in [Run the prototype](docs/run-the-prototype.md).
 
-Granola sign-in, listing, and focus suggestions have worked in account checks. Selected-note import now reads the observed private-note and summary fields; fictional headless checks pass, while a successful real-note import still needs confirmation. Reimporting refreshes a kept note when Granola supplies a newer update timestamp. Import failures now stay visible in the chooser and preserve your selection for retry; Cancel discards pending results. Granola selection is limited to 10 notes per import (20 kept per session). Focus is optional and stays in the notebook; suggestions run only when requested.
+Granola sign-in, listing, and focus suggestions have worked in account checks. Selected-note import now reads the observed private-note and summary fields; fictional headless checks pass, while a successful real-note import still needs confirmation. Reimporting refreshes a kept note when Granola supplies a newer update timestamp. Import failures now stay visible in the chooser and preserve your selection for retry; Cancel discards pending import results. Disconnect also invalidates delayed listing and suggestion responses, including after reconnecting; notes already imported stay until removed. Removing a note clears a reminder quoting it, even while held open. Granola selection is limited to 10 notes per import (20 kept per session). Focus is optional and stays in the notebook; suggestions run only when requested.
 
 ## Live session (developer build)
 

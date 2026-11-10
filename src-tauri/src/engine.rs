@@ -1214,6 +1214,19 @@ impl Engine {
             .collect();
         let keys: Vec<&String> = self.notes.iter().map(|note| &note.key).collect();
         self.shown_notes.retain(|key| keys.contains(&key));
+        // Explicit removal must also release an excerpt already shown in a
+        // reminder, including one held open for reading.
+        if self
+            .state
+            .cue
+            .as_ref()
+            .is_some_and(|cue| cue.note.is_some() && !keys.contains(&&cue.source_id))
+        {
+            self.forget_unshown();
+            self.state.cue = None;
+            self.cooldown_until = self.state.elapsed_ms + self.cooldown();
+            self.changed();
+        }
     }
 
     /// Carries the focus lines to a replacement engine.
@@ -4107,6 +4120,58 @@ mod tests {
         assert!(cue.evidence.contains("tool shed"));
         assert_eq!(cue.note.as_ref().unwrap().source_date, "2026-10-28");
         assert_eq!(cue.source_id, "file:n1");
+    }
+
+    #[test]
+    fn removing_an_imported_note_clears_its_held_cue_without_exporting_the_excerpt() {
+        for held in [false, true] {
+            let mut e = with_notes();
+            e.update_notes("A manual notebook line.".into()).unwrap();
+            e.ingest(e.session(), live("w1", 9_000, "Review the welcome guide."))
+                .unwrap();
+            let cue = e.state.cue.as_ref().unwrap();
+            assert!(cue.evidence.contains("tool shed"));
+            let id = cue.id.clone();
+            if held {
+                e.inspect_cue(&id, true).unwrap();
+            }
+            assert!(!e.markdown().contains("tool shed"));
+            assert!(!e.markdown().contains("file:n1"));
+            let before = e.state.revision;
+            // Remove the displayed note while another imported note remains.
+            e.set_notes(vec![(
+                "file:n2".into(),
+                "Sign".into(),
+                "2026-11-05".into(),
+                "file".into(),
+                "An unrelated imported excerpt.".into(),
+            )]);
+            assert!(
+                e.state.revision > before,
+                "removal must publish a new cue state"
+            );
+            assert!(e.state.cue.is_none());
+            assert!(e.cue_snapshot().cue.is_none());
+            assert!(!serde_json::to_string(&e.state)
+                .unwrap()
+                .contains("tool shed"));
+            assert!(!e.markdown().contains("imported excerpt"));
+            assert!(e.markdown().contains("A manual notebook line."));
+            assert!(e.inspect_cue(&id, true).is_err());
+        }
+        let mut e = with_notes();
+        e.ingest(
+            e.session(),
+            live("w1", 9_000, "Someone can take the welcome guide."),
+        )
+        .unwrap();
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.set_notes(vec![]);
+        assert_eq!(
+            e.state.cue.as_ref().unwrap().id,
+            id,
+            "an unrelated question stays"
+        );
     }
 
     #[test]
