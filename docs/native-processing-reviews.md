@@ -31,6 +31,6 @@ Run `cargo test --manifest-path src-tauri/Cargo.toml --locked`. The tests use fi
 
 ## Remaining release dependency
 
-The review store is not an IPC endpoint or a complete permission dialog. Next, project trusted processor/source disclosures into bounded native snapshots, maintain event revisions across sessions, and bind deferred UI controls to their originating session and scope. Register narrow main-window commands only with that disclosure/event contract; do not mount controls or activate a provider before it passes fictional acceptance. The notebook still lacks Cancel during model loading.
+The review store is not an IPC endpoint or a complete permission dialog. The [native status contract](native-processing-status.md) now projects trusted processor/source disclosures with monotonic revisions. Next, bind deferred UI controls to their originating session and scope, and register the narrow main-window mutation commands against that contract; do not mount controls or activate a provider before it passes fictional acceptance. The notebook still lacks Cancel during model loading.
 
 Real-device Stop, native accessibility, Granola selected-note account acceptance, signed installation and the comparison against no assistance remain separate gates. These tests establish reproducible control behavior, not cue quality, listening comprehension or production readiness.

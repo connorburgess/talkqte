@@ -1,5 +1,5 @@
-/** Proposed control contract, exercised through fictional IPC only.
- * No native command or application entry point activates this client yet. */
+/** Native read-only snapshot/event; mutation commands remain a proposed
+ * contract exercised through fictional IPC. The app does not mount it yet. */
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
@@ -41,8 +41,8 @@ export interface ProcessingSnapshot {
   session: string;
   /** Changes when permission, processor or source membership/revisions change. */
   scopeRevision: number;
-  phase: 'off' | 'active' | 'paused' | 'unavailable' | 'ended';
-  capture: 'running' | 'stopping' | 'off';
+  phase: 'off' | 'active' | 'paused' | 'unavailable' | 'stopping' | 'ended';
+  capture: 'unknown' | 'starting' | 'running' | 'stopping' | 'off';
   processor: ProcessorSummary | null;
   notes: ProcessingNote[];
   approved: ProcessingScope | null;

@@ -115,6 +115,11 @@ mod tests {
             "fixture".into(),
             ProcessingLocation::OnDevice,
             "fictional-policy".into(),
+            crate::engine::ProcessorDisclosure::new(
+                "Fictional worker".into(),
+                "Fictional in-memory test only.".into(),
+            )
+            .unwrap(),
         )
         .unwrap();
         let mut runtime = Runtime {
@@ -468,6 +473,11 @@ mod tests {
             "fixture".into(),
             ProcessingLocation::OnDevice,
             "fictional-policy".into(),
+            crate::engine::ProcessorDisclosure::new(
+                "Fictional worker".into(),
+                "Fictional in-memory test only.".into(),
+            )
+            .unwrap(),
         )
         .unwrap();
         let mut r = Runtime {

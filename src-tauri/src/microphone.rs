@@ -185,6 +185,10 @@ impl Controller {
         self.0.try_lock().ok().map(|state| state.snapshot.status)
     }
 
+    pub(crate) fn try_snapshot(&self) -> Option<Snapshot> {
+        self.0.try_lock().ok().map(|state| state.snapshot.clone())
+    }
+
     pub fn snapshot(&self) -> Result<Snapshot, String> {
         self.0
             .lock()
@@ -717,7 +721,11 @@ mod tests {
         let (read_tx, read_rx) = mpsc::channel();
         let read = thread::spawn(move || {
             read_tx
-                .send((reader.try_status(), reader.poll(Instant::now()).is_none()))
+                .send((
+                    reader.try_status(),
+                    reader.try_snapshot().is_none(),
+                    reader.poll(Instant::now()).is_none(),
+                ))
                 .unwrap();
         });
         let result = read_rx.recv_timeout(Duration::from_secs(1));
@@ -730,7 +738,7 @@ mod tests {
         release_tx.send(()).unwrap();
         start.join().unwrap();
         read.join().unwrap();
-        assert_eq!(result.unwrap(), (None, true));
+        assert_eq!(result.unwrap(), (None, true, true));
         let update = stop_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         stop.join().unwrap();
         assert_eq!(update.snapshot.status, Status::Stopping);
