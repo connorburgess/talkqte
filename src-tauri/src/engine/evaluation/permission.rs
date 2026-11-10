@@ -231,6 +231,7 @@ impl Engine {
         }
         self.invalidate_evaluation();
         self.evaluation.as_mut().unwrap().permission.revoke();
+        self.set_evaluation_status(EvaluationStatus::Idle);
         self.evaluated_cue = None;
         self.state.cue = None;
         self.unshown = None;
