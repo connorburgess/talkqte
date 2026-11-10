@@ -5,6 +5,7 @@ fn main() {
             "start_demo",
             "pause_demo",
             "resume_demo",
+            "set_live_cues_paused",
             "end_demo",
             "respond_to_cue",
             "keep_line",

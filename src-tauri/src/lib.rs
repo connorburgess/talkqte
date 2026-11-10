@@ -139,6 +139,14 @@ fn resume_demo(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<(
     })
 }
 #[tauri::command]
+fn set_live_cues_paused(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    paused: bool,
+) -> Result<(), String> {
+    change(&app, &state, |e| e.set_live_cues_paused(paused))
+}
+#[tauri::command]
 fn end_demo(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
     let live = state
         .0
@@ -1178,6 +1186,7 @@ pub fn run() {
             start_demo,
             pause_demo,
             resume_demo,
+            set_live_cues_paused,
             end_demo,
             respond_to_cue,
             keep_line,

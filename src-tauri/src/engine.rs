@@ -428,6 +428,8 @@ pub struct Snapshot {
     pub question_size: QuestionSize,
     /// True for a live session fed by transcription rather than the demo.
     pub live: bool,
+    /// Live cue suppression only; capture, transcription and the clock continue.
+    pub cues_paused: bool,
     /// The person's name for this session only, used to notice questions
     /// asked of them. Never saved, and not sent to the companion.
     pub user_name: Option<String>,
@@ -446,6 +448,7 @@ pub struct CueSnapshot {
     pub revision: u64,
     pub status: Status,
     pub live: bool,
+    pub cues_paused: bool,
     pub cue: Option<Cue>,
     pub overlay_enabled: bool,
     pub companion_position: CompanionPosition,
@@ -463,6 +466,8 @@ pub struct Engine {
     cooldown_until: u64,
     /// Whether this session's transcript includes ingested (non-demo) lines.
     live_input: bool,
+    /// Ignore delayed transcription from before the most recent cue resume.
+    cues_after_ms: Option<u64>,
     /// The user's name for this app session, used to recognize questions
     /// addressed to them. Never stored or sent anywhere.
     /// When each question type was last shown in this session.
@@ -520,6 +525,7 @@ impl Engine {
                 companion_position: CompanionPosition::BottomRight,
                 question_size: QuestionSize::Standard,
                 live: demo.segments.is_empty() && demo.duration_ms == u64::MAX,
+                cues_paused: false,
                 user_name: None,
                 focus: vec![],
             },
@@ -529,6 +535,7 @@ impl Engine {
             cue_deadline: 0,
             cooldown_until: 0,
             live_input: false,
+            cues_after_ms: None,
             last_shown: vec![],
             focus_terms: vec![],
             focus_touched: vec![],
@@ -545,6 +552,7 @@ impl Engine {
             revision: self.state.revision,
             status: self.state.status,
             live: self.state.live,
+            cues_paused: self.state.cues_paused,
             cue: self.state.cue.clone(),
             overlay_enabled: self.state.overlay_enabled,
             companion_position: self.state.companion_position,
@@ -565,6 +573,8 @@ impl Engine {
         }
         self.generation += 1;
         self.live_input = false;
+        self.state.cues_paused = false;
+        self.cues_after_ms = None;
         self.last_shown.clear();
         self.shown_notes.clear();
         self.focus_touched = vec![false; self.state.focus.len()];
@@ -600,8 +610,27 @@ impl Engine {
 
     pub fn end(&mut self) {
         self.state.status = Status::Ended;
+        self.state.cues_paused = false;
+        self.cues_after_ms = None;
         self.state.cue = None;
         self.changed();
+    }
+
+    /// Quiet the live companion without implying that capture has stopped.
+    /// Resume only permits newly spoken lines, never a transcription backlog.
+    pub fn set_live_cues_paused(&mut self, paused: bool) -> Result<(), String> {
+        if !self.state.live || self.state.status != Status::Running {
+            return Err("Cue pause is available only during a live session.".into());
+        }
+        if self.state.cues_paused == paused {
+            return Ok(());
+        }
+        self.state.cues_paused = paused;
+        self.state.cue = None;
+        self.unshown = None;
+        self.cues_after_ms = Some(self.state.elapsed_ms);
+        self.changed();
+        Ok(())
     }
 
     pub fn advance(&mut self, delta_ms: u64) {
@@ -732,6 +761,13 @@ impl Engine {
             .and_then(|index| self.focus_touched.get_mut(index))
         {
             *touched = true;
+        }
+        if self.state.cues_paused
+            || self
+                .cues_after_ms
+                .is_some_and(|resumed_at| segment.at_ms <= resumed_at)
+        {
+            return;
         }
         // The conversation answered the open cue. Withdraw it before the
         // user spends attention on it, unless they are reading it; then
@@ -2189,6 +2225,107 @@ mod tests {
         engine.demo.duration_ms = 600_000;
         engine.advance(10_000);
         engine
+    }
+
+    #[test]
+    fn live_cue_pause_clears_even_a_held_cue_without_freezing_input() {
+        for held in [false, true] {
+            let mut e = Engine::live();
+            e.start().unwrap();
+            e.advance(1_000);
+            let session = e.session();
+            e.ingest(
+                session,
+                live("first", 1_000, "Someone should send the checklist."),
+            )
+            .unwrap();
+            let cue_id = e.state.cue.as_ref().unwrap().id.clone();
+            if held {
+                e.inspect_cue(&cue_id, true).unwrap();
+            }
+            e.state.notes = "A manually written note.".into();
+            e.set_focus(vec!["Settle the volunteer schedule".into()])
+                .unwrap();
+            e.set_user_name(Some("Robin".into())).unwrap();
+            e.set_live_cues_paused(true).unwrap();
+            assert_eq!(e.state.status, Status::Running);
+            assert_eq!(e.session(), session);
+            assert!(e.state.cues_paused && e.cue_snapshot().cues_paused);
+            assert!(e.state.cue.is_none() && e.cue_snapshot().cue.is_none());
+            assert!(e.inspect_cue(&cue_id, true).is_err());
+            for (i, text) in [
+                "Someone could send it soon.",
+                "Robin, who will check the garden?",
+                "I will send the checklist by Friday.",
+                "The volunteer schedule is settled.",
+            ]
+            .iter()
+            .enumerate()
+            {
+                e.advance(1_000);
+                e.ingest(
+                    session,
+                    live(&format!("during-{i}"), e.state.elapsed_ms, text),
+                )
+                .unwrap();
+                assert!(e.state.cue.is_none());
+            }
+            assert_eq!(e.state.elapsed_ms, 5_000);
+            assert_eq!(e.state.transcript.len(), 5);
+            assert_eq!(e.focus_touched, [true]);
+            assert_eq!(e.state.notes, "A manually written note.");
+        }
+    }
+
+    #[test]
+    fn live_cue_resume_skips_delayed_speech_and_waits_for_new_input() {
+        let mut e = Engine::live();
+        e.start().unwrap();
+        e.advance(1_000);
+        e.set_live_cues_paused(true).unwrap();
+        e.advance(3_000);
+        e.set_live_cues_paused(false).unwrap();
+        e.advance(1_000);
+        // A repeated command must not move the resume boundary forward.
+        e.set_live_cues_paused(false).unwrap();
+        for (id, at) in [("delayed", 3_000), ("boundary", 4_000)] {
+            e.ingest(e.session(), live(id, at, "Someone should send it soon."))
+                .unwrap();
+            assert!(e.state.cue.is_none());
+        }
+        assert_eq!(e.state.transcript.len(), 2);
+        e.ingest(
+            e.session(),
+            live("new", 4_500, "Someone should send the checklist."),
+        )
+        .unwrap();
+        assert_eq!(e.state.cue.as_ref().unwrap().source_id, "new");
+        assert!(!e.cue_snapshot().cues_paused);
+    }
+
+    #[test]
+    fn cue_pause_cannot_restart_a_stopped_session_or_pause_the_demo() {
+        let mut e = Engine::default();
+        e.start().unwrap();
+        let revision = e.state.revision;
+        assert!(e.set_live_cues_paused(true).is_err());
+        assert_eq!(e.state.revision, revision);
+        let mut e = Engine::live();
+        assert!(e.set_live_cues_paused(true).is_err());
+        e.start().unwrap();
+        e.set_live_cues_paused(true).unwrap();
+        let old = e.session();
+        e.end();
+        assert!(!e.state.cues_paused);
+        assert!(e.set_live_cues_paused(false).is_err());
+        assert!(e
+            .ingest(old, live("late", 0, "Someone should send it."))
+            .is_err());
+        e.start().unwrap();
+        assert!(!e.state.cues_paused);
+        e.ingest(e.session(), live("fresh", 0, "Someone should send it."))
+            .unwrap();
+        assert!(e.state.cue.is_some());
     }
 
     #[test]

@@ -17,6 +17,7 @@ const state: Snapshot = {
   description: demo.description,
   status: 'ready',
   live: false,
+  cuesPaused: false,
   elapsedMs: 0,
   durationMs: demo.durationMs,
   transcript: [],
@@ -208,6 +209,7 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
     }
     case 'start_live_session':
     case 'stop_live_session':
+    case 'set_live_cues_paused':
     case 'download_model':
     case 'cancel_model_download':
     case 'remove_model':

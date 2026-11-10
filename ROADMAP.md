@@ -87,7 +87,8 @@ Prove that audio capture, local transcription, and the floating prompt can coexi
 - [x] Transcribe a synthetic meeting locally without network access after model setup. A real-time developer replay of a fictional two-voice clip with a feature-gated Whisper backend. A developer build routes the microphone into a live session; system audio is not captured.
 - [x] Measure transcript delay, memory growth, CPU use, and dropped audio. Synthetic replays of 10, 20, and 60 minutes measured these ([results](docs/local-transcription.md#sustained-session)); the hour-long run showed no memory growth and about 14% of one M5 Pro Max core. Live capture, the companion, and the lowest supported Mac are not yet included.
 - [ ] Show a dismissible prompt without taking keyboard focus from the meeting.
-- [ ] Confirm stop/pause and device-change behavior, including headphones.
+- [x] Pause and resume live cues independently of capture and transcription, clearing the current cue and skipping delayed speech from the pause. Rust and headless browser checks cover the [controls and failure cases](docs/live-cue-pause.md); no hardware claim.
+- [ ] Confirm stop/pause and device-change behavior, including headphones. Live cue pause is implemented; microphone release, device changes, and native control acceptance remain open.
 
 ## First usable version
 

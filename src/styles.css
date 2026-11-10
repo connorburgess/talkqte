@@ -434,6 +434,7 @@ svg {
 }
 .session-strip {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 14px;
@@ -517,6 +518,7 @@ svg {
 }
 .session-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
@@ -1211,6 +1213,12 @@ svg {
   gap: 6px;
   min-height: 64px;
   padding: 8px 12px;
+}
+/* Four live controls keep 44px targets; leave room for both status lines
+   even with wider platform fallback fonts at the compact 320px width. */
+.companion-bar-live {
+  gap: 4px;
+  padding-inline: 8px;
 }
 .companion-status {
   display: grid;

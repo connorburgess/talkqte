@@ -81,6 +81,8 @@ Then choose **Download speech model** in Settings; **Set up live session** in th
 
 Choose **Start live session** in the notebook and grant microphone permission if asked. **Stop live session**, in the notebook or companion, releases the microphone, finishes transcribing the last few seconds, and ends the session; **Stop microphone** does the same. If microphone access is refused or the device fails, the session ends. Speech is transcribed in chunks of up to 3 seconds, ending early at a pause, so lines appear about 3 seconds after they are spoken in a synthetic replay; the delay on real hardware has not been measured. Audio is not recorded. The transcript stays in memory until you start another session or quit, and a live session cannot be exported. Other apps' audio, including the other side of a call, is not captured. Settings shows whether this build and model support a live session.
 
+**Pause cues**, in the notebook or companion, clears the current suggestion and keeps cues quiet while the microphone, transcript, and session clock continue. **Resume cues** waits for newly spoken lines; delayed speech from the pause does not become a new cue. The companion shows **Cues off / Mic still on** while paused. Use **Stop live session** to stop listening. These controls are [checked headlessly](docs/live-cue-pause.md); native microphone and cross-app acceptance remain separate.
+
 This has been checked with synthetic audio and a scripted recognizer in tests. The download is tested against a simulated server, plus one ranged request to the real source. A live session on real hardware, real-meeting accuracy, and the first-run setup step in the [model delivery plan](docs/model-delivery.md) are still unchecked or unbuilt.
 
 ## Fictional cue lab

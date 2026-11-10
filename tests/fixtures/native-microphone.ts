@@ -17,6 +17,7 @@ let microphone: MicrophoneSnapshot = {
 let session: Snapshot;
 let resolveSnapshot: ((value: MicrophoneSnapshot) => void) | undefined;
 let rejectStop = false;
+let rejectCuePause = false;
 let delayStop = false;
 let releaseStop: (() => void) | undefined;
 let delayQuestionResponse = false;
@@ -61,6 +62,7 @@ async function publish(value: Partial<Snapshot>) {
 async function startLive() {
   await publish({
     live: true,
+    cuesPaused: false,
     status: 'running',
     title: 'Live session',
     description: 'Transcript lines from a local transcription source.',
@@ -78,22 +80,23 @@ async function say(text: string, question?: string) {
   await publish({
     elapsedMs: atMs,
     transcript: [...session.transcript, { id, atMs, speaker: 'Speaker', text }],
-    cue: question
-      ? {
-          id: `live:${id}`,
-          kind: 'Owner',
-          question,
-          evidence: text,
-          sourceId: id,
-          remainingMs: 18_000,
-          totalMs: 18_000,
-          held: false,
-          expanded: false,
-          resolvedBy: null,
-          note: null,
-          aboutFocus: false,
-        }
-      : session.cue,
+    cue:
+      question && !session.cuesPaused
+        ? {
+            id: `live:${id}`,
+            kind: 'Owner',
+            question,
+            evidence: text,
+            sourceId: id,
+            remainingMs: 18_000,
+            totalMs: 18_000,
+            held: false,
+            expanded: false,
+            resolvedBy: null,
+            note: null,
+            aboutFocus: false,
+          }
+        : session.cue,
   });
 }
 
@@ -223,7 +226,17 @@ mockIPC(
         return;
       case 'stop_live_session':
         await send({ status: 'stopping', canStart: false, activity: 'quiet' });
-        await publish({ status: 'ended', cue: null });
+        await publish({ status: 'ended', cue: null, cuesPaused: false });
+        return;
+      case 'set_live_cues_paused':
+        if (rejectCuePause) {
+          rejectCuePause = false;
+          throw new Error('Could not pause cues. Try again.');
+        }
+        await publish({
+          cuesPaused: (args as { paused: boolean }).paused,
+          cue: null,
+        });
         return;
       case 'export_preview':
         if (session.live)
@@ -262,7 +275,11 @@ declare global {
       holdNextResponse: () => void;
       releaseResponse: () => void;
     };
-    liveTest: { start: typeof startLive; say: typeof say };
+    liveTest: {
+      start: typeof startLive;
+      say: typeof say;
+      rejectNextPause: () => void;
+    };
     modelTest: { finish: () => void };
     microphoneTest: {
       send: typeof send;
@@ -280,7 +297,13 @@ window.questionTest = {
   },
   releaseResponse: () => releaseQuestionResponse?.(),
 };
-window.liveTest = { start: startLive, say };
+window.liveTest = {
+  start: startLive,
+  say,
+  rejectNextPause: () => {
+    rejectCuePause = true;
+  },
+};
 window.modelTest = { finish: () => releaseDownload?.('done') };
 window.microphoneTest = {
   send,

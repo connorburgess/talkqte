@@ -102,7 +102,10 @@ function FloatingQuestion() {
           <>
             {/* The bar is the handle: the native window follows a drag on
                 it or on its text, and remembers where it was put. */}
-            <header className="companion-bar" data-tauri-drag-region>
+            <header
+              className={`companion-bar${live ? ' companion-bar-live' : ''}`}
+              data-tauri-drag-region
+            >
               <div className="companion-status" data-tauri-drag-region>
                 <strong className="companion-title" data-tauri-drag-region>
                   {mic?.status === 'listening' && (
@@ -117,12 +120,20 @@ function FloatingQuestion() {
                       }
                     />
                   )}
-                  {microphoneControl ? 'Mic only' : live ? 'Live' : 'TalkQTE'}
+                  {microphoneControl
+                    ? 'Mic only'
+                    : live
+                      ? state.cuesPaused
+                        ? 'Cues off'
+                        : 'Live'
+                      : 'TalkQTE'}
                 </strong>
                 <span role="status" data-tauri-drag-region>
                   {live
                     ? mic?.status === 'listening'
-                      ? 'Listening · On this device'
+                      ? state.cuesPaused
+                        ? 'Mic still on'
+                        : 'Mic on · Local'
                       : microphoneLabel(mic)
                     : microphoneControl
                       ? microphone.stopPending && mic?.status !== 'stopping'
@@ -140,17 +151,42 @@ function FloatingQuestion() {
                 </span>
               </div>
               {live ? (
-                <button
-                  className="companion-control"
-                  aria-label="Stop live session"
-                  title="Stop live session"
-                  disabled={busy}
-                  onClick={() =>
-                    void run(() => bridge.command('stop_live_session'))
-                  }
-                >
-                  <span>Stop</span>
-                </button>
+                <>
+                  <button
+                    className="companion-control"
+                    aria-label={state.cuesPaused ? 'Resume cues' : 'Pause cues'}
+                    title={
+                      state.cuesPaused
+                        ? 'Resume cues'
+                        : 'Pause cues; microphone and transcript continue'
+                    }
+                    disabled={busy}
+                    onClick={() =>
+                      void run(() =>
+                        bridge.command('set_live_cues_paused', {
+                          paused: !state.cuesPaused,
+                        }),
+                      )
+                    }
+                  >
+                    {state.cuesPaused ? (
+                      <Play size={16} />
+                    ) : (
+                      <Pause size={16} />
+                    )}
+                  </button>
+                  <button
+                    className="companion-control"
+                    aria-label="Stop live session"
+                    title="Stop live session"
+                    disabled={busy}
+                    onClick={() =>
+                      void run(() => bridge.command('stop_live_session'))
+                    }
+                  >
+                    <span>Stop</span>
+                  </button>
+                </>
               ) : microphoneControl ? (
                 <button
                   className="companion-control"
@@ -806,14 +842,21 @@ function Notebook() {
               </button>
             </div>
 
-            <section className="session-strip" aria-label="Demo controls">
+            <section
+              className="session-strip"
+              aria-label={
+                state.live ? 'Live session controls' : 'Demo controls'
+              }
+            >
               <div className="session-state">
                 <span className={`status-dot ${state.status}`} />
                 <div>
                   <strong>
                     {state.live
                       ? live
-                        ? 'Live session in progress'
+                        ? state.cuesPaused
+                          ? 'Cues paused · session continues'
+                          : 'Live session in progress'
                         : 'Live session ended'
                       : state.status === 'running'
                         ? 'Demo in progress'
@@ -825,7 +868,9 @@ function Notebook() {
                   </strong>
                   <span>
                     {state.live
-                      ? 'Your microphone · transcribed on this device · not saved'
+                      ? state.cuesPaused && live
+                        ? 'Microphone and transcript continue. Stop live session to stop listening.'
+                        : 'Your microphone · transcribed on this device · not saved'
                       : 'Scripted conversation · separate from microphone'}
                   </span>
                 </div>
@@ -836,16 +881,41 @@ function Notebook() {
                   {!state.live && <span> / {clockTime(state.durationMs)}</span>}
                 </span>
                 {live ? (
-                  <button
-                    className="secondary-button"
-                    disabled={busy}
-                    onClick={() =>
-                      void run(() => bridge.command('stop_live_session'))
-                    }
-                  >
-                    <Square size={14} />
-                    Stop live session
-                  </button>
+                  <>
+                    <button
+                      className="secondary-button"
+                      disabled={busy}
+                      title={
+                        state.cuesPaused
+                          ? 'Only new speech can raise a cue after resuming.'
+                          : 'Clear the current cue; microphone and transcript continue.'
+                      }
+                      onClick={() =>
+                        void run(() =>
+                          bridge.command('set_live_cues_paused', {
+                            paused: !state.cuesPaused,
+                          }),
+                        )
+                      }
+                    >
+                      {state.cuesPaused ? (
+                        <Play size={15} />
+                      ) : (
+                        <Pause size={15} />
+                      )}
+                      {state.cuesPaused ? 'Resume cues' : 'Pause cues'}
+                    </button>
+                    <button
+                      className="secondary-button"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(() => bridge.command('stop_live_session'))
+                      }
+                    >
+                      <Square size={14} />
+                      Stop live session
+                    </button>
+                  </>
                 ) : active ? (
                   <>
                     <button
@@ -1217,20 +1287,24 @@ function Notebook() {
                       <MessageCircle size={28} />
                     </div>
                     <h3>
-                      {state.status === 'ready'
-                        ? 'Room for a good question.'
-                        : state.status === 'ended'
-                          ? 'Take the useful bits with you.'
-                          : 'A little room to think.'}
+                      {state.cuesPaused
+                        ? 'Cues are paused.'
+                        : state.status === 'ready'
+                          ? 'Room for a good question.'
+                          : state.status === 'ended'
+                            ? 'Take the useful bits with you.'
+                            : 'A little room to think.'}
                     </h3>
                     <p>
-                      {state.status === 'ready'
-                        ? 'When something could use a little clarity, a question will appear here.'
-                        : state.status === 'ended'
-                          ? state.live
-                            ? 'Your notes stay here until you close the app.'
-                            : 'Your notes are still here. Export them before closing the app.'
-                          : 'Questions pass quietly. You can keep listening without responding.'}
+                      {state.cuesPaused
+                        ? 'Resume cues when you want suggestions again. Speech from the pause will not become a new cue.'
+                        : state.status === 'ready'
+                          ? 'When something could use a little clarity, a question will appear here.'
+                          : state.status === 'ended'
+                            ? state.live
+                              ? 'Your notes stay here until you close the app.'
+                              : 'Your notes are still here. Export them before closing the app.'
+                            : 'Questions pass quietly. You can keep listening without responding.'}
                     </p>
                     {state.status === 'ready' && (
                       <div className="cue-example">
