@@ -1,0 +1,512 @@
+import { useEffect, useRef, useState } from 'react';
+import { Pause, Play, Square } from 'lucide-react';
+import {
+  noteKey,
+  processingApi,
+  type ProcessingNote,
+  type ProcessingReview,
+  type ProcessingScope,
+  type ProcessingSnapshot,
+} from '../lib/processing';
+import './processing.css';
+
+const issues = {
+  scopeChanged:
+    'An approved source changed. Processing is off. Review the sources again to continue.',
+  inputLimit:
+    'This context is too large to process. Choose fewer prior notes in a new review.',
+  authentication:
+    'The processor needs sign-in. Resolve that in its own app, then explicitly review processing again.',
+  allowance:
+    'The processor allowance is unavailable. Processing has stopped; no alternate service will be used.',
+  rateLimit:
+    'The processor is rate limited. Processing has stopped; it will not retry automatically.',
+  worker:
+    'The processor is unavailable. Processing has stopped; no new cues will be generated.',
+};
+function NoteLabel({ note }: { note: ProcessingNote }) {
+  return (
+    <>
+      <strong>{note.title}</strong>
+      <span>
+        {note.provider === 'granola' ? 'Granola' : 'Imported file'} ·{' '}
+        {note.sourceDate} · prior note
+      </span>
+    </>
+  );
+}
+function conversationLabel(scope: ProcessingScope) {
+  return scope.conversation === 'newSpeechOnly'
+    ? 'New speech only, from approval'
+    : 'Recent conversation and new speech';
+}
+
+/** Reusable control surface. Mounted only by the fictional IPC fixture until
+ * the native contract, adapter and processing choice are separately reviewed. */
+export function ProcessingControl() {
+  const [snapshot, setSnapshot] = useState<ProcessingSnapshot | null>(null);
+  const current = useRef<ProcessingSnapshot | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [recent, setRecent] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [review, setReview] = useState<ProcessingReview | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const serial = useRef(0);
+  const alive = useRef(false);
+  const reviewHeading = useRef<HTMLHeadingElement>(null);
+  const editHeading = useRef<HTMLHeadingElement>(null);
+  const launcher = useRef<HTMLButtonElement>(null);
+  const statusHeading = useRef<HTMLHeadingElement>(null);
+  const restoreFocus = useRef(false);
+  const isEditing = useRef(false);
+  isEditing.current = editing || !!review;
+
+  function receive(next: ProcessingSnapshot) {
+    if (
+      !alive.current ||
+      (current.current && next.revision <= current.current.revision)
+    )
+      return;
+    const old = current.current;
+    current.current = next;
+    setSnapshot(next);
+    if (
+      old &&
+      (old.session !== next.session ||
+        old.scopeRevision !== next.scopeRevision ||
+        next.capture !== 'running')
+    ) {
+      restoreFocus.current = isEditing.current;
+      serial.current += 1;
+      setBusy(null);
+      setEditing(false);
+      setReview(null);
+      setSelected([]);
+      setRecent(false);
+      setError('');
+    }
+  }
+  useEffect(() => {
+    alive.current = true;
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void processingApi
+      .listen(receive)
+      .then(async (release) => {
+        if (disposed) {
+          release();
+          return;
+        }
+        unlisten = release;
+        const next = await processingApi.snapshot();
+        if (!disposed) receive(next);
+      })
+      .catch(() => {
+        if (!disposed)
+          setError(
+            'Processing status is unavailable. You can still request Stop live session.',
+          );
+      });
+    return () => {
+      disposed = true;
+      alive.current = false;
+      serial.current += 1;
+      unlisten?.();
+    };
+  }, []);
+  useEffect(() => {
+    if (review) reviewHeading.current?.focus();
+    else if (editing) editHeading.current?.focus();
+    else if (restoreFocus.current) {
+      restoreFocus.current = false;
+      (launcher.current ?? statusHeading.current)?.focus();
+    }
+  }, [review, editing]);
+
+  async function closeReview() {
+    const ticket = ++serial.current;
+    restoreFocus.current = true;
+    const id = review?.id;
+    setReview(null);
+    setEditing(false);
+    setBusy(null);
+    setError('');
+    setSelected([]);
+    setRecent(false);
+    if (id)
+      await processingApi.cancel(id).catch(() => {
+        if (alive.current && ticket === serial.current)
+          setError(
+            'The review could not be cleared. It has not been approved.',
+          );
+      });
+  }
+  async function prepare() {
+    if (!snapshot?.processor) return;
+    const scope: ProcessingScope = {
+      conversation: recent ? 'recentAndNewSpeech' : 'newSpeechOnly',
+      notes: snapshot.notes
+        .filter((note) => selected.includes(noteKey(note)))
+        .map(({ provider, sourceId, revision }) => ({
+          provider,
+          sourceId,
+          revision,
+        })),
+    };
+    const ticket = ++serial.current;
+    setBusy('review');
+    setError('');
+    try {
+      const result = await processingApi.review(scope);
+      if (!alive.current || ticket !== serial.current) {
+        void processingApi.cancel(result.id).catch(() => {});
+        return;
+      }
+      if (
+        result.session !== current.current?.session ||
+        result.scopeRevision !== current.current?.scopeRevision ||
+        result.processor.id !== snapshot.processor.id ||
+        result.processor.revision !== snapshot.processor.revision ||
+        result.scope.conversation !== scope.conversation ||
+        result.scope.notes.map(noteKey).sort().join() !==
+          scope.notes.map(noteKey).sort().join() ||
+        result.notes.map(noteKey).sort().join() !==
+          scope.notes.map(noteKey).sort().join()
+      ) {
+        void processingApi.cancel(result.id).catch(() => {});
+        throw 'scope_changed';
+      }
+      setReview(result);
+    } catch (failure) {
+      if (alive.current && ticket === serial.current)
+        setError(
+          failure === 'input_limit'
+            ? 'These notes exceed the processing limit. Choose fewer and review again.'
+            : failure === 'scope_changed'
+              ? 'Sources changed before review. Choose the current notes and try again.'
+              : 'Could not prepare the review. Nothing new was approved. Try again.',
+        );
+    } finally {
+      if (alive.current && ticket === serial.current) setBusy(null);
+    }
+  }
+  async function act(kind: string, action: () => Promise<void>) {
+    const ticket = ++serial.current;
+    setBusy(kind);
+    setError('');
+    restoreFocus.current = isEditing.current;
+    if (kind !== 'approve') {
+      setReview(null);
+      setEditing(false);
+    }
+    try {
+      await action();
+      if (alive.current) receive(await processingApi.snapshot());
+    } catch {
+      // A response can fail after the native action applied. Refresh state once;
+      // never repeat an approval, stop or provider operation automatically.
+      try {
+        if (alive.current) receive(await processingApi.snapshot());
+      } catch {
+        /* Keep the last known capture state and explicit Stop control. */
+      }
+      if (alive.current && ticket === serial.current)
+        setError(
+          kind === 'stop'
+            ? 'Stop was not confirmed. Try Stop live session again.'
+            : kind === 'approve'
+              ? 'Approval was not confirmed. Check the current status before trying again.'
+              : 'The change was not confirmed. Check the current status and try again.',
+        );
+    } finally {
+      if (alive.current && ticket === serial.current) setBusy(null);
+    }
+  }
+  const capture = snapshot?.capture;
+  const canReview =
+    capture === 'running' &&
+    (snapshot?.phase === 'off' || snapshot?.phase === 'unavailable') &&
+    !!snapshot.processor &&
+    !snapshot.approved;
+  const approved = snapshot?.approved;
+  const active = snapshot?.phase === 'active';
+  const paused = snapshot?.phase === 'paused';
+  const location =
+    snapshot?.processor?.location === 'hosted'
+      ? `Hosted by ${snapshot.processor.destination}`
+      : 'On this device';
+  const phase = !snapshot
+    ? 'Checking processing status…'
+    : {
+        off: 'Processing off',
+        active: 'Processing on',
+        paused: 'Cues paused',
+        unavailable: 'Processing unavailable',
+        ended: 'Session ended',
+      }[snapshot.phase];
+
+  return (
+    <section
+      className="processing-panel"
+      aria-labelledby="processing-title"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && editing && busy !== 'approve') {
+          event.preventDefault();
+          void closeReview();
+        }
+      }}
+    >
+      <div className="processing-heading">
+        <h2 id="processing-title" ref={statusHeading} tabIndex={-1}>
+          Cue processing
+        </h2>
+        <span role="status">{phase}</span>
+      </div>
+      <p className="processing-capture">
+        {capture === 'running'
+          ? 'Microphone and transcript continue. Stop live session to stop listening.'
+          : capture === 'stopping'
+            ? 'Stopping the live session… waiting for the microphone to stop.'
+            : capture === 'off'
+              ? 'Microphone is off.'
+              : 'Microphone status is unknown.'}
+      </p>
+      {snapshot?.processor && (
+        <p>
+          <strong>{snapshot.processor.name}</strong> · {location}
+        </p>
+      )}
+      {!snapshot?.processor && snapshot && (
+        <p>No evaluated-cue processor is available for this session.</p>
+      )}
+      {snapshot?.issue && (
+        <p className="processing-message" role="status">
+          {issues[snapshot.issue]}
+        </p>
+      )}
+      {active && snapshot?.lastDecision === 'quiet' && (
+        <p className="processing-muted">
+          No cue needed from the last evaluated speech.
+        </p>
+      )}
+      {approved && (
+        <details className="processing-approved">
+          <summary>Approved sources for this session</summary>
+          <p>{conversationLabel(approved)}</p>
+          {approved.notes.length ? (
+            <ul>
+              {snapshot?.notes
+                .filter((note) =>
+                  approved.notes.some(
+                    (item) => noteKey(item) === noteKey(note),
+                  ),
+                )
+                .map((note) => (
+                  <li key={noteKey(note)}>
+                    <NoteLabel note={note} />
+                  </li>
+                ))}
+            </ul>
+          ) : (
+            <p>No prior notes approved.</p>
+          )}
+        </details>
+      )}
+      <div className="processing-actions">
+        {!editing && canReview && (
+          <button
+            ref={launcher}
+            className="primary-button"
+            disabled={!!busy}
+            onClick={() => {
+              setSelected([]);
+              setRecent(false);
+              setEditing(true);
+              setError('');
+            }}
+          >
+            Review processing
+          </button>
+        )}
+        {(active || paused) && (
+          <button
+            className="secondary-button"
+            disabled={!!busy}
+            onClick={() =>
+              void act('pause', () => processingApi.pause(!paused))
+            }
+          >
+            {paused ? <Play size={17} /> : <Pause size={17} />}
+            {paused ? 'Resume cues' : 'Pause cues'}
+          </button>
+        )}
+        {approved && (
+          <button
+            className="secondary-button"
+            disabled={
+              busy === 'disable' || busy === 'stop' || capture === 'stopping'
+            }
+            onClick={() => void act('disable', processingApi.disable)}
+          >
+            Disable processing
+          </button>
+        )}
+        {capture !== 'off' && (
+          <button
+            className="secondary-button"
+            disabled={busy === 'stop' || capture === 'stopping'}
+            onClick={() => void act('stop', processingApi.stop)}
+          >
+            <Square size={17} />
+            {busy === 'stop' || capture === 'stopping'
+              ? 'Stopping…'
+              : 'Stop live session'}
+          </button>
+        )}
+      </div>
+      {approved && (
+        <p className="processing-muted">
+          Pause and Disable processing leave the microphone on. Disable
+          processing before choosing different sources.
+        </p>
+      )}
+      {editing && !review && (
+        <form
+          className="processing-review"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void prepare();
+          }}
+        >
+          <h3 ref={editHeading} tabIndex={-1}>
+            Choose what to process
+          </h3>
+          <p>{snapshot?.processor?.dataPolicy}</p>
+          <fieldset disabled={!!busy}>
+            <legend>Conversation</legend>
+            <p>New speech after approval is included.</p>
+            <label className="processing-option">
+              <input
+                type="checkbox"
+                checked={recent}
+                onChange={(event) => setRecent(event.target.checked)}
+              />
+              Also include recent conversation
+            </label>
+          </fieldset>
+          <fieldset disabled={!!busy}>
+            <legend>Prior notes · optional</legend>
+            <p>Importing a note does not approve it for processing.</p>
+            {snapshot?.notes.length ? (
+              <div className="processing-notes">
+                {snapshot.notes.map((note) => (
+                  <label
+                    className="processing-option processing-note"
+                    key={noteKey(note)}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(noteKey(note))}
+                      onChange={(event) =>
+                        setSelected((items) =>
+                          event.target.checked
+                            ? [...items, noteKey(note)]
+                            : items.filter((id) => id !== noteKey(note)),
+                        )
+                      }
+                    />
+                    <span>
+                      <NoteLabel note={note} />
+                    </span>
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <p>
+                No prior notes imported. You can continue with new speech only.
+              </p>
+            )}
+          </fieldset>
+          <div className="processing-actions">
+            <button className="primary-button" disabled={!!busy} type="submit">
+              {busy === 'review'
+                ? 'Preparing review…'
+                : 'Review selected sources'}
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => void closeReview()}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+      {review && (
+        <div className="processing-review">
+          <h3 ref={reviewHeading} tabIndex={-1}>
+            Review before enabling
+          </h3>
+          <dl>
+            <dt>Processor</dt>
+            <dd>
+              {review.processor.name} · {review.processor.model}
+            </dd>
+            <dt>Processing location</dt>
+            <dd>
+              {review.processor.location === 'hosted'
+                ? `Sent to ${review.processor.destination}`
+                : 'On this device'}
+            </dd>
+            <dt>Conversation</dt>
+            <dd>{conversationLabel(review.scope)}</dd>
+            <dt>Prior notes</dt>
+            <dd>
+              {review.notes.length ? (
+                <ul>
+                  {review.notes.map((note) => (
+                    <li key={noteKey(note)}>
+                      <NoteLabel note={note} />
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                'None'
+              )}
+            </dd>
+          </dl>
+          <p>{review.processor.dataPolicy}</p>
+          <p>
+            This approval ends with this session. A changed approved note
+            requires another review.
+          </p>
+          <div className="processing-actions">
+            <button
+              className="primary-button"
+              disabled={!!busy}
+              onClick={() =>
+                void act('approve', () => processingApi.approve(review.id))
+              }
+            >
+              {busy === 'approve' ? 'Enabling…' : 'Enable for this session'}
+            </button>
+            <button
+              className="secondary-button"
+              disabled={busy === 'approve'}
+              onClick={() => void closeReview()}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {error && (
+        <p className="processing-message" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
