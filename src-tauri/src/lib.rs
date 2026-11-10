@@ -579,24 +579,10 @@ struct PickedNotes {
 
 fn publish_context(app: &tauri::AppHandle, runtime: &mut Runtime) {
     // The engine may quote an imported note as a context reminder.
-    let notes = runtime
-        .context
-        .items()
-        .iter()
-        .map(|item| {
-            (
-                format!("{}:{}", item.provider.id(), item.source_id),
-                item.title.clone(),
-                item.source_date.clone(),
-                item.provider.id().to_string(),
-                item.excerpt.clone(),
-            )
-        })
-        .collect();
     let before = runtime.engine.state.revision;
-    runtime.engine.set_notes(notes);
+    runtime.engine.set_notes(runtime.context.items().to_vec());
     if runtime.engine.state.revision != before {
-        // A removed note may have been visible in either window, even paused.
+        // A changed or removed note may be visible in either window, even held.
         publish(app, runtime);
     }
     let _ = app.emit_to("main", "context:changed", runtime.context.items());
