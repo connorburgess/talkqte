@@ -27,6 +27,12 @@ PLAYWRIGHT_PORT=1440 npm test -- tests/processing.spec.ts --project=chromium
 
 A local macOS WebKit run encountered `html` intercepting pointer events and an initial keyboard-focus failure, also seen in earlier browser checks. That run was stopped; it is not a pass. The pull request must pass the complete browser suite in CI, including WebKit, before merging. Native VoiceOver, cross-app focus and comprehension remain separate acceptance checks.
 
+### Keyboard-mode checkpoint, 11 November 2026
+
+A later local macOS probe isolated the two remaining keyboard failures: after waiting for enabled buttons, plain Tab skipped the review launcher and approval action in headless WebKit, while Option-Tab reached both. Chromium reached both with Tab. This matches the [Playwright maintainer's explanation that macOS WebKit follows Safari's keyboard-navigation behavior](https://github.com/microsoft/playwright/issues/41808), checked on 11 November 2026; it does not establish an application focus defect.
+
+The two keyboard scenarios now use Option-Tab on macOS WebKit and Tab elsewhere. They still assert actual keyboard focus, Enter/Space activation, Escape cancellation and draft reset, and the narrow approval route to Stop. No assertions are skipped, no programmatic focus is substituted for navigation, and no system preference or application tab order is changed. All 60 processing-control tests passed locally across Chromium and WebKit after this change, including the 320-pixel/reduced-motion check. The test correction does not establish native VoiceOver, cross-app focus, other Mac keyboard configurations or user comprehension. Those acceptance gates remain open.
+
 The screenshots use only fictional content. They show the test harness, not an activated app integration; older Stop labels now read “Stop capture,” with “Cancel start” during model preparation:
 
 - [Source selection, desktop](assets/processing-sources-desktop.png)
