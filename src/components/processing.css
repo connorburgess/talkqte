@@ -1,0 +1,149 @@
+.processing-panel {
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--paper);
+  max-width: 760px;
+  overflow-wrap: anywhere;
+}
+.processing-heading,
+.processing-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.processing-heading {
+  justify-content: space-between;
+}
+.processing-panel p {
+  margin-top: 12px;
+  max-width: 70ch;
+}
+.processing-capture {
+  font-weight: 600;
+}
+.processing-muted,
+.processing-heading > span {
+  color: var(--muted);
+}
+.processing-actions {
+  margin-top: 20px;
+}
+.processing-actions button {
+  min-height: 48px;
+}
+.processing-review {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.processing-review h3 {
+  font-size: 20px;
+}
+.processing-review fieldset {
+  border: 0;
+  padding: 0;
+  margin: 24px 0 0;
+  min-width: 0;
+}
+.processing-review legend {
+  font-weight: 700;
+  padding: 0;
+}
+.processing-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  cursor: pointer;
+}
+.processing-option input {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  margin: 3px 0 0;
+  accent-color: var(--forest);
+}
+.processing-note {
+  border-bottom: 1px solid var(--line);
+}
+.processing-note strong,
+.processing-note span span,
+.processing-panel li strong,
+.processing-panel li span {
+  display: block;
+}
+.processing-note span span,
+.processing-panel li span {
+  color: var(--muted);
+  margin-top: 4px;
+}
+.processing-note:has(input:checked) {
+  background: #edf0e7;
+}
+.processing-review dl {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) minmax(0, 3fr);
+  gap: 12px 24px;
+  margin: 20px 0;
+}
+.processing-review dt {
+  color: var(--muted);
+}
+.processing-review dd {
+  margin: 0;
+}
+.processing-panel ul {
+  margin: 0;
+  padding-left: 20px;
+}
+.processing-panel li + li {
+  margin-top: 12px;
+}
+.processing-approved {
+  margin-top: 16px;
+}
+.processing-approved summary {
+  cursor: pointer;
+  padding: 8px 0;
+  min-height: 44px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.processing-panel h2:focus,
+.processing-approved summary:focus-visible,
+.processing-review h3:focus {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+.processing-approved ul {
+  margin-top: 12px;
+}
+.processing-message {
+  color: #91412e;
+}
+@media (max-width: 520px) {
+  .processing-panel {
+    padding: 20px 16px;
+  }
+  .processing-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .processing-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .processing-actions button {
+    white-space: normal;
+  }
+  .processing-review dl {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+  .processing-review dd + dt {
+    margin-top: 12px;
+  }
+}
