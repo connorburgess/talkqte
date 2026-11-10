@@ -42,6 +42,21 @@ The optional Focus field now preserves ordered submissions, including Clear and 
 
 The optional session-name field now preserves newer drafts and ordered saves, with inline rejection recovery and [fictional keyboard/UI evidence](name-save-recovery.md). This removes a setup data-loss case; it does not establish direct-address cue accuracy or real-meeting usefulness. The next dependency is the existing live phrase-rule and participation/listening acceptance.
 
+### Capability description checkpoint — 11 November 2026
+
+Source and existing acceptance records were reviewed at app commit [`8991f5f`](https://github.com/connorburgess/talkqte/commit/8991f5f59ffb345ee327da5131e1d7964bba958d). This reconciles stale current-facing product, roadmap and research descriptions; it supplies no new runtime or user evidence.
+
+| Current development behavior | Source and recorded evidence | Remaining gate |
+| --- | --- | --- |
+| Optional local microphone transcription feeds phrase rules | `start_live_session` in [native commands](../src-tauri/src/lib.rs); [synthetic measurements](local-transcription.md#sustained-session) and [9 November owner observation](native-validation.md#live-session-check) | System audio, measured live budgets, lowest-supported hardware and native Stop/device recovery |
+| Session-name direct questions, fixed pattern resolution and selected-note reminders | [Engine and fictional tests](../src-tauri/src/engine.rs); [cue rule limitations](cue-intelligence.md) | Semantic relevance, reliable addressee/answer judgment and useful participation alongside listening |
+| Live Pause cues clears cues while microphone/transcript continue | `set_live_cues_paused` in the [engine](../src-tauri/src/engine.rs), both controls in [App.tsx](../src/App.tsx), and [headless acceptance](live-cue-pause.md) | Native control/Stop, VoiceOver and cross-app acceptance |
+| Granola selected-note parsing, refresh and connection retirement | [Granola source and fictional tests](../src-tauri/src/granola.rs), `import_context_notes` in [native commands](../src-tauri/src/lib.rs), and [import validation](granola-import-validation.md) | First successful selected real-note import and real-account disconnect/data-flow confirmation; live input and writeback remain separate, unimplemented capabilities |
+
+The UI/UX checkpoint for this documentation change is consistency of the described user flow and its limits: optional setup, source disclosure, explicit cue/capture controls and no required saving step. It changes no rendered controls, adds no screenshot or interaction evidence, and establishes no accessibility or usefulness result. Existing native and participant checks stay open. Claude remains in the isolated lab by the owner's decision; no production evaluator is selected.
+
+The next integration acceptance remains one selected real note appearing with its source/date and no unselected notes in the updated native app. The next live-control acceptance remains pause/resume and Stop/device recovery on named hardware. Documentation consistency cannot substitute for either.
+
 ## Integration readiness
 
 Start planning now. Keep previous-note import, live transcript input, and provider writeback as independent capabilities. A successful read does not validate live input or mutation support.

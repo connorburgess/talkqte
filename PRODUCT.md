@@ -14,7 +14,7 @@ Rust application core, Tauri 2, React, TypeScript, and CSS. Optional local Whisp
 
 Stay grounded. Respond in the moment.
 
-Use AI to help a meeting participant follow what is happening and surface relevant context to respond while the moment still matters. A clarification question is one possible prompt; a concise source-backed reminder or response prompt may also support participation. These broader cue types are product directions to validate, not implemented capabilities. TalkQTE should work on its own or alongside an existing note-taker without requiring a new notes workflow.
+Use AI to help a meeting participant follow what is happening and surface relevant context to respond while the moment still matters. A clarification question is one possible prompt; a concise source-backed reminder or response prompt may also support participation. General semantic reminders and response assistance remain product directions to validate. The prototype can already show selected-note excerpts through title-word matches; that limited rule does not judge relevance. TalkQTE should work on its own or alongside an existing note-taker without requiring a new notes workflow.
 
 The initial audience includes people who want a little help participating and people who already use Granola or Fireflies for their meeting record. The existing note-taker can remain the primary record. The live cue has context disclosure and dismissal, with no Save action or saved-question workflow. Optional notes and export remain prototype utilities; they are not the product promise.
 
@@ -58,7 +58,7 @@ The current notebook is a prototype surface, not a requirement to build a meetin
 
 - One timely cue at a time; dismissal is always easy and has no penalty.
 - Ground context and response prompts in inspectable sources. Do not invent facts, commitments, or an answer on the user's behalf.
-- Let the conversation answer first. Cancel a candidate that is resolved before display, and remove a displayed question when it becomes stale or redundant. The demo withdraws a question when a later line matches a fixed answer pattern, such as naming an owner or a day; it does not yet judge meaning, redundancy, or topic changes.
+- Let the conversation answer first. Cancel a candidate that is resolved before display, and remove a displayed question when it becomes stale or redundant. The prototype uses fixed answer, repeat, topic-change and correction patterns to withdraw or suppress some cues; it does not judge their meaning or reliably resolve paraphrases.
 - Timing should preserve relevance without countdown pressure, scores, or a demand to respond.
 - AI should select useful context and prompts, including when to stay quiet. Compare candidate reasoning against simple baselines and human-labeled fictional cases. The current phrase rules are a demo scaffold, not the intended product intelligence.
 - Plan production operation, integration, installation, updates, and support alongside the feature they enable; distinguish planned readiness from verified capability.
@@ -71,7 +71,7 @@ The current notebook is a prototype surface, not a requirement to build a meetin
 
 When the conversation clearly asks the user a question, prioritize that question over a general clarifying suggestion. Use explicit addressee evidence and the user's selected identity; a question addressed to someone else or an ambiguous addressee should stay quiet.
 
-Keep the question visible while the user is answering, without a competing suggestion or an expiring countdown pressuring them to respond. Let the user dismiss it at any time. Do not fabricate an answer, assign a response score, or penalize silence. Direct-address detection and answer-aware timing are future work, not behavior provided by the current phrase-based demo.
+Keep the question visible while the user is answering, without a competing suggestion or an expiring countdown pressuring them to respond. Let the user dismiss it at any time. Do not fabricate an answer, assign a response score, or penalize silence. The current engine has a narrow name-based “Asked you” rule, controlled by the optional session name in Settings. It prioritizes a matched question over an unread suggestion and gives it a fixed 45-second unread lifetime; source disclosure can hold it for reading. It does not detect whether the user is answering. Reliable addressee judgment and answer-aware timing remain future work, with live accuracy and usefulness unverified. See the [rule limits](docs/cue-intelligence.md) and [native acceptance gaps](docs/native-validation.md#live-session-check).
 
 ## Brand commitments
 
@@ -113,4 +113,4 @@ A runnable desktop prototype provides the notebook, Rust-owned prompt lifecycle,
 
 ## Open decisions
 
-The final visual identity and exact retention defaults remain open. Proposed defaults live in PRIVACY.md. No real customer evidence or product performance benchmarks are available.
+The final visual identity and exact retention defaults remain open. Proposed defaults live in PRIVACY.md. No TalkQTE user-outcome study has been completed. [Synthetic transcription measurements](docs/local-transcription.md#sustained-session) exist on one development Mac; they do not establish whole-app live-call budgets or performance on the lowest supported Mac.
