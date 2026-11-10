@@ -605,16 +605,24 @@ function Notebook() {
   }, [state]);
   const modelState = model?.status;
   useEffect(() => {
-    // Rechecked whenever the model is installed or removed.
+    // Only the latest model state may determine whether a live session is ready.
+    let current = true;
+    setLiveStatus(null);
     bridge
       .liveStatus()
-      .then(setLiveStatus)
-      .catch(() =>
-        setLiveStatus({
-          available: false,
-          reason: 'Live transcription status is unavailable.',
-        }),
-      );
+      .then((status) => {
+        if (current) setLiveStatus(status);
+      })
+      .catch(() => {
+        if (current)
+          setLiveStatus({
+            available: false,
+            reason: 'Live transcription status is unavailable.',
+          });
+      });
+    return () => {
+      current = false;
+    };
   }, [modelState]);
   useEffect(() => {
     let disposed = false;

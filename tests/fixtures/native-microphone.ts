@@ -6,7 +6,12 @@ import { mockIPC } from '@tauri-apps/api/mocks';
 import { emit } from '@tauri-apps/api/event';
 import * as preview from '../../src/lib/preview';
 import type { MicrophoneSnapshot } from '../../src/lib/microphone';
-import type { Commands, ModelStatus, Snapshot } from '../../src/lib/types';
+import type {
+  Commands,
+  LiveStatus,
+  ModelStatus,
+  Snapshot,
+} from '../../src/lib/types';
 import type { ProcessingSnapshot, StopTarget } from '../../src/lib/processing';
 
 let microphone: MicrophoneSnapshot = {
@@ -152,6 +157,12 @@ let model: ModelStatus = {
   message: null,
 };
 let releaseDownload: ((outcome: 'done' | 'cancelled') => void) | undefined;
+let holdLiveStatus = false;
+const heldLiveStatuses: {
+  value: LiveStatus;
+  resolve: (value: LiveStatus) => void;
+  reject: (error: Error) => void;
+}[] = [];
 async function sendModel(value: Partial<ModelStatus>) {
   model = { ...model, revision: model.revision + 1, ...value };
   await emit('model:changed', model);
@@ -384,13 +395,24 @@ mockIPC(
       case 'remove_model':
         await sendModel({ status: 'missing', message: null });
         return;
-      case 'live_status':
-        return liveAvailable || model.status === 'installed'
-          ? { available: true, reason: null }
-          : {
-              available: false,
-              reason: 'This build does not include local transcription.',
-            };
+      case 'live_status': {
+        const value: LiveStatus =
+          liveAvailable || model.status === 'installed'
+            ? { available: true, reason: null }
+            : {
+                available: false,
+                reason: modelBuild
+                  ? 'The local speech model is not installed.'
+                  : 'This build does not include local transcription.',
+              };
+        if (holdLiveStatus) {
+          holdLiveStatus = false;
+          return new Promise<LiveStatus>((resolve, reject) => {
+            heldLiveStatuses.push({ value, resolve, reject });
+          });
+        }
+        return value;
+      }
       case 'start_live_session':
         await beginStart();
         return;
@@ -487,7 +509,12 @@ declare global {
       setQuestionSize: (size: Snapshot['questionSize']) => Promise<void>;
       rejectNextPause: () => void;
     };
-    modelTest: { finish: () => void };
+    modelTest: {
+      finish: () => void;
+      holdNextStatus: () => void;
+      pendingStatuses: () => number;
+      releaseStatus: (fail?: boolean) => void;
+    };
     microphoneTest: {
       send: typeof send;
       calls: string[];
@@ -552,7 +579,18 @@ window.liveTest = {
     rejectCuePause = true;
   },
 };
-window.modelTest = { finish: () => releaseDownload?.('done') };
+window.modelTest = {
+  finish: () => releaseDownload?.('done'),
+  holdNextStatus: () => {
+    holdLiveStatus = true;
+  },
+  pendingStatuses: () => heldLiveStatuses.length,
+  releaseStatus: (fail = false) => {
+    const pending = heldLiveStatuses.shift();
+    if (fail) pending?.reject(new Error('Status unavailable.'));
+    else if (pending) pending.resolve(pending.value);
+  },
+};
 window.microphoneTest = {
   send,
   calls,
