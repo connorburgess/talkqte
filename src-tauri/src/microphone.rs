@@ -150,6 +150,11 @@ struct Update {
     retired: Option<Box<dyn CaptureStream>>,
 }
 
+enum Reservation {
+    Ready(u64, Snapshot),
+    Cancelled(Option<Update>),
+}
+
 impl Update {
     fn status(snapshot: Snapshot) -> Self {
         Self {
@@ -163,6 +168,18 @@ impl Update {
 pub struct Controller(Arc<Mutex<State>>);
 
 impl Controller {
+    fn reserve_start(&self, on_reserved: Option<OnReserved>) -> Result<Reservation, String> {
+        let (generation, snapshot) = self.begin_start()?;
+        // Do not hold the microphone mutex while the owner records this ID.
+        // Once accepted, Stop can retire this exact generation even before
+        // permission/device work runs. Rejection never requests permission.
+        if on_reserved.is_some_and(|accept| !accept(generation)) {
+            return Ok(Reservation::Cancelled(
+                self.request_stop_of(Some(generation))?,
+            ));
+        }
+        Ok(Reservation::Ready(generation, snapshot))
+    }
     // Timer and window placement must never wait behind native stream startup.
     pub fn try_status(&self) -> Option<Status> {
         self.0.try_lock().ok().map(|state| state.snapshot.status)
@@ -412,12 +429,18 @@ pub async fn start_microphone(
     app: tauri::AppHandle,
     state: tauri::State<'_, Controller>,
 ) -> Result<(), String> {
-    start(app, state.inner().clone(), None).await.map(|_| ())
+    start(app, state.inner().clone(), None, None)
+        .await
+        .map(|_| ())
 }
 
 /// Called with the start's generation and the tap's chunker once capture has
 /// really started.
 pub type OnTap = Box<dyn FnOnce(u64, crate::audio_tap::Chunker) + Send>;
+
+/// Records a reserved capture generation in its owning session before any
+/// permission request. Return false if that session has stopped or changed.
+pub type OnReserved = Box<dyn FnOnce(u64) -> bool + Send>;
 
 /// Starts capture. With `tap`, the callback also feeds a transcription tap
 /// with chunks of the given length, and `OnTap` receives its chunker only if
@@ -427,12 +450,22 @@ pub async fn start(
     app: tauri::AppHandle,
     controller: Controller,
     tap: Option<(u64, OnTap)>,
+    on_reserved: Option<OnReserved>,
 ) -> Result<u64, String> {
     let preparer = controller.clone();
-    let (generation, snapshot) =
-        tauri::async_runtime::spawn_blocking(move || preparer.begin_start())
+    let reserved =
+        tauri::async_runtime::spawn_blocking(move || preparer.reserve_start(on_reserved))
             .await
             .map_err(|_| "Could not start the microphone check.")??;
+    let (generation, snapshot) = match reserved {
+        Reservation::Ready(generation, snapshot) => (generation, snapshot),
+        Reservation::Cancelled(update) => {
+            if let Some(update) = update {
+                publish_and_cleanup(&app, controller, update);
+            }
+            return Err("Live session start was cancelled.".into());
+        }
+    };
     publish(&app, &snapshot);
     // The permission callback may be shared between threads, so the one-shot
     // tap hand-off is taken out of a lock exactly once.
@@ -565,6 +598,84 @@ mod tests {
         controller.begin_start().unwrap();
         assert!(controller.begin_start().is_err());
         assert_eq!(controller.snapshot().unwrap().status, Status::Starting);
+    }
+
+    #[test]
+    fn stopped_session_rejects_microphone_reservation_before_permission() {
+        let runtime = Arc::new(Mutex::new(crate::Runtime::default()));
+        let ticket = runtime.lock().unwrap().begin_live_start().unwrap();
+        let session = runtime.lock().unwrap().install_live_start(&ticket).unwrap();
+        runtime.lock().unwrap().take_live_for_stop();
+        let guard = ticket.guard();
+        let owner = runtime.clone();
+        let controller = Controller::default();
+        let result = controller
+            .reserve_start(Some(Box::new(move |generation| {
+                owner
+                    .lock()
+                    .unwrap()
+                    .reserve_live_microphone(&guard, session, generation)
+            })))
+            .unwrap();
+        let Reservation::Cancelled(Some(update)) = result else {
+            panic!("a stopped session must not enter the permission path");
+        };
+        finish(&controller, update);
+        assert_eq!(controller.snapshot().unwrap().status, Status::Off);
+        assert!(runtime.lock().unwrap().live.is_none());
+    }
+
+    #[test]
+    fn stop_after_registration_retires_the_start_before_permission_returns() {
+        use std::{sync::mpsc, thread};
+        let runtime = Arc::new(Mutex::new(crate::Runtime::default()));
+        let ticket = runtime.lock().unwrap().begin_live_start().unwrap();
+        let session = runtime.lock().unwrap().install_live_start(&ticket).unwrap();
+        let guard = ticket.guard();
+        let controller = Controller::default();
+        let starter = controller.clone();
+        let owner = runtime.clone();
+        let (entered_tx, entered) = mpsc::channel();
+        let (release, release_rx) = mpsc::channel();
+        let task = thread::spawn(move || {
+            starter.reserve_start(Some(Box::new(move |generation| {
+                let accepted = owner
+                    .lock()
+                    .unwrap()
+                    .reserve_live_microphone(&guard, session, generation);
+                entered_tx.send(generation).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+                accepted
+            })))
+        });
+        let generation = entered.recv_timeout(Duration::from_secs(2)).unwrap();
+        let live = runtime.lock().unwrap().take_live_for_stop().unwrap();
+        assert_eq!(live.microphone, Some(generation));
+        finish(
+            &controller,
+            controller
+                .request_stop_of(live.microphone)
+                .unwrap()
+                .unwrap(),
+        );
+        runtime.lock().unwrap().engine.end();
+        release.send(()).unwrap();
+        assert!(
+            matches!(task.join().unwrap().unwrap(), Reservation::Ready(id, _) if id == generation)
+        );
+        assert!(!controller.is_starting(generation));
+        let (stream, starts, drops) = fake(false);
+        assert!(controller
+            .complete_start(
+                generation,
+                Arc::new(Meter::default()),
+                Ok(stream),
+                Instant::now(),
+            )
+            .is_none());
+        assert_eq!(starts.load(Ordering::SeqCst), 0);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        assert_eq!(controller.snapshot().unwrap().status, Status::Off);
     }
 
     #[test]
