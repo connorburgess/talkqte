@@ -243,6 +243,7 @@ export function ProcessingControl() {
         active: 'Processing on',
         paused: 'Cues paused',
         unavailable: 'Processing unavailable',
+        stopping: 'Finishing session',
         ended: 'Session ended',
       }[snapshot.phase];
 
@@ -265,12 +266,14 @@ export function ProcessingControl() {
       </div>
       <p className="processing-capture">
         {capture === 'running'
-          ? 'Microphone and transcript continue. Stop live session to stop listening.'
+          ? 'Microphone is on. Stop live session to stop listening.'
           : capture === 'stopping'
             ? 'Stopping the live session… waiting for the microphone to stop.'
-            : capture === 'off'
-              ? 'Microphone is off.'
-              : 'Microphone status is unknown.'}
+            : capture === 'starting'
+              ? 'Starting microphone… you can stop while it starts.'
+              : capture === 'off'
+                ? 'Microphone is off.'
+                : 'Microphone status is unknown. Use Stop live session to request that it stops.'}
       </p>
       {snapshot?.processor && (
         <p>

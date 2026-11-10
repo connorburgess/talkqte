@@ -4,11 +4,14 @@ use super::*;
 use crate::cue_evaluator::{Action, Decision, Failure, Provenance, Request, Source, Worker};
 
 mod permission;
+mod projection;
+pub(super) use permission::context_fingerprint;
 use permission::Permission;
 pub use permission::{
     ConversationScope, ProcessingError, ProcessingLocation, ProcessingReview,
-    ProcessorConfiguration,
+    ProcessorConfiguration, ProcessorDisclosure,
 };
+pub use projection::{CaptureState, ProcessingSnapshot, ProcessingTracker};
 
 const RECENT_LINES: usize = 6;
 
@@ -32,6 +35,7 @@ pub enum EvaluationOutcome {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EvaluationIssue {
+    ScopeChanged,
     InputLimit,
     InvalidReply,
     TimedOut,
@@ -678,6 +682,11 @@ mod tests {
             "fixture-v1".into(),
             ProcessingLocation::OnDevice,
             "fictional-policy-v1".into(),
+            ProcessorDisclosure::new(
+                "Fictional worker".into(),
+                "Fictional in-memory test only.".into(),
+            )
+            .unwrap(),
         )
         .unwrap()
     }
@@ -833,6 +842,11 @@ mod tests {
                     "fictional-policy-v1"
                 }
                 .into(),
+                ProcessorDisclosure::new(
+                    "Fictional worker".into(),
+                    "Fictional in-memory test only.".into(),
+                )
+                .unwrap(),
             )
             .unwrap();
             let mut replacement = Harness::unapproved(processor, Duration::from_secs(5));

@@ -132,7 +132,7 @@ test('Pause and Disable preserve capture; Stop waits for capture confirmation', 
   await page.getByRole('button', { name: 'Pause cues' }).click();
   await expect(page.getByText('Cues paused', { exact: true })).toBeVisible();
   await expect(
-    page.getByText('Microphone and transcript continue.', { exact: false }),
+    page.getByText('Microphone is on.', { exact: false }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Resume cues' }).click();
   await expect(page.getByRole('button', { name: 'Pause cues' })).toBeVisible();
@@ -247,9 +247,7 @@ test('failed Stop retains capture warning, redacts errors and permits an explici
   await expect(page.getByRole('alert')).toHaveText(
     'Stop was not confirmed. Try Stop live session again.',
   );
-  await expect(
-    page.getByText(/Microphone and transcript continue/),
-  ).toBeVisible();
+  await expect(page.getByText(/Microphone is on/)).toBeVisible();
   await expect(page.getByText('PRIVATE_PROVIDER_ERROR')).toHaveCount(0);
   expect(await calls(page, 'stop_live_session')).toHaveLength(1);
   await page.getByRole('button', { name: 'Stop live session' }).click();
@@ -421,3 +419,57 @@ for (const action of ['Pause cues', 'Resume cues']) {
     await expect(page.getByRole('alert')).toHaveCount(0);
   });
 }
+
+test('startup and unknown capture keep Stop available without offering processing', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 560 });
+  await open(page);
+  for (const capture of ['starting', 'unknown'] as const) {
+    await send(page, { capture });
+    await expect(
+      page.getByRole('button', { name: 'Review processing', exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: 'Stop live session', exact: true }),
+    ).toBeEnabled();
+    await expect(
+      page.getByText(
+        capture === 'starting'
+          ? 'Starting microphone… you can stop while it starts.'
+          : 'Microphone status is unknown. Use Stop live session to request that it stops.',
+      ),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  await page
+    .getByRole('button', { name: 'Stop live session', exact: true })
+    .click();
+  expect(await calls(page, 'stop_live_session')).toHaveLength(1);
+});
+
+test('confirmed capture off during transcript drain does not enable a new review', async ({
+  page,
+}) => {
+  await open(page);
+  await send(page, { phase: 'stopping', capture: 'off', approved: null });
+  await expect(
+    page.getByText('Finishing session', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText('Microphone is off.', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Review processing', exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Resume cues' })).toHaveCount(
+    0,
+  );
+  await expect(
+    page.getByRole('button', { name: 'Stop live session', exact: true }),
+  ).toHaveCount(0);
+});

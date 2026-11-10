@@ -10,16 +10,38 @@ pub enum ProcessingLocation {
     Hosted { service: String },
 }
 
+/// Bounded display text supplied by trusted native adapter registration. It
+/// describes the adapter's declared policy, not independent verification of it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessorDisclosure {
+    pub(super) name: String,
+    pub(super) data_policy: String,
+}
+
+impl ProcessorDisclosure {
+    pub fn new(name: String, data_policy: String) -> Result<Self, ProcessingError> {
+        if !valid_label(&name, 256) || !valid_label(&data_policy, 2_048) {
+            return Err(ProcessingError::InvalidScope);
+        }
+        Ok(Self { name, data_policy })
+    }
+}
+
+fn valid_label(value: &str, limit: usize) -> bool {
+    !value.trim().is_empty() && value.len() <= limit && !value.chars().any(char::is_control)
+}
+
 /// Identifies the complete reviewed adapter configuration. This is not a
 /// provider implementation or proof of its declared data-handling policy.
 /// Deliberately not deserializable from IPC.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessorConfiguration {
-    id: String,
-    revision: u64,
-    model: String,
-    location: ProcessingLocation,
+    pub(super) id: String,
+    pub(super) revision: u64,
+    pub(super) model: String,
+    pub(super) location: ProcessingLocation,
     policy_revision: String,
+    pub(super) disclosure: ProcessorDisclosure,
 }
 
 impl ProcessorConfiguration {
@@ -29,9 +51,9 @@ impl ProcessorConfiguration {
         model: String,
         location: ProcessingLocation,
         policy_revision: String,
+        disclosure: ProcessorDisclosure,
     ) -> Result<Self, ProcessingError> {
-        let valid =
-            |s: &str| !s.trim().is_empty() && s.len() <= 256 && !s.chars().any(char::is_control);
+        let valid = |s: &str| valid_label(s, 256);
         if !valid(&id)
             || !valid(&model)
             || !valid(&policy_revision)
@@ -45,11 +67,13 @@ impl ProcessorConfiguration {
             model,
             location,
             policy_revision,
+            disclosure,
         })
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum ConversationScope {
     NewSpeechOnly,
     RecentAndNewSpeech,
@@ -82,7 +106,7 @@ impl fmt::Debug for ProcessingReview {
 }
 
 pub(super) struct Permission {
-    processor: ProcessorConfiguration,
+    pub(super) processor: ProcessorConfiguration,
     owner: Arc<()>,
     pub(super) generation: u64,
     pub(super) grant: Option<Grant>,
@@ -131,6 +155,17 @@ fn notes_match(approved: &[Source], notes: &[NoteTerms]) -> bool {
 fn fingerprint(source: &Source) -> [u8; 32] {
     // Source contains only serializable strings, integers and tagged enums.
     Sha256::digest(serde_json::to_vec(source).expect("source serialization")).into()
+}
+
+// Recomputed only when the validated context changes, never on every native
+// clock/status poll. Order alone is not a different processing scope.
+pub(in crate::engine) fn context_fingerprint(notes: &[NoteTerms]) -> [u8; 32] {
+    let mut fingerprints: Vec<_> = notes
+        .iter()
+        .map(|note| fingerprint(&note_source(&note.item)))
+        .collect();
+    fingerprints.sort_unstable();
+    Sha256::digest(fingerprints.concat()).into()
 }
 
 impl Engine {
@@ -226,13 +261,7 @@ impl Engine {
     /// changes with a reused revision. Reordering alone is not a scope change.
     /// Only a digest leaves this module; no extra excerpt copy is retained.
     pub(crate) fn processing_context_fingerprint(&self) -> [u8; 32] {
-        let mut notes: Vec<_> = self
-            .notes
-            .iter()
-            .map(|note| fingerprint(&note_source(&note.item)))
-            .collect();
-        notes.sort_unstable();
-        Sha256::digest(notes.concat()).into()
+        self.processing_context_digest
     }
 
     /// Commit a reviewed scope under the engine lock. This never starts capture
@@ -285,6 +314,9 @@ impl Engine {
                 && !state.permission.valid(self.generation, &self.notes)
         }) {
             self.revoke_processing();
+            self.set_evaluation_status(EvaluationStatus::Unavailable(
+                EvaluationIssue::ScopeChanged,
+            ));
         }
     }
 }

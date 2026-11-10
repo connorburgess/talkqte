@@ -35,6 +35,7 @@ struct Runtime {
     live: Option<Live>,
     live_start: live_control::StartGate,
     processing_reviews: processing_reviews::Reviews,
+    processing_status: engine::ProcessingTracker,
     /// Prior notes the user imported this session, in memory only.
     context: context::ContextStore,
     /// A listed note source kept for selection, retry, or cancellation.
@@ -54,6 +55,7 @@ impl Default for Runtime {
             live: None,
             live_start: live_control::StartGate::default(),
             processing_reviews: processing_reviews::Reviews::default(),
+            processing_status: engine::ProcessingTracker::default(),
             context: context::ContextStore::default(),
             pending_import: None,
             granola: None,
@@ -75,10 +77,54 @@ impl Runtime {
 struct AppState(Mutex<Runtime>);
 
 // Emit while holding the state lock, preserving revision order across commands/ticks.
-fn publish(app: &tauri::AppHandle, runtime: &Runtime) {
+fn publish(app: &tauri::AppHandle, runtime: &mut Runtime) {
     let _ = app.emit_to("main", "session:changed", &runtime.engine.state);
     let cue_state = runtime.engine.cue_snapshot();
     let _ = app.emit_to("cue", "cue:changed", &cue_state);
+    publish_processing(app, runtime);
+}
+
+fn capture_state(snapshot: Option<microphone::Snapshot>) -> engine::CaptureState {
+    use engine::CaptureState;
+    use microphone::Status;
+    match snapshot {
+        None => CaptureState::Unknown,
+        Some(s) => match s.status {
+            Status::Off => CaptureState::Off,
+            Status::Starting => CaptureState::Starting,
+            Status::Listening => CaptureState::Running,
+            Status::Stopping => CaptureState::Stopping,
+            Status::Error if s.can_start => CaptureState::Off,
+            Status::Error => CaptureState::Stopping,
+        },
+    }
+}
+
+fn publish_processing(app: &tauri::AppHandle, runtime: &mut Runtime) -> engine::ProcessingSnapshot {
+    // Never wait behind device startup/teardown while holding Runtime. Unknown
+    // remains explicit; neither engine End nor a busy lock confirms capture off.
+    let capture = capture_state(app.state::<microphone::Controller>().try_snapshot());
+    let (snapshot, changed) = runtime.processing_status.update(&runtime.engine, capture);
+    if changed {
+        let _ = app.emit_to("main", "processing:changed", &snapshot);
+    }
+    snapshot
+}
+
+#[tauri::command]
+fn processing_snapshot(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<engine::ProcessingSnapshot, String> {
+    if window.label() != "main" {
+        return Err("Processing status is available in the notebook only.".into());
+    }
+    let mut runtime = state
+        .0
+        .lock()
+        .map_err(|_| "Processing status is unavailable.")?;
+    Ok(publish_processing(&app, &mut runtime))
 }
 
 fn change(
@@ -98,7 +144,7 @@ fn change(
         ..
     } = &mut *runtime;
     processing_reviews.reconcile(engine);
-    publish(app, &runtime);
+    publish(app, &mut runtime);
     drop(runtime);
     companion::refresh(app);
     result
@@ -615,6 +661,7 @@ fn publish_context(app: &tauri::AppHandle, runtime: &mut Runtime) {
         publish(app, runtime);
     }
     let _ = app.emit_to("main", "context:changed", runtime.context.items());
+    publish_processing(app, runtime);
 }
 
 /// Lets the user choose a notes file, reads it, and lists its notes for
@@ -1022,7 +1069,7 @@ async fn start_live_session(
             let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
             runtime.sync();
             let session = runtime.install_live_start(&start)?;
-            publish(&app, &runtime);
+            publish(&app, &mut runtime);
             session
         };
         companion::refresh(&app);
@@ -1050,7 +1097,7 @@ async fn start_live_session(
                 let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
                 runtime.sync();
                 let result = runtime.engine.ingest(session, segment);
-                publish(&sink_app, &runtime);
+                publish(&sink_app, &mut runtime);
                 result
             };
             // Attach the runner only to the session that asked for it.
@@ -1149,7 +1196,7 @@ async fn stop_live_session(
     let live = {
         let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
         let live = runtime.take_live_for_stop();
-        publish(&app, &runtime);
+        publish(&app, &mut runtime);
         live
     };
     let Some(live) = live else {
@@ -1192,6 +1239,7 @@ pub fn run() {
         .manage(microphone::Controller::default())
         .manage(ModelDownload::default())
         .invoke_handler(tauri::generate_handler![
+            processing_snapshot,
             snapshot,
             start_demo,
             pause_demo,
@@ -1253,7 +1301,7 @@ pub fn run() {
                     let before = runtime.engine.state.revision;
                     runtime.sync();
                     if runtime.engine.state.revision != before {
-                        publish(&handle, &runtime);
+                        publish(&handle, &mut runtime);
                     }
                     // A live session whose microphone was refused, failed, or
                     // stopped elsewhere ends rather than run with nothing
@@ -1268,7 +1316,7 @@ pub fn run() {
                         });
                     if lost {
                         if let Some(live) = runtime.take_live_for_stop() {
-                            publish(&handle, &runtime);
+                            publish(&handle, &mut runtime);
                             let app = handle.clone();
                             tauri::async_runtime::spawn_blocking(move || {
                                 finish_live(&app, live, true)
@@ -1276,6 +1324,7 @@ pub fn run() {
                         }
                     }
                     let cue = runtime.engine.cue_snapshot();
+                    publish_processing(&handle, &mut runtime);
                     drop(runtime);
                     microphone::refresh(&handle);
                     let Some(microphone) = handle.state::<microphone::Controller>().try_status()
@@ -1344,5 +1393,34 @@ mod carry_over_tests {
         assert!(next.state.revision > before);
         let again = carry_over(&next, Engine::default());
         assert!(again.state.revision > next.state.revision);
+    }
+}
+
+#[cfg(test)]
+mod processing_capture_tests {
+    use super::*;
+
+    #[test]
+    fn capture_confirmation_comes_from_the_adapter_including_failed_cleanup() {
+        use engine::CaptureState as C;
+        use microphone::Status as M;
+        assert_eq!(capture_state(None), C::Unknown);
+        for (status, can_start, expected) in [
+            (M::Off, true, C::Off),
+            (M::Starting, false, C::Starting),
+            (M::Listening, false, C::Running),
+            (M::Stopping, false, C::Stopping),
+            (M::Error, false, C::Stopping),
+            (M::Error, true, C::Off),
+        ] {
+            assert_eq!(
+                capture_state(Some(microphone::Snapshot {
+                    status,
+                    can_start,
+                    ..microphone::Snapshot::default()
+                })),
+                expected
+            );
+        }
     }
 }

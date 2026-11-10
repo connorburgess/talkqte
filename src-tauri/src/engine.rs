@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 
 mod evaluation;
 pub use evaluation::{
-    ConversationScope, EvaluationIssue, EvaluationOutcome, EvaluationStatus, ProcessingError,
-    ProcessingLocation, ProcessingReview, ProcessorConfiguration,
+    CaptureState, ConversationScope, EvaluationIssue, EvaluationOutcome, EvaluationStatus,
+    ProcessingError, ProcessingLocation, ProcessingReview, ProcessingSnapshot, ProcessingTracker,
+    ProcessorConfiguration, ProcessorDisclosure,
 };
 
 const CUE_MS: u64 = 18_000;
@@ -468,6 +469,7 @@ pub struct CueSnapshot {
 }
 
 pub struct Engine {
+    identity: std::sync::Arc<()>,
     demo: Demo,
     pub state: Snapshot,
     generation: u64,
@@ -498,6 +500,7 @@ pub struct Engine {
     still_open_shown: bool,
     /// Imported notes prepared for matching, and the keys already shown.
     notes: Vec<NoteTerms>,
+    processing_context_digest: [u8; 32],
     shown_notes: Vec<String>,
     /// A cue type created since the last publish, with its previous time.
     unshown: Option<(String, Option<u64>)>,
@@ -526,6 +529,7 @@ impl Engine {
 
     fn from_demo(demo: Demo) -> Self {
         Self {
+            identity: std::sync::Arc::new(()),
             state: Snapshot {
                 revision: 0,
                 title: demo.title.clone(),
@@ -562,6 +566,7 @@ impl Engine {
             reminders_shown: 0,
             still_open_shown: false,
             notes: vec![],
+            processing_context_digest: evaluation::context_fingerprint(&[]),
             shown_notes: vec![],
             unshown: None,
         }
@@ -1337,6 +1342,7 @@ impl Engine {
                     .any(|old| old.key == cue.source_id && notes.iter().any(|new| new == old))
         });
         self.notes = notes;
+        self.processing_context_digest = evaluation::context_fingerprint(&self.notes);
         self.reconcile_processing_permission();
         let keys: Vec<&String> = self.notes.iter().map(|note| &note.key).collect();
         self.shown_notes.retain(|key| keys.contains(&key));
@@ -1361,6 +1367,7 @@ impl Engine {
     /// Carries imported notes to a replacement engine.
     pub fn copy_notes_from(&mut self, previous: &Engine) {
         self.notes = previous.notes.clone();
+        self.processing_context_digest = previous.processing_context_digest;
         self.shown_notes = previous.shown_notes.clone();
         self.reconcile_processing_permission();
     }

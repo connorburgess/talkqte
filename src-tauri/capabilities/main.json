@@ -9,6 +9,7 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "allow-snapshot",
+    "allow-processing-snapshot",
     "allow-start-demo",
     "allow-pause-demo",
     "allow-resume-demo",

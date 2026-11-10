@@ -299,6 +299,11 @@ mod tests {
             "fixture".into(),
             engine::ProcessingLocation::OnDevice,
             "fictional-policy".into(),
+            engine::ProcessorDisclosure::new(
+                "Fictional worker".into(),
+                "Fictional in-memory test only.".into(),
+            )
+            .unwrap(),
         )
         .unwrap();
         let mut runtime = Runtime {
