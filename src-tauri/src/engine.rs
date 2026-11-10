@@ -473,6 +473,9 @@ pub struct Engine {
     generation: u64,
     evaluation_revision: u64,
     evaluation: Option<evaluation::State>,
+    /// Stop has begun; transcript ingestion may finish, but processing cannot
+    /// be approved or resumed. This does not assert that capture is released.
+    live_stopping: bool,
     evaluated_cue: Option<(String, Vec<crate::cue_evaluator::Source>)>,
     next_segment: usize,
     cue_deadline: u64,
@@ -546,6 +549,7 @@ impl Engine {
             generation: 0,
             evaluation_revision: 0,
             evaluation: None,
+            live_stopping: false,
             evaluated_cue: None,
             next_segment: 0,
             cue_deadline: 0,
@@ -588,6 +592,7 @@ impl Engine {
             return Err("End the current demo before replaying it.".into());
         }
         self.revoke_processing();
+        self.live_stopping = false;
         self.invalidate_evaluation();
         self.evaluated_cue = None;
         self.generation += 1;
@@ -631,6 +636,7 @@ impl Engine {
 
     pub fn end(&mut self) {
         self.revoke_processing();
+        self.live_stopping = false;
         self.invalidate_evaluation();
         self.evaluated_cue = None;
         self.state.status = Status::Ended;
@@ -643,6 +649,9 @@ impl Engine {
     /// Quiet the live companion without implying that capture has stopped.
     /// Resume only permits newly spoken lines, never a transcription backlog.
     pub fn set_live_cues_paused(&mut self, paused: bool) -> Result<(), String> {
+        if self.live_stopping {
+            return Err("The live session is stopping.".into());
+        }
         if !self.state.live || self.state.status != Status::Running {
             return Err("Cue pause is available only during a live session.".into());
         }
@@ -657,6 +666,32 @@ impl Engine {
         self.cues_after_ms = Some(self.state.elapsed_ms);
         self.changed();
         Ok(())
+    }
+
+    /// Close processing permission before releasing capture and draining queued
+    /// transcript. The engine stays Running for ingestion until native cleanup
+    /// ends this exact session. A failed cleanup cannot reopen permission.
+    pub fn begin_live_stop(&mut self) {
+        if self.state.live && self.state.status == Status::Running && !self.live_stopping {
+            self.live_stopping = true;
+            self.revoke_processing();
+            self.changed();
+        }
+    }
+
+    pub fn is_live_stopping(&self) -> bool {
+        self.live_stopping
+    }
+
+    /// Finish only the session whose native cleanup completed. An older
+    /// cleanup cannot end a replacement session or clear its stopping state.
+    pub fn finish_live_stop(&mut self, session: u64) -> bool {
+        if self.live_stopping && self.generation == session {
+            self.end();
+            true
+        } else {
+            false
+        }
     }
 
     pub fn advance(&mut self, delta_ms: u64) {

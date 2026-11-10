@@ -130,6 +130,7 @@ impl Runtime {
         let mut engine = carry_over(&self.engine, Engine::live());
         engine.start()?;
         self.export = None;
+        self.processing_reviews.clear();
         self.engine = engine;
         self.last_tick = std::time::Instant::now();
         let session = self.engine.session();
@@ -169,7 +170,8 @@ impl Runtime {
     /// Call under the runtime lock BEFORE draining queued transcription.
     pub(crate) fn take_live_for_stop(&mut self) -> Option<Live> {
         self.live_start.cancel();
-        self.engine.revoke_processing();
+        self.processing_reviews.clear();
+        self.engine.begin_live_stop();
         self.live.take()
     }
 }
@@ -331,7 +333,16 @@ mod tests {
         assert!(!runtime.engine.has_processing_permission());
         assert_eq!(
             runtime.engine.approve_processing(old_review),
-            Err(engine::ProcessingError::StaleReview)
+            Err(engine::ProcessingError::SessionInactive)
+        );
+        assert!(runtime.engine.is_live_stopping());
+        assert!(runtime.engine.set_live_cues_paused(false).is_err());
+        assert_eq!(
+            runtime
+                .engine
+                .review_processing(engine::ConversationScope::NewSpeechOnly, &[])
+                .unwrap_err(),
+            engine::ProcessingError::SessionInactive
         );
         assert_eq!(
             runtime.engine.state.status,
