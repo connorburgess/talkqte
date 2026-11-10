@@ -76,8 +76,8 @@ export function execute(
               ? 'Claude Code is not installed. Install it and sign in through its official subscription flow.'
               : error.killed ||
                   error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
-                ? 'Claude Code exceeded the time or output limit; no retry was attempted.'
-                : 'Claude Code failed; check your subscription access in the official CLI. No retry or API fallback was attempted.';
+                ? 'Claude Code exceeded the time or output limit; the lab did not retry.'
+                : 'Claude Code failed; check your subscription access in the official CLI. The lab did not retry or request an API fallback.';
           reject(new Error(message));
         } else resolve(stdout);
       },
@@ -209,7 +209,14 @@ export async function runLab(
       '--permission-prompts',
       'none',
       '--settings',
-      '{"disableAllHooks":true,"fastMode":false}',
+      JSON.stringify({
+        disableAllHooks: true,
+        fastMode: false,
+        // Request failure instead of the CLI's content-based model switch.
+        // Managed policy may override these settings; verify the result too.
+        switchModelsOnFlag: false,
+        availableModels: [MODEL],
+      }),
       '--output-format',
       'json',
       '--system-prompt',
@@ -223,7 +230,7 @@ export async function runLab(
     const elapsedMs = Math.round(performance.now() - start);
     const result = parseObject(
       raw,
-      'Claude returned an unreadable result; no retry was attempted.',
+      'Claude returned an unreadable result; the lab did not retry.',
     );
     if (
       result.type !== 'result' ||
@@ -231,7 +238,7 @@ export async function runLab(
       result.is_error !== false
     ) {
       throw new Error(
-        'Claude did not complete the evaluation. It may be unavailable or at its usage limit; no retry or fallback was attempted.',
+        'Claude did not complete the evaluation. It may be unavailable or at its usage limit; the lab did not retry or request a fallback.',
       );
     }
     const models = Object.keys(result.modelUsage ?? {});
@@ -243,7 +250,7 @@ export async function runLab(
     const decision = validateDecision(
       parseObject(
         result.result,
-        'Claude did not return the expected decision JSON; no retry was attempted.',
+        'Claude did not return the expected decision JSON; the lab did not retry.',
       ),
       testCase,
     );

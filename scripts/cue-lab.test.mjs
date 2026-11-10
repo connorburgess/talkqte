@@ -142,6 +142,12 @@ test('one selected case uses isolated subscription CLI and returns source-checke
   assert.equal(call.command, 'claude');
   assert.equal(call.args[call.args.indexOf('--tools') + 1], '');
   assert.equal(call.args[call.args.indexOf('--model') + 1], MODEL);
+  const settings = JSON.parse(call.args[call.args.indexOf('--settings') + 1]);
+  assert.equal(settings.switchModelsOnFlag, false);
+  assert.deepEqual(settings.availableModels, [MODEL]);
+  assert.equal(settings.fallbackModel, undefined);
+  assert.equal(settings.disableAllHooks, true);
+  assert.equal(settings.fastMode, false);
   for (const flag of [
     '--safe-mode',
     '--restricted',
@@ -201,6 +207,10 @@ test('usage limits, wrong models and malformed replies fail without retry', asyn
       result: 'fictional sensitive provider details',
     },
     { ...success, modelUsage: { 'different-model': {} } },
+    {
+      ...success,
+      modelUsage: { [MODEL]: {}, 'different-model': {} },
+    },
     { ...success, result: 'not json' },
     {
       ...success,
