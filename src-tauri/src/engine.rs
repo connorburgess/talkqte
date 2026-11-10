@@ -2,6 +2,10 @@ use crate::context::ContextItem;
 use serde::{Deserialize, Serialize};
 
 mod evaluation;
+pub use evaluation::{
+    ConversationScope, ProcessingError, ProcessingLocation, ProcessingReview,
+    ProcessorConfiguration,
+};
 
 const CUE_MS: u64 = 18_000;
 /// A question asked of the user stays long enough for them to answer.
@@ -583,6 +587,7 @@ impl Engine {
         if matches!(self.state.status, Status::Running | Status::Paused) {
             return Err("End the current demo before replaying it.".into());
         }
+        self.revoke_processing();
         self.invalidate_evaluation();
         self.evaluated_cue = None;
         self.generation += 1;
@@ -625,6 +630,7 @@ impl Engine {
     }
 
     pub fn end(&mut self) {
+        self.revoke_processing();
         self.invalidate_evaluation();
         self.evaluated_cue = None;
         self.state.status = Status::Ended;
@@ -684,6 +690,7 @@ impl Engine {
             self.consume(segment, now);
         }
         if now >= self.demo.duration_ms {
+            self.revoke_processing();
             self.state.status = Status::Ended;
             // A deliberately opened question stays readable after playback ends.
             // Explicit End demo and Replay still clear it.
@@ -1295,6 +1302,7 @@ impl Engine {
                     .any(|old| old.key == cue.source_id && notes.iter().any(|new| new == old))
         });
         self.notes = notes;
+        self.reconcile_processing_permission();
         let keys: Vec<&String> = self.notes.iter().map(|note| &note.key).collect();
         self.shown_notes.retain(|key| keys.contains(&key));
         // Keep a refreshed note marked shown: no automatic replacement or
@@ -1319,6 +1327,7 @@ impl Engine {
     pub fn copy_notes_from(&mut self, previous: &Engine) {
         self.notes = previous.notes.clone();
         self.shown_notes = previous.shown_notes.clone();
+        self.reconcile_processing_permission();
     }
 
     /// The first imported note this line is about, by its title words, that
@@ -1443,6 +1452,7 @@ impl Engine {
     /// engine never reuses an ID that late work for the old one still holds.
     pub fn continue_sessions_from(&mut self, previous: &Engine) {
         self.generation = self.generation.max(previous.generation);
+        self.reconcile_processing_permission();
     }
 
     pub fn set_sensitivity(&mut self, value: Sensitivity) {

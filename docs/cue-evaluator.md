@@ -1,6 +1,6 @@
 # Bounded cue evaluator
 
-`src-tauri/src/cue_evaluator.rs` provides a replaceable Rust worker and decision contract. Development constructors connect it to the Rust cue engine with transcript-only input or an explicit selected-note scope; no app command enables either path. No model, provider adapter, credentials, network request, or automatic reasoning is supplied. The app continues to use its existing phrase rules.
+`src-tauri/src/cue_evaluator.rs` provides a replaceable Rust worker and decision contract. A development constructor registers it with the Rust cue engine, disabled until an explicit session grant approves transcript input and any exact prior-note selection; no app command enables this path. No model, provider adapter, credentials, network request, or automatic reasoning is supplied. The app continues to use its existing phrase rules.
 
 This foundation supports timely context by rejecting late or obsolete proposals before they can reach the cue lifecycle. Structure and source-membership checks do not establish that a proposal is true, relevant, or useful to someone listening.
 
@@ -35,12 +35,12 @@ Adapters must check cancellation, cap transport buffers, terminate their own sub
 
 Eight headless Rust tests use fictional evaluators and channels, without model calls. They exercise all four actions, input/output bounds, malformed and unsupported decisions, unknown or repeated references, changed context and cue identity, cancelled and expired results, an occupied worker, adapter failure, worker exit, and nonblocking teardown. The complete library suite passed 225 tests on 10 November 2026.
 
-The transcript lifecycle bridge below is the next delivered slice. The selected-note development bridge below adds source lifecycle and disclosure; semantic note reasoning and provider/app activation remain separate work. Provider selection, explicit processing permission, model quality, actual latency/resource budgets, and comparison with no assistance remain separate gates. These offline tests establish neither semantic quality nor user outcomes.
+The transcript lifecycle bridge below is the next delivered slice. The selected-note development bridge below adds source lifecycle and disclosure; semantic note reasoning and provider/app activation remain separate work. Provider selection, a user-facing permission flow, model quality, actual latency/resource budgets, and comparison with no assistance remain separate gates. These offline tests establish neither semantic quality nor user outcomes.
 
 
 ## Transcript lifecycle bridge
 
-`Engine::live_with_evaluator(worker)` constructs a development engine using one explicitly supplied worker instead of phrase rules. No native command uses this constructor. The app and its fictional browser preview retain their current behavior, with no provider selected or inference enabled.
+`Engine::live_with_evaluator(worker, processor)` registers one explicitly supplied worker and immutable processor configuration instead of phrase rules, initially without processing permission. No native command uses this constructor. The app and its fictional browser preview retain their current behavior, with no provider selected or inference enabled.
 
 Each newly accepted eligible transcript line requests evaluation with the last six complete, fresh lines and the visible cue's original references (at most four); waiting speech notifications coalesce as described below. The worker's byte bounds still apply; excessive input stays quiet rather than truncating speech or splitting work. Source IDs, times, speaker labels, and exact text come from the engine. Manual notes, imported excerpts, the session name, and focus text are excluded. Focused mode is enforced locally through the existing word-match policy.
 
@@ -57,9 +57,9 @@ Bounded catch-up scheduling is implemented below. An explicitly scoped activatio
 
 ## Selected-note development bridge
 
-`Engine::live_with_selected_note_evaluator(worker)` explicitly opts a development caller into the already selected in-memory note store as well as recent speech. The transcript-only constructor still excludes prior notes. Neither constructor is used by app commands. Importing a note is not processing permission, and this change selects no model or provider.
+The earlier selected-note constructor has been replaced by the session permission boundary below. A grant defaults to no notes and can approve exact provider/ID/revision selections from the imported store; importing another note never expands it. No app command uses this evaluator, and no model or provider is selected.
 
-The request includes the same recent speech and original cue references, plus up to twenty selected notes. Each note keeps its complete excerpt, title, provider, source date, and revision. IDs use `prior:<provider>:<source-id>` so file notes, Granola notes, and transcript segments cannot collide. Manual notebook edits, raw focus/name settings, unselected provider notes, and credentials are excluded. A note update does not schedule work by itself.
+The request includes the same recent speech and original cue references, plus up to twenty explicitly approved notes. Each note keeps its complete excerpt, title, provider, source date, and revision. IDs use `prior:<provider>:<source-id>` so file notes, Granola notes, and transcript segments cannot collide. Manual notebook edits, raw focus/name settings, unselected provider notes, and credentials are excluded. A note update does not schedule work by itself.
 
 Existing per-source and 32 KiB aggregate bounds apply to the entire selection. An oversized selection or multibyte excerpt fails closed without truncation, batching, a retry, or partial context. A future activation flow must explain these input limits and unavailable evaluation; silently implying active assistance would be wrong.
 
@@ -101,3 +101,18 @@ Four new headless tests and the updated eviction test use fictional dialogue, a 
 Catch-up removes a scheduling gap; it does not make an old answer current. If every evaluation is overtaken by speech, no proposal is applied until a result completes against unchanged, fresh input. Source ageing can also invalidate a request even without new speech. Accepting older output merely to increase cue count would require separate relevance validation. A non-cooperative adapter still blocks its worker indefinitely; the notification adds no copied content and cannot bypass that stall.
 
 The next release dependency is an explicit processing/provider path and permission flow before activation. On that path, measure cancellation responsiveness, request volume, skipped opportunities and trigger-to-visible latency under sustained speech and realistic pauses against [the budgets](budgets.md), including a source-backed already-answered/topic-change check. No production provider or implicit inference is enabled here. Compare useful participation and listening with no assistance separately; fictional scheduling success does not establish either outcome.
+
+
+## Session processing permission
+
+Implemented and checked with fictional adapters on 10 November 2026. Registration alone sends nothing. `review_processing` prepares a Rust-only, single-use review for one engine instance, session, permission generation and immutable processor configuration. The configuration identifies the adapter/model/version, on-device or named hosted destination, and policy revision. It is supplied by trusted Rust adapter registration, not deserialized from a webview; this contract does not verify an adapter's honesty or provide an OS sandbox.
+
+A review explicitly chooses new speech only or recent and new speech, plus zero or more exact prior-note selections. Unknown IDs, wrong providers/revisions, duplicate selections, more than twenty notes and oversized note scope fail as a whole. The review holds SHA-256 fingerprints of the complete note content and provenance rather than excerpt copies. Approval rechecks them against the current store before installing an in-memory grant. A stale review cannot restore an earlier selection or move to another engine, session or processor configuration.
+
+New-speech-only permission starts after the confirmation clock time, excluding earlier or delayed buffered transcript lines. Explicit recent-speech approval can request the existing fresh six-line window immediately. Both retain the existing freshness, pause, source and aggregate bounds. Adding an unapproved note cannot widen the grant. Changing or removing any approved note, including text/title/date changes without a revision bump, revokes the entire grant and requires a new review. Scope changes cancel pending work and clear copied cue evidence, including held cues.
+
+Dispatch checks the grant and builds input only from approved sources. Polling checks its permission generation as well as the complete current request under the same engine lock before applying a reply. Revocation discards waiting speech, caller-owned pending input, grant excerpts and cue copies. It leaves capture state, the notebook, transcript and imported store intact. Stop and session restart revoke permission; no grant is copied into a replacement engine. Pause cues cancels and clears pending/displayed work while preserving the still-valid grant, and Resume permits only newly spoken input. A running adapter may retain its request until it returns; cancellation cannot retract an upload or forcibly stop arbitrary Rust code.
+
+Seven new headless tests plus the migrated lifecycle/source tests pass; the complete Rust suite passes 254 library tests. All-target Clippy and Rust formatting also pass. Acceptance covers zero adapter calls before approval or after revocation/restart, explicit recent versus new speech, exact selected metadata, stale source/configuration reviews, atomic scope rejection, delayed replies across revocation/reapproval, and oversized combined context without a partial dispatch. Existing source tests additionally confirm that changing approved notes clears held disclosure and prevents subsequent submissions. No model process, account, microphone or provider request ran.
+
+The next bounded dependency is the fictional processing-control flow: show location, source selection, availability, continuing capture, Pause/Resume, disable and Stop clearly, with headless keyboard and narrow-layout checks. Native IPC, a concrete adapter, authentication/allowance recovery and app activation are not provided by this change. These controls and the [remaining provider and outcome gates](processing-plan.md#acceptance-and-dependency-order) must be verified before evaluated cues are offered for real conversations.
