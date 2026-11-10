@@ -134,7 +134,7 @@ impl Engine {
     /// Never include manual notes, focus text, or identity settings. Fail closed
     /// on the worker's per-source and aggregate byte bounds without truncation.
     fn evaluation_request(&self) -> Result<Option<Request>, Failure> {
-        if self.state.status != Status::Running || self.state.cues_paused {
+        if self.state.status != Status::Running || self.state.cues_paused || self.live_stopping {
             return Ok(None);
         }
         let Some(state) = &self.evaluation else {

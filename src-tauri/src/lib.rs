@@ -12,6 +12,7 @@ mod live_control;
 mod microphone;
 pub mod model;
 pub mod notes_file;
+pub mod processing_reviews;
 pub mod transcription;
 
 use engine::{CompanionPosition, Engine, QuestionSize, Response, Sensitivity};
@@ -33,6 +34,7 @@ struct Runtime {
     /// delivering transcript lines takes the lock.
     live: Option<Live>,
     live_start: live_control::StartGate,
+    processing_reviews: processing_reviews::Reviews,
     /// Prior notes the user imported this session, in memory only.
     context: context::ContextStore,
     /// A listed note source kept for selection, retry, or cancellation.
@@ -51,6 +53,7 @@ impl Default for Runtime {
             export: None,
             live: None,
             live_start: live_control::StartGate::default(),
+            processing_reviews: processing_reviews::Reviews::default(),
             context: context::ContextStore::default(),
             pending_import: None,
             granola: None,
@@ -65,6 +68,7 @@ impl Runtime {
         self.engine
             .advance(now.duration_since(self.last_tick).as_millis() as u64);
         self.last_tick = now;
+        self.processing_reviews.reconcile(&self.engine);
     }
 }
 
@@ -88,6 +92,12 @@ fn change(
         .map_err(|_| "The demo is unavailable. Please restart TalkQTE.")?;
     runtime.sync();
     let result = action(&mut runtime.engine);
+    let Runtime {
+        engine,
+        processing_reviews,
+        ..
+    } = &mut *runtime;
+    processing_reviews.reconcile(engine);
     publish(app, &runtime);
     drop(runtime);
     companion::refresh(app);
@@ -599,6 +609,7 @@ fn publish_context(app: &tauri::AppHandle, runtime: &mut Runtime) {
     // The engine may quote an imported note as a context reminder.
     let before = runtime.engine.state.revision;
     runtime.engine.set_notes(runtime.context.items().to_vec());
+    runtime.processing_reviews.reconcile(&runtime.engine);
     if runtime.engine.state.revision != before {
         // A changed or removed note may be visible in either window, even held.
         publish(app, runtime);
@@ -965,10 +976,7 @@ fn finish_live(app: &tauri::AppHandle, live: Live, flush: bool) {
     }
     let state = app.state::<AppState>();
     let _ = change(app, &state, |e| {
-        if e.state.live && e.session() == live.session && e.state.status == engine::Status::Running
-        {
-            e.end();
-        }
+        e.finish_live_stop(live.session);
         Ok(())
     });
 }

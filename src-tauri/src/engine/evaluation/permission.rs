@@ -146,7 +146,11 @@ impl Engine {
             .evaluation
             .as_ref()
             .ok_or(ProcessingError::Unavailable)?;
-        if !self.state.live || self.state.status != Status::Running || self.state.cues_paused {
+        if !self.state.live
+            || self.state.status != Status::Running
+            || self.state.cues_paused
+            || self.live_stopping
+        {
             return Err(ProcessingError::SessionInactive);
         }
         if notes.len() > crate::context::MAX_ITEMS {
@@ -179,15 +183,17 @@ impl Engine {
         })
     }
 
-    /// Commit a reviewed scope under the engine lock. This never starts capture
-    /// or constructs a provider; a native UI/adapter remains a separate gate.
-    pub fn approve_processing(&mut self, review: ProcessingReview) -> Result<(), ProcessingError> {
+    fn reviewed_sources(&self, review: &ProcessingReview) -> Result<Vec<Source>, ProcessingError> {
         let permission = &self
             .evaluation
             .as_ref()
             .ok_or(ProcessingError::Unavailable)?
             .permission;
-        if !self.state.live || self.state.status != Status::Running || self.state.cues_paused {
+        if !self.state.live
+            || self.state.status != Status::Running
+            || self.state.cues_paused
+            || self.live_stopping
+        {
             return Err(ProcessingError::SessionInactive);
         }
         if !Arc::ptr_eq(&review.owner, &permission.owner)
@@ -207,6 +213,32 @@ impl Engine {
                 .ok_or(ProcessingError::StaleReview)?;
             notes.push(source);
         }
+        Ok(notes)
+    }
+
+    /// Native review ownership can discard invalid tokens without consuming a
+    /// valid one or granting permission as a side effect of checking it.
+    pub(crate) fn processing_review_is_current(&self, review: &ProcessingReview) -> bool {
+        self.reviewed_sources(review).is_ok()
+    }
+
+    /// Bind a pending review to the available source set, including content
+    /// changes with a reused revision. Reordering alone is not a scope change.
+    /// Only a digest leaves this module; no extra excerpt copy is retained.
+    pub(crate) fn processing_context_fingerprint(&self) -> [u8; 32] {
+        let mut notes: Vec<_> = self
+            .notes
+            .iter()
+            .map(|note| fingerprint(&note_source(&note.item)))
+            .collect();
+        notes.sort_unstable();
+        Sha256::digest(notes.concat()).into()
+    }
+
+    /// Commit a reviewed scope under the engine lock. This never starts capture
+    /// or constructs a provider; a native UI/adapter remains a separate gate.
+    pub fn approve_processing(&mut self, review: ProcessingReview) -> Result<(), ProcessingError> {
+        let notes = self.reviewed_sources(&review)?;
         self.revoke_processing();
         self.evaluation.as_mut().unwrap().permission.grant = Some(Grant {
             session: review.session,
@@ -239,7 +271,8 @@ impl Engine {
     }
 
     pub fn has_processing_permission(&self) -> bool {
-        self.state.status == Status::Running
+        !self.live_stopping
+            && self.state.status == Status::Running
             && self
                 .evaluation
                 .as_ref()
