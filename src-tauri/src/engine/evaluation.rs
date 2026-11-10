@@ -600,8 +600,12 @@ mod tests {
         );
         let mut h = Harness::with_selected_notes();
         h.engine.set_sensitivity(Sensitivity::Focused);
-        h.engine.set_focus(vec!["Legal review".into()]).unwrap();
-        h.engine.set_notes(vec![selected(Provider::File, "one")]);
+        h.engine
+            .set_focus(vec!["Legal supplier approval".into()])
+            .unwrap();
+        let mut focused_note = selected(Provider::File, "one");
+        focused_note.excerpt = "Legal supplier approval takes two days.".into();
+        h.engine.set_notes(vec![focused_note]);
         h.line("The checklist handoff is still unclear.");
         h.request();
         h.reply(
