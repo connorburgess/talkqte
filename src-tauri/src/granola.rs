@@ -1135,6 +1135,10 @@ struct Note {
 /// them. Only direct meeting children of meetings_data supply chooser rows;
 /// participant, folder, and attachment content is deliberately skipped.
 fn tagged_listing(text: &str) -> Result<(Vec<Note>, usize), SourceError> {
+    tagged_meetings(text, false)
+}
+
+fn tagged_meetings(text: &str, details: bool) -> Result<(Vec<Note>, usize), SourceError> {
     let mut reader = Reader::from_str(text);
     let mut notes = Vec::new();
     let mut seen_ids = std::collections::HashSet::new();
@@ -1173,14 +1177,20 @@ fn tagged_listing(text: &str) -> Result<(Vec<Note>, usize), SourceError> {
                         for attribute in tag.attributes() {
                             let attribute = attribute.map_err(|_| SourceError::Unavailable)?;
                             let key = attribute.key.as_ref();
-                            if matches!(key, "id" | "title" | "meeting_at" | "date") {
+                            if matches!(key, "id" | "title" | "meeting_at" | "date" | "created_at")
+                            {
                                 let value = attribute
                                     .normalized_value(XmlVersion::Implicit1_0)
                                     .map_err(|_| SourceError::Unavailable)?;
                                 fields.insert(key.to_string(), Value::String(value.into_owned()));
                             }
                         }
-                        if !empty {
+                        if details && !empty {
+                            fields.insert(
+                                "notes".into(),
+                                Value::String(tagged_note_text(&mut reader)?),
+                            );
+                        } else if !empty {
                             reader
                                 .read_to_end(tag.name())
                                 .map_err(|_| SourceError::Unavailable)?;
@@ -1210,6 +1220,104 @@ fn tagged_listing(text: &str) -> Result<(Vec<Note>, usize), SourceError> {
         return Err(SourceError::Unavailable);
     }
     Ok((notes, remaining))
+}
+
+/// Only the two observed direct content fields belong to a selected note.
+/// Provider notices, attendees, attachments and nested meeting-shaped data
+/// are not note content. Keep private notes and the generated summary labeled.
+fn tagged_note_text(reader: &mut Reader<&[u8]>) -> Result<String, SourceError> {
+    let mut private_notes = None;
+    let mut summary = None;
+    loop {
+        let event = reader.read_event().map_err(|_| SourceError::Unavailable)?;
+        match event {
+            Event::Start(ref tag) | Event::Empty(ref tag) => {
+                let empty = matches!(event, Event::Empty(_));
+                let name = tag.name();
+                if matches!(name.as_ref(), "private_notes" | "summary") {
+                    let slot = if name.as_ref() == "private_notes" {
+                        &mut private_notes
+                    } else {
+                        &mut summary
+                    };
+                    if slot.is_some() {
+                        return Err(SourceError::Unavailable);
+                    }
+                    let mut unavailable = false;
+                    for attribute in tag.attributes() {
+                        let attribute = attribute.map_err(|_| SourceError::Unavailable)?;
+                        if name.as_ref() == "private_notes" && attribute.key.as_ref() == "status" {
+                            let status = attribute
+                                .normalized_value(XmlVersion::Implicit1_0)
+                                .map_err(|_| SourceError::Unavailable)?;
+                            unavailable = matches!(status.as_ref(), "empty" | "not_included");
+                        }
+                    }
+                    let content = if empty {
+                        String::new()
+                    } else if unavailable {
+                        reader
+                            .read_to_end(name)
+                            .map_err(|_| SourceError::Unavailable)?;
+                        String::new()
+                    } else {
+                        tagged_field_text(reader, name)?
+                    };
+                    *slot = Some(content);
+                } else if !empty {
+                    reader
+                        .read_to_end(name)
+                        .map_err(|_| SourceError::Unavailable)?;
+                }
+            }
+            Event::End(tag) if tag.name().as_ref() == "meeting" => break,
+            Event::DocType(_) | Event::Eof => return Err(SourceError::Unavailable),
+            _ => {}
+        }
+    }
+    if private_notes.is_none() && summary.is_none() {
+        return Err(SourceError::Unavailable);
+    }
+    Ok([("Private notes", private_notes), ("Summary", summary)]
+        .into_iter()
+        .filter_map(|(label, text)| {
+            text.filter(|s| !s.trim().is_empty())
+                .map(|s| format!("{label}:\n{}", s.trim()))
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n"))
+}
+
+/// Markdown is carried as text, not rendered as HTML. Decode XML references
+/// once and preserve line breaks/CDATA. Unknown nested formats fail explicitly
+/// instead of importing their metadata or silently dropping part of a note.
+fn tagged_field_text(
+    reader: &mut Reader<&[u8]>,
+    end: quick_xml::name::QName<'_>,
+) -> Result<String, SourceError> {
+    let mut text = String::new();
+    loop {
+        match reader.read_event().map_err(|_| SourceError::Unavailable)? {
+            Event::Text(value) => text.push_str(&value.xml_content(XmlVersion::Implicit1_0)),
+            Event::CData(value) => text.push_str(&value.xml_content(XmlVersion::Implicit1_0)),
+            Event::GeneralRef(value) => {
+                if let Some(character) = value
+                    .resolve_char_ref()
+                    .map_err(|_| SourceError::Unavailable)?
+                {
+                    text.push(character);
+                } else {
+                    text.push_str(
+                        quick_xml::escape::resolve_predefined_entity(value.as_ref())
+                            .ok_or(SourceError::Unavailable)?,
+                    );
+                }
+            }
+            Event::End(tag) if tag.name() == end => return Ok(text),
+            Event::Comment(_) => {}
+            _ => return Err(SourceError::Unavailable),
+        }
+    }
 }
 
 /// The notes in a tool's output, whatever it calls its fields: an array at
@@ -1371,20 +1479,39 @@ impl NoteSource for Connection {
             .cloned()
             .ok_or(SourceError::Unavailable)?;
         let argument = tool.ids_argument.unwrap_or_else(|| "meeting_ids".into());
+        let mut arguments = serde_json::Map::new();
+        arguments.insert(argument, json!(selection));
+        // Note excerpts need neither attendee metadata nor attachments.
+        if tool.arguments.iter().any(|name| name == "max_participants") {
+            arguments.insert("max_participants".into(), json!(0));
+        }
+        if tool.arguments.iter().any(|name| name == "attachments") {
+            arguments.insert("attachments".into(), json!("none"));
+        }
         let result = self.call(
             "tools/call",
-            json!({ "name": tool.name, "arguments": { argument: selection } }),
+            json!({ "name": tool.name, "arguments": arguments }),
         )?;
         trace("get_meetings result", &result);
         let output = tool_output(&result);
-        if let Value::String(text) = &output {
+        let notes = if let Value::String(text) = &output {
             trace_text("get_meetings text", text);
-            // The account trace has established the listing shape only.
-            // An unrecognized detail format is a provider failure, not a
-            // successful import of zero notes.
-            return Err(SourceError::UnsupportedFormat);
+            tagged_meetings(text, true)
+                .map_err(|_| SourceError::UnsupportedFormat)?
+                .0
+        } else {
+            notes_in(&output)
+        };
+        // Missing/inaccessible or size-omitted selections must not look like
+        // a successful partial import. Keep the chooser available for retry
+        // or a smaller selection; do not fetch more notes automatically.
+        if selection
+            .iter()
+            .any(|id| !notes.iter().any(|note| &note.id == id))
+        {
+            return Err(SourceError::Unavailable);
         }
-        Ok(notes_in(&output)
+        Ok(notes
             .into_iter()
             .filter(|note| selection.iter().any(|wanted| wanted == &note.id))
             .map(|note| ContextItem {
@@ -1536,7 +1663,7 @@ mod tests {
         Json,
         EventStream,
         TaggedListing,
-        TaggedDetails,
+        TaggedDetails(&'static str),
         Status(u16),
         RpcError(&'static str),
         ToolError,
@@ -1632,7 +1759,7 @@ mod tests {
                     }
                     Some("tools/list") => json!({"tools": [
                         {"name": "list_meetings", "inputSchema": {"type": "object", "properties": {"time_range": {"type": "string"}, "max_participants": {"type": "integer"}}}},
-                        {"name": "get_meetings", "inputSchema": {"type": "object", "properties": {"meeting_ids": {"type": "array", "items": {"type": "string"}}}}},
+                        {"name": "get_meetings", "inputSchema": {"type": "object", "properties": {"meeting_ids": {"type": "array", "items": {"type": "string"}}, "attachments": {"type": "string"}, "max_participants": {"type": "integer"}}}},
                         {"name": "query_granola_meetings", "inputSchema": {"type": "object", "properties": {"question": {"type": "string"}}}}
                     ]}),
                     Some("tools/call") if matches!(answer, Answer::ToolError) => {
@@ -1645,10 +1772,13 @@ mod tests {
                         json!({"content": [{"type": "text", "text": TAGGED_LISTING}]})
                     }
                     Some("tools/call")
-                        if matches!(answer, Answer::TaggedDetails)
+                        if matches!(answer, Answer::TaggedDetails(_))
                             && request["params"]["name"] == "get_meetings" =>
                     {
-                        json!({"content": [{"type": "text", "text": "<meeting id=\"m2\"><unknown>Fictional note</unknown></meeting>"}]})
+                        let Answer::TaggedDetails(text) = answer else {
+                            unreachable!()
+                        };
+                        json!({"content": [{"type": "text", "text": text}]})
                     }
                     Some("tools/call") if request["params"]["name"] == "query_granola_meetings" => {
                         json!({"content": [{"type": "text", "text": "Here is what is still open:\n\n1. Agree the launch plan for the newsletter\n2. Decide who owns the compost bins\n- “Settle the volunteer schedule”\n- Agree the launch plan for the newsletter\n\nLet me know if you want more detail."}]})
@@ -1804,11 +1934,130 @@ The default range is the last thirty days.
 
     #[test]
     fn unrecognized_details_fail_instead_of_reporting_a_successful_empty_import() {
-        let (endpoint, _) = fictional_server(Answer::TaggedDetails);
+        let (endpoint, _) = fictional_server(Answer::TaggedDetails(
+            "<meeting id=\"m2\"><unknown>Fictional note</unknown></meeting>",
+        ));
         let mut connection = Connection::open_at(&endpoint, &tokens(), false).unwrap();
         assert_eq!(
             connection.fetch(&["m2".into()]),
             Err(SourceError::UnsupportedFormat)
+        );
+    }
+
+    const TAGGED_DETAILS: &str = include_str!("../tests/fixtures/granola-details.xml");
+
+    #[test]
+    fn tagged_details_import_only_the_selection_through_the_real_store_path() {
+        let (endpoint, seen) = fictional_server(Answer::TaggedDetails(TAGGED_DETAILS));
+        let mut connection = Connection::open_at(&endpoint, &tokens(), false).unwrap();
+        let (listed, _) = connection.list_recent().unwrap();
+        let ids = vec![listed[1].source_id.clone()];
+        let mut pending = crate::context_import::PendingImport::new(Box::new(connection));
+        let mut attempt = pending.start().unwrap();
+        let fetched = attempt.fetch(&ids).unwrap();
+        assert!(pending.restore(attempt));
+        let mut store = crate::context::ContextStore::default();
+        let outcome = store.merge(Provider::Granola, &ids, fetched);
+        assert_eq!(outcome.added, 1);
+        assert_eq!(outcome.rejected, 0);
+        let note = &store.items()[0];
+        assert_eq!(note.source_id, "m2");
+        assert_eq!(note.title, "Visitor questions");
+        assert_eq!(note.source_date, "2026-11-02");
+        assert_eq!(
+            note.excerpt,
+            "Summary:\nVisitors asked where to find watering cans."
+        );
+        assert_eq!(note.provider, Provider::Granola);
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            seen.len(),
+            5,
+            "no transcript, attachment or follow-up calls"
+        );
+        let request: Value = serde_json::from_str(&seen[4].1).unwrap();
+        assert_eq!(
+            request["params"]["arguments"],
+            json!({"meeting_ids": ["m2"], "max_participants": 0, "attachments": "none"})
+        );
+    }
+
+    #[test]
+    fn tagged_details_keep_content_labels_and_skip_metadata() {
+        let (notes, _) = tagged_meetings(TAGGED_DETAILS, true).unwrap();
+        assert_eq!(
+            notes[0].text,
+            "Private notes:\nBring a map of the tool shed.\n\nSummary:\nDraft a one-page guide."
+        );
+        assert_eq!(notes.len(), 2);
+        // Missing private text must not hide an available summary. Text in an
+        // unavailable private field is a status notice, never a personal note.
+        let (notes, _) = tagged_meetings(
+            r#"<meetings_data>
+          <meeting id="m1" created_at="2026-11-02T00:00:00Z">
+            <private_notes status="not_included">Not yours.</private_notes>
+            <summary># Café &amp; garden &#x1F331;
+- Keep &lt;two&gt; bins.
+<![CDATA[- Plain <text> & symbols.]]></summary>
+          </meeting>
+          <meeting id="m1"><summary>Duplicate</summary></meeting>
+        </meetings_data>"#,
+            true,
+        )
+        .unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].date, "2026-11-02");
+        assert_eq!(
+            notes[0].text,
+            "Summary:\n# Café & garden 🌱\n- Keep <two> bins.\n- Plain <text> & symbols."
+        );
+    }
+
+    #[test]
+    fn malformed_or_unrecognized_details_never_become_note_content() {
+        for text in [
+            "plain prose",
+            "<meetings_data><meeting id='m1'><summary>cut off",
+            "<meetings_data><meeting id='m1'><summary>wrong end</private_notes></meeting></meetings_data>",
+            "<meetings_data><meeting id='m1' id='m2'><summary>duplicate id</summary></meeting></meetings_data>",
+            "<meetings_data><meeting id='m1'><summary>&unknown;</summary></meeting></meetings_data>",
+            "<meetings_data><meeting id='m1'><summary><unknown>nested format</unknown></summary></meeting></meetings_data>",
+            "<meetings_data><meeting id='m1'><summary>one</summary><summary>two</summary></meeting></meetings_data>",
+            "<meetings_data><meeting id='m1'><attachments><summary>not note text</summary></attachments></meeting></meetings_data>",
+            "<!DOCTYPE meetings_data><meetings_data/>",
+        ] {
+            assert!(tagged_meetings(text, true).is_err(), "invalid reply: {text}");
+        }
+    }
+
+    #[test]
+    fn empty_note_content_is_counted_as_skipped_without_adding_context() {
+        const EMPTY: &str = "<meetings_data><meeting id='m1' meeting_at='2026-11-02T00:00:00Z'><private_notes status='empty'/><summary/></meeting></meetings_data>";
+        let (endpoint, _) = fictional_server(Answer::TaggedDetails(EMPTY));
+        let mut connection = Connection::open_at(&endpoint, &tokens(), false).unwrap();
+        let ids = vec!["m1".into()];
+        let mut store = crate::context::ContextStore::default();
+        assert_eq!(
+            store
+                .merge(Provider::Granola, &ids, connection.fetch(&ids).unwrap())
+                .rejected,
+            1
+        );
+        assert!(store.items().is_empty());
+    }
+
+    #[test]
+    fn omitted_selected_notes_fail_without_silently_importing_a_partial_selection() {
+        let (endpoint, seen) = fictional_server(Answer::TaggedDetails(TAGGED_DETAILS));
+        let mut connection = Connection::open_at(&endpoint, &tokens(), false).unwrap();
+        assert_eq!(
+            connection.fetch(&["m2".into(), "omitted-note".into()]),
+            Err(SourceError::Unavailable)
+        );
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            4,
+            "no automatic follow-up reads"
         );
     }
 
