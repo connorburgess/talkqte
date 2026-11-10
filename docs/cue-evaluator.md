@@ -1,6 +1,6 @@
 # Bounded cue evaluator
 
-`src-tauri/src/cue_evaluator.rs` provides a replaceable Rust worker and decision contract. It is not connected to app commands or the cue engine yet. No model, provider adapter, credentials, network request, or automatic reasoning is supplied. The app continues to use its existing phrase rules.
+`src-tauri/src/cue_evaluator.rs` provides a replaceable Rust worker and decision contract. A development constructor now connects it to the Rust cue engine with transcript-only input; no app command enables that path. No model, provider adapter, credentials, network request, or automatic reasoning is supplied. The app continues to use its existing phrase rules.
 
 This foundation supports timely context by rejecting late or obsolete proposals before they can reach the cue lifecycle. Structure and source-membership checks do not establish that a proposal is true, relevant, or useful to someone listening.
 
@@ -35,4 +35,21 @@ Adapters must check cancellation, cap transport buffers, terminate their own sub
 
 Eight headless Rust tests use fictional evaluators and channels, without model calls. They exercise all four actions, input/output bounds, malformed and unsupported decisions, unknown or repeated references, changed context and cue identity, cancelled and expired results, an occupied worker, adapter failure, worker exit, and nonblocking teardown. The complete library suite passed 225 tests on 10 November 2026.
 
-Next implementation: construct requests from the engine's authorized context and apply proposals through its existing lifecycle, testing pause, dismissal, held cues, source removal, and Stop with a fictional adapter first. Provider selection, explicit processing permission, model quality, actual latency/resource budgets, and comparison with no assistance remain separate gates. These offline tests establish neither semantic quality nor user outcomes.
+The transcript lifecycle bridge below is the next delivered slice. Imported-note reasoning and provider/app activation remain separate implementation work. Provider selection, explicit processing permission, model quality, actual latency/resource budgets, and comparison with no assistance remain separate gates. These offline tests establish neither semantic quality nor user outcomes.
+
+
+## Transcript lifecycle bridge
+
+`Engine::live_with_evaluator(worker)` constructs a development engine using one explicitly supplied worker instead of phrase rules. No native command uses this constructor. The app and its fictional browser preview retain their current behavior, with no provider selected or inference enabled.
+
+For each newly accepted eligible transcript line, the engine attempts one evaluation with the last six complete, fresh lines and the visible cue's original references (at most four). The worker's byte bounds still apply; excessive input stays quiet rather than truncating speech or splitting work. Source IDs, times, speaker labels, and exact text come from the engine. Manual notes, imported excerpts, the session name, and focus text are excluded. Focused mode is enforced locally through the existing word-match policy.
+
+New speech, pause/resume, dismissal, Stop/replay, focus, name, sensitivity, or imported-note changes cancel pending work. Clock ticks and appearance changes do not cancel a still-current request. Polling and application share the engine's lock with controls; results are checked against current session, eligibility, sources, cue identity, and freshness. New speech arriving while a cancelled adapter is still busy is skipped, with no backlog, timer retry, fallback, or replacement thread. This conservative policy may skip opportunities during continuous speech; provider latency and scheduling need measurement before activation.
+
+A `show` proposal can use only the free cue slot. It respects cooldown, Focused mode, and a bounded two-minute exact-text repeat history. Each cited transcript excerpt is shown with its speaker and time. Its 18-second lifetime starts at the newest cited speech, not when the result arrives. This is structural grounding and lifecycle validation, not proof of source support or semantic deduplication.
+
+`quiet` leaves the current cue alone, including when use is labelled possible. A sourced `resolved` result clears an unread cue; a held cue retains its words and shows the cited resolution. `withdraw` clears even a held cue whose premise is no longer valid, without calling that premise answered. Transcript eviction removes an affected cue and its copied evidence, including a held cue. Dismissal, cue pause, expiry, and Stop also release those copies. No evaluator reason, observed-use label, or unused suggestion becomes a note, export, or retained score.
+
+Eight additional headless lifecycle tests use fictional delayed replies. They cover ordinary clock ticks, source disclosure and excluded inputs, quiet versus resolution while held, withdrawal, pause/resume without replay, dismissal/cooldown/repeats, Stop/new-session isolation, transcript eviction, stale sources, settings changes, malformed references, Focused filtering, and no rule fallback. No device, account, model, or network input is used.
+
+Remaining implementation: selected prior-note requests and complete multi-source provenance in the cue presentation, revision/removal tests for those notes, and an explicitly scoped activation path after a processing/provider decision. Actual semantic quality, latency under ongoing speech, hardware operation, and useful participation while listening remain unvalidated.

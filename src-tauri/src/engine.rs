@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+mod evaluation;
+
 const CUE_MS: u64 = 18_000;
 /// A question asked of the user stays long enough for them to answer.
 const ASKED_MS: u64 = 45_000;
@@ -461,6 +463,9 @@ pub struct Engine {
     demo: Demo,
     pub state: Snapshot,
     generation: u64,
+    evaluation_revision: u64,
+    evaluation: Option<evaluation::State>,
+    evaluated_cue: Option<(String, Vec<crate::cue_evaluator::Source>)>,
     next_segment: usize,
     cue_deadline: u64,
     cooldown_until: u64,
@@ -531,6 +536,9 @@ impl Engine {
             },
             demo,
             generation: 0,
+            evaluation_revision: 0,
+            evaluation: None,
+            evaluated_cue: None,
             next_segment: 0,
             cue_deadline: 0,
             cooldown_until: 0,
@@ -571,6 +579,8 @@ impl Engine {
         if matches!(self.state.status, Status::Running | Status::Paused) {
             return Err("End the current demo before replaying it.".into());
         }
+        self.invalidate_evaluation();
+        self.evaluated_cue = None;
         self.generation += 1;
         self.live_input = false;
         self.state.cues_paused = false;
@@ -594,6 +604,7 @@ impl Engine {
         if self.state.status != Status::Running {
             return Err("Only a running demo can be paused.".into());
         }
+        self.invalidate_evaluation();
         self.state.status = Status::Paused;
         self.changed();
         Ok(())
@@ -603,12 +614,15 @@ impl Engine {
         if self.state.status != Status::Paused {
             return Err("Only a paused demo can be resumed.".into());
         }
+        self.invalidate_evaluation();
         self.state.status = Status::Running;
         self.changed();
         Ok(())
     }
 
     pub fn end(&mut self) {
+        self.invalidate_evaluation();
+        self.evaluated_cue = None;
         self.state.status = Status::Ended;
         self.state.cues_paused = false;
         self.cues_after_ms = None;
@@ -625,7 +639,9 @@ impl Engine {
         if self.state.cues_paused == paused {
             return Ok(());
         }
+        self.invalidate_evaluation();
         self.state.cues_paused = paused;
+        self.evaluated_cue = None;
         self.state.cue = None;
         self.unshown = None;
         self.cues_after_ms = Some(self.state.elapsed_ms);
@@ -649,6 +665,7 @@ impl Engine {
                 // A quote leaves no pause behind it: it asked for nothing.
                 let quote = cue.kind == SAID;
                 self.state.cue = None;
+                self.evaluated_cue = None;
                 if !quote {
                     self.cooldown_until = self.cue_deadline + self.cooldown();
                 }
@@ -671,6 +688,7 @@ impl Engine {
                 self.forget_unshown();
             }
         }
+        self.poll_evaluation();
         self.changed();
     }
 
@@ -748,12 +766,14 @@ impl Engine {
     }
 
     fn consume(&mut self, segment: Segment, now: u64) {
+        self.invalidate_evaluation();
         self.state.transcript.push(segment.clone());
         // Keep memory bounded in a long session; the oldest lines go first.
         if self.state.transcript.len() > MAX_TRANSCRIPT_SEGMENTS {
             let excess = self.state.transcript.len() - MAX_TRANSCRIPT_SEGMENTS;
             self.state.transcript.drain(..excess);
         }
+        self.reconcile_evaluated_sources();
         // Any mention counts as the conversation touching a focus line, even
         // one put to someone else or taken back: it was raised.
         if let Some(touched) = self
@@ -767,6 +787,10 @@ impl Engine {
                 .cues_after_ms
                 .is_some_and(|resumed_at| segment.at_ms <= resumed_at)
         {
+            return;
+        }
+        if self.evaluation.is_some() {
+            self.submit_evaluation();
             return;
         }
         // The conversation answered the open cue. Withdraw it before the
@@ -1190,6 +1214,8 @@ impl Engine {
             .ok_or("That question has already passed.")?
             .kind
             == SAID;
+        self.invalidate_evaluation();
+        self.evaluated_cue = None;
         self.state.cue = None;
         if !quote {
             self.cooldown_until = self.state.elapsed_ms + self.cooldown();
@@ -1237,6 +1263,7 @@ impl Engine {
     /// date, provider, excerpt)` per note. A note already shown this session
     /// stays shown.
     pub fn set_notes(&mut self, notes: Vec<(String, String, String, String, String)>) {
+        self.invalidate_evaluation();
         self.notes = notes
             .into_iter()
             .map(|(key, title, source_date, provider, excerpt)| NoteTerms {
@@ -1363,6 +1390,7 @@ impl Engine {
                     .unwrap_or(false)
             })
             .collect();
+        self.invalidate_evaluation();
         self.focus_terms = terms;
         self.state.focus = lines;
         self.changed();
@@ -1389,6 +1417,7 @@ impl Engine {
                 );
             }
         }
+        self.invalidate_evaluation();
         self.state.user_name = name;
         self.changed();
         Ok(())
@@ -1401,6 +1430,7 @@ impl Engine {
     }
 
     pub fn set_sensitivity(&mut self, value: Sensitivity) {
+        self.invalidate_evaluation();
         self.state.sensitivity = value;
         self.changed();
     }

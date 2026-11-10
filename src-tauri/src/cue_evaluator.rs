@@ -1,5 +1,6 @@
 //! Provider-independent cue evaluation. No provider or app command starts this
-//! worker yet. The caller supplies selected, bounded sources; the evaluator has
+//! worker. A development engine bridge uses fictional adapters in tests.
+//! The caller supplies selected, bounded sources; the evaluator has
 //! no engine, capture, file, or export handle. Validation establishes structure
 //! and source membership, not semantic truth or usefulness.
 
