@@ -28,6 +28,6 @@ Compared the [previous notebook](assets/notebook-start-before.png) at base `43f6
 
 ## Remaining acceptance
 
-Integrate evaluator permission review, pause and disable into the notebook with unavailable processing when no adapter is registered. Keep this capture path independent, and test the complete flow before selecting or activating any concrete evaluator.
+[Evaluator permission controls](notebook-processing-controls.md) now share notebook status with this independent capture path, and the complete flow has fictional headless acceptance. No adapter is registered. Selecting and reviewing a concrete processing path remains a separate decision before activation.
 
 Separately check real macOS model preparation, permission cancellation, microphone release, queued transcript drain, device failure, app shutdown and cross-window focus. Keep Granola selected-note account import, signed installation/upgrades, device resource budgets and useful participation with preserved listening as independent release gates. This developer change is not a released or production-verified capability.

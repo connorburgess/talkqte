@@ -1,5 +1,6 @@
 // Browser tests only. This replaces the entry point through a Playwright route;
 // it never opens a device or ships in the application bundle.
+import { fictionalPermissions } from './processing-permissions';
 import * as granolaFixture from './native-granola';
 import { mockIPC } from '@tauri-apps/api/mocks';
 import { emit } from '@tauri-apps/api/event';
@@ -59,6 +60,21 @@ async function sendProcessing(value: Partial<ProcessingSnapshot>) {
   if (!new URLSearchParams(location.search).has('no-processing-events'))
     await emit('processing:changed', structuredClone(processing));
 }
+const permissionFixture = fictionalPermissions(
+  () => processing,
+  async (value) => {
+    await sendProcessing(value);
+    if (session?.live)
+      await publish({ cuesPaused: value.phase === 'paused', cue: null });
+  },
+);
+if (new URLSearchParams(location.search).has('processor'))
+  processing = {
+    ...processing,
+    ...permissionFixture.configuration(
+      new URLSearchParams(location.search).has('hosted'),
+    ),
+  };
 async function completeCaptureStop() {
   await send({
     status: 'off',
@@ -67,7 +83,12 @@ async function completeCaptureStop() {
     message: null,
   });
   await publish({ status: 'ended', cue: null, cuesPaused: false });
-  await sendProcessing({ capture: 'off', phase: 'ended' });
+  await sendProcessing({
+    capture: 'off',
+    phase: 'ended',
+    approved: null,
+    scopeRevision: processing.scopeRevision + 1,
+  });
 }
 async function beginStart() {
   operation += 1;
@@ -166,7 +187,14 @@ async function startLive() {
     cue: null,
   });
   await send({ status: 'listening', activity: 'active', canStart: false });
-  await sendProcessing({ capture: 'running', phase: 'off', startup: 'idle' });
+  await sendProcessing({
+    capture: 'running',
+    phase: 'off',
+    startup: 'idle',
+    session: `fictional-session-${operation}`,
+    approved: null,
+    scopeRevision: processing.scopeRevision + 1,
+  });
 }
 async function say(text: string, question?: string) {
   const id = `t1-0-${session.transcript.length}`;
@@ -203,6 +231,8 @@ mockIPC(
     ) {
       return granolaFixture.command(command, args);
     }
+    if (permissionFixture.commands.includes(command))
+      return permissionFixture.command(command, args);
     switch (command) {
       case 'processing_snapshot':
         if (delayProcessingSnapshot)
@@ -426,6 +456,7 @@ preview.connect((value) => {
 
 declare global {
   interface Window {
+    permissionTest: typeof permissionFixture;
     captureTest: {
       send: typeof sendProcessing;
       state: () => ProcessingSnapshot;
@@ -436,6 +467,7 @@ declare global {
       holdStop: () => void;
       releaseStop: () => void;
       failStop: () => void;
+      failSnapshot: () => void;
       holdDrain: () => void;
       holdName: () => void;
       holdPermission: () => void;
@@ -466,6 +498,7 @@ declare global {
     };
   }
 }
+window.permissionTest = permissionFixture;
 window.captureTest = {
   send: sendProcessing,
   state: () => structuredClone(processing),
@@ -481,6 +514,9 @@ window.captureTest = {
     heldCaptureStop = true;
   },
   releaseStop: () => releaseCaptureStop?.(),
+  failSnapshot: () => {
+    failProcessingSnapshot = true;
+  },
   failStop: () => {
     failCaptureStop = true;
   },

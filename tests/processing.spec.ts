@@ -433,7 +433,7 @@ test('a failed approval and missing processor do not invent processing or hide S
   );
   await page.getByRole('button', { name: 'Enable for this session' }).click();
   await expect(page.getByRole('alert')).toHaveText(
-    'Approval was not confirmed. Check the current status before trying again.',
+    'Approval was not confirmed. Check the status and review sources again before enabling.',
   );
   await expect(page.getByText('Processing off', { exact: true })).toBeVisible();
   await expect(page.getByText('PRIVATE_PROVIDER_ERROR')).toHaveCount(0);

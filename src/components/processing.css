@@ -147,3 +147,13 @@
     margin-top: 12px;
   }
 }
+
+.notebook-processing {
+  margin: 16px clamp(16px, 3vw, 44px) 0;
+}
+.notebook-processing .processing-panel {
+  max-width: none;
+}
+.processing-actions:empty {
+  display: none;
+}
