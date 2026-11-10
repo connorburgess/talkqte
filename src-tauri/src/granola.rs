@@ -447,6 +447,9 @@ struct Tool {
     ids_argument: Option<String>,
     /// The argument its schema names for a free-text question, if any.
     query_argument: Option<String>,
+    /// Every argument its schema names, so optional ones are sent only
+    /// where they exist.
+    arguments: Vec<String>,
 }
 
 /// An open MCP session with Granola, acting as the signed-in person.
@@ -522,15 +525,29 @@ impl Connection {
     /// Recent notes to choose from, and how many more the server listed
     /// than are shown.
     pub fn list_recent(&mut self) -> Result<(Vec<NoteSummary>, usize), SourceError> {
-        if self.tool("list_meetings").is_none() {
+        let Some(tool) = self.tool("list_meetings") else {
             return Err(SourceError::Unavailable);
+        };
+        // Granola lists the last 7 days unless told otherwise; the chooser
+        // promises 30. Attendees are left out: the chooser shows titles and
+        // dates, and names of other people are not needed.
+        let mut arguments = serde_json::Map::new();
+        if tool.arguments.iter().any(|name| name == "time_range") {
+            arguments.insert("time_range".into(), json!("last_30_days"));
+        }
+        if tool.arguments.iter().any(|name| name == "max_participants") {
+            arguments.insert("max_participants".into(), json!(0));
         }
         let result = self.call(
             "tools/call",
-            json!({ "name": "list_meetings", "arguments": {} }),
+            json!({ "name": "list_meetings", "arguments": arguments }),
         )?;
         trace("list_meetings result", &result);
-        trace("list_meetings output", &tool_output(&result));
+        let output = tool_output(&result);
+        trace("list_meetings output", &output);
+        if let Value::String(text) = &output {
+            trace_text("list_meetings text", text);
+        }
         let notes = notes_in(&tool_output(&result));
         let total = notes.len();
         let summaries: Vec<NoteSummary> = notes
@@ -700,6 +717,45 @@ fn trace(label: &str, value: &Value) {
     eprintln!("granola trace: {label}: {}", shape(value));
 }
 
+/// The layout of a text reply with its content blanked: every letter
+/// becomes `x` and every digit `9`, while tag names and attribute names
+/// inside `<...>` stay, so a tagged or Markdown list can be read for its
+/// shape (what is a title, what is a date) and nothing else. Cut at 2,000
+/// characters. Developer trace only, like `trace`.
+fn trace_text(label: &str, text: &str) {
+    if std::env::var_os("TALKQTE_GRANOLA_TRACE").is_none() {
+        return;
+    }
+    eprintln!("granola trace: {label}: {}", skeleton(text));
+}
+
+fn skeleton(text: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    let mut in_value = false;
+    for c in text.chars().take(2_000) {
+        match c {
+            '<' if !in_value => {
+                in_tag = true;
+                out.push(c);
+            }
+            '>' if in_tag && !in_value => {
+                in_tag = false;
+                out.push(c);
+            }
+            '"' if in_tag => {
+                in_value = !in_value;
+                out.push(c);
+            }
+            _ if in_tag && !in_value => out.push(c),
+            _ if c.is_ascii_digit() => out.push('9'),
+            _ if c.is_alphabetic() => out.push('x'),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 /// The structure of a value with no content: `"<str:12>"` for a string.
 fn shape(value: &Value) -> Value {
     match value {
@@ -745,10 +801,14 @@ fn tool_from(value: &Value) -> Option<Tool> {
                     .map(|(key, _)| key.clone())
             })
     });
+    let arguments = properties
+        .map(|properties| properties.keys().cloned().collect())
+        .unwrap_or_default();
     Some(Tool {
         name,
         ids_argument,
         query_argument,
+        arguments,
     })
 }
 
@@ -1324,7 +1384,7 @@ mod tests {
                         json!({"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}, "serverInfo": {"name": "fictional"}})
                     }
                     Some("tools/list") => json!({"tools": [
-                        {"name": "list_meetings", "inputSchema": {"type": "object", "properties": {}}},
+                        {"name": "list_meetings", "inputSchema": {"type": "object", "properties": {"time_range": {"type": "string"}, "max_participants": {"type": "integer"}}}},
                         {"name": "get_meetings", "inputSchema": {"type": "object", "properties": {"meeting_ids": {"type": "array", "items": {"type": "string"}}}}},
                         {"name": "query_granola_meetings", "inputSchema": {"type": "object", "properties": {"question": {"type": "string"}}}}
                     ]}),
@@ -1417,6 +1477,12 @@ mod tests {
                 "none before the server issues one"
             );
             assert!(seen[4].0.to_lowercase().contains("mcp-session-id: s-1"));
+            let listed: Value = serde_json::from_str(&seen[3].1).unwrap();
+            assert_eq!(
+                listed["params"]["arguments"],
+                json!({"time_range": "last_30_days", "max_participants": 0}),
+                "the chooser promises 30 days and needs no attendees"
+            );
             let asked: Value = serde_json::from_str(&seen[4].1).unwrap();
             assert_eq!(asked["params"]["arguments"]["meeting_ids"], json!(["m2"]));
             assert!(!format!("{connection:?}").contains("fictional-token"));
@@ -1606,6 +1672,10 @@ mod tests {
         assert_eq!(
             shaped,
             json!({"meetings": [{"id": "<str:2>", "title": "<str:20>", "notes": "<str:12>"}, {"id": "<str:2>"}, "<+1 more>"], "n": 3})
+        );
+        assert_eq!(
+            skeleton("<meeting id=\"m-1\" date=\"2026-11-10\">\n<title>Garden day</title> 3 notes</meeting>"),
+            "<meeting id=\"x-9\" date=\"9999-99-99\">\n<title>xxxxxx xxx</title> 9 xxxxx</meeting>"
         );
         assert!(!shaped.to_string().contains("Garden"));
     }
