@@ -50,6 +50,8 @@ For a subscription-only experiment, verify the active login and billing mode wit
 
 Use the vendor's normal sign-in flow and unmodified CLI. Do not extract session tokens or imitate private endpoints. A local CLI still sends selected context to a hosted model; it does not establish on-device inference. Begin with a bounded, user-started fictional replay, disable unnecessary tools and integrations, and verify local session storage and provider data settings before considering real conversations. Direct inference APIs and SDK-based product integration are deferred under the current no-API preference.
 
+The [processing and permission proposal](processing-plan.md) records the 10 November provider-documentation check, concrete source scope, failure behavior and dependency order. It enables no model or app inference.
+
 ## Production remains a separate decision
 
 Keep the semantic evaluator replaceable behind a narrow interface. A subscription experiment can test cue quality, but does not establish a dependable live service, acceptable tail latency, or frictionless onboarding. Do not require a coding subscription as the default distribution path without validating that choice with intended users. The local-first product plan remains the baseline; an optional hosted mode needs an explicit processing decision.

@@ -1,12 +1,12 @@
 # Development milestones
 
-Planning baseline, 8 November 2026. TalkQTE is progressing from a proof of concept toward a dependable AI meeting companion with supported integrations and broader platform availability. The stages describe intended capabilities, not release dates or a claim that they already work.
+Planning baseline, 8 November 2026; implementation status refreshed 10 November 2026. TalkQTE is progressing from a proof of concept toward a dependable AI meeting companion with supported integrations and broader platform availability. The stages describe intended capabilities, not release dates or a claim that they already work.
 
 **Proof of concept → live AI companion → connected workflows → broader platform availability.**
 
 ## 1. Proof of concept
 
-**Current:** the desktop prototype replays fictional dialogue and displays fixed questions from phrase rules. It provides a floating companion, source disclosure, pause, and dismissal. A separate opt-in microphone monitor reports signal activity; it does not transcribe or supply live cues.
+**Current:** the desktop prototype replays fictional dialogue and displays fixed questions from phrase rules. It provides a floating companion, source disclosure, pause, and dismissal. A separate opt-in microphone monitor reports signal activity only. A `local-whisper` developer build also offers Settings model setup and a user-started microphone transcription session using the same phrase rules; it does not capture the other side of a call or generate semantic cues.
 
 **Purpose:** establish a simple interaction for timely context and prompts. One cue appears, the user can inspect or dismiss it, and unused cues pass quietly. Questions are one possible cue type. Saving generated prompts is not part of this flow.
 
@@ -27,10 +27,11 @@ See the [cue intelligence plan](cue-intelligence.md) for bounded evaluation, run
 - Native focus, Spaces/full-screen, screen sharing, keyboard access, readability, and reduced motion are checked on the supported setup.
 - Meeting-use evaluation considers relevance, timing, missed opportunities, and the ability to keep listening. A passing build or a large number of generated cues is insufficient.
 
-**Next real-audio prerequisite:** run local transcription in a Rust-owned worker that feeds `Engine::ingest` with the session ID captured at start. The worker's bounded queue, cancellation, and session handling exist in `transcription.rs`, tested with a scripted recognizer. A feature-gated local Whisper recognizer now transcribes a fictional synthetic clip into a sourced question with the network denied ([check and result](local-transcription.md)). A real-time replay of a fictional two-voice meeting withdrew the question after a recognized answer. Ending during transcription stopped all further updates, and the engine refused the late lines. Still needed: model delivery and starting the worker from the app's own session controls.
-**Acceptance check:** on a named Mac, play a synthetic two-speaker clip in which one line leaves an owner open and a later line names one. With the network denied and no stored audio, the companion shows the question with the first line as its source and withdraws it after the answering line. Ending the session mid-transcription results in no further transcript or cue updates. Record transcript delay and worker memory. Until then, only Rust engine tests exercise this boundary. The lab's separate cached-transcript probe still feeds text through the demo input.
+**Current audio boundary:** a `local-whisper` developer build downloads and verifies the pinned speech model in Settings, then starts the Rust transcription worker from **Start live session**. The engine accepts source-linked lines for the active session. Fictional replay checks cover recognized questions/answers and late input after End; the [native validation record](native-validation.md#live-session-check) records a first microphone session, with timing, denial, device changes, Stop and cross-app checks still incomplete. Other apps' audio is not captured.
 
-The [bounded cue evaluator worker](cue-evaluator.md) now has an offline-tested request/decision contract, cancellation, deadlines, and stale-result rejection. Next engineering work connects that contract to the Rust cue lifecycle using a fictional evaluator, while both-side capture/transcription feasibility proceeds separately. Neither requires choosing a production model first. Rust retains lifecycle and permission control; model choice follows measured quality, timing, privacy, and operating constraints.
+**Next audio acceptance:** on a named Mac and audio setup, measure speech-to-line and cue delay, Stop/device release, denial and device-change recovery. Both sides of a synthetic call require a separately enabled capture adapter; microphone-only success does not prove that capability. Record whole-app resources alongside a call against the [agreed budgets](budgets.md), without storing audio.
+
+The [bounded evaluator](cue-evaluator.md) is connected to the Rust cue lifecycle through development-only transcript and selected-note constructors. Fictional tests cover source disclosure/revisions, hold, pause, dismissal, Stop, expiry and coalesced scheduling. Native app commands still construct the phrase-rule engine. The [processing proposal](processing-plan.md) defines the next independent engineering step: session-scoped permissions and availability with fictional adapters before selecting or activating a provider. Actual model latency, semantic source support and useful participation remain unvalidated; neither the bridge nor the subscription lab establishes production readiness.
 
 ## 3. Connected workflows
 
