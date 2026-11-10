@@ -6,6 +6,7 @@ import { emit } from '@tauri-apps/api/event';
 import { ProcessingControl } from '../../src/components/ProcessingControl';
 import {
   noteKey,
+  type ExpectedScope,
   type ProcessingReview,
   type ProcessingScope,
   type ProcessingSnapshot,
@@ -69,11 +70,18 @@ async function boundary(value: Partial<ProcessingSnapshot>) {
 mockIPC(
   async (command, args) => {
     calls.push({ command, args: structuredClone(args) });
-    const commandSession = state.session;
-    const commandScope = state.scopeRevision;
+    const requireScope = () => {
+      const expected = (args as { expected?: ExpectedScope }).expected;
+      if (
+        expected?.session !== state.session ||
+        expected?.scopeRevision !== state.scopeRevision
+      )
+        throw 'scope_changed';
+    };
     // Capture review/snapshot BEFORE the held reply to exercise stale messages.
     let response: ProcessingReview | undefined;
     if (command === 'review_processing_scope') {
+      requireScope();
       const scope = (args as { scope: ProcessingScope }).scope;
       response = {
         id: `review-${++reviewNumber}`,
@@ -131,6 +139,7 @@ mockIPC(
         return;
       }
       case 'revoke_processing':
+        requireScope();
         await boundary({
           phase: 'off',
           approved: null,
@@ -138,16 +147,15 @@ mockIPC(
           lastDecision: null,
         });
         return;
-      case 'set_live_cues_paused':
+      case 'set_processing_paused':
+        requireScope();
         if (
-          commandSession !== state.session ||
-          commandScope !== state.scopeRevision ||
           !state.approved ||
           state.capture !== 'running' ||
           !['active', 'paused'].includes(state.phase)
         )
           throw 'scope_changed';
-        await send({
+        await boundary({
           phase: (args as { paused: boolean }).paused ? 'paused' : 'active',
           lastDecision: null,
         });

@@ -72,6 +72,7 @@ test('default off, exact source identities, and explicit hosted confirmation', a
     {
       command: 'review_processing_scope',
       args: {
+        expected: { session: 'fictional-garden', scopeRevision: 1 },
         scope: {
           conversation: 'recentAndNewSpeech',
           notes: [{ provider: 'file', sourceId: 'garden', revision: 1 }],
@@ -119,6 +120,77 @@ test('keyboard cancellation restores focus and forgets a draft', async ({
   expect(await calls(page, 'cancel_processing_review')).toHaveLength(1);
   expect(await calls(page, 'approve_processing_scope')).toEqual([]);
 });
+
+test('processing controls send only the originating session and scope', async ({
+  page,
+}) => {
+  await open(page);
+  await enable(page);
+  await page.getByRole('button', { name: 'Pause cues' }).click();
+  await page.getByRole('button', { name: 'Resume cues' }).click();
+  await page.getByRole('button', { name: 'Disable processing' }).click();
+  expect(await calls(page, 'set_processing_paused')).toEqual([
+    {
+      command: 'set_processing_paused',
+      args: {
+        expected: { session: 'fictional-garden', scopeRevision: 2 },
+        paused: true,
+      },
+    },
+    {
+      command: 'set_processing_paused',
+      args: {
+        expected: { session: 'fictional-garden', scopeRevision: 3 },
+        paused: false,
+      },
+    },
+  ]);
+  expect(await calls(page, 'revoke_processing')).toEqual([
+    {
+      command: 'revoke_processing',
+      args: {
+        expected: { session: 'fictional-garden', scopeRevision: 4 },
+      },
+    },
+  ]);
+  expect(await calls(page, 'set_live_cues_paused')).toEqual([]);
+  await expect(page.getByText(/Microphone is on/)).toBeVisible();
+});
+
+for (const replacement of ['sources', 'session']) {
+  test(`delayed Disable cannot revoke fresh approval after changed ${replacement}`, async ({
+    page,
+  }) => {
+    await open(page);
+    await enable(page);
+    await page.evaluate(() => window.processingTest.hold('revoke_processing'));
+    await page.getByRole('button', { name: 'Disable processing' }).click();
+    await page.evaluate(
+      (replacement) =>
+        replacement === 'sources'
+          ? window.processingTest.replaceSources()
+          : window.processingTest.newSession(),
+      replacement,
+    );
+    await enable(page);
+    const snapshots = (await calls(page, 'processing_snapshot')).length;
+    await page.evaluate(() =>
+      window.processingTest.release('revoke_processing'),
+    );
+    await expect
+      .poll(async () => (await calls(page, 'processing_snapshot')).length)
+      .toBe(snapshots + 1);
+    await expect(
+      page.getByText('Processing on', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Pause cues' }),
+    ).toBeEnabled();
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    expect(await calls(page, 'revoke_processing')).toHaveLength(1);
+    expect(await calls(page, 'approve_processing_scope')).toHaveLength(2);
+  });
+}
 
 test('Pause and Disable preserve capture; Stop waits for capture confirmation', async ({
   page,
@@ -389,7 +461,7 @@ for (const action of ['Pause cues', 'Resume cues']) {
     if (action === 'Resume cues')
       await page.getByRole('button', { name: 'Pause cues' }).click();
     await page.evaluate(() =>
-      window.processingTest.hold('set_live_cues_paused'),
+      window.processingTest.hold('set_processing_paused'),
     );
     await page.getByRole('button', { name: action }).click();
     await page.getByRole('button', { name: 'Stop live session' }).click();
@@ -399,7 +471,7 @@ for (const action of ['Pause cues', 'Resume cues']) {
     await page.evaluate(() => window.processingTest.newSession());
     const snapshots = (await calls(page, 'processing_snapshot')).length;
     await page.evaluate(() =>
-      window.processingTest.release('set_live_cues_paused'),
+      window.processingTest.release('set_processing_paused'),
     );
     await expect
       .poll(async () => (await calls(page, 'processing_snapshot')).length)

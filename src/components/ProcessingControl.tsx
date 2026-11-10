@@ -158,7 +158,7 @@ export function ProcessingControl() {
     setBusy('review');
     setError('');
     try {
-      const result = await processingApi.review(scope);
+      const result = await processingApi.review(snapshot, scope);
       if (!alive.current || ticket !== serial.current) {
         void processingApi.cancel(result.id).catch(() => {});
         return;
@@ -337,7 +337,7 @@ export function ProcessingControl() {
             className="secondary-button"
             disabled={!!busy}
             onClick={() =>
-              void act('pause', () => processingApi.pause(!paused))
+              void act('pause', () => processingApi.pause(snapshot!, !paused))
             }
           >
             {paused ? <Play size={17} /> : <Pause size={17} />}
@@ -350,7 +350,9 @@ export function ProcessingControl() {
             disabled={
               busy === 'disable' || busy === 'stop' || capture === 'stopping'
             }
-            onClick={() => void act('disable', processingApi.disable)}
+            onClick={() =>
+              void act('disable', () => processingApi.disable(snapshot!))
+            }
           >
             Disable processing
           </button>

@@ -40,8 +40,8 @@ pub enum LastDecision {
     Cue,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NoteSelection {
     pub provider: Provider,
     pub source_id: String,
@@ -71,8 +71,8 @@ impl From<&ContextItem> for NoteSummary {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Scope {
     pub conversation: ConversationScope,
     pub notes: Vec<NoteSelection>,
@@ -140,6 +140,20 @@ struct ScopeKey {
     stopping: bool,
 }
 
+impl ScopeKey {
+    fn for_engine(engine: &Engine) -> Self {
+        Self {
+            owner: engine.identity.clone(),
+            session: engine.session(),
+            permission: engine.evaluation.as_ref().map(|s| s.permission.generation),
+            context: engine.processing_context_fingerprint(),
+            status: engine.state.status,
+            paused: engine.state.cues_paused,
+            stopping: engine.is_live_stopping(),
+        }
+    }
+}
+
 impl PartialEq for ScopeKey {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.owner, &other.owner)
@@ -160,18 +174,20 @@ pub struct ProcessingTracker {
 }
 
 impl ProcessingTracker {
+    /// Validate the originating UI scope against current native authority,
+    /// including changes not yet published. Do not consume an event revision.
+    pub(crate) fn scope_is_current(&self, engine: &Engine, session: &str, revision: u64) -> bool {
+        self.previous.as_ref().is_some_and(|(key, snapshot)| {
+            snapshot.session == session
+                && snapshot.scope_revision == revision
+                && *key == ScopeKey::for_engine(engine)
+        })
+    }
+
     /// Called under the native runtime lock. The boolean marks an event-worthy
     /// change; polling the clock or reading unchanged status emits nothing.
     pub fn update(&mut self, engine: &Engine, capture: CaptureState) -> (ProcessingSnapshot, bool) {
-        let key = ScopeKey {
-            owner: engine.identity.clone(),
-            session: engine.session(),
-            permission: engine.evaluation.as_ref().map(|s| s.permission.generation),
-            context: engine.processing_context_fingerprint(),
-            status: engine.state.status,
-            paused: engine.state.cues_paused,
-            stopping: engine.is_live_stopping(),
-        };
+        let key = ScopeKey::for_engine(engine);
         let (mut revision, mut scope_revision) =
             self.previous.as_ref().map_or((0, 0), |(old, s)| {
                 (
@@ -199,7 +215,7 @@ impl ProcessingTracker {
 }
 
 impl Engine {
-    fn processing_snapshot(
+    pub(crate) fn processing_snapshot(
         &self,
         capture: CaptureState,
         scope_revision: u64,

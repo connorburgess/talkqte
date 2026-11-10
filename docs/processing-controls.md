@@ -15,7 +15,7 @@ This checks the permission flow before activating a provider. It does not establ
 
 ## Headless evidence
 
-`tests/processing.spec.ts` covers these behaviors with fictional IPC. All 21 Chromium checks passed on 10 November 2026, including keyboard cancellation and focus, delayed approval and Pause/Resume after Stop/new session, source revision changes, rejected scope, missing processor, empty and oversized context, failure recovery, and a long source title at a 320 × 560 viewport with reduced motion. Two further checks cover starting/unknown capture with Stop available and capture off while the session finishes. The layout has no horizontal overflow and its buttons remain at least 48 pixels high.
+`tests/processing.spec.ts` covers these behaviors with fictional IPC. All 24 Chromium checks passed on 10 November 2026, including keyboard cancellation and focus, delayed approval and Pause/Resume after Stop/new session, source revision changes, rejected scope, missing processor, empty and oversized context, failure recovery, and a long source title at a 320 × 560 viewport with reduced motion. Capture checks cover starting/unknown capture with Stop available and capture off while the session finishes. Three command checks verify originating session/scope arguments and delayed Disable after source/session replacement. The layout has no horizontal overflow and its buttons remain at least 48 pixels high.
 
 Run the scoped checks with a free local port:
 
@@ -35,11 +35,10 @@ The screenshots use only fictional content. They show the test harness, not an a
 
 ## Next integration blocker
 
-The read-only `processing_snapshot` command and main-window `processing:changed` event now have a [native implementation](native-processing-status.md). Review/approval/cancellation and guarded mutation handlers remain a **proposed contract**. Browser tests still use fictional IPC. Before mounting this component in the app:
+The read-only `processing_snapshot` command and main-window `processing:changed` event have a [native implementation](native-processing-status.md). Review/approval/cancellation and session/scope-bound Disable/Pause/Resume now have [native handlers and fictional acceptance](native-processing-commands.md). Browser tests still use fictional IPC. Before mounting this component in the app:
 
-1. Implement the native controller over the [Rust permission boundary](cue-evaluator.md#session-processing-permission). Generate opaque reviews in Rust; validate processor configuration, session, permission generation, exact note revisions/content and input bounds under the session lock. Never accept a frontend-provided processor, destination or policy as authority.
-2. Use the native snapshot/scope revisions and bounded review store when binding commands. Capture can be unknown or starting; microphone release and the session finishing its queued transcript are separate states. Source changes must not silently expand a grant.
-3. Prove command/event ordering, late approval, note changes, cancellation and failure transitions with fictional native adapters. Bind any deferred Pause/Resume transition to the session and permission generation at command entry; it cannot act on a newer or unapproved session. A frontend cancellation alone cannot revoke a native grant. Stop must revoke processing before following the existing capture-stop path; an executing adapter may still hold input until it cooperates or returns.
-4. Review the complete concrete adapter and app integration, including existing microphone/privacy copy, before any separately authorized trial. A hosted processor must not coexist with a claim that its submitted transcript stays on-device. Confirm adapter availability and policy before showing an approval flow.
+1. Bind capture Stop to its originating session/generation, including independent microphone monitoring and model startup. Source changes must not block Stop; late teardown cannot stop replacement capture. Keep microphone release distinct from finishing queued transcription.
+2. Integrate the guarded commands and native events without weakening exact source/processor review. Preserve explicit cancellation and bounded errors; no frontend cancellation alone revokes a native grant. Verify the complete start/review/pause/disable/Stop/recovery flow headlessly and in the native target environment.
+3. Review the complete concrete adapter and app integration, including existing microphone/privacy copy, before any separately authorized trial. A hosted processor must not coexist with a claim that its submitted transcript stays on-device. Confirm adapter availability and policy before showing an approval flow.
 
 Continue the [processing acceptance sequence](processing-plan.md#acceptance-and-dependency-order). The native controller and fake-adapter checks are independently actionable; provider activation and any new inference remain separate decisions.

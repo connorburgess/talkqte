@@ -1,5 +1,5 @@
-//! Bounded native review ownership for the future command/event controller.
-//! No app command or provider is enabled here. A review ID identifies a stored
+//! Bounded native review ownership for the command/event controller.
+//! No provider is enabled here. A review ID identifies a stored
 //! Rust review; it cannot supply new sources, a destination or an executable.
 use crate::{
     context::Provider,
@@ -87,6 +87,7 @@ impl Reviews {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::processing_commands::{Error as CommandError, ExpectedScope};
     use crate::{
         context::ContextItem,
         cue_evaluator::{Cancellation, Evaluator, Failure, Request, Worker},
@@ -181,6 +182,258 @@ mod tests {
                 },
             )
             .unwrap();
+    }
+
+    fn expected(r: &mut Runtime) -> ExpectedScope {
+        let (s, _) = r
+            .processing_status
+            .update(&r.engine, crate::engine::CaptureState::Running);
+        ExpectedScope {
+            session: s.session,
+            scope_revision: s.scope_revision,
+        }
+    }
+
+    fn scope(notes: &[ContextItem]) -> crate::engine::Scope {
+        crate::engine::Scope {
+            conversation: ConversationScope::NewSpeechOnly,
+            notes: notes
+                .iter()
+                .map(|n| crate::engine::NoteSelection {
+                    provider: n.provider,
+                    source_id: n.source_id.clone(),
+                    revision: n.revision,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn native_review_discloses_exact_metadata_and_only_approval_dispatches() {
+        let (mut r, calls) = runtime();
+        let a = note(Provider::File, "one");
+        let b = note(Provider::Granola, "one");
+        r.engine.set_notes(vec![a.clone(), b.clone()]);
+        let guard = expected(&mut r);
+        let review = r
+            .review_processing_scope(&guard, scope(std::slice::from_ref(&b)))
+            .unwrap();
+        let serialized = serde_json::to_string(&review).unwrap();
+        assert!(!serialized.contains(&a.excerpt));
+        assert!(!serialized.contains("excerpt"));
+        assert_eq!(review.notes.len(), 1);
+        assert_eq!(review.notes[0].source.provider, Provider::Granola);
+        assert_eq!(review.scope, scope(&[b]));
+        assert_eq!(review.session, guard.session);
+        assert_eq!(review.scope_revision, guard.scope_revision);
+        assert_eq!(review.processor.name, "Fictional worker");
+        assert!(calls.try_recv().is_err());
+        assert!(!r.engine.has_processing_permission());
+        r.approve_processing_scope(&review.id).unwrap();
+        assert_eq!(
+            r.approve_processing_scope(&review.id),
+            Err(CommandError::ScopeChanged)
+        );
+        line(&mut r);
+        assert_eq!(
+            calls
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap()
+                .sources()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn deferred_controls_reject_changed_sources_even_before_the_event_is_published() {
+        for published in [false, true] {
+            for field in ["content", "revision", "title", "date", "add", "remove"] {
+                let (mut r, _calls) = runtime();
+                let original = note(Provider::File, "one");
+                r.engine.set_notes(vec![original.clone()]);
+                // The note is unapproved: changing it must not revoke this grant.
+                let guard = expected(&mut r);
+                let review = r.review_processing_scope(&guard, scope(&[])).unwrap();
+                r.approve_processing_scope(&review.id).unwrap();
+                let old = expected(&mut r);
+                let mut changed = original;
+                match field {
+                    "content" => changed.excerpt = "A revised fictional guide.".into(),
+                    "revision" => changed.revision += 1,
+                    "title" => changed.title = "Changed garden title".into(),
+                    "date" => changed.source_date = "2026-11-02".into(),
+                    _ => (),
+                }
+                let notes = match field {
+                    "add" => vec![changed, note(Provider::Granola, "two")],
+                    "remove" => vec![],
+                    _ => vec![changed],
+                };
+                r.engine.set_notes(notes);
+                if published {
+                    expected(&mut r);
+                }
+                assert!(matches!(
+                    r.review_processing_scope(&old, scope(&[])),
+                    Err(CommandError::ScopeChanged)
+                ));
+                assert_eq!(
+                    r.pause_processing(&old, true),
+                    Err(CommandError::ScopeChanged)
+                );
+                assert_eq!(
+                    r.pause_processing(&old, false),
+                    Err(CommandError::ScopeChanged)
+                );
+                assert_eq!(r.disable_processing(&old), Err(CommandError::ScopeChanged));
+                assert!(r.engine.has_processing_permission());
+                assert!(!r.engine.state.cues_paused);
+                let fresh = expected(&mut r);
+                r.pause_processing(&fresh, true).unwrap();
+                assert!(r.engine.state.cues_paused);
+                assert!(r.live.is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn old_controls_cannot_change_a_new_grant_or_a_replacement_engine_with_same_session() {
+        let (mut r, _calls) = runtime();
+        let before = expected(&mut r);
+        let review = r.review_processing_scope(&before, scope(&[])).unwrap();
+        r.approve_processing_scope(&review.id).unwrap();
+        assert_eq!(
+            r.disable_processing(&before),
+            Err(CommandError::ScopeChanged)
+        );
+        let old = expected(&mut r);
+        let (replacement, _other_calls) = runtime();
+        assert_eq!(r.engine.session(), replacement.engine.session());
+        r.engine = replacement.engine;
+        assert_eq!(
+            r.pause_processing(&old, true),
+            Err(CommandError::ScopeChanged)
+        );
+        assert!(matches!(
+            r.review_processing_scope(&old, scope(&[])),
+            Err(CommandError::ScopeChanged)
+        ));
+        let fresh = expected(&mut r);
+        let review = r.review_processing_scope(&fresh, scope(&[])).unwrap();
+        r.approve_processing_scope(&review.id).unwrap();
+        assert_eq!(r.disable_processing(&old), Err(CommandError::ScopeChanged));
+        assert!(r.engine.has_processing_permission());
+    }
+
+    #[test]
+    fn scoped_pause_resume_and_disable_preserve_capture_and_require_fresh_authority() {
+        let (mut r, _calls) = runtime();
+        let off = expected(&mut r);
+        assert_eq!(
+            r.pause_processing(&off, false),
+            Err(CommandError::SessionInactive)
+        );
+        let review = r.review_processing_scope(&off, scope(&[])).unwrap();
+        r.approve_processing_scope(&review.id).unwrap();
+        let active = expected(&mut r);
+        r.pause_processing(&active, true).unwrap();
+        assert_eq!(
+            r.pause_processing(&active, false),
+            Err(CommandError::ScopeChanged)
+        );
+        let paused = expected(&mut r);
+        r.pause_processing(&paused, false).unwrap();
+        let resumed = expected(&mut r);
+        r.disable_processing(&resumed).unwrap();
+        assert!(r.live.is_some());
+        assert_eq!(r.engine.state.status, Status::Running);
+        assert!(!r.engine.has_processing_permission());
+        assert_eq!(
+            r.pause_processing(&paused, false),
+            Err(CommandError::ScopeChanged)
+        );
+    }
+
+    #[test]
+    fn stop_rejects_current_and_delayed_processing_commands_during_drain() {
+        let (mut r, _calls) = runtime();
+        let guard = expected(&mut r);
+        let review = r.review_processing_scope(&guard, scope(&[])).unwrap();
+        let _live = r.take_live_for_stop().unwrap();
+        assert_eq!(
+            r.approve_processing_scope(&review.id),
+            Err(CommandError::ScopeChanged)
+        );
+        assert_eq!(
+            r.pause_processing(&guard, false),
+            Err(CommandError::ScopeChanged)
+        );
+        let stopping = expected(&mut r);
+        assert!(matches!(
+            r.review_processing_scope(&stopping, scope(&[])),
+            Err(CommandError::SessionInactive)
+        ));
+        assert_eq!(
+            r.pause_processing(&stopping, false),
+            Err(CommandError::SessionInactive)
+        );
+        r.disable_processing(&stopping).unwrap();
+        assert!(r.engine.is_live_stopping());
+        assert!(!r.engine.has_processing_permission());
+    }
+
+    #[test]
+    fn invalid_ipc_selection_and_cancel_leave_a_valid_review_intact() {
+        let (mut r, _calls) = runtime();
+        let guard = expected(&mut r);
+        let review = r.review_processing_scope(&guard, scope(&[])).unwrap();
+        let missing = note(Provider::File, "missing");
+        for notes in [vec![missing.clone()], vec![missing; 21]] {
+            assert!(matches!(
+                r.review_processing_scope(&guard, scope(&notes)),
+                Err(CommandError::InvalidScope)
+            ));
+        }
+        for id in ["".to_string(), "x".repeat(10000), "0".repeat(64)] {
+            assert_eq!(
+                r.approve_processing_scope(&id),
+                Err(CommandError::ScopeChanged)
+            );
+            let _ = r.cancel_processing_review(&id);
+        }
+        r.approve_processing_scope(&review.id).unwrap();
+        let fresh = expected(&mut r);
+        let review = r.review_processing_scope(&fresh, scope(&[])).unwrap();
+        r.cancel_processing_review(&review.id).unwrap();
+        assert_eq!(
+            r.approve_processing_scope(&review.id),
+            Err(CommandError::ScopeChanged)
+        );
+        assert!(r.engine.has_processing_permission());
+        let mut ordinary = Runtime::default();
+        let guard = expected(&mut ordinary);
+        assert!(matches!(
+            ordinary.review_processing_scope(&guard, scope(&[])),
+            Err(CommandError::Unavailable)
+        ));
+    }
+
+    #[test]
+    fn ipc_scope_rejects_disclosure_injection_unknown_providers_and_invalid_revisions() {
+        for value in [
+            serde_json::json!({"conversation":"newSpeechOnly","notes":[],"destination":"untrusted"}),
+            serde_json::json!({"conversation":"allHistory","notes":[]}),
+            serde_json::json!({"conversation":"newSpeechOnly","notes":[{"provider":"unknown","sourceId":"one","revision":1}]}),
+            serde_json::json!({"conversation":"newSpeechOnly","notes":[{"provider":"file","sourceId":"one","revision":-1}]}),
+            serde_json::json!({"conversation":"newSpeechOnly","notes":[{"provider":"file","sourceId":"one","revision":1,"excerpt":"untrusted"}]}),
+        ] {
+            assert!(serde_json::from_value::<crate::engine::Scope>(value).is_err());
+        }
+        assert!(serde_json::from_value::<ExpectedScope>(
+            serde_json::json!({"session":"1","scopeRevision":1,"processor":"untrusted"})
+        )
+        .is_err());
     }
 
     #[test]

@@ -11,7 +11,10 @@ pub use permission::{
     ConversationScope, ProcessingError, ProcessingLocation, ProcessingReview,
     ProcessorConfiguration, ProcessorDisclosure,
 };
-pub use projection::{CaptureState, ProcessingSnapshot, ProcessingTracker};
+pub use projection::{
+    CaptureState, NoteSelection, NoteSummary, ProcessingSnapshot, ProcessingTracker,
+    ProcessorSummary, Scope,
+};
 
 const RECENT_LINES: usize = 6;
 

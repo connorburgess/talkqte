@@ -12,6 +12,7 @@ mod live_control;
 mod microphone;
 pub mod model;
 pub mod notes_file;
+mod processing_commands;
 pub mod processing_reviews;
 pub mod transcription;
 
@@ -1239,6 +1240,11 @@ pub fn run() {
         .manage(microphone::Controller::default())
         .manage(ModelDownload::default())
         .invoke_handler(tauri::generate_handler![
+            processing_commands::review_processing_scope,
+            processing_commands::approve_processing_scope,
+            processing_commands::cancel_processing_review,
+            processing_commands::revoke_processing,
+            processing_commands::set_processing_paused,
             processing_snapshot,
             snapshot,
             start_demo,

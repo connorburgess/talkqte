@@ -1,5 +1,5 @@
-/** Native read-only snapshot/event; mutation commands remain a proposed
- * contract exercised through fictional IPC. The app does not mount it yet. */
+/** Native status and guarded processing commands. The surface remains test-
+ * mounted; capture Stop and app/provider activation are separate gates. */
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
@@ -57,6 +57,14 @@ export interface ProcessingReview {
   scope: ProcessingScope;
   notes: ProcessingNote[];
 }
+export type ExpectedScope = Pick<
+  ProcessingSnapshot,
+  'session' | 'scopeRevision'
+>;
+const expectedScope = ({ session, scopeRevision }: ExpectedScope) => ({
+  session,
+  scopeRevision,
+});
 export const noteKey = (note: NoteSelection) =>
   JSON.stringify([note.provider, note.sourceId, note.revision]);
 export const processingApi = {
@@ -65,11 +73,19 @@ export const processingApi = {
     listen<ProcessingSnapshot>('processing:changed', ({ payload }) =>
       receive(payload),
     ),
-  review: (scope: ProcessingScope) =>
-    invoke<ProcessingReview>('review_processing_scope', { scope }),
+  review: (expected: ExpectedScope, scope: ProcessingScope) =>
+    invoke<ProcessingReview>('review_processing_scope', {
+      expected: expectedScope(expected),
+      scope,
+    }),
   approve: (id: string) => invoke<void>('approve_processing_scope', { id }),
   cancel: (id: string) => invoke<void>('cancel_processing_review', { id }),
-  disable: () => invoke<void>('revoke_processing'),
-  pause: (paused: boolean) => invoke<void>('set_live_cues_paused', { paused }),
+  disable: (expected: ExpectedScope) =>
+    invoke<void>('revoke_processing', { expected: expectedScope(expected) }),
+  pause: (expected: ExpectedScope, paused: boolean) =>
+    invoke<void>('set_processing_paused', {
+      expected: expectedScope(expected),
+      paused,
+    }),
   stop: () => invoke<void>('stop_live_session'),
 };

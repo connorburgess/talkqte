@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 mod evaluation;
 pub use evaluation::{
     CaptureState, ConversationScope, EvaluationIssue, EvaluationOutcome, EvaluationStatus,
-    ProcessingError, ProcessingLocation, ProcessingReview, ProcessingSnapshot, ProcessingTracker,
-    ProcessorConfiguration, ProcessorDisclosure,
+    NoteSelection, NoteSummary, ProcessingError, ProcessingLocation, ProcessingReview,
+    ProcessingSnapshot, ProcessingTracker, ProcessorConfiguration, ProcessorDisclosure,
+    ProcessorSummary, Scope,
 };
 
 const CUE_MS: u64 = 18_000;
