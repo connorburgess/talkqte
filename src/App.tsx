@@ -406,6 +406,7 @@ function Notebook() {
   const [search, setSearch] = useState('');
   const [notes, setNotes] = useState('');
   const [userName, setUserName] = useState('');
+  const [nameError, setNameError] = useState('');
   const [focus, setFocus] = useState('');
   // Granola's assistant can propose focus lines; offered only when the
   // connection exists and the server lists that tool.
@@ -507,8 +508,11 @@ function Notebook() {
       closeSuggestions();
     });
   const initialized = useRef(false);
-  // Enter followed by leaving a field saves once, not twice.
-  const savingName = useRef(false);
+  // Ordered name saves must not replace edits made while a reply is pending.
+  const nameEdit = useRef(0);
+  const confirmedName = useRef('');
+  const pendingName = useRef<{ value: string; edit: number } | null>(null);
+  // Enter followed by leaving the Focus field saves once, not twice.
   const savingFocus = useRef(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
@@ -600,6 +604,7 @@ function Notebook() {
       engineNotes.current = state.notes;
       setNotes(state.notes);
       setUserName(state.userName ?? '');
+      confirmedName.current = state.userName ?? '';
       setFocus(state.focus.join('\n'));
     }
   }, [state]);
@@ -700,26 +705,41 @@ function Notebook() {
       }
     });
   };
-  // Saving the name leaves other controls enabled and focus where it is. A
-  // rejected name puts the field back to the name in effect.
+  // Saving the name leaves other controls enabled and focus where it is. Only
+  // an untouched rejected submission reverts to the last confirmed name.
   const saveName = () => {
     const next = userName.trim();
-    const current = state.userName ?? '';
-    if (next === current) {
-      setUserName(current);
+    if (!pendingName.current && next === confirmedName.current) {
+      setUserName(next);
+      setNameError('');
       return;
     }
-    if (savingName.current) return;
-    savingName.current = true;
+    // Deduplicate Enter followed by blur, but queue a different submission.
+    if (pendingName.current?.value === next) {
+      pendingName.current.edit = nameEdit.current;
+      return;
+    }
+    const request = { value: next, edit: nameEdit.current };
+    pendingName.current = request;
     bridge
       .command('set_user_name', { name: next || null })
-      .then(() => setUserName(next))
+      .then(() => {
+        confirmedName.current = next;
+        if (pendingName.current === request) setNameError('');
+        if (
+          pendingName.current === request &&
+          nameEdit.current === request.edit
+        )
+          setUserName(next);
+      })
       .catch((e: unknown) => {
-        setError(e instanceof Error ? e.message : String(e));
-        setUserName(current);
+        if (pendingName.current !== request) return;
+        setNameError(e instanceof Error ? e.message : String(e));
+        if (nameEdit.current === request.edit)
+          setUserName(confirmedName.current);
       })
       .finally(() => {
-        savingName.current = false;
+        if (pendingName.current === request) pendingName.current = null;
       });
   };
   const saveFocus = () => {
@@ -1575,18 +1595,34 @@ function Notebook() {
                 <label htmlFor="user-name">Name</label>
                 <input
                   id="user-name"
-                  aria-describedby="user-name-help"
+                  aria-describedby={
+                    nameError
+                      ? 'user-name-help user-name-error'
+                      : 'user-name-help'
+                  }
                   type="text"
                   value={userName}
                   maxLength={40}
                   autoComplete="off"
                   spellCheck={false}
-                  onChange={(e) => setUserName(e.target.value)}
+                  onChange={(e) => {
+                    nameEdit.current++;
+                    setUserName(e.target.value);
+                  }}
                   onBlur={saveName}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') saveName();
                   }}
                 />
+                {nameError && (
+                  <p
+                    id="user-name-error"
+                    className="setting-error"
+                    role="alert"
+                  >
+                    Name wasn't changed. {nameError} Edit the name to try again.
+                  </p>
+                )}
               </div>
             </section>
             <section className="setting">

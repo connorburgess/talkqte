@@ -44,6 +44,7 @@ let heldCaptureStop = false;
 let releaseCaptureStop: (() => void) | undefined;
 let heldDrain = false;
 let heldName = false;
+const nameSubmissions: (string | null)[] = [];
 let heldPermission = false;
 let releasePermission: (() => void) | undefined;
 let releaseName: (() => void) | undefined;
@@ -321,6 +322,7 @@ mockIPC(
         });
         return;
       case 'set_user_name': {
+        nameSubmissions.push((args as Commands['set_user_name']).name);
         if (heldName) {
           heldName = false;
           await new Promise<void>((resolve) => {
@@ -478,6 +480,10 @@ preview.connect((value) => {
 
 declare global {
   interface Window {
+    nameTest: {
+      submissions: (string | null)[];
+      current: () => string | null;
+    };
     permissionTest: typeof permissionFixture;
     captureTest: {
       send: typeof sendProcessing;
@@ -569,6 +575,10 @@ window.questionTest = {
     delayQuestionResponse = true;
   },
   releaseResponse: () => releaseQuestionResponse?.(),
+};
+window.nameTest = {
+  submissions: nameSubmissions,
+  current: () => session.userName,
 };
 window.liveTest = {
   start: startLive,
