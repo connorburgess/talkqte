@@ -400,10 +400,15 @@ test('the compact companion can pause cues without hiding microphone state or St
     expect(box!.x + box!.width).toBeLessThanOrEqual(320);
     expect(box!.height).toBeGreaterThanOrEqual(44);
   }
-  const fits = await page
-    .locator('.companion-title')
-    .evaluate((el) => el.scrollWidth <= el.clientWidth);
-  expect(fits).toBe(true);
+  for (const selector of [
+    '.companion-title',
+    '.companion-status > [role=status]',
+  ]) {
+    const fits = await page
+      .locator(selector)
+      .evaluate((el) => el.scrollWidth <= el.clientWidth);
+    expect(fits, selector).toBe(true);
+  }
   await page.getByRole('button', { name: 'Resume cues' }).click();
   await expect(page.getByRole('status')).toHaveText('Mic on · Local');
   await page.getByRole('button', { name: 'Stop live session' }).click();

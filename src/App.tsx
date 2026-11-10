@@ -102,7 +102,10 @@ function FloatingQuestion() {
           <>
             {/* The bar is the handle: the native window follows a drag on
                 it or on its text, and remembers where it was put. */}
-            <header className="companion-bar" data-tauri-drag-region>
+            <header
+              className={`companion-bar${live ? ' companion-bar-live' : ''}`}
+              data-tauri-drag-region
+            >
               <div className="companion-status" data-tauri-drag-region>
                 <strong className="companion-title" data-tauri-drag-region>
                   {mic?.status === 'listening' && (

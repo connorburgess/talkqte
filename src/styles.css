@@ -1214,6 +1214,12 @@ svg {
   min-height: 64px;
   padding: 8px 12px;
 }
+/* Four live controls keep 44px targets; leave room for both status lines
+   even with wider platform fallback fonts at the compact 320px width. */
+.companion-bar-live {
+  gap: 4px;
+  padding-inline: 8px;
+}
 .companion-status {
   display: grid;
   gap: 1px;
