@@ -44,6 +44,10 @@ let heldCaptureStop = false;
 let releaseCaptureStop: (() => void) | undefined;
 let heldDrain = false;
 let heldName = false;
+let heldFocus = false;
+let releaseFocus: (() => void) | undefined;
+let completedFocus = 0;
+const focusSubmissions: string[][] = [];
 const nameSubmissions: (string | null)[] = [];
 let heldPermission = false;
 let releasePermission: (() => void) | undefined;
@@ -321,6 +325,21 @@ mockIPC(
           message: null,
         });
         return;
+      case 'set_focus': {
+        const { lines } = args as Commands['set_focus'];
+        focusSubmissions.push([...lines]);
+        if (heldFocus) {
+          heldFocus = false;
+          await new Promise<void>((resolve) => {
+            releaseFocus = resolve;
+          });
+        }
+        try {
+          return preview.command('set_focus', { lines });
+        } finally {
+          completedFocus++;
+        }
+      }
       case 'set_user_name': {
         nameSubmissions.push((args as Commands['set_user_name']).name);
         if (heldName) {
@@ -480,6 +499,13 @@ preview.connect((value) => {
 
 declare global {
   interface Window {
+    focusTest: {
+      submissions: string[][];
+      current: () => string[];
+      completed: () => number;
+      hold: () => void;
+      release: () => void;
+    };
     nameTest: {
       submissions: (string | null)[];
       current: () => string | null;
@@ -575,6 +601,15 @@ window.questionTest = {
     delayQuestionResponse = true;
   },
   releaseResponse: () => releaseQuestionResponse?.(),
+};
+window.focusTest = {
+  submissions: focusSubmissions,
+  current: () => session.focus,
+  completed: () => completedFocus,
+  hold: () => {
+    heldFocus = true;
+  },
+  release: () => releaseFocus?.(),
 };
 window.nameTest = {
   submissions: nameSubmissions,

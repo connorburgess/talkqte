@@ -38,6 +38,8 @@ The notebook now has reachable Cancel start and a guarded Stop that bypasses pen
 
 The [system-audio plan](system-audio-plan.md) now separates independent API/permission planning from the native capture gate. Its next evidence is a separately authorized synthetic application-audio experiment on the target OS, proving the disclosed scope, zero video delivery and actual source release before combining sources. The UI/UX checkpoint currently covers the proposed consent/control policy only; source selection, readable app labels, keyboard recovery and native permission behavior still need a rendered flow and device checks. No system-audio capability or higher OS minimum is introduced.
 
+The optional Focus field now preserves ordered submissions, including Clear and accepted suggestions, and keeps rejected lines editable with [inline recovery and fictional UI/UX evidence](focus-save-recovery.md). This removes a mismatch between the visible draft and the applied Focus after rapid submissions. The next dependency remains native/live phrase-rule behavior and usefulness alongside listening; this fix does not validate relevance.
+
 The optional session-name field now preserves newer drafts and ordered saves, with inline rejection recovery and [fictional keyboard/UI evidence](name-save-recovery.md). This removes a setup data-loss case; it does not establish direct-address cue accuracy or real-meeting usefulness. The next dependency is the existing live phrase-rule and participation/listening acceptance.
 
 ## Integration readiness
