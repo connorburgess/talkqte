@@ -1101,6 +1101,9 @@ svg {
   font-size: 14px;
   font-weight: 650;
 }
+.setting .setting-error {
+  max-width: 16rem;
+}
 .setting .appearance-example {
   font-size: 24px;
   font-weight: 700;

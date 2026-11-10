@@ -43,6 +43,8 @@ This track runs alongside the feature milestones below. The goal includes a depe
 
 ## Runnable prototype
 
+- [x] Preserve newer session-name drafts and ordered submissions while a save is pending, including clearing the name and recovering from rejection. [Fictional browser and UI/UX checks](docs/name-save-recovery.md) cover the field; direct-address live acceptance remains separate.
+
 - [x] Fictional meeting playback with a notebook and arriving transcript segments.
 - [x] Rust-owned question expiry, cooldown, pause, and timing sensitivity.
 - [x] Phrase-based owner, deadline, and decision questions, with source disclosure and dismissal.
