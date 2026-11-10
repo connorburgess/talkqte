@@ -2,6 +2,14 @@ import { expect, test, type Page } from '@playwright/test';
 import type { ProcessingSnapshot } from '../src/lib/processing';
 import type {} from './fixtures/native-processing';
 
+function controlTab(browserName: string) {
+  // macOS WebKit follows Safari's keyboard navigation mode. Option-Tab
+  // includes buttons without changing the developer's system preferences.
+  return browserName === 'webkit' && process.platform === 'darwin'
+    ? 'Alt+Tab'
+    : 'Tab';
+}
+
 async function open(page: Page, query = '') {
   await page.route('**/*', async (route) => {
     if (route.request().resourceType() !== 'document') return route.continue();
@@ -92,14 +100,15 @@ test('default off, exact source identities, and explicit hosted confirmation', a
 
 test('keyboard cancellation restores focus and forgets a draft', async ({
   page,
+  browserName,
 }) => {
   await open(page);
-  await page.keyboard.press('Tab');
+  await page.keyboard.press(controlTab(browserName));
   await expect(
     page.getByRole('button', { name: 'Review processing' }),
   ).toBeFocused();
   await page.keyboard.press('Enter');
-  await page.keyboard.press('Tab');
+  await page.keyboard.press(controlTab(browserName));
   await expect(
     page.getByRole('checkbox', { name: 'Also include recent conversation' }),
   ).toBeFocused();
@@ -363,6 +372,7 @@ test('empty notes and oversized selection are actionable without implicit approv
 
 test('320px layout wraps long sources and keeps keyboard access to approval and Stop', async ({
   page,
+  browserName,
 }) => {
   await page.setViewportSize({ width: 320, height: 560 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -384,7 +394,7 @@ test('320px layout wraps long sources and keeps keyboard access to approval and 
   await expect(
     page.getByRole('heading', { name: 'Review before enabling' }),
   ).toBeFocused();
-  await page.keyboard.press('Tab');
+  await page.keyboard.press(controlTab(browserName));
   await expect(
     page.getByRole('button', { name: 'Enable for this session' }),
   ).toBeFocused();
