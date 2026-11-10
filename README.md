@@ -67,7 +67,7 @@ npm run desktop
 
 `npm run dev` serves the same notebook as a browser simulation at `http://127.0.0.1:1420`, with the fictional demo and no microphone. What the notebook, companion, focus list, prior notes, and export do today, with their limits, is in [Run the prototype](docs/run-the-prototype.md).
 
-Granola sign-in and focus suggestions have worked in an account check. The note chooser now reads Granola's tagged listing format, verified with fictional fixtures matching its structure; listing and importing a selected real note still need a follow-up check. Unsupported note-detail formats report an error instead of a successful empty import.
+Granola sign-in, listing, and focus suggestions have worked in account checks. Selected-note import still needs its tagged detail mapping verified. Import failures now stay visible in the chooser and preserve your selection for retry; Cancel discards pending results. Granola selection is limited to 10 notes per import (20 kept per session). Focus is optional and stays in the notebook; suggestions run only when requested.
 
 ## Live session (developer build)
 

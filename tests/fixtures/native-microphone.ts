@@ -1,5 +1,6 @@
 // Browser tests only. This replaces the entry point through a Playwright route;
 // it never opens a device or ships in the application bundle.
+import * as granolaFixture from './native-granola';
 import { mockIPC } from '@tauri-apps/api/mocks';
 import { emit } from '@tauri-apps/api/event';
 import * as preview from '../../src/lib/preview';
@@ -99,6 +100,12 @@ async function say(text: string, question?: string) {
 mockIPC(
   async (command, args) => {
     calls.push(command);
+    if (
+      new URLSearchParams(location.search).has('granola') &&
+      granolaFixture.commands.includes(command)
+    ) {
+      return granolaFixture.command(command, args);
+    }
     switch (command) {
       case 'snapshot':
         return structuredClone(session);
