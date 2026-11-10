@@ -1,5 +1,7 @@
 # Native processing command authority
 
+> Follow-up: [Notebook capture controls](notebook-capture-controls.md) now expose Cancel start and guarded Stop in the app. References below to the missing Cancel UI describe this earlier acceptance boundary. Evaluator permission integration and native device checks remain open.
+
 The main window can now prepare, approve and cancel an exact processing review, disable processing, and pause/resume approved cues through native commands. The normal app still registers no evaluator and does not mount the processing controls. This is a prerequisite for dependable user control, not activated inference or evidence of useful meeting assistance.
 
 ## Command boundary

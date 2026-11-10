@@ -1,5 +1,7 @@
 # Native processing review ownership
 
+> Follow-up: [Notebook capture controls](notebook-capture-controls.md) now expose Cancel start and guarded Stop in the app. References below to the missing Cancel UI describe this earlier acceptance boundary. Evaluator permission integration and native device checks remain open.
+
 This Rust prerequisite supports reliable control of future evaluated cues. It does not enable a provider, mount the proposed controls, or establish useful participation in meetings. Normal app engines still use phrase rules and cannot prepare an evaluator review.
 
 ## Implemented authority

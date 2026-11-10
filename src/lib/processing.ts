@@ -1,5 +1,5 @@
-/** Native status and guarded processing commands. The surface remains test-
- * mounted; normal-app integration and provider activation are separate gates. */
+/** Native status and guarded commands. The notebook uses capture status/Stop;
+ * evaluator permission UI and provider activation remain separate gates. */
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 

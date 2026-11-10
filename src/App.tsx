@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowDownToLine,
   ArrowUpRight,
@@ -34,6 +34,7 @@ import { MicrophoneControl } from './components/MicrophoneControl';
 import { ContextNotes } from './components/ContextNotes';
 import { SetupCard, type SetupTarget } from './components/SetupCard';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
+import { useCaptureControl } from './lib/useCaptureControl';
 
 const floating = new URLSearchParams(location.search).get('window') === 'cue';
 
@@ -313,7 +314,84 @@ function FloatingQuestion() {
 function Notebook() {
   const { state, error, setError, busy, run } = useSession<Snapshot>();
   const microphone = useMicrophone();
+  const capture = useCaptureControl();
+  const [startPending, setStartPending] = useState(false);
+  const [startInstalled, setStartInstalled] = useState(false);
+  useEffect(() => {
+    if (startPending && state?.live && state.status === 'running')
+      setStartInstalled(true);
+  }, [startPending, state?.live, state?.status]);
+  const startButton = useRef<HTMLButtonElement>(null);
+  const cancelButton = useRef<HTMLButtonElement | null>(null);
+  const restoreStartFocus = useRef(false);
+  const focusCancel = useRef(false);
+  const rememberCancel = useCallback((node: HTMLButtonElement | null) => {
+    if (!node && cancelButton.current === document.activeElement)
+      restoreStartFocus.current = true;
+    cancelButton.current = node;
+  }, []);
+  const preparing =
+    capture.state?.startup === 'loading' ||
+    capture.state?.startup === 'cancelling' ||
+    (startPending && !startInstalled);
+  const cancelling = capture.state?.startup === 'cancelling';
+  const finishing = capture.state?.phase === 'stopping';
+  const startLive = () => {
+    focusCancel.current = document.activeElement === startButton.current;
+    capture.clearError();
+    setStartInstalled(false);
+    setStartPending(true);
+    void run(async () => {
+      setNotice('');
+      try {
+        await bridge.command('start_live_session');
+      } catch (e) {
+        // Native cancellation is an expected result, not a startup failure.
+        if (
+          (e instanceof Error ? e.message : String(e)) !==
+          'Live session start was cancelled.'
+        )
+          throw e;
+      } finally {
+        setStartPending(false);
+      }
+    });
+  };
   const [view, setView] = useState<'notebook' | 'settings'>('notebook');
+  useEffect(() => {
+    if (
+      !preparing ||
+      capture.state?.startup !== 'loading' ||
+      !focusCancel.current
+    )
+      return;
+    focusCancel.current = false;
+    if (document.activeElement === document.body) cancelButton.current?.focus();
+  }, [preparing, capture.state?.startup]);
+  useEffect(() => {
+    if (!restoreStartFocus.current || capture.busy) return;
+    if (preparing) {
+      if (
+        !cancelling &&
+        capture.state?.startup === 'loading' &&
+        document.activeElement === document.body
+      )
+        cancelButton.current?.focus();
+      return;
+    }
+    if (busy || finishing) return;
+    restoreStartFocus.current = false;
+    if (view === 'notebook' && document.activeElement === document.body)
+      startButton.current?.focus();
+  }, [
+    preparing,
+    cancelling,
+    capture.busy,
+    capture.state?.startup,
+    busy,
+    finishing,
+    view,
+  ]);
   // Set when a link opens Settings at the live transcription section.
   const [focusLiveSetup, setFocusLiveSetup] = useState(false);
   useEffect(() => {
@@ -787,7 +865,58 @@ function Notebook() {
             {bridge.desktop ? 'Desktop prototype' : 'Browser preview'}
           </span>
         </header>
-        <MicrophoneControl microphone={microphone} live={live} />
+        <MicrophoneControl
+          microphone={microphone}
+          live={live || finishing}
+          preparing={preparing}
+          cancelling={cancelling}
+          action={
+            preparing ? (
+              <button
+                ref={rememberCancel}
+                className="secondary-button"
+                disabled={
+                  capture.busy ||
+                  cancelling ||
+                  capture.state?.startup !== 'loading'
+                }
+                onClick={() => {
+                  restoreStartFocus.current =
+                    document.activeElement === cancelButton.current;
+                  void capture.stop();
+                }}
+              >
+                {cancelling ? 'Cancelling…' : 'Cancel start'}
+              </button>
+            ) : live || finishing ? (
+              <button
+                className="secondary-button"
+                disabled={capture.busy || !capture.state}
+                onClick={() => void capture.stop()}
+              >
+                <Square size={14} />
+                Stop live session
+              </button>
+            ) : undefined
+          }
+        />
+        {(preparing || live || finishing) &&
+          (capture.statusError || capture.error) && (
+            <div className="error-banner" role="alert">
+              <span>
+                {capture.error ||
+                  'Capture status is unavailable. Refresh it to use Stop or Cancel start.'}
+              </span>
+              {capture.statusError && (
+                <button
+                  className="secondary-button"
+                  onClick={capture.retryStatus}
+                >
+                  Refresh capture status
+                </button>
+              )}
+            </div>
+          )}
         {error && (
           <div className="error-banner" role="alert">
             <span>{error}</span>
@@ -845,42 +974,58 @@ function Notebook() {
             <section
               className="session-strip"
               aria-label={
-                state.live ? 'Live session controls' : 'Demo controls'
+                state.live || preparing
+                  ? 'Live session controls'
+                  : 'Demo controls'
               }
             >
               <div className="session-state">
                 <span className={`status-dot ${state.status}`} />
                 <div>
                   <strong>
-                    {state.live
-                      ? live
-                        ? state.cuesPaused
-                          ? 'Cues paused · session continues'
-                          : 'Live session in progress'
-                        : 'Live session ended'
-                      : state.status === 'running'
-                        ? 'Demo in progress'
-                        : state.status === 'paused'
-                          ? 'Demo paused'
-                          : state.status === 'ended'
-                            ? 'Demo finished'
-                            : 'Ready when you are'}
+                    {preparing
+                      ? cancelling
+                        ? 'Cancelling start'
+                        : 'Preparing live session'
+                      : finishing
+                        ? 'Finishing live session'
+                        : state.live
+                          ? live
+                            ? state.cuesPaused
+                              ? 'Cues paused · session continues'
+                              : 'Live session in progress'
+                            : 'Live session ended'
+                          : state.status === 'running'
+                            ? 'Demo in progress'
+                            : state.status === 'paused'
+                              ? 'Demo paused'
+                              : state.status === 'ended'
+                                ? 'Demo finished'
+                                : 'Ready when you are'}
                   </strong>
                   <span>
-                    {state.live
-                      ? state.cuesPaused && live
-                        ? 'Microphone and transcript continue. Stop live session to stop listening.'
-                        : 'Your microphone · transcribed on this device · not saved'
-                      : 'Scripted conversation · separate from microphone'}
+                    {preparing
+                      ? 'Local speech model · capture status shown above'
+                      : finishing
+                        ? 'Waiting for microphone release and remaining transcription.'
+                        : state.live
+                          ? state.cuesPaused && live
+                            ? 'Microphone and transcript continue. Stop live session to stop listening.'
+                            : 'Your microphone · transcribed on this device · not saved'
+                          : 'Scripted conversation · separate from microphone'}
                   </span>
                 </div>
               </div>
               <div className="session-actions">
-                <span className="session-clock">
-                  {clockTime(state.elapsedMs)}
-                  {!state.live && <span> / {clockTime(state.durationMs)}</span>}
-                </span>
-                {live ? (
+                {!preparing && (
+                  <span className="session-clock">
+                    {clockTime(state.elapsedMs)}
+                    {!state.live && (
+                      <span> / {clockTime(state.durationMs)}</span>
+                    )}
+                  </span>
+                )}
+                {preparing || finishing ? null : live ? (
                   <>
                     <button
                       className="secondary-button"
@@ -904,16 +1049,6 @@ function Notebook() {
                         <Pause size={15} />
                       )}
                       {state.cuesPaused ? 'Resume cues' : 'Pause cues'}
-                    </button>
-                    <button
-                      className="secondary-button"
-                      disabled={busy}
-                      onClick={() =>
-                        void run(() => bridge.command('stop_live_session'))
-                      }
-                    >
-                      <Square size={14} />
-                      Stop live session
                     </button>
                   </>
                 ) : active ? (
@@ -953,18 +1088,14 @@ function Notebook() {
                     {liveStatus?.available && (
                       <button
                         className="secondary-button"
-                        disabled={busy || microphone.active}
+                        ref={startButton}
+                        disabled={busy || startPending || microphone.active}
                         title={
                           microphone.active
                             ? 'Stop the microphone check first.'
                             : undefined
                         }
-                        onClick={() =>
-                          void run(() => {
-                            setNotice('');
-                            return bridge.command('start_live_session');
-                          })
-                        }
+                        onClick={startLive}
                       >
                         Start live session
                       </button>

@@ -1,5 +1,7 @@
 # Live startup cancellation
 
+> Follow-up: [Notebook capture controls](notebook-capture-controls.md) now expose Cancel start and guarded Stop in the app. References below to the missing Cancel UI describe this earlier acceptance boundary. Evaluator permission integration and native device checks remain open.
+
 This native prerequisite supports controllable participation cues: a Stop request must prevent a delayed startup from opening capture, and queued speech must not restart evaluated cues after processing permission is revoked. It does not establish meeting usefulness or native device reliability.
 
 ## Implemented boundary

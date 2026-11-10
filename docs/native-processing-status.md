@@ -1,5 +1,7 @@
 # Native processing status
 
+> Follow-up: [Notebook capture controls](notebook-capture-controls.md) now expose Cancel start and guarded Stop in the app. References below to the missing Cancel UI describe this earlier acceptance boundary. Evaluator permission integration and native device checks remain open.
+
 This read-only contract supports dependable control of future evaluated cues. `processing_snapshot` and `processing:changed` provide the main window with native status; the companion receives neither the command permission nor the event. The normal app still registers no evaluator and does not mount the proposed processing controls. No provider or capture is activated by reading status.
 
 ## Authority and data boundary

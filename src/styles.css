@@ -1524,6 +1524,7 @@ svg {
   margin-bottom: 16px;
 }
 .setup-card .meeting-line {
+  float: none;
   margin-bottom: 8px;
 }
 .setup-steps {
