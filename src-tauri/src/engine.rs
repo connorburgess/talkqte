@@ -80,6 +80,10 @@ pub struct Cue {
     pub kind: String,
     pub question: String,
     pub evidence: String,
+    /// Complete typed disclosure for an evaluated cue, in citation order.
+    /// Phrase-rule cues retain their existing single-source payload.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<crate::cue_evaluator::Source>,
     pub source_id: String,
     pub remaining_ms: u64,
     pub total_ms: u64,
@@ -101,6 +105,8 @@ pub struct Cue {
 pub struct Resolution {
     pub source_id: String,
     pub evidence: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<crate::cue_evaluator::Source>,
 }
 
 /// The imported note a context cue comes from, so the companion can say so
@@ -798,6 +804,7 @@ impl Engine {
             if cue.resolved_by.is_none() && resolves(&cue.kind, &segment.text) {
                 if cue.held {
                     cue.resolved_by = Some(Resolution {
+                        sources: Vec::new(),
                         source_id: segment.id.clone(),
                         evidence: segment.text.clone(),
                     });
@@ -895,6 +902,7 @@ impl Engine {
                 }
                 self.cue_deadline = segment.at_ms + ASKED_MS;
                 self.state.cue = Some(Cue {
+                    sources: Vec::new(),
                     id: format!("{}:{}", self.generation, segment.id),
                     kind: ASKED.into(),
                     question: asked,
@@ -973,6 +981,7 @@ impl Engine {
                 let total_ms = if about_focus { ASKED_MS } else { CUE_MS };
                 self.cue_deadline = segment.at_ms + total_ms;
                 self.state.cue = Some(Cue {
+                    sources: Vec::new(),
                     id: format!("{}:{}", self.generation, segment.id),
                     kind: kind.into(),
                     question,
@@ -1019,6 +1028,7 @@ impl Engine {
                 self.unshown = None;
                 self.cue_deadline = segment.at_ms + CUE_MS;
                 self.state.cue = Some(Cue {
+                    sources: Vec::new(),
                     id: format!("{}:{}", self.generation, line_id),
                     kind: CONTEXT.into(),
                     question: note.item.title.clone(),
@@ -1073,6 +1083,7 @@ impl Engine {
         self.unshown = None;
         self.cue_deadline = at_ms + ASKED_MS;
         self.state.cue = Some(Cue {
+            sources: Vec::new(),
             id: format!("{}:{}", self.generation, id),
             kind: STILL_OPEN.into(),
             question: format!("Not covered: {}", open.join(" · ")),
@@ -1121,6 +1132,7 @@ impl Engine {
         self.unshown = Some((key, None));
         self.cue_deadline = segment.at_ms + CUE_MS;
         self.state.cue = Some(Cue {
+            sources: Vec::new(),
             id: format!("{}:{}", self.generation, segment.id),
             kind: SAID.into(),
             question: quote,
@@ -1287,9 +1299,10 @@ impl Engine {
         self.shown_notes.retain(|key| keys.contains(&key));
         // Keep a refreshed note marked shown: no automatic replacement or
         // second reminder this session. Removal releases its copied evidence.
-        if obsolete {
+        if obsolete || self.reconcile_evaluated_sources() {
             self.forget_unshown();
             self.state.cue = None;
+            self.evaluated_cue = None;
             self.cooldown_until = self.state.elapsed_ms + self.cooldown();
             self.changed();
         }
@@ -3665,6 +3678,7 @@ mod tests {
         assert_eq!(
             cue.resolved_by,
             Some(Resolution {
+                sources: Vec::new(),
                 source_id: "t2".into(),
                 evidence: "Jordan will take the first draft.".into(),
             })
