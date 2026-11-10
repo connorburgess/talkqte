@@ -1,6 +1,6 @@
 # Roadmap
 
-This is a development plan. Unchecked items are not implemented.
+This is a development plan. An unchecked item may be partly implemented; it remains open until its stated scope and acceptance checks are complete. Checked items establish only the capability and evidence described, not a supported release or demonstrated user benefit.
 
 The product goal is timely context that helps someone stay grounded and respond during the conversation. Clarification questions are the first bounded cue type. Saving and note-taking are secondary use cases to validate, not required proof of value. Current public presentation should explain a clearly labeled fictional concept and invite people to follow development; recruitment and downloads remain later stages.
 
@@ -58,7 +58,9 @@ This track runs alongside the feature milestones below. The goal includes a depe
 
 The [native validation record](docs/native-validation.md) covers a limited macOS notebook keyboard smoke check and lists the remaining companion acceptance checks. It is not a complete accessibility or meeting-app compatibility pass.
 
-The question demo plays synthetic text. Separate microphone monitoring measures signal activity only. In developer builds, a live session transcribes the microphone locally and runs the phrase-based questions on it; it has not been checked on real hardware or in a real meeting. The prototype does not capture system audio, persist a notebook, or integrate with other services.
+The question demo plays synthetic text. Separate microphone monitoring measures signal activity only. A `local-whisper` developer build transcribes the microphone locally and applies phrase rules. The [9 November hardware check](docs/native-validation.md#live-session-check) observed transcription, a timing question, and a reminder from fictional imported notes; it did not establish measured latency, microphone release after Stop, or dependable meeting use. System audio is not captured, and notebooks are not persisted between launches.
+
+The development Granola connection has passed account sign-in, listing, and requested focus-suggestion checks. Selected-note parsing and recovery pass fictional headless checks; [successful real-note import remains unconfirmed](docs/granola-import-validation.md). Prior-note access does not establish live transcript input or writeback. No reasoning model is activated for live cues.
 
 ## Next product validation
 
@@ -151,10 +153,10 @@ Provider access and capabilities can change; recheck them when implementing each
 
 Windows is the next planned desktop platform after the macOS foundation. Parallels provides an initial Windows test environment and a route to explore Ubuntu. VM results apply to the tested guest architecture and virtual devices; they do not establish support for physical PCs or every Linux distribution. See the [platform validation plan](docs/platforms.md).
 
-- [ ] Build, install, and launch the Windows prototype in Parallels; record Windows, architecture, WebView2, and toolchain versions.
+- [ ] Build, install, and launch the Windows prototype in Parallels; record Windows, architecture, WebView2, and toolchain versions. A native Arm build, launch, and fictional demo are [recorded for one Windows 11 Arm VM](docs/platforms.md#first-vm-result-8-november-2026); an installer was not checked, so the full item remains open.
 - [ ] Validate Windows companion focus, scaling, keyboard access, full-screen meetings, and screen-sharing behavior.
 - [ ] Prove both sides of a synthetic call, Stop/recovery, and device changes through a Windows capture adapter.
-- [ ] Add Windows build/Rust checks when the build target is established, then validate signed installation and updates on the claimed physical hardware and architectures.
+- [ ] Add Windows build/Rust checks when the build target is established, then validate signed installation and updates on the claimed physical hardware and architectures. Windows Arm Rust tests, Clippy, and the desktop debug build are configured in the [checks workflow](.github/workflows/checks.yml); signed installation, updates, and physical-device acceptance remain unverified.
 - [ ] Explore an Ubuntu ARM64 VM: build and run the desktop shell, assess audio and companion behavior, and record the desktop/session configuration.
 - [ ] Decide whether to support a named Linux configuration based on the Ubuntu evidence and maintenance effort. General Linux support remains undecided.
 
