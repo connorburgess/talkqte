@@ -362,6 +362,13 @@ impl Worker {
         })
     }
 
+    /// An occupied worker must not cause callers to build a request backlog.
+    /// A stopped worker is not busy: submission reports its terminal failure.
+    pub(crate) fn is_busy(&self) -> bool {
+        !self.stopped.load(Ordering::Acquire)
+            && (self.pending.is_some() || self.active.load(Ordering::Acquire))
+    }
+
     pub fn submit(&mut self, request: Request) -> Result<(), Failure> {
         if self.stopped.load(Ordering::Acquire) {
             return Err(Failure::WorkerUnavailable);
