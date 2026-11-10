@@ -424,6 +424,20 @@ const STOP_WORDS = new Set([
 ]);
 const contextListeners = new Set<(items: ContextItem[]) => void>();
 function emitContext() {
+  shownNotes = shownNotes.filter((id) =>
+    contextItems.some((item) => item.sourceId === id),
+  );
+  const cue = state.cue;
+  if (
+    cue?.note &&
+    !contextItems.some(
+      (item) => `${item.provider}:${item.sourceId}` === cue.sourceId,
+    )
+  ) {
+    state.cue = null;
+    cooldown = state.elapsedMs + quietMs();
+    emit();
+  }
   for (const receive of contextListeners)
     receive(structuredClone(contextItems));
 }

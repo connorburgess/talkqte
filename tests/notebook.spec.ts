@@ -343,6 +343,43 @@ test('a line about an imported note shows a reminder that names the note as its 
   ).not.toContainText('tool shed');
 });
 
+for (const removeAll of [false, true]) {
+  test(`removing ${removeAll ? 'all prior notes' : 'a prior note'} clears its held reminder while paused`, async ({
+    page,
+  }) => {
+    const panel = page.getByRole('region', { name: 'Prior context' });
+    await panel.getByRole('button', { name: 'Add notes from a file' }).click();
+    const dialog = page.getByRole('dialog', { name: /Choose notes/ });
+    await dialog
+      .getByRole('checkbox', { name: /Garden welcome guide/ })
+      .check();
+    await dialog.getByRole('checkbox', { name: /Visitor questions/ }).check();
+    await dialog.getByRole('button', { name: 'Import 2 selected' }).click();
+    await page.getByRole('button', { name: 'Try demo', exact: true }).click();
+    await page.clock.runFor(5200);
+    const question = page.getByRole('region', { name: 'Suggested question' });
+    await question.getByRole('button', { name: 'Why?' }).click();
+    await expect(question).toContainText('tool shed');
+    await expect(question).toContainText('Kept here until you dismiss it.');
+    await page.getByRole('button', { name: 'Pause', exact: true }).click();
+    await panel
+      .getByRole('button', {
+        name: removeAll
+          ? 'Remove all'
+          : 'Remove Garden welcome guide (2026-10-28)',
+        exact: true,
+      })
+      .click();
+    await expect(question).toHaveCount(0);
+    await expect(panel.getByRole('listitem')).toHaveCount(removeAll ? 0 : 1);
+    await expect(page.getByText(/map of the tool shed/)).toHaveCount(0);
+    await page.getByRole('button', { name: 'Export', exact: true }).click();
+    await expect(
+      page.getByRole('dialog', { name: 'Review your export' }).locator('pre'),
+    ).not.toContainText('tool shed');
+  });
+}
+
 test('a chooser with nothing to choose says so instead of showing a blank list', async ({
   page,
 }) => {
