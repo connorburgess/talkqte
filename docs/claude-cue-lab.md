@@ -13,7 +13,7 @@ npm run lab:claude
 npm run test:cue-lab
 ```
 
-The bundled fictional cases cover a missing owner, an already-answered issue, a visible cue being resolved, a question asked but unanswered, a topic change, uncertain speaker attribution, a context reminder, an instruction embedded in a transcript, a corrected premise, a paraphrased use, and a repeated trigger. The last three were added after the validation record below and have not been run. Expected labels are withheld from the model. Only bundled cases are accepted; there is no arbitrary transcript/file input or unattended loop.
+The bundled fictional cases cover a missing owner, an already-answered issue, a visible cue being resolved, a question asked but unanswered, a topic change, uncertain speaker attribution, a context reminder, an instruction embedded in a transcript, a corrected premise, a paraphrased use, and a repeated trigger. All eleven have three authorized runs recorded below, from 8–10 November 2026. Expected labels are withheld from the model. Only bundled cases are accepted; there is no arbitrary transcript/file input or unattended loop.
 
 ## Check the subscription, then run one case
 
@@ -53,7 +53,7 @@ On 8 November 2026, all 11 offline tests passed, repository formatting passed, a
 
 Inspection of the fixture supports this decision: the first line leaves the checklist owner open, and the second explicitly assigns it to Maya. The runner verified subscription authentication and the returned model ID. Reported usage was 2 input tokens, 1,205 cache-creation input tokens, 0 cache-read input tokens, and 116 output tokens; these counters do not establish the account's remaining allowance or constitute a billing receipt.
 
-This timing includes the inference CLI's startup and response, excluding the separate version/authentication checks. Repeated latency and useful participation during a conversation remain unvalidated.
+This timing includes the inference CLI's startup and response, excluding the separate version/authentication checks. At this point, repeated latency and useful participation during a conversation remained unvalidated.
 
 On 9 November 2026, with the owner's authorization, the other seven cases were run once each. Claude Code 2.1.318 again reported subscription authentication, no API key or provider override was set, and paid extra usage was confirmed off. Each case was one invocation with no retry.
 
@@ -79,7 +79,7 @@ Its reasons were specific: for `context-corrected`, that the second line reverse
 
 Across all eleven cases, run once each, the evaluator matched the expected labels in 10; across the first eight, in 7.
 
-On 10 November 2026, with the owner's authorization for a repeated batch, every case was run twice more under the same conditions (Claude Code 2.1.318, `claude-opus-5-5`, subscription authentication, no API key or provider override, paid extra usage confirmed off by the owner), one invocation each, 22 in all. The three runs of each case agreed on the action every time, including `missing-owner`, which stayed `quiet` three times for the same reason as before. So the single-run comparison holds: 10 of 11 expected actions in each of three passes, with no case flipping between runs. Request wall times over the 22 new runs were 2,969 to 5,505 ms (3,615 to 5,768 ms across all 33), including CLI start-up. The 22 runs reported 27,262 input tokens, nearly all cache creation, and 3,404 output tokens, about 155 output tokens a run; these counters are not a billing receipt and say nothing about the account's remaining allowance.
+On 10 November 2026, with the owner's authorization for a repeated batch, every case was run twice more under the same conditions (Claude Code 2.1.318, `claude-opus-5-5`, subscription authentication, no API key or provider override, paid extra usage confirmed off by the owner), one invocation each, 22 in all. The three runs of each case agreed on the action every time, including `missing-owner`, which stayed `quiet` three times for the same reason as before. So the single-run comparison holds: 10 of 11 expected actions in each of three passes, with no case flipping between runs. Request wall times over the 22 new runs were 2,969 to 5,505 ms (2,969 to 5,768 ms across all 33), including CLI start-up. The 22 runs reported 27,262 input tokens, nearly all cache creation, and 3,404 output tokens, about 155 output tokens a run; these counters are not a billing receipt and say nothing about the account's remaining allowance.
 
 | Case                     | Expected   | Run 1      | Run 2      | Run 3      | Wall time, runs 1–3          |
 | ------------------------ | ---------- | ---------- | ---------- | ---------- | ---------------------------- |
@@ -95,6 +95,12 @@ On 10 November 2026, with the owner's authorization for a repeated batch, every 
 | `paraphrased-use`        | `resolved` | `resolved` | `resolved` | `resolved` | 4,085 ms, 5,363 ms, 3,061 ms |
 | `repeated-trigger`       | `quiet`    | `quiet`    | `quiet`    | `quiet`    | 4,807 ms, 5,323 ms, 4,173 ms |
 
-What this does and does not show: the evaluator is consistent on these eleven fictional cases, and its one disagreement with the labels is stable rather than noise. It still says nothing about usefulness in a meeting, about speech-to-text errors, or about latency with the app's own context, and eleven cases are too few to estimate a false-suppression rate; that needs a larger suite and real conversations. In `missing-owner` it stayed quiet. Its reason was that the second line already raises settling the handoff, so a cue would duplicate it. That judgment is defensible, so the case's label should be reviewed rather than counted as a clear failure. Request times were 3.6–5.8 seconds, including CLI startup, which is above the proposed 5-second budget for a visible cue in some cases. Each case ran once, so these results say nothing about consistency across runs, real meetings, or usefulness to a participant. The phrase rules scored 2 of 8 on the same cases ([comparison](cue-intelligence.md#rules-baseline-on-the-shared-suite)).
+The three recorded actions agree for each of these eleven fictional cases, with 10 of 11 matching the expected action in every pass. This is limited repeatability evidence on the same small suite, not an estimate of false suppression or proof of useful participation. Speech-to-text errors, latency with the app's own context, and real-meeting usefulness remain unvalidated.
+
+In `missing-owner`, the evaluator stayed quiet in all three runs because the second line already raises settling the handoff. That is a plausible reason to avoid a duplicate cue, so the expected label still needs human review; it is not a confirmed model failure. Keep the original label and recorded disagreement until that review is recorded.
+
+Across all 33 requests, wall time was 2,969–5,768 ms including CLI startup. Some requests exceed the proposed 5-second visible-cue budget before app integration; these isolated timings do not establish end-to-end cue latency. The current offline phrase-rule baseline matches 5 of 11 expected actions (3 of the original eight), compared with the lab's 10 of 11 (7 of eight). The [comparison and its limitations](cue-intelligence.md#rules-baseline-on-the-shared-suite) explain how the baseline handles cases with an existing cue.
+
+Next evidence: review the disputed label, broaden the fictional suite, and compare useful participation and listening comprehension in the planned human-cued conditions. Further model runs need separate authorization; the recorded batch does not enable recurring inference. No TalkQTE user-outcome study has been completed.
 
 Record any live trial's selected fixture, model, CLI version, outcome, and latency separately; do not describe the entire suite as evaluated after a single trial. Keep account information and raw provider/session output outside the repository.
