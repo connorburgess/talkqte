@@ -32,6 +32,7 @@ export function ContextNotes({
     onGranola?.(status);
   };
   const [signingIn, setSigningIn] = useState(false);
+  const [listing, setListing] = useState(false);
   useEffect(() => {
     // The desktop keeps the session for the app run; the preview has none.
     bridge
@@ -41,35 +42,48 @@ export function ContextNotes({
   }, []);
   const [chosen, setChosen] = useState<string[]>([]);
   const [working, setWorking] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [pickError, setPickError] = useState('');
+  const operation = useRef(0);
+  const granolaButton = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
+  const selectionLimit = pickedFrom === 'granola' ? 10 : 200;
   const allChosen =
     !!picked &&
-    picked.notes.length > 0 &&
-    picked.notes.every((note) => chosen.includes(note.sourceId));
+    chosen.length === Math.min(picked.notes.length, selectionLimit) &&
+    chosen.length > 0;
   const addButton = useRef<HTMLButtonElement>(null);
   const returnFocus = useRef(false);
   useEffect(() => {
     if (picked) dialog.current?.showModal();
     else if (dialog.current?.open) dialog.current.close();
   }, [picked]);
-  // Focus goes back to the Add button once the chooser has closed and the
-  // button is enabled again.
+  // Return to the control that opened this chooser after it is enabled again.
   useEffect(() => {
     if (!picked && !working && returnFocus.current) {
       returnFocus.current = false;
-      addButton.current?.focus();
+      (pickedFrom === 'granola' ? granolaButton : addButton).current?.focus();
     }
   }, [picked, working]);
 
   async function run(work: () => Promise<void>) {
+    const current = ++operation.current;
     setWorking(true);
+    setPickError('');
     onError('');
     try {
       await work();
     } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
+      if (current === operation.current) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (picked) setPickError(message);
+        else onError(message);
+      }
     } finally {
-      setWorking(false);
+      if (current === operation.current) {
+        setWorking(false);
+        setImporting(false);
+      }
     }
   }
   const pick = () =>
@@ -108,11 +122,16 @@ export function ContextNotes({
     void bridge.command('cancel_granola_sign_in').catch(() => {});
   const chooseGranola = () =>
     void run(async () => {
-      const result = await bridge.listGranolaNotes();
-      returnFocus.current = true;
-      setChosen([]);
-      setPickedFrom('granola');
-      setPicked(result);
+      setListing(true);
+      try {
+        const result = await bridge.listGranolaNotes();
+        returnFocus.current = true;
+        setChosen([]);
+        setPickedFrom('granola');
+        setPicked(result);
+      } finally {
+        setListing(false);
+      }
     });
   const disconnectGranola = () =>
     void run(async () => {
@@ -123,7 +142,10 @@ export function ContextNotes({
     });
   const importChosen = () =>
     void run(async () => {
+      const current = operation.current;
+      setImporting(true);
       const outcome = await bridge.importContextNotes(chosen);
+      if (current !== operation.current) return;
       setPicked(null);
       const parts = [
         outcome.added ? `${outcome.added} imported` : '',
@@ -181,10 +203,11 @@ export function ContextNotes({
                 <button
                   className="secondary-button"
                   disabled={busy || working}
+                  ref={granolaButton}
                   onClick={chooseGranola}
                 >
                   <Link2 size={15} />
-                  Choose Granola notes
+                  {listing ? 'Loading Granola notes…' : 'Choose Granola notes'}
                 </button>
                 <button
                   className="text-button"
@@ -279,6 +302,7 @@ export function ContextNotes({
           if (picked) cancel();
         }}
         aria-labelledby="context-pick-title"
+        aria-describedby="context-pick-description"
       >
         <div className="dialog-heading">
           <h2 id="context-pick-title">
@@ -287,16 +311,21 @@ export function ContextNotes({
           <button
             className="icon-button"
             aria-label="Close without importing"
-            disabled={working}
+            disabled={working && !importing}
             onClick={cancel}
           >
             <X size={20} />
           </button>
         </div>
-        <p>
+        <p id="context-pick-description">
           Only the notes you tick are kept, for this session. They appear beside
           your notebook as prior context and never feed a question on their own.
         </p>
+        {pickedFrom === 'granola' && picked && picked.notes.length > 0 && (
+          <p className="small">
+            Choose up to 10 notes per import. Keep up to 20 in this session.
+          </p>
+        )}
         {picked && picked.skipped > 0 && (
           <p className="muted small">
             {picked.skipped} more{' '}
@@ -307,20 +336,31 @@ export function ContextNotes({
           </p>
         )}
         {picked && picked.notes.length > 1 && (
-          <p className="context-choose-all small">
+          <div className="context-choose-all small">
+            <span role="status">
+              {chosen.length} of {picked.notes.length} selected
+            </span>
             <button
               type="button"
               className="text-button"
               disabled={working}
               onClick={() =>
                 setChosen(
-                  allChosen ? [] : picked.notes.map((note) => note.sourceId),
+                  allChosen
+                    ? []
+                    : picked.notes
+                        .slice(0, selectionLimit)
+                        .map((note) => note.sourceId),
                 )
               }
             >
-              {allChosen ? 'Clear all' : 'Select all'}
+              {allChosen
+                ? 'Clear all'
+                : picked.notes.length > selectionLimit
+                  ? `Select first ${selectionLimit}`
+                  : 'Select all'}
             </button>
-          </p>
+          </div>
         )}
         {picked && picked.notes.length === 0 && (
           <p className="context-empty" role="status">
@@ -335,7 +375,14 @@ export function ContextNotes({
               <label>
                 <input
                   type="checkbox"
-                  aria-describedby={`context-preview-${index}`}
+                  aria-describedby={
+                    note.preview ? `context-preview-${index}` : undefined
+                  }
+                  disabled={
+                    working ||
+                    (chosen.length >= selectionLimit &&
+                      !chosen.includes(note.sourceId))
+                  }
                   checked={chosen.includes(note.sourceId)}
                   onChange={(e) =>
                     setChosen((current) =>
@@ -345,21 +392,38 @@ export function ContextNotes({
                     )
                   }
                 />
-                <span>
+                <span className="context-choice-copy">
                   <strong>{note.title}</strong>
-                  <span className="muted small"> {note.sourceDate}</span>
+                  <time className="muted small" dateTime={note.sourceDate}>
+                    {note.sourceDate}
+                  </time>
+                  {note.preview && (
+                    <span
+                      className="context-preview"
+                      id={`context-preview-${index}`}
+                    >
+                      {note.preview}
+                    </span>
+                  )}
                 </span>
               </label>
-              <span className="context-preview" id={`context-preview-${index}`}>
-                {note.preview}
-              </span>
             </li>
           ))}
         </ul>
+        {pickError && (
+          <p className="export-error" role="alert">
+            {pickError}
+          </p>
+        )}
+        {importing && (
+          <p role="status">
+            Reading selected notes… You can cancel without importing.
+          </p>
+        )}
         <div className="dialog-actions">
           <button
             className="secondary-button"
-            disabled={working}
+            disabled={working && !importing}
             onClick={cancel}
           >
             Cancel
@@ -369,7 +433,9 @@ export function ContextNotes({
             disabled={working || chosen.length === 0}
             onClick={importChosen}
           >
-            Import {chosen.length || ''} selected
+            {importing
+              ? 'Importing…'
+              : `Import ${chosen.length || ''} selected`}
           </button>
         </div>
       </dialog>

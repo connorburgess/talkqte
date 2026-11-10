@@ -672,7 +672,6 @@ function Notebook() {
             !active &&
             !(
               state.userName &&
-              state.focus.length > 0 &&
               (!model || !['missing', 'downloading'].includes(model.status))
             ) && (
               <>
@@ -970,7 +969,9 @@ function Notebook() {
                   </p>
                 )}
               <div className="setting-control">
-                <label htmlFor="meeting-focus">Focus</label>
+                <label htmlFor="meeting-focus">
+                  Focus <span className="muted small">· optional</span>
+                </label>
                 <textarea
                   id="meeting-focus"
                   ref={focusField}

@@ -8,30 +8,25 @@ test.beforeEach(async ({ page }) => {
   ).toBeVisible();
 });
 
-test('the setup card walks a new person to a name and a focus, then steps aside', async ({
+test('focus is optional and the setup card can finish without it', async ({
   page,
 }) => {
   const card = page.getByRole('region', { name: 'Before your first meeting' });
-  await expect(card).toBeVisible();
-  await expect(card.getByRole('listitem')).toHaveCount(3); // no speech model in the browser
-  await expect(card).toContainText('Your name, to do');
+  await expect(card).toContainText('What matters today · optional');
+  await card.getByRole('button', { name: 'Write the focus' }).click();
+  await expect(page.getByRole('textbox', { name: 'Focus' })).toBeFocused();
+  await expect(page.getByRole('textbox', { name: 'Focus' })).toHaveValue('');
   await card.getByRole('button', { name: 'Add your name' }).click();
   const name = page.getByRole('textbox', { name: 'Name' });
-  await expect(name).toBeFocused();
   await name.fill('Robin');
-  await page.getByRole('combobox', { name: 'Question timing' }).focus(); // leaving saves the name
+  await page.getByRole('combobox', { name: 'Question timing' }).focus();
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();
-  await expect(card).toContainText('Your name, done');
-  await expect(card).toContainText('What matters today, to do');
-  // The focus lives in the notebook, beside the session, so the card stays
-  // in view while it is written.
-  await card.getByRole('button', { name: 'Write the focus' }).click();
-  const focus = page.getByRole('textbox', { name: 'Focus' });
-  await expect(focus).toBeFocused();
-  await focus.fill('Agree the launch plan for the newsletter');
-  await page.getByRole('button', { name: 'Notebook', exact: true }).focus(); // leaving saves the focus
-  // Prior notes are optional, so the card has done its job and goes.
   await expect(card).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'Focus' })).toHaveValue('');
+  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Pause', exact: true }),
+  ).toBeVisible();
 });
 
 test('the setup card sends Choose notes to the prior-context panel without changing view', async ({

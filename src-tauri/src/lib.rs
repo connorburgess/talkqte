@@ -3,6 +3,7 @@ mod companion;
 #[cfg(target_os = "macos")]
 mod companion_macos;
 pub mod context;
+mod context_import;
 pub mod engine;
 pub mod granola;
 pub mod live;
@@ -31,8 +32,8 @@ struct Runtime {
     live: Option<Live>,
     /// Prior notes the user imported this session, in memory only.
     context: context::ContextStore,
-    /// A notes file read and listed, waiting for the user's selection.
-    pending_import: Option<Box<dyn context::NoteSource + Send>>,
+    /// A listed note source kept for selection, retry, or cancellation.
+    pending_import: Option<context_import::PendingImport>,
     /// The Granola session for this app run, once the person has signed in.
     granola: Option<granola::Shared>,
     /// Set while a Granola sign-in waits for the browser; cleared to cancel.
@@ -625,7 +626,7 @@ async fn pick_context_file(
         .0
         .lock()
         .map_err(|_| "The notebook is unavailable.")?
-        .pending_import = Some(Box::new(source));
+        .pending_import = Some(context_import::PendingImport::new(Box::new(source)));
     Ok(Some(PickedNotes {
         file_name,
         notes,
@@ -642,36 +643,52 @@ async fn import_context_notes(
 ) -> Result<context::MergeOutcome, String> {
     // The fetch may go to a provider, so it runs off the main thread and
     // outside the lock, with real pauses between retries.
-    let mut source = state
-        .0
-        .lock()
-        .map_err(|_| "The notebook is unavailable.")?
-        .pending_import
-        .take()
-        .ok_or("Choose notes first.")?;
-    let provider = source.provider();
+    let (mut attempt, provider) = {
+        let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+        let pending = runtime
+            .pending_import
+            .as_mut()
+            .ok_or("Choose notes first.")?;
+        let provider = pending.provider();
+        if provider == context::Provider::Granola && ids.len() > 10 {
+            return Err("Choose up to 10 Granola notes per import.".into());
+        }
+        (
+            pending.start().ok_or("An import is already running.")?,
+            provider,
+        )
+    };
     let selection = ids.clone();
-    let fetched = tauri::async_runtime::spawn_blocking(move || {
-        context::fetch_selection(source.as_mut(), &selection, &|| false, &mut |delay| {
-            std::thread::sleep(delay);
-            true
-        })
+    let (attempt, fetched) = tauri::async_runtime::spawn_blocking(move || {
+        let fetched = attempt.fetch(&selection);
+        (attempt, fetched)
     })
     .await
-    .map_err(|_| "The notes could not be read.".to_string())?
-    .map_err(|error| match error {
+    .map_err(|_| "The notes could not be read. Close the chooser and try again.".to_string())?;
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    if !runtime
+        .pending_import
+        .as_mut()
+        .is_some_and(|pending| pending.restore(attempt))
+    {
+        return Err("Import cancelled. Nothing was imported.".into());
+    }
+    let fetched = fetched.map_err(|error| match error {
         context::FetchError::Failed(context::ConnectionStatus::Expired) => {
-            "Granola's sign-in has expired; connect again."
+            "Granola's sign-in has expired. Close this chooser, disconnect, and connect again."
         }
         context::FetchError::Failed(context::ConnectionStatus::Revoked) => {
-            "Granola withdrew this app's access; connect again if you want to."
+            "Granola withdrew this app's access. Close this chooser, disconnect, and connect again if you want to."
         }
         context::FetchError::Failed(context::ConnectionStatus::RateLimited { .. }) => {
-            "Granola asked for a pause; try again in a moment."
+            "Granola asked for a pause. Try importing again in a moment."
         }
-        _ => "The notes could not be read.",
+        context::FetchError::Failed(context::ConnectionStatus::UnsupportedFormat) => {
+            "Granola returned a note format TalkQTE cannot read yet. Nothing was imported. Cancel to return to your notebook."
+        }
+        _ => "The selected notes could not be read. Nothing was imported. Try again, or cancel to choose other notes.",
     })?;
-    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    runtime.pending_import = None;
     let outcome = runtime.context.merge(provider, &ids, fetched);
     publish_context(&app, &mut runtime);
     Ok(outcome)
@@ -755,6 +772,9 @@ fn granola_error(error: &context::SourceError) -> String {
         }
         context::SourceError::Interrupted => "Granola could not be reached.".into(),
         context::SourceError::Unavailable => "Granola's notes are not available right now.".into(),
+        context::SourceError::UnsupportedFormat => {
+            "Granola returned a note format TalkQTE cannot read yet.".into()
+        }
     }
 }
 
@@ -831,7 +851,7 @@ async fn list_granola_notes(state: tauri::State<'_, AppState>) -> Result<PickedN
     if runtime.granola.is_none() {
         return Err("Granola was disconnected.".into());
     }
-    runtime.pending_import = Some(Box::new(shared));
+    runtime.pending_import = Some(context_import::PendingImport::new(Box::new(shared)));
     Ok(PickedNotes {
         file_name: "Granola · the last 30 days".into(),
         notes,

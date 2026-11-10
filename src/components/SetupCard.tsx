@@ -51,6 +51,7 @@ export function SetupCard({
     },
     {
       key: 'focus',
+      optional: true,
       title: 'What matters today',
       done: focus.length > 0,
       detail:

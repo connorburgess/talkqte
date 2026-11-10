@@ -724,12 +724,55 @@ fn trace(label: &str, value: &Value) {
 
 /// The layout of a text reply with content masked. Only known structural
 /// tag and attribute names survive; arbitrary names can themselves contain
-/// meeting content. Cut at 2,000 characters. Developer trace only, like `trace`.
+/// meeting content. Output is bounded to 4 KB/80 tags plus a truncation marker.
 fn trace_text(label: &str, text: &str) {
     if std::env::var_os("TALKQTE_GRANOLA_TRACE").is_none() {
         return;
     }
-    eprintln!("granola trace: {label}: {}", skeleton(text));
+    eprintln!("granola trace: {label}: {}", text_layout(text));
+}
+
+/// Content-free outline: long provider notices and note bodies cannot crowd
+/// the fields out of the diagnostic. Names still pass through the allowlist;
+/// attribute values and text are omitted altogether, even for malformed XML.
+fn text_layout(text: &str) -> String {
+    let mut reader = Reader::from_str(text);
+    let mut out = String::new();
+    let mut events = 0;
+    loop {
+        let event = reader.read_event();
+        let empty = matches!(event, Ok(Event::Empty(_)));
+        let line = match event {
+            Ok(Event::Start(tag) | Event::Empty(tag)) => {
+                let mut line = format!("<{}", tag.name().as_ref());
+                for attribute in tag.attributes().take(20) {
+                    let Ok(attribute) = attribute else { break };
+                    line.push_str(&format!(" {}=\"x\"", attribute.key.as_ref()));
+                }
+                line.push_str(if empty { "/>" } else { ">" });
+                skeleton(&line)
+            }
+            Ok(Event::End(tag)) => skeleton(&format!("</{}>", tag.name().as_ref())),
+            Ok(Event::Text(body)) if !body.as_ref().trim().is_empty() => {
+                format!("[text:{}]", body.as_ref().chars().count())
+            }
+            Ok(Event::CData(body)) => format!("[cdata:{}]", body.as_ref().chars().count()),
+            Ok(Event::Eof) => break,
+            Err(_) => {
+                out.push_str("[unrecognized markup]\n");
+                break;
+            }
+            _ => continue,
+        };
+        if out.len() + line.len() > 4_000 || events >= 80 {
+            out.push_str("[outline truncated]\n");
+            break;
+        }
+        out.push_str(&line);
+        out.push('\n');
+        events += 1;
+    }
+    out
 }
 
 fn skeleton(text: &str) -> String {
@@ -775,6 +818,10 @@ fn skeleton(text: &str) -> String {
                 | "remaining_count"
                 | "next_cursor"
                 | "private_notes"
+                | "status"
+                | "ai_summary"
+                | "notes_markdown"
+                | "enhanced_notes"
         )
     }
 
@@ -1335,7 +1382,7 @@ impl NoteSource for Connection {
             // The account trace has established the listing shape only.
             // An unrecognized detail format is a provider failure, not a
             // successful import of zero notes.
-            return Err(SourceError::Unavailable);
+            return Err(SourceError::UnsupportedFormat);
         }
         Ok(notes_in(&output)
             .into_iter()
@@ -1355,6 +1402,26 @@ impl NoteSource for Connection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detail_trace_reaches_fields_after_long_notices_without_content() {
+        let text = format!("{}<meetings_data><meeting id='private-id' title='Private title'><private_notes status='empty'/><summary>{}</summary><PrivateName>private body</PrivateName></meeting></meetings_data>", "Long notice. ".repeat(500), "Long note body. ".repeat(500));
+        let layout = text_layout(&text);
+        assert!(layout.contains("<private_notes status=\"x\"/>"));
+        assert!(layout.contains("<summary>"));
+        assert!(layout.contains("</meeting>"));
+        for secret in [
+            "private-id",
+            "Private title",
+            "Long notice",
+            "Long note",
+            "PrivateName",
+            "private body",
+        ] {
+            assert!(!layout.contains(secret));
+        }
+        assert!(layout.len() < 300);
+    }
 
     #[test]
     fn pkce_and_the_authorize_url_follow_the_profile() {
@@ -1741,7 +1808,7 @@ The default range is the last thirty days.
         let mut connection = Connection::open_at(&endpoint, &tokens(), false).unwrap();
         assert_eq!(
             connection.fetch(&["m2".into()]),
-            Err(SourceError::Unavailable)
+            Err(SourceError::UnsupportedFormat)
         );
     }
 

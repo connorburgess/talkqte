@@ -58,6 +58,7 @@ pub enum ConnectionStatus {
         retry_after_s: u64,
     },
     Unavailable,
+    UnsupportedFormat,
 }
 
 /// One imported note, labeled so it can never be mistaken for something
@@ -89,6 +90,7 @@ pub enum SourceError {
     /// A dropped connection or timeout; safe to retry.
     Interrupted,
     Unavailable,
+    UnsupportedFormat,
 }
 
 /// A note source behind the native boundary. Authentication and provider
@@ -240,6 +242,7 @@ fn status_for(error: &SourceError) -> ConnectionStatus {
             retry_after_s: retry_after.as_secs(),
         },
         SourceError::Interrupted | SourceError::Unavailable => ConnectionStatus::Unavailable,
+        SourceError::UnsupportedFormat => ConnectionStatus::UnsupportedFormat,
     }
 }
 
@@ -424,6 +427,10 @@ mod tests {
         for (error, status) in [
             (SourceError::Expired, ConnectionStatus::Expired),
             (SourceError::Revoked, ConnectionStatus::Revoked),
+            (
+                SourceError::UnsupportedFormat,
+                ConnectionStatus::UnsupportedFormat,
+            ),
         ] {
             let mut source = Scripted::new(vec![Err(error)]);
             let (result, waits) = fetch(&mut source);
