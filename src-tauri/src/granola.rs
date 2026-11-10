@@ -14,6 +14,7 @@ use crate::context::{
     MAX_TITLE_CHARS,
 };
 use crate::notes_file::{NoteSummary, MAX_NOTES};
+use quick_xml::{events::Event, Reader, XmlVersion};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
@@ -548,7 +549,11 @@ impl Connection {
         if let Value::String(text) = &output {
             trace_text("list_meetings text", text);
         }
-        let notes = notes_in(&output);
+        let (notes, remaining) = if let Value::String(text) = &output {
+            tagged_listing(text)?
+        } else {
+            (notes_in(&output), 0)
+        };
         let total = notes.len();
         let summaries: Vec<NoteSummary> = notes
             .into_iter()
@@ -560,7 +565,7 @@ impl Connection {
                 preview: preview(&note.text),
             })
             .collect();
-        let skipped = total - summaries.len();
+        let skipped = (total - summaries.len()).saturating_add(remaining);
         Ok((summaries, skipped))
     }
 
@@ -763,6 +768,13 @@ fn skeleton(text: &str) -> String {
                 | "has_more"
                 | "total"
                 | "count"
+                | "meetings_data"
+                | "meeting_at"
+                | "pagination"
+                | "total_count"
+                | "remaining_count"
+                | "next_cursor"
+                | "private_notes"
         )
     }
 
@@ -1072,6 +1084,87 @@ struct Note {
     text: String,
 }
 
+/// The observed listing is a sequence of XML fragments with prose between
+/// them. Only direct meeting children of meetings_data supply chooser rows;
+/// participant, folder, and attachment content is deliberately skipped.
+fn tagged_listing(text: &str) -> Result<(Vec<Note>, usize), SourceError> {
+    let mut reader = Reader::from_str(text);
+    let mut notes = Vec::new();
+    let mut seen_ids = std::collections::HashSet::new();
+    let mut in_data = false;
+    let mut saw_data = false;
+    let mut remaining = 0;
+    loop {
+        let event = reader.read_event().map_err(|_| SourceError::Unavailable)?;
+        match event {
+            Event::Start(ref tag) | Event::Empty(ref tag) => {
+                let empty = matches!(event, Event::Empty(_));
+                match tag.name().as_ref() {
+                    "meetings_data" if !in_data => {
+                        saw_data = true;
+                        in_data = !empty;
+                    }
+                    "pagination" if !in_data => {
+                        for attribute in tag.attributes() {
+                            let attribute = attribute.map_err(|_| SourceError::Unavailable)?;
+                            if attribute.key.as_ref() == "remaining_count" {
+                                remaining = attribute
+                                    .normalized_value(XmlVersion::Implicit1_0)
+                                    .map_err(|_| SourceError::Unavailable)?
+                                    .parse::<usize>()
+                                    .map_err(|_| SourceError::Unavailable)?;
+                            }
+                        }
+                        if !empty {
+                            reader
+                                .read_to_end(tag.name())
+                                .map_err(|_| SourceError::Unavailable)?;
+                        }
+                    }
+                    "meeting" if in_data => {
+                        let mut fields = serde_json::Map::new();
+                        for attribute in tag.attributes() {
+                            let attribute = attribute.map_err(|_| SourceError::Unavailable)?;
+                            let key = attribute.key.as_ref();
+                            if matches!(key, "id" | "title" | "meeting_at" | "date") {
+                                let value = attribute
+                                    .normalized_value(XmlVersion::Implicit1_0)
+                                    .map_err(|_| SourceError::Unavailable)?;
+                                fields.insert(key.to_string(), Value::String(value.into_owned()));
+                            }
+                        }
+                        if !empty {
+                            reader
+                                .read_to_end(tag.name())
+                                .map_err(|_| SourceError::Unavailable)?;
+                        }
+                        if let Some(note) = note_from(&Value::Object(fields)) {
+                            if seen_ids.insert(note.id.clone()) {
+                                notes.push(note);
+                            }
+                        }
+                    }
+                    _ if !empty => {
+                        reader
+                            .read_to_end(tag.name())
+                            .map_err(|_| SourceError::Unavailable)?;
+                    }
+                    _ => {}
+                }
+            }
+            Event::End(tag) if tag.name().as_ref() == "meetings_data" => in_data = false,
+            // No DTD or custom entities are needed for provider metadata.
+            Event::DocType(_) => return Err(SourceError::Unavailable),
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    if !saw_data || in_data {
+        return Err(SourceError::Unavailable);
+    }
+    Ok((notes, remaining))
+}
+
 /// The notes in a tool's output, whatever it calls its fields: an array at
 /// the root or under the first array-valued key, each with an id, a title or
 /// name, a date-like field, and a text-like field.
@@ -1108,6 +1201,8 @@ fn note_from(value: &Value) -> Option<Note> {
         .filter(|title| !title.is_empty())
         .unwrap_or_else(|| "Untitled note".into());
     let date = pick(&[
+        // Granola's display date is prose; meeting_at is the ISO source date.
+        "meeting_at",
         "date",
         "created_at",
         "createdAt",
@@ -1234,7 +1329,15 @@ impl NoteSource for Connection {
             json!({ "name": tool.name, "arguments": { argument: selection } }),
         )?;
         trace("get_meetings result", &result);
-        Ok(notes_in(&tool_output(&result))
+        let output = tool_output(&result);
+        if let Value::String(text) = &output {
+            trace_text("get_meetings text", text);
+            // The account trace has established the listing shape only.
+            // An unrecognized detail format is a provider failure, not a
+            // successful import of zero notes.
+            return Err(SourceError::Unavailable);
+        }
+        Ok(notes_in(&output)
             .into_iter()
             .filter(|note| selection.iter().any(|wanted| wanted == &note.id))
             .map(|note| ContextItem {
@@ -1365,6 +1468,8 @@ mod tests {
     enum Answer {
         Json,
         EventStream,
+        TaggedListing,
+        TaggedDetails,
         Status(u16),
         RpcError(&'static str),
         ToolError,
@@ -1466,6 +1571,18 @@ mod tests {
                     Some("tools/call") if matches!(answer, Answer::ToolError) => {
                         json!({"isError": true, "content": [{"type": "text", "text": "Something went wrong."}]})
                     }
+                    Some("tools/call")
+                        if matches!(answer, Answer::TaggedListing)
+                            && request["params"]["name"] == "list_meetings" =>
+                    {
+                        json!({"content": [{"type": "text", "text": TAGGED_LISTING}]})
+                    }
+                    Some("tools/call")
+                        if matches!(answer, Answer::TaggedDetails)
+                            && request["params"]["name"] == "get_meetings" =>
+                    {
+                        json!({"content": [{"type": "text", "text": "<meeting id=\"m2\"><unknown>Fictional note</unknown></meeting>"}]})
+                    }
                     Some("tools/call") if request["params"]["name"] == "query_granola_meetings" => {
                         json!({"content": [{"type": "text", "text": "Here is what is still open:\n\n1. Agree the launch plan for the newsletter\n2. Decide who owns the compost bins\n- “Settle the volunteer schedule”\n- Agree the launch plan for the newsletter\n\nLet me know if you want more detail."}]})
                     }
@@ -1508,7 +1625,7 @@ mod tests {
 
     #[test]
     fn a_session_lists_recent_notes_and_fetches_only_the_selection() {
-        for answer in [Answer::Json, Answer::EventStream] {
+        for answer in [Answer::Json, Answer::EventStream, Answer::TaggedListing] {
             let (endpoint, seen) = fictional_server(answer);
             let mut connection = Connection::open_at(&endpoint, &tokens(), false).unwrap();
             assert_eq!(
@@ -1562,6 +1679,70 @@ mod tests {
             assert_eq!(asked["params"]["arguments"]["meeting_ids"], json!(["m2"]));
             assert!(!format!("{connection:?}").contains("fictional-token"));
         }
+    }
+
+    // Same structure as the observed provider listing; all values are fictional.
+    const TAGGED_LISTING: &str = r#"
+<pagination has_more="false" total_count="2" remaining_count="0" />
+<requested_range time_range="last_30_days">Recent notes</requested_range>
+The default range is the last thirty days.
+<meetings_data connected_user_email="gardener@example.com" count="2">
+  <meeting id="m1" title="Garden welcome guide" date="Oct 28, 2026 10:00 am UTC" meeting_at="2026-10-28T10:00:00Z">
+    <known_participants>Robin (robin@example.com)</known_participants>
+    <folders />
+  </meeting>
+  <meeting id="m2" title="Visitor questions" date="Nov 2, 2026 9:00 am UTC" meeting_at="2026-11-02T09:00:00Z" />
+</meetings_data>"#;
+
+    #[test]
+    fn tagged_listing_decodes_metadata_without_importing_other_content() {
+        let (notes, remaining) = tagged_listing(TAGGED_LISTING).unwrap();
+        assert_eq!(remaining, 0);
+        assert_eq!(notes.len(), 2);
+        assert_eq!(notes[0].date, "2026-10-28");
+        assert!(notes.iter().all(|note| note.text.is_empty()));
+        let (notes, remaining) = tagged_listing(r#"
+<pagination remaining_count="7" />
+<meeting id="outside" title="Not a row" />
+<meetings_data>
+  <meeting id='m&amp;1' title='Café &amp; &quot;Garden&quot; &gt; shed &#x1F331;' meeting_at='2026-11-02T09:00:00+07:00'>
+    <known_participants><meeting id="nested" title="Not a row" /></known_participants>
+  </meeting>
+  <meeting id='m&amp;1' title='Duplicate' />
+  <meeting title='Missing ID' />
+</meetings_data>"#).unwrap();
+        assert_eq!(remaining, 7);
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].id, "m&1");
+        assert_eq!(notes[0].title, "Café & \"Garden\" > shed 🌱");
+        assert_eq!(notes[0].date, "2026-11-02");
+        assert!(notes[0].text.is_empty());
+        assert_eq!(tagged_listing("<meetings_data />").unwrap(), (vec![], 0));
+    }
+
+    #[test]
+    fn invalid_tagged_listings_are_errors_instead_of_empty_results() {
+        for text in [
+            "A different response format",
+            "<meetings_data><meeting id='m1'>",
+            "<meetings_data><meeting id='m1' id='m2' /></meetings_data>",
+            "<meetings_data><meeting id='m1' title='&unknown;' /></meetings_data>",
+            "<meetings_data><meeting id='m1' /></different>",
+            "<pagination remaining_count='many'/><meetings_data/>",
+            "<!DOCTYPE meetings_data><meetings_data />",
+        ] {
+            assert!(tagged_listing(text).is_err(), "invalid reply: {text}");
+        }
+    }
+
+    #[test]
+    fn unrecognized_details_fail_instead_of_reporting_a_successful_empty_import() {
+        let (endpoint, _) = fictional_server(Answer::TaggedDetails);
+        let mut connection = Connection::open_at(&endpoint, &tokens(), false).unwrap();
+        assert_eq!(
+            connection.fetch(&["m2".into()]),
+            Err(SourceError::Unavailable)
+        );
     }
 
     #[test]

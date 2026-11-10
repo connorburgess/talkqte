@@ -67,6 +67,8 @@ npm run desktop
 
 `npm run dev` serves the same notebook as a browser simulation at `http://127.0.0.1:1420`, with the fictional demo and no microphone. What the notebook, companion, focus list, prior notes, and export do today, with their limits, is in [Run the prototype](docs/run-the-prototype.md).
 
+Granola sign-in and focus suggestions have worked in an account check. The note chooser now reads Granola's tagged listing format, verified with fictional fixtures matching its structure; listing and importing a selected real note still need a follow-up check. Unsupported note-detail formats report an error instead of a successful empty import.
+
 ## Live session (developer build)
 
 A live session transcribes your microphone on this Mac and runs the phrase-based questions on what it hears. It is off in ordinary builds. To try it, build with the `local-whisper` feature (needs CMake):

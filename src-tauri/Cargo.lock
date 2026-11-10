@@ -3408,6 +3408,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-av-foundation",
  "open",
+ "quick-xml",
  "rtrb",
  "serde",
  "serde_json",
