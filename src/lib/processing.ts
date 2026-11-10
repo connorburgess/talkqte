@@ -1,5 +1,5 @@
 /** Native status and guarded processing commands. The surface remains test-
- * mounted; capture Stop and app/provider activation are separate gates. */
+ * mounted; normal-app integration and provider activation are separate gates. */
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
@@ -35,6 +35,10 @@ export type ProcessingIssue =
   | 'rateLimit'
   | 'worker'
   | null;
+export interface StopTarget {
+  operation: string | null;
+  microphone: string;
+}
 export interface ProcessingSnapshot {
   /** Monotonic across sessions; late snapshots cannot restore an older state. */
   revision: number;
@@ -43,6 +47,8 @@ export interface ProcessingSnapshot {
   scopeRevision: number;
   phase: 'off' | 'active' | 'paused' | 'unavailable' | 'stopping' | 'ended';
   capture: 'unknown' | 'starting' | 'running' | 'stopping' | 'off';
+  stopTarget: StopTarget;
+  startup: 'idle' | 'loading' | 'cancelling' | 'unknown';
   processor: ProcessorSummary | null;
   notes: ProcessingNote[];
   approved: ProcessingScope | null;
@@ -87,5 +93,6 @@ export const processingApi = {
       expected: expectedScope(expected),
       paused,
     }),
-  stop: () => invoke<void>('stop_live_session'),
+  stop: ({ operation, microphone }: StopTarget) =>
+    invoke<void>('stop_capture', { target: { operation, microphone } }),
 };

@@ -15,7 +15,7 @@ This checks the permission flow before activating a provider. It does not establ
 
 ## Headless evidence
 
-`tests/processing.spec.ts` covers these behaviors with fictional IPC. All 24 Chromium checks passed on 10 November 2026, including keyboard cancellation and focus, delayed approval and Pause/Resume after Stop/new session, source revision changes, rejected scope, missing processor, empty and oversized context, failure recovery, and a long source title at a 320 × 560 viewport with reduced motion. Capture checks cover starting/unknown capture with Stop available and capture off while the session finishes. Three command checks verify originating session/scope arguments and delayed Disable after source/session replacement. The layout has no horizontal overflow and its buttons remain at least 48 pixels high.
+`tests/processing.spec.ts` covers these behaviors with fictional IPC. All 30 Chromium checks passed on 10 November 2026, including keyboard cancellation and focus, delayed approval and Pause/Resume after Stop/new session, source revision changes, rejected scope, missing processor, empty and oversized context, failure recovery, and a long source title at a 320 × 560 viewport with reduced motion. Capture checks cover starting/unknown capture with Stop available and capture off while the session finishes. Command checks verify originating session/scope arguments and delayed Disable after source/session replacement. Six additional [scoped Stop checks](scoped-capture-stop.md) cover model-start cancellation, changed sources, replacement capture/session, missing status and startup completion before delivery. The layout has no horizontal overflow and its buttons remain at least 48 pixels high; pending/cancelled startup and unknown capture also passed a rendered narrow/200%-zoom review.
 
 Run the scoped checks with a free local port:
 
@@ -25,7 +25,7 @@ PLAYWRIGHT_PORT=1440 npm test -- tests/processing.spec.ts --project=chromium
 
 A local macOS WebKit run encountered `html` intercepting pointer events and an initial keyboard-focus failure, also seen in earlier browser checks. That run was stopped; it is not a pass. The pull request must pass the complete browser suite in CI, including WebKit, before merging. Native VoiceOver, cross-app focus and comprehension remain separate acceptance checks.
 
-The screenshots use only fictional content. They show the test harness, not an activated app integration:
+The screenshots use only fictional content. They show the test harness, not an activated app integration; older Stop labels now read “Stop capture,” with “Cancel start” during model preparation:
 
 - [Source selection, desktop](assets/processing-sources-desktop.png)
 - [Hosted confirmation, narrow layout](assets/processing-review-narrow.png)
@@ -35,10 +35,9 @@ The screenshots use only fictional content. They show the test harness, not an a
 
 ## Next integration blocker
 
-The read-only `processing_snapshot` command and main-window `processing:changed` event have a [native implementation](native-processing-status.md). Review/approval/cancellation and session/scope-bound Disable/Pause/Resume now have [native handlers and fictional acceptance](native-processing-commands.md). Browser tests still use fictional IPC. Before mounting this component in the app:
+The read-only `processing_snapshot` command and main-window `processing:changed` event have a [native implementation](native-processing-status.md). Review/approval/cancellation and session/scope-bound Disable/Pause/Resume have [native handlers and fictional acceptance](native-processing-commands.md). Capture Stop now has [operation/generation guards](scoped-capture-stop.md), including pending model startup and independent monitoring. Browser tests still use fictional IPC. Before activating evaluated cues in the app:
 
-1. Bind capture Stop to its originating session/generation, including independent microphone monitoring and model startup. Source changes must not block Stop; late teardown cannot stop replacement capture. Keep microphone release distinct from finishing queued transcription.
-2. Integrate the guarded commands and native events without weakening exact source/processor review. Preserve explicit cancellation and bounded errors; no frontend cancellation alone revokes a native grant. Verify the complete start/review/pause/disable/Stop/recovery flow headlessly and in the native target environment.
-3. Review the complete concrete adapter and app integration, including existing microphone/privacy copy, before any separately authorized trial. A hosted processor must not coexist with a claim that its submitted transcript stays on-device. Confirm adapter availability and policy before showing an approval flow.
+1. Integrate the guarded commands and native events without weakening exact source/processor review. Make Cancel start reachable while the notebook's Start command is pending. Preserve explicit cancellation and bounded errors; no frontend cancellation alone revokes a native grant. Verify the complete start/review/pause/disable/Stop/recovery flow headlessly and in the native target environment.
+2. Review the complete concrete adapter and app integration, including existing microphone/privacy copy, before any separately authorized trial. A hosted processor must not coexist with a claim that its submitted transcript stays on-device. Confirm adapter availability and policy before showing an approval flow.
 
 Continue the [processing acceptance sequence](processing-plan.md#acceptance-and-dependency-order). The native controller and fake-adapter checks are independently actionable; provider activation and any new inference remain separate decisions.

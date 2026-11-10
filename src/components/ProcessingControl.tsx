@@ -59,6 +59,7 @@ export function ProcessingControl() {
   const launcher = useRef<HTMLButtonElement>(null);
   const statusHeading = useRef<HTMLHeadingElement>(null);
   const restoreFocus = useRef(false);
+  const stopRequested = useRef(false);
   const isEditing = useRef(false);
   isEditing.current = editing || !!review;
 
@@ -71,13 +72,23 @@ export function ProcessingControl() {
     const old = current.current;
     current.current = next;
     setSnapshot(next);
+    if (old && old.stopTarget.operation !== next.stopTarget.operation)
+      stopRequested.current = false;
+    if (
+      stopRequested.current &&
+      next.capture === 'off' &&
+      next.startup === 'idle'
+    ) {
+      stopRequested.current = false;
+      restoreFocus.current = true;
+    }
     if (
       old &&
       (old.session !== next.session ||
         old.scopeRevision !== next.scopeRevision ||
         next.capture !== 'running')
     ) {
-      restoreFocus.current = isEditing.current;
+      restoreFocus.current ||= isEditing.current;
       serial.current += 1;
       setBusy(null);
       setEditing(false);
@@ -105,7 +116,7 @@ export function ProcessingControl() {
       .catch(() => {
         if (!disposed)
           setError(
-            'Processing status is unavailable. You can still request Stop live session.',
+            'Processing status is unavailable. You can still request Stop capture.',
           );
       });
     return () => {
@@ -122,7 +133,7 @@ export function ProcessingControl() {
       restoreFocus.current = false;
       (launcher.current ?? statusHeading.current)?.focus();
     }
-  }, [review, editing]);
+  }, [review, editing, snapshot?.capture, snapshot?.startup]);
 
   async function closeReview() {
     const ticket = ++serial.current;
@@ -194,6 +205,7 @@ export function ProcessingControl() {
   async function act(kind: string, action: () => Promise<void>) {
     const ticket = ++serial.current;
     setBusy(kind);
+    if (kind === 'stop') stopRequested.current = true;
     setError('');
     restoreFocus.current = isEditing.current;
     if (kind !== 'approve') {
@@ -214,7 +226,7 @@ export function ProcessingControl() {
       if (alive.current && ticket === serial.current)
         setError(
           kind === 'stop'
-            ? 'Stop was not confirmed. Try Stop live session again.'
+            ? 'Stop was not confirmed. Check the current status, then try again.'
             : kind === 'approve'
               ? 'Approval was not confirmed. Check the current status before trying again.'
               : 'The change was not confirmed. Check the current status and try again.',
@@ -224,6 +236,9 @@ export function ProcessingControl() {
     }
   }
   const capture = snapshot?.capture;
+  const startup = snapshot?.startup;
+  const cancelStart =
+    capture === 'off' && (startup === 'loading' || startup === 'cancelling');
   const canReview =
     capture === 'running' &&
     (snapshot?.phase === 'off' || snapshot?.phase === 'unavailable') &&
@@ -266,15 +281,24 @@ export function ProcessingControl() {
       </div>
       <p className="processing-capture">
         {capture === 'running'
-          ? 'Microphone is on. Stop live session to stop listening.'
+          ? 'Microphone is on. Stop capture to stop listening.'
           : capture === 'stopping'
-            ? 'Stopping the live session… waiting for the microphone to stop.'
+            ? 'Waiting for the microphone to stop…'
             : capture === 'starting'
               ? 'Starting microphone… you can stop while it starts.'
               : capture === 'off'
                 ? 'Microphone is off.'
-                : 'Microphone status is unknown. Use Stop live session to request that it stops.'}
+                : 'Microphone status is unknown. Use Stop capture to request that it stops.'}
       </p>
+      {startup && startup !== 'idle' && (
+        <p role="status" className="processing-muted">
+          {startup === 'loading'
+            ? 'Preparing the live session… you can cancel before it starts.'
+            : startup === 'cancelling'
+              ? 'Start cancelled. Waiting for preparation to finish before you can start again.'
+              : 'Live startup status is unavailable. You can still request Stop capture.'}
+        </p>
+      )}
       {snapshot?.processor && (
         <p>
           <strong>{snapshot.processor.name}</strong> · {location}
@@ -357,16 +381,29 @@ export function ProcessingControl() {
             Disable processing
           </button>
         )}
-        {capture !== 'off' && (
+        {(capture !== 'off' || startup !== 'idle') && (
           <button
             className="secondary-button"
-            disabled={busy === 'stop' || capture === 'stopping'}
-            onClick={() => void act('stop', processingApi.stop)}
+            disabled={
+              busy === 'stop' ||
+              capture === 'stopping' ||
+              (cancelStart && startup === 'cancelling')
+            }
+            onClick={() =>
+              void act('stop', async () => {
+                const origin = snapshot ?? (await processingApi.snapshot());
+                await processingApi.stop(origin.stopTarget);
+              })
+            }
           >
             <Square size={17} />
-            {busy === 'stop' || capture === 'stopping'
-              ? 'Stopping…'
-              : 'Stop live session'}
+            {cancelStart
+              ? startup === 'cancelling' || busy === 'stop'
+                ? 'Cancelling…'
+                : 'Cancel start'
+              : busy === 'stop' || capture === 'stopping'
+                ? 'Stopping…'
+                : 'Stop capture'}
           </button>
         )}
       </div>

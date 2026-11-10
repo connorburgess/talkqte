@@ -22,6 +22,6 @@ These checks establish reproducible command behavior, not native accessibility, 
 
 ## Next dependency
 
-The processing surface's Stop action still uses the existing live-session endpoint. Before mounting it, provide a capture Stop bound to the originating session/capture generation, including independent microphone monitoring and cancellable model startup. Source changes must not prevent Stop, and late cleanup must not stop replacement capture. Verify these cases with fictional adapters, then integrate the UI and separately check native focus, permission clarity and actual device release. Do not treat the scope revision used for processing permission as the correct authority for emergency capture Stop.
+The processing surface's Stop action now uses [operation/generation-bound capture Stop](scoped-capture-stop.md), including independent microphone monitoring and cancellable model startup. Its fictional acceptance is separate from the command counts above. The next step is integrating the UI with reachable Cancel start, then separately checking native focus, permission clarity and actual device release. Processing scope revision is deliberately not the authority for capture Stop.
 
 Provider selection/activation, Granola selected-note account acceptance, signed installation and a comparison of participation plus listening remain independent release gates.

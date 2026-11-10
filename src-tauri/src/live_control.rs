@@ -12,7 +12,15 @@ use std::sync::{
 const CANCELLED: &str = "Live session start was cancelled.";
 
 #[derive(Clone, Default)]
-pub(crate) struct StartGate(Arc<Mutex<Option<Arc<AtomicBool>>>>);
+pub(crate) struct StartGate(Arc<Mutex<StartState>>);
+
+#[derive(Default)]
+struct StartState {
+    current: Option<Arc<AtomicBool>>,
+    // Retained after the loader exits, through capture and drain. A new
+    // explicit start replaces it, so old Stop requests cannot cancel a retry.
+    operation: Option<String>,
+}
 
 #[derive(Clone)]
 #[cfg(any(feature = "local-whisper", test))]
@@ -22,37 +30,55 @@ pub(crate) struct StartGuard(Arc<AtomicBool>);
 pub(crate) struct StartTicket {
     gate: StartGate,
     guard: StartGuard,
+    operation: String,
 }
 
 impl StartGate {
     #[cfg(any(feature = "local-whisper", test))]
     fn begin(&self) -> Result<StartTicket, String> {
         let mut current = self.0.lock().map_err(|_| "Live startup is unavailable.")?;
-        if current.is_some() {
+        if current.current.is_some() {
             return Err(
                 "A live session is still starting or cancelling. Wait for it to finish.".into(),
             );
         }
         let flag = Arc::new(AtomicBool::new(false));
-        *current = Some(flag.clone());
+        let mut bytes = [0_u8; 32];
+        getrandom::fill(&mut bytes).map_err(|_| "Live startup is unavailable.")?;
+        let operation: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        current.operation = Some(operation.clone());
+        current.current = Some(flag.clone());
         Ok(StartTicket {
             gate: self.clone(),
             guard: StartGuard(flag),
+            operation,
         })
     }
 
     pub(crate) fn cancel(&self) {
         if let Ok(current) = self.0.lock() {
-            if let Some(flag) = current.as_ref() {
+            if let Some(flag) = current.current.as_ref() {
                 flag.store(true, Ordering::Release);
             }
         }
+    }
+
+    pub(crate) fn control(&self) -> Result<(Option<String>, crate::engine::StartupState), String> {
+        use crate::engine::StartupState;
+        let state = self.0.lock().map_err(|_| "Live startup is unavailable.")?;
+        let phase = match &state.current {
+            None => StartupState::Idle,
+            Some(flag) if flag.load(Ordering::Acquire) => StartupState::Cancelling,
+            Some(_) => StartupState::Loading,
+        };
+        Ok((state.operation.clone(), phase))
     }
 
     #[cfg(any(feature = "local-whisper", test))]
     fn accepts(&self, guard: &StartGuard) -> bool {
         self.0.lock().is_ok_and(|current| {
             current
+                .current
                 .as_ref()
                 .is_some_and(|flag| Arc::ptr_eq(flag, &guard.0) && !flag.load(Ordering::Acquire))
         })
@@ -87,10 +113,11 @@ impl Drop for StartTicket {
     fn drop(&mut self) {
         if let Ok(mut current) = self.gate.0.lock() {
             if current
+                .current
                 .as_ref()
                 .is_some_and(|flag| Arc::ptr_eq(flag, &self.guard.0))
             {
-                *current = None;
+                current.current = None;
             }
         }
     }
@@ -135,6 +162,7 @@ impl Runtime {
         self.last_tick = std::time::Instant::now();
         let session = self.engine.session();
         self.live = Some(Live {
+            operation: Some(ticket.operation.clone()),
             session,
             microphone: None,
             runner: None,
@@ -329,6 +357,7 @@ mod tests {
             .unwrap();
         let session = runtime.engine.session();
         runtime.live = Some(Live {
+            operation: None,
             session,
             microphone: Some(12),
             runner: None,

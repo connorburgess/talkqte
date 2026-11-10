@@ -26,6 +26,6 @@ Run `cargo test --manifest-path src-tauri/Cargo.toml --locked` for these and the
 
 ## Remaining acceptance
 
-The current notebook serializes commands and disables its actions while Start awaits model loading. This change does **not** expose an interactive Cancel-start action during that interval. The native processing command/event work must expose truthful starting/stopping state, bind deferred controls to their originating session, and prevent fresh approval while Stop drains a session before mounting the controls.
+The current notebook serializes commands and disables its actions while Start awaits model loading. This change does **not** expose an interactive Cancel-start action there. [Scoped capture Stop](scoped-capture-stop.md) now carries stable operation ownership across loading and live installation, and the test-mounted controls display distinct loading/cancelling states. Integrating them into the notebook with reachable cancellation is still required; fresh processing approval remains blocked during drain.
 
 Real microphone permission, device teardown, app shutdown and cross-window operation still need an explicit native check. No real capture or model inference was used for this acceptance. Signed distribution, Granola account import, accessibility and the comparison against no assistance remain separate release gates.

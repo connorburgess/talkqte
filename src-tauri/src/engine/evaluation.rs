@@ -13,7 +13,7 @@ pub use permission::{
 };
 pub use projection::{
     CaptureState, NoteSelection, NoteSummary, ProcessingSnapshot, ProcessingTracker,
-    ProcessorSummary, Scope,
+    ProcessorSummary, Scope, StartupState, StopTarget,
 };
 
 const RECENT_LINES: usize = 6;

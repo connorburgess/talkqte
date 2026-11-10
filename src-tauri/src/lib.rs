@@ -1,4 +1,5 @@
 pub mod audio_tap;
+mod capture_control;
 mod companion;
 #[cfg(target_os = "macos")]
 mod companion_macos;
@@ -104,8 +105,27 @@ fn capture_state(snapshot: Option<microphone::Snapshot>) -> engine::CaptureState
 fn publish_processing(app: &tauri::AppHandle, runtime: &mut Runtime) -> engine::ProcessingSnapshot {
     // Never wait behind device startup/teardown while holding Runtime. Unknown
     // remains explicit; neither engine End nor a busy lock confirms capture off.
-    let capture = capture_state(app.state::<microphone::Controller>().try_snapshot());
-    let (snapshot, changed) = runtime.processing_status.update(&runtime.engine, capture);
+    let controller = app.state::<microphone::Controller>();
+    let (generation, microphone) = controller.control_snapshot();
+    let capture = capture_state(microphone);
+    let (operation, mut startup) = runtime
+        .live_start
+        .control()
+        .unwrap_or((None, engine::StartupState::Unknown));
+    // Loading describes the model, not microphone permission/startup.
+    if runtime.live.is_some() && startup == engine::StartupState::Loading {
+        startup = engine::StartupState::Idle;
+    }
+    let target = engine::StopTarget {
+        operation,
+        microphone: generation.to_string(),
+    };
+    let (snapshot, changed) = runtime.processing_status.update_with_capture_control(
+        &runtime.engine,
+        capture,
+        target,
+        startup,
+    );
     if changed {
         let _ = app.emit_to("main", "processing:changed", &snapshot);
     }
@@ -1001,6 +1021,7 @@ fn disconnect_granola(state: tauri::State<AppState>) -> Result<GranolaStatus, St
 /// A live session's parts: the engine session it feeds, the microphone start
 /// capturing for it, and its runner once capture has begun.
 struct Live {
+    operation: Option<String>,
     session: u64,
     microphone: Option<u64>,
     runner: Option<live::LiveSession>,
@@ -1240,6 +1261,7 @@ pub fn run() {
         .manage(microphone::Controller::default())
         .manage(ModelDownload::default())
         .invoke_handler(tauri::generate_handler![
+            capture_control::stop_capture,
             processing_commands::review_processing_scope,
             processing_commands::approve_processing_scope,
             processing_commands::cancel_processing_review,

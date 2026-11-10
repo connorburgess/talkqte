@@ -8,6 +8,7 @@
     "core:event:allow-unlisten",
     "allow-snapshot",
     "allow-processing-snapshot",
+    "allow-stop-capture",
     "allow-review-processing-scope",
     "allow-approve-processing-scope",
     "allow-cancel-processing-review",

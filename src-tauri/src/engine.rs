@@ -6,7 +6,7 @@ pub use evaluation::{
     CaptureState, ConversationScope, EvaluationIssue, EvaluationOutcome, EvaluationStatus,
     NoteSelection, NoteSummary, ProcessingError, ProcessingLocation, ProcessingReview,
     ProcessingSnapshot, ProcessingTracker, ProcessorConfiguration, ProcessorDisclosure,
-    ProcessorSummary, Scope,
+    ProcessorSummary, Scope, StartupState, StopTarget,
 };
 
 const CUE_MS: u64 = 18_000;
