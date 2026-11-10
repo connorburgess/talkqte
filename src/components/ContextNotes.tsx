@@ -300,8 +300,10 @@ export function ContextNotes({
         {picked && picked.skipped > 0 && (
           <p className="muted small">
             {picked.skipped} more{' '}
-            {picked.skipped === 1 ? 'note is' : 'notes are'} not listed: the
-            file has repeated ids or more than 200 notes.
+            {picked.skipped === 1 ? 'note is' : 'notes are'} not listed
+            {pickedFrom === 'granola'
+              ? ': Granola returned a partial list, or it exceeds the 200-note chooser limit.'
+              : ': the file has repeated ids or more than 200 notes.'}
           </p>
         )}
         {picked && picked.notes.length > 1 && (

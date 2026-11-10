@@ -14,6 +14,7 @@ use crate::context::{
     MAX_TITLE_CHARS,
 };
 use crate::notes_file::{NoteSummary, MAX_NOTES};
+use quick_xml::{events::Event, Reader, XmlVersion};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
@@ -548,7 +549,11 @@ impl Connection {
         if let Value::String(text) = &output {
             trace_text("list_meetings text", text);
         }
-        let notes = notes_in(&tool_output(&result));
+        let (notes, remaining) = if let Value::String(text) = &output {
+            tagged_listing(text)?
+        } else {
+            (notes_in(&output), 0)
+        };
         let total = notes.len();
         let summaries: Vec<NoteSummary> = notes
             .into_iter()
@@ -560,7 +565,7 @@ impl Connection {
                 preview: preview(&note.text),
             })
             .collect();
-        let skipped = total - summaries.len();
+        let skipped = (total - summaries.len()).saturating_add(remaining);
         Ok((summaries, skipped))
     }
 
@@ -717,11 +722,9 @@ fn trace(label: &str, value: &Value) {
     eprintln!("granola trace: {label}: {}", shape(value));
 }
 
-/// The layout of a text reply with its content blanked: every letter
-/// becomes `x` and every digit `9`, while tag names and attribute names
-/// inside `<...>` stay, so a tagged or Markdown list can be read for its
-/// shape (what is a title, what is a date) and nothing else. Cut at 2,000
-/// characters. Developer trace only, like `trace`.
+/// The layout of a text reply with content masked. Only known structural
+/// tag and attribute names survive; arbitrary names can themselves contain
+/// meeting content. Cut at 2,000 characters. Developer trace only, like `trace`.
 fn trace_text(label: &str, text: &str) {
     if std::env::var_os("TALKQTE_GRANOLA_TRACE").is_none() {
         return;
@@ -730,27 +733,111 @@ fn trace_text(label: &str, text: &str) {
 }
 
 fn skeleton(text: &str) -> String {
+    fn masked(c: char) -> char {
+        if c.is_numeric() {
+            '9'
+        } else if c.is_ascii_punctuation() || matches!(c, ' ' | '\n' | '\r' | '\t') {
+            c
+        } else {
+            'x'
+        }
+    }
+
+    fn structural(name: &str) -> bool {
+        matches!(
+            name,
+            "meeting"
+                | "meetings"
+                | "note"
+                | "notes"
+                | "title"
+                | "date"
+                | "id"
+                | "meeting_id"
+                | "created_at"
+                | "updated_at"
+                | "start_time"
+                | "end_time"
+                | "summary"
+                | "content"
+                | "text"
+                | "url"
+                | "participants"
+                | "attendees"
+                | "access_notice"
+                | "has_more"
+                | "total"
+                | "count"
+                | "meetings_data"
+                | "meeting_at"
+                | "pagination"
+                | "total_count"
+                | "remaining_count"
+                | "next_cursor"
+                | "private_notes"
+        )
+    }
+
     let mut out = String::new();
+    let mut chars = text.chars().take(2_000).peekable();
     let mut in_tag = false;
-    let mut in_value = false;
-    for c in text.chars().take(2_000) {
+    let mut tag_name = false;
+    let mut awaiting_value = false;
+    // A space denotes an unquoted value; the other delimiters are quotes.
+    let mut value_delimiter = None;
+    while let Some(c) = chars.next() {
+        if let Some(delimiter) = value_delimiter {
+            if delimiter == ' ' && (c.is_whitespace() || c == '>') {
+                value_delimiter = None;
+            } else {
+                if c == delimiter {
+                    value_delimiter = None;
+                }
+                out.push(masked(c));
+                continue;
+            }
+        }
+        if awaiting_value && !c.is_whitespace() {
+            awaiting_value = false;
+            if c != '>' {
+                value_delimiter = Some(if matches!(c, '\'' | '"') { c } else { ' ' });
+                out.push(masked(c));
+                continue;
+            }
+        }
         match c {
-            '<' if !in_value => {
+            '<' => {
                 in_tag = true;
+                tag_name = true;
+                awaiting_value = false;
                 out.push(c);
             }
-            '>' if in_tag && !in_value => {
+            '>' => {
                 in_tag = false;
+                awaiting_value = false;
                 out.push(c);
             }
-            '"' if in_tag => {
-                in_value = !in_value;
+            '=' if in_tag => {
+                awaiting_value = true;
                 out.push(c);
             }
-            _ if in_tag && !in_value => out.push(c),
-            _ if c.is_ascii_digit() => out.push('9'),
-            _ if c.is_alphabetic() => out.push('x'),
-            _ => out.push(c),
+            _ if in_tag && (c.is_alphanumeric() || c == '_') => {
+                let mut name = String::from(c);
+                while let Some(&next) = chars.peek() {
+                    if !(next.is_alphanumeric() || matches!(next, '_' | '-' | ':')) {
+                        break;
+                    }
+                    name.push(chars.next().unwrap());
+                }
+                let attribute_name = chars.clone().find(|c| !c.is_whitespace()) == Some('=');
+                if (tag_name || attribute_name) && structural(&name) {
+                    out.push_str(&name);
+                } else {
+                    out.extend(name.chars().map(masked));
+                }
+                tag_name = false;
+            }
+            _ => out.push(masked(c)),
         }
     }
     out
@@ -997,6 +1084,87 @@ struct Note {
     text: String,
 }
 
+/// The observed listing is a sequence of XML fragments with prose between
+/// them. Only direct meeting children of meetings_data supply chooser rows;
+/// participant, folder, and attachment content is deliberately skipped.
+fn tagged_listing(text: &str) -> Result<(Vec<Note>, usize), SourceError> {
+    let mut reader = Reader::from_str(text);
+    let mut notes = Vec::new();
+    let mut seen_ids = std::collections::HashSet::new();
+    let mut in_data = false;
+    let mut saw_data = false;
+    let mut remaining = 0;
+    loop {
+        let event = reader.read_event().map_err(|_| SourceError::Unavailable)?;
+        match event {
+            Event::Start(ref tag) | Event::Empty(ref tag) => {
+                let empty = matches!(event, Event::Empty(_));
+                match tag.name().as_ref() {
+                    "meetings_data" if !in_data => {
+                        saw_data = true;
+                        in_data = !empty;
+                    }
+                    "pagination" if !in_data => {
+                        for attribute in tag.attributes() {
+                            let attribute = attribute.map_err(|_| SourceError::Unavailable)?;
+                            if attribute.key.as_ref() == "remaining_count" {
+                                remaining = attribute
+                                    .normalized_value(XmlVersion::Implicit1_0)
+                                    .map_err(|_| SourceError::Unavailable)?
+                                    .parse::<usize>()
+                                    .map_err(|_| SourceError::Unavailable)?;
+                            }
+                        }
+                        if !empty {
+                            reader
+                                .read_to_end(tag.name())
+                                .map_err(|_| SourceError::Unavailable)?;
+                        }
+                    }
+                    "meeting" if in_data => {
+                        let mut fields = serde_json::Map::new();
+                        for attribute in tag.attributes() {
+                            let attribute = attribute.map_err(|_| SourceError::Unavailable)?;
+                            let key = attribute.key.as_ref();
+                            if matches!(key, "id" | "title" | "meeting_at" | "date") {
+                                let value = attribute
+                                    .normalized_value(XmlVersion::Implicit1_0)
+                                    .map_err(|_| SourceError::Unavailable)?;
+                                fields.insert(key.to_string(), Value::String(value.into_owned()));
+                            }
+                        }
+                        if !empty {
+                            reader
+                                .read_to_end(tag.name())
+                                .map_err(|_| SourceError::Unavailable)?;
+                        }
+                        if let Some(note) = note_from(&Value::Object(fields)) {
+                            if seen_ids.insert(note.id.clone()) {
+                                notes.push(note);
+                            }
+                        }
+                    }
+                    _ if !empty => {
+                        reader
+                            .read_to_end(tag.name())
+                            .map_err(|_| SourceError::Unavailable)?;
+                    }
+                    _ => {}
+                }
+            }
+            Event::End(tag) if tag.name().as_ref() == "meetings_data" => in_data = false,
+            // No DTD or custom entities are needed for provider metadata.
+            Event::DocType(_) => return Err(SourceError::Unavailable),
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    if !saw_data || in_data {
+        return Err(SourceError::Unavailable);
+    }
+    Ok((notes, remaining))
+}
+
 /// The notes in a tool's output, whatever it calls its fields: an array at
 /// the root or under the first array-valued key, each with an id, a title or
 /// name, a date-like field, and a text-like field.
@@ -1033,6 +1201,8 @@ fn note_from(value: &Value) -> Option<Note> {
         .filter(|title| !title.is_empty())
         .unwrap_or_else(|| "Untitled note".into());
     let date = pick(&[
+        // Granola's display date is prose; meeting_at is the ISO source date.
+        "meeting_at",
         "date",
         "created_at",
         "createdAt",
@@ -1159,7 +1329,15 @@ impl NoteSource for Connection {
             json!({ "name": tool.name, "arguments": { argument: selection } }),
         )?;
         trace("get_meetings result", &result);
-        Ok(notes_in(&tool_output(&result))
+        let output = tool_output(&result);
+        if let Value::String(text) = &output {
+            trace_text("get_meetings text", text);
+            // The account trace has established the listing shape only.
+            // An unrecognized detail format is a provider failure, not a
+            // successful import of zero notes.
+            return Err(SourceError::Unavailable);
+        }
+        Ok(notes_in(&output)
             .into_iter()
             .filter(|note| selection.iter().any(|wanted| wanted == &note.id))
             .map(|note| ContextItem {
@@ -1290,6 +1468,8 @@ mod tests {
     enum Answer {
         Json,
         EventStream,
+        TaggedListing,
+        TaggedDetails,
         Status(u16),
         RpcError(&'static str),
         ToolError,
@@ -1391,6 +1571,18 @@ mod tests {
                     Some("tools/call") if matches!(answer, Answer::ToolError) => {
                         json!({"isError": true, "content": [{"type": "text", "text": "Something went wrong."}]})
                     }
+                    Some("tools/call")
+                        if matches!(answer, Answer::TaggedListing)
+                            && request["params"]["name"] == "list_meetings" =>
+                    {
+                        json!({"content": [{"type": "text", "text": TAGGED_LISTING}]})
+                    }
+                    Some("tools/call")
+                        if matches!(answer, Answer::TaggedDetails)
+                            && request["params"]["name"] == "get_meetings" =>
+                    {
+                        json!({"content": [{"type": "text", "text": "<meeting id=\"m2\"><unknown>Fictional note</unknown></meeting>"}]})
+                    }
                     Some("tools/call") if request["params"]["name"] == "query_granola_meetings" => {
                         json!({"content": [{"type": "text", "text": "Here is what is still open:\n\n1. Agree the launch plan for the newsletter\n2. Decide who owns the compost bins\n- “Settle the volunteer schedule”\n- Agree the launch plan for the newsletter\n\nLet me know if you want more detail."}]})
                     }
@@ -1433,7 +1625,7 @@ mod tests {
 
     #[test]
     fn a_session_lists_recent_notes_and_fetches_only_the_selection() {
-        for answer in [Answer::Json, Answer::EventStream] {
+        for answer in [Answer::Json, Answer::EventStream, Answer::TaggedListing] {
             let (endpoint, seen) = fictional_server(answer);
             let mut connection = Connection::open_at(&endpoint, &tokens(), false).unwrap();
             assert_eq!(
@@ -1487,6 +1679,70 @@ mod tests {
             assert_eq!(asked["params"]["arguments"]["meeting_ids"], json!(["m2"]));
             assert!(!format!("{connection:?}").contains("fictional-token"));
         }
+    }
+
+    // Same structure as the observed provider listing; all values are fictional.
+    const TAGGED_LISTING: &str = r#"
+<pagination has_more="false" total_count="2" remaining_count="0" />
+<requested_range time_range="last_30_days">Recent notes</requested_range>
+The default range is the last thirty days.
+<meetings_data connected_user_email="gardener@example.com" count="2">
+  <meeting id="m1" title="Garden welcome guide" date="Oct 28, 2026 10:00 am UTC" meeting_at="2026-10-28T10:00:00Z">
+    <known_participants>Robin (robin@example.com)</known_participants>
+    <folders />
+  </meeting>
+  <meeting id="m2" title="Visitor questions" date="Nov 2, 2026 9:00 am UTC" meeting_at="2026-11-02T09:00:00Z" />
+</meetings_data>"#;
+
+    #[test]
+    fn tagged_listing_decodes_metadata_without_importing_other_content() {
+        let (notes, remaining) = tagged_listing(TAGGED_LISTING).unwrap();
+        assert_eq!(remaining, 0);
+        assert_eq!(notes.len(), 2);
+        assert_eq!(notes[0].date, "2026-10-28");
+        assert!(notes.iter().all(|note| note.text.is_empty()));
+        let (notes, remaining) = tagged_listing(r#"
+<pagination remaining_count="7" />
+<meeting id="outside" title="Not a row" />
+<meetings_data>
+  <meeting id='m&amp;1' title='Café &amp; &quot;Garden&quot; &gt; shed &#x1F331;' meeting_at='2026-11-02T09:00:00+07:00'>
+    <known_participants><meeting id="nested" title="Not a row" /></known_participants>
+  </meeting>
+  <meeting id='m&amp;1' title='Duplicate' />
+  <meeting title='Missing ID' />
+</meetings_data>"#).unwrap();
+        assert_eq!(remaining, 7);
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].id, "m&1");
+        assert_eq!(notes[0].title, "Café & \"Garden\" > shed 🌱");
+        assert_eq!(notes[0].date, "2026-11-02");
+        assert!(notes[0].text.is_empty());
+        assert_eq!(tagged_listing("<meetings_data />").unwrap(), (vec![], 0));
+    }
+
+    #[test]
+    fn invalid_tagged_listings_are_errors_instead_of_empty_results() {
+        for text in [
+            "A different response format",
+            "<meetings_data><meeting id='m1'>",
+            "<meetings_data><meeting id='m1' id='m2' /></meetings_data>",
+            "<meetings_data><meeting id='m1' title='&unknown;' /></meetings_data>",
+            "<meetings_data><meeting id='m1' /></different>",
+            "<pagination remaining_count='many'/><meetings_data/>",
+            "<!DOCTYPE meetings_data><meetings_data />",
+        ] {
+            assert!(tagged_listing(text).is_err(), "invalid reply: {text}");
+        }
+    }
+
+    #[test]
+    fn unrecognized_details_fail_instead_of_reporting_a_successful_empty_import() {
+        let (endpoint, _) = fictional_server(Answer::TaggedDetails);
+        let mut connection = Connection::open_at(&endpoint, &tokens(), false).unwrap();
+        assert_eq!(
+            connection.fetch(&["m2".into()]),
+            Err(SourceError::Unavailable)
+        );
     }
 
     #[test]
@@ -1678,6 +1934,30 @@ mod tests {
             "<meeting id=\"x-9\" date=\"9999-99-99\">\n<title>xxxxxx xxx</title> 9 xxxxx</meeting>"
         );
         assert!(!shaped.to_string().contains("Garden"));
+    }
+
+    #[test]
+    fn text_trace_masks_attribute_values_and_arbitrary_markup() {
+        assert_eq!(
+            skeleton("<meeting title='Garden day' id=m-1 date = \"2026-11-10\">"),
+            "<meeting title='xxxxxx xxx' id=x-9 date = \"9999-99-99\">"
+        );
+        // Known field names in values must also be masked, even when a value
+        // contains apparent markup. Unknown tag/attribute names are private.
+        assert_eq!(
+            skeleton("<meeting title='notes <date>' id=title Garden=notes><Orchid>"),
+            "<meeting title='xxxxx <xxxx>' id=xxxxx xxxxxx=xxxxx><xxxxxx>"
+        );
+        assert_eq!(
+            skeleton("<meeting title='Garden <date>"),
+            "<meeting title='xxxxxx <xxxx>"
+        );
+        assert_eq!(
+            skeleton("<Garden planning tomorrow>"),
+            "<xxxxxx xxxxxxxx xxxxxxxx>"
+        );
+        assert_eq!(skeleton("東京 ٢٣ 🌱\u{001b}[31m"), "xx 99 xx[99x");
+        assert_eq!(skeleton(&"é".repeat(2_001)), "x".repeat(2_000));
     }
 
     #[test]
