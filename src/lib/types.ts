@@ -5,17 +5,37 @@ export interface Segment {
   speaker: string;
   text: string;
 }
+/** Only the cited sources, not the evaluator's entire selected context. */
+export interface CueSource {
+  id: string;
+  revision: number;
+  text: string;
+  provenance:
+    | { kind: 'transcript'; atMs: number; speaker: string }
+    | {
+        kind: 'priorNote';
+        provider: 'file' | 'granola';
+        date: string;
+        title: string;
+      };
+}
 export interface Cue {
   id: string;
   kind: string;
   question: string;
   evidence: string;
+  /** Evaluated cues disclose every cited source separately. */
+  sources?: CueSource[];
   sourceId: string;
   remainingMs: number;
   totalMs: number;
   held: boolean;
   expanded: boolean;
-  resolvedBy: { sourceId: string; evidence: string } | null;
+  resolvedBy: {
+    sourceId: string;
+    evidence: string;
+    sources?: CueSource[];
+  } | null;
   /** Set for a context reminder: the imported note it quotes. */
   note: { title: string; sourceDate: string; provider: string } | null;
   /** The line uses words from a focus line: shown sooner, kept longer. */

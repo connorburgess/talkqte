@@ -1,14 +1,14 @@
 # Bounded cue evaluator
 
-`src-tauri/src/cue_evaluator.rs` provides a replaceable Rust worker and decision contract. A development constructor now connects it to the Rust cue engine with transcript-only input; no app command enables that path. No model, provider adapter, credentials, network request, or automatic reasoning is supplied. The app continues to use its existing phrase rules.
+`src-tauri/src/cue_evaluator.rs` provides a replaceable Rust worker and decision contract. Development constructors connect it to the Rust cue engine with transcript-only input or an explicit selected-note scope; no app command enables either path. No model, provider adapter, credentials, network request, or automatic reasoning is supplied. The app continues to use its existing phrase rules.
 
 This foundation supports timely context by rejecting late or obsolete proposals before they can reach the cue lifecycle. Structure and source-membership checks do not establish that a proposal is true, relevant, or useful to someone listening.
 
 ## Input and output
 
-The caller constructs an immutable request with a session ID, eligibility revision, selected sources, and optional existing cue. Each source has a unique ID, revision, text, and provenance: transcript time/speaker or prior-note provider/date. Imported notes remain distinguishable from current speech. Source text is untrusted data, not instructions or permission to act.
+The caller constructs an immutable request with a session ID, eligibility revision, selected sources, and optional existing cue. Each source has a unique ID, revision, text, and provenance: transcript time/speaker or prior-note provider/date/title. Imported notes remain distinguishable from current speech. Source text is untrusted data, not instructions or permission to act.
 
-Requests allow 1–32 sources, at most 4,096 bytes of text per source, and at most 32,768 bytes across source text, IDs, and metadata. IDs and provenance strings are limited to 128 characters. An existing cue has a bounded ID, at most 240 characters of text, and 1–4 distinct references to supplied sources. JSON encoding adds overhead; adapters must also bound their complete wire input and transport output.
+Requests allow 1–32 sources, at most 4,096 bytes of text per source, and at most 32,768 bytes across source text, IDs, and metadata. Source IDs are limited to 160 characters to accommodate a namespace around the context store's 128-byte note IDs. Speaker and date strings allow at most 128 characters; note titles allow 200. Their bytes, including provider labels, count toward the aggregate limit. An existing cue has a bounded ID, at most 240 characters of text, and 1–4 distinct references to supplied sources. JSON encoding adds overhead; adapters must also bound their complete wire input and transport output.
 
 A reply is at most 4,096 bytes of JSON with exactly five fields: `action`, `cue`, `sourceIds`, `reason`, and `observedUse`. Unknown fields, missing fields, invalid types, and duplicate object fields fail validation.
 
@@ -35,7 +35,7 @@ Adapters must check cancellation, cap transport buffers, terminate their own sub
 
 Eight headless Rust tests use fictional evaluators and channels, without model calls. They exercise all four actions, input/output bounds, malformed and unsupported decisions, unknown or repeated references, changed context and cue identity, cancelled and expired results, an occupied worker, adapter failure, worker exit, and nonblocking teardown. The complete library suite passed 225 tests on 10 November 2026.
 
-The transcript lifecycle bridge below is the next delivered slice. Imported-note reasoning and provider/app activation remain separate implementation work. Provider selection, explicit processing permission, model quality, actual latency/resource budgets, and comparison with no assistance remain separate gates. These offline tests establish neither semantic quality nor user outcomes.
+The transcript lifecycle bridge below is the next delivered slice. The selected-note development bridge below adds source lifecycle and disclosure; semantic note reasoning and provider/app activation remain separate work. Provider selection, explicit processing permission, model quality, actual latency/resource budgets, and comparison with no assistance remain separate gates. These offline tests establish neither semantic quality nor user outcomes.
 
 
 ## Transcript lifecycle bridge
@@ -46,10 +46,37 @@ For each newly accepted eligible transcript line, the engine attempts one evalua
 
 New speech, pause/resume, dismissal, Stop/replay, focus, name, sensitivity, or imported-note changes cancel pending work. Reimporting an unchanged selected store does not cancel it. Clock ticks and appearance changes do not cancel a still-current request. Polling and application share the engine's lock with controls; results are checked against current session, eligibility, sources, cue identity, and freshness. New speech arriving while a cancelled adapter is still busy is skipped, with no backlog, timer retry, fallback, or replacement thread. This conservative policy may skip opportunities during continuous speech; provider latency and scheduling need measurement before activation.
 
-A `show` proposal can use only the free cue slot. It respects cooldown, Focused mode, and a bounded two-minute exact-text repeat history. Each cited transcript excerpt is shown with its speaker and time. Its 18-second lifetime starts at the newest cited speech, not when the result arrives. This is structural grounding and lifecycle validation, not proof of source support or semantic deduplication.
+A `show` proposal can use only the free cue slot. It respects cooldown, Focused mode, and a bounded two-minute exact-text repeat history. Each cited transcript excerpt is shown with its speaker and time. Its 18-second lifetime starts at the newest cited speech, not when the result arrives. Source IDs use a `transcript:` namespace. This is structural grounding and lifecycle validation, not proof of source support or semantic deduplication.
 
 `quiet` leaves the current cue alone, including when use is labelled possible. A sourced `resolved` result clears an unread cue; a held cue retains its words and shows the cited resolution. `withdraw` clears even a held cue whose premise is no longer valid, without calling that premise answered. Transcript eviction removes an affected cue and its copied evidence, including a held cue. Dismissal, cue pause, expiry, and Stop also release those copies. No evaluator reason, observed-use label, or unused suggestion becomes a note, export, or retained score.
 
 Eight additional headless lifecycle tests use fictional delayed replies. They cover ordinary clock ticks, source disclosure and excluded inputs, quiet versus resolution while held, withdrawal, pause/resume without replay, dismissal/cooldown/repeats, Stop/new-session isolation, transcript eviction, stale sources, settings changes, malformed references, Focused filtering, and no rule fallback. No device, account, model, or network input is used.
 
-Remaining implementation: selected prior-note requests and complete multi-source provenance in the cue presentation, revision/removal tests for those notes, and an explicitly scoped activation path after a processing/provider decision. Actual semantic quality, latency under ongoing speech, hardware operation, and useful participation while listening remain unvalidated.
+Remaining implementation: bounded scheduling under sustained speech and an explicitly scoped activation path after a processing/provider decision. Actual semantic quality, latency under ongoing speech, hardware operation, and useful participation while listening remain unvalidated.
+
+
+## Selected-note development bridge
+
+`Engine::live_with_selected_note_evaluator(worker)` explicitly opts a development caller into the already selected in-memory note store as well as recent speech. The transcript-only constructor still excludes prior notes. Neither constructor is used by app commands. Importing a note is not processing permission, and this change selects no model or provider.
+
+The request includes the same recent speech and original cue references, plus up to twenty selected notes. Each note keeps its complete excerpt, title, provider, source date, and revision. IDs use `prior:<provider>:<source-id>` so file notes, Granola notes, and transcript segments cannot collide. Manual notebook edits, raw focus/name settings, unselected provider notes, and credentials are excluded. A note update does not schedule work by itself.
+
+Existing per-source and 32 KiB aggregate bounds apply to the entire selection. An oversized selection or multibyte excerpt fails closed without truncation, batching, a retry, or partial context. A future activation flow must explain these input limits and unavailable evaluation; silently implying active assistance would be wrong.
+
+Every state-changing decision must cite fresh speech in addition to any notes. An earlier note alone cannot raise a cue or establish that this conversation answered or corrected it; fresh speech elsewhere in the request is insufficient. Focused-mode matching uses cited speech, not prior-note wording. These are structural guards, not semantic evidence that the cited words justify a decision.
+
+Cue and resolution snapshots disclose all cited sources separately, at most four each, with exact excerpts. A prior note displays its title, provider, and date; a transcript excerpt displays its speaker and session time. Only cited sources reach the companion. Mixed resolution is labelled as resolved from its sources instead of attributing all of it to the conversation. The complete question and disclosure/hold/dismiss controls remain. Long source text scrolls with the existing companion surface; native window and assistive-technology checks remain open.
+
+Changing or removing any cited note clears the cue and copied disclosure, even while held or when that note was cited only by a resolution. Unchanged and unrelated imports leave visible evidence intact. Changed context cancels pending proposals; a delayed response cannot restore the removed revision. An adapter already executing still owns its request until it cooperatively returns, as described under cancellation above. Nothing is retained in notes or exported automatically.
+
+Five additional fictional Rust tests cover mixed/provider-colliding IDs, disclosure order and exclusion of uncited text, fresh cited speech, revision/removal during delayed work, held original/resolution evidence, input size failure, and maximum supported IDs/titles. The complete library suite passes 243 tests. Headless Chromium checks cover keyboard disclosure, distinct source labels, resolution/removal, and four long citations at 320 px with larger text. Local WebKit pointer actions also time out in unchanged controls; Linux browser CI remains required before merge. These checks do not prove real-account import, native placement, semantic quality, or user benefit.
+
+Fictional browser evidence (420 × 560 companion viewport; longer disclosure scrolls):
+
+| Previous single-quote rendering of mixed input | Separate source disclosure |
+| --- | --- |
+| ![Mixed source text labelled as the live transcript](assets/evaluator-sources-before.png) | ![Conversation and prior notes labelled separately with dates](assets/evaluator-sources-after.png) |
+
+[320-pixel companion rendering](assets/evaluator-sources-narrow.png).
+
+Next readiness check: use sustained fictional speech with deliberately delayed evaluators to measure skipped opportunities and tune bounded scheduling without enabling inference. Then review an explicit processing/provider choice and its actual latency, privacy, cost and onboarding behavior. The planned no-assistance comparison still needs people and must measure listening together with useful participation.
