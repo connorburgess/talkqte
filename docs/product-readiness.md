@@ -42,6 +42,8 @@ The optional Focus field now preserves ordered submissions, including Clear and 
 
 The optional session-name field now preserves newer drafts and ordered saves, with inline rejection recovery and [fictional keyboard/UI evidence](name-save-recovery.md). This removes a setup data-loss case; it does not establish direct-address cue accuracy or real-meeting usefulness. The next dependency is the existing live phrase-rule and participation/listening acceptance.
 
+Granola startup status replies now respect newer connection results and the lifetime of the notebook view, with [fictional connection-control and UI/UX checks](granola-import-validation.md#connection-status-after-sign-in-or-navigation). This prevents obsolete connection controls; the next integration gate remains selected real-note import and native account-level recovery.
+
 ### Capability description checkpoint — 11 November 2026
 
 Source and existing acceptance records were reviewed at app commit [`8991f5f`](https://github.com/connorburgess/talkqte/commit/8991f5f59ffb345ee327da5131e1d7964bba958d). This reconciles stale current-facing product, roadmap and research descriptions; it supplies no new runtime or user evidence.

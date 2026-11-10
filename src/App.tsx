@@ -439,12 +439,6 @@ function Notebook() {
       focusSuggestions.current = false;
     }
   };
-  useEffect(() => {
-    bridge
-      .granolaStatus()
-      .then(granolaChanged)
-      .catch(() => setCanSuggest(false));
-  }, []);
   const focusField = useRef<HTMLTextAreaElement>(null);
   // Clear is a mousedown before a click, so the blur that would save the old
   // text is skipped when it heads for Clear; the field keeps the focus.

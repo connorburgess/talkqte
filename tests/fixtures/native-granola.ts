@@ -1,7 +1,11 @@
 // Fictional native IPC boundary for the chooser. No account or network access.
 // Rust tests separately verify fetching, cancellation, and source retention.
 import { emit } from '@tauri-apps/api/event';
-import type { ContextItem, NoteSummary } from '../../src/lib/types';
+import type {
+  ContextItem,
+  GranolaStatus,
+  NoteSummary,
+} from '../../src/lib/types';
 
 const notes: NoteSummary[] = Array.from({ length: 24 }, (_, index) => ({
   sourceId: `garden-${index}`,
@@ -13,6 +17,10 @@ const notes: NoteSummary[] = Array.from({ length: 24 }, (_, index) => ({
   preview: '',
 }));
 let connected = false;
+let holdStatus = new URLSearchParams(location.search).has(
+  'hold-granola-status',
+);
+const statuses: Array<(fail: boolean) => void> = [];
 let pending = false;
 let generation = 0;
 let failNext = false;
@@ -44,8 +52,17 @@ const status = () => ({
 });
 export async function command(name: string, args: unknown) {
   switch (name) {
-    case 'granola_status':
-      return status();
+    case 'granola_status': {
+      const value = status();
+      if (!holdStatus) return value;
+      return new Promise<GranolaStatus>((resolve, reject) => {
+        statuses.push((fail) =>
+          fail
+            ? reject(new Error('Granola status unavailable.'))
+            : resolve(value),
+        );
+      });
+    }
     case 'connect_granola':
       connected = true;
       return status();
@@ -144,6 +161,9 @@ export async function command(name: string, args: unknown) {
 declare global {
   interface Window {
     granolaTest: {
+      holdStatuses: (hold?: boolean) => void;
+      releaseStatuses: (fail?: boolean) => void;
+      pendingStatuses: number;
       fail: () => void;
       hold: () => void;
       release: () => void;
@@ -159,6 +179,16 @@ declare global {
   }
 }
 window.granolaTest = {
+  holdStatuses: (hold = true) => {
+    holdStatus = hold;
+  },
+  releaseStatuses: (fail = false) => {
+    holdStatus = false;
+    for (const finish of statuses.splice(0)) finish(fail);
+  },
+  get pendingStatuses() {
+    return statuses.length;
+  },
   fail: () => {
     failNext = true;
   },
