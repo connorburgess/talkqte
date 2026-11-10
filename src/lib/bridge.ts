@@ -118,15 +118,26 @@ export async function removeAllContext() {
 /** Reports the imported prior notes and their later changes. */
 export async function watchContext(receive: (items: ContextItem[]) => void) {
   if (preview) return (await preview).connectContext(receive);
+  let receivedEvent = false;
   const unlisten = await listen<ContextItem[]>(
     'context:changed',
-    ({ payload }) => receive(payload),
+    ({ payload }) => {
+      receivedEvent = true;
+      receive(payload);
+    },
   );
   try {
-    receive(await invoke<ContextItem[]>('context_items'));
+    const initial = await invoke<ContextItem[]>('context_items');
+    // An import/removal event already supplies the complete current list.
+    // A delayed startup read must not hide an import or restore a removed copy.
+    if (!receivedEvent) receive(initial);
   } catch (error) {
-    unlisten();
-    throw error;
+    // Once events have supplied context, an obsolete read failure must not
+    // detach the listener and leave later removals invisible.
+    if (!receivedEvent) {
+      unlisten();
+      throw error;
+    }
   }
   return unlisten;
 }

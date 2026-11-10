@@ -2,6 +2,7 @@
 // it never opens a device or ships in the application bundle.
 import { fictionalPermissions } from './processing-permissions';
 import * as granolaFixture from './native-granola';
+import * as contextFixture from './native-context';
 import { mockIPC } from '@tauri-apps/api/mocks';
 import { emit } from '@tauri-apps/api/event';
 import * as preview from '../../src/lib/preview';
@@ -241,6 +242,12 @@ async function say(text: string, question?: string) {
 mockIPC(
   async (command, args) => {
     calls.push(command);
+    if (
+      new URLSearchParams(location.search).has('context-ordering') &&
+      contextFixture.commands.includes(command)
+    ) {
+      return contextFixture.command(command, args);
+    }
     if (
       new URLSearchParams(location.search).has('granola') &&
       granolaFixture.commands.includes(command)

@@ -44,6 +44,8 @@ The optional session-name field now preserves newer drafts and ordered saves, wi
 
 Granola startup status replies now respect newer connection results and the lifetime of the notebook view, with [fictional connection-control and UI/UX checks](granola-import-validation.md#connection-status-after-sign-in-or-navigation). This prevents obsolete connection controls; the next integration gate remains selected real-note import and native account-level recovery.
 
+The imported-note list also preserves newer import/removal events when a startup read completes late or fails, with [fictional list-recovery and UI/UX evidence](context-list-recovery.md). This prevents removed copies reappearing on screen; native/account deletion and data-flow acceptance remain separate.
+
 ### Capability description checkpoint — 11 November 2026
 
 Source and existing acceptance records were reviewed at app commit [`8991f5f`](https://github.com/connorburgess/talkqte/commit/8991f5f59ffb345ee327da5131e1d7964bba958d). This reconciles stale current-facing product, roadmap and research descriptions; it supplies no new runtime or user evidence.
