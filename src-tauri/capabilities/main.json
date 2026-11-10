@@ -2,14 +2,17 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
   "description": "Notebook commands for the local main window only.",
-  "windows": [
-    "main"
-  ],
+  "windows": ["main"],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "allow-snapshot",
     "allow-processing-snapshot",
+    "allow-review-processing-scope",
+    "allow-approve-processing-scope",
+    "allow-cancel-processing-review",
+    "allow-revoke-processing",
+    "allow-set-processing-paused",
     "allow-start-demo",
     "allow-pause-demo",
     "allow-resume-demo",
