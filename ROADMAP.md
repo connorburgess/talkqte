@@ -80,6 +80,9 @@ See the [review findings, current gaps, and experiment](docs/research.md). No us
 
 Prove that audio capture, local transcription, and the floating prompt can coexist with a real meeting app before expanding the dashboard.
 
+- [x] Build a provider-independent Rust cue evaluator worker with bounded input/output, one outstanding evaluation, source validation, cancellation, deadlines, and stale-result rejection. Eight fictional headless tests cover the [contract and failure cases](docs/cue-evaluator.md); no model or app connection is supplied.
+- [ ] Connect validated evaluator proposals to the Rust cue lifecycle with a fictional adapter first; test held cues, pause, dismissal, source removal, and Stop before selecting or enabling a model provider.
+
 - [ ] Start and stop microphone and system-audio capture with explicit permission. A live session started from the microphone after the macOS permission prompt in the [9 November check](docs/native-validation.md#live-session-check); Stop was not checked, and system audio is not captured.
 - [x] Transcribe a synthetic meeting locally without network access after model setup. A real-time developer replay of a fictional two-voice clip with a feature-gated Whisper backend. A developer build routes the microphone into a live session; system audio is not captured.
 - [x] Measure transcript delay, memory growth, CPU use, and dropped audio. Synthetic replays of 10, 20, and 60 minutes measured these ([results](docs/local-transcription.md#sustained-session)); the hour-long run showed no memory growth and about 14% of one M5 Pro Max core. Live capture, the companion, and the lowest supported Mac are not yet included.
