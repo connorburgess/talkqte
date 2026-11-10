@@ -548,7 +548,7 @@ impl Connection {
         if let Value::String(text) = &output {
             trace_text("list_meetings text", text);
         }
-        let notes = notes_in(&tool_output(&result));
+        let notes = notes_in(&output);
         let total = notes.len();
         let summaries: Vec<NoteSummary> = notes
             .into_iter()
@@ -717,11 +717,9 @@ fn trace(label: &str, value: &Value) {
     eprintln!("granola trace: {label}: {}", shape(value));
 }
 
-/// The layout of a text reply with its content blanked: every letter
-/// becomes `x` and every digit `9`, while tag names and attribute names
-/// inside `<...>` stay, so a tagged or Markdown list can be read for its
-/// shape (what is a title, what is a date) and nothing else. Cut at 2,000
-/// characters. Developer trace only, like `trace`.
+/// The layout of a text reply with content masked. Only known structural
+/// tag and attribute names survive; arbitrary names can themselves contain
+/// meeting content. Cut at 2,000 characters. Developer trace only, like `trace`.
 fn trace_text(label: &str, text: &str) {
     if std::env::var_os("TALKQTE_GRANOLA_TRACE").is_none() {
         return;
@@ -730,27 +728,104 @@ fn trace_text(label: &str, text: &str) {
 }
 
 fn skeleton(text: &str) -> String {
+    fn masked(c: char) -> char {
+        if c.is_numeric() {
+            '9'
+        } else if c.is_ascii_punctuation() || matches!(c, ' ' | '\n' | '\r' | '\t') {
+            c
+        } else {
+            'x'
+        }
+    }
+
+    fn structural(name: &str) -> bool {
+        matches!(
+            name,
+            "meeting"
+                | "meetings"
+                | "note"
+                | "notes"
+                | "title"
+                | "date"
+                | "id"
+                | "meeting_id"
+                | "created_at"
+                | "updated_at"
+                | "start_time"
+                | "end_time"
+                | "summary"
+                | "content"
+                | "text"
+                | "url"
+                | "participants"
+                | "attendees"
+                | "access_notice"
+                | "has_more"
+                | "total"
+                | "count"
+        )
+    }
+
     let mut out = String::new();
+    let mut chars = text.chars().take(2_000).peekable();
     let mut in_tag = false;
-    let mut in_value = false;
-    for c in text.chars().take(2_000) {
+    let mut tag_name = false;
+    let mut awaiting_value = false;
+    // A space denotes an unquoted value; the other delimiters are quotes.
+    let mut value_delimiter = None;
+    while let Some(c) = chars.next() {
+        if let Some(delimiter) = value_delimiter {
+            if delimiter == ' ' && (c.is_whitespace() || c == '>') {
+                value_delimiter = None;
+            } else {
+                if c == delimiter {
+                    value_delimiter = None;
+                }
+                out.push(masked(c));
+                continue;
+            }
+        }
+        if awaiting_value && !c.is_whitespace() {
+            awaiting_value = false;
+            if c != '>' {
+                value_delimiter = Some(if matches!(c, '\'' | '"') { c } else { ' ' });
+                out.push(masked(c));
+                continue;
+            }
+        }
         match c {
-            '<' if !in_value => {
+            '<' => {
                 in_tag = true;
+                tag_name = true;
+                awaiting_value = false;
                 out.push(c);
             }
-            '>' if in_tag && !in_value => {
+            '>' => {
                 in_tag = false;
+                awaiting_value = false;
                 out.push(c);
             }
-            '"' if in_tag => {
-                in_value = !in_value;
+            '=' if in_tag => {
+                awaiting_value = true;
                 out.push(c);
             }
-            _ if in_tag && !in_value => out.push(c),
-            _ if c.is_ascii_digit() => out.push('9'),
-            _ if c.is_alphabetic() => out.push('x'),
-            _ => out.push(c),
+            _ if in_tag && (c.is_alphanumeric() || c == '_') => {
+                let mut name = String::from(c);
+                while let Some(&next) = chars.peek() {
+                    if !(next.is_alphanumeric() || matches!(next, '_' | '-' | ':')) {
+                        break;
+                    }
+                    name.push(chars.next().unwrap());
+                }
+                let attribute_name = chars.clone().find(|c| !c.is_whitespace()) == Some('=');
+                if (tag_name || attribute_name) && structural(&name) {
+                    out.push_str(&name);
+                } else {
+                    out.extend(name.chars().map(masked));
+                }
+                tag_name = false;
+            }
+            _ => out.push(masked(c)),
         }
     }
     out
@@ -1678,6 +1753,30 @@ mod tests {
             "<meeting id=\"x-9\" date=\"9999-99-99\">\n<title>xxxxxx xxx</title> 9 xxxxx</meeting>"
         );
         assert!(!shaped.to_string().contains("Garden"));
+    }
+
+    #[test]
+    fn text_trace_masks_attribute_values_and_arbitrary_markup() {
+        assert_eq!(
+            skeleton("<meeting title='Garden day' id=m-1 date = \"2026-11-10\">"),
+            "<meeting title='xxxxxx xxx' id=x-9 date = \"9999-99-99\">"
+        );
+        // Known field names in values must also be masked, even when a value
+        // contains apparent markup. Unknown tag/attribute names are private.
+        assert_eq!(
+            skeleton("<meeting title='notes <date>' id=title Garden=notes><Orchid>"),
+            "<meeting title='xxxxx <xxxx>' id=xxxxx xxxxxx=xxxxx><xxxxxx>"
+        );
+        assert_eq!(
+            skeleton("<meeting title='Garden <date>"),
+            "<meeting title='xxxxxx <xxxx>"
+        );
+        assert_eq!(
+            skeleton("<Garden planning tomorrow>"),
+            "<xxxxxx xxxxxxxx xxxxxxxx>"
+        );
+        assert_eq!(skeleton("東京 ٢٣ 🌱\u{001b}[31m"), "xx 99 xx[99x");
+        assert_eq!(skeleton(&"é".repeat(2_001)), "x".repeat(2_000));
     }
 
     #[test]
