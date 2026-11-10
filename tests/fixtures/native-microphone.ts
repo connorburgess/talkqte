@@ -244,7 +244,22 @@ mockIPC(
         return preview.exportPreview();
       case 'export_markdown':
         return true;
+      case 'inspect_cue': {
+        if (!session.live)
+          return preview.command(command, args as Commands['inspect_cue']);
+        const { id, expanded } = args as Commands['inspect_cue'];
+        if (session.cue?.id !== id)
+          throw new Error('That question has already passed.');
+        await publish({ cue: { ...session.cue, expanded, held: true } });
+        return;
+      }
       case 'respond_to_cue':
+        if (session.live) {
+          if (session.cue?.id !== (args as Commands['respond_to_cue']).id)
+            throw new Error('That question has already passed.');
+          await publish({ cue: null });
+          return;
+        }
         preview.command(command, args as Commands['respond_to_cue']);
         if (delayQuestionResponse) {
           delayQuestionResponse = false;
@@ -278,6 +293,8 @@ declare global {
     liveTest: {
       start: typeof startLive;
       say: typeof say;
+      setCue: (cue: Snapshot['cue']) => Promise<void>;
+      setQuestionSize: (size: Snapshot['questionSize']) => Promise<void>;
       rejectNextPause: () => void;
     };
     modelTest: { finish: () => void };
@@ -300,6 +317,8 @@ window.questionTest = {
 window.liveTest = {
   start: startLive,
   say,
+  setCue: (cue) => publish({ cue }),
+  setQuestionSize: (questionSize) => publish({ questionSize }),
   rejectNextPause: () => {
     rejectCuePause = true;
   },

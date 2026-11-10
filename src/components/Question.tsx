@@ -1,6 +1,44 @@
 import { useId } from 'react';
 import { ChevronDown, ChevronUp, X } from 'lucide-react';
-import type { Cue, CueSnapshot } from '../lib/types';
+import {
+  clockTime,
+  type Cue,
+  type CueSnapshot,
+  type CueSource,
+} from '../lib/types';
+
+function hasPriorNotes(sources?: CueSource[]) {
+  return sources?.some((source) => source.provenance.kind === 'priorNote');
+}
+
+function Sources({ sources, label }: { sources: CueSource[]; label: string }) {
+  return (
+    <ul className="evidence-sources" aria-label={label} role="list">
+      {sources.map((source) => (
+        <li key={source.id}>
+          {source.provenance.kind === 'priorNote' ? (
+            <>
+              <p className="source-title">{source.provenance.title}</p>
+              <p className="source-label">
+                {source.provenance.provider === 'granola'
+                  ? 'Granola'
+                  : 'Imported file'}
+                {' · '}
+                {source.provenance.date} · prior note
+              </p>
+            </>
+          ) : (
+            <p className="source-label">
+              This conversation · {clockTime(source.provenance.atMs)} ·{' '}
+              {source.provenance.speaker}
+            </p>
+          )}
+          <blockquote className="evidence">“{source.text}”</blockquote>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export function Question({
   cue,
@@ -35,9 +73,11 @@ export function Question({
       <p className="question-meta">
         {cue.note
           ? `Reminder from your notes · ${cue.note.sourceDate}`
-          : `${live ? 'Live question' : 'Demo question'} · ${cue.kind}${
-              cue.aboutFocus ? ' · about what matters' : ''
-            }`}
+          : hasPriorNotes(cue.sources)
+            ? 'Suggestion with prior context'
+            : `${live ? 'Live question' : 'Demo question'} · ${cue.kind}${
+                cue.aboutFocus ? ' · about what matters' : ''
+              }`}
       </p>
       <button
         className="question-disclosure"
@@ -54,32 +94,57 @@ export function Question({
         {!cue.expanded && <ChevronDown size={16} />}
       </button>
       <div id={contextId} hidden={!cue.expanded} className="question-context">
-        <p>
-          {cue.note
-            ? `From your imported note, ${cue.note.sourceDate} · not from this conversation`
-            : live
-              ? 'From the live transcript'
-              : 'From the fictional transcript'}
-        </p>
-        <blockquote className="evidence">“{cue.evidence}”</blockquote>
+        {cue.sources?.length ? (
+          <>
+            {hasPriorNotes(cue.sources) && (
+              <p>Prior notes are not from this conversation.</p>
+            )}
+            <Sources sources={cue.sources} label="Cue sources" />
+          </>
+        ) : (
+          <>
+            <p>
+              {cue.note
+                ? `From your imported note, ${cue.note.sourceDate} · not from this conversation`
+                : live
+                  ? 'From the live transcript'
+                  : 'From the fictional transcript'}
+            </p>
+            <blockquote className="evidence">“{cue.evidence}”</blockquote>
+          </>
+        )}
         {cue.aboutFocus && (
           <p>
-            This line uses words from your focus list, so it came through sooner
-            and stays longer.
+            {cue.sources?.length
+              ? 'This suggestion cites speech with words from your focus list.'
+              : 'This line uses words from your focus list, so it came through sooner and stays longer.'}
           </p>
         )}
         {cue.resolvedBy && (
           <>
-            <p>Answered later</p>
-            <blockquote className="evidence">
-              “{cue.resolvedBy.evidence}”
-            </blockquote>
+            <p className="resolution-label">
+              {hasPriorNotes(cue.resolvedBy.sources)
+                ? 'Resolution sources'
+                : 'Answered later'}
+            </p>
+            {cue.resolvedBy.sources?.length ? (
+              <Sources
+                sources={cue.resolvedBy.sources}
+                label="Resolution sources"
+              />
+            ) : (
+              <blockquote className="evidence">
+                “{cue.resolvedBy.evidence}”
+              </blockquote>
+            )}
           </>
         )}
       </div>
       {cue.resolvedBy ? (
         <p className="question-held">
-          This was answered in the conversation. Kept here until you dismiss it.
+          {hasPriorNotes(cue.resolvedBy.sources)
+            ? 'Marked resolved from these sources. Kept here until you dismiss it.'
+            : 'This was answered in the conversation. Kept here until you dismiss it.'}
         </p>
       ) : (
         cue.held && (

@@ -35,6 +35,7 @@ pub enum Provenance {
     PriorNote {
         provider: crate::context::Provider,
         date: String,
+        title: String,
     },
 }
 
@@ -45,6 +46,12 @@ pub struct Source {
     pub revision: u64,
     pub provenance: Provenance,
     pub text: String,
+}
+
+impl fmt::Debug for Source {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Source").finish_non_exhaustive()
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize)]
@@ -97,12 +104,23 @@ impl Request {
         }
         let mut bytes = 0usize;
         for (index, source) in sources.iter().enumerate() {
-            let metadata = match &source.provenance {
-                Provenance::Transcript { speaker, .. } => speaker,
-                Provenance::PriorNote { date, .. } => date,
+            let metadata_bytes = match &source.provenance {
+                Provenance::Transcript { speaker, .. } if bounded_text(speaker, 128) => {
+                    speaker.len()
+                }
+                Provenance::PriorNote {
+                    provider,
+                    date,
+                    title,
+                } if bounded_text(date, 128)
+                    && bounded_text(title, crate::context::MAX_TITLE_CHARS) =>
+                {
+                    date.len() + title.len() + provider.id().len()
+                }
+                _ => return Err(Failure::InvalidInput),
             };
-            if !bounded_text(&source.id, 128)
-                || !bounded_text(metadata, 128)
+            // Space for a provider namespace around a validated 128-byte note ID.
+            if !bounded_text(&source.id, 160)
                 || source.text.trim().is_empty()
                 || source.text.len() > MAX_SOURCE_BYTES
                 || sources[..index]
@@ -111,7 +129,7 @@ impl Request {
             {
                 return Err(Failure::InvalidInput);
             }
-            bytes += source.text.len() + source.id.len() + metadata.len();
+            bytes += source.text.len() + source.id.len() + metadata_bytes;
         }
         if bytes > MAX_CONTEXT_BYTES {
             return Err(Failure::InvalidInput);
@@ -660,13 +678,26 @@ mod tests {
             provenance: Provenance::PriorNote {
                 provider: crate::context::Provider::Granola,
                 date: "2026-11-01".into(),
+                title: "Garden review".into(),
             },
             text: "Earlier garden notes, not current speech.".into(),
         };
-        let input = make(vec![note]).unwrap();
+        let input = make(vec![note.clone()]).unwrap();
         let encoded = serde_json::to_value(&input).unwrap();
         assert_eq!(encoded["sources"][0]["provenance"]["kind"], "priorNote");
         assert_eq!(encoded["sources"][0]["provenance"]["date"], "2026-11-01");
+        assert_eq!(
+            encoded["sources"][0]["provenance"]["title"],
+            "Garden review"
+        );
+        let mut invalid = note.clone();
+        invalid.id = "n".repeat(161);
+        assert_eq!(make(vec![invalid]).unwrap_err(), Failure::InvalidInput);
+        let mut invalid = note;
+        if let Provenance::PriorNote { title, .. } = &mut invalid.provenance {
+            *title = "t".repeat(crate::context::MAX_TITLE_CHARS + 1);
+        }
+        assert_eq!(make(vec![invalid]).unwrap_err(), Failure::InvalidInput);
         assert!(!format!("{input:?}").contains("garden"));
         assert!(
             !format!("{:?}", validate(&reply("show"), &original).unwrap()).contains("checklist")

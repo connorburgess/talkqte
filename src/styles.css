@@ -795,6 +795,36 @@ svg {
 .question-context {
   padding: 8px 0 4px;
 }
+.evidence-sources {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+}
+.evidence-sources li + li {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #547064;
+}
+.evidence-sources .evidence {
+  white-space: pre-wrap;
+}
+.source-label {
+  color: #c5d5c7;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.source-title {
+  color: #f4f4e9;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.question-context .resolution-label {
+  margin-top: 24px;
+}
 .question-context blockquote + p {
   margin-top: 12px;
 }
