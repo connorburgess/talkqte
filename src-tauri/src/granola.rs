@@ -1129,6 +1129,7 @@ struct Note {
     title: String,
     date: String,
     text: String,
+    revision: u64,
 }
 
 /// The observed listing is a sequence of XML fragments with prose between
@@ -1177,8 +1178,14 @@ fn tagged_meetings(text: &str, details: bool) -> Result<(Vec<Note>, usize), Sour
                         for attribute in tag.attributes() {
                             let attribute = attribute.map_err(|_| SourceError::Unavailable)?;
                             let key = attribute.key.as_ref();
-                            if matches!(key, "id" | "title" | "meeting_at" | "date" | "created_at")
-                            {
+                            if matches!(
+                                key,
+                                "id" | "title"
+                                    | "meeting_at"
+                                    | "date"
+                                    | "created_at"
+                                    | "updated_at"
+                            ) {
                                 let value = attribute
                                     .normalized_value(XmlVersion::Implicit1_0)
                                     .map_err(|_| SourceError::Unavailable)?;
@@ -1378,11 +1385,20 @@ fn note_from(value: &Value) -> Option<Note> {
         "notes_plain",
     ])
     .unwrap_or_default();
+    // Use the provider's update time, never fetch order or our local clock.
+    // Unknown versions may be imported once but cannot overwrite a known
+    // newer copy. Revision 1 also matches the original unversioned adapter.
+    let revision = pick(&["updated_at", "updatedAt"])
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(&value).ok())
+        .and_then(|time| u64::try_from(time.timestamp_millis()).ok())
+        .filter(|version| *version > 1)
+        .unwrap_or(1);
     Some(Note {
         id: id.trim().to_string(),
         title: title.chars().take(MAX_TITLE_CHARS).collect(),
         date,
         text,
+        revision,
     })
 }
 
@@ -1520,7 +1536,7 @@ impl NoteSource for Connection {
                 title: note.title,
                 source_date: note.date,
                 excerpt: note.text.trim().chars().take(MAX_EXCERPT_CHARS).collect(),
-                revision: 1,
+                revision: note.revision,
             })
             .collect())
     }
@@ -1945,6 +1961,99 @@ The default range is the last thirty days.
     }
 
     const TAGGED_DETAILS: &str = include_str!("../tests/fixtures/granola-details.xml");
+
+    #[test]
+    fn selected_note_reimports_refresh_newer_content_but_never_roll_back() {
+        const NEWER: &str = "<meetings_data><meeting id='m2' title='Visitor questions' meeting_at='2026-11-02T09:00:00Z' updated_at='2026-11-02T10:00:00.001Z'><summary>Watering cans moved beside the shed.</summary></meeting></meetings_data>";
+        const SAME_IN_ANOTHER_ZONE: &str = "<meetings_data><meeting id='m2' title='Visitor questions' meeting_at='2026-11-02T09:00:00Z' updated_at='2026-11-02T17:00:00.001+07:00'><summary>Same revision must not replace the copy.</summary></meeting></meetings_data>";
+        const UNKNOWN: &str = "<meetings_data><meeting id='m2' title='Visitor questions' meeting_at='2026-11-02T09:00:00Z' updated_at='not a timestamp'><summary>Unknown revision must not replace the copy.</summary></meeting></meetings_data>";
+        let selection = vec!["m2".into()];
+        let mut store = crate::context::ContextStore::default();
+        for (text, expected_counts, expected_excerpt) in [
+            (
+                TAGGED_DETAILS,
+                (1, 0, 0),
+                "Summary:\nVisitors asked where to find watering cans.",
+            ),
+            (
+                NEWER,
+                (0, 1, 0),
+                "Summary:\nWatering cans moved beside the shed.",
+            ),
+            (
+                NEWER,
+                (0, 0, 1),
+                "Summary:\nWatering cans moved beside the shed.",
+            ),
+            (
+                TAGGED_DETAILS,
+                (0, 0, 1),
+                "Summary:\nWatering cans moved beside the shed.",
+            ),
+            (
+                SAME_IN_ANOTHER_ZONE,
+                (0, 0, 1),
+                "Summary:\nWatering cans moved beside the shed.",
+            ),
+            (
+                UNKNOWN,
+                (0, 0, 1),
+                "Summary:\nWatering cans moved beside the shed.",
+            ),
+        ] {
+            // Reconnecting does not reset the provider's revision ordering.
+            let (endpoint, _) = fictional_server(Answer::TaggedDetails(text));
+            let mut connection = Connection::open_at(&endpoint, &tokens(), false).unwrap();
+            let fetched = connection.fetch(&selection).unwrap();
+            let outcome = store.merge(Provider::Granola, &selection, fetched);
+            assert_eq!(
+                (outcome.added, outcome.updated, outcome.unchanged),
+                expected_counts
+            );
+            assert_eq!(store.items().len(), 1);
+            assert_eq!(store.items()[0].excerpt, expected_excerpt);
+            assert_eq!(
+                store.items()[0].source_date,
+                "2026-11-02",
+                "revision is not the meeting date"
+            );
+        }
+    }
+
+    #[test]
+    fn absent_or_invalid_update_times_stay_unversioned_without_blocking_first_import() {
+        for updated in [
+            Value::Null,
+            json!(""),
+            json!("yesterday"),
+            json!("2026-02-30T12:00:00Z"),
+            json!("2026-11-02T10:00:00"),
+            json!("1960-01-01T00:00:00Z"),
+            json!(999),
+        ] {
+            let note = note_from(&json!({"id": "m1", "updated_at": updated, "created_at": "2026-11-02T00:00:00Z", "text": "A fictional note."})).unwrap();
+            assert_eq!(
+                note.revision, 1,
+                "a meeting or fetch date must not invent a revision"
+            );
+        }
+        let snake =
+            note_from(&json!({"id":"m1", "updated_at":"2026-11-02T10:00:00.123Z"})).unwrap();
+        let camel =
+            note_from(&json!({"id":"m1", "updatedAt":"2026-11-02T17:00:00.123+07:00"})).unwrap();
+        assert!(snake.revision > 1);
+        assert_eq!(snake.revision, camel.revision);
+        let (endpoint, _) = fictional_server(Answer::Json);
+        let mut connection = Connection::open_at(&endpoint, &tokens(), false).unwrap();
+        let ids = vec!["m2".into()];
+        let mut store = crate::context::ContextStore::default();
+        assert_eq!(
+            store
+                .merge(Provider::Granola, &ids, connection.fetch(&ids).unwrap())
+                .added,
+            1
+        );
+    }
 
     #[test]
     fn tagged_details_import_only_the_selection_through_the_real_store_path() {
