@@ -69,3 +69,21 @@ These cropped browser captures use fictional garden notes at a 1320 × 880 viewp
 | ![Fictional prior-context panel with every action disabled during listing](assets/granola-loading-before.png) | ![Fictional prior-context panel with Disconnect available and a loading explanation](assets/granola-loading-after.png) |
 
 The [narrow rendering](assets/granola-loading-narrow.png) keeps the action and retained note readable. Browser checks do not establish native VoiceOver, real-account request behavior or usefulness during a meeting. The next integration acceptance gate remains a successful selected real-note import and removal in the updated native app; no account, capture or model was used for this change.
+
+## Waiting for Focus suggestions
+
+11 November 2026. **Suggest from Granola** previously used the notebook's shared busy state. A held fictional response reproduced that **Disconnect Granola** and **Try demo** were disabled until the assistant answered. The optional request now has its own loading and error state, leaving the notebook and Disconnect available. The request still asks the same fixed question only after an explicit action; no new native command, automatic request or provider access was added.
+
+Disconnect clears unapplied suggestions and invalidates the pending UI result. Accepted or manually typed Focus lines remain. A reply from a retired connection cannot show an old suggestion or error, or clear a replacement request's loading state. The existing native connection retirement is unchanged: an HTTP request already sent may finish. This is not a remote cancellation guarantee.
+
+The waiting button stays in the keyboard route with an unavailable state, and repeated activation sends no additional request. If keyboard focus remains there when an answer arrives, it moves into the suggestion group. A reply leaves another focused control alone. The user still chooses which lines to add; typing during the wait is preserved. Errors offer an explicit retry or manual Focus entry; an empty answer leaves existing Focus intact. Focus remains optional and is not a meeting prerequisite.
+
+UI/UX checkpoint: the task is to request optional preparation without losing the ability to work or leave the connection. The paper/evergreen interface is preserved, with a named waiting state and a short recovery explanation. All 64 Granola, Focus-suggestion and notebook checks passed in Chromium and WebKit, including reconnect races, repeat activation, selected-only addition, empty/error recovery and keyboard focus. The 600 × 700 reduced-motion rendering has no horizontal overflow. Frontend build, formatting and the design scan passed; the scan returned no findings, and rendered states were inspected.
+
+| Before: no pending explanation | After: named wait and recovery route |
+| --- | --- |
+| ![Fictional Focus panel waiting with a disabled suggestion button](assets/granola-focus-before.png) | ![Fictional Focus panel with an Asking Granola state and disconnect guidance](assets/granola-focus-after.png) |
+
+The corresponding prior-context control is [disabled before](assets/granola-focus-connection-before.png) and [available after](assets/granola-focus-connection-after.png). The [narrow state](assets/granola-focus-narrow.png) and [retry state](assets/granola-focus-error.png) use fictional garden text. The desktop captures use a 1320 × 880 viewport.
+
+Acceptance is limited to the actual React notebook with a fictional native IPC replacement. No account, capture, inference or VM run was used. Native VoiceOver, behavior alongside another application and real-account waits remain unverified. The next integration gate is still one selected real-note import and removal in the updated native app; a successful suggestion flow does not verify that separate capability or demonstrate useful participation.

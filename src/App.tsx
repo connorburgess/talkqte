@@ -411,11 +411,26 @@ function Notebook() {
   // connection exists and the server lists that tool.
   const [canSuggest, setCanSuggest] = useState(false);
   const [suggestions, setSuggestions] = useState<string[] | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestionError, setSuggestionError] = useState('');
+  const suggestionRequest = useRef(0);
+  const suggestionButton = useRef<HTMLButtonElement>(null);
+  const focusSuggestions = useRef(false);
   const [ticked, setTicked] = useState<string[]>([]);
-  const granolaChanged = (status: GranolaStatus) =>
-    setCanSuggest(
-      status.connected && status.tools.includes('query_granola_meetings'),
-    );
+  const granolaChanged = (status: GranolaStatus) => {
+    const available =
+      status.connected && status.tools.includes('query_granola_meetings');
+    setCanSuggest(available);
+    if (!available) {
+      // A reply already crossing IPC must not outlive this connection.
+      suggestionRequest.current++;
+      setSuggesting(false);
+      setSuggestions(null);
+      setSuggestionError('');
+      setTicked([]);
+      focusSuggestions.current = false;
+    }
+  };
   useEffect(() => {
     bridge
       .granolaStatus()
@@ -443,6 +458,12 @@ function Notebook() {
     );
   }, [state?.live, state?.status]);
   const suggestionList = useRef<HTMLFieldSetElement>(null);
+  useEffect(() => {
+    if (suggestions === null || !focusSuggestions.current) return;
+    focusSuggestions.current = false;
+    if (document.hasFocus() && document.activeElement === document.body)
+      suggestionList.current?.focus();
+  }, [suggestions]);
   const currentFocusLines = () =>
     focus
       .split('\n')
@@ -450,14 +471,26 @@ function Notebook() {
       .filter(Boolean);
   // The engine keeps five lines; the ticks are capped to what still fits.
   const roomForSuggestions = Math.max(0, 5 - currentFocusLines().length);
-  const suggestFocus = () =>
-    void run(async () => {
+  const suggestFocus = async () => {
+    if (suggesting || busy || !canSuggest) return;
+    const current = ++suggestionRequest.current;
+    setSuggesting(true);
+    setSuggestionError('');
+    try {
       const lines = await bridge.suggestGranolaFocus();
+      if (current !== suggestionRequest.current) return;
+      focusSuggestions.current =
+        document.hasFocus() &&
+        document.activeElement === suggestionButton.current;
       setSuggestions(lines);
       setTicked([]);
-      if (lines.length === 0) setNotice('Granola suggested nothing.');
-      setTimeout(() => suggestionList.current?.focus(), 0);
-    });
+    } catch (e) {
+      if (current === suggestionRequest.current)
+        setSuggestionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (current === suggestionRequest.current) setSuggesting(false);
+    }
+  };
   const closeSuggestions = () => {
     setSuggestions(null);
     setTicked([]);
@@ -1208,11 +1241,25 @@ function Notebook() {
                     <button
                       type="button"
                       className="secondary-button"
+                      ref={suggestionButton}
                       disabled={busy}
-                      onClick={suggestFocus}
+                      // Keep keyboard focus while waiting; the handler guards repeats.
+                      aria-disabled={suggesting || undefined}
+                      onClick={() => void suggestFocus()}
                     >
-                      Suggest from Granola
+                      {suggesting ? 'Asking Granola…' : 'Suggest from Granola'}
                     </button>
+                    {suggesting && (
+                      <p className="small muted" role="status">
+                        Waiting for suggestions. You can keep working or
+                        disconnect in Prior context.
+                      </p>
+                    )}
+                    {suggestionError && (
+                      <p role="alert">
+                        {suggestionError} Ask again, or type your own focus.
+                      </p>
+                    )}
                     <p className="small muted">
                       Asks Granola’s assistant one question about your meetings
                       of the last 30 days and shows its answer for you to tick.

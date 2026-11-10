@@ -22,6 +22,8 @@ let holdNextListing = false;
 let failNextDisconnect = false;
 const listings: Array<(fail: boolean) => void> = [];
 let completedListings = 0;
+const suggestions: Array<(result: string[] | string) => void> = [];
+let completedSuggestions = 0;
 let items: ContextItem[] = [];
 const selections: string[][] = [];
 export const commands = [
@@ -29,13 +31,16 @@ export const commands = [
   'connect_granola',
   'list_granola_notes',
   'disconnect_granola',
+  'suggest_granola_focus',
   'context_items',
   'import_context_notes',
   'cancel_context_import',
 ];
 const status = () => ({
   connected,
-  tools: connected ? ['list_meetings', 'get_meetings'] : [],
+  tools: connected
+    ? ['list_meetings', 'get_meetings', 'query_granola_meetings']
+    : [],
 });
 export async function command(name: string, args: unknown) {
   switch (name) {
@@ -55,6 +60,20 @@ export async function command(name: string, args: unknown) {
       return status();
     case 'context_items':
       return items;
+    case 'suggest_granola_focus':
+      // Deliberately allow a retired success to cross IPC. The UI must reject
+      // it too; native connection retirement has its own Rust tests.
+      try {
+        return await new Promise<string[]>((resolve, reject) => {
+          suggestions.push((result) =>
+            typeof result === 'string'
+              ? reject(new Error(result))
+              : resolve(result),
+          );
+        });
+      } finally {
+        completedSuggestions++;
+      }
     case 'list_granola_notes': {
       const current = generation;
       if (holdNextListing) {
@@ -132,6 +151,9 @@ declare global {
       releaseListing: (index: number, fail?: boolean) => void;
       failDisconnect: () => void;
       completedListings: number;
+      releaseSuggestion: (index: number, result: string[] | string) => void;
+      suggestionRequests: number;
+      completedSuggestions: number;
       selections: string[][];
     };
   }
@@ -153,6 +175,13 @@ window.granolaTest = {
   },
   get completedListings() {
     return completedListings;
+  },
+  releaseSuggestion: (index, result) => suggestions[index]?.(result),
+  get suggestionRequests() {
+    return suggestions.length;
+  },
+  get completedSuggestions() {
+    return completedSuggestions;
   },
   selections,
 };
