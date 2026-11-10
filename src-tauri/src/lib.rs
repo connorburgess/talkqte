@@ -584,7 +584,12 @@ fn publish_context(app: &tauri::AppHandle, runtime: &mut Runtime) {
             )
         })
         .collect();
+    let before = runtime.engine.state.revision;
     runtime.engine.set_notes(notes);
+    if runtime.engine.state.revision != before {
+        // A removed note may have been visible in either window, even paused.
+        publish(app, runtime);
+    }
     let _ = app.emit_to("main", "context:changed", runtime.context.items());
 }
 
@@ -785,6 +790,9 @@ async fn connect_granola(state: tauri::State<'_, AppState>) -> Result<GranolaSta
     let cancel = Arc::new(AtomicBool::new(false));
     {
         let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+        if runtime.granola.is_some() {
+            return Err("Disconnect Granola before connecting again.".into());
+        }
         if runtime.granola_sign_in.is_some() {
             return Err("A Granola sign-in is already in progress.".into());
         }
@@ -796,6 +804,9 @@ async fn connect_granola(state: tauri::State<'_, AppState>) -> Result<GranolaSta
             &|url| open::that(url).map_err(|_| "The browser could not be opened.".to_string()),
             &|| waiting.load(Ordering::Relaxed),
         )?;
+        if waiting.load(Ordering::Relaxed) {
+            return Err("Sign-in cancelled.".into());
+        }
         granola::Connection::open(&tokens).map_err(|error| granola_error(&error))
     })
     .await
@@ -847,9 +858,9 @@ async fn list_granola_notes(state: tauri::State<'_, AppState>) -> Result<PickedN
     .await
     .map_err(|_| "Granola's notes could not be listed.".to_string())??;
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-    // A disconnect while the list was in flight wins: nothing is kept.
-    if runtime.granola.is_none() {
-        return Err("Granola was disconnected.".into());
+    // A disconnect or account replacement while listing wins.
+    if !shared.is_current(runtime.granola.as_ref()) {
+        return Err("The Granola connection changed. Choose notes again.".into());
     }
     runtime.pending_import = Some(context_import::PendingImport::new(Box::new(shared)));
     Ok(PickedNotes {
@@ -876,8 +887,9 @@ async fn suggest_granola_focus(state: tauri::State<'_, AppState>) -> Result<Vec<
             "This Granola account does not offer the assistant that answers questions.".into(),
         );
     }
-    tauri::async_runtime::spawn_blocking(move || {
-        shared.suggest_focus().map_err(|error| match error {
+    let request = shared.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        request.suggest_focus().map_err(|error| match error {
             context::SourceError::Interrupted => {
                 "Granola's assistant did not answer in time; try again.".to_string()
             }
@@ -885,7 +897,12 @@ async fn suggest_granola_focus(state: tauri::State<'_, AppState>) -> Result<Vec<
         })
     })
     .await
-    .map_err(|_| "Granola's suggestions could not be fetched.".to_string())?
+    .map_err(|_| "Granola's suggestions could not be fetched.".to_string())?;
+    let runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    if !shared.is_current(runtime.granola.as_ref()) {
+        return Err("The Granola connection changed. Ask for suggestions again.".into());
+    }
+    result
 }
 
 /// Forgets the Granola session. Imported notes stay until removed, as they
@@ -893,7 +910,12 @@ async fn suggest_granola_focus(state: tauri::State<'_, AppState>) -> Result<Vec<
 #[tauri::command]
 fn disconnect_granola(state: tauri::State<AppState>) -> Result<GranolaStatus, String> {
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-    runtime.granola = None;
+    if let Some(connection) = runtime.granola.take() {
+        connection.disconnect();
+    }
+    if let Some(cancel) = &runtime.granola_sign_in {
+        cancel.store(true, Ordering::Relaxed);
+    }
     if runtime
         .pending_import
         .as_ref()
