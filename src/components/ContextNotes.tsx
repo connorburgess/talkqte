@@ -27,18 +27,29 @@ export function ContextNotes({
     connected: false,
     tools: [],
   });
+  const granolaRevision = useRef(0);
   const setGranola = (status: GranolaStatus) => {
+    granolaRevision.current++;
     setGranolaState(status);
     onGranola?.(status);
   };
   const [signingIn, setSigningIn] = useState(false);
   const [listing, setListing] = useState(false);
   useEffect(() => {
-    // The desktop keeps the session for the app run; the preview has none.
+    // A startup snapshot must not replace a later connection result or report
+    // through a notebook view that has since closed.
+    let active = true;
+    const revision = granolaRevision.current;
+    const receive = (status: GranolaStatus) => {
+      if (active && revision === granolaRevision.current) setGranola(status);
+    };
     bridge
       .granolaStatus()
-      .then(setGranola)
-      .catch(() => setGranola({ connected: false, tools: [] }));
+      .then(receive)
+      .catch(() => receive({ connected: false, tools: [] }));
+    return () => {
+      active = false;
+    };
   }, []);
   const [chosen, setChosen] = useState<string[]>([]);
   const [working, setWorking] = useState(false);
@@ -303,9 +314,12 @@ export function ContextNotes({
         </ul>
       ) : (
         <p className="muted small">
-          No prior notes selected. Connect Granola to choose from your notes of
-          the last 30 days, or add a file. A TalkQTE notes file is a JSON file
-          with a list of notes, each with an id, a date, and text.
+          No prior notes selected.{' '}
+          {granola.connected
+            ? 'Choose Granola notes from the last 30 days, or add a file.'
+            : 'Connect Granola to choose from your notes of the last 30 days, or add a file.'}{' '}
+          A TalkQTE notes file is a JSON file with a list of notes, each with an
+          id, a date, and text.
         </p>
       )}
       <dialog

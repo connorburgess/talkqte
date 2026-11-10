@@ -87,3 +87,18 @@ UI/UX checkpoint: the task is to request optional preparation without losing the
 The corresponding prior-context control is [disabled before](assets/granola-focus-connection-before.png) and [available after](assets/granola-focus-connection-after.png). The [narrow state](assets/granola-focus-narrow.png) and [retry state](assets/granola-focus-error.png) use fictional garden text. The desktop captures use a 1320 × 880 viewport.
 
 Acceptance is limited to the actual React notebook with a fictional native IPC replacement. No account, capture, inference or VM run was used. Native VoiceOver, behavior alongside another application and real-account waits remain unverified. The next integration gate is still one selected real-note import and removal in the updated native app; a successful suggestion flow does not verify that separate capability or demonstrate useful participation.
+
+
+## Connection status after sign-in or navigation
+
+11 November 2026. A delayed fictional startup status reproduced a connection-control regression: after sign-in succeeded, an older disconnected reply replaced the current state and hid **Choose Granola notes**, **Disconnect Granola** and **Suggest from Granola**. The notebook and prior-context panel previously made separate startup status requests. A response from a prior notebook view could also change suggestion availability after navigating through Settings and disconnecting or reconnecting.
+
+The prior-context panel now owns the status read and reports current connection results to the notebook. A startup success or failure is ignored after a newer connection result or after that panel closes. Returning to the notebook still reads the current connection; an initial read failure leaves explicit sign-in available. The empty-context guidance now tells a connected person to choose notes instead of asking them to connect again. No native authentication, provider request, retained-data or capture behavior changes.
+
+The UI/UX task is to keep connection state, available actions and keyboard focus consistent while optional prior context is prepared. The existing paper/evergreen presentation and explicit connection flow are preserved. Fictional IPC tests cover late disconnected and failed replies, old views returning connected or failed replies after disconnect/reconnect, current status on remount, and recovery from an initial status failure. Keyboard focus remains on the current control, and Disconnect returns it to Connect Granola. The connected panel is also reviewed at 600 × 700 with reduced motion and no horizontal overflow.
+
+| Before: an older reply hid the connected controls | After: current connection and Disconnect remain available |
+| --- | --- |
+| ![Fictional prior-context panel incorrectly asking to connect again](assets/granola-status-before.png) | ![Fictional prior-context panel retaining note selection and keyboard-focused Disconnect](assets/granola-status-after.png) |
+
+These desktop crops use a 1320 × 880 browser viewport; the [narrow rendering](assets/granola-status-narrow.png) uses the same fictional IPC. All 12 new checks passed in Chromium and WebKit, plus 32 surrounding Granola/notebook checks in Chromium. The frontend build, formatting and source design scan passed; the scan reported no findings and the rendered crops were inspected. Existing local WebKit pointer-entry tests timed out before the test body; the same timeout was reproduced with unchanged app source from `60355d3`, so the surrounding local WebKit suite is not counted as passing. This is a reproduced browser boundary defect, not an observed real-account failure. Real selected-note import, native VoiceOver and cross-app behavior remain separate acceptance gates.
