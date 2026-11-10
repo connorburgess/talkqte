@@ -26,6 +26,8 @@ export interface CueSnapshot {
   status: Status;
   /** A live session fed by local transcription, not the scripted demo. */
   live: boolean;
+  /** Suppresses cues while the live microphone and transcript continue. */
+  cuesPaused: boolean;
   cue: Cue | null;
   overlayEnabled: boolean;
   companionPosition: 'bottomRight' | 'topCenter' | 'topLeft' | 'topRight';
@@ -48,6 +50,7 @@ export type Commands = {
   start_demo: undefined;
   pause_demo: undefined;
   resume_demo: undefined;
+  set_live_cues_paused: { paused: boolean };
   end_demo: undefined;
   respond_to_cue: { id: string; response: 'dismiss' };
   keep_line: { id: string };

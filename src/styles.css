@@ -434,6 +434,7 @@ svg {
 }
 .session-strip {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 14px;
@@ -517,6 +518,7 @@ svg {
 }
 .session-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }

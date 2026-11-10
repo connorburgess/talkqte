@@ -12,6 +12,7 @@
     "allow-start-demo",
     "allow-pause-demo",
     "allow-resume-demo",
+    "allow-set-live-cues-paused",
     "allow-end-demo",
     "allow-respond-to-cue",
     "allow-keep-line",

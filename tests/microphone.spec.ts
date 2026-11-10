@@ -248,7 +248,7 @@ test('a live session is labelled live, has no end time, and cannot be exported',
 }) => {
   await nativePage(page, '?live');
   await page.getByRole('button', { name: 'Start live session' }).click();
-  const strip = page.getByRole('region', { name: 'Demo controls' });
+  const strip = page.getByRole('region', { name: 'Live session controls' });
   await expect(strip).toContainText('Live session in progress');
   await expect(strip).not.toContainText('/');
   await expect(
@@ -301,6 +301,117 @@ test('without local transcription, the notebook offers no live session and says 
   ).toBeVisible();
 });
 
+test('live cues pause independently of the microphone and transcript', async ({
+  page,
+}) => {
+  await nativePage(page, '?live');
+  await page
+    .getByRole('button', { name: 'Start live session', exact: true })
+    .click();
+  await page.evaluate(() =>
+    window.liveTest.say(
+      'Someone should send the checklist.',
+      'Who will send the checklist?',
+    ),
+  );
+  const question = page.getByRole('region', { name: 'Suggested question' });
+  await expect(question).toBeVisible();
+  await page.getByRole('button', { name: 'Pause cues', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  const strip = page.getByRole('region', { name: 'Live session controls' });
+  await expect(strip).toContainText('Cues paused · session continues');
+  await expect(strip).toContainText('Microphone and transcript continue');
+  await expect(question).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Resume cues' })).toBeFocused();
+  await expect(
+    page.getByRole('region', { name: 'Microphone', exact: true }),
+  ).toContainText('On');
+  await page.evaluate(() =>
+    window.liveTest.say('The garden gate is open.', 'A paused suggestion'),
+  );
+  await page.getByRole('tab', { name: /Transcript/ }).click();
+  await expect(page.getByRole('tabpanel')).toContainText(
+    'The garden gate is open.',
+  );
+  await expect(strip).toContainText('0:02');
+  await expect(question).toHaveCount(0);
+  await page.getByRole('button', { name: 'Resume cues' }).click();
+  await expect(strip).toContainText('Live session in progress');
+  await expect(question).toHaveCount(0);
+  expect(await page.evaluate(() => window.microphoneTest.calls)).not.toContain(
+    'stop_live_session',
+  );
+  expect(await page.evaluate(() => window.microphoneTest.calls)).not.toContain(
+    'stop_microphone',
+  );
+  await page.getByRole('button', { name: 'Pause cues' }).click();
+  await page.getByRole('button', { name: 'Stop live session' }).click();
+  await expect(strip).toContainText('Live session ended');
+  await expect(page.getByRole('button', { name: 'Resume cues' })).toHaveCount(
+    0,
+  );
+});
+
+test('a rejected cue pause stays live and narrow controls remain usable', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await nativePage(page, '?live');
+  await page
+    .getByRole('button', { name: 'Start live session', exact: true })
+    .click();
+  await page.evaluate(() => window.liveTest.rejectNextPause());
+  await page.getByRole('button', { name: 'Pause cues' }).click();
+  await expect(page.getByRole('alert')).toContainText(
+    'Could not pause cues. Try again.',
+  );
+  await expect(page.getByRole('button', { name: 'Pause cues' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Resume cues' })).toHaveCount(
+    0,
+  );
+  await page.getByRole('button', { name: 'Pause cues' }).click();
+  for (const name of ['Resume cues', 'Stop live session']) {
+    const box = await page
+      .getByRole('button', { name, exact: true })
+      .boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+});
+
+test('the compact companion can pause cues without hiding microphone state or Stop', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 76 });
+  await nativePage(page, '?window=cue&live');
+  await page.evaluate(() => window.liveTest.start());
+  await page.getByRole('button', { name: 'Pause cues', exact: true }).click();
+  await expect(page.getByText('Cues off', { exact: true })).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('Mic still on');
+  for (const name of ['Resume cues', 'Stop live session', 'Hide companion']) {
+    const box = await page
+      .getByRole('button', { name, exact: true })
+      .boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(320);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+  const fits = await page
+    .locator('.companion-title')
+    .evaluate((el) => el.scrollWidth <= el.clientWidth);
+  expect(fits).toBe(true);
+  await page.getByRole('button', { name: 'Resume cues' }).click();
+  await expect(page.getByRole('status')).toHaveText('Mic on · Local');
+  await page.getByRole('button', { name: 'Stop live session' }).click();
+  expect(await page.evaluate(() => window.microphoneTest.calls)).toContain(
+    'stop_live_session',
+  );
+});
+
 test('the companion labels a live session and its Stop ends the session', async ({
   page,
 }) => {
@@ -308,9 +419,7 @@ test('the companion labels a live session and its Stop ends the session', async 
   await nativePage(page, '?window=cue&live');
   await page.evaluate(() => window.liveTest.start());
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
-  await expect(page.getByRole('status')).toHaveText(
-    'Listening · On this device',
-  );
+  await expect(page.getByRole('status')).toHaveText('Mic on · Local');
   await expect(page.getByRole('button', { name: 'Pause demo' })).toHaveCount(0);
   await expect(
     page.getByRole('button', { name: 'Stop microphone' }),
