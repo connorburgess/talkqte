@@ -46,6 +46,8 @@ export function ContextNotes({
   const [pickError, setPickError] = useState('');
   const operation = useRef(0);
   const granolaButton = useRef<HTMLButtonElement>(null);
+  const connectButton = useRef<HTMLButtonElement>(null);
+  const returnConnectFocus = useRef(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const selectionLimit = pickedFrom === 'granola' ? 10 : 200;
   const allChosen =
@@ -64,7 +66,11 @@ export function ContextNotes({
       returnFocus.current = false;
       (pickedFrom === 'granola' ? granolaButton : addButton).current?.focus();
     }
-  }, [picked, working]);
+    if (!working && returnConnectFocus.current) {
+      returnConnectFocus.current = false;
+      connectButton.current?.focus();
+    }
+  }, [picked, working, granola.connected]);
 
   async function run(work: () => Promise<void>) {
     const current = ++operation.current;
@@ -122,20 +128,26 @@ export function ContextNotes({
     void bridge.command('cancel_granola_sign_in').catch(() => {});
   const chooseGranola = () =>
     void run(async () => {
+      const current = operation.current;
       setListing(true);
       try {
         const result = await bridge.listGranolaNotes();
+        if (current !== operation.current) return;
         returnFocus.current = true;
         setChosen([]);
         setPickedFrom('granola');
         setPicked(result);
       } finally {
-        setListing(false);
+        if (current === operation.current) setListing(false);
       }
     });
   const disconnectGranola = () =>
     void run(async () => {
+      // Retire the listing UI immediately, independently of its response.
+      // A failed disconnect keeps the connection and allows an explicit retry.
+      setListing(false);
       setGranola(await bridge.disconnectGranola());
+      returnConnectFocus.current = true;
       onNotice(
         'Granola disconnected. Imported notes stay until you remove them.',
       );
@@ -211,7 +223,7 @@ export function ContextNotes({
                 </button>
                 <button
                   className="text-button"
-                  disabled={busy || working}
+                  disabled={busy || (working && !listing)}
                   onClick={disconnectGranola}
                 >
                   Disconnect Granola
@@ -223,6 +235,7 @@ export function ContextNotes({
               </button>
             ) : (
               <button
+                ref={connectButton}
                 className="secondary-button"
                 disabled={busy || working}
                 onClick={connectGranola}
@@ -250,6 +263,11 @@ export function ContextNotes({
         <p className="muted small" role="status">
           Sign in to Granola in your browser, then return here. Nothing is read
           until you choose notes.
+        </p>
+      )}
+      {listing && (
+        <p className="muted small" role="status">
+          Loading recent notes… You can disconnect while you wait.
         </p>
       )}
       {items.length > 0 ? (

@@ -18,6 +18,10 @@ let generation = 0;
 let failNext = false;
 let holdNext = false;
 let release: (() => void) | undefined;
+let holdNextListing = false;
+let failNextDisconnect = false;
+const listings: Array<(fail: boolean) => void> = [];
+let completedListings = 0;
 let items: ContextItem[] = [];
 const selections: string[][] = [];
 export const commands = [
@@ -41,16 +45,40 @@ export async function command(name: string, args: unknown) {
       connected = true;
       return status();
     case 'disconnect_granola':
+      if (failNextDisconnect) {
+        failNextDisconnect = false;
+        throw new Error('Granola could not disconnect. Try again.');
+      }
       connected = false;
       pending = false;
       generation++;
       return status();
     case 'context_items':
       return items;
-    case 'list_granola_notes':
-      pending = true;
-      generation++;
+    case 'list_granola_notes': {
+      const current = generation;
+      if (holdNextListing) {
+        holdNextListing = false;
+        try {
+          await new Promise<void>((resolve, reject) => {
+            listings.push((fail) =>
+              fail
+                ? reject(new Error('The old Granola listing failed.'))
+                : resolve(),
+            );
+          });
+        } finally {
+          completedListings++;
+        }
+      }
+      if (current === generation) {
+        pending = true;
+        generation++;
+      }
+      // A success may already be crossing IPC when Disconnect is clicked.
+      // Exercise the UI's own guard as well as the native retirement tests.
       return { fileName: 'Granola · the last 30 days', notes, skipped: 0 };
+    }
     case 'cancel_context_import':
       pending = false;
       generation++;
@@ -100,6 +128,10 @@ declare global {
       fail: () => void;
       hold: () => void;
       release: () => void;
+      holdListing: () => void;
+      releaseListing: (index: number, fail?: boolean) => void;
+      failDisconnect: () => void;
+      completedListings: number;
       selections: string[][];
     };
   }
@@ -112,5 +144,15 @@ window.granolaTest = {
     holdNext = true;
   },
   release: () => release?.(),
+  holdListing: () => {
+    holdNextListing = true;
+  },
+  releaseListing: (index, fail = false) => listings[index]?.(fail),
+  failDisconnect: () => {
+    failNextDisconnect = true;
+  },
+  get completedListings() {
+    return completedListings;
+  },
   selections,
 };

@@ -110,3 +110,131 @@ test('bulk selection respects the provider ten-note limit', async ({
   ).toHaveLength(10);
   await expect(chooser).not.toBeVisible();
 });
+
+test('disconnect stays reachable while listing and ignores a late chooser', async ({
+  page,
+  browserName,
+}, testInfo) => {
+  const chooser = page.getByRole('dialog', { name: /Choose notes/ });
+  await chooser.getByRole('checkbox').first().check();
+  await chooser.getByRole('button', { name: 'Import 1 selected' }).click();
+  const context = page.getByRole('region', { name: 'Prior context' });
+  await expect(context.getByRole('listitem')).toHaveCount(1);
+  await page.evaluate(() => window.granolaTest.holdListing());
+  await page.getByRole('button', { name: 'Choose Granola notes' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Loading Granola notes…' }),
+  ).toBeDisabled();
+  await context.screenshot({
+    path: testInfo.outputPath('granola-loading.png'),
+  });
+  const disconnect = page.getByRole('button', {
+    name: 'Disconnect Granola',
+    exact: true,
+  });
+  await expect(disconnect).toBeEnabled();
+  await page.setViewportSize({ width: 600, height: 700 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await disconnect.scrollIntoViewIfNeeded();
+  await expect(disconnect).toBeInViewport();
+  expect(await context.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(
+    true,
+  );
+  await context.screenshot({
+    path: testInfo.outputPath('granola-loading-narrow.png'),
+  });
+  // Check the surrounding tab route before keyboard activation.
+  await page
+    .getByRole('button', { name: 'Disconnect Granola', exact: true })
+    .focus();
+  await page.keyboard.press(
+    browserName === 'webkit' && process.platform === 'darwin'
+      ? 'Alt+Shift+Tab'
+      : 'Shift+Tab',
+  );
+  await page.keyboard.press(
+    browserName === 'webkit' && process.platform === 'darwin'
+      ? 'Alt+Tab'
+      : 'Tab',
+  );
+  await expect(disconnect).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(
+    page.getByRole('button', { name: 'Connect Granola', exact: true }),
+  ).toBeFocused();
+  await expect(context.getByRole('listitem')).toHaveCount(1);
+  await page.evaluate(() => window.granolaTest.releaseListing(0));
+  await expect
+    .poll(() => page.evaluate(() => window.granolaTest.completedListings))
+    .toBe(1);
+  await expect(chooser).not.toBeVisible();
+  await expect(context.getByRole('listitem')).toHaveCount(1);
+  await expect(
+    page.getByRole('button', { name: 'Add notes from a file' }),
+  ).toBeEnabled();
+});
+
+test('an old listing failure cannot clear a new connection loading state', async ({
+  page,
+}) => {
+  const chooser = page.getByRole('dialog', { name: /Choose notes/ });
+  await chooser.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.evaluate(() => window.granolaTest.holdListing());
+  await page.getByRole('button', { name: 'Choose Granola notes' }).click();
+  await page
+    .getByRole('button', { name: 'Disconnect Granola', exact: true })
+    .click();
+  await page
+    .getByRole('button', { name: 'Connect Granola', exact: true })
+    .click();
+  await page.evaluate(() => window.granolaTest.holdListing());
+  await page.getByRole('button', { name: 'Choose Granola notes' }).click();
+  await page.evaluate(() => window.granolaTest.releaseListing(0, true));
+  await expect
+    .poll(() => page.evaluate(() => window.granolaTest.completedListings))
+    .toBe(1);
+  await expect(
+    page.getByRole('button', { name: 'Loading Granola notes…' }),
+  ).toBeDisabled();
+  await expect(page.getByText('The old Granola listing failed.')).toHaveCount(
+    0,
+  );
+  await expect(chooser).not.toBeVisible();
+  await page.evaluate(() => window.granolaTest.releaseListing(1));
+  await expect(chooser).toBeVisible();
+  await chooser.getByRole('checkbox').first().check();
+  await chooser.getByRole('button', { name: 'Import 1 selected' }).click();
+  await expect(
+    page.getByRole('region', { name: 'Prior context' }).getByRole('listitem'),
+  ).toHaveCount(1);
+});
+
+test('a failed disconnect stays connected and offers an explicit retry', async ({
+  page,
+}) => {
+  const chooser = page.getByRole('dialog', { name: /Choose notes/ });
+  await chooser.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.evaluate(() => {
+    window.granolaTest.holdListing();
+    window.granolaTest.failDisconnect();
+  });
+  await page.getByRole('button', { name: 'Choose Granola notes' }).click();
+  const disconnect = page.getByRole('button', {
+    name: 'Disconnect Granola',
+    exact: true,
+  });
+  await disconnect.click();
+  await expect(page.getByRole('alert')).toContainText(
+    'Granola could not disconnect. Try again.',
+  );
+  await expect(disconnect).toBeEnabled();
+  await page.evaluate(() => window.granolaTest.releaseListing(0));
+  await expect
+    .poll(() => page.evaluate(() => window.granolaTest.completedListings))
+    .toBe(1);
+  await expect(chooser).not.toBeVisible();
+  await disconnect.click();
+  await expect(
+    page.getByRole('button', { name: 'Connect Granola', exact: true }),
+  ).toBeFocused();
+});

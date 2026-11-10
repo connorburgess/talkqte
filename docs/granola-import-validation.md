@@ -52,3 +52,20 @@ Headless acceptance uses a fictional MCP server and the actual connection/store 
 Acceptance: eight Chromium/WebKit import/removal checks, frontend build/formatting, and 217 Rust tests passed, including these regressions and the existing import-selection, retry, callback-state and context-store tests. All inputs and credentials were fictional. This is source review and headless regression evidence, not traffic inspection of a real account or native VoiceOver/cross-app validation. A request already sent may still finish; logical deletion does not promise memory zeroization or control over terminal, operating-system, browser or provider retention.
 
 Remaining release checks: confirm one real selected-note import and removal in the native app, inspect an explicitly authorized account session's data flow without retaining content, and verify provider-side disconnect/retention expectations separately. Imported-context usefulness remains a separate human validation task.
+
+
+## Disconnect while notes are loading
+
+11 November 2026. The notebook previously disabled **Disconnect Granola** while a note listing was pending, even though the native connection already supported retirement without waiting for that request. A headless regression reproduced the disabled control before the fix.
+
+Disconnect now stays available during listing. A short loading status names that option. After a successful disconnect, keyboard focus returns to **Connect Granola**, imported copies remain, and file import is available again. The old listing cannot reopen the chooser, report an obsolete error, or clear a replacement connection's loading state. A failed disconnect leaves the connection visible and offers an explicit retry. The native retirement and HTTP behavior are unchanged: a request already sent may finish, but its retired result is discarded.
+
+UI/UX checkpoint: the task is to leave an optional provider wait and return to the conversation without losing selected prior context. The existing notebook appearance is preserved. Fictional native-IPC replacements cover a delayed success, delayed failure across reconnect, failed-disconnect retry, retained imports and keyboard focus. All 54 Granola/notebook checks passed in Chromium and WebKit; the narrower loading flow was checked at 600 × 700 with reduced motion, without horizontal overflow. The frontend build, formatting and mechanical design scan passed. The scan reported no findings; rendered states were also inspected.
+
+These cropped browser captures use fictional garden notes at a 1320 × 880 viewport:
+
+| Before: Disconnect disabled during listing | After: Disconnect available during listing |
+| --- | --- |
+| ![Fictional prior-context panel with every action disabled during listing](assets/granola-loading-before.png) | ![Fictional prior-context panel with Disconnect available and a loading explanation](assets/granola-loading-after.png) |
+
+The [narrow rendering](assets/granola-loading-narrow.png) keeps the action and retained note readable. Browser checks do not establish native VoiceOver, real-account request behavior or usefulness during a meeting. The next integration acceptance gate remains a successful selected real-note import and removal in the updated native app; no account, capture or model was used for this change.
