@@ -56,7 +56,7 @@ These are development milestones, not announced release dates or current capabil
 
 ## Run the current prototype
 
-The stack is Rust, Tauri 2, React, and TypeScript. Local Whisper transcription is available only in a developer build with a manually installed model. The AI cue runtime is still being evaluated, and a lab model is not automatically the production choice.
+The stack is Rust, Tauri 2, React, and TypeScript. Local Whisper transcription is available only in a `local-whisper` developer build, with model setup in Settings or a developer-supplied model path. The AI cue runtime is still being evaluated, and a lab model is not automatically the production choice.
 
 On macOS, install Node.js 22, Rust 1.97.1, and Xcode Command Line Tools. See [Tauri's prerequisites](https://v2.tauri.app/start/prerequisites/).
 
@@ -83,7 +83,7 @@ Choose **Start live session** in the notebook and grant microphone permission if
 
 **Pause cues**, in the notebook or companion, clears the current suggestion and keeps cues quiet while the microphone, transcript, and session clock continue. **Resume cues** waits for newly spoken lines; delayed speech from the pause does not become a new cue. The companion shows **Cues off / Mic still on** while paused. Use **Stop live session** to stop listening. These controls are [checked headlessly](docs/live-cue-pause.md); native microphone and cross-app acceptance remain separate.
 
-This has been checked with synthetic audio and a scripted recognizer in tests. The download is tested against a simulated server, plus one ranged request to the real source. A live session on real hardware, real-meeting accuracy, and the first-run setup step in the [model delivery plan](docs/model-delivery.md) are still unchecked or unbuilt.
+This has been checked with synthetic audio and a scripted recognizer in tests. The download is tested against a simulated server, plus one ranged request to the real source. A first microphone session is recorded in the [native validation notes](docs/native-validation.md#live-session-check); measured latency, Stop/device edge cases, real-meeting accuracy and clean-install first-use acceptance remain open in the [model delivery plan](docs/model-delivery.md).
 
 ## Fictional cue lab
 

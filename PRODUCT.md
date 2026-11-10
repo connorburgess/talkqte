@@ -8,7 +8,7 @@ The interface runs in a Tauri desktop shell. macOS is the first target, with Win
 
 ## Stack
 
-Rust application core, Tauri 2, React, TypeScript, and CSS. Local Whisper is the planned transcription engine.
+Rust application core, Tauri 2, React, TypeScript, and CSS. Optional local Whisper transcription is available in a developer build; cue reasoning is a separate, unselected runtime.
 
 ## Purpose
 
@@ -109,7 +109,7 @@ Use the observations to choose the next small change. A demo or a few comparison
 
 ## First implementation
 
-A runnable desktop prototype provides the dashboard, Rust-owned prompt lifecycle, and floating prompt window using a fictional demo. An optional macOS microphone activity monitor reports signal activity after explicit opt-in. It does not generate questions from audio or transcribe speech. System-audio capture, Whisper inference, and a live clarification pipeline remain subsequent technical milestones. Real microphone operation and native cross-app companion behavior still need platform verification.
+A runnable desktop prototype provides the notebook, Rust-owned prompt lifecycle, and floating prompt window using a fictional demo. An optional macOS microphone activity monitor reports signal activity only. Separately, a `local-whisper` developer build provides model setup and a user-started microphone transcription session using phrase rules. A first hardware session is recorded, while timing, Stop/device edge cases and native cross-app behavior still need verification. System-audio capture and semantic live cues remain subsequent milestones. Development-only evaluator constructors and source/scheduling tests do not enable inference in the app.
 
 ## Open decisions
 
