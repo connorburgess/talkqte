@@ -82,7 +82,7 @@ Whisper worker -> transcript segments -> cue evaluator -> cue lifecycle
 - Rust owns prompt expiry, cooldowns, persistence, retention, and session boundaries.
 - React owns rendering, keyboard interactions, and presentation. It accesses native behavior only through narrowly scoped, validated commands.
 - Local Whisper may use whisper.cpp through Rust bindings. This is a Rust application with a native inference dependency, not a promise of an entirely Rust dependency tree.
-- AI cue reasoning is a separate planned evaluator behind a narrow interface. Rust retains lifecycle and permission control; the model returns bounded decisions with source references. No production runtime is selected. Whisper transcribes speech and does not provide cue reasoning. See [cue intelligence](cue-intelligence.md).
+- AI cue reasoning has a provider-independent worker and validated contract in `cue_evaluator.rs`, tested with fictional evaluators. It permits one outstanding request, checks source references, and rejects cancelled, expired, or changed-context results. The worker is not connected to the app or engine yet; Rust retains lifecycle and permission control. No production runtime is selected. Whisper transcribes speech and does not provide cue reasoning. See the [worker contract and remaining integration](cue-evaluator.md) and [cue intelligence plan](cue-intelligence.md).
 
 ## Future integration boundary
 

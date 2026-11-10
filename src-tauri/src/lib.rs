@@ -4,6 +4,7 @@ mod companion;
 mod companion_macos;
 pub mod context;
 mod context_import;
+pub mod cue_evaluator;
 pub mod engine;
 pub mod granola;
 pub mod live;
