@@ -1,3 +1,4 @@
+use crate::context::ContextItem;
 use serde::{Deserialize, Serialize};
 
 mod evaluation;
@@ -405,10 +406,7 @@ const NOTE_STOP_WORDS: &[&str] = &[
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct NoteTerms {
     key: String,
-    title: String,
-    source_date: String,
-    provider: String,
-    excerpt: String,
+    item: ContextItem,
     terms: Vec<String>,
 }
 
@@ -1023,8 +1021,8 @@ impl Engine {
                 self.state.cue = Some(Cue {
                     id: format!("{}:{}", self.generation, line_id),
                     kind: CONTEXT.into(),
-                    question: note.title.clone(),
-                    evidence: note.excerpt.clone(),
+                    question: note.item.title.clone(),
+                    evidence: note.item.excerpt.clone(),
                     source_id: note.key.clone(),
                     remaining_ms: self.cue_deadline - now,
                     total_ms: CUE_MS,
@@ -1032,9 +1030,9 @@ impl Engine {
                     expanded: false,
                     resolved_by: None,
                     note: Some(NoteRef {
-                        title: note.title,
-                        source_date: note.source_date,
-                        provider: note.provider,
+                        title: note.item.title,
+                        source_date: note.item.source_date,
+                        provider: note.item.provider.id().into(),
                     }),
                     about_focus: false,
                 });
@@ -1257,34 +1255,39 @@ impl Engine {
         Ok(())
     }
 
-    /// Sets or clears the name used to recognize questions addressed to the
-    /// user. Kept in memory for this app session only.
-    /// Replaces the imported notes a context cue may quote: `(key, title,
-    /// date, provider, excerpt)` per note. A note already shown this session
-    /// stays shown.
-    pub fn set_notes(&mut self, notes: Vec<(String, String, String, String, String)>) {
-        self.invalidate_evaluation();
-        self.notes = notes
+    /// Synchronizes the validated, explicitly selected context store. Preserve
+    /// its provider identity and revision, including across engine replacement.
+    /// An unchanged import leaves a held cue and pending evaluation alone.
+    pub fn set_notes(&mut self, notes: Vec<ContextItem>) {
+        let notes: Vec<_> = notes
             .into_iter()
-            .map(|(key, title, source_date, provider, excerpt)| NoteTerms {
-                terms: note_terms(&title),
-                key,
-                title,
-                source_date,
-                provider,
-                excerpt,
+            .map(|item| NoteTerms {
+                terms: note_terms(&item.title),
+                key: format!("{}:{}", item.provider.id(), item.source_id),
+                item,
             })
             .collect();
+        if self.notes == notes {
+            return;
+        }
+        self.invalidate_evaluation();
+        // A newer revision can invalidate a reminder even when its excerpt
+        // stayed the same. Compare the complete original item so a changed
+        // date/title cannot leave misleading disclosure either. Clear rather
+        // than replacing words under the reader's eyes.
+        let obsolete = self.state.cue.as_ref().is_some_and(|cue| {
+            cue.note.is_some()
+                && !self
+                    .notes
+                    .iter()
+                    .any(|old| old.key == cue.source_id && notes.iter().any(|new| new == old))
+        });
+        self.notes = notes;
         let keys: Vec<&String> = self.notes.iter().map(|note| &note.key).collect();
         self.shown_notes.retain(|key| keys.contains(&key));
-        // Explicit removal must also release an excerpt already shown in a
-        // reminder, including one held open for reading.
-        if self
-            .state
-            .cue
-            .as_ref()
-            .is_some_and(|cue| cue.note.is_some() && !keys.contains(&&cue.source_id))
-        {
+        // Keep a refreshed note marked shown: no automatic replacement or
+        // second reminder this session. Removal releases its copied evidence.
+        if obsolete {
             self.forget_unshown();
             self.state.cue = None;
             self.cooldown_until = self.state.elapsed_ms + self.cooldown();
@@ -3373,14 +3376,13 @@ mod tests {
                 ("n5", "Newsletter launch plan"),
             ]
             .iter()
-            .map(|(key, title)| {
-                (
-                    key.to_string(),
-                    title.to_string(),
-                    "2026-11-01".into(),
-                    "file".into(),
-                    format!("About the {}.", title.to_lowercase()),
-                )
+            .map(|(key, title)| ContextItem {
+                provider: crate::context::Provider::File,
+                source_id: key.to_string(),
+                title: title.to_string(),
+                source_date: "2026-11-01".into(),
+                excerpt: format!("About the {}.", title.to_lowercase()),
+                revision: 1,
             })
             .collect(),
         );
@@ -4251,20 +4253,22 @@ mod tests {
     fn with_notes() -> Engine {
         let mut e = live_session();
         e.set_notes(vec![
-            (
-                "file:n1".into(),
-                "Garden welcome guide".into(),
-                "2026-10-28".into(),
-                "file".into(),
-                "Draft a one-page guide with a map of the tool shed.".into(),
-            ),
-            (
-                "file:n2".into(),
-                "Sign".into(),
-                "2026-11-05".into(),
-                "file".into(),
-                "Too short a title to match.".into(),
-            ),
+            ContextItem {
+                provider: crate::context::Provider::File,
+                source_id: "n1".into(),
+                title: "Garden welcome guide".into(),
+                source_date: "2026-10-28".into(),
+                excerpt: "Draft a one-page guide with a map of the tool shed.".into(),
+                revision: 1,
+            },
+            ContextItem {
+                provider: crate::context::Provider::File,
+                source_id: "n2".into(),
+                title: "Sign".into(),
+                source_date: "2026-11-05".into(),
+                excerpt: "Too short a title to match.".into(),
+                revision: 1,
+            },
         ]);
         e
     }
@@ -4290,6 +4294,159 @@ mod tests {
     }
 
     #[test]
+    fn newer_note_import_clears_old_reminders_without_replacing_or_repeating_them() {
+        use crate::context::{ContextStore, Provider};
+        for provider in [Provider::File, Provider::Granola] {
+            for held in [false, true] {
+                for change in ["revision", "excerpt", "title", "date"] {
+                    let original = ContextItem {
+                        provider,
+                        source_id: "welcome".into(),
+                        title: "Garden welcome guide".into(),
+                        source_date: "2026-10-28".into(),
+                        excerpt: "Use the tool shed map.".into(),
+                        revision: 1,
+                    };
+                    let mut store = ContextStore::default();
+                    let selection = vec![original.source_id.clone()];
+                    assert_eq!(
+                        store
+                            .merge(provider, &selection, vec![original.clone()])
+                            .added,
+                        1
+                    );
+                    let mut e = live_session();
+                    e.update_notes("A manual notebook line.".into()).unwrap();
+                    e.set_notes(store.items().to_vec());
+                    e.ingest(e.session(), live("w1", 9_000, "Review the welcome guide."))
+                        .unwrap();
+                    let id = e.state.cue.as_ref().unwrap().id.clone();
+                    if held {
+                        e.inspect_cue(&id, true).unwrap();
+                        e.pause().unwrap();
+                    }
+                    let mut updated = original.clone();
+                    updated.revision = 2;
+                    match change {
+                        "excerpt" => updated.excerpt = "Use the greenhouse map instead.".into(),
+                        "title" => updated.title = "Updated garden welcome guide".into(),
+                        "date" => updated.source_date = "2026-11-02".into(),
+                        _ => (),
+                    }
+                    assert_eq!(
+                        store
+                            .merge(provider, &selection, vec![updated.clone()])
+                            .updated,
+                        1
+                    );
+                    let before = e.state.revision;
+                    e.set_notes(store.items().to_vec());
+                    assert!(e.state.revision > before, "publish retirement: {change}");
+                    assert!(e.state.cue.is_none(), "obsolete {change}, held={held}");
+                    assert!(e.cue_snapshot().cue.is_none());
+                    assert!(e.inspect_cue(&id, true).is_err());
+                    assert!(!serde_json::to_string(&e.state)
+                        .unwrap()
+                        .contains("tool shed"));
+                    assert!(!e.markdown().contains("greenhouse"));
+                    assert_eq!(e.state.notes, "A manual notebook line.");
+                    if held {
+                        e.resume().unwrap();
+                    }
+                    e.advance(30_000);
+                    e.ingest(
+                        e.session(),
+                        live("w2", e.state.elapsed_ms, "Review the welcome guide."),
+                    )
+                    .unwrap();
+                    assert!(
+                        e.state.cue.is_none(),
+                        "refresh must not re-arm the reminder"
+                    );
+                    // A later session can use the refreshed source, including
+                    // when the runtime replaces the engine for live capture.
+                    let mut replacement = Engine::live();
+                    replacement.copy_notes_from(&e);
+                    replacement.start().unwrap();
+                    replacement.advance(1_000);
+                    replacement
+                        .ingest(
+                            replacement.session(),
+                            live("new", 1_000, "Review the welcome guide."),
+                        )
+                        .unwrap();
+                    let cue = replacement.state.cue.as_ref().unwrap();
+                    assert_eq!(cue.question, updated.title);
+                    assert_eq!(cue.evidence, updated.excerpt);
+                    assert_eq!(cue.note.as_ref().unwrap().source_date, updated.source_date);
+                    assert_eq!(cue.note.as_ref().unwrap().provider, provider.id());
+                    // A revision-only update must also survive engine copying.
+                    updated.revision = 3;
+                    store.merge(provider, &selection, vec![updated]);
+                    replacement.set_notes(store.items().to_vec());
+                    assert!(replacement.state.cue.is_none());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn repeated_older_and_unrelated_imports_preserve_the_held_reminder() {
+        use crate::context::{ContextStore, Provider};
+        let mut e = with_notes();
+        let original = e.notes[0].item.clone();
+        let mut store = ContextStore::default();
+        let selection = vec![original.source_id.clone()];
+        store.merge(Provider::File, &selection, vec![original.clone()]);
+        e.set_notes(store.items().to_vec());
+        e.ingest(e.session(), live("w1", 9_000, "Review the welcome guide."))
+            .unwrap();
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.inspect_cue(&id, true).unwrap();
+        let before = serde_json::to_string(&e.cue_snapshot()).unwrap();
+        for revision in [1, 0] {
+            let mut duplicate = original.clone();
+            duplicate.revision = revision;
+            duplicate.excerpt = "An old or repeated response must not replace the note.".into();
+            assert_eq!(
+                store
+                    .merge(Provider::File, &selection, vec![duplicate])
+                    .unchanged,
+                1
+            );
+            e.set_notes(store.items().to_vec());
+            assert_eq!(serde_json::to_string(&e.cue_snapshot()).unwrap(), before);
+        }
+        // Equal source IDs from different providers are separate notes.
+        let mut other = original;
+        other.provider = Provider::Granola;
+        for revision in [2, 3] {
+            other.revision = revision;
+            other.excerpt = format!("Unrelated provider revision {revision}.");
+            store.merge(Provider::Granola, &selection, vec![other.clone()]);
+            e.set_notes(store.items().to_vec());
+            assert_eq!(serde_json::to_string(&e.cue_snapshot()).unwrap(), before);
+        }
+        store.remove(Provider::Granola, &other.source_id);
+        e.set_notes(store.items().to_vec());
+        assert_eq!(serde_json::to_string(&e.cue_snapshot()).unwrap(), before);
+        // A transcript question is unaffected by changes to imported notes.
+        e.respond(&id, Response::Dismiss).unwrap();
+        e.advance(20_000);
+        e.ingest(
+            e.session(),
+            live("w2", e.state.elapsed_ms, "Someone can take the draft."),
+        )
+        .unwrap();
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        let mut refreshed = store.items()[0].clone();
+        refreshed.revision += 1;
+        store.merge(Provider::File, &selection, vec![refreshed]);
+        e.set_notes(store.items().to_vec());
+        assert_eq!(e.state.cue.as_ref().unwrap().id, id);
+    }
+
+    #[test]
     fn removing_an_imported_note_clears_its_held_cue_without_exporting_the_excerpt() {
         for held in [false, true] {
             let mut e = with_notes();
@@ -4306,13 +4463,14 @@ mod tests {
             assert!(!e.markdown().contains("file:n1"));
             let before = e.state.revision;
             // Remove the displayed note while another imported note remains.
-            e.set_notes(vec![(
-                "file:n2".into(),
-                "Sign".into(),
-                "2026-11-05".into(),
-                "file".into(),
-                "An unrelated imported excerpt.".into(),
-            )]);
+            e.set_notes(vec![ContextItem {
+                provider: crate::context::Provider::File,
+                source_id: "n2".into(),
+                title: "Sign".into(),
+                source_date: "2026-11-05".into(),
+                excerpt: "An unrelated imported excerpt.".into(),
+                revision: 1,
+            }]);
             assert!(
                 e.state.revision > before,
                 "removal must publish a new cue state"
@@ -4389,28 +4547,30 @@ mod tests {
     fn common_words_long_titles_excerpts_and_retracted_words_do_not_match() {
         let mut e = live_session();
         e.set_notes(vec![
-            (
-                "file:a".into(),
-                "Weekly planning meeting notes".into(),
-                "2026-11-01".into(),
-                "file".into(),
-                "Agenda items.".into(),
-            ),
-            (
-                "file:b".into(),
-                "Orchard volunteer handover plan for spring planting season and watering schedule"
-                    .into(),
-                "2026-11-02".into(),
-                "file".into(),
-                "Seedling trays go to the north shed.".into(),
-            ),
-            (
-                "file:c".into(),
-                "Jardín opening".into(),
-                "2026-11-03".into(),
-                "file".into(),
-                "Menu draft.".into(),
-            ),
+            ContextItem {
+                provider: crate::context::Provider::File,
+                source_id: "a".into(),
+                title: "Weekly planning meeting notes".into(),
+                source_date: "2026-11-01".into(),
+                excerpt: "Agenda items.".into(),
+                revision: 1,
+            },
+            ContextItem {
+                provider: crate::context::Provider::File,
+                source_id: "b".into(),
+                title: "Orchard volunteer handover plan for spring planting season and watering schedule".into(),
+                source_date: "2026-11-02".into(),
+                excerpt: "Seedling trays go to the north shed.".into(),
+                revision: 1,
+            },
+            ContextItem {
+                provider: crate::context::Provider::File,
+                source_id: "c".into(),
+                title: "Jardín opening".into(),
+                source_date: "2026-11-03".into(),
+                excerpt: "Menu draft.".into(),
+                revision: 1,
+            },
         ]);
         e.ingest(
             e.session(),

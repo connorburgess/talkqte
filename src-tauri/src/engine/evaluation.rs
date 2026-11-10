@@ -401,7 +401,7 @@ mod tests {
     }
 
     #[test]
-    fn clock_ticks_do_not_cancel_a_valid_sourced_proposal_or_export_it() {
+    fn ticks_and_unchanged_imports_do_not_cancel_a_sourced_proposal_or_export_it() {
         let mut h = Harness::new();
         h.engine
             .update_notes("A private manual note".into())
@@ -410,13 +410,15 @@ mod tests {
             .set_focus(vec!["Review checklist ownership".into()])
             .unwrap();
         h.engine.set_user_name(Some("Robin".into())).unwrap();
-        h.engine.set_notes(vec![(
-            "file:one".into(),
-            "Earlier launch review".into(),
-            "2026-11-01".into(),
-            "file".into(),
-            "Selected prior excerpt".into(),
-        )]);
+        let imported = ContextItem {
+            provider: crate::context::Provider::File,
+            source_id: "one".into(),
+            title: "Earlier launch review".into(),
+            source_date: "2026-11-01".into(),
+            excerpt: "Selected prior excerpt".into(),
+            revision: 1,
+        };
+        h.engine.set_notes(vec![imported.clone()]);
         h.line("The checklist handoff is still unclear.");
         let request = h.request();
         let json = serde_json::to_string(&request).unwrap();
@@ -430,6 +432,9 @@ mod tests {
         }
         h.engine.advance(2_000);
         h.engine.set_question_size(QuestionSize::Large);
+        // A repeated/older import leaves the selected store unchanged. Its
+        // synchronization must not silently cancel this valid response.
+        h.engine.set_notes(vec![imported]);
         h.reply(
             "show",
             Some("Who owns the checklist?"),
@@ -619,7 +624,14 @@ mod tests {
                     .set_focus(vec!["Supplier review budget".into()])
                     .unwrap(),
                 "name" => h.engine.set_user_name(Some("Robin".into())).unwrap(),
-                "notes" => h.engine.set_notes(vec![]),
+                "notes" => h.engine.set_notes(vec![ContextItem {
+                    provider: crate::context::Provider::File,
+                    source_id: "selected".into(),
+                    title: "Earlier review".into(),
+                    source_date: "2026-11-01".into(),
+                    excerpt: "A newly selected fictional note.".into(),
+                    revision: 1,
+                }]),
                 _ => (),
             }
             let id = if change == "invalid" {
