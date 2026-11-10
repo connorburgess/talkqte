@@ -408,6 +408,13 @@ function Notebook() {
   const [userName, setUserName] = useState('');
   const [nameError, setNameError] = useState('');
   const [focus, setFocus] = useState('');
+  const [focusError, setFocusError] = useState('');
+  const focusEdit = useRef(0);
+  const confirmedFocus = useRef('');
+  const pendingFocusSave = useRef<{
+    value: string;
+    promise: Promise<boolean>;
+  } | null>(null);
   // Granola's assistant can propose focus lines; offered only when the
   // connection exists and the server lists that tool.
   const [canSuggest, setCanSuggest] = useState(false);
@@ -442,11 +449,40 @@ function Notebook() {
   // Clear is a mousedown before a click, so the blur that would save the old
   // text is skipped when it heads for Clear; the field keeps the focus.
   const clearButton = useRef<HTMLButtonElement>(null);
+  // All Focus writes share the command queue and latest-request error state.
+  const applyFocus = (lines: string[]): Promise<boolean> => {
+    const value = lines.join('\n');
+    if (pendingFocusSave.current?.value === value)
+      return pendingFocusSave.current.promise;
+    if (!pendingFocusSave.current && value === confirmedFocus.current) {
+      setFocusError('');
+      return Promise.resolve(true);
+    }
+    const promise = bridge
+      .command('set_focus', { lines })
+      .then(() => {
+        confirmedFocus.current = value;
+        if (pendingFocusSave.current?.promise === promise) setFocusError('');
+        return true;
+      })
+      .catch((e: unknown) => {
+        if (pendingFocusSave.current?.promise === promise)
+          setFocusError(e instanceof Error ? e.message : String(e));
+        return false;
+      })
+      .finally(() => {
+        if (pendingFocusSave.current?.promise === promise)
+          pendingFocusSave.current = null;
+      });
+    pendingFocusSave.current = { value, promise };
+    return promise;
+  };
   const clearFocus = () => {
+    focusEdit.current++;
     setFocus('');
     setSuggestions(null);
     setTicked([]);
-    void run(() => bridge.command('set_focus', { lines: [] }));
+    void run(() => applyFocus([]));
     setTimeout(() => focusField.current?.focus(), 0);
   };
   // The focus as it stood when a live session ended, so the box can say the
@@ -503,17 +539,25 @@ function Notebook() {
       for (const line of ticked)
         if (!lines.some((seen) => seen.toLowerCase() === line.toLowerCase()))
           lines.push(line);
-      await bridge.command('set_focus', { lines });
+      const edit = focusEdit.current;
+      if (!(await applyFocus(lines)) || focusEdit.current !== edit) return;
+      const restoreFocus = suggestionList.current?.contains(
+        document.activeElement,
+      );
       setFocus(lines.join('\n'));
-      closeSuggestions();
+      setSuggestions(null);
+      setTicked([]);
+      if (restoreFocus)
+        setTimeout(() => {
+          if (document.hasFocus() && document.activeElement === document.body)
+            focusField.current?.focus();
+        }, 0);
     });
   const initialized = useRef(false);
   // Ordered name saves must not replace edits made while a reply is pending.
   const nameEdit = useRef(0);
   const confirmedName = useRef('');
   const pendingName = useRef<{ value: string; edit: number } | null>(null);
-  // Enter followed by leaving the Focus field saves once, not twice.
-  const savingFocus = useRef(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
@@ -606,6 +650,7 @@ function Notebook() {
       setUserName(state.userName ?? '');
       confirmedName.current = state.userName ?? '';
       setFocus(state.focus.join('\n'));
+      confirmedFocus.current = state.focus.join('\n');
     }
   }, [state]);
   const modelState = model?.status;
@@ -743,27 +788,16 @@ function Notebook() {
       });
   };
   const saveFocus = () => {
-    const lines = focus
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean);
-    const current = state.focus;
-    if (lines.join('\n') === current.join('\n')) {
-      setFocus(current.join('\n'));
-      return;
-    }
-    if (savingFocus.current) return;
-    savingFocus.current = true;
-    bridge
-      .command('set_focus', { lines })
-      // The typed text stays as it is either way: a rejected line is fixed
-      // in place, and an edit made meanwhile is not overwritten.
-      .catch((e: unknown) => {
-        setError(e instanceof Error ? e.message : String(e));
-      })
-      .finally(() => {
-        savingFocus.current = false;
-      });
+    // Submitting again also retires a delayed suggestion acceptance.
+    focusEdit.current++;
+    const lines = currentFocusLines();
+    if (
+      !pendingFocusSave.current &&
+      lines.join('\n') === confirmedFocus.current
+    )
+      setFocus(confirmedFocus.current);
+    // Keep rejected lines and newer drafts editable; replies never replace them.
+    void applyFocus(lines);
   };
   const prepareExport = () =>
     void run(async () => {
@@ -1255,15 +1289,28 @@ function Notebook() {
                 <textarea
                   id="meeting-focus"
                   ref={focusField}
-                  aria-describedby="meeting-focus-help"
+                  aria-describedby={
+                    focusError
+                      ? 'meeting-focus-help meeting-focus-error'
+                      : 'meeting-focus-help'
+                  }
                   value={focus}
                   rows={3}
                   spellCheck={false}
-                  onChange={(e) => setFocus(e.target.value)}
+                  onChange={(e) => {
+                    focusEdit.current++;
+                    setFocus(e.target.value);
+                  }}
                   onBlur={(e) => {
                     if (e.relatedTarget !== clearButton.current) saveFocus();
                   }}
                 />
+                {focusError && (
+                  <p id="meeting-focus-error" role="alert">
+                    Focus wasn't applied. {focusError} Edit the lines and leave
+                    the field to try again, or Clear.
+                  </p>
+                )}
                 {canSuggest && suggestions === null && (
                   <div className="suggest-focus">
                     <button

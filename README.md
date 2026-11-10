@@ -89,6 +89,8 @@ This has been checked with synthetic audio and a scripted recognizer in tests. T
 
 **Cue processing** is available as a status and permission surface in the live notebook and Settings. The normal app has no evaluator configured: it reports **Processing unavailable** and continues to describe its local phrase rules. Fictional headless checks cover source review, approval, Pause/Disable, failures and independent Stop through the real notebook; this does not enable a model or establish native/device acceptance. See the [permission flow and UI/UX checkpoint](docs/notebook-processing-controls.md).
 
+**Focus** is optional. Leaving the field applies its lines, including edits made while an earlier save is pending. Clear and accepted suggestions use the same ordered saves. Rejected lines stay editable with an inline retry message; delayed replies preserve newer drafts and keyboard focus. See the [Focus recovery checks](docs/focus-save-recovery.md).
+
 **Your name** in Settings is optional and kept only until quit. Enter or leaving the field applies it to phrase-based **Asked you** cues. Later edits survive a slow save; rejected names show an inline error and keep the last applied name unless you have already typed a newer draft. See the [name recovery checks](docs/name-save-recovery.md).
 
 ## Fictional cue lab

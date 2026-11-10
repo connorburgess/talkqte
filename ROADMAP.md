@@ -43,6 +43,7 @@ This track runs alongside the feature milestones below. The goal includes a depe
 
 ## Runnable prototype
 
+- [x] Preserve later Focus submissions while an earlier save is pending, including Clear, accepted suggestions and inline rejection recovery. [Fictional browser and UI/UX checks](docs/focus-save-recovery.md) cover the field; live relevance and participation acceptance remain separate.
 - [x] Preserve newer session-name drafts and ordered submissions while a save is pending, including clearing the name and recovering from rejection. [Fictional browser and UI/UX checks](docs/name-save-recovery.md) cover the field; direct-address live acceptance remains separate.
 
 - [x] Fictional meeting playback with a notebook and arriving transcript segments.
