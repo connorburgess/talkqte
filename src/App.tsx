@@ -30,6 +30,7 @@ import {
 
 const megabytes = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
 import { Question } from './components/Question';
+import { ProcessingControl } from './components/ProcessingControl';
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { ContextNotes } from './components/ContextNotes';
 import { SetupCard, type SetupTarget } from './components/SetupCard';
@@ -857,7 +858,7 @@ function Notebook() {
             {view === 'notebook' && (
               <>
                 <ChevronRight size={14} />
-                <span>Demo</span>
+                <span>{state.live ? 'Live session' : 'Demo'}</span>
               </>
             )}
           </div>
@@ -870,6 +871,7 @@ function Notebook() {
           live={live || finishing}
           preparing={preparing}
           cancelling={cancelling}
+          processingConfigured={!!capture.state?.processor}
           action={
             preparing ? (
               <button
@@ -900,7 +902,7 @@ function Notebook() {
             ) : undefined
           }
         />
-        {(preparing || live || finishing) &&
+        {(preparing || live || finishing || view === 'settings') &&
           (capture.statusError || capture.error) && (
             <div className="error-banner" role="alert">
               <span>
@@ -917,6 +919,20 @@ function Notebook() {
               )}
             </div>
           )}
+        {bridge.desktop && (
+          <div
+            className="notebook-processing"
+            hidden={view !== 'settings' && !state.live}
+          >
+            <ProcessingControl
+              status={{
+                snapshot: capture.state,
+                failed: capture.statusError,
+                refresh: capture.refresh,
+              }}
+            />
+          </div>
+        )}
         {error && (
           <div className="error-banner" role="alert">
             <span>{error}</span>
@@ -1027,29 +1043,31 @@ function Notebook() {
                 )}
                 {preparing || finishing ? null : live ? (
                   <>
-                    <button
-                      className="secondary-button"
-                      disabled={busy}
-                      title={
-                        state.cuesPaused
-                          ? 'Only new speech can raise a cue after resuming.'
-                          : 'Clear the current cue; microphone and transcript continue.'
-                      }
-                      onClick={() =>
-                        void run(() =>
-                          bridge.command('set_live_cues_paused', {
-                            paused: !state.cuesPaused,
-                          }),
-                        )
-                      }
-                    >
-                      {state.cuesPaused ? (
-                        <Play size={15} />
-                      ) : (
-                        <Pause size={15} />
-                      )}
-                      {state.cuesPaused ? 'Resume cues' : 'Pause cues'}
-                    </button>
+                    {!capture.state?.processor && (
+                      <button
+                        className="secondary-button"
+                        disabled={busy}
+                        title={
+                          state.cuesPaused
+                            ? 'Only new speech can raise a cue after resuming.'
+                            : 'Clear the current cue; microphone and transcript continue.'
+                        }
+                        onClick={() =>
+                          void run(() =>
+                            bridge.command('set_live_cues_paused', {
+                              paused: !state.cuesPaused,
+                            }),
+                          )
+                        }
+                      >
+                        {state.cuesPaused ? (
+                          <Play size={15} />
+                        ) : (
+                          <Pause size={15} />
+                        )}
+                        {state.cuesPaused ? 'Resume cues' : 'Pause cues'}
+                      </button>
+                    )}
                   </>
                 ) : active ? (
                   <>
@@ -1446,9 +1464,13 @@ function Notebook() {
                   </div>
                 )}
                 <p className="companion-footnote">
-                  {state.live
-                    ? 'Suggestions use simple phrase rules on what was transcribed. Use a cue in the conversation or let it pass.'
-                    : 'Suggestions in this demo use simple phrase rules. Use a cue in the conversation or let it pass.'}
+                  {state.live && capture.state?.processor
+                    ? capture.state.approved
+                      ? 'Cues use the sources approved for this session. Pause cues or disable processing above at any time.'
+                      : 'Evaluated cues need approval in Cue processing above. You can leave processing off.'
+                    : state.live
+                      ? 'Suggestions use simple phrase rules on what was transcribed. Use a cue in the conversation or let it pass.'
+                      : 'Suggestions in this demo use simple phrase rules. Use a cue in the conversation or let it pass.'}
                 </p>
                 <button
                   className="text-button companion-settings"

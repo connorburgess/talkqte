@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Pause, Play, Square } from 'lucide-react';
 import {
   noteKey,
@@ -41,9 +41,17 @@ function conversationLabel(scope: ProcessingScope) {
     : 'Recent conversation and new speech';
 }
 
-/** Reusable control surface. Mounted only by the fictional IPC fixture until
- * the native contract, adapter and processing choice are separately reviewed. */
-export function ProcessingControl() {
+/** The notebook supplies its shared native status and owns capture controls.
+ * Standalone mounting is retained for the fictional control-contract tests. */
+export function ProcessingControl({
+  status,
+}: {
+  status?: {
+    snapshot: ProcessingSnapshot | null;
+    failed: boolean;
+    refresh: () => Promise<ProcessingSnapshot>;
+  };
+}) {
   const [snapshot, setSnapshot] = useState<ProcessingSnapshot | null>(null);
   const current = useRef<ProcessingSnapshot | null>(null);
   const [editing, setEditing] = useState(false);
@@ -61,6 +69,7 @@ export function ProcessingControl() {
   const restoreFocus = useRef(false);
   const stopRequested = useRef(false);
   const isEditing = useRef(false);
+  const panel = useRef<HTMLElement>(null);
   isEditing.current = editing || !!review;
 
   function receive(next: ProcessingSnapshot) {
@@ -88,7 +97,9 @@ export function ProcessingControl() {
         old.scopeRevision !== next.scopeRevision ||
         next.capture !== 'running')
     ) {
-      restoreFocus.current ||= isEditing.current;
+      restoreFocus.current ||=
+        isEditing.current &&
+        (!status || !!panel.current?.contains(document.activeElement));
       serial.current += 1;
       setBusy(null);
       setEditing(false);
@@ -98,7 +109,18 @@ export function ProcessingControl() {
       setError('');
     }
   }
+  useLayoutEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      serial.current += 1;
+    };
+  }, []);
+  useLayoutEffect(() => {
+    if (status?.snapshot) receive(status.snapshot);
+  }, [status?.snapshot]);
   useEffect(() => {
+    if (status) return;
     alive.current = true;
     let unlisten: (() => void) | undefined;
     let disposed = false;
@@ -214,23 +236,32 @@ export function ProcessingControl() {
     }
     try {
       await action();
-      if (alive.current) receive(await processingApi.snapshot());
+      if (alive.current)
+        receive(await (status ? status.refresh() : processingApi.snapshot()));
     } catch {
       // A response can fail after the native action applied. Refresh state once;
       // never repeat an approval, stop or provider operation automatically.
       try {
-        if (alive.current) receive(await processingApi.snapshot());
+        if (alive.current)
+          receive(await (status ? status.refresh() : processingApi.snapshot()));
       } catch {
         /* Keep the last known capture state and explicit Stop control. */
       }
-      if (alive.current && ticket === serial.current)
+      if (alive.current && ticket === serial.current) {
+        if (kind === 'approve') {
+          // Native reviews are single-use even if approval fails. Require a
+          // fresh review instead of retrying with a potentially consumed ID.
+          if (review) void processingApi.cancel(review.id).catch(() => {});
+          setReview(null);
+        }
         setError(
           kind === 'stop'
             ? 'Stop was not confirmed. Check the current status, then try again.'
             : kind === 'approve'
-              ? 'Approval was not confirmed. Check the current status before trying again.'
+              ? 'Approval was not confirmed. Check the status and review sources again before enabling.'
               : 'The change was not confirmed. Check the current status and try again.',
         );
+      }
     } finally {
       if (alive.current && ticket === serial.current) setBusy(null);
     }
@@ -242,6 +273,7 @@ export function ProcessingControl() {
   const canReview =
     capture === 'running' &&
     (snapshot?.phase === 'off' || snapshot?.phase === 'unavailable') &&
+    !status?.failed &&
     !!snapshot.processor &&
     !snapshot.approved;
   const approved = snapshot?.approved;
@@ -251,19 +283,24 @@ export function ProcessingControl() {
     snapshot?.processor?.location === 'hosted'
       ? `Hosted by ${snapshot.processor.destination}`
       : 'On this device';
-  const phase = !snapshot
-    ? 'Checking processing status…'
-    : {
-        off: 'Processing off',
-        active: 'Processing on',
-        paused: 'Cues paused',
-        unavailable: 'Processing unavailable',
-        stopping: 'Finishing session',
-        ended: 'Session ended',
-      }[snapshot.phase];
+  const phase = status?.failed
+    ? 'Processing status unavailable'
+    : !snapshot
+      ? 'Checking processing status…'
+      : !snapshot.processor && status
+        ? 'Processing unavailable'
+        : {
+            off: 'Processing off',
+            active: 'Processing on',
+            paused: 'Cues paused',
+            unavailable: 'Processing unavailable',
+            stopping: 'Finishing session',
+            ended: 'Session ended',
+          }[snapshot.phase];
 
   return (
     <section
+      ref={panel}
       className="processing-panel"
       aria-labelledby="processing-title"
       onKeyDown={(event) => {
@@ -279,18 +316,20 @@ export function ProcessingControl() {
         </h2>
         <span role="status">{phase}</span>
       </div>
-      <p className="processing-capture">
-        {capture === 'running'
-          ? 'Microphone is on. Stop capture to stop listening.'
-          : capture === 'stopping'
-            ? 'Waiting for the microphone to stop…'
-            : capture === 'starting'
-              ? 'Starting microphone… you can stop while it starts.'
-              : capture === 'off'
-                ? 'Microphone is off.'
-                : 'Microphone status is unknown. Use Stop capture to request that it stops.'}
-      </p>
-      {startup && startup !== 'idle' && (
+      {!status && (
+        <p className="processing-capture">
+          {capture === 'running'
+            ? 'Microphone is on. Stop capture to stop listening.'
+            : capture === 'stopping'
+              ? 'Waiting for the microphone to stop…'
+              : capture === 'starting'
+                ? 'Starting microphone… you can stop while it starts.'
+                : capture === 'off'
+                  ? 'Microphone is off.'
+                  : 'Microphone status is unknown. Use Stop capture to request that it stops.'}
+        </p>
+      )}
+      {!status && startup && startup !== 'idle' && (
         <p role="status" className="processing-muted">
           {startup === 'loading'
             ? 'Preparing the live session… you can cancel before it starts.'
@@ -305,7 +344,16 @@ export function ProcessingControl() {
         </p>
       )}
       {!snapshot?.processor && snapshot && (
-        <p>No evaluated-cue processor is available for this session.</p>
+        <p>
+          No evaluated-cue processor is available for this session.
+          {status &&
+            ' Live cues use local phrase rules; no reasoning model is connected.'}
+        </p>
+      )}
+      {status?.failed && (
+        <p className="processing-message">
+          Refresh capture status above before changing processing permissions.
+        </p>
       )}
       {snapshot?.issue && (
         <p className="processing-message" role="status">
@@ -345,7 +393,7 @@ export function ProcessingControl() {
           <button
             ref={launcher}
             className="primary-button"
-            disabled={!!busy}
+            disabled={!!busy || !!status?.failed}
             onClick={() => {
               setSelected([]);
               setRecent(false);
@@ -359,7 +407,7 @@ export function ProcessingControl() {
         {(active || paused) && (
           <button
             className="secondary-button"
-            disabled={!!busy}
+            disabled={!!busy || !!status?.failed}
             onClick={() =>
               void act('pause', () => processingApi.pause(snapshot!, !paused))
             }
@@ -372,7 +420,10 @@ export function ProcessingControl() {
           <button
             className="secondary-button"
             disabled={
-              busy === 'disable' || busy === 'stop' || capture === 'stopping'
+              busy === 'disable' ||
+              busy === 'stop' ||
+              capture === 'stopping' ||
+              !!status?.failed
             }
             onClick={() =>
               void act('disable', () => processingApi.disable(snapshot!))
@@ -381,7 +432,7 @@ export function ProcessingControl() {
             Disable processing
           </button>
         )}
-        {(capture !== 'off' || startup !== 'idle') && (
+        {!status && (capture !== 'off' || startup !== 'idle') && (
           <button
             className="secondary-button"
             disabled={
@@ -411,6 +462,7 @@ export function ProcessingControl() {
         <p className="processing-muted">
           Pause and Disable processing leave the microphone on. Disable
           processing before choosing different sources.
+          {status && ' Use Stop live session above to release the microphone.'}
         </p>
       )}
       {editing && !review && (
@@ -425,7 +477,7 @@ export function ProcessingControl() {
             Choose what to process
           </h3>
           <p>{snapshot?.processor?.dataPolicy}</p>
-          <fieldset disabled={!!busy}>
+          <fieldset disabled={!!busy || !!status?.failed}>
             <legend>Conversation</legend>
             <p>New speech after approval is included.</p>
             <label className="processing-option">
@@ -437,7 +489,7 @@ export function ProcessingControl() {
               Also include recent conversation
             </label>
           </fieldset>
-          <fieldset disabled={!!busy}>
+          <fieldset disabled={!!busy || !!status?.failed}>
             <legend>Prior notes · optional</legend>
             <p>Importing a note does not approve it for processing.</p>
             {snapshot?.notes.length ? (
@@ -471,7 +523,11 @@ export function ProcessingControl() {
             )}
           </fieldset>
           <div className="processing-actions">
-            <button className="primary-button" disabled={!!busy} type="submit">
+            <button
+              className="primary-button"
+              disabled={!!busy || !!status?.failed}
+              type="submit"
+            >
               {busy === 'review'
                 ? 'Preparing review…'
                 : 'Review selected sources'}
@@ -527,7 +583,7 @@ export function ProcessingControl() {
           <div className="processing-actions">
             <button
               className="primary-button"
-              disabled={!!busy}
+              disabled={!!busy || !!status?.failed}
               onClick={() =>
                 void act('approve', () => processingApi.approve(review.id))
               }

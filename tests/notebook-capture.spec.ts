@@ -195,6 +195,9 @@ test('narrow and desktop preparation controls fit, and cancellation does not tak
   await expect(
     page.getByRole('button', { name: 'Settings', exact: true }),
   ).toBeFocused();
+  await expect(
+    mic(page).getByRole('button', { name: 'Start microphone', exact: true }),
+  ).toBeEnabled();
   await expect(mic(page).getByRole('status')).toHaveText('Off');
 });
 

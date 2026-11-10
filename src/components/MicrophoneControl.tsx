@@ -8,12 +8,14 @@ export function MicrophoneControl({
   preparing = false,
   cancelling = false,
   action,
+  processingConfigured = false,
 }: {
   microphone: Microphone;
   live?: boolean;
   preparing?: boolean;
   cancelling?: boolean;
   action?: ReactNode;
+  processingConfigured?: boolean;
 }) {
   const { state, error, busy, active, start, stop } = microphone;
   if (live || preparing)
@@ -50,8 +52,11 @@ export function MicrophoneControl({
         ) : (
           <p>
             Your microphone is transcribed on this device. Audio is not
-            recorded, and the transcript is not saved or sent. Stop live session
-            to release the microphone.
+            recorded.
+            {processingConfigured
+              ? ' Cue processing has separate permissions below.'
+              : ' The transcript is not saved or sent.'}{' '}
+            Stop live session to release the microphone.
           </p>
         )}
         {(error || state?.message) && (

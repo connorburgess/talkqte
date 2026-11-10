@@ -1,5 +1,5 @@
-/** Native status and guarded commands. The notebook uses capture status/Stop;
- * evaluator permission UI and provider activation remain separate gates. */
+/** Native status and guarded capture/processing commands for the notebook.
+ * Provider activation remains a separate gate; the app registers no evaluator. */
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 

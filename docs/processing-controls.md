@@ -1,6 +1,8 @@
 # Fictional processing-control acceptance
 
-The proposed cue-processing controls now have a reusable React component and a typed IPC client. They are mounted only by `tests/fixtures/native-processing.tsx`, which replaces the application entry point during browser tests. The normal notebook and desktop app do not expose these controls or start an evaluator. No microphone, model, sign-in, or provider request runs in this fixture.
+> Follow-up, 11 November: [Notebook integration](notebook-processing-controls.md) now exposes the native permission surface with shared status and independent capture controls. No evaluator is activated. The standalone evidence below describes the earlier boundary.
+
+The proposed cue-processing controls now have a reusable React component and a typed IPC client. They are mounted only by `tests/fixtures/native-processing.tsx`, which replaces the application entry point during browser tests. At this earlier checkpoint, the normal notebook did not expose these controls. The app still starts no evaluator. No microphone, model, sign-in, or provider request runs in this fixture.
 
 This checks the permission flow before activating a provider. It does not establish that people understand the flow, that native assistive technology works, or that evaluated cues help a conversation. The existing notebook style and optional Focus controls are preserved.
 

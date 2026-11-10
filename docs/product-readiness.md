@@ -32,9 +32,9 @@ Evaluate static release artifacts and update metadata before adding a custom ser
 
 For any proposed backend, record the unmet need, expected load, data boundary, latency target, cost model, failure behavior, and maintenance owner first. Introduce hosted infrastructure when this evidence warrants it. Revisit bandwidth, rate limits, and support capacity at pilot and wider-release reviews; the [operating estimates](operating-estimates.md) record the first measured sizes.
 
-### Current capture-control checkpoint — 10 November 2026
+### Current control checkpoint — 11 November 2026
 
-The notebook now has reachable Cancel start and a guarded Stop that bypasses pending notebook commands, with [fictional actual-app tests and UI/UX evidence](notebook-capture-controls.md). This removes a control-path blocker; it does not establish microphone release on hardware. The next bounded implementation dependency is evaluator permission review/pause/disable in the notebook without a selected adapter or implicit approval. Separately verify native startup/permission cancellation, delayed teardown and cross-window focus before claiming dependable capture. Granola selected-note account acceptance, delivery/signing, resource budgets and participation/listening outcomes retain their separate gates.
+The notebook now has reachable Cancel start and a guarded Stop that bypasses pending notebook commands, with [fictional actual-app tests and UI/UX evidence](notebook-capture-controls.md). This removes a control-path blocker; it does not establish microphone release on hardware. [Notebook permission review/pause/disable](notebook-processing-controls.md) now shares native status and preserves independent Stop, with unavailable processing when no adapter is registered. Fictional actual-app checks pass; the next processing dependency is a concrete provider/path decision with quality, latency, privacy, limits and onboarding evidence. Separately verify native startup/permission cancellation, delayed teardown and cross-window focus before claiming dependable capture. Granola selected-note account acceptance, delivery/signing, resource budgets and participation/listening outcomes retain their separate gates.
 
 ## Integration readiness
 

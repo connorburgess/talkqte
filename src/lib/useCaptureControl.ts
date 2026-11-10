@@ -44,6 +44,17 @@ export function useCaptureControl() {
     };
   }, [attempt]);
 
+  async function refresh() {
+    try {
+      const next = await processingApi.snapshot();
+      receive(next);
+      return next;
+    } catch (error) {
+      if (mounted.current) setStatusError(true);
+      throw error;
+    }
+  }
+
   async function stop() {
     // Use the displayed target, never a refreshed replacement operation. A
     // rejected stale action refreshes status, but requires another user click.
@@ -60,7 +71,7 @@ export function useCaptureControl() {
         );
     } finally {
       try {
-        receive(await processingApi.snapshot());
+        await refresh();
       } catch {
         if (mounted.current) setStatusError(true);
       }
@@ -74,6 +85,7 @@ export function useCaptureControl() {
     error,
     busy,
     stop,
+    refresh,
     clearError: () => setError(''),
     retryStatus: () => setAttempt((value) => value + 1),
   };
