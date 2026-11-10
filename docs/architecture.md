@@ -118,3 +118,8 @@ Investigate macOS ScreenCaptureKit/Core Audio through maintained native bindings
 - [Apple microphone authorization](https://developer.apple.com/documentation/avfoundation/requesting-authorization-to-capture-and-save-media)
 - [ScreenCaptureKit Rust bindings](https://docs.rs/screencapturekit/latest/screencapturekit/)
 - [whisper.cpp](https://github.com/ggml-org/whisper.cpp)
+
+
+### Evaluator lifecycle development boundary
+
+The [bounded evaluator](cue-evaluator.md) has a transcript-only engine bridge in `engine/evaluation.rs`. `Engine::live_with_evaluator` accepts an explicitly supplied worker; native session commands still construct the phrase-rule engine. The alternative path ingests the same validated transcript, applies the same controls and clock, and polls under the engine lock. It schedules only on new eligible speech, uses a separate eligibility revision from snapshot time, cancels obsolete work, and rejects late results before mutating the visible cue. Imported-note and provider activation work remains separate; no network or model capability is introduced.
