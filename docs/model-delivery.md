@@ -69,6 +69,16 @@ Not yet built: the project's own GitHub Releases copy (the upstream repository i
 5. An app update that changes the model keeps the old one until the new one is verified.
 6. Nothing in logs or temporary files contains audio or transcripts.
 
+## Readiness response ordering — 11 November 2026
+
+Installing or removing the speech model starts a new readiness check. Settings shows **Checking…** and the notebook withholds **Start live session** until that check completes. A response or failure from a retired check cannot replace the current result. This prevents a delayed missing-model response from hiding Start after installation, or a delayed ready response from offering it after removal. Model download, integrity checks and native capture commands are unchanged.
+
+Four scenarios in `tests/model-readiness.spec.ts` mount the actual notebook with fictional native IPC. They cover a stale missing-model result after installation, a stale failure after installation, a stale ready result after removal, and removal while the current check is pending. The keyboard flow checks the notebook controls as well as Settings; no model is downloaded and no microphone is started.
+
+All eight Chromium/WebKit readiness checks pass, including preserved keyboard focus and no horizontal overflow at 600 × 700. Fifty focused Chromium notebook, microphone-control and readiness checks pass, along with the frontend build, formatting and source design scan (no findings). The original Chromium regression failed before the fix. A separate local macOS WebKit pointer-entry timeout also occurred with unchanged `App.tsx` from `df1cec3`; the new regression scenarios use keyboard activation. Existing pointer tests remain unchanged, and their repository checks must still pass before merge. This is not a confirmed native pointer defect or evidence that native pointer access works.
+
+UI/UX checkpoint: preserve a clear setup state so the person can tell when a live session is available. The existing paper/evergreen layout and controls are retained. Compare the [contradictory status before the fix](assets/model-readiness-before.png) at base `df1cec3`, [installed status after the fix](assets/model-readiness-after.png), and [pending check after removal](assets/model-readiness-checking.png). These are rendered fictional fixtures, including a 600 × 700 viewport with reduced motion. They establish neither native accessibility nor clean-install acceptance. The next device check is to install and remove the model in a developer build, verify the notebook readiness state, and separately verify explicit Start/Stop and model integrity.
+
 ## Next steps
 
 - Score text accuracy for `tiny.en` and `base.en` against the script of several fictional clips, including faster speech and background noise, before offering `base.en`.
