@@ -1,7 +1,7 @@
 //! Source-aware lifecycle bridge. No app command constructs this engine;
 //! the explicit Rust constructor is exercised with fictional adapters only.
 use super::*;
-use crate::cue_evaluator::{Action, Decision, Provenance, Request, Source, Worker};
+use crate::cue_evaluator::{Action, Decision, Failure, Provenance, Request, Source, Worker};
 
 mod permission;
 use permission::Permission;
@@ -12,12 +12,40 @@ pub use permission::{
 
 const RECENT_LINES: usize = 6;
 
+/// Content-free operational state for a future native controller. An absent
+/// cue is not evidence that an evaluator chose quiet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EvaluationStatus {
+    Idle,
+    Pending,
+    Decided(EvaluationOutcome),
+    Unavailable(EvaluationIssue),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EvaluationOutcome {
+    Quiet,
+    Shown,
+    Resolved,
+    Withdrawn,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EvaluationIssue {
+    InputLimit,
+    InvalidReply,
+    TimedOut,
+    WorkerUnavailable,
+}
+
 pub(super) struct State {
     worker: Worker,
     pending: Option<Pending>,
     // One coalesced speech notification, never a queue of copied requests.
     latest_speech_waiting: bool,
     permission: Permission,
+    status: EvaluationStatus,
+    outcome_at_ms: Option<u64>,
 }
 
 struct Pending {
@@ -36,8 +64,47 @@ impl Engine {
             pending: None,
             latest_speech_waiting: false,
             permission: Permission::new(processor),
+            status: EvaluationStatus::Idle,
+            outcome_at_ms: None,
         });
         engine
+    }
+
+    /// None means this engine has no evaluator. Permission and capture state
+    /// remain separate; Idle alone never means processing is enabled.
+    pub fn evaluation_status(&self) -> Option<EvaluationStatus> {
+        self.evaluation.as_ref().map(|state| state.status)
+    }
+
+    fn set_evaluation_status(&mut self, status: EvaluationStatus) {
+        if let Some(state) = &mut self.evaluation {
+            if state.status != status {
+                state.status = status;
+                state.outcome_at_ms = None;
+                self.changed();
+            }
+        }
+    }
+
+    fn fail_evaluation(&mut self, failure: Failure) {
+        let issue = match failure {
+            Failure::InvalidInput => EvaluationIssue::InputLimit,
+            Failure::InvalidDecision => EvaluationIssue::InvalidReply,
+            Failure::Expired => EvaluationIssue::TimedOut,
+            Failure::EvaluatorUnavailable | Failure::WorkerUnavailable => {
+                EvaluationIssue::WorkerUnavailable
+            }
+            // Superseded work and controls are not provider outages.
+            Failure::Busy | Failure::Cancelled | Failure::Stale => return,
+        };
+        self.revoke_processing();
+        self.set_evaluation_status(EvaluationStatus::Unavailable(issue));
+    }
+
+    fn record_evaluation_outcome(&mut self, request: &Request, outcome: EvaluationOutcome) {
+        self.set_evaluation_status(EvaluationStatus::Decided(outcome));
+        self.evaluation.as_mut().unwrap().outcome_at_ms =
+            request.sources().iter().filter_map(source_time).max();
     }
 
     pub(super) fn invalidate_evaluation(&mut self) {
@@ -52,21 +119,34 @@ impl Engine {
                 let _ = state.worker.poll(&pending.request);
             }
         }
+        // An error stays visible through new speech and controls until an
+        // explicit revoke/approval or session replacement clears it.
+        if !matches!(
+            self.evaluation_status(),
+            Some(EvaluationStatus::Unavailable(_))
+        ) {
+            self.set_evaluation_status(EvaluationStatus::Idle);
+        }
     }
 
     /// The last six complete transcript lines plus the visible cue's original
     /// sources (at most four), optionally with exactly approved prior notes.
     /// Never include manual notes, focus text, or identity settings. Fail closed
     /// on the worker's per-source and aggregate byte bounds without truncation.
-    fn evaluation_request(&self) -> Option<Request> {
+    fn evaluation_request(&self) -> Result<Option<Request>, Failure> {
         if self.state.status != Status::Running || self.state.cues_paused {
-            return None;
+            return Ok(None);
         }
-        let permission = &self.evaluation.as_ref()?.permission;
+        let Some(state) = &self.evaluation else {
+            return Ok(None);
+        };
+        let permission = &state.permission;
         if !permission.valid(self.generation, &self.notes) {
-            return None;
+            return Ok(None);
         }
-        let grant = permission.grant.as_ref()?;
+        let Some(grant) = &permission.grant else {
+            return Ok(None);
+        };
         let recent: Vec<_> = self
             .state
             .transcript
@@ -80,13 +160,15 @@ impl Engine {
             })
             .collect();
         if recent.is_empty() {
-            return None;
+            return Ok(None);
         }
         let mut sources = Vec::new();
         let existing = if let Some(cue) = &self.state.cue {
-            let (id, cited) = self.evaluated_cue.as_ref()?;
+            let Some((id, cited)) = &self.evaluated_cue else {
+                return Ok(None);
+            };
             if *id != cue.id || cue.resolved_by.is_some() {
-                return None;
+                return Ok(None);
             }
             sources.extend(cited.iter().cloned());
             Some(crate::cue_evaluator::ExistingCue {
@@ -113,9 +195,9 @@ impl Engine {
             Some(at_ms) => grant.after_ms.is_some_and(|after| at_ms <= after),
             None => !grant.notes.contains(source),
         }) {
-            return None;
+            return Ok(None);
         }
-        Request::new(self.generation, self.evaluation_revision, sources, existing).ok()
+        Request::new(self.generation, self.evaluation_revision, sources, existing).map(Some)
     }
 
     /// Only newly accepted eligible speech requests work. Multiple notifications
@@ -135,6 +217,13 @@ impl Engine {
     /// retry a completed/failed input or create work without new eligible speech.
     pub(super) fn poll_evaluation(&mut self) {
         self.reconcile_processing_permission();
+        if self.evaluation.as_ref().is_some_and(|state| {
+            state
+                .outcome_at_ms
+                .is_some_and(|at_ms| self.state.elapsed_ms.saturating_sub(at_ms) >= CUE_MS)
+        }) {
+            self.set_evaluation_status(EvaluationStatus::Idle);
+        }
         if self
             .evaluation
             .as_ref()
@@ -154,8 +243,14 @@ impl Engine {
             return;
         }
         // Build only when the worker can accept work, from current sources and
-        // cue state. Stale/oversized context consumes the marker without a retry.
-        let request = self.evaluation_request();
+        // cue state. Invalid input revokes permission before any dispatch.
+        let request = match self.evaluation_request() {
+            Ok(request) => request,
+            Err(error) => {
+                self.fail_evaluation(error);
+                return;
+            }
+        };
         let state = self.evaluation.as_mut().expect("evaluation checked");
         state.latest_speech_waiting = false;
         if let Some(request) = request {
@@ -164,16 +259,23 @@ impl Engine {
                     state.pending = Some(Pending {
                         request,
                         permission_generation: state.permission.generation,
-                    })
+                    });
+                    self.set_evaluation_status(EvaluationStatus::Pending);
                 }
-                Err(crate::cue_evaluator::Failure::Busy) => state.latest_speech_waiting = true,
-                Err(_) => {} // Unavailable workers are not restarted automatically.
+                Err(Failure::Busy) => state.latest_speech_waiting = true,
+                Err(error) => self.fail_evaluation(error),
             }
         }
     }
 
     fn poll_pending_evaluation(&mut self) {
-        let current = self.evaluation_request();
+        let current = match self.evaluation_request() {
+            Ok(request) => request,
+            Err(error) => {
+                self.fail_evaluation(error);
+                return;
+            }
+        };
         let state = self.evaluation.as_mut().expect("evaluation checked");
         let pending = state.pending.as_ref().expect("pending checked");
         let permission_current = pending.permission_generation == state.permission.generation;
@@ -187,9 +289,13 @@ impl Engine {
             return;
         };
         let submitted = state.pending.take().expect("pending checked");
-        if let (Some(current), Ok(decision)) = (current, result) {
+        self.set_evaluation_status(EvaluationStatus::Idle);
+        if let Some(current) = current {
             if permission_current && current == submitted.request {
-                self.apply_evaluation(&current, decision);
+                match result {
+                    Ok(decision) => self.apply_evaluation(&current, decision),
+                    Err(error) => self.fail_evaluation(error),
+                }
             }
         }
     }
@@ -219,7 +325,10 @@ impl Engine {
             return;
         }
         match decision.action {
-            Action::Quiet => return,
+            Action::Quiet => {
+                self.record_evaluation_outcome(request, EvaluationOutcome::Quiet);
+                return;
+            }
             Action::Show => {
                 let Some(question) = decision.cue else {
                     return;
@@ -303,6 +412,15 @@ impl Engine {
                 }
             }
         }
+        self.record_evaluation_outcome(
+            request,
+            match decision.action {
+                Action::Show => EvaluationOutcome::Shown,
+                Action::Resolved => EvaluationOutcome::Resolved,
+                Action::Withdraw => EvaluationOutcome::Withdrawn,
+                Action::Quiet => unreachable!(),
+            },
+        );
         self.changed();
     }
 
@@ -834,9 +952,26 @@ mod tests {
             .unwrap();
         h.engine.approve_processing(review).unwrap();
         drain_without_another_request(&mut h);
-        assert!(h.engine.has_processing_permission());
+        assert!(!h.engine.has_processing_permission());
+        assert_eq!(
+            h.engine.evaluation_status(),
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::InputLimit))
+        );
         assert!(h.engine.evaluation.as_ref().unwrap().pending.is_none());
         assert!(h.engine.state.cue.is_none());
+        h.line("A shorter new line cannot resume processing by itself.");
+        drain_without_another_request(&mut h);
+        let review = h
+            .engine
+            .review_processing(ConversationScope::RecentAndNewSpeech, &[])
+            .unwrap();
+        h.engine.approve_processing(review).unwrap();
+        assert!(h
+            .request()
+            .sources()
+            .iter()
+            .all(|source| source_time(source).is_some()));
+        h.reply("quiet", None, &["transcript:line-7"], "not_observed");
     }
 
     fn selected(provider: crate::context::Provider, id: &str) -> ContextItem {
@@ -1182,6 +1317,10 @@ mod tests {
     fn quiet_and_possible_use_do_not_resolve_a_held_cue_but_sourced_resolution_does() {
         let mut h = Harness::new();
         let id = h.show();
+        assert_eq!(
+            h.engine.evaluation_status(),
+            Some(EvaluationStatus::Decided(EvaluationOutcome::Shown))
+        );
         h.line("Robin asks about the checklist.");
         h.request();
         // Hold can be selected while the result is in flight; apply reads it now.
@@ -1193,6 +1332,10 @@ mod tests {
             "possible",
         );
         assert!(h.engine.state.cue.as_ref().unwrap().resolved_by.is_none());
+        assert_eq!(
+            h.engine.evaluation_status(),
+            Some(EvaluationStatus::Decided(EvaluationOutcome::Quiet))
+        );
         h.line("Maya is responsible for that checklist.");
         h.request();
         h.reply(
@@ -1202,6 +1345,10 @@ mod tests {
             "possible",
         );
         let cue = h.engine.state.cue.as_ref().unwrap();
+        assert_eq!(
+            h.engine.evaluation_status(),
+            Some(EvaluationStatus::Decided(EvaluationOutcome::Resolved))
+        );
         assert_eq!(cue.id, id);
         assert_eq!(cue.question, "Who owns the checklist?");
         assert!(cue.held && cue.expanded);
@@ -1425,7 +1572,7 @@ mod tests {
     }
 
     #[test]
-    fn latest_input_failure_or_timeout_is_not_retried_without_new_speech() {
+    fn failure_and_timeout_require_new_approval_even_after_new_speech() {
         for timeout in [false, true] {
             let mut h = Harness::with_budget(if timeout {
                 Duration::from_millis(20)
@@ -1438,6 +1585,10 @@ mod tests {
             h.replies.send("{}".into()).unwrap(); // Cancelled first attempt.
             let latest = next_scheduled_request(&mut h);
             assert_eq!(latest.sources().last().unwrap().id, "transcript:line-2");
+            let stale_review = h
+                .engine
+                .review_processing(ConversationScope::NewSpeechOnly, &[])
+                .unwrap();
             if timeout {
                 std::thread::sleep(Duration::from_millis(30));
                 h.engine.advance(1); // Deadline expires while adapter remains occupied.
@@ -1445,12 +1596,153 @@ mod tests {
             h.replies.send("{}".into()).unwrap(); // Malformed output must stay quiet.
             drain_without_another_request(&mut h);
             assert!(h.engine.state.cue.is_none());
+            let unavailable = Some(EvaluationStatus::Unavailable(if timeout {
+                EvaluationIssue::TimedOut
+            } else {
+                EvaluationIssue::InvalidReply
+            }));
+            assert_eq!(h.engine.evaluation_status(), unavailable);
+            assert!(!h.engine.has_processing_permission());
+            assert_eq!(
+                h.engine.approve_processing(stale_review),
+                Err(ProcessingError::StaleReview)
+            );
             h.line("A new fictional topic begins.");
+            h.engine.set_live_cues_paused(true).unwrap();
+            h.engine.set_live_cues_paused(false).unwrap();
+            drain_without_another_request(&mut h);
+            assert_eq!(h.engine.evaluation_status(), unavailable);
+            assert_eq!(h.engine.state.transcript.len(), 3);
+            h.approve_notes();
+            assert_eq!(h.engine.evaluation_status(), Some(EvaluationStatus::Idle));
+            h.line("Fresh approval permits only new speech.");
             assert_eq!(
                 h.request().sources().last().unwrap().id,
-                "transcript:line-3"
+                "transcript:line-4"
             );
-            h.reply("quiet", None, &["transcript:line-3"], "not_observed");
+            h.reply("quiet", None, &["transcript:line-4"], "not_observed");
+        }
+    }
+
+    #[test]
+    fn quiet_is_an_explicit_fresh_decision_not_an_absent_cue() {
+        assert_eq!(Engine::live().evaluation_status(), None);
+        let mut h = Harness::new();
+        assert_eq!(h.engine.evaluation_status(), Some(EvaluationStatus::Idle));
+        h.line("The checklist has a confirmed owner.");
+        h.request();
+        assert_eq!(
+            h.engine.evaluation_status(),
+            Some(EvaluationStatus::Pending)
+        );
+        let revision = h.engine.state.revision;
+        h.replies
+            .send(
+                serde_json::json!({
+                    "action": "quiet", "cue": null, "sourceIds": ["transcript:line-1"],
+                    "reason": "Fictional supported decision", "observedUse": "not_observed"
+                })
+                .to_string(),
+            )
+            .unwrap();
+        let until = Instant::now() + Duration::from_secs(2);
+        while h.engine.evaluation_status() == Some(EvaluationStatus::Pending) {
+            assert!(Instant::now() < until);
+            h.engine.poll_evaluation(); // No clock revision hides a missed status publication.
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(h.engine.state.revision > revision);
+        assert_eq!(
+            h.engine.evaluation_status(),
+            Some(EvaluationStatus::Decided(EvaluationOutcome::Quiet))
+        );
+        assert!(h.engine.state.cue.is_none());
+        h.engine.advance(CUE_MS);
+        assert_eq!(h.engine.evaluation_status(), Some(EvaluationStatus::Idle));
+        assert!(h.engine.has_processing_permission());
+        assert!(h.requests.try_recv().is_err());
+    }
+
+    #[test]
+    fn changed_context_clears_quiet_and_cancelled_replies_are_not_failures() {
+        for change in ["speech", "notes", "pause", "revoke", "end"] {
+            let mut h = Harness::new();
+            h.line("Maya owns the checklist.");
+            h.request();
+            h.reply("quiet", None, &["transcript:line-1"], "not_observed");
+            let revision = h.engine.state.revision;
+            match change {
+                "speech" => h.line("The next topic is the garden schedule."),
+                "notes" => h
+                    .engine
+                    .set_notes(vec![selected(crate::context::Provider::File, "new")]),
+                "pause" => h.engine.set_live_cues_paused(true).unwrap(),
+                "revoke" => h.engine.revoke_processing(),
+                "end" => h.engine.end(),
+                _ => unreachable!(),
+            }
+            assert!(h.engine.state.revision > revision, "{change}");
+            assert_ne!(
+                h.engine.evaluation_status(),
+                Some(EvaluationStatus::Decided(EvaluationOutcome::Quiet)),
+                "{change}"
+            );
+            if change == "speech" {
+                h.request();
+                h.engine.set_live_cues_paused(true).unwrap();
+                h.replies.send("invalid cancelled output".into()).unwrap();
+            }
+            drain_without_another_request(&mut h);
+            assert_eq!(
+                h.engine.evaluation_status(),
+                Some(EvaluationStatus::Idle),
+                "{change}"
+            );
+        }
+    }
+
+    #[test]
+    fn provider_error_and_worker_exit_revoke_permission_without_affecting_capture() {
+        struct Broken(bool);
+        impl Evaluator for Broken {
+            fn evaluate(&mut self, _: &Request, _: &Cancellation) -> Result<String, Failure> {
+                assert!(!self.0, "fictional worker exit");
+                Err(Failure::EvaluatorUnavailable)
+            }
+        }
+        for exits in [false, true] {
+            let worker = Worker::start(Broken(exits), Duration::from_secs(5)).unwrap();
+            let mut h = Harness::new();
+            h.engine = Engine::live_with_evaluator(worker, fictional_processor());
+            h.engine.start().unwrap();
+            h.approve_notes();
+            h.engine
+                .update_notes("Keep this manual note.".into())
+                .unwrap();
+            h.line("Someone should take the checklist.");
+            h.settle();
+            let unavailable = Some(EvaluationStatus::Unavailable(
+                EvaluationIssue::WorkerUnavailable,
+            ));
+            assert_eq!(h.engine.evaluation_status(), unavailable);
+            assert!(!h.engine.has_processing_permission());
+            h.line("Capture continues without a provider restart.");
+            assert_eq!(h.engine.state.transcript.len(), 2);
+            assert_eq!(h.engine.state.status, Status::Running);
+            assert_eq!(h.engine.state.notes, "Keep this manual note.");
+            assert_eq!(h.engine.evaluation_status(), unavailable);
+            assert!(h.engine.state.cue.is_none(), "no phrase-rule fallback");
+            if exits {
+                // An explicit reapproval cannot resurrect a stopped worker.
+                h.approve_notes();
+                h.line("No replacement worker is launched.");
+                assert_eq!(h.engine.evaluation_status(), unavailable);
+                assert!(!h.engine.has_processing_permission());
+            }
+            h.engine.end();
+            h.engine.start().unwrap();
+            assert_eq!(h.engine.evaluation_status(), Some(EvaluationStatus::Idle));
+            assert!(!h.engine.has_processing_permission());
         }
     }
 
@@ -1574,6 +1866,10 @@ mod tests {
         h.line("That checklist is no longer part of this release.");
         h.request();
         h.reply("withdraw", None, &["transcript:line-2"], "unknown");
+        assert_eq!(
+            h.engine.evaluation_status(),
+            Some(EvaluationStatus::Decided(EvaluationOutcome::Withdrawn))
+        );
         assert!(h.engine.state.cue.is_none());
         assert!(h.engine.state.notes.is_empty());
         assert!(h.engine.evaluated_cue.is_none());
@@ -1624,6 +1920,15 @@ mod tests {
                 "not_observed",
             );
             assert!(h.engine.state.cue.is_none(), "{change}");
+            assert_eq!(
+                h.engine.evaluation_status(),
+                Some(if change == "invalid" {
+                    EvaluationStatus::Unavailable(EvaluationIssue::InvalidReply)
+                } else {
+                    EvaluationStatus::Idle
+                }),
+                "{change}: suppression is not a quiet decision or an outage"
+            );
             h.engine.advance(1_000);
             assert!(h.requests.try_recv().is_err(), "no timer retry");
         }
