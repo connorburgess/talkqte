@@ -3,36 +3,40 @@
 use super::*;
 use crate::cue_evaluator::{Action, Decision, Provenance, Request, Source, Worker};
 
+mod permission;
+use permission::Permission;
+pub use permission::{
+    ConversationScope, ProcessingError, ProcessingLocation, ProcessingReview,
+    ProcessorConfiguration,
+};
+
 const RECENT_LINES: usize = 6;
 
 pub(super) struct State {
     worker: Worker,
-    pending: Option<Request>,
+    pending: Option<Pending>,
     // One coalesced speech notification, never a queue of copied requests.
     latest_speech_waiting: bool,
-    selected_notes: bool,
+    permission: Permission,
+}
+
+struct Pending {
+    request: Request,
+    permission_generation: u64,
 }
 
 impl Engine {
-    /// Development boundary for a caller-supplied evaluator. This is not a
-    /// processing permission or a provider selection. Native commands continue
-    /// to construct `live()` and run phrase rules. Never runs both cue paths.
-    pub fn live_with_evaluator(worker: Worker) -> Self {
+    /// Register a trusted Rust adapter without granting processing permission.
+    /// A session must review/approve its scope separately. Native commands still
+    /// construct `live()` and run phrase rules. Never runs both cue paths.
+    pub fn live_with_evaluator(worker: Worker, processor: ProcessorConfiguration) -> Self {
         let mut engine = Self::live();
         engine.evaluation = Some(State {
             worker,
             pending: None,
             latest_speech_waiting: false,
-            selected_notes: false,
+            permission: Permission::new(processor),
         });
-        engine
-    }
-
-    /// Development-only opt-in to the selected context store as well as speech.
-    /// This caller choice is not a substitute for app processing permission.
-    pub fn live_with_selected_note_evaluator(worker: Worker) -> Self {
-        let mut engine = Self::live_with_evaluator(worker);
-        engine.evaluation.as_mut().unwrap().selected_notes = true;
         engine
     }
 
@@ -45,19 +49,24 @@ impl Engine {
                 // Drain the cancelled ticket without waiting for the adapter.
                 // Stop need not receive another clock tick to release the
                 // caller's copies of the request and its source text.
-                let _ = state.worker.poll(&pending);
+                let _ = state.worker.poll(&pending.request);
             }
         }
     }
 
     /// The last six complete transcript lines plus the visible cue's original
-    /// sources (at most four), optionally with the selected prior-note store.
+    /// sources (at most four), optionally with exactly approved prior notes.
     /// Never include manual notes, focus text, or identity settings. Fail closed
     /// on the worker's per-source and aggregate byte bounds without truncation.
     fn evaluation_request(&self) -> Option<Request> {
         if self.state.status != Status::Running || self.state.cues_paused {
             return None;
         }
+        let permission = &self.evaluation.as_ref()?.permission;
+        if !permission.valid(self.generation, &self.notes) {
+            return None;
+        }
+        let grant = permission.grant.as_ref()?;
         let recent: Vec<_> = self
             .state
             .transcript
@@ -67,6 +76,7 @@ impl Engine {
             .filter(|line| {
                 self.state.elapsed_ms.saturating_sub(line.at_ms) < CUE_MS
                     && self.cues_after_ms.is_none_or(|after| line.at_ms > after)
+                    && grant.after_ms.is_none_or(|after| line.at_ms > after)
             })
             .collect();
         if recent.is_empty() {
@@ -92,15 +102,18 @@ impl Engine {
                 sources.push(transcript_source(line));
             }
         }
-        if self.evaluation.as_ref()?.selected_notes {
-            for note in &self.notes {
-                if !sources
-                    .iter()
-                    .any(|source| matches_note(&note.item, source))
-                {
-                    sources.push(note_source(&note.item));
-                }
+        for note in &grant.notes {
+            if !sources.contains(note) {
+                sources.push(note.clone());
             }
+        }
+        // Recheck retained cue sources too: disclosure is no exception to the
+        // grant, including transcript captured before NewSpeechOnly approval.
+        if sources.iter().any(|source| match source_time(source) {
+            Some(at_ms) => grant.after_ms.is_some_and(|after| at_ms <= after),
+            None => !grant.notes.contains(source),
+        }) {
+            return None;
         }
         Request::new(self.generation, self.evaluation_revision, sources, existing).ok()
     }
@@ -108,6 +121,9 @@ impl Engine {
     /// Only newly accepted eligible speech requests work. Multiple notifications
     /// coalesce while a cancelled adapter returns; controls discard the marker.
     pub(super) fn submit_evaluation(&mut self) {
+        if !self.has_processing_permission() {
+            return;
+        }
         if let Some(state) = &mut self.evaluation {
             state.latest_speech_waiting = true;
         }
@@ -118,6 +134,7 @@ impl Engine {
     /// Clock ticks poll results and dispatch a waiting speech notification, never
     /// retry a completed/failed input or create work without new eligible speech.
     pub(super) fn poll_evaluation(&mut self) {
+        self.reconcile_processing_permission();
         if self
             .evaluation
             .as_ref()
@@ -143,7 +160,12 @@ impl Engine {
         state.latest_speech_waiting = false;
         if let Some(request) = request {
             match state.worker.submit(request.clone()) {
-                Ok(()) => state.pending = Some(request),
+                Ok(()) => {
+                    state.pending = Some(Pending {
+                        request,
+                        permission_generation: state.permission.generation,
+                    })
+                }
                 Err(crate::cue_evaluator::Failure::Busy) => state.latest_speech_waiting = true,
                 Err(_) => {} // Unavailable workers are not restarted automatically.
             }
@@ -154,15 +176,19 @@ impl Engine {
         let current = self.evaluation_request();
         let state = self.evaluation.as_mut().expect("evaluation checked");
         let pending = state.pending.as_ref().expect("pending checked");
-        if current.is_none() {
+        let permission_current = pending.permission_generation == state.permission.generation;
+        if current.is_none() || !permission_current {
             state.worker.cancel_pending();
         }
-        let Some(result) = state.worker.poll(current.as_ref().unwrap_or(pending)) else {
+        let Some(result) = state
+            .worker
+            .poll(current.as_ref().unwrap_or(&pending.request))
+        else {
             return;
         };
         let submitted = state.pending.take().expect("pending checked");
         if let (Some(current), Ok(decision)) = (current, result) {
-            if current == submitted {
+            if permission_current && current == submitted.request {
                 self.apply_evaluation(&current, decision);
             }
         }
@@ -421,15 +447,18 @@ mod tests {
     }
     impl Harness {
         fn new() -> Self {
-            Self::make(false)
+            Self::with_budget(Duration::from_secs(5))
         }
-        fn with_selected_notes() -> Self {
-            Self::make(true)
+        fn with_budget(budget: Duration) -> Self {
+            let mut h = Self::unapproved(fictional_processor(), budget);
+            let review = h
+                .engine
+                .review_processing(ConversationScope::NewSpeechOnly, &[])
+                .unwrap();
+            h.engine.approve_processing(review).unwrap();
+            h
         }
-        fn make(selected_notes: bool) -> Self {
-            Self::with_budget(selected_notes, Duration::from_secs(5))
-        }
-        fn with_budget(selected_notes: bool, budget: Duration) -> Self {
+        fn unapproved(processor: ProcessorConfiguration, budget: Duration) -> Self {
             let (requests_tx, requests) = mpsc::channel();
             let (replies, replies_rx) = mpsc::channel();
             let worker = Worker::start(
@@ -440,11 +469,7 @@ mod tests {
                 budget,
             )
             .unwrap();
-            let mut engine = if selected_notes {
-                Engine::live_with_selected_note_evaluator(worker)
-            } else {
-                Engine::live_with_evaluator(worker)
-            };
+            let mut engine = Engine::live_with_evaluator(worker, processor);
             engine.start().unwrap();
             Self {
                 engine,
@@ -452,6 +477,25 @@ mod tests {
                 replies,
                 next_line: 0,
             }
+        }
+        fn approve_notes(&mut self) {
+            let scope: Vec<_> = self
+                .engine
+                .notes
+                .iter()
+                .map(|note| {
+                    (
+                        note.item.provider,
+                        note.item.source_id.clone(),
+                        note.item.revision,
+                    )
+                })
+                .collect();
+            let review = self
+                .engine
+                .review_processing(ConversationScope::NewSpeechOnly, &scope)
+                .unwrap();
+            self.engine.approve_processing(review).unwrap();
         }
         fn line(&mut self, text: &str) {
             self.engine.advance(10);
@@ -509,6 +553,292 @@ mod tests {
         }
     }
 
+    fn fictional_processor() -> ProcessorConfiguration {
+        ProcessorConfiguration::new(
+            "fictional".into(),
+            1,
+            "fixture-v1".into(),
+            ProcessingLocation::OnDevice,
+            "fictional-policy-v1".into(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn registration_import_and_capture_do_not_grant_processing() {
+        let mut h = Harness::unapproved(fictional_processor(), Duration::from_secs(5));
+        h.engine
+            .set_notes(vec![selected(crate::context::Provider::File, "one")]);
+        h.engine
+            .update_notes("An unsent manual draft.".into())
+            .unwrap();
+        h.line("Someone should take the checklist.");
+        drain_without_another_request(&mut h);
+        assert!(!h.engine.has_processing_permission());
+        assert!(
+            h.engine.state.cue.is_none(),
+            "no silent phrase-rule fallback"
+        );
+        let review = h
+            .engine
+            .review_processing(ConversationScope::NewSpeechOnly, &[])
+            .unwrap();
+        h.engine.approve_processing(review).unwrap();
+        drain_without_another_request(&mut h);
+        h.line("Who will take the checklist?");
+        let request = h.request();
+        assert_eq!(request.sources().len(), 1);
+        assert_eq!(request.sources()[0].id, "transcript:line-2");
+        h.reply("quiet", None, &["transcript:line-2"], "not_observed");
+        h.engine.revoke_processing();
+        h.line("Someone should send the checklist soon.");
+        drain_without_another_request(&mut h);
+        assert_eq!(h.engine.state.status, Status::Running);
+        assert_eq!(h.engine.state.transcript.len(), 3);
+        assert_eq!(h.engine.state.notes, "An unsent manual draft.");
+        assert!(h.engine.state.cue.is_none());
+    }
+
+    #[test]
+    fn reviewed_recent_speech_and_exact_notes_are_the_only_permitted_sources() {
+        use crate::context::Provider;
+        let mut h = Harness::unapproved(fictional_processor(), Duration::from_secs(5));
+        let file = selected(Provider::File, "one");
+        let approved = selected(Provider::Granola, "one");
+        h.engine.set_notes(vec![file, approved.clone()]);
+        h.line("Can we send the garden guide Friday?");
+        let review = h
+            .engine
+            .review_processing(
+                ConversationScope::RecentAndNewSpeech,
+                &[(Provider::Granola, "one".into(), 7)],
+            )
+            .unwrap();
+        h.engine.approve_processing(review).unwrap();
+        let request = h.request();
+        assert_eq!(request.sources().len(), 2);
+        assert_eq!(request.sources()[1], note_source(&approved));
+        h.reply("quiet", None, &["transcript:line-1"], "not_observed");
+        // Replacing an unapproved note and adding a note cannot widen approval.
+        h.engine
+            .set_notes(vec![approved, selected(Provider::File, "new")]);
+        assert!(h.engine.has_processing_permission());
+        h.line("The guide still needs review.");
+        let request = h.request();
+        assert_eq!(request.sources().len(), 3);
+        assert!(!request
+            .sources()
+            .iter()
+            .any(|s| s.id.starts_with("prior:file:")));
+        h.reply("quiet", None, &["transcript:line-2"], "not_observed");
+    }
+
+    #[test]
+    fn stale_review_cannot_approve_a_changed_note_or_revoked_session() {
+        use crate::context::Provider;
+        for change in [
+            "revision", "text", "title", "date", "provider", "removed", "revoke", "replay",
+        ] {
+            let mut h = Harness::unapproved(fictional_processor(), Duration::from_secs(5));
+            let mut note = selected(Provider::Granola, "one");
+            h.engine.set_notes(vec![note.clone()]);
+            let review = h
+                .engine
+                .review_processing(
+                    ConversationScope::NewSpeechOnly,
+                    &[(Provider::Granola, "one".into(), 7)],
+                )
+                .unwrap();
+            match change {
+                "revision" => note.revision += 1,
+                "text" => note.excerpt = "An updated fictional plan.".into(),
+                "title" => note.title = "An updated title".into(),
+                "date" => note.source_date = "2026-11-02".into(),
+                "provider" => note.provider = Provider::File,
+                "revoke" => h.engine.revoke_processing(),
+                "replay" => {
+                    h.engine.end();
+                    h.engine.start().unwrap();
+                }
+                _ => (),
+            }
+            h.engine.set_notes(if change == "removed" {
+                vec![]
+            } else {
+                vec![note]
+            });
+            assert_eq!(
+                h.engine.approve_processing(review),
+                Err(ProcessingError::StaleReview),
+                "{change}"
+            );
+            h.line("Who should review the garden guide?");
+            drain_without_another_request(&mut h);
+            assert!(!h.engine.has_processing_permission());
+        }
+    }
+
+    #[test]
+    fn review_cannot_move_to_another_adapter_configuration_or_engine() {
+        for change in [
+            "id",
+            "revision",
+            "model",
+            "destination",
+            "policy",
+            "same-config",
+        ] {
+            let original = Harness::unapproved(fictional_processor(), Duration::from_secs(5));
+            let review = original
+                .engine
+                .review_processing(ConversationScope::NewSpeechOnly, &[])
+                .unwrap();
+            let processor = ProcessorConfiguration::new(
+                if change == "id" { "other" } else { "fictional" }.into(),
+                if change == "revision" { 2 } else { 1 },
+                if change == "model" {
+                    "fixture-v2"
+                } else {
+                    "fixture-v1"
+                }
+                .into(),
+                if change == "destination" {
+                    ProcessingLocation::Hosted {
+                        service: "Fictional service".into(),
+                    }
+                } else {
+                    ProcessingLocation::OnDevice
+                },
+                if change == "policy" {
+                    "policy-v2"
+                } else {
+                    "fictional-policy-v1"
+                }
+                .into(),
+            )
+            .unwrap();
+            let mut replacement = Harness::unapproved(processor, Duration::from_secs(5));
+            assert_eq!(original.engine.session(), replacement.engine.session());
+            assert_eq!(
+                replacement.engine.approve_processing(review),
+                Err(ProcessingError::StaleReview),
+                "{change}"
+            );
+            replacement.line("Who will take the checklist?");
+            drain_without_another_request(&mut replacement);
+        }
+    }
+
+    #[test]
+    fn scope_is_atomic_and_superseded_reviews_cannot_restore_permission() {
+        use crate::context::Provider;
+        let mut h = Harness::unapproved(fictional_processor(), Duration::from_secs(5));
+        h.engine.set_notes(vec![selected(Provider::Granola, "one")]);
+        for scope in [
+            vec![(Provider::Granola, "one".into(), 6)],
+            vec![(Provider::File, "one".into(), 7)],
+            vec![(Provider::Granola, "missing".into(), 7)],
+            vec![(Provider::Granola, "one".into(), 7); 2],
+            vec![(Provider::Granola, "one".into(), 7); 21],
+        ] {
+            assert_eq!(
+                h.engine
+                    .review_processing(ConversationScope::NewSpeechOnly, &scope)
+                    .unwrap_err(),
+                ProcessingError::InvalidScope
+            );
+        }
+        let old = h
+            .engine
+            .review_processing(
+                ConversationScope::NewSpeechOnly,
+                &[(Provider::Granola, "one".into(), 7)],
+            )
+            .unwrap();
+        let current = h
+            .engine
+            .review_processing(ConversationScope::NewSpeechOnly, &[])
+            .unwrap();
+        h.engine.approve_processing(current).unwrap();
+        assert_eq!(
+            h.engine.approve_processing(old),
+            Err(ProcessingError::StaleReview)
+        );
+        h.line("Who should review the garden guide?");
+        assert_eq!(h.request().sources().len(), 1);
+        h.reply("quiet", None, &["transcript:line-1"], "not_observed");
+    }
+
+    #[test]
+    fn revoke_and_reapprove_cannot_apply_old_reply_or_replay_waiting_input() {
+        let mut h = Harness::new();
+        h.line("Who will take the garden checklist?");
+        h.request(); // Occupied, deliberately ignoring cancellation.
+        h.line("The next handoff is still unclear.");
+        h.engine.revoke_processing();
+        let review = h
+            .engine
+            .review_processing(ConversationScope::NewSpeechOnly, &[])
+            .unwrap();
+        h.engine.approve_processing(review).unwrap();
+        h.reply(
+            "show",
+            Some("Who owns the checklist?"),
+            &["transcript:line-1"],
+            "not_observed",
+        );
+        drain_without_another_request(&mut h);
+        assert!(h.engine.state.cue.is_none());
+        h.line("A new garden handoff needs clarification.");
+        let request = h.request();
+        assert_eq!(request.sources().len(), 1);
+        assert_eq!(request.sources()[0].id, "transcript:line-3");
+        h.reply(
+            "show",
+            Some("Who owns the new handoff?"),
+            &["transcript:line-3"],
+            "not_observed",
+        );
+        let id = h.engine.state.cue.as_ref().unwrap().id.clone();
+        h.engine.inspect_cue(&id, true).unwrap();
+        h.engine.revoke_processing();
+        assert!(h.engine.state.cue.is_none());
+        assert!(h.engine.evaluated_cue.is_none());
+        assert!(h.engine.evaluation.as_ref().unwrap().pending.is_none());
+        assert_eq!(h.engine.state.status, Status::Running);
+        assert_eq!(h.engine.state.transcript.len(), 3);
+    }
+
+    #[test]
+    fn full_request_bounds_apply_after_valid_note_approval_without_partial_dispatch() {
+        use crate::context::Provider;
+        let mut h = Harness::unapproved(fictional_processor(), Duration::from_secs(5));
+        let notes: Vec<_> = (0..15)
+            .map(|i| {
+                let mut note = selected(Provider::File, &format!("note-{i}"));
+                note.excerpt = "Fictional ".repeat(200);
+                note
+            })
+            .collect();
+        let scope: Vec<_> = notes
+            .iter()
+            .map(|n| (n.provider, n.source_id.clone(), n.revision))
+            .collect();
+        h.engine.set_notes(notes);
+        for _ in 0..6 {
+            h.line(&"Garden discussion. ".repeat(50));
+        }
+        let review = h
+            .engine
+            .review_processing(ConversationScope::RecentAndNewSpeech, &scope)
+            .unwrap();
+        h.engine.approve_processing(review).unwrap();
+        drain_without_another_request(&mut h);
+        assert!(h.engine.has_processing_permission());
+        assert!(h.engine.evaluation.as_ref().unwrap().pending.is_none());
+        assert!(h.engine.state.cue.is_none());
+    }
+
     fn selected(provider: crate::context::Provider, id: &str) -> ContextItem {
         ContextItem {
             provider,
@@ -523,13 +853,14 @@ mod tests {
     #[test]
     fn mixed_sources_keep_distinct_identity_dates_revisions_and_exact_disclosure() {
         use crate::context::Provider;
-        let mut h = Harness::with_selected_notes();
+        let mut h = Harness::new();
         let file = selected(Provider::File, "line-1");
         let mut granola = selected(Provider::Granola, "line-1");
         granola.source_date = "2026-11-02".into();
         granola.excerpt = "Leave one day for printing.".into();
         let unreferenced = selected(Provider::File, "not-cited");
         h.engine.set_notes(vec![file, granola, unreferenced]);
+        h.approve_notes();
         h.engine
             .update_notes("Manual private draft.".into())
             .unwrap();
@@ -571,8 +902,9 @@ mod tests {
     #[test]
     fn prior_notes_cannot_raise_or_resolve_a_cue_without_fresh_cited_speech() {
         use crate::context::Provider;
-        let mut h = Harness::with_selected_notes();
+        let mut h = Harness::new();
         h.engine.set_notes(vec![selected(Provider::File, "one")]);
+        h.approve_notes();
         h.engine.advance(1_000);
         assert!(
             h.requests.try_recv().is_err(),
@@ -621,7 +953,7 @@ mod tests {
             h.engine.state.cue.as_ref().unwrap().resolved_by.is_none(),
             "old held speech is not a fresh anchor"
         );
-        let mut h = Harness::with_selected_notes();
+        let mut h = Harness::new();
         h.engine.set_sensitivity(Sensitivity::Focused);
         h.engine
             .set_focus(vec!["Legal supplier approval".into()])
@@ -629,6 +961,7 @@ mod tests {
         let mut focused_note = selected(Provider::File, "one");
         focused_note.excerpt = "Legal supplier approval takes two days.".into();
         h.engine.set_notes(vec![focused_note]);
+        h.approve_notes();
         h.line("The checklist handoff is still unclear.");
         h.request();
         h.reply(
@@ -647,9 +980,10 @@ mod tests {
     fn note_revision_or_removal_discards_delayed_proposals_without_retry() {
         use crate::context::Provider;
         for removed in [false, true] {
-            let mut h = Harness::with_selected_notes();
+            let mut h = Harness::new();
             let mut note = selected(Provider::Granola, "one");
             h.engine.set_notes(vec![note.clone()]);
+            h.approve_notes();
             h.line("The review schedule is unclear.");
             h.request();
             note.revision += 1;
@@ -676,9 +1010,10 @@ mod tests {
         use crate::context::Provider;
         for resolution_source in [false, true] {
             for change in ["revision", "excerpt", "title", "date", "remove"] {
-                let mut h = Harness::with_selected_notes();
+                let mut h = Harness::new();
                 let mut note = selected(Provider::Granola, "one");
                 h.engine.set_notes(vec![note.clone()]);
+                h.approve_notes();
                 h.line("The review schedule is unclear.");
                 h.request();
                 let mut ids = vec!["transcript:line-1"];
@@ -734,6 +1069,9 @@ mod tests {
                     .unwrap()
                     .contains("Legal review"));
                 assert!(h.engine.inspect_cue(&id, true).is_err());
+                assert!(!h.engine.has_processing_permission());
+                h.line("Another garden review needs an owner.");
+                drain_without_another_request(&mut h);
             }
         }
     }
@@ -742,7 +1080,7 @@ mod tests {
     fn oversized_selected_context_fails_closed_and_namespaced_maximum_ids_fit() {
         use crate::context::Provider;
         for multibyte in [false, true] {
-            let mut h = Harness::with_selected_notes();
+            let mut h = Harness::new();
             let notes = (0..if multibyte { 1 } else { 20 })
                 .map(|i| {
                     let mut note = selected(Provider::File, &format!("note-{i}"));
@@ -755,15 +1093,35 @@ mod tests {
                 })
                 .collect();
             h.engine.set_notes(notes);
+            let scope: Vec<_> = h
+                .engine
+                .notes
+                .iter()
+                .map(|note| {
+                    (
+                        note.item.provider,
+                        note.item.source_id.clone(),
+                        note.item.revision,
+                    )
+                })
+                .collect();
+            h.engine.revoke_processing();
+            assert_eq!(
+                h.engine
+                    .review_processing(ConversationScope::NewSpeechOnly, &scope)
+                    .unwrap_err(),
+                ProcessingError::InvalidScope
+            );
             h.line("The review schedule is unclear.");
             assert!(h.engine.evaluation.as_ref().unwrap().pending.is_none());
             assert!(h.requests.try_recv().is_err());
             assert!(h.engine.state.cue.is_none());
         }
-        let mut h = Harness::with_selected_notes();
+        let mut h = Harness::new();
         let mut note = selected(Provider::Granola, &"n".repeat(128));
         note.title = "t".repeat(crate::context::MAX_TITLE_CHARS);
         h.engine.set_notes(vec![note]);
+        h.approve_notes();
         h.line("The review schedule is unclear.");
         assert_eq!(h.request().sources().len(), 2);
         h.reply("quiet", None, &["transcript:line-1"], "not_observed");
@@ -1019,9 +1377,10 @@ mod tests {
             "note-removal",
             "stale",
         ] {
-            let mut h = Harness::with_selected_notes();
+            let mut h = Harness::new();
             let mut note = selected(crate::context::Provider::Granola, "review");
             h.engine.set_notes(vec![note.clone()]);
+            h.approve_notes();
             let id = h.show();
             h.engine.inspect_cue(&id, true).unwrap();
             h.line("The next garden handoff is not clear.");
@@ -1068,14 +1427,11 @@ mod tests {
     #[test]
     fn latest_input_failure_or_timeout_is_not_retried_without_new_speech() {
         for timeout in [false, true] {
-            let mut h = Harness::with_budget(
-                false,
-                if timeout {
-                    Duration::from_millis(20)
-                } else {
-                    Duration::from_secs(5)
-                },
-            );
+            let mut h = Harness::with_budget(if timeout {
+                Duration::from_millis(20)
+            } else {
+                Duration::from_secs(5)
+            });
             h.line("The garden checklist needs an owner.");
             h.request();
             h.line("Who will take the garden checklist?");
@@ -1169,6 +1525,13 @@ mod tests {
         assert!(h.engine.state.cue.is_none());
         assert!(h.engine.state.transcript.is_empty());
         h.line("A new meeting begins.");
+        assert!(!h.engine.has_processing_permission());
+        assert!(h.requests.try_recv().is_err());
+        let review = h
+            .engine
+            .review_processing(ConversationScope::RecentAndNewSpeech, &[])
+            .unwrap();
+        h.engine.approve_processing(review).unwrap();
         assert_ne!(old, h.request());
         h.reply("quiet", None, &["transcript:line-2"], "not_observed");
     }
