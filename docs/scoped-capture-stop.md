@@ -2,7 +2,7 @@
 
 The main-window `stop_capture` command can cancel one live startup, stop its capture and finish its queued transcription, or stop independent microphone monitoring. It is bound to the operation the user saw. An unrelated note change does not prevent Stop, and an old request cannot cancel a replacement live start or release a newer microphone generation.
 
-The processing controls remain mounted only in the fictional browser fixture. The normal notebook still uses its existing controls and waits for startup before enabling actions. Making Cancel start reachable there is the next integration task; this native prerequisite does not complete that user flow or activate a processor.
+The notebook now uses this contract for [reachable Cancel start and independent Stop](notebook-capture-controls.md). Evaluator permission controls remain mounted only in the fictional browser fixture; neither this native boundary nor the capture integration activates a processor.
 
 ## Ownership and truthful status
 
@@ -28,6 +28,6 @@ Fictional visual evidence: [earlier Stop label](assets/processing-capture-unknow
 
 ## Next acceptance boundary
 
-Integrate the guarded commands/events into the notebook and make Cancel start reachable while its Start command is pending. Keep Stop independent of other busy actions, avoid duplicated/conflicting capture controls, retain optional Focus/setup, and show unavailable processing when no adapter is registered. Test the complete start, cancel, review, pause, disable, Stop and recovery flow headlessly before separately verifying native permission, focus, cross-window behavior and actual microphone release.
+The [notebook capture slice](notebook-capture-controls.md) now makes Cancel start reachable and keeps Stop independent of other busy actions. Next integrate evaluator permission review, pause and disable without duplicated capture controls, retaining optional Focus/setup and unavailable processing when no adapter is registered. Extend the full start/cancel/review/pause/disable/Stop/recovery flow headlessly before separately verifying native permission, focus, cross-window behavior and actual microphone release.
 
 Provider activation, Granola account import, signed installation, resource measurement and participation/listening outcomes remain separate gates. The [processing acceptance sequence](processing-plan.md#acceptance-and-dependency-order) still applies.

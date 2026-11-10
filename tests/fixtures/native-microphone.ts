@@ -6,6 +6,7 @@ import { emit } from '@tauri-apps/api/event';
 import * as preview from '../../src/lib/preview';
 import type { MicrophoneSnapshot } from '../../src/lib/microphone';
 import type { Commands, ModelStatus, Snapshot } from '../../src/lib/types';
+import type { ProcessingSnapshot, StopTarget } from '../../src/lib/processing';
 
 let microphone: MicrophoneSnapshot = {
   revision: 0,
@@ -15,6 +16,98 @@ let microphone: MicrophoneSnapshot = {
   message: null,
 };
 let session: Snapshot;
+let processing: ProcessingSnapshot = {
+  revision: 0,
+  session: 'fictional-session',
+  scopeRevision: 0,
+  phase: 'off',
+  capture: 'off',
+  startup: 'idle',
+  stopTarget: { operation: null, microphone: '0' },
+  processor: null,
+  notes: [],
+  approved: null,
+  issue: null,
+  lastDecision: null,
+};
+let operation = 0;
+let heldStart = new URLSearchParams(location.search).has('hold-start');
+let releaseStart: (() => void) | undefined;
+let startFailure = '';
+let heldCaptureStop = false;
+let releaseCaptureStop: (() => void) | undefined;
+let heldDrain = false;
+let heldName = false;
+let heldPermission = false;
+let releasePermission: (() => void) | undefined;
+let releaseName: (() => void) | undefined;
+let failCaptureStop = false;
+let failProcessingSnapshot = new URLSearchParams(location.search).has(
+  'fail-processing',
+);
+const initialProcessingSnapshots: ((value: ProcessingSnapshot) => void)[] = [];
+let delayProcessingSnapshot = new URLSearchParams(location.search).has(
+  'delay-processing',
+);
+const stopTargets: StopTarget[] = [];
+async function sendProcessing(value: Partial<ProcessingSnapshot>) {
+  processing = {
+    ...processing,
+    ...value,
+    revision: value.revision ?? processing.revision + 1,
+  };
+  if (!new URLSearchParams(location.search).has('no-processing-events'))
+    await emit('processing:changed', structuredClone(processing));
+}
+async function completeCaptureStop() {
+  await send({
+    status: 'off',
+    canStart: true,
+    activity: 'quiet',
+    message: null,
+  });
+  await publish({ status: 'ended', cue: null, cuesPaused: false });
+  await sendProcessing({ capture: 'off', phase: 'ended' });
+}
+async function beginStart() {
+  operation += 1;
+  const id = operation.toString(16).padStart(64, '0');
+  await sendProcessing({
+    startup: 'loading',
+    stopTarget: { operation: id, microphone: String(operation) },
+  });
+  if (heldStart) {
+    heldStart = false;
+    await new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+  }
+  const cancelled = processing.startup === 'cancelling';
+  await sendProcessing({ startup: 'idle' });
+  if (cancelled) throw new Error('Live session start was cancelled.');
+  if (startFailure) {
+    const failure = startFailure;
+    startFailure = '';
+    throw new Error(failure);
+  }
+  await startLive();
+  if (heldPermission) {
+    heldPermission = false;
+    await send({
+      status: 'starting',
+      activity: 'quiet',
+      canStart: false,
+      message: 'Waiting for microphone permission…',
+    });
+    await sendProcessing({ capture: 'starting' });
+    await new Promise<void>((resolve) => {
+      releasePermission = resolve;
+    });
+    if (processing.phase === 'ended')
+      throw new Error('Live session start was cancelled.');
+  }
+}
+
 let resolveSnapshot: ((value: MicrophoneSnapshot) => void) | undefined;
 let rejectStop = false;
 let rejectCuePause = false;
@@ -73,6 +166,7 @@ async function startLive() {
     cue: null,
   });
   await send({ status: 'listening', activity: 'active', canStart: false });
+  await sendProcessing({ capture: 'running', phase: 'off', startup: 'idle' });
 }
 async function say(text: string, question?: string) {
   const id = `t1-0-${session.transcript.length}`;
@@ -110,6 +204,46 @@ mockIPC(
       return granolaFixture.command(command, args);
     }
     switch (command) {
+      case 'processing_snapshot':
+        if (delayProcessingSnapshot)
+          return new Promise<ProcessingSnapshot>((resolve) =>
+            initialProcessingSnapshots.push(resolve),
+          );
+        if (failProcessingSnapshot) {
+          failProcessingSnapshot = false;
+          throw new Error('unavailable');
+        }
+        return structuredClone(processing);
+      case 'stop_capture': {
+        const { target } = args as { target: StopTarget };
+        stopTargets.push(structuredClone(target));
+        if (heldCaptureStop) {
+          heldCaptureStop = false;
+          await new Promise<void>((resolve) => {
+            releaseCaptureStop = resolve;
+          });
+        }
+        if (
+          target.operation !== processing.stopTarget.operation ||
+          target.microphone !== processing.stopTarget.microphone
+        )
+          throw new Error('capture_changed');
+        if (failCaptureStop) {
+          failCaptureStop = false;
+          throw new Error('unavailable');
+        }
+        if (
+          processing.startup === 'loading' ||
+          processing.startup === 'cancelling'
+        ) {
+          await sendProcessing({ startup: 'cancelling' });
+          return;
+        }
+        await send({ status: 'stopping', canStart: false, activity: 'quiet' });
+        await sendProcessing({ phase: 'stopping', capture: 'stopping' });
+        if (!heldDrain) await completeCaptureStop();
+        return;
+      }
       case 'snapshot':
         return structuredClone(session);
       case 'microphone_snapshot':
@@ -146,6 +280,12 @@ mockIPC(
         });
         return;
       case 'set_user_name': {
+        if (heldName) {
+          heldName = false;
+          await new Promise<void>((resolve) => {
+            releaseName = resolve;
+          });
+        }
         // Stands in for the engine's validation of a session-only name.
         const { name } = args as Commands['set_user_name'];
         if (name && !/^[\p{L}' -]{1,40}$/u.test(name))
@@ -222,7 +362,7 @@ mockIPC(
               reason: 'This build does not include local transcription.',
             };
       case 'start_live_session':
-        await startLive();
+        await beginStart();
         return;
       case 'stop_live_session':
         await send({ status: 'stopping', canStart: false, activity: 'quiet' });
@@ -286,6 +426,24 @@ preview.connect((value) => {
 
 declare global {
   interface Window {
+    captureTest: {
+      send: typeof sendProcessing;
+      state: () => ProcessingSnapshot;
+      targets: StopTarget[];
+      releaseStart: () => void;
+      holdStart: () => void;
+      failStart: (message: string) => void;
+      holdStop: () => void;
+      releaseStop: () => void;
+      failStop: () => void;
+      holdDrain: () => void;
+      holdName: () => void;
+      holdPermission: () => void;
+      releasePermission: () => void;
+      releaseName: () => void;
+      finishStop: typeof completeCaptureStop;
+      resolveSnapshots: (value: ProcessingSnapshot) => void;
+    };
     questionTest: {
       holdNextResponse: () => void;
       releaseResponse: () => void;
@@ -308,6 +466,41 @@ declare global {
     };
   }
 }
+window.captureTest = {
+  send: sendProcessing,
+  state: () => structuredClone(processing),
+  targets: stopTargets,
+  holdStart: () => {
+    heldStart = true;
+  },
+  releaseStart: () => releaseStart?.(),
+  failStart: (message) => {
+    startFailure = message;
+  },
+  holdStop: () => {
+    heldCaptureStop = true;
+  },
+  releaseStop: () => releaseCaptureStop?.(),
+  failStop: () => {
+    failCaptureStop = true;
+  },
+  holdDrain: () => {
+    heldDrain = true;
+  },
+  holdName: () => {
+    heldName = true;
+  },
+  releaseName: () => releaseName?.(),
+  holdPermission: () => {
+    heldPermission = true;
+  },
+  releasePermission: () => releasePermission?.(),
+  finishStop: completeCaptureStop,
+  resolveSnapshots: (value) => {
+    delayProcessingSnapshot = false;
+    initialProcessingSnapshots.splice(0).forEach((resolve) => resolve(value));
+  },
+};
 window.questionTest = {
   holdNextResponse: () => {
     delayQuestionResponse = true;

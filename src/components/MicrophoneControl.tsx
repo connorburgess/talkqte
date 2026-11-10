@@ -1,20 +1,29 @@
+import type { ReactNode } from 'react';
 import { desktop } from '../lib/bridge';
 import { microphoneLabel, type Microphone } from '../lib/microphone';
 
 export function MicrophoneControl({
   microphone,
   live = false,
+  preparing = false,
+  cancelling = false,
+  action,
 }: {
   microphone: Microphone;
   live?: boolean;
+  preparing?: boolean;
+  cancelling?: boolean;
+  action?: ReactNode;
 }) {
   const { state, error, busy, active, start, stop } = microphone;
-  if (live)
+  if (live || preparing)
     return (
       <section className="microphone-panel" aria-label="Microphone">
         <div className="microphone-heading">
           <div>
-            <strong>Live session</strong>
+            <strong>
+              {preparing ? 'Preparing live session' : 'Live session'}
+            </strong>
             <span className="microphone-status" role="status">
               {microphoneLabel(state)}
             </span>
@@ -30,12 +39,21 @@ export function MicrophoneControl({
               </span>
             )}
           </div>
+          {action}
         </div>
-        <p>
-          Your microphone is transcribed on this device. Audio is not recorded,
-          and the transcript is not saved or sent. Stop live session to release
-          the microphone.
-        </p>
+        {preparing ? (
+          <p role="status">
+            {cancelling
+              ? 'Start cancelled. Waiting for model preparation to finish before you can start again.'
+              : 'Preparing local transcription. Cancel start to prevent capture.'}
+          </p>
+        ) : (
+          <p>
+            Your microphone is transcribed on this device. Audio is not
+            recorded, and the transcript is not saved or sent. Stop live session
+            to release the microphone.
+          </p>
+        )}
         {(error || state?.message) && (
           <p className="microphone-message" role="alert">
             {error || state?.message}

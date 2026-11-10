@@ -281,7 +281,7 @@ test('a live session is labelled live, has no end time, and cannot be exported',
     page.getByRole('button', { name: 'Try demo', exact: true }),
   ).toBeVisible();
   expect(await page.evaluate(() => window.microphoneTest.calls)).toContain(
-    'stop_live_session',
+    'stop_capture',
   );
 });
 

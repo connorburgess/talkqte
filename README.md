@@ -85,7 +85,7 @@ Choose **Start live session** in the notebook and grant microphone permission if
 
 This has been checked with synthetic audio and a scripted recognizer in tests. The download is tested against a simulated server, plus one ranged request to the real source. A first microphone session is recorded in the [native validation notes](docs/native-validation.md#live-session-check); measured latency, Stop/device edge cases, real-meeting accuracy and clean-install first-use acceptance remain open in the [model delivery plan](docs/model-delivery.md).
 
-Native Stop now cancels a pending model start and retires its microphone reservation, with [fictional race tests](docs/live-start-cancellation.md). The notebook still waits for startup before enabling its actions; an interactive Cancel-start control and real-device Stop checks remain pending.
+**Cancel start** appears beside microphone status while the local speech model prepares. Cancellation prevents capture even if preparation finishes later; wait for it to finish before starting again. **Stop live session** stays beside microphone status in both Notebook and Settings, independently of pending notebook actions. Microphone status confirms release; the session can keep finishing queued transcription afterward. This [notebook flow is checked headlessly](docs/notebook-capture-controls.md) on fictional IPC, over the [native cancellation race tests](docs/live-start-cancellation.md). Real-device Stop and permission checks remain pending.
 
 ## Fictional cue lab
 
