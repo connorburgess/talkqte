@@ -1,0 +1,17 @@
+<connected_user_email>gardener@example.com</connected_user_email>
+Fictional provider notice: account metadata is not note content.
+<meetings_data count="2">
+  <meeting id="m1" title="Garden welcome guide" date="Oct 28, 2026 10:00 am UTC" meeting_at="2026-10-28T10:00:00Z" created_at="2026-10-28T10:01:00Z" updated_at="2026-10-28T11:00:00Z" url="https://example.com/notes/m1">
+    <known_participants>Robin (robin@example.com)</known_participants>
+    <folders />
+    <private_notes>Bring a map of the tool shed.</private_notes>
+    <summary>Draft a one-page guide.</summary>
+    <attachments><summary>This attachment is not note content.</summary></attachments>
+  </meeting>
+  <meeting id="m2" title="Visitor questions" date="Nov 2, 2026 9:00 am UTC" meeting_at="2026-11-02T09:00:00Z" created_at="2026-11-02T09:02:00Z" updated_at="2026-11-02T10:00:00Z" url="https://example.com/notes/m2">
+    <known_participants>Robin (robin@example.com)</known_participants>
+    <folders />
+    <private_notes status="empty" />
+    <summary>Visitors asked where to find watering cans.</summary>
+  </meeting>
+</meetings_data>
