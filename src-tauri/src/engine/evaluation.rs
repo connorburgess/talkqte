@@ -8,6 +8,8 @@ const RECENT_LINES: usize = 6;
 pub(super) struct State {
     worker: Worker,
     pending: Option<Request>,
+    // One coalesced speech notification, never a queue of copied requests.
+    latest_speech_waiting: bool,
     selected_notes: bool,
 }
 
@@ -20,6 +22,7 @@ impl Engine {
         engine.evaluation = Some(State {
             worker,
             pending: None,
+            latest_speech_waiting: false,
             selected_notes: false,
         });
         engine
@@ -36,6 +39,7 @@ impl Engine {
     pub(super) fn invalidate_evaluation(&mut self) {
         self.evaluation_revision = self.evaluation_revision.wrapping_add(1);
         if let Some(state) = &mut self.evaluation {
+            state.latest_speech_waiting = false;
             state.worker.cancel_pending();
             if let Some(pending) = state.pending.take() {
                 // Drain the cancelled ticket without waiting for the adapter.
@@ -101,39 +105,55 @@ impl Engine {
         Request::new(self.generation, self.evaluation_revision, sources, existing).ok()
     }
 
-    /// Called only for newly accepted eligible speech. Busy work is skipped,
-    /// never queued for replay, retried on a clock tick, or sent to a fallback.
+    /// Only newly accepted eligible speech requests work. Multiple notifications
+    /// coalesce while a cancelled adapter returns; controls discard the marker.
     pub(super) fn submit_evaluation(&mut self) {
-        self.poll_evaluation();
-        let Some(request) = self.evaluation_request() else {
-            return;
-        };
-        let Some(state) = &mut self.evaluation else {
-            return;
-        };
-        if state.worker.submit(request.clone()).is_ok() {
-            state.pending = Some(request);
+        if let Some(state) = &mut self.evaluation {
+            state.latest_speech_waiting = true;
         }
+        self.poll_evaluation();
     }
 
     /// Runs under the same engine borrow/lock as controls and transcript input.
-    /// A timer tick changes display time, not eligibility; passage past the
-    /// source's freshness window still invalidates a result at application.
+    /// Clock ticks poll results and dispatch a waiting speech notification, never
+    /// retry a completed/failed input or create work without new eligible speech.
     pub(super) fn poll_evaluation(&mut self) {
         if self
             .evaluation
             .as_ref()
-            .is_none_or(|state| state.pending.is_none())
+            .is_some_and(|state| state.pending.is_some())
+        {
+            self.poll_pending_evaluation();
+        }
+        self.dispatch_latest_speech();
+    }
+
+    fn dispatch_latest_speech(&mut self) {
+        if self
+            .evaluation
+            .as_ref()
+            .is_none_or(|state| !state.latest_speech_waiting || state.worker.is_busy())
         {
             return;
         }
+        // Build only when the worker can accept work, from current sources and
+        // cue state. Stale/oversized context consumes the marker without a retry.
+        let request = self.evaluation_request();
+        let state = self.evaluation.as_mut().expect("evaluation checked");
+        state.latest_speech_waiting = false;
+        if let Some(request) = request {
+            match state.worker.submit(request.clone()) {
+                Ok(()) => state.pending = Some(request),
+                Err(crate::cue_evaluator::Failure::Busy) => state.latest_speech_waiting = true,
+                Err(_) => {} // Unavailable workers are not restarted automatically.
+            }
+        }
+    }
+
+    fn poll_pending_evaluation(&mut self) {
         let current = self.evaluation_request();
-        let Some(state) = &mut self.evaluation else {
-            return;
-        };
-        let Some(pending) = &state.pending else {
-            return;
-        };
+        let state = self.evaluation.as_mut().expect("evaluation checked");
+        let pending = state.pending.as_ref().expect("pending checked");
         if current.is_none() {
             state.worker.cancel_pending();
         }
@@ -407,6 +427,9 @@ mod tests {
             Self::make(true)
         }
         fn make(selected_notes: bool) -> Self {
+            Self::with_budget(selected_notes, Duration::from_secs(5))
+        }
+        fn with_budget(selected_notes: bool, budget: Duration) -> Self {
             let (requests_tx, requests) = mpsc::channel();
             let (replies, replies_rx) = mpsc::channel();
             let worker = Worker::start(
@@ -414,7 +437,7 @@ mod tests {
                     requests: requests_tx,
                     replies: replies_rx,
                 },
-                Duration::from_secs(5),
+                budget,
             )
             .unwrap();
             let mut engine = if selected_notes {
@@ -904,6 +927,230 @@ mod tests {
         assert!(h.engine.state.cue.is_some());
     }
 
+    // Pump the normal engine clock; no new speech is supplied to wake the worker.
+    fn next_scheduled_request(h: &mut Harness) -> Request {
+        let until = Instant::now() + Duration::from_secs(2);
+        loop {
+            h.engine.advance(1);
+            if let Ok(request) = h.requests.try_recv() {
+                return request;
+            }
+            assert!(Instant::now() < until, "latest speech was never scheduled");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn latest_speech_catches_up_after_a_busy_worker_without_another_line() {
+        let mut h = Harness::new();
+        h.line("The garden checklist still needs an owner.");
+        let obsolete = h.request();
+        // Six seconds of fictional speech while the adapter ignores cancellation.
+        for _ in 0..24 {
+            h.engine.advance(240);
+            h.line("The garden checklist handoff is still unclear.");
+        }
+        assert!(h.requests.try_recv().is_err(), "no overlapping evaluation");
+        h.replies
+            .send(
+                serde_json::json!({
+                    "action": "show", "cue": "An obsolete suggestion",
+                    "sourceIds": ["transcript:line-1"],
+                    "reason": "Fictional stale reply", "observedUse": "not_observed"
+                })
+                .to_string(),
+            )
+            .unwrap();
+        let latest = next_scheduled_request(&mut h);
+        assert_ne!(latest, obsolete);
+        assert_eq!(latest.sources().len(), RECENT_LINES);
+        assert_eq!(latest.sources().last().unwrap().id, "transcript:line-25");
+        assert!(
+            h.engine.state.cue.is_none(),
+            "obsolete reply must not flash"
+        );
+        h.reply(
+            "show",
+            Some("Who will take the garden checklist?"),
+            &["transcript:line-25"],
+            "not_observed",
+        );
+        assert_eq!(
+            h.engine.state.cue.as_ref().unwrap().sources[0].id,
+            "transcript:line-25"
+        );
+        for _ in 0..20 {
+            h.engine.advance(100);
+        }
+        assert!(
+            h.requests.try_recv().is_err(),
+            "no repeated evaluation of the same input"
+        );
+    }
+
+    fn drain_without_another_request(h: &mut Harness) {
+        let until = Instant::now() + Duration::from_secs(2);
+        while h.engine.evaluation.as_ref().unwrap().worker.is_busy() {
+            h.engine.advance(1);
+            assert!(h.requests.try_recv().is_err(), "unexpected repeated work");
+            assert!(Instant::now() < until, "fictional worker did not finish");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        for _ in 0..20 {
+            h.engine.advance(100);
+        }
+        assert!(
+            h.requests.try_recv().is_err(),
+            "clock must not invent speech"
+        );
+    }
+
+    #[test]
+    fn waiting_speech_is_discarded_by_controls_note_changes_and_freshness() {
+        for change in [
+            "pause",
+            "stop",
+            "new-session",
+            "dismiss",
+            "focus",
+            "name",
+            "sensitivity",
+            "note-revision",
+            "note-removal",
+            "stale",
+        ] {
+            let mut h = Harness::with_selected_notes();
+            let mut note = selected(crate::context::Provider::Granola, "review");
+            h.engine.set_notes(vec![note.clone()]);
+            let id = h.show();
+            h.engine.inspect_cue(&id, true).unwrap();
+            h.line("The next garden handoff is not clear.");
+            h.request();
+            h.line("There is more to clarify about the handoff.");
+            match change {
+                "pause" => {
+                    h.engine.set_live_cues_paused(true).unwrap();
+                    h.engine.set_live_cues_paused(false).unwrap();
+                }
+                "stop" => h.engine.end(),
+                "new-session" => {
+                    h.engine.end();
+                    h.engine.start().unwrap();
+                }
+                "dismiss" => h.engine.respond(&id, Response::Dismiss).unwrap(),
+                "focus" => h
+                    .engine
+                    .set_focus(vec!["Garden supplier approval".into()])
+                    .unwrap(),
+                "name" => h.engine.set_user_name(Some("Robin".into())).unwrap(),
+                "sensitivity" => h.engine.set_sensitivity(Sensitivity::Focused),
+                "note-revision" => {
+                    note.revision += 1;
+                    h.engine.set_notes(vec![note]);
+                }
+                "note-removal" => h.engine.set_notes(vec![]),
+                "stale" => h.engine.advance(CUE_MS),
+                _ => unreachable!(),
+            }
+            h.reply("resolved", None, &["transcript:line-2"], "possible");
+            drain_without_another_request(&mut h);
+            assert!(
+                h.engine
+                    .state
+                    .cue
+                    .as_ref()
+                    .is_none_or(|cue| cue.resolved_by.is_none()),
+                "cancelled resolution was applied after {change}"
+            );
+        }
+    }
+
+    #[test]
+    fn latest_input_failure_or_timeout_is_not_retried_without_new_speech() {
+        for timeout in [false, true] {
+            let mut h = Harness::with_budget(
+                false,
+                if timeout {
+                    Duration::from_millis(20)
+                } else {
+                    Duration::from_secs(5)
+                },
+            );
+            h.line("The garden checklist needs an owner.");
+            h.request();
+            h.line("Who will take the garden checklist?");
+            h.replies.send("{}".into()).unwrap(); // Cancelled first attempt.
+            let latest = next_scheduled_request(&mut h);
+            assert_eq!(latest.sources().last().unwrap().id, "transcript:line-2");
+            if timeout {
+                std::thread::sleep(Duration::from_millis(30));
+                h.engine.advance(1); // Deadline expires while adapter remains occupied.
+            }
+            h.replies.send("{}".into()).unwrap(); // Malformed output must stay quiet.
+            drain_without_another_request(&mut h);
+            assert!(h.engine.state.cue.is_none());
+            h.line("A new fictional topic begins.");
+            assert_eq!(
+                h.request().sources().last().unwrap().id,
+                "transcript:line-3"
+            );
+            h.reply("quiet", None, &["transcript:line-3"], "not_observed");
+        }
+    }
+
+    #[test]
+    fn sustained_input_replaces_waiting_work_and_never_applies_superseded_results() {
+        // Controlled speech clock and explicit reply gates, not provider timings.
+        for gap_ms in [250, 1_000, 3_000] {
+            let mut h = Harness::new();
+            h.line("The garden checklist still needs an owner.");
+            let mut current = h.request();
+            let mut submissions = 1;
+            for _ in 0..3 {
+                for _ in 0..8 {
+                    h.engine.advance(gap_ms - 10);
+                    h.line("We are still discussing the garden checklist.");
+                }
+                assert!(h.requests.try_recv().is_err(), "adapter must not overlap");
+                let old_id = current.sources().last().unwrap().id.clone();
+                h.replies
+                    .send(
+                        serde_json::json!({
+                            "action": "show", "cue": "Who owns the garden checklist?",
+                            "sourceIds": [old_id], "reason": "Fictional delayed reply",
+                            "observedUse": "not_observed"
+                        })
+                        .to_string(),
+                    )
+                    .unwrap();
+                current = next_scheduled_request(&mut h);
+                submissions += 1;
+                assert_eq!(
+                    current.sources().last().unwrap().id,
+                    format!("transcript:line-{}", h.next_line)
+                );
+                assert!(current.sources().len() <= RECENT_LINES);
+                assert!(
+                    h.engine.state.cue.is_none(),
+                    "new speech invalidates old proposals"
+                );
+            }
+            let latest_id = current.sources().last().unwrap().id.clone();
+            h.reply(
+                "show",
+                Some("Who will take the garden checklist?"),
+                &[&latest_id],
+                "not_observed",
+            );
+            assert_eq!(
+                h.engine.state.cue.as_ref().unwrap().sources[0].id,
+                latest_id
+            );
+            assert_eq!(submissions, 4, "25 lines coalesce into four evaluations");
+            drain_without_another_request(&mut h);
+        }
+    }
+
     #[test]
     fn stop_and_new_session_cannot_receive_the_previous_reply() {
         let mut h = Harness::new();
@@ -927,7 +1174,7 @@ mod tests {
     }
 
     #[test]
-    fn source_eviction_releases_even_a_held_cue_and_no_backlog_replays() {
+    fn source_eviction_releases_held_copies_and_only_latest_speech_catches_up() {
         let mut h = Harness::new();
         let id = h.show();
         h.engine.inspect_cue(&id, true).unwrap();
@@ -939,9 +1186,21 @@ mod tests {
         assert!(h.engine.state.cue.is_none());
         assert!(h.engine.evaluated_cue.is_none());
         h.reply("resolved", None, &["transcript:line-2"], "not_observed");
-        h.engine.advance(1_000);
-        assert!(h.requests.try_recv().is_err());
+        let latest = next_scheduled_request(&mut h);
+        assert!(latest.existing_cue().is_none());
+        assert_eq!(latest.sources().len(), RECENT_LINES);
+        assert!(!latest
+            .sources()
+            .iter()
+            .any(|source| source.id == "transcript:line-2"));
         assert!(h.engine.state.cue.is_none());
+        let last_id = latest.sources().last().unwrap().id.clone();
+        h.reply("quiet", None, &[&last_id], "not_observed");
+        h.engine.advance(1_000);
+        assert!(
+            h.requests.try_recv().is_err(),
+            "no replay of intermediate inputs"
+        );
     }
 
     #[test]
