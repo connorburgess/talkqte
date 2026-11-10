@@ -85,6 +85,8 @@ Choose **Start live session** in the notebook and grant microphone permission if
 
 This has been checked with synthetic audio and a scripted recognizer in tests. The download is tested against a simulated server, plus one ranged request to the real source. A first microphone session is recorded in the [native validation notes](docs/native-validation.md#live-session-check); measured latency, Stop/device edge cases, real-meeting accuracy and clean-install first-use acceptance remain open in the [model delivery plan](docs/model-delivery.md).
 
+Native Stop now cancels a pending model start and retires its microphone reservation, with [fictional race tests](docs/live-start-cancellation.md). The notebook still waits for startup before enabling its actions; an interactive Cancel-start control and real-device Stop checks remain pending.
+
 ## Fictional cue lab
 
 An optional developer lab evaluates one bundled fictional scenario through Claude Code with Opus 5.5 using an existing subscription. It explores when to stay quiet or resolve a cue; it is separate from the phrase-based app and does not process real calls. `npm run lab:claude` lists cases without inference. Read the [lab setup and billing checks](docs/claude-cue-lab.md) before explicitly running a case; separately billed inference APIs are not supported.
