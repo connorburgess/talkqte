@@ -21,6 +21,7 @@ let microphone: MicrophoneSnapshot = {
   activity: 'quiet',
   canStart: true,
   message: null,
+  deviceName: null,
 };
 let session: Snapshot;
 let processing: ProcessingSnapshot = {
@@ -130,6 +131,7 @@ async function beginStart() {
       activity: 'quiet',
       canStart: false,
       message: 'Waiting for microphone permission…',
+      deviceName: null,
     });
     await sendProcessing({ capture: 'starting' });
     await new Promise<void>((resolve) => {
@@ -310,6 +312,7 @@ mockIPC(
           status: 'starting',
           canStart: false,
           message: 'Waiting for microphone permission…',
+          deviceName: null,
         });
         return;
       case 'stop_microphone':

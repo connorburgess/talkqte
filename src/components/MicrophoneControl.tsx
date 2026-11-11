@@ -1,6 +1,35 @@
 import type { ReactNode } from 'react';
 import { desktop } from '../lib/bridge';
-import { microphoneLabel, type Microphone } from '../lib/microphone';
+import {
+  microphoneLabel,
+  type Microphone,
+  type MicrophoneSnapshot,
+} from '../lib/microphone';
+
+function MicrophoneInput({ state }: { state: MicrophoneSnapshot | null }) {
+  if (!desktop || !state) return null;
+  const opened = ['starting', 'listening', 'stopping'].includes(state.status);
+  return (
+    <div className="microphone-input">
+      {opened && (state.deviceName || state.status === 'listening') && (
+        <p>
+          {state.status === 'stopping' ? 'Releasing input: ' : 'Input: '}
+          <bdi>{state.deviceName || 'name unavailable'}</bdi>
+        </p>
+      )}
+      <details>
+        <summary>Change microphone</summary>
+        <p>
+          On macOS, stop the microphone or live session and wait for Off. After
+          an error, wait until Start is available. Choose an input in macOS
+          System Settings → Sound → Input, then start again here. Each start
+          uses the macOS default input; TalkQTE does not switch devices
+          automatically.
+        </p>
+      </details>
+    </div>
+  );
+}
 
 export function MicrophoneControl({
   microphone,
@@ -43,6 +72,7 @@ export function MicrophoneControl({
           </div>
           {action}
         </div>
+        <MicrophoneInput state={state} />
         {preparing ? (
           <p role="status">
             {cancelling
@@ -104,6 +134,7 @@ export function MicrophoneControl({
               : 'Start microphone'}
         </button>
       </div>
+      <MicrophoneInput state={state} />
       <p>
         Activity check only. No recording, transcription, or system audio. Demo
         questions are scripted.

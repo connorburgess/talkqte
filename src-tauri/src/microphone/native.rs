@@ -39,9 +39,18 @@ pub(super) fn request_permission(complete: impl Fn(Result<(), Failure>) + Send +
 }
 
 #[cfg(target_os = "macos")]
-impl CaptureStream for cpal::Stream {
+struct InputStream {
+    stream: cpal::Stream,
+    device_name: Option<String>,
+}
+
+#[cfg(target_os = "macos")]
+impl CaptureStream for InputStream {
     fn play(&self) -> Result<(), Failure> {
-        cpal::traits::StreamTrait::play(self).map_err(|_| Failure::Device)
+        cpal::traits::StreamTrait::play(&self.stream).map_err(|_| Failure::Device)
+    }
+    fn device_name(&self) -> Option<&str> {
+        self.device_name.as_deref()
     }
 }
 
@@ -60,6 +69,12 @@ where
     use std::{sync::atomic::Ordering, time::Duration};
     let failures = meter.clone();
     let mut tap = tap;
+    // Read from the same device we open, after explicit start/permission. A
+    // missing description must not prevent capture. No device enumeration.
+    let device_name = device
+        .description()
+        .ok()
+        .map(|description| description.name().to_owned());
     device
         .build_input_stream(
             config,
@@ -73,7 +88,12 @@ where
             move |_| failures.failed.store(true, Ordering::Release),
             Some(Duration::from_secs(2)),
         )
-        .map(|stream| Box::new(stream) as Box<dyn CaptureStream>)
+        .map(|stream| {
+            Box::new(InputStream {
+                stream,
+                device_name,
+            }) as Box<dyn CaptureStream>
+        })
         .map_err(|_| Failure::Device)
 }
 

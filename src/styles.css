@@ -434,6 +434,24 @@ svg {
 .microphone-panel .microphone-message {
   color: #85432e;
 }
+.microphone-input {
+  overflow-wrap: anywhere;
+}
+.microphone-input details {
+  margin-top: 8px;
+  font-size: 14px;
+  color: #52624d;
+}
+.microphone-input summary {
+  cursor: pointer;
+  width: fit-content;
+  padding: 6px 0;
+}
+.microphone-input summary:focus-visible {
+  outline: 2px solid var(--forest);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
 .status-dot.active {
   background: #326542;
 }

@@ -44,6 +44,7 @@ pub struct Snapshot {
     pub can_start: bool,
     pub activity: Activity,
     pub message: Option<String>,
+    pub device_name: Option<String>,
 }
 
 impl Default for Snapshot {
@@ -54,6 +55,7 @@ impl Default for Snapshot {
             can_start: true,
             activity: Activity::Quiet,
             message: None,
+            device_name: None,
         }
     }
 }
@@ -114,6 +116,22 @@ impl Meter {
 
 pub(super) trait CaptureStream: Send + Sync {
     fn play(&self) -> Result<(), Failure>;
+    // Cached by the adapter at stream construction; never query hardware here.
+    fn device_name(&self) -> Option<&str> {
+        None
+    }
+}
+
+fn display_device_name(name: Option<&str>) -> Option<String> {
+    let name: String = name?
+        .chars()
+        .filter(|c| {
+            !c.is_control() && !matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        })
+        .take(120)
+        .collect();
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_owned())
 }
 
 struct Capture {
@@ -141,6 +159,9 @@ impl State {
             matches!(status, Status::Off | Status::Error) && !self.cleanup_pending;
         self.snapshot.activity = activity;
         self.snapshot.message = message.map(str::to_owned);
+        if matches!(status, Status::Off | Status::Error) {
+            self.snapshot.device_name = None;
+        }
     }
 }
 
@@ -280,6 +301,7 @@ impl Controller {
                         retired: Some(stream),
                     });
                 }
+                state.snapshot.device_name = display_device_name(stream.device_name());
                 state.capture = Some(Capture {
                     _stream: stream,
                     meter,
@@ -579,6 +601,9 @@ mod tests {
         fail: bool,
     }
     impl CaptureStream for FakeStream {
+        fn device_name(&self) -> Option<&str> {
+            Some("Garden USB microphone")
+        }
         fn play(&self) -> Result<(), Failure> {
             self.starts.fetch_add(1, Ordering::SeqCst);
             if self.fail {
@@ -927,8 +952,18 @@ mod tests {
     #[test]
     fn stop_releases_capture_and_late_callbacks_cannot_reactivate_it() {
         let (controller, meter, drops, now) = running();
-        finish(&controller, controller.request_stop().unwrap());
+        assert_eq!(
+            controller.snapshot().unwrap().device_name.as_deref(),
+            Some("Garden USB microphone")
+        );
+        let stopping = controller.request_stop().unwrap();
+        assert_eq!(
+            stopping.snapshot.device_name.as_deref(),
+            Some("Garden USB microphone")
+        );
+        finish(&controller, stopping);
         assert_eq!(drops.load(Ordering::SeqCst), 1);
+        assert!(controller.snapshot().unwrap().device_name.is_none());
         meter.observe([0.5; 32].into_iter());
         assert!(controller.poll(now).is_none());
         assert_eq!(controller.snapshot().unwrap().status, Status::Off);
@@ -948,6 +983,7 @@ mod tests {
             .unwrap()
             .snapshot;
         assert_eq!(snapshot.status, Status::Error);
+        assert!(snapshot.device_name.is_none());
         assert!(snapshot.message.unwrap().contains("System Settings"));
         let (generation, _) = controller.begin_start().unwrap();
         let (stream, _, drops) = fake(true);
@@ -960,6 +996,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(update.snapshot.status, Status::Error);
+        assert!(update.snapshot.device_name.is_none());
         assert!(controller.begin_start().is_err());
         finish(&controller, update);
         assert_eq!(drops.load(Ordering::SeqCst), 1);
@@ -975,6 +1012,7 @@ mod tests {
             }
             let update = controller.poll(now + INPUT_TIMEOUT).unwrap();
             assert_eq!(update.snapshot.status, Status::Error);
+            assert!(update.snapshot.device_name.is_none());
             assert_eq!(update.snapshot.activity, Activity::Quiet);
             assert!(!update.snapshot.can_start);
             let error_revision = update.snapshot.revision;
@@ -987,6 +1025,23 @@ mod tests {
             assert_eq!(drops.load(Ordering::SeqCst), 1);
             assert!(controller.poll(now + INPUT_TIMEOUT).is_none());
         }
+    }
+
+    #[test]
+    fn device_labels_are_bounded_and_missing_names_stay_unknown() {
+        assert_eq!(display_device_name(None), None);
+        assert_eq!(display_device_name(Some(" \n\t")), None);
+        assert_eq!(
+            display_device_name(Some(" Garden\u{202e} USB\n ")),
+            Some("Garden USB".into())
+        );
+        assert_eq!(
+            display_device_name(Some(&"庭".repeat(200)))
+                .unwrap()
+                .chars()
+                .count(),
+            120
+        );
     }
 
     struct SlowStream {
