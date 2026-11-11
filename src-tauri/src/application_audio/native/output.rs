@@ -56,6 +56,12 @@ impl Callback {
         ) {
             // Full consumes its interval; a later packet preserves that gap.
             Ok(()) | Err(Rejected::Full | Rejected::Cancelled) => {}
+            Err(Rejected::Closed) => self
+                .fault
+                .control
+                .0
+                .cancelled
+                .store(true, std::sync::atomic::Ordering::Release),
             Err(_) => self.fault.record(),
         }
     }
@@ -227,6 +233,7 @@ mod tests {
         ));
         deliver(&output, 0, &[0.1]);
         assert!(control.is_cancelled());
+        assert!(!output.ivars().fault.failed.load(Ordering::Acquire));
 
         let (_gate, control, start, output, _reader) = setup();
         let _capture = accept(start);

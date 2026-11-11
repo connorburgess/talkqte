@@ -74,8 +74,9 @@ audio output queue, not a claim about macOS delegate dispatch ordering.
 
 A successful start result alone does not prove continuing source health. Native
 error delivery and permission revocation still need device evidence. Sample
-validation, unexpected output type, unavailable callback state and a closed
-consumer share the same operation-scoped fault signal and cleanup path.
+validation, unexpected output type and unavailable callback state share the
+operation-scoped fault signal. Consumer retirement requests ordinary cancellation;
+both follow the same cleanup path.
 No silent restart, alternate source, resampling, microphone mixing, retention,
 provider access or inference is introduced.
 
@@ -125,9 +126,10 @@ signal are allocated before native startup. Each callback checks the operation's
 cancellation, accepts only audio, validates/copies the buffer, then pushes the
 exact source-frame interval. A full handoff drops that interval without waiting;
 the next accepted interval exposes the gap. A cancelled operation delivers no
-more work. Malformed input or a closed consumer cancels the operation, so queued
-and already-returned blocks fail their source guards. The owner reports
-`StreamFailed` and uses its existing Stop/remove/drain cleanup sequence.
+more work. Malformed input cancels the operation, so queued and already-returned
+blocks fail their source guards. The owner reports `StreamFailed` and uses its
+existing Stop/remove/drain cleanup sequence. A closed consumer is ordinary
+cancellation rather than a native-stream failure.
 
 A single `Mutex::try_lock` protects the mutable reader, scratch and producer.
 It never waits or retries: unexpected concurrent/reentrant delivery or poisoned
@@ -138,19 +140,25 @@ borrowed sample or native stream is stored by the handler. The owner retains the
 output through successful Stop, output removal and the queue fence.
 
 The session reader refuses delivery until startup is accepted. It retains the
-existing source/session guards and explicit origin mapping. The host must stop
-the owner when a session ends or its consumer is retired; detecting a closed
-consumer on a later callback is only a fallback and cannot stop a silent stream.
-No host task, shutdown policy, live permission flow or recognizer is added here.
+existing source/session guards and explicit origin mapping. Retiring or dropping
+the reader publishes an operation-scoped atomic closure signal. The native owner
+checks it on every poll, cancels delivery and initiates Stop even if the selected
+application is silent. During pending startup it waits for completion before
+Stop, preserving the reservation; repeated polls cannot duplicate that request.
+No callback-state lock or native object crosses this closure signal. The host
+must keep polling and retire the reader when its session ends. No host task,
+shutdown policy, live permission flow or recognizer is added here.
 
 ## Validation
 
-On the development Mac, all **356 Rust tests** pass with this feature enabled.
-The ten ownership tests construct no native stream and request no access: nine
+On the development Mac, all **357 Rust tests** pass with this feature enabled.
+The eleven ownership tests construct no native stream and request no access: ten
 scripted lifecycle tests and one test of the actual completion block. They cover cancellation before startup, cancelled
 late success, successful start followed by missing/delayed Stop completion,
 explicit retry after failed Stop with a stale old completion, failed output
-removal, failed start and owner abandonment. The completion block keeps only the first result, without reading or retaining
+removal, failed start and owner abandonment. A real session-reader retirement
+also exercises pending/running owner cleanup without any sample callback; it
+keeps new reviews blocked through confirmed Stop and drain. The completion block keeps only the first result, without reading or retaining
 the error object. The lifecycle tests assert that another review
 remains blocked until successful Stop and queue drain, and that resources are
 released once. Two added fault tests cover pending startup, running capture,

@@ -46,6 +46,7 @@ pub struct Status {
 // A private seam for completion-order tests of this native owner, not a public
 // capture abstraction. Methods run only on the owning thread, never a callback.
 trait Driver {
+    fn consumer_closed(&self) -> bool;
     fn stream_failed(&self) -> bool;
     fn start(&mut self, completion: Arc<AtomicU8>);
     fn stop(&mut self, completion: Arc<AtomicU8>);
@@ -133,6 +134,11 @@ impl<D: Driver> Owner<D> {
         let Some((driver, lease)) = &self.resources else {
             return self.status;
         };
+        // Consumer retirement must initiate cleanup even if a silent source
+        // never calls the sample handler again. This is cancellation, not an OS fault.
+        if driver.consumer_closed() {
+            lease.control.0.cancelled.store(true, Ordering::Release);
+        }
         if driver.stream_failed() && self.status.problem.is_none() {
             self.status.problem = Some(Problem::StreamFailed);
         }
@@ -232,9 +238,17 @@ mod tests {
         remove_fails: bool,
         removes: usize,
         drops: usize,
+        consumer_closed: Arc<AtomicBool>,
     }
     struct Fake(Arc<Mutex<Script>>, StreamFault);
     impl Driver for Fake {
+        fn consumer_closed(&self) -> bool {
+            self.0
+                .lock()
+                .unwrap()
+                .consumer_closed
+                .load(Ordering::Acquire)
+        }
         fn stream_failed(&self) -> bool {
             self.1.failed.load(Ordering::Acquire)
         }
@@ -280,6 +294,57 @@ mod tests {
     fn complete(slot: &AtomicU8, outcome: u8) {
         slot.store(outcome, Ordering::Release);
     }
+
+    #[test]
+    fn retiring_a_silent_consumer_stops_pending_or_running_capture() {
+        use crate::application_audio::handoff::Format;
+        for during_start in [true, false] {
+            let gate = Gate::default();
+            let mut review = gate.review(source()).unwrap();
+            let control = review.control();
+            let mut start = gate.approve(&mut review).unwrap();
+            let (input, reader) = start.handoff(Format::new(16_000, 1).unwrap(), 1).unwrap();
+            let script = Arc::new(Mutex::new(Script {
+                consumer_closed: input.consumer_closed_signal(),
+                ..Script::default()
+            }));
+            let mut owner = Owner::begin(
+                start,
+                Fake(script.clone(), StreamFault::new(control.clone())),
+            )
+            .unwrap();
+            if !during_start {
+                complete(&script.lock().unwrap().starts[0], SUCCEEDED);
+                assert_eq!(owner.poll().stage, Stage::Running);
+            }
+            // The real session reader retires on session replacement. No audio
+            // callback or native object is needed to publish consumer closure.
+            let mut session = reader.bind_session(7, 0);
+            assert!(session.try_next(8).is_err());
+            assert_eq!(
+                owner.poll().stage,
+                if during_start {
+                    Stage::CancellingStart
+                } else {
+                    Stage::Stopping
+                }
+            );
+            assert!(control.is_cancelled());
+            assert_eq!(owner.poll().problem, None);
+            busy(&gate);
+            if during_start {
+                assert!(script.lock().unwrap().stops.is_empty());
+                complete(&script.lock().unwrap().starts[0], SUCCEEDED);
+                assert_eq!(owner.poll().stage, Stage::Stopping);
+            }
+            owner.poll();
+            assert_eq!(script.lock().unwrap().stops.len(), 1);
+            finish(&mut owner, &script);
+            assert!(gate.review(source()).is_ok());
+            drop(input);
+        }
+    }
+
     fn finish(owner: &mut Owner<Fake>, script: &Mutex<Script>) {
         complete(script.lock().unwrap().stops.last().unwrap(), SUCCEEDED);
         assert_eq!(owner.poll().stage, Stage::Draining);

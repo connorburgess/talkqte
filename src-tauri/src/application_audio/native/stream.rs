@@ -102,6 +102,7 @@ impl NativeOwner {
         let (input, reader) = start
             .handoff(Format::new(16_000, 1).unwrap(), MAX_BLOCKS)
             .map_err(|_| Failure::StartFailed)?;
+        let consumer_closed = input.consumer_closed_signal();
         let fault = Arc::new(StreamFault::new(start.lease.control.clone()));
         let output = AudioOutput::new(input, pcm, fault.clone());
         let output = ProtocolObject::from_retained(output);
@@ -143,6 +144,7 @@ impl NativeOwner {
         };
         let driver = Stream {
             stream,
+            consumer_closed,
             delegate,
             output,
             queue,
@@ -197,6 +199,7 @@ impl StreamDelegate {
 
 struct Stream {
     stream: Retained<SCStream>,
+    consumer_closed: Arc<AtomicBool>,
     // Retain explicitly: the stream delegate relationship alone is not ownership.
     delegate: Retained<StreamDelegate>,
     output: Retained<ProtocolObject<dyn SCStreamOutput>>,
@@ -219,6 +222,9 @@ fn completion(slot: Arc<AtomicU8>) -> RcBlock<dyn Fn(*mut NSError)> {
 }
 
 impl Driver for Stream {
+    fn consumer_closed(&self) -> bool {
+        self.consumer_closed.load(Ordering::Acquire)
+    }
     fn stream_failed(&self) -> bool {
         self.delegate.ivars().failed.load(Ordering::Acquire)
     }
