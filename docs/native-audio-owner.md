@@ -58,22 +58,37 @@ and poll the owner through cleanup, including app shutdown; an owner task panic
 and process-exit policy remain release blockers. This fallback is why this code
 must remain disconnected from normal app controls.
 
-The native stream-error delegate and callback fault propagation are also still
-missing. A successful start result alone does not prove continuing source health.
+The retained `SCStreamDelegate` closes delivery immediately when macOS reports
+`stream:didStopWithError:`. Its callback only sets operation-scoped atomics; it
+does not inspect or retain the stream/error, allocate, lock, log or call cleanup.
+The owner observes `StreamFailed` on its next poll and follows the same cleanup
+sequence. A failure during pending start still waits for that completion; a
+failure during Stop cannot replace its completion or create another Stop.
+Cleanup failures take precedence in the reported problem so explicit recovery
+remains actionable. Late signals cannot cancel a later operation. The delegate
+is retained alongside the stream through cleanup; the queue fence covers the
+audio output queue, not a claim about macOS delegate dispatch ordering.
+
+A successful start result alone does not prove continuing source health. Native
+error delivery, permission revocation and sample-handler fault propagation still
+need implementation or device evidence as applicable.
 No silent restart, alternate source, resampling, microphone mixing, retention,
 provider access or inference is introduced.
 
 ## Validation
 
-On the development Mac, all **341 Rust tests** pass with this feature enabled.
-The eight new tests construct no native stream and request no access: seven
+On the development Mac, all **343 Rust tests** pass with this feature enabled.
+The ten new tests construct no native stream and request no access: nine
 scripted lifecycle tests and one test of the actual completion block. They cover cancellation before startup, cancelled
 late success, successful start followed by missing/delayed Stop completion,
 explicit retry after failed Stop with a stale old completion, failed output
 removal, failed start and owner abandonment. The completion block keeps only the first result, without reading or retaining
 the error object. The lifecycle tests assert that another review
 remains blocked until successful Stop and queue drain, and that resources are
-released once. The concrete macOS driver is compiled with those tests. A compile-fail doctest
+released once. Two added fault tests cover pending startup, running capture,
+pending Stop, repeated faults and isolation from a later operation. They invoke
+the same atomic signal as the delegate; they do not simulate an Objective-C
+message or prove native error delivery. The concrete macOS driver is compiled with those tests. A compile-fail doctest
 also guards against making the native owner transferable across threads.
 
 ```sh
@@ -112,7 +127,7 @@ does not replace those terms or complete a distribution-license review.
 ## Next acceptance and UI/UX checkpoint
 
 The immediate implementation dependency is a bounded, source-bound native sample
-callback plus stream-error propagation. Validate format, byte layout, sample
+callback with format-fault propagation. Validate format, byte layout, sample
 counts and native timestamps before copying into the existing handoff; reject
 unsupported input and preserve discontinuities. Then prepare the consent/selection
 and owner-task shutdown flow before requesting a bounded native run. Do not add

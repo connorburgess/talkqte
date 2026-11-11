@@ -2,7 +2,7 @@
 //! permission request, sample handler or processing path enables this module.
 //! Native filtering, callback safety and actual release still need device tests.
 
-use super::{Application, Failure, Lease, Phase, Start};
+use super::{Application, Control, Failure, Lease, Phase, Start};
 use std::sync::{
     atomic::{AtomicBool, AtomicU8, Ordering},
     Arc,
@@ -29,6 +29,7 @@ pub enum Stage {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Problem {
+    StreamFailed,
     StartFailed,
     StopFailed,
     RemoveFailed,
@@ -43,10 +44,32 @@ pub struct Status {
 // A private seam for completion-order tests of this native owner, not a public
 // capture abstraction. Methods run only on the owning thread, never a callback.
 trait Driver {
+    fn stream_failed(&self) -> bool;
     fn start(&mut self, completion: Arc<AtomicU8>);
     fn stop(&mut self, completion: Arc<AtomicU8>);
     fn remove_output(&mut self) -> bool;
     fn drain(&self, completion: Arc<AtomicBool>);
+}
+
+// Shared with the native delegate. No native references, locks, allocation or
+// error text cross into this callback signal. Cancellation is operation-scoped.
+struct StreamFault {
+    control: Control,
+    failed: AtomicBool,
+}
+
+impl StreamFault {
+    fn new(control: Control) -> Self {
+        Self {
+            control,
+            failed: AtomicBool::new(false),
+        }
+    }
+
+    fn record(&self) {
+        self.control.0.cancelled.store(true, Ordering::Release);
+        self.failed.store(true, Ordering::Release);
+    }
 }
 
 struct Owner<D: Driver> {
@@ -105,9 +128,12 @@ impl<D: Driver> Owner<D> {
     }
 
     fn poll(&mut self) -> Status {
-        let Some((_, lease)) = &self.resources else {
+        let Some((driver, lease)) = &self.resources else {
             return self.status;
         };
+        if driver.stream_failed() && self.status.problem.is_none() {
+            self.status.problem = Some(Problem::StreamFailed);
+        }
         match self.status.stage {
             Stage::Starting | Stage::CancellingStart => {
                 match self.completion.load(Ordering::Acquire) {
@@ -137,7 +163,7 @@ impl<D: Driver> Owner<D> {
                         }
                     }
                     outcome => {
-                        if outcome != SUCCEEDED {
+                        if outcome != SUCCEEDED && self.status.problem.is_none() {
                             self.status.problem = Some(Problem::StartFailed);
                         }
                         // Even start failure is conservatively stopped. Until the OS
@@ -205,8 +231,11 @@ mod tests {
         removes: usize,
         drops: usize,
     }
-    struct Fake(Arc<Mutex<Script>>);
+    struct Fake(Arc<Mutex<Script>>, StreamFault);
     impl Driver for Fake {
+        fn stream_failed(&self) -> bool {
+            self.1.failed.load(Ordering::Acquire)
+        }
         fn start(&mut self, slot: Arc<AtomicU8>) {
             self.0.lock().unwrap().starts.push(slot);
         }
@@ -236,7 +265,11 @@ mod tests {
         let control = review.control();
         let start = gate.approve(&mut review).unwrap();
         let script = Arc::new(Mutex::new(Script::default()));
-        let owner = Owner::begin(start, Fake(script.clone())).unwrap();
+        let owner = Owner::begin(
+            start,
+            Fake(script.clone(), StreamFault::new(control.clone())),
+        )
+        .unwrap();
         (gate, control, owner, script)
     }
     fn busy(gate: &Gate) {
@@ -268,7 +301,10 @@ mod tests {
         gate.stop(&control).unwrap();
         let script = Arc::new(Mutex::new(Script::default()));
         assert!(matches!(
-            Owner::begin(start, Fake(script.clone())),
+            Owner::begin(
+                start,
+                Fake(script.clone(), StreamFault::new(control.clone()))
+            ),
             Err(Failure::Cancelled)
         ));
         assert!(script.lock().unwrap().starts.is_empty());
@@ -335,8 +371,10 @@ mod tests {
         complete(&old, FAILED);
         assert_eq!(owner.poll().stage, Stage::StopFailed);
         busy(&gate);
+        // Repeated stream errors cannot hide the actionable cleanup failure.
+        owner.resources.as_ref().unwrap().0 .1.record();
         for _ in 0..5 {
-            owner.poll();
+            assert_eq!(owner.poll().problem, Some(Problem::StopFailed));
         }
         assert_eq!(script.lock().unwrap().stops.len(), 1);
         assert!(owner.retry_cleanup());
@@ -387,6 +425,62 @@ mod tests {
         busy(&gate);
         finish(&mut owner, &script);
         assert_eq!(owner.poll().problem, Some(Problem::StartFailed));
+    }
+
+    #[test]
+    fn stream_fault_cancels_delivery_before_owner_poll_and_waits_for_pending_start() {
+        let (gate, control, mut owner, script) = setup();
+        owner.resources.as_ref().unwrap().0 .1.record();
+        assert!(control.is_cancelled());
+        assert_eq!(
+            owner.poll(),
+            Status {
+                stage: Stage::CancellingStart,
+                problem: Some(Problem::StreamFailed)
+            }
+        );
+        assert!(script.lock().unwrap().stops.is_empty());
+        busy(&gate);
+        complete(&script.lock().unwrap().starts[0], SUCCEEDED);
+        assert_eq!(owner.poll().stage, Stage::Stopping);
+        assert!(!control.0.capturing.load(Ordering::Acquire));
+        finish(&mut owner, &script);
+        assert_eq!(owner.poll().problem, Some(Problem::StreamFailed));
+    }
+
+    #[test]
+    fn stream_fault_during_capture_or_stop_never_restarts_or_releases_early() {
+        for fault_before_stop in [true, false] {
+            let (gate, control, mut owner, script) = setup();
+            complete(&script.lock().unwrap().starts[0], SUCCEEDED);
+            assert_eq!(owner.poll().stage, Stage::Running);
+            if !fault_before_stop {
+                gate.stop(&control).unwrap();
+                assert_eq!(owner.poll().stage, Stage::Stopping);
+            }
+            owner.resources.as_ref().unwrap().0 .1.record();
+            assert!(control.is_cancelled());
+            for _ in 0..3 {
+                owner.resources.as_ref().unwrap().0 .1.record();
+                assert_eq!(
+                    owner.poll(),
+                    Status {
+                        stage: Stage::Stopping,
+                        problem: Some(Problem::StreamFailed)
+                    }
+                );
+                busy(&gate);
+            }
+            assert_eq!(script.lock().unwrap().starts.len(), 1);
+            assert_eq!(script.lock().unwrap().stops.len(), 1);
+            finish(&mut owner, &script);
+            // A late signal still belongs to the old operation, never a new review.
+            let mut next = gate.review(source()).unwrap();
+            let next_control = next.control();
+            let _next_start = gate.approve(&mut next).unwrap();
+            StreamFault::new(control).record();
+            assert!(!next_control.is_cancelled());
+        }
     }
 
     #[test]

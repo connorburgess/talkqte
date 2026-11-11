@@ -1,11 +1,13 @@
 use super::*;
 use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchRetained};
-use objc2::{rc::Retained, runtime::ProtocolObject, AnyThread};
-use objc2_foundation::{NSArray, NSError};
+use objc2::{
+    define_class, msg_send, rc::Retained, runtime::ProtocolObject, AnyThread, DefinedClass,
+};
+use objc2_foundation::{NSArray, NSError, NSObject, NSObjectProtocol};
 use objc2_screen_capture_kit::{
     SCContentFilter, SCDisplay, SCRunningApplication, SCStream, SCStreamConfiguration,
-    SCStreamOutput, SCStreamOutputType, SCWindow,
+    SCStreamDelegate, SCStreamOutput, SCStreamOutputType, SCWindow,
 };
 use std::sync::atomic::AtomicU64;
 
@@ -83,6 +85,7 @@ impl NativeOwner {
         if start.lease.control.0.application != selection.source {
             return Err(Failure::ReviewChanged);
         }
+        let delegate = StreamDelegate::new(start.lease.control.clone());
         let queue = DispatchQueue::new("talkqte.application-audio", None);
         let applications = NSArray::from_slice(&[&*selection.application]);
         let exceptions = NSArray::<SCWindow>::new();
@@ -105,7 +108,7 @@ impl NativeOwner {
                 SCStream::alloc(),
                 &filter,
                 &config,
-                None,
+                Some(ProtocolObject::from_ref(&*delegate)),
             );
             // The caller's callback contract and this serial queue satisfy the
             // binding's additional threading requirement. Only audio is attached.
@@ -120,6 +123,7 @@ impl NativeOwner {
         };
         let driver = Stream {
             stream,
+            delegate,
             output,
             queue,
             _selection: selection,
@@ -140,8 +144,36 @@ impl NativeOwner {
     }
 }
 
+define_class!(
+    // SAFETY: NSObject has no subclass requirements. Immutable ivars contain
+    // only operation-scoped atomics/Arc state; callbacks never touch native state.
+    #[unsafe(super = NSObject)]
+    #[name = "TalkQTEAudioStreamDelegate"]
+    #[ivars = StreamFault]
+    struct StreamDelegate;
+
+    unsafe impl NSObjectProtocol for StreamDelegate {}
+
+    unsafe impl SCStreamDelegate for StreamDelegate {
+        #[unsafe(method(stream:didStopWithError:))]
+        fn stopped(&self, _stream: &SCStream, _error: &NSError) {
+            self.ivars().record();
+        }
+    }
+);
+
+impl StreamDelegate {
+    fn new(control: Control) -> Retained<Self> {
+        let this = Self::alloc().set_ivars(StreamFault::new(control));
+        // SAFETY: NSObject initialization with the correct signature and ivars.
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
 struct Stream {
     stream: Retained<SCStream>,
+    // Retain explicitly: the stream delegate relationship alone is not ownership.
+    delegate: Retained<StreamDelegate>,
     output: Retained<ProtocolObject<dyn SCStreamOutput>>,
     queue: DispatchRetained<DispatchQueue>,
     _selection: Selection,
@@ -162,6 +194,9 @@ fn completion(slot: Arc<AtomicU8>) -> RcBlock<dyn Fn(*mut NSError)> {
 }
 
 impl Driver for Stream {
+    fn stream_failed(&self) -> bool {
+        self.delegate.ivars().failed.load(Ordering::Acquire)
+    }
     fn start(&mut self, slot: Arc<AtomicU8>) {
         self.start = Some(completion(slot));
         // SAFETY: stream and block are retained until native cleanup; callback
