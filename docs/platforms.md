@@ -42,6 +42,37 @@ In the same Windows 11 Arm VM, commit `81aa840` built successfully with `npm ci`
 
 The Notepad foreground comparison was inconclusive: the automation did not establish that its test Notepad was foreground before the question arrived. The initial automation cleanup forced the app process to exit. A separate idle-app check closed the notebook through its UI Automation window control and observed the app process exit within five seconds; exit after a running demo remains unverified. These results do not establish cross-app focus behavior, general keyboard accessibility, or support on other Windows configurations.
 
+### Current build and installer packaging, 11 November 2026
+
+App commit `17e100d`, with the Windows configuration added in this change, produced an unsigned debug NSIS installer in the Windows 11 Pro ARM64 VM (10.0.26300.9711, four virtual CPUs, 12 GiB memory). Parallels remains 27.1.0 with 27.0.3 guest tools; WebView2 is now 157.0.4341.46. The check reused Node.js 22.23.4, npm 10.9.9, Rust 1.97.1 (`aarch64-pc-windows-msvc`), Visual Studio 2022 Build Tools with MSVC 14.44.35207 / SDK 10.0.26100.0, and Clang 22.1.8. No VM configuration, guest-tool or system toolchain change was needed.
+
+Run from an ARM64 MSVC developer command prompt with Node, Rust and Clang on its process `PATH`. The first attempt failed while building `ring` because Clang was missing from that process's `PATH`; adding the already-installed compiler fixed it. After locked dependency preparation, the frontend build, **297 Rust tests** and Clippy with warnings denied passed on `17e100d`:
+
+```bat
+npm ci --no-audit --no-fund
+cargo fetch --manifest-path src-tauri/Cargo.toml --locked
+set CARGO_BUILD_JOBS=1
+set CARGO_PROFILE_DEV_DEBUG=0
+set CARGO_PROFILE_TEST_DEBUG=0
+set CARGO_NET_OFFLINE=true
+npm run build
+cargo test --manifest-path src-tauri/Cargo.toml --locked
+cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+npm run tauri -- build --debug --ci
+```
+
+Initial packaging failed with NSIS child-process error `0x2` from the system account's tool cache. The Windows-only [configuration](../src-tauri/tauri.windows.conf.json) selects NSIS and caches bundler tools under the project's target directory. With that override, the final command above rebuilt the app and successfully packaged it without a command-line bundle override. Tauri documents [platform-specific configuration and local tool caching](https://v2.tauri.app/reference/config/#uselocaltoolsdir). The Windows CI job now exercises this default packaging command.
+
+| Output | Observed result |
+| --- | --- |
+| Application | 17,204,736 bytes; native ARM64 PE (`0xAA64`); Authenticode `NotSigned`. |
+| NSIS installer | 3,402,263 bytes (3.24 MiB); x86 PE wrapper (`0x014C`) containing the ARM64 app; Authenticode `NotSigned`. |
+| Development footprint | About 3.29 GiB for the isolated checkout, dependency caches and build output. |
+
+These are one debug build's measurements, not release delivery or runtime resource budgets. The NSIS wrapper architecture matches Tauri's [Windows Arm packaging design](https://v2.tauri.app/distribute/windows-installer/). The default WebView2 download-bootstrapper behavior remains; this is not a self-contained offline installer. Cargo's offline setting does not stop the bundler fetching its tools. No model feature, account access or meeting capture was exercised.
+
+**UI/UX checkpoint:** packaging completed, but the installer and app were not opened because native UI access was unavailable. Earlier demo observations do not validate this executable. Next acceptance is installation in an available ordinary-user desktop, launch, start/end of the fictional demo, keyboard disclosure/dismissal, companion focus and placement, then clean exit and uninstall. Signing, upgrades, missing-WebView2 recovery, capture, screen sharing, x64 and physical-PC checks remain separate. The build/install/launch roadmap item stays open.
+
 ## Ubuntu exploration
 
 Parallels supports Ubuntu guests and documents installation from an ARM image on Apple silicon. Start with a supported Ubuntu LTS guest; record its exact version, architecture, desktop environment, display session, and audio configuration. [Ubuntu installation guide](https://kb.parallels.com/en/128445)
