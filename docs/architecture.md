@@ -104,6 +104,15 @@ Synchronizing the context store passes complete `ContextItem` values to the engi
 
 ## Next native spike and acceptance criteria
 
+Before that spike, `application_audio.rs` supplies a development-only single-source
+review/start/cancel boundary. It binds an immutable application selection to a
+one-use review and scoped Stop, reserving the operation until its pending start
+and returned stream have been released. Adapter work and destruction occur
+outside the state lock. [Synthetic acceptance](application-audio-boundary.md)
+establishes ownership only; native filtering, deadlines, audio handoff and actual
+source release remain unimplemented or unverified. No runtime command instantiates
+this boundary, and the microphone path is unchanged.
+
 1. Capture both sides of a synthetic call with headphones, with clear microphone/system permissions.
 2. Stop and pause promptly; test device disconnect and permission denial.
 3. Measure transcription latency and resource use on the target Mac while the meeting app runs.
