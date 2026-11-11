@@ -2,8 +2,8 @@
 
 12 November 2026. The `native-audio-spike` Cargo feature adds a macOS
 ScreenCaptureKit owner in `application_audio::native`. It is off by default and
-has no Tauri command, selection UI, enumeration, sample handler or transcription
-connection. No native capture was run for this change. The app still provides
+has no Tauri command, selection UI, enumeration or transcription
+connection. A bounded sample handler is connected only inside this experiment. No native capture was run for this change. The app still provides
 only its existing microphone paths.
 
 This advances the [source-only experiment](system-audio-plan.md): dependable
@@ -25,11 +25,14 @@ filter. It registers only audio output, requests 16 kHz mono and excludes this
 process's audio. This configuration is not proof that delivered buffers have the
 requested format or that native filtering meets the intended scope.
 
-The caller must supply a callback that honors the source/cancellation boundary
-and the binding's serial-queue threading rules. The constructor is unsafe because
-Objective-C protocol conformance alone does not establish callback safety. No
-such sample handler or caller exists in the app. Native objects stay on their
-constructing worker thread; no `unsafe Send` or `Sync` implementation is added.
+The constructor installs its own source-bound audio output on a dedicated serial
+queue. It accepts an explicit `ClockBinding` and returns a session-bound reader
+alongside the owner. The host must establish the correspondence between native
+source time and session time; neither callback arrival nor the first sample is
+used to guess it. The constructor remains unsafe because native buffer validity
+and CoreMedia copying behavior require live-context validation. No caller exists
+in the app. Native objects stay on their constructing worker thread; no
+`unsafe Send` or `Sync` implementation is added.
 
 The owner polls bounded completion slots outside audio callbacks and UI work:
 
@@ -70,8 +73,9 @@ is retained alongside the stream through cleanup; the queue fence covers the
 audio output queue, not a claim about macOS delegate dispatch ordering.
 
 A successful start result alone does not prove continuing source health. Native
-error delivery, permission revocation and sample-handler fault propagation still
-need implementation or device evidence as applicable.
+error delivery and permission revocation still need device evidence. Sample
+validation, unexpected output type, unavailable callback state and a closed
+consumer share the same operation-scoped fault signal and cleanup path.
 No silent restart, alternate source, resampling, microphone mixing, retention,
 provider access or inference is introduced.
 
@@ -80,10 +84,10 @@ provider access or inference is introduced.
 The same disabled development feature now includes `native::pcm::PcmReader`.
 It reads actual CoreMedia metadata and uses
 [`CMSampleBufferCopyPCMDataIntoAudioBufferList`](https://developer.apple.com/documentation/coremedia/cmsamplebuffercopypcmdataintoaudiobufferlist%28_%3Aat%3Aframecount%3Ainto%3A%29?language=objc)
-to copy into caller-owned, fixed scratch space. No capture callback or app command
-calls it yet. It carries no source/session authority: the eventual callback must
-check its approved operation, serialize its reader/scratch access, and pass only
-successful output through the existing source-bound handoff.
+to copy into fixed scratch space owned by the development audio output. The
+reader itself carries no source/session authority. The output checks cancellation
+before touching native data and passes only validated samples through the
+existing handoff using the control bound to its approved Start.
 
 The accepted format is deliberately narrow: ready, valid linear PCM, little-endian
 packed float32, 16 kHz, one channel, four bytes per frame/packet and one frame per
@@ -102,8 +106,8 @@ offsets, clock resets, overlapping/repeated frames and overflow are rejected.
 It preserves missing frame positions, including initial gaps, rather than using
 arrival time or the amount successfully queued. An inspected/copied interval
 consumes its source time even if the subsequent handoff is full. Any read error
-permanently retires this reader; the eventual callback must also cancel delivery
-and return cleanup control to the native owner. No automatic restart is supplied.
+permanently retires this reader; the callback also cancels delivery
+and returns cleanup control to the native owner. No automatic restart is supplied.
 
 This is a strict development acceptance contract, not proof that every supported
 Mac emits this layout or timestamp representation. The host still needs to
@@ -112,11 +116,36 @@ buffer or borrowed byte pointer escapes the read; the output is copied into the
 caller's scratch prefix. A temporary retained format description is released
 within the call. The Rust layer allocates no payload during the read, but this
 is **not** an allocation, locking or latency guarantee for the CoreMedia APIs.
-Validate those properties before using the path inside a live sample callback.
+Validate those properties before exercising the connected callback with live audio.
+
+## Callback delivery
+
+The output and its 2,048-sample scratch array, 32-slot handoff and shared fault
+signal are allocated before native startup. Each callback checks the operation's
+cancellation, accepts only audio, validates/copies the buffer, then pushes the
+exact source-frame interval. A full handoff drops that interval without waiting;
+the next accepted interval exposes the gap. A cancelled operation delivers no
+more work. Malformed input or a closed consumer cancels the operation, so queued
+and already-returned blocks fail their source guards. The owner reports
+`StreamFailed` and uses its existing Stop/remove/drain cleanup sequence.
+
+A single `Mutex::try_lock` protects the mutable reader, scratch and producer.
+It never waits or retries: unexpected concurrent/reentrant delivery or poisoned
+state cancels the operation. The configured queue is serial, but this check avoids
+relying on that assumption for Rust mutable aliasing. This does not establish
+native scheduling latency or an allocation-free CoreMedia implementation. No
+borrowed sample or native stream is stored by the handler. The owner retains the
+output through successful Stop, output removal and the queue fence.
+
+The session reader refuses delivery until startup is accepted. It retains the
+existing source/session guards and explicit origin mapping. The host must stop
+the owner when a session ends or its consumer is retired; detecting a closed
+consumer on a later callback is only a fallback and cannot stop a silent stream.
+No host task, shutdown policy, live permission flow or recognizer is added here.
 
 ## Validation
 
-On the development Mac, all **350 Rust tests** pass with this feature enabled.
+On the development Mac, all **356 Rust tests** pass with this feature enabled.
 The ten ownership tests construct no native stream and request no access: nine
 scripted lifecycle tests and one test of the actual completion block. They cover cancellation before startup, cancelled
 late success, successful start followed by missing/delayed Stop completion,
@@ -135,7 +164,12 @@ backing, oversized buffers, NaN, invalidation, inconsistent duration, overlap,
 variable frame sizes and internal timing gaps. No stream or capture source is
 created. These memory-only checks run on the development Mac; they do not prove
 macOS 14 behavior or the live callback contract. The concrete macOS driver is
-compiled with those tests. A compile-fail doctest
+compiled with those tests. Six callback tests invoke the actual output handler
+with fictional CoreMedia objects: startup gating and explicit session mapping,
+queue overflow/gaps, invalid-sample retirement of returned work, Stop before
+invalid input, reentrant delivery, and abandoned-session/unexpected-output faults.
+These construct the Objective-C output object, but do not simulate native message
+dispatch or construct a ScreenCaptureKit stream. A compile-fail doctest
 also guards against making the native owner transferable across threads.
 
 ```sh
@@ -175,11 +209,10 @@ does not replace those terms or complete a distribution-license review.
 
 ## Next acceptance and UI/UX checkpoint
 
-The immediate implementation dependency is a bounded, source-bound native sample
-callback with operation-scoped fault propagation. Connect the bounded PCM reader
-to the existing handoff, establish source/session clock origin, and verify callback
-allocation/latency and actual buffer sizes. Then prepare the consent/selection
-and owner-task shutdown flow before requesting a bounded native run. Do not add
+The immediate implementation dependency is the owner-task shutdown/recovery
+flow and an established native-to-session clock origin. Verify callback
+allocation/latency and actual buffer sizes, and prepare explicit consent/selection
+before requesting a bounded native run. Do not add
 another generic queue or benchmark framework.
 
 The user task remains: choose one clearly named application, understand its

@@ -64,7 +64,7 @@ struct Packet {
 impl Start {
     /// Allocate a fixed ring on the startup worker, after exact-source approval.
     /// The adapter must keep both endpoints within this capture's lifetime and
-    /// only start its consumer after Start::run accepts the returned resource.
+    /// only deliver after Start::run or the native owner accepts the resource.
     /// One queue is allowed per approved operation.
     pub fn handoff(&mut self, format: Format, blocks: usize) -> Result<(Input, Reader), Rejected> {
         if self.lease.control.is_cancelled() {

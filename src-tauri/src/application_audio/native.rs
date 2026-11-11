@@ -1,5 +1,5 @@
 //! Development-only ScreenCaptureKit ownership. No app command, enumeration,
-//! permission request, sample handler or processing path enables this module.
+//! permission request or processing path enables this module.
 //! Native filtering, callback safety and actual release still need device tests.
 
 use super::{Application, Control, Failure, Lease, Phase, Start};
@@ -8,9 +8,10 @@ use std::sync::{
     Arc,
 };
 
+mod output;
 pub mod pcm;
 mod stream;
-pub use stream::{NativeOwner, Selection};
+pub use stream::{ClockBinding, NativeOwner, Selection};
 
 const PENDING: u8 = 0;
 const SUCCEEDED: u8 = 1;

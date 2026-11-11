@@ -1,5 +1,5 @@
-//! Narrow CoreMedia PCM reader for the isolated native experiment. No capture
-//! callback invokes this yet. The eventual host must bind its clock origin to
+//! Narrow CoreMedia PCM reader for the isolated native experiment. Its output
+//! callback uses this reader. The eventual host must bind its clock origin to
 //! session time and retire the operation on any error; never guess a format.
 
 use crate::application_audio::handoff::MAX_SAMPLES;
@@ -212,7 +212,7 @@ fn frame_position(origin: CMTime, pts: CMTime) -> Result<u64, PcmError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use objc2_core_foundation::CFRetained;
     use objc2_core_media::{
@@ -220,7 +220,7 @@ mod tests {
         CMFormatDescription, CMSampleTimingInfo,
     };
 
-    fn time(value: i64, timescale: i32) -> CMTime {
+    pub(crate) fn time(value: i64, timescale: i32) -> CMTime {
         CMTime {
             value,
             timescale,
@@ -229,7 +229,7 @@ mod tests {
         }
     }
 
-    fn format() -> AudioStreamBasicDescription {
+    pub(crate) fn format() -> AudioStreamBasicDescription {
         AudioStreamBasicDescription {
             mSampleRate: 16_000.0,
             mFormatID: kAudioFormatLinearPCM,
@@ -245,7 +245,7 @@ mod tests {
 
     // Construct only memory-backed fictional PCM. No ScreenCaptureKit object,
     // device, permission, dispatch callback, model or network is involved.
-    fn sample(
+    pub(crate) fn sample(
         asbd: AudioStreamBasicDescription,
         samples: &[f32],
         pts: CMTime,

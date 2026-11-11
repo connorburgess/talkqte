@@ -1,15 +1,29 @@
+use super::output::AudioOutput;
 use super::*;
+use crate::application_audio::{
+    handoff::{Format, MAX_BLOCKS},
+    timing::SessionReader,
+};
 use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2::{
     define_class, msg_send, rc::Retained, runtime::ProtocolObject, AnyThread, DefinedClass,
 };
+use objc2_core_media::CMTime;
 use objc2_foundation::{NSArray, NSError, NSObject, NSObjectProtocol};
 use objc2_screen_capture_kit::{
     SCContentFilter, SCDisplay, SCRunningApplication, SCStream, SCStreamConfiguration,
     SCStreamDelegate, SCStreamOutput, SCStreamOutputType, SCWindow,
 };
 use std::sync::atomic::AtomicU64;
+
+/// An explicit mapping supplied by the host, never inferred from arrival time.
+/// The host must establish that source_origin corresponds to session_origin_ms.
+pub struct ClockBinding {
+    pub source_origin: CMTime,
+    pub session: u64,
+    pub session_origin_ms: u64,
+}
 
 /// A retained native application instance, not a name used to find another app.
 /// Construct only after an explicitly authorized selection/enumeration flow.
@@ -66,26 +80,32 @@ impl NativeOwner {
     /// No enumeration, picker, microphone, file, network or model API is called.
     ///
     /// # Safety
-    /// The supplied output must be safe to call on a dedicated serial dispatch
-    /// queue, honor this Start's cancellation/source boundary, and not access
-    /// thread-confined state from its callback. It must not retain borrowed media,
-    /// allocate, block, log, record or infer in the callback. These requirements
-    /// are not established by implementing the Objective-C output protocol.
+    /// The host must establish the supplied source/session clock relationship and
+    /// validate CoreMedia copying latency/allocation for live callback use.
+    /// Native buffers must remain valid and immutable during their callbacks.
+    /// The built-in output is registered only on its dedicated serial queue.
     /// Run on a worker, never a UI thread or output callback. Keep polling until
     /// Released, including after cancellation; no real capture is authorized by
     /// compiling this feature or constructing Selection.
     pub unsafe fn begin(
-        start: Start,
+        mut start: Start,
         selection: Selection,
-        output: Retained<ProtocolObject<dyn SCStreamOutput>>,
-    ) -> Result<Self, Failure> {
+        clock: ClockBinding,
+    ) -> Result<(Self, SessionReader), Failure> {
         if start.lease.control.is_cancelled() {
             return Err(Failure::Cancelled);
         }
         if start.lease.control.0.application != selection.source {
             return Err(Failure::ReviewChanged);
         }
-        let delegate = StreamDelegate::new(start.lease.control.clone());
+        let pcm = pcm::PcmReader::new(clock.source_origin).map_err(|_| Failure::StartFailed)?;
+        let (input, reader) = start
+            .handoff(Format::new(16_000, 1).unwrap(), MAX_BLOCKS)
+            .map_err(|_| Failure::StartFailed)?;
+        let fault = Arc::new(StreamFault::new(start.lease.control.clone()));
+        let output = AudioOutput::new(input, pcm, fault.clone());
+        let output = ProtocolObject::from_retained(output);
+        let delegate = StreamDelegate::new(fault);
         let queue = DispatchQueue::new("talkqte.application-audio", None);
         let applications = NSArray::from_slice(&[&*selection.application]);
         let exceptions = NSArray::<SCWindow>::new();
@@ -130,7 +150,12 @@ impl NativeOwner {
             start: None,
             stop: None,
         };
-        Owner::begin(start, driver).map(Self)
+        Owner::begin(start, driver).map(|owner| {
+            (
+                Self(owner),
+                reader.bind_session(clock.session, clock.session_origin_ms),
+            )
+        })
     }
 
     pub fn poll(&mut self) -> Status {
@@ -149,7 +174,7 @@ define_class!(
     // only operation-scoped atomics/Arc state; callbacks never touch native state.
     #[unsafe(super = NSObject)]
     #[name = "TalkQTEAudioStreamDelegate"]
-    #[ivars = StreamFault]
+    #[ivars = Arc<StreamFault>]
     struct StreamDelegate;
 
     unsafe impl NSObjectProtocol for StreamDelegate {}
@@ -163,8 +188,8 @@ define_class!(
 );
 
 impl StreamDelegate {
-    fn new(control: Control) -> Retained<Self> {
-        let this = Self::alloc().set_ivars(StreamFault::new(control));
+    fn new(fault: Arc<StreamFault>) -> Retained<Self> {
+        let this = Self::alloc().set_ivars(fault);
         // SAFETY: NSObject initialization with the correct signature and ivars.
         unsafe { msg_send![super(this), init] }
     }
