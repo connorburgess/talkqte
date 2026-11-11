@@ -166,7 +166,7 @@ Windows is the next planned desktop platform after the macOS foundation. Paralle
 - [ ] Validate Windows companion focus, scaling, keyboard access, full-screen meetings, and screen-sharing behavior.
 - [ ] Prove both sides of a synthetic call, Stop/recovery, and device changes through a Windows capture adapter.
 - [ ] Add Windows build/Rust checks when the build target is established, then validate signed installation and updates on the claimed physical hardware and architectures. Windows Arm Rust tests, Clippy, and the desktop debug build are configured in the [checks workflow](.github/workflows/checks.yml); signed installation, updates, and physical-device acceptance remain unverified.
-- [ ] Explore an Ubuntu ARM64 VM: build and run the desktop shell, assess audio and companion behavior, and record the desktop/session configuration.
+- [ ] Explore an Ubuntu ARM64 VM: build and run the desktop shell, assess audio and companion behavior, and record the desktop/session configuration. The [11 November headless check](docs/platforms.md#current-headless-build-11-november-2026) passed 297 Rust tests and built current `ab8d369` as a native ARM64 executable. Current desktop launch and companion/audio acceptance remain open; the guest was at its sign-in screen.
 - [ ] Decide whether to support a named Linux configuration based on the Ubuntu evidence and maintenance effort. General Linux support remains undecided.
 
 ## Future goal: participate from a phone

@@ -67,6 +67,26 @@ Wayland reports window positions as 0,0 to the accessibility interface, so this 
 
 In the same Ubuntu ARM64 GNOME Wayland VM, the fictional demo on commit `b05b4dc` exposed both the notebook and companion as AT-SPI frames (1024 × 736 and 320 × 76). Both reported position `(0, 0)`, so these coordinates do not establish actual placement or stacking. The fictional question appeared; the **Why?** and **Dismiss** buttons reported focusable and accepted AT-SPI focus. A synthesized Return key did not open context, so keyboard activation remains unverified; this check cannot distinguish an application issue from Wayland input synthesis restrictions. The demo ended and the test process exited on SIGTERM. No screen-reader, physical keyboard, cross-app focus, or stacking result is claimed.
 
+### Current headless build, 11 November 2026
+
+App commit `ab8d369` builds in an isolated checkout in the Ubuntu 26.04 LTS ARM64 guest. The current configuration is Linux 7.0.0-42, GNOME Shell 50.1, two virtual CPUs and 4 GiB assigned memory, with Parallels 27.1.0 and matching guest tools. WebKitGTK is 2.52.6 and GTK is 3.24.52. The check reused the existing Node.js 22.23.4, npm 10.9.9 and Rust 1.97.1 binaries; no system package, guest-tool or VM configuration change was needed.
+
+The dependency preparation and validation commands passed:
+
+```sh
+npm ci --no-audit --no-fund
+cargo fetch --manifest-path src-tauri/Cargo.toml --locked
+npm run build
+CARGO_NET_OFFLINE=true cargo test --manifest-path src-tauri/Cargo.toml --locked
+CARGO_NET_OFFLINE=true npm run tauri -- build --debug --no-bundle --ci
+```
+
+The native test run passed all **297 tests**, with no failures or ignored tests. The desktop build produced an aarch64 ELF executable. Both used the default features, one Cargo build job, and `CARGO_PROFILE_DEV_DEBUG=0` / `CARGO_PROFILE_TEST_DEBUG=0` to reduce debug-information memory and disk use. Cargo's offline setting applies after dependency retrieval; it is not a claim that dependency setup or every test has no network access. The tests use fictional inputs and local test servers, with no real account, meeting capture or model trial. The isolated source, dependency caches and build output occupied about 2.9 GiB after completion; this is one development setup's footprint, not an application delivery budget.
+
+**UI/UX checkpoint:** no application window was opened. The guest had only a Wayland login-screen session, so the earlier demo and companion observations above do not validate this current executable. Launch, keyboard activation, focus, placement/stacking and screen-reader checks still need a signed-in desktop. Audio, screen sharing, packaging, updates and physical-device support are not established by this build. The Ubuntu roadmap item stays open and general Linux support remains undecided.
+
+Next acceptance: launch this build in an available signed-in session, start and end the fictional demo, verify notebook disclosure/dismissal by keyboard and observe companion placement and cross-app focus. Preserve existing applications and stop before any capture or meeting access that has not been explicitly authorized.
+
 ## Mobile validation
 
 Follow the [mobile plan](mobile.md). Start with a readable touch interface and a foreground companion connected to an explicitly selected, authorized live session. A paired desktop must actually receive the meeting; pairing cannot obtain audio from a separate call on the phone by itself.
