@@ -3,6 +3,7 @@
 //! submodule accepts synthetic buffers without activating any capture.
 //! A future native adapter must independently prove the selection and filtering.
 
+pub mod chunks;
 pub mod handoff;
 pub mod timing;
 
