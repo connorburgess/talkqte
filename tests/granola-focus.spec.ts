@@ -12,6 +12,7 @@ test.beforeEach(async ({ page }) => {
     });
   });
   await page.goto('/?granola');
+  await page.locator('.focus-disclosure > summary').press('Enter');
   await page
     .getByRole('button', { name: 'Connect Granola', exact: true })
     .click();

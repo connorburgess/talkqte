@@ -7,7 +7,6 @@ import {
   CircleHelp,
   Crosshair,
   FileText,
-  Leaf,
   MessageCircle,
   Pause,
   Play,
@@ -584,9 +583,16 @@ function Notebook() {
   // The setup card: put away for this app session with Not now, or gone
   // once the required steps are done.
   const [setupDismissed, setSetupDismissed] = useState(false);
+  const meetingEntry = useRef<HTMLButtonElement>(null);
+  const [focusExpanded, setFocusExpanded] = useState(false);
+  // A failed background save must stay discoverable even after collapsing Focus.
+  useEffect(() => {
+    if (focusError || suggestionError) setFocusExpanded(true);
+  }, [focusError, suggestionError]);
   const pendingFocus = useRef<SetupTarget | null>(null);
   const goToSetup = (target: SetupTarget) => {
     if (target === 'focus') {
+      setFocusExpanded(true);
       // The card only shows in the notebook, so the focus box is already here.
       setTimeout(() => {
         focusField.current?.scrollIntoView({ block: 'center' });
@@ -849,14 +855,6 @@ function Notebook() {
           </button>
         </nav>
         <div className="sidebar-bottom">
-          <div className="sidebar-note">
-            <ShieldCheck size={20} />
-            <p>
-              A space to think.
-              <br />
-              <span>Microphone starts only when you choose.</span>
-            </p>
-          </div>
           <button
             className={view === 'settings' ? 'nav-item selected' : 'nav-item'}
             aria-current={view === 'settings' ? 'page' : undefined}
@@ -901,46 +899,24 @@ function Notebook() {
                 </button>
               )}
             </label>
-            {state &&
-              !setupDismissed &&
-              !active &&
-              !(
-                state.userName &&
-                (!model || !['missing', 'downloading'].includes(model.status))
-              ) && (
-                <>
-                  <SetupCard
-                    name={state.userName}
-                    focus={state.focus}
-                    model={model}
-                    items={contextItems}
-                    busy={busy}
-                    onGoTo={goToSetup}
-                    onDismiss={() => setSetupDismissed(true)}
-                  />
-                </>
-              )}
-            <p className="list-label">Start here</p>
+            <p className="list-label">Meetings</p>
             {matches ? (
               <button
+                ref={meetingEntry}
                 className="meeting selected-meeting"
                 aria-current="true"
                 onClick={() => {
                   setTab('notes');
                 }}
               >
-                <div className="meeting-line">
-                  <span className="demo-tag">
-                    {state.live ? 'Live session' : 'Demo meeting'}
-                  </span>
-                  <ChevronRight size={15} />
-                </div>
                 <strong>{state.title}</strong>
+                <span className="meeting-type">
+                  {state.live ? 'Live session' : 'Demo meeting'}
+                </span>
                 {state.live ? (
                   <p>Your microphone, transcribed on this device</p>
                 ) : (
                   <>
-                    <p>A welcome guide for the garden</p>
                     <span className="meeting-meta">
                       Robin & Alex <span>1m 44s</span>
                     </span>
@@ -956,14 +932,29 @@ function Notebook() {
                 </button>
               </div>
             )}
-            <div className="list-foot">
-              <Leaf size={18} />
-              <p>
-                Try a conversation.
-                <br />
-                Get a feel for the timing.
-              </p>
-            </div>
+            {state &&
+              !setupDismissed &&
+              !active &&
+              !(
+                state.userName &&
+                (!model || !['missing', 'downloading'].includes(model.status))
+              ) && (
+                <details className="setup-disclosure">
+                  <summary>Set up a live session</summary>
+                  <SetupCard
+                    name={state.userName}
+                    focus={state.focus}
+                    model={model}
+                    items={contextItems}
+                    busy={busy}
+                    onGoTo={goToSetup}
+                    onDismiss={() => {
+                      setSetupDismissed(true);
+                      meetingEntry.current?.focus();
+                    }}
+                  />
+                </details>
+              )}
           </div>
           {listResizable && (
             <PanelDivider
@@ -1140,9 +1131,6 @@ function Notebook() {
           <div className="notebook-body">
             <div className="meeting-header">
               <div>
-                <div className="meeting-icon">
-                  <Leaf size={27} />
-                </div>
                 <h1>{state.title}</h1>
                 <p>{state.description}</p>
                 {state.live ? (
@@ -1153,8 +1141,6 @@ function Notebook() {
                   </div>
                 ) : (
                   <div className="participants">
-                    <span className="avatar">R</span>
-                    <span className="avatar second">A</span>
                     <span>Robin & Alex</span>
                     <span className="meta-divider" />
                     <span>Fictional demo</span>
@@ -1343,168 +1329,6 @@ function Notebook() {
               </div>
             </section>
 
-            <section
-              className="meeting-focus"
-              aria-labelledby="meeting-focus-title"
-            >
-              <div className="meeting-focus-heading">
-                <div>
-                  <h2 id="meeting-focus-title">This meeting</h2>
-                  <p id="meeting-focus-help" className="small muted">
-                    Up to five short lines on what you want to get to, such as
-                    “agree the launch plan for the newsletter”. A question about
-                    one of them comes through even in the pause after another;
-                    when the meeting is wrapping up, the lines never touched are
-                    listed once. Word matches, kept until you quit.
-                  </p>
-                </div>
-                {focus.trim().length > 0 && (
-                  <button
-                    ref={clearButton}
-                    type="button"
-                    className="text-button"
-                    disabled={busy}
-                    onClick={clearFocus}
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-              {endedFocus !== null &&
-                endedFocus.length > 0 &&
-                endedFocus === focus.trim() && (
-                  <p className="small muted" role="status">
-                    Kept from the session that just ended.
-                  </p>
-                )}
-              <div className="setting-control">
-                <label htmlFor="meeting-focus">
-                  Focus <span className="muted small">· optional</span>
-                </label>
-                <textarea
-                  id="meeting-focus"
-                  ref={focusField}
-                  aria-describedby={
-                    focusError
-                      ? 'meeting-focus-help meeting-focus-error'
-                      : 'meeting-focus-help'
-                  }
-                  value={focus}
-                  rows={3}
-                  spellCheck={false}
-                  onChange={(e) => {
-                    focusEdit.current++;
-                    setFocus(e.target.value);
-                  }}
-                  onBlur={(e) => {
-                    if (e.relatedTarget !== clearButton.current) saveFocus();
-                  }}
-                />
-                {focusError && (
-                  <p id="meeting-focus-error" role="alert">
-                    Focus wasn't applied. {focusError} Edit the lines and leave
-                    the field to try again, or Clear.
-                  </p>
-                )}
-                {canSuggest && suggestions === null && (
-                  <div className="suggest-focus">
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      ref={suggestionButton}
-                      disabled={busy}
-                      // Keep keyboard focus while waiting; the handler guards repeats.
-                      aria-disabled={suggesting || undefined}
-                      onClick={() => void suggestFocus()}
-                    >
-                      {suggesting ? 'Asking Granola…' : 'Suggest from Granola'}
-                    </button>
-                    {suggesting && (
-                      <p className="small muted" role="status">
-                        Waiting for suggestions. You can keep working or
-                        disconnect in Prior context.
-                      </p>
-                    )}
-                    {suggestionError && (
-                      <p role="alert">
-                        {suggestionError} Ask again, or type your own focus.
-                      </p>
-                    )}
-                    <p className="small muted">
-                      Asks Granola’s assistant one question about your meetings
-                      of the last 30 days and shows its answer for you to tick.
-                      Granola sees the question; nothing else leaves this Mac.
-                    </p>
-                  </div>
-                )}
-                {suggestions !== null && (
-                  <fieldset
-                    className="suggest-focus"
-                    ref={suggestionList}
-                    tabIndex={-1}
-                  >
-                    <legend>
-                      Granola suggests
-                      {roomForSuggestions < suggestions.length && (
-                        <span className="muted small">
-                          {' '}
-                          · room for {roomForSuggestions} more{' '}
-                          {roomForSuggestions === 1 ? 'line' : 'lines'}
-                        </span>
-                      )}
-                    </legend>
-                    {suggestions.length === 0 && (
-                      <p className="small muted">
-                        Nothing came back. Type what matters instead.
-                      </p>
-                    )}
-                    {suggestions.map((line) => (
-                      <label key={line} className="suggest-line">
-                        <input
-                          type="checkbox"
-                          checked={ticked.includes(line)}
-                          disabled={
-                            !ticked.includes(line) &&
-                            ticked.length >= roomForSuggestions
-                          }
-                          onChange={(e) =>
-                            setTicked((current) =>
-                              e.target.checked
-                                ? [...current, line]
-                                : current.filter((seen) => seen !== line),
-                            )
-                          }
-                        />
-                        <span>{line}</span>
-                      </label>
-                    ))}
-                    <div className="dialog-actions">
-                      <button
-                        type="button"
-                        className="secondary-button"
-                        disabled={busy}
-                        onClick={closeSuggestions}
-                      >
-                        Dismiss
-                      </button>
-                      <button
-                        type="button"
-                        className="primary-button"
-                        disabled={busy || ticked.length === 0}
-                        onClick={acceptSuggestions}
-                      >
-                        Add {ticked.length || ''} to the focus
-                      </button>
-                    </div>
-                    <p className="small muted">
-                      A suggestion is Granola’s reading of your notes, not a
-                      fact; it becomes a focus line only when you add it, and
-                      each needs a few specific words.
-                    </p>
-                  </fieldset>
-                )}
-              </div>
-            </section>
             <div
               className={`notebook-grid${splitContent ? ' is-split' : ''}`}
               ref={measureGrid}
@@ -1566,10 +1390,6 @@ function Notebook() {
                     role="tabpanel"
                     aria-labelledby="notes-tab"
                   >
-                    <div className="note-intro">
-                      <h2>Leave with a little more clarity.</h2>
-                      <p>Jot down what matters, if you need to.</p>
-                    </div>
                     <label className="visually-hidden" htmlFor="meeting-notes">
                       Meeting notes
                     </label>
@@ -1670,9 +1490,6 @@ function Notebook() {
                   />
                 ) : (
                   <div className="question-idle">
-                    <div className="idle-mark">
-                      <MessageCircle size={28} />
-                    </div>
                     <h3>
                       {state.cuesPaused
                         ? 'Cues are paused.'
@@ -1693,12 +1510,6 @@ function Notebook() {
                               : 'Your notes are still here. Export them before closing the app.'
                             : 'Questions pass quietly. You can keep listening without responding.'}
                     </p>
-                    {state.status === 'ready' && (
-                      <div className="cue-example">
-                        <span>For example</span>
-                        <p>“Who will take the first draft?”</p>
-                      </div>
-                    )}
                   </div>
                 )}
                 <p className="companion-footnote">
@@ -1719,6 +1530,193 @@ function Notebook() {
                 </button>
               </aside>
             </div>
+            <section
+              className="meeting-focus"
+              aria-labelledby="meeting-focus-title"
+            >
+              <details
+                className="focus-disclosure"
+                open={focusExpanded}
+                onToggle={(event) => setFocusExpanded(event.currentTarget.open)}
+              >
+                <summary id="meeting-focus-title">
+                  This meeting{' '}
+                  <span>
+                    {suggesting
+                      ? 'Waiting for Granola…'
+                      : suggestions !== null
+                        ? 'Suggestions ready'
+                        : focus.trim()
+                          ? 'Review focus'
+                          : 'Add a focus · optional'}
+                  </span>
+                </summary>
+                <div className="meeting-focus-heading">
+                  <div>
+                    <p id="meeting-focus-help" className="small muted">
+                      Up to five short lines on what you want to get to, such as
+                      “agree the launch plan for the newsletter”. A question
+                      about one of them comes through even in the pause after
+                      another; when the meeting is wrapping up, the lines never
+                      touched are listed once. Word matches, kept until you
+                      quit.
+                    </p>
+                  </div>
+                  {focus.trim().length > 0 && (
+                    <button
+                      ref={clearButton}
+                      type="button"
+                      className="text-button"
+                      disabled={busy}
+                      onClick={clearFocus}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                {endedFocus !== null &&
+                  endedFocus.length > 0 &&
+                  endedFocus === focus.trim() && (
+                    <p className="small muted" role="status">
+                      Kept from the session that just ended.
+                    </p>
+                  )}
+                <div className="setting-control">
+                  <label htmlFor="meeting-focus">
+                    Focus <span className="muted small">· optional</span>
+                  </label>
+                  <textarea
+                    id="meeting-focus"
+                    ref={focusField}
+                    aria-describedby={
+                      focusError
+                        ? 'meeting-focus-help meeting-focus-error'
+                        : 'meeting-focus-help'
+                    }
+                    value={focus}
+                    rows={3}
+                    spellCheck={false}
+                    onChange={(e) => {
+                      focusEdit.current++;
+                      setFocus(e.target.value);
+                    }}
+                    onBlur={(e) => {
+                      if (
+                        !clearButton.current ||
+                        e.relatedTarget !== clearButton.current
+                      )
+                        saveFocus();
+                    }}
+                  />
+                  {focusError && (
+                    <p id="meeting-focus-error" role="alert">
+                      Focus wasn't applied. {focusError} Edit the lines and
+                      leave the field to try again, or Clear.
+                    </p>
+                  )}
+                  {canSuggest && suggestions === null && (
+                    <div className="suggest-focus">
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        ref={suggestionButton}
+                        disabled={busy}
+                        // Keep keyboard focus while waiting; the handler guards repeats.
+                        aria-disabled={suggesting || undefined}
+                        onClick={() => void suggestFocus()}
+                      >
+                        {suggesting
+                          ? 'Asking Granola…'
+                          : 'Suggest from Granola'}
+                      </button>
+                      {suggesting && (
+                        <p className="small muted" role="status">
+                          Waiting for suggestions. You can keep working or
+                          disconnect in Prior context.
+                        </p>
+                      )}
+                      {suggestionError && (
+                        <p role="alert">
+                          {suggestionError} Ask again, or type your own focus.
+                        </p>
+                      )}
+                      <p className="small muted">
+                        Asks Granola’s assistant one question about your
+                        meetings of the last 30 days and shows its answer for
+                        you to tick. Granola sees the question; nothing else
+                        leaves this Mac.
+                      </p>
+                    </div>
+                  )}
+                  {suggestions !== null && (
+                    <fieldset
+                      className="suggest-focus"
+                      ref={suggestionList}
+                      tabIndex={-1}
+                    >
+                      <legend>
+                        Granola suggests
+                        {roomForSuggestions < suggestions.length && (
+                          <span className="muted small">
+                            {' '}
+                            · room for {roomForSuggestions} more{' '}
+                            {roomForSuggestions === 1 ? 'line' : 'lines'}
+                          </span>
+                        )}
+                      </legend>
+                      {suggestions.length === 0 && (
+                        <p className="small muted">
+                          Nothing came back. Type what matters instead.
+                        </p>
+                      )}
+                      {suggestions.map((line) => (
+                        <label key={line} className="suggest-line">
+                          <input
+                            type="checkbox"
+                            checked={ticked.includes(line)}
+                            disabled={
+                              !ticked.includes(line) &&
+                              ticked.length >= roomForSuggestions
+                            }
+                            onChange={(e) =>
+                              setTicked((current) =>
+                                e.target.checked
+                                  ? [...current, line]
+                                  : current.filter((seen) => seen !== line),
+                              )
+                            }
+                          />
+                          <span>{line}</span>
+                        </label>
+                      ))}
+                      <div className="dialog-actions">
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          disabled={busy}
+                          onClick={closeSuggestions}
+                        >
+                          Dismiss
+                        </button>
+                        <button
+                          type="button"
+                          className="primary-button"
+                          disabled={busy || ticked.length === 0}
+                          onClick={acceptSuggestions}
+                        >
+                          Add {ticked.length || ''} to the focus
+                        </button>
+                      </div>
+                      <p className="small muted">
+                        A suggestion is Granola’s reading of your notes, not a
+                        fact; it becomes a focus line only when you add it, and
+                        each needs a few specific words.
+                      </p>
+                    </fieldset>
+                  )}
+                </div>
+              </details>
+            </section>
             <ContextNotes
               items={contextItems}
               busy={busy}

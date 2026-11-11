@@ -161,20 +161,6 @@ svg {
 .sidebar-bottom {
   margin-top: auto;
 }
-.sidebar-note {
-  padding: 22px 12px;
-  display: flex;
-  gap: 10px;
-  color: #bdcfc3;
-  font-size: 14px;
-}
-.sidebar-note span {
-  display: inline-block;
-  color: #b3c4bb;
-  margin-top: 4px;
-  font-size: 13px;
-  max-width: 125px;
-}
 .version {
   margin: 18px 12px 0;
   padding-top: 17px;
@@ -252,10 +238,10 @@ svg {
 .meeting {
   text-align: left;
   width: 100%;
-  border: 1px solid #cbd2c1;
+  border: 0;
   background: #e5eadb;
-  border-radius: var(--radius-panel);
-  padding: 18px;
+  border-radius: 8px;
+  padding: 12px;
 }
 .meeting:hover {
   background: #dee5d1;
@@ -267,15 +253,16 @@ svg {
   color: #506146;
   margin-bottom: 12px;
 }
-.demo-tag {
-  font-size: 12px;
-  border: 1px solid #b7c3a6;
-  padding: 2px 5px;
-  border-radius: 8px;
-}
 .meeting strong {
+  display: block;
   font-size: 16px;
-  font-weight: 700;
+  font-weight: 650;
+}
+.meeting-type {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 4px;
 }
 .meeting p {
   font-size: 14px;
@@ -287,16 +274,7 @@ svg {
   justify-content: space-between;
   font-size: 12px;
   color: #5d6852;
-  margin-top: 20px;
-}
-.list-foot {
-  margin-top: auto;
-  padding: 22px 8px 5px;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  color: #66705e;
-  font-size: 14px;
+  margin-top: 8px;
 }
 .search-empty {
   padding: 24px 7px;
@@ -329,7 +307,7 @@ svg {
   color: var(--muted);
 }
 .notebook-body {
-  padding: 36px 32px 24px;
+  padding: 28px 32px 24px;
   max-width: 1280px;
   margin: 0 auto;
 }
@@ -338,18 +316,11 @@ svg {
   align-items: flex-start;
   gap: 24px;
   justify-content: space-between;
-  margin-bottom: 31px;
-}
-.meeting-icon {
-  display: inline-flex;
-  color: #4d6650;
-  background: #e9ecdf;
-  padding: 10px;
-  border-radius: 20px;
-  margin-bottom: 18px;
+  margin-bottom: 24px;
 }
 .meeting-header h1 {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
+  font-size: 28px;
 }
 .meeting-header p {
   color: var(--muted);
@@ -357,29 +328,12 @@ svg {
   max-width: 48ch;
 }
 .participants {
-  margin-top: 20px;
+  margin-top: 12px;
   display: flex;
   align-items: center;
   gap: 9px;
   font-size: 14px;
   color: var(--muted);
-}
-.avatar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 25px;
-  height: 25px;
-  border-radius: 50%;
-  border: 2px solid var(--paper);
-  background: #e6d4b6;
-  color: #645139;
-  font-size: 10px;
-}
-.avatar.second {
-  margin-left: -16px;
-  background: #d5dfcf;
-  color: #4f6548;
 }
 .meta-divider {
   height: 12px;
@@ -438,17 +392,13 @@ svg {
   justify-content: space-between;
   align-items: center;
   gap: 14px;
-  padding: 16px;
-  border: 1px solid #d5dacb;
-  border-radius: var(--radius-panel);
-  background: #f0f2e9;
+  padding: 14px 0;
+  border-block: 1px solid var(--line);
 }
 .microphone-panel {
   margin: 20px clamp(16px, 3vw, 44px) 0;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-panel);
-  background: #f0f2e9;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
 }
 .microphone-heading {
   display: flex;
@@ -537,13 +487,38 @@ svg {
   width: 48px;
 }
 .meeting-focus {
+  margin-top: 28px;
+  border-block: 1px solid var(--line);
+}
+.focus-disclosure > summary,
+.setup-disclosure > summary {
+  cursor: pointer;
+  min-height: 48px;
+  padding: 12px 4px;
+  color: var(--forest);
+  font-size: 14px;
+  font-weight: 650;
+}
+.focus-disclosure > summary span {
+  margin-left: 12px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.focus-disclosure > summary:focus-visible,
+.setup-disclosure > summary:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.focus-disclosure[open] {
+  padding-bottom: 16px;
+}
+.focus-disclosure .setting-control {
+  margin-top: 12px;
+}
+.setup-disclosure {
   margin-top: 20px;
-  padding: 16px;
-  border: 1px solid #d5dacb;
-  border-radius: var(--radius-panel);
-  background: #f0f2e9;
-  display: grid;
-  gap: 10px;
+  border-top: 1px solid var(--line);
 }
 .meeting-focus-heading {
   display: flex;
@@ -577,10 +552,8 @@ svg {
 }
 .tabs {
   display: flex;
-  gap: 6px;
-  background: #ecefe4;
-  padding: 5px;
-  border-radius: 20px;
+  gap: 18px;
+  border-bottom: 1px solid var(--line);
 }
 .tabs button {
   display: flex;
@@ -588,46 +561,33 @@ svg {
   gap: 7px;
   color: var(--muted);
   border: 0;
-  padding: 9px 13px;
+  padding: 10px 0;
   background: transparent;
-  border-radius: var(--radius-control);
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
   font-size: 15px;
 }
 .tabs button[aria-selected='true'] {
   color: var(--forest);
-  background: #fffef9;
-  box-shadow: 0 2px 5px #203c3210;
-  font-weight: 700;
+  border-bottom-color: var(--forest);
+  font-weight: 650;
 }
 .tabs button > span {
   color: var(--muted);
   font-size: 13px;
 }
-.note-intro {
-  margin-top: 26px;
-}
-.note-intro h2 {
-  font-size: 20px;
-  letter-spacing: -0.02em;
-}
-.note-intro p {
-  margin-top: 9px;
-  color: var(--muted);
-  font-size: 16px;
-  max-width: 44ch;
-}
 .note-editor {
   width: 100%;
-  min-height: 158px;
-  margin-top: 21px;
-  padding: 16px;
-  border: 1px solid var(--line);
+  min-height: 220px;
+  margin-top: 16px;
+  padding: 8px 4px;
+  border: 0;
   resize: vertical;
-  background: #fffef9;
+  background: transparent;
   color: var(--ink);
   line-height: 1.8;
   font-size: 16px;
-  border-radius: 20px;
+  border-radius: 4px;
 }
 .note-editor:focus-visible {
   outline-offset: 3px;
@@ -640,8 +600,7 @@ svg {
   flex-wrap: wrap;
   color: var(--muted);
   margin-top: 9px;
-  padding-bottom: 22px;
-  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
   font-variant-numeric: tabular-nums;
 }
 .companion-heading {
@@ -656,22 +615,11 @@ svg {
   font-weight: 700;
 }
 .question-idle {
-  padding: 26px 22px 23px;
-  border: 1px solid #d7dccd;
-  border-radius: var(--radius-question);
-  background: #eef1e6;
-}
-.idle-mark {
-  margin: 0 0 16px;
-  color: #647953;
-  background: #fffef9;
-  padding: 12px;
-  border-radius: 20px;
-  display: inline-flex;
+  padding: 20px 0;
 }
 .question-idle h3 {
-  font-size: 22px;
-  font-weight: 700;
+  font-size: 18px;
+  font-weight: 650;
   letter-spacing: -0.025em;
   line-height: 1.35;
 }
@@ -680,20 +628,6 @@ svg {
   color: #616e56;
   margin-top: 11px;
   line-height: 1.7;
-}
-.cue-example {
-  border-top: 1px solid #d0d8c3;
-  margin-top: 24px;
-  padding-top: 15px;
-  color: #5e6b53;
-}
-.cue-example span {
-  font-size: 14px;
-}
-.cue-example p {
-  font-size: 16px;
-  margin-top: 6px;
-  font-style: italic;
 }
 .companion-footnote {
   font-size: 14px;
@@ -893,9 +827,7 @@ svg {
 }
 .context-panel {
   margin-top: 24px;
-  padding: 18px 20px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
+  padding: 0 0 18px;
   background: var(--paper);
 }
 .context-panel,
@@ -941,9 +873,8 @@ svg {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
 }
 .context-list li strong {
   display: block;
@@ -1370,11 +1301,7 @@ svg {
     width: 205px;
   }
   .question-idle {
-    padding: 19px;
-  }
-  .question-idle .idle-mark,
-  .cue-example {
-    display: none;
+    padding: 16px 0;
   }
   .question-idle h3 {
     font-size: 20px;
@@ -1430,7 +1357,6 @@ svg {
   .sidebar-bottom {
     margin: 0;
   }
-  .sidebar-note,
   .version {
     display: none;
   }
@@ -1443,8 +1369,7 @@ svg {
     padding: 16px;
   }
   .list-heading,
-  .list-label,
-  .list-foot {
+  .list-label {
     display: none;
   }
   .meeting {
@@ -1488,9 +1413,12 @@ svg {
     padding: 7px;
     font-size: 14px;
   }
-  .session-strip,
-  .meeting-focus {
-    padding: 12px;
+  .session-strip {
+    padding: 12px 0;
+  }
+  .focus-disclosure > summary span {
+    display: block;
+    margin-left: 18px;
   }
   .session-actions {
     margin-left: auto;
@@ -1517,13 +1445,10 @@ svg {
   }
 }
 
-/* The first-run card in the notebook's Start here column. */
+/* Optional setup is reachable after the meeting list. */
 .setup-card {
   text-align: left;
-  border: 1px solid #cbd2c1;
-  background: #f3f5ec;
-  border-radius: var(--radius-panel);
-  padding: 16px 18px;
+  padding: 12px 4px;
   margin-bottom: 16px;
 }
 .setup-card .meeting-line {
@@ -1563,7 +1488,7 @@ svg {
 }
 .setup-steps .text-button {
   margin-top: 4px;
-  min-height: 32px;
+  min-height: 44px;
 }
 
 /* Focus suggestions from Granola, under the focus field in the notebook. */
