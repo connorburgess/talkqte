@@ -61,7 +61,8 @@ This track runs alongside the feature milestones below. The goal includes a depe
 - [x] Withdraw a question when a later line matches a fixed owner, date, or choice pattern; keep a question being read in place and mark it answered with its source. Phrase rules only.
 - [x] Skip a question type within two minutes of when it was last raised and shown, whether it was answered, dismissed, or ignored. Phrase rules only.
 - [x] Separate, explicit macOS microphone activity monitoring with a Stop control and no retained audio.
-- [ ] Verify real microphone permission, device release, signal activity, and disconnect behavior on macOS.
+- [x] Record the owner's bounded microphone activity-monitor acceptance, separating reported passes from unknown device/recovery details ([11 November report](docs/native-validation.md#owner-reported-microphone-acceptance--11-november-2026)).
+- [ ] Verify real microphone permission, device release, signal activity, and disconnect behavior on macOS. The owner reports passing the activity-monitor checklist on 11 November; the input/OS, exact disconnect status, fallback and reconnect behavior still need a named configuration. This does not validate the separate local-transcription path.
 - [ ] Verify native placement, cross-app focus, Spaces, full-screen meetings, and screen-sharing behavior on macOS.
 
 The [native validation record](docs/native-validation.md) covers a limited macOS notebook keyboard smoke check and lists the remaining companion acceptance checks. It is not a complete accessibility or meeting-app compatibility pass.
