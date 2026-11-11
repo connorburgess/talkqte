@@ -34,6 +34,11 @@ import { ProcessingControl } from './components/ProcessingControl';
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { ContextNotes } from './components/ContextNotes';
 import { SetupCard, type SetupTarget } from './components/SetupCard';
+import {
+  PanelDivider,
+  boundWidth,
+  useElementWidth,
+} from './components/PanelDivider';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
 import { useCaptureControl } from './lib/useCaptureControl';
 
@@ -313,6 +318,25 @@ function FloatingQuestion() {
 }
 
 function Notebook() {
+  const [measureShell, shellWidth] = useElementWidth();
+  const [measureGrid, gridWidth] = useElementWidth();
+  // Layout preferences belong to this mounted notebook only, never meeting data.
+  const [preferredListWidth, setPreferredListWidth] = useState<number | null>(
+    null,
+  );
+  const [notesRatio, setNotesRatio] = useState(1 / 1.95);
+  const listResizable = shellWidth >= 1000;
+  const listDefault = shellWidth > 1200 ? 248 : shellWidth > 1150 ? 220 : 205;
+  const listMax = Math.max(
+    200,
+    Math.min(400, shellWidth - (shellWidth > 1200 ? 224 : 204) - 480),
+  );
+  const listWidth = boundWidth(preferredListWidth ?? listDefault, 200, listMax);
+  const splitContent = shellWidth > 760 && gridWidth >= 600;
+  const notesMax = Math.max(260, gridWidth - 28 - 290);
+  const notesWidth = boundWidth((gridWidth - 28) * notesRatio, 260, notesMax);
+  const resizeNotes = (value: number) =>
+    setNotesRatio(value / (gridWidth - 28));
   const { state, error, setError, busy, run } = useSession<Snapshot>();
   const microphone = useMicrophone();
   const capture = useCaptureControl();
@@ -801,7 +825,7 @@ function Notebook() {
     });
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" ref={measureShell}>
       <aside className="sidebar">
         <a
           className="brand"
@@ -848,92 +872,110 @@ function Notebook() {
       </aside>
 
       {view === 'notebook' && (
-        <aside className="meeting-list" aria-label="Meeting list">
-          <div className="list-heading">
-            <h1>Notebook</h1>
-            <span>1</span>
-          </div>
-          <label className="search">
-            <Search size={17} />
-            <input
-              aria-label="Search meetings"
-              placeholder="Search meetings"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            {search && (
-              <button
-                className="icon-button"
-                aria-label="Clear search"
-                onClick={() => setSearch('')}
-              >
-                <X size={15} />
-              </button>
-            )}
-          </label>
-          {state &&
-            !setupDismissed &&
-            !active &&
-            !(
-              state.userName &&
-              (!model || !['missing', 'downloading'].includes(model.status))
-            ) && (
-              <>
-                <SetupCard
-                  name={state.userName}
-                  focus={state.focus}
-                  model={model}
-                  items={contextItems}
-                  busy={busy}
-                  onGoTo={goToSetup}
-                  onDismiss={() => setSetupDismissed(true)}
-                />
-              </>
-            )}
-          <p className="list-label">Start here</p>
-          {matches ? (
-            <button
-              className="meeting selected-meeting"
-              aria-current="true"
-              onClick={() => {
-                setTab('notes');
-              }}
-            >
-              <div className="meeting-line">
-                <span className="demo-tag">
-                  {state.live ? 'Live session' : 'Demo meeting'}
-                </span>
-                <ChevronRight size={15} />
-              </div>
-              <strong>{state.title}</strong>
-              {state.live ? (
-                <p>Your microphone, transcribed on this device</p>
-              ) : (
+        <aside
+          className="meeting-list"
+          id="meeting-list"
+          aria-label="Meeting list"
+          style={listResizable ? { width: listWidth } : undefined}
+        >
+          <div className="meeting-list-content">
+            <div className="list-heading">
+              <h1>Notebook</h1>
+              <span>1</span>
+            </div>
+            <label className="search">
+              <Search size={17} />
+              <input
+                aria-label="Search meetings"
+                placeholder="Search meetings"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {search && (
+                <button
+                  className="icon-button"
+                  aria-label="Clear search"
+                  onClick={() => setSearch('')}
+                >
+                  <X size={15} />
+                </button>
+              )}
+            </label>
+            {state &&
+              !setupDismissed &&
+              !active &&
+              !(
+                state.userName &&
+                (!model || !['missing', 'downloading'].includes(model.status))
+              ) && (
                 <>
-                  <p>A welcome guide for the garden</p>
-                  <span className="meeting-meta">
-                    Robin & Alex <span>1m 44s</span>
-                  </span>
+                  <SetupCard
+                    name={state.userName}
+                    focus={state.focus}
+                    model={model}
+                    items={contextItems}
+                    busy={busy}
+                    onGoTo={goToSetup}
+                    onDismiss={() => setSetupDismissed(true)}
+                  />
                 </>
               )}
-            </button>
-          ) : (
-            <div className="search-empty">
-              <Search size={22} />
-              <p>No matching meetings.</p>
-              <button className="text-button" onClick={() => setSearch('')}>
-                Clear search
+            <p className="list-label">Start here</p>
+            {matches ? (
+              <button
+                className="meeting selected-meeting"
+                aria-current="true"
+                onClick={() => {
+                  setTab('notes');
+                }}
+              >
+                <div className="meeting-line">
+                  <span className="demo-tag">
+                    {state.live ? 'Live session' : 'Demo meeting'}
+                  </span>
+                  <ChevronRight size={15} />
+                </div>
+                <strong>{state.title}</strong>
+                {state.live ? (
+                  <p>Your microphone, transcribed on this device</p>
+                ) : (
+                  <>
+                    <p>A welcome guide for the garden</p>
+                    <span className="meeting-meta">
+                      Robin & Alex <span>1m 44s</span>
+                    </span>
+                  </>
+                )}
               </button>
+            ) : (
+              <div className="search-empty">
+                <Search size={22} />
+                <p>No matching meetings.</p>
+                <button className="text-button" onClick={() => setSearch('')}>
+                  Clear search
+                </button>
+              </div>
+            )}
+            <div className="list-foot">
+              <Leaf size={18} />
+              <p>
+                Try a conversation.
+                <br />
+                Get a feel for the timing.
+              </p>
             </div>
-          )}
-          <div className="list-foot">
-            <Leaf size={18} />
-            <p>
-              Try a conversation.
-              <br />
-              Get a feel for the timing.
-            </p>
           </div>
+          {listResizable && (
+            <PanelDivider
+              label="Meeting list"
+              controls="meeting-list"
+              className="list-divider"
+              value={listWidth}
+              min={200}
+              max={listMax}
+              onChange={setPreferredListWidth}
+            />
+          )}
         </aside>
       )}
 
@@ -951,6 +993,65 @@ function Notebook() {
               </>
             )}
           </div>
+          {view === 'notebook' && (listResizable || splitContent) && (
+            <details
+              className="layout-controls"
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  event.currentTarget.open = false;
+                  event.currentTarget.querySelector('summary')?.focus();
+                }
+              }}
+            >
+              <summary>Panel sizes</summary>
+              <div className="layout-controls-body">
+                {listResizable && (
+                  <label>
+                    Notebook width
+                    <input
+                      type="range"
+                      min={200}
+                      max={listMax}
+                      value={listWidth}
+                      aria-valuetext={`${listWidth} pixels wide`}
+                      onChange={(event) =>
+                        setPreferredListWidth(Number(event.target.value))
+                      }
+                    />
+                  </label>
+                )}
+                {splitContent && (
+                  <label>
+                    Notes and transcript width
+                    <input
+                      type="range"
+                      min={260}
+                      max={notesMax}
+                      value={notesWidth}
+                      aria-valuetext={`${notesWidth} pixels wide`}
+                      onChange={(event) =>
+                        resizeNotes(Number(event.target.value))
+                      }
+                    />
+                  </label>
+                )}
+                <button
+                  className="secondary-button"
+                  onClick={() => {
+                    setPreferredListWidth(null);
+                    setNotesRatio(1 / 1.95);
+                  }}
+                >
+                  Reset panel sizes
+                </button>
+                <p>
+                  Sizes last until you close the app. Narrow windows stack the
+                  panels.
+                </p>
+              </div>
+            </details>
+          )}
           <span className="prototype-label">
             {bridge.desktop ? 'Desktop prototype' : 'Browser preview'}
           </span>
@@ -1404,8 +1505,18 @@ function Notebook() {
                 )}
               </div>
             </section>
-            <div className="notebook-grid">
-              <section className="editor-section">
+            <div
+              className={`notebook-grid${splitContent ? ' is-split' : ''}`}
+              ref={measureGrid}
+              style={
+                splitContent
+                  ? {
+                      gridTemplateColumns: `${notesWidth}px 28px minmax(0, 1fr)`,
+                    }
+                  : undefined
+              }
+            >
+              <section className="editor-section" id="meeting-editor">
                 <div
                   className="tabs"
                   role="tablist"
@@ -1523,6 +1634,17 @@ function Notebook() {
                 )}
               </section>
 
+              {splitContent && (
+                <PanelDivider
+                  label="Notes and transcript"
+                  controls="meeting-editor"
+                  className="content-divider"
+                  value={notesWidth}
+                  min={260}
+                  max={notesMax}
+                  onChange={resizeNotes}
+                />
+              )}
               <aside className="companion" aria-label="Question companion">
                 <div className="companion-heading">
                   <h2>A timely question</h2>
@@ -1920,6 +2042,11 @@ function Notebook() {
         <div className="visually-hidden" role="status">
           {notice}
         </div>
+        <p className="visually-hidden" id="panel-resize-help">
+          Drag to resize. Left and right arrows adjust width; Home and End use
+          the limits. Escape cancels a drag. Panel sizes in the toolbar offers
+          sliders and Reset.
+        </p>
       </main>
       <dialog
         ref={modal}
