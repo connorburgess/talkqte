@@ -1,3 +1,4 @@
+pub mod application_audio;
 pub mod audio_tap;
 mod capture_control;
 mod companion;
