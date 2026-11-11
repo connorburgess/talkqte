@@ -18,11 +18,14 @@ async function drag(page: Page, divider: Locator, distance: number) {
 }
 
 async function noOverflow(page: Page) {
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
+  // Viewport changes can return before the measured panel widths settle.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => document.documentElement.scrollWidth - innerWidth),
+      { message: 'Resized panels fit the viewport', timeout: 1000 },
+    )
+    .toBeLessThanOrEqual(0);
 }
 
 test.beforeEach(async ({ page }) => {
