@@ -1007,14 +1007,41 @@ mod tests {
     fn device_error_and_missing_callbacks_release_capture() {
         for failed in [false, true] {
             let (controller, meter, drops, now) = running();
+            // Lose a stream that was actually delivering audio, not just a
+            // start that never received its first callback.
+            meter.observe([0.5; 32].into_iter());
+            let listening = controller.poll(now).unwrap().snapshot;
+            assert_eq!(listening.status, Status::Listening);
+            assert_eq!(listening.activity, Activity::Active);
+            let lost_at = if failed {
+                // Native errors must stop capture even before the watchdog.
+                meter.observe([0.5; 32].into_iter());
+                now + Duration::from_millis(200)
+            } else {
+                assert!(controller
+                    .poll(now + INPUT_TIMEOUT - Duration::from_millis(1))
+                    .is_some_and(|update| update.snapshot.status == Status::Listening));
+                now + INPUT_TIMEOUT
+            };
             if failed {
                 meter.failed.store(true, Ordering::Release);
             }
-            let update = controller.poll(now + INPUT_TIMEOUT).unwrap();
+            let update = controller.poll(lost_at).unwrap();
             assert_eq!(update.snapshot.status, Status::Error);
             assert!(update.snapshot.device_name.is_none());
             assert_eq!(update.snapshot.activity, Activity::Quiet);
             assert!(!update.snapshot.can_start);
+            assert!(controller.begin_start().is_err());
+            assert!(update
+                .snapshot
+                .message
+                .as_deref()
+                .unwrap()
+                .contains(if failed {
+                    "monitoring stopped"
+                } else {
+                    "stopped delivering audio"
+                }));
             let error_revision = update.snapshot.revision;
             assert_eq!(drops.load(Ordering::SeqCst), 0);
             drop(update.retired);
@@ -1023,8 +1050,44 @@ mod tests {
             assert!(released.can_start);
             assert!(released.revision > error_revision);
             assert_eq!(drops.load(Ordering::SeqCst), 1);
-            assert!(controller.poll(now + INPUT_TIMEOUT).is_none());
+            // Late data or errors from the retired stream do not reconnect it.
+            meter.observe([0.5; 32].into_iter());
+            meter.failed.store(true, Ordering::Release);
+            assert!(controller.poll(lost_at + INPUT_TIMEOUT).is_none());
+            assert_eq!(controller.snapshot().unwrap().status, Status::Error);
+
+            // An explicit retry owns a new stream and ignores the old meter.
+            let (generation, _) = controller.begin_start().unwrap();
+            let next_meter = Arc::new(Meter::default());
+            let (stream, starts, next_drops) = fake(false);
+            let retry_at = lost_at + INPUT_TIMEOUT;
+            controller.complete_start(generation, next_meter.clone(), Ok(stream), retry_at);
+            next_meter.observe([0.0; 32].into_iter());
+            let recovered = controller.poll(retry_at).unwrap().snapshot;
+            assert_eq!(recovered.status, Status::Listening);
+            assert_eq!(recovered.activity, Activity::Quiet);
+            assert_eq!(starts.load(Ordering::SeqCst), 1);
+            finish(&controller, controller.request_stop().unwrap());
+            assert_eq!(next_drops.load(Ordering::SeqCst), 1);
+            assert_eq!(controller.snapshot().unwrap().status, Status::Off);
         }
+    }
+
+    #[test]
+    fn continuing_silent_callbacks_are_not_a_device_disconnect() {
+        let (controller, meter, drops, now) = running();
+        // Silence is still valid input. Only missing callbacks, not low signal,
+        // should trigger the watchdog during a quiet part of a conversation.
+        for seconds in 0..=10 {
+            meter.observe([0.0; 32].into_iter());
+            controller.poll(now + Duration::from_secs(seconds));
+            let snapshot = controller.snapshot().unwrap();
+            assert_eq!(snapshot.status, Status::Listening);
+            assert_eq!(snapshot.activity, Activity::Quiet);
+            assert_eq!(drops.load(Ordering::SeqCst), 0);
+        }
+        finish(&controller, controller.request_stop().unwrap());
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
     }
 
     #[test]
