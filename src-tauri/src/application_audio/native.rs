@@ -8,6 +8,7 @@ use std::sync::{
     Arc,
 };
 
+pub mod pcm;
 mod stream;
 pub use stream::{NativeOwner, Selection};
 

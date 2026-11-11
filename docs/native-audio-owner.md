@@ -75,10 +75,49 @@ need implementation or device evidence as applicable.
 No silent restart, alternate source, resampling, microphone mixing, retention,
 provider access or inference is introduced.
 
+## Bounded native PCM reading
+
+The same disabled development feature now includes `native::pcm::PcmReader`.
+It reads actual CoreMedia metadata and uses
+[`CMSampleBufferCopyPCMDataIntoAudioBufferList`](https://developer.apple.com/documentation/coremedia/cmsamplebuffercopypcmdataintoaudiobufferlist%28_%3Aat%3Aframecount%3Ainto%3A%29?language=objc)
+to copy into caller-owned, fixed scratch space. No capture callback or app command
+calls it yet. It carries no source/session authority: the eventual callback must
+check its approved operation, serialize its reader/scratch access, and pass only
+successful output through the existing source-bound handoff.
+
+The accepted format is deliberately narrow: ready, valid linear PCM, little-endian
+packed float32, 16 kHz, one channel, four bytes per frame/packet and one frame per
+packet. Mono planar is accepted only with the same contiguous size metadata.
+Unknown flags, inconsistent metadata, variable frame sizes, missing data and
+non-finite samples fail closed. Buffers must contain 1–2,048 frames (at most
+128 ms). Larger buffers are rejected, not truncated or silently split; observed
+native buffer sizes must inform any later change to this bound. The reader does
+not convert, clamp, pad or insert silence.
+
+The caller supplies an explicit source-clock origin. The reader checks numeric,
+unrounded, nonnegative, epoch-zero `CMTime` values and uses wide rational
+arithmetic to map timestamps to exact frame offsets. Uniform per-frame timing
+and total duration must agree with the format and frame count. Fractional-frame
+offsets, clock resets, overlapping/repeated frames and overflow are rejected.
+It preserves missing frame positions, including initial gaps, rather than using
+arrival time or the amount successfully queued. An inspected/copied interval
+consumes its source time even if the subsequent handoff is full. Any read error
+permanently retires this reader; the eventual callback must also cancel delivery
+and return cleanup control to the native owner. No automatic restart is supplied.
+
+This is a strict development acceptance contract, not proof that every supported
+Mac emits this layout or timestamp representation. The host still needs to
+establish the source-clock relationship to the engine's session clock. No native
+buffer or borrowed byte pointer escapes the read; the output is copied into the
+caller's scratch prefix. A temporary retained format description is released
+within the call. The Rust layer allocates no payload during the read, but this
+is **not** an allocation, locking or latency guarantee for the CoreMedia APIs.
+Validate those properties before using the path inside a live sample callback.
+
 ## Validation
 
-On the development Mac, all **343 Rust tests** pass with this feature enabled.
-The ten new tests construct no native stream and request no access: nine
+On the development Mac, all **350 Rust tests** pass with this feature enabled.
+The ten ownership tests construct no native stream and request no access: nine
 scripted lifecycle tests and one test of the actual completion block. They cover cancellation before startup, cancelled
 late success, successful start followed by missing/delayed Stop completion,
 explicit retry after failed Stop with a stale old completion, failed output
@@ -88,7 +127,15 @@ remains blocked until successful Stop and queue drain, and that resources are
 released once. Two added fault tests cover pending startup, running capture,
 pending Stop, repeated faults and isolation from a later operation. They invoke
 the same atomic signal as the delegate; they do not simulate an Objective-C
-message or prove native error delivery. The concrete macOS driver is compiled with those tests. A compile-fail doctest
+message or prove native error delivery. Seven further tests exercise PCM validation: five construct real CoreMedia
+objects containing fictional float samples and call the native copy/metadata
+APIs, and two test unsupported ASBD fields and rational clock rejection. They
+cover mono/planar values, exact gaps across time scales, wrong rate, missing
+backing, oversized buffers, NaN, invalidation, inconsistent duration, overlap,
+variable frame sizes and internal timing gaps. No stream or capture source is
+created. These memory-only checks run on the development Mac; they do not prove
+macOS 14 behavior or the live callback contract. The concrete macOS driver is
+compiled with those tests. A compile-fail doctest
 also guards against making the native owner transferable across threads.
 
 ```sh
@@ -113,7 +160,9 @@ This selects a development implementation, not a production binding proven on de
 Enabled binding features cover streams, retained source metadata, blocks,
 dispatch, CoreMedia and CoreGraphics; picker, recording and screenshot features
 are not selected. The existing objc2 0.6.5, block2 0.6.2 and dispatch2 0.3.1
-versions are reused. The lockfile additionally resolves ScreenCaptureKit,
+versions are reused. PCM reading adds direct optional CoreMedia/CoreAudioTypes
+references and a test-only CoreFoundation reference at their already-resolved
+0.3.2 versions, with no new package version. The lockfile additionally resolves ScreenCaptureKit,
 CoreMedia and CoreVideo 0.3.2, with no unrelated version update or Swift build.
 A lockfile dependency is not a measurement of delivered binary size.
 
@@ -127,9 +176,9 @@ does not replace those terms or complete a distribution-license review.
 ## Next acceptance and UI/UX checkpoint
 
 The immediate implementation dependency is a bounded, source-bound native sample
-callback with format-fault propagation. Validate format, byte layout, sample
-counts and native timestamps before copying into the existing handoff; reject
-unsupported input and preserve discontinuities. Then prepare the consent/selection
+callback with operation-scoped fault propagation. Connect the bounded PCM reader
+to the existing handoff, establish source/session clock origin, and verify callback
+allocation/latency and actual buffer sizes. Then prepare the consent/selection
 and owner-task shutdown flow before requesting a bounded native run. Do not add
 another generic queue or benchmark framework.
 

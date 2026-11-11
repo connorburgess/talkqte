@@ -18,8 +18,8 @@ required-features = ["local-whisper"]
 tauri-build = { version = "2", features = [] }
 
 [features]
-# Development-only asynchronous ownership; no app command enables capture.
-native-audio-spike = ["dep:objc2-screen-capture-kit", "dep:objc2-foundation", "dep:dispatch2"]
+# Development-only ownership and PCM validation; no app command enables capture.
+native-audio-spike = ["dep:objc2-screen-capture-kit", "dep:objc2-foundation", "dep:dispatch2", "dep:objc2-core-media", "dep:objc2-core-audio-types"]
 # Local speech recognition with whisper.cpp. Off by default until model
 # delivery is decided; needs CMake and a C++ toolchain to build.
 local-whisper = ["dep:whisper-rs"]
@@ -58,3 +58,9 @@ objc2-av-foundation = { version = "0.3", default-features = false, features = ["
 objc2-screen-capture-kit = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "SCStream", "SCShareableContent", "block2", "dispatch2", "objc2-core-media", "objc2-core-graphics"] }
 objc2-foundation = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "NSObject", "NSArray", "NSError", "NSString"] }
 dispatch2 = { version = "=0.3.1", optional = true }
+
+objc2-core-media = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "CMBase", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer", "CMTime", "objc2-core-audio-types"] }
+objc2-core-audio-types = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "CoreAudioBaseTypes"] }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std"] }
