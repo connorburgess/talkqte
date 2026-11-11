@@ -238,9 +238,89 @@ native audio, user-flow observation or transcription-quality result.
 
 The user goal remains timely context while following the conversation. This
 slice addresses the risk of turning separated speech into continuous input; it
-adds no rendered UI or listening-benefit evidence. Next, measure this combined
-handoff/timing/chunk path under sustained synthetic input and delayed consumers,
-recording resource use and discontinuities separately from native capture.
+adds no rendered UI or listening-benefit evidence. The bounded synthetic
+measurement below now covers this combined handoff/timing/chunk path; it does not
+complete native integration or the whole-app resource budgets.
 Native format conversion, clock accuracy, source filtering, startup/cleanup and
 hardware budgets remain open. The broader integration, accessibility, delivery,
 support and participation/listening gates above remain open too.
+
+## Bounded component measurement — 12 November 2026
+
+A one-off synthetic probe checked the combined path at
+[`98c1aa6`](https://github.com/connorburgess/talkqte/tree/98c1aa6fed720e60299a0e8ad844e71847d9ff1f).
+It found no loss in five minutes of normal pacing, preserved the exact gap under
+intentional overload, and rejected work after cancellation. This is an isolated
+component measurement, not a live-call benchmark or native capture result. No
+application behavior or permanent benchmark framework was added.
+
+### Method and acceptance
+
+- Apple M5 Pro, 48 GiB RAM, macOS 26.4 (25E246), native ARM64, Rust 1.97.1.
+  This was a shared development machine, not a controlled idle-host experiment.
+- The standalone driver compiled unchanged ownership, handoff, timing and chunk
+  modules from the recorded commit, with the existing `AudioChunk` definition
+  and sample-rate constant. It used `rustc -C opt-level=2 -C debug-assertions=yes`
+  and cached development-profile `rtrb` 0.4.1. It did not load Tauri, a recognizer,
+  a model or a device. Synthetic startup returned a unit resource.
+- One producer generated 320 mono frames at 16 kHz every 20 ms against absolute
+  monotonic deadlines. The ring held eight blocks (160 ms at that input size);
+  output chunks held at most 48,000 frames (three seconds). The consumer polled
+  about every millisecond and released each output after checking it.
+- Every frame's value was its absolute frame number divided by 2^23, exactly
+  representable and below 1 for these runs. Checking each output value against
+  its timestamp detected reordered samples or speech joined across a missing
+  interval. No output audio was accumulated. This probe used millisecond-aligned
+  frames; existing unit tests cover irregular blocks and sub-millisecond gaps.
+- Acceptance was declared before execution: zero normal loss; generated frames
+  equal delivered plus counted loss at clean EOF; input/output loss counters and
+  missing positions agree; chunks stay bounded; cancellation invalidates returned
+  work and discards pending audio. Resource figures establish a descriptive
+  baseline, without a component CPU/RSS pass threshold.
+- The overload run stalled the consumer for 800 ms after its first full chunk.
+  The cancellation run reused one gate for 1,000 freshly approved operations,
+  each with one full output chunk and 320 additional frames pending before Stop.
+  It checked the returned chunk's source/session guard, rejected further pushes
+  and repeated polls, dropped the resource/endpoints and observed the idle gate.
+
+### Observed results
+
+| Case | Driver wall time | Result | Process CPU time, user + system | Maximum RSS |
+| --- | --- | --- | --- | --- |
+| Normally paced input | 300.003 s | 4,800,000 generated and delivered frames; 100 chunks; zero dropped frames or gaps | 0.55 + 1.54 s | 3.02 MiB |
+| Intentional consumer stall | 10.003 s | 160,000 generated; 149,760 delivered in five chunks; 10,240 dropped frames exactly matched the preserved gap | 0.02 + 0.05 s | 2.30 MiB |
+| Repeated cancellation | 0.167 s, accelerated | 1,000 cycles; no accepted output after Stop; gate returned idle after each resource release | 0.16 + 0.00 s | 2.42 MiB |
+
+All output chunks were at most 48,000 frames. Normal process CPU time was 2.09 s
+across approximately 300 s, about 0.70% of one core. That includes generation,
+per-sample assertions, allocation and polling, not just the component. The
+cancellation driver's elapsed time excludes process startup; the external timed
+process took 0.67 s. It is not a long-duration memory test or a native Stop timer.
+
+An external `ps` sampler collected 298 RSS observations at approximately one-second
+intervals during the normal run. After the first 30 seconds, RSS ranged from
+2,240 to 3,088 KiB. Median RSS was 2,496 KiB during seconds 30–60 and 2,304 KiB
+during seconds 270–300, a 7.7% decrease rather than growth in this interval.
+`/usr/bin/time -lp` supplied process CPU time and maximum RSS; the external sampler
+is excluded. Raw process observations and the disposable driver remain outside
+the repository. The 34 existing boundary tests also passed in the standalone
+source harness; no test was added merely to repeat these implementations.
+
+### Decision and remaining dependency
+
+This closes the bounded synthetic component check, with no defect requiring a
+code change. It does not meet the [60-minute whole-app and minimum-device
+budgets](budgets.md): there was no native capture, format conversion, transcription,
+meeting app, companion, M1/8 GiB device or battery measurement. There is no new
+privacy, performance, accessibility or participation guarantee.
+
+The next meaningful audio evidence is the existing [source-only native
+experiment](system-audio-plan.md): truthful application selection, selected-source
+inclusion and unrelated-source exclusion, zero delivered video, and observed
+startup/Stop/resource release on the target OS. Binding and lifecycle preparation
+can proceed independently; running other-app capture still needs its explicit
+scope authorization and hardware. Add further offline work only for a named
+experiment prerequisite or reproduced failure. Granola account recovery, native
+accessibility, signed installation/upgrades, support and the separate
+participation/listening comparison remain open; another helper or successful
+build cannot substitute for them.
