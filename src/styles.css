@@ -561,9 +561,19 @@ svg {
 }
 .notebook-grid {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(290px, 0.95fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 28px;
   margin-top: 32px;
+}
+.notebook-grid.is-split {
+  column-gap: 0;
+}
+.notebook-grid:not(.is-split) .companion {
+  grid-row: 1;
+}
+.notebook-grid.is-split .companion {
+  grid-column: 3;
+  grid-row: 1;
 }
 .tabs {
   display: flex;
@@ -1354,20 +1364,10 @@ svg {
   .notebook-body {
     padding-inline: 28px;
   }
-  .notebook-grid {
-    grid-template-columns: minmax(240px, 1fr) minmax(275px, 0.95fr);
-    gap: 20px;
-  }
 }
 @media (max-width: 1150px) {
   .meeting-list {
     width: 205px;
-  }
-  .notebook-grid {
-    grid-template-columns: 1fr;
-  }
-  .companion {
-    grid-row: 1;
   }
   .question-idle {
     padding: 19px;

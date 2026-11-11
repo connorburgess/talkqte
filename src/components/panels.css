@@ -1,0 +1,103 @@
+.panel-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-height: 44px;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  color: #526552;
+  position: relative;
+  z-index: 2;
+}
+.panel-divider::before {
+  content: '';
+  position: absolute;
+  inset: 0 13px;
+  background: var(--line);
+  z-index: -1;
+}
+.panel-divider svg {
+  background: var(--paper, #f8f9f2);
+  border-radius: 4px;
+}
+.panel-divider:hover::before,
+.panel-divider:focus-visible::before,
+.panel-divider.is-dragging::before {
+  background: var(--forest);
+}
+.panel-divider:focus-visible {
+  outline: 2px solid var(--forest);
+  outline-offset: -2px;
+}
+.meeting-list-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #7b8973 transparent;
+}
+.meeting-list-content > * {
+  flex-shrink: 0;
+}
+.list-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -14px;
+}
+.content-divider {
+  grid-column: 2;
+  grid-row: 1;
+}
+.layout-controls {
+  position: relative;
+  margin-left: auto;
+  margin-right: 16px;
+  font-size: 13px;
+}
+.layout-controls summary {
+  cursor: pointer;
+  color: var(--forest);
+  padding: 12px 4px;
+  min-height: 44px;
+}
+.layout-controls summary:focus-visible {
+  outline: 2px solid var(--forest);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.layout-controls-body {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  width: 272px;
+  padding: 20px;
+  background: #fffef9;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 6px 18px #203c3218;
+  z-index: 10;
+}
+.layout-controls-body label {
+  display: block;
+  font-weight: 650;
+  margin-bottom: 16px;
+}
+.layout-controls-body input[type='range'] {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  accent-color: var(--forest);
+}
+.layout-controls-body p {
+  color: var(--muted);
+  margin: 12px 0 0;
+}
+.notebook-grid .editor-section,
+.notebook-grid .companion {
+  min-width: 0;
+}
