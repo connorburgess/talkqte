@@ -1,5 +1,16 @@
 # Granola import recovery check
 
+## Owner-observed native import and removal — 11 November 2026
+
+The owner reports that adding a Granola note and removing it both succeeded in the native app. The development checkout was updated to `d269764` before the check. This establishes a successful basic account import/removal on one Mac, beyond the fictional parser and browser tests. It is an owner observation, not an instrumented account or privacy audit; no private note content, identifiers or screenshot is included here.
+
+Sign-in, listing and requested Focus suggestions had already been observed. This new report does not independently verify displayed source/date accuracy, rejection of unselected provider content, newer/older reimport ordering, disconnect during a real request, or provider/OS retention. Those checks remain explicit integration acceptance work. It also supplies no live transcript input, writeback, meeting-usefulness or user-outcome evidence.
+
+Next account check: deliberately reimport a known updated note, confirm its source/date and absence of duplicates, then verify disconnect/reconnect and failure recovery without retaining private content. Keep existing notebook operation available throughout. Native accessibility and participation/listening validation remain separate.
+
+The dated development checkpoints below retain their original evidence scope. Their references to an unconfirmed first account import describe the state before this owner report.
+
+
 10 November 2026. The owner confirmed sign-in and note listing work. A compact, content-free account diagnostic now establishes the detail structure: `meetings_data` contains `meeting` entries with metadata attributes and direct `private_notes` and `summary` fields. The parser supports that structure; a successful selected real-note import is still unconfirmed. A build or fictional import is not account-level acceptance.
 
 The chooser now keeps failures inside its dialog, preserves the selection for retry, shows progress, and returns keyboard focus to the control that opened it. Closing, disconnecting, or replacing a pending import invalidates its late result in Rust. Cancellation discards results; an already-sent HTTP request may still finish. No import holds the notebook lock during network work. Granola selection stops at ten notes per request, matching the tool schema; twenty notes can be kept per session.
