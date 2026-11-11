@@ -100,4 +100,4 @@ jobs:
           rustc +1.97.1 -vV
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
-      - run: npm run tauri -- build --debug --no-bundle
+      - run: npm run tauri -- build --debug --ci
