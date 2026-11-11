@@ -11,6 +11,12 @@ async function pendingStatus(page: Page) {
     .toBeGreaterThan(0);
 }
 async function connected(page: Page) {
+  if (
+    await page
+      .locator('.focus-disclosure')
+      .evaluate((el) => !(el as HTMLDetailsElement).open)
+  )
+    await page.locator('.focus-disclosure > summary').press('Enter');
   await expect(button(page, 'Choose Granola notes')).toBeEnabled();
   await expect(button(page, 'Disconnect Granola')).toBeEnabled();
   await expect(button(page, 'Suggest from Granola')).toBeEnabled();

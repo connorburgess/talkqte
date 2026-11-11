@@ -513,6 +513,7 @@ test('with a model to install, the setup card keeps a speech-model step that lea
   page,
 }) => {
   await nativePage(page, '?model');
+  await page.locator('.setup-disclosure > summary').press('Enter');
   const card = page.getByRole('region', { name: 'Before your first meeting' });
   await expect(card.getByRole('listitem')).toHaveCount(4);
   await expect(card).toContainText('Speech model, to do');

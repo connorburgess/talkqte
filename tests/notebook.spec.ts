@@ -11,6 +11,7 @@ test.beforeEach(async ({ page }) => {
 test('focus is optional and the setup card can finish without it', async ({
   page,
 }) => {
+  await page.locator('.setup-disclosure > summary').press('Enter');
   const card = page.getByRole('region', { name: 'Before your first meeting' });
   await expect(card).toContainText('What matters today · optional');
   await card.getByRole('button', { name: 'Write the focus' }).click();
@@ -32,6 +33,7 @@ test('focus is optional and the setup card can finish without it', async ({
 test('the setup card sends Choose notes to the prior-context panel without changing view', async ({
   page,
 }) => {
+  await page.locator('.setup-disclosure > summary').press('Enter');
   const card = page.getByRole('region', { name: 'Before your first meeting' });
   await card.getByRole('button', { name: 'Choose notes' }).click();
   await expect(
@@ -44,6 +46,7 @@ test('the setup card sends Choose notes to the prior-context panel without chang
 });
 
 test('the setup card can be put away for the session', async ({ page }) => {
+  await page.locator('.setup-disclosure > summary').press('Enter');
   const card = page.getByRole('region', { name: 'Before your first meeting' });
   await card.getByRole('button', { name: 'Not now' }).click();
   await expect(card).toHaveCount(0);
@@ -153,7 +156,7 @@ test('search has a recoverable empty state and settings explain the prototype', 
   await expect(page.getByText('No matching meetings.')).toBeVisible();
   await page.getByRole('button', { name: 'Clear search' }).first().click();
   await expect(
-    page.getByRole('button', { name: /Demo meeting A better welcome/ }),
+    page.getByRole('button', { name: /A better welcome Demo meeting/ }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page
@@ -173,6 +176,7 @@ test('search has a recoverable empty state and settings explain the prototype', 
 test('focus lines are written in the notebook, kept for the session, cleared in one step, and a line without identifying words is refused', async ({
   page,
 }) => {
+  await page.locator('.focus-disclosure > summary').press('Enter');
   const box = page.getByRole('region', { name: 'This meeting' });
   const focus = box.getByRole('textbox', { name: 'Focus' });
   await expect(box.getByRole('button', { name: 'Clear' })).toHaveCount(0);

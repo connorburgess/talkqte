@@ -37,6 +37,8 @@ AI is intended to select relevant context, decide whether a cue would help, and 
 
 The microphone indicator measures signal activity only. It does not transcribe, record, or feed the demo. A live session is separate: see [Live session](#live-session-developer-build). Granola sign-in, listing, and requested focus suggestions have worked in account checks; the owner also confirmed native note import and removal on 11 November. Refresh, failure recovery and account data-flow checks remain. Imported-note reminders use title-word matches, not a judgment of relevance. See [current privacy behavior](PRIVACY.md) and the [native validation record](docs/native-validation.md) for the limits of existing checks.
 
+**Quieter notebook:** the editor and cue area come before optional meeting focus. Expand **This meeting** to edit Focus, or **Set up a live session** below the meeting list for the first-run checklist. Import, export, microphone status and Stop remain reachable. See the [layout and interaction checks](docs/notebook-simplification.md).
+
 **Adjustable panels:** drag the notebook divider or the divider between Notes/Transcript and the question. Focus a divider for arrow-key resizing, or use **Panel sizes** in the toolbar for sliders and reset. Narrow windows stack the panels; sizes last for the app session. See the [interaction checks and native limitations](docs/panel-sizing.md).
 
 ## Where we are heading
