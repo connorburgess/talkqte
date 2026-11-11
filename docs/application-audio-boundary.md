@@ -1,7 +1,8 @@
 # Selected-application audio ownership
 
 Development checkpoint, 11 November 2026. `src-tauri/src/application_audio.rs`
-implements an offline review/start/cancel boundary and synthetic audio handoff
+implements an offline review/start/cancel boundary, synthetic audio handoff
+and session timing
 for the source-only experiment in the [system-audio plan](system-audio-plan.md). It has no native adapter, OS
 enumeration, permission request, native audio delivery, Tauri command or app
 control.
@@ -147,11 +148,53 @@ sustained device resources remain unmeasured.
 
 The user task remains explicitly starting one named application and trusting
 Stop. This milestone addresses the risk of misattributing or joining separated
-speech; it adds no rendered user flow or usability evidence. The next live-input
-independent step is checked frame-to-session clock mapping with synthetic
-discontinuities. The native adapter contract must still establish truthful
+speech; it adds no rendered user flow or usability evidence. The session timing below supplies checked frame-to-session mapping with
+synthetic discontinuities. The native adapter contract must still establish truthful
 source selection, native clock mapping, startup deadlines and asynchronous cleanup. The separately
 permissioned capture experiment must still prove filtering, no delivered video,
 actual release and device budgets before any app integration. Integration,
 delivery/signing, native accessibility and participation/listening acceptance
 remain independent release gates; this handoff does not close them.
+
+## Session timing — 12 November 2026
+
+`application_audio::timing` consumes one handoff reader and binds it once to an
+explicit engine session ID and the session-relative millisecond time of frame
+zero. Delayed reads keep their capture position; neither wall time nor queue
+arrival time supplies the origin. The adapter remains responsible for deriving
+that origin from the native clock before use.
+
+Start and exclusive end are each calculated from absolute frame positions:
+`origin_ms + floor(frame * 1000 / sample_rate)`. Checked wide integer arithmetic
+avoids intermediate overflow and accumulated per-block rounding drift. A result
+outside `u64` milliseconds retires the reader without returning a partially
+mapped block. Millisecond rounding can make a short block or gap have equal
+endpoints; original samples, frame positions and a nonzero gap frame count retain
+that distinction. Missing audio is never filled with silence or concatenated.
+
+The wrapper retains exact operation/source identity and unconverted interleaved
+samples. A changed session, cancellation or closed handoff permanently retires
+its reader; pending startup remains retryable. Retirement closes the queue
+consumer, but the capture owner must still stop and release the actual source.
+Already returned work must pass `belongs_to(current_session, current_source)`
+and the engine's existing session-result guard at commit. Session IDs must not
+be reused. Queue-capacity losses remain readable, including trailing drops; after
+retirement the count is the last observation, not a native loss measurement.
+
+Eight offline tests verify delayed stereo delivery, explicit origins, irregular
+blocks at 8/44.1/192 kHz over a year-long frame offset, initial and capacity gaps,
+sub-millisecond gaps, trailing loss counts, session replacement, cancellation,
+same-application restarts, startup and closure, and near-`u64` boundary arithmetic.
+These synthetic inputs establish timestamp and ownership behavior only. No
+native clock precision, capture latency, resampling quality or useful-conversation
+outcome has been measured.
+
+The experience goal is context placed at the right point in the conversation,
+without treating missed audio as continuous speech. This milestone accepts the
+offline timing contract; it has no rendered UI change. Next is bounded,
+gap-aware preparation for the existing 16 kHz mono transcription contract,
+rejecting unsupported formats until conversion is explicit. Native clock origin,
+drift and resets, filtering, asynchronous cleanup, permission disclosure and
+actual device resource budgets remain separate adapter acceptance. Granola
+source/date and recovery checks, native accessibility, signed delivery/updates,
+support and participation/listening evidence remain release blockers.

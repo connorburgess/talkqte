@@ -111,9 +111,12 @@ and returned stream have been released. Adapter work and destruction occur
 outside the state lock. [Synthetic acceptance](application-audio-boundary.md)
 establishes ownership only. Its `handoff` submodule carries bounded synthetic
 audio with exact operation identity, immutable format, absolute frame positions
-and explicit gaps. Native filtering, clock mapping, deadlines and actual source
-release remain unimplemented or unverified. No runtime command instantiates
-this boundary, and the microphone path is unchanged.
+and explicit gaps. Its `timing` submodule binds one reader to a session and an
+explicit frame-zero origin, with checked absolute-frame conversion and
+frame-level discontinuities. Returned work still requires source/session guards.
+Native filtering, clock origin/drift, deadlines and actual source release remain
+unimplemented or unverified; the blocks are not transcription-ready audio. No
+runtime command instantiates this boundary, and the microphone path is unchanged.
 
 1. Capture both sides of a synthetic call with headphones, with clear microphone/system permissions.
 2. Stop and pause promptly; test device disconnect and permission denial.

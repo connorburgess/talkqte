@@ -4,6 +4,7 @@
 //! A future native adapter must independently prove the selection and filtering.
 
 pub mod handoff;
+pub mod timing;
 
 use std::sync::{
     atomic::{AtomicBool, Ordering},
