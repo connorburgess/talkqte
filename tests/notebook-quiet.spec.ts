@@ -81,6 +81,23 @@ test('a collapsed focus section reveals a rejected save without moving keyboard 
   await page.getByRole('textbox', { name: 'Focus' }).fill('Garden access');
   await notes.focus();
   await expect(page.getByRole('alert')).toHaveCount(0);
+
+  // Recovery must also be visible if the save finishes while Settings is open.
+  await page.evaluate(() => window.focusTest.hold());
+  await page.getByRole('textbox', { name: 'Focus' }).fill('Team sync');
+  await summary.press('Enter');
+  await page
+    .getByRole('button', { name: 'Settings', exact: true })
+    .press('Enter');
+  await page.evaluate(() => window.focusTest.release());
+  await expect
+    .poll(() => page.evaluate(() => window.focusTest.completed()))
+    .toBe(3);
+  const notebook = page.getByRole('button', { name: 'Notebook', exact: true });
+  await notebook.press('Enter');
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Focus' })).toBeVisible();
+  await expect(notebook).toBeFocused();
 });
 
 for (const width of [320, 600]) {

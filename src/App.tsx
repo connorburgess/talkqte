@@ -584,17 +584,15 @@ function Notebook() {
   // once the required steps are done.
   const [setupDismissed, setSetupDismissed] = useState(false);
   const meetingEntry = useRef<HTMLButtonElement>(null);
-  const focusDisclosure = useRef<HTMLDetailsElement>(null);
   const [focusExpanded, setFocusExpanded] = useState(false);
   // A failed background save must stay discoverable even after collapsing Focus.
   useEffect(() => {
-    if ((focusError || suggestionError) && focusDisclosure.current)
-      focusDisclosure.current.open = true;
+    if (focusError || suggestionError) setFocusExpanded(true);
   }, [focusError, suggestionError]);
   const pendingFocus = useRef<SetupTarget | null>(null);
   const goToSetup = (target: SetupTarget) => {
     if (target === 'focus') {
-      if (focusDisclosure.current) focusDisclosure.current.open = true;
+      setFocusExpanded(true);
       // The card only shows in the notebook, so the focus box is already here.
       setTimeout(() => {
         focusField.current?.scrollIntoView({ block: 'center' });
@@ -1538,7 +1536,6 @@ function Notebook() {
             >
               <details
                 className="focus-disclosure"
-                ref={focusDisclosure}
                 open={focusExpanded}
                 onToggle={(event) => setFocusExpanded(event.currentTarget.open)}
               >
