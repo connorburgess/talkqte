@@ -181,6 +181,14 @@ pub struct Reader {
 }
 
 impl Reader {
+    pub(super) fn format(&self) -> Format {
+        self.format
+    }
+
+    pub(super) fn control(&self) -> Control {
+        self.control.clone()
+    }
+
     pub fn dropped_frames(&self) -> u64 {
         self.dropped.load(Ordering::Acquire)
     }

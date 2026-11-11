@@ -48,6 +48,24 @@ impl Reader {
 }
 
 impl SessionReader {
+    /// Prepare bounded 16 kHz mono chunks on a worker. Other formats require
+    /// explicit conversion; this consumes the reader even when refused.
+    pub fn into_chunks(self) -> Result<super::chunks::Chunker, super::chunks::ChunkError> {
+        use super::chunks::{ChunkError, Chunker};
+        if let Some(error) = self.terminal {
+            return Err(ChunkError::Timing(error));
+        }
+        let reader = self.reader.as_ref().expect("active reader");
+        if reader.format().sample_rate() != crate::transcription::SAMPLE_RATE as u32
+            || reader.format().channels() != 1
+        {
+            return Err(ChunkError::UnsupportedFormat);
+        }
+        let control = reader.control();
+        let (session, origin_ms) = (self.session, self.origin_ms);
+        Ok(Chunker::new(self, control, session, origin_ms))
+    }
+
     /// Queue-capacity loss, including trailing drops without a later block.
     /// After retirement this is the last observed count, not a native loss total.
     pub fn dropped_frames(&self) -> u64 {
@@ -149,7 +167,7 @@ impl TimedBlock {
     }
 }
 
-fn frame_ms(origin_ms: u64, frame: u64, sample_rate: u32) -> Result<u64, TimingError> {
+pub(super) fn frame_ms(origin_ms: u64, frame: u64, sample_rate: u32) -> Result<u64, TimingError> {
     let offset = u128::from(frame)
         .checked_mul(1_000)
         .ok_or(TimingError::Overflow)?

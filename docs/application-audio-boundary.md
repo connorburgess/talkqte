@@ -1,11 +1,10 @@
 # Selected-application audio ownership
 
 Development checkpoint, 11 November 2026. `src-tauri/src/application_audio.rs`
-implements an offline review/start/cancel boundary, synthetic audio handoff
-and session timing
-for the source-only experiment in the [system-audio plan](system-audio-plan.md). It has no native adapter, OS
-enumeration, permission request, native audio delivery, Tauri command or app
-control.
+implements an offline review/start/cancel boundary, synthetic audio handoff,
+session timing and chunk preparation for the source-only experiment in the
+[system-audio plan](system-audio-plan.md). It has no native adapter, OS enumeration,
+permission request, native audio delivery, Tauri command or app control.
 The app remains microphone-only. This is not a capture capability or release.
 
 The goal is to receive relevant conversation context without accidentally
@@ -191,10 +190,57 @@ outcome has been measured.
 
 The experience goal is context placed at the right point in the conversation,
 without treating missed audio as continuous speech. This milestone accepts the
-offline timing contract; it has no rendered UI change. Next is bounded,
-gap-aware preparation for the existing 16 kHz mono transcription contract,
-rejecting unsupported formats until conversion is explicit. Native clock origin,
+offline timing contract; it has no rendered UI change. The chunk preparation below accepts the existing 16 kHz mono transcription
+contract and rejects unsupported formats until conversion is explicit. Native clock origin,
 drift and resets, filtering, asynchronous cleanup, permission disclosure and
 actual device resource budgets remain separate adapter acceptance. Granola
 source/date and recovery checks, native accessibility, signed delivery/updates,
 support and participation/listening evidence remain release blockers.
+
+
+## Gap-aware transcription chunks — 12 November 2026
+
+`SessionReader::into_chunks` consumes the mapped reader and accepts only an
+explicit 16 kHz mono format. Other rates and channel layouts are refused; no
+samples are resampled, downmixed or relabelled. This is worker-side preparation
+for `transcription::AudioChunk`, not a recognizer connection or native capability.
+
+Each poll consumes at most one handoff block and returns at most one chunk.
+Continuous audio is split into three-second chunks (48,000 samples). The
+assembler holds at most that many pending samples; each returned chunk contains
+at most 192,000 sample bytes. The original bounded handoff remains upstream.
+Allocations and sample copies occur on the worker. These structural limits are
+not measurements of whole-app memory, allocator overhead or device latency;
+callers still need a bounded downstream queue and must release rejected chunks.
+
+Every nonzero frame gap ends any partial chunk before the later samples begin,
+even when both sides round to the same millisecond. No missing samples are
+replaced with silence. Splits use the original absolute frame-to-session mapping,
+not repeated addition of rounded block durations. A clean producer EOF returns
+the last partial chunk once, then reports Closed; empty input emits no chunk.
+Cancellation, session replacement or timing failure discards pending audio and
+permanently retires the reader. Retirement closes the queue consumer; the source
+owner must still stop and release native resources. Queue-loss counts survive
+retirement, including loss after the last delivered block.
+
+Returned chunks retain exact operation and session identity. Before committing
+recognized text, a consumer must recheck `belongs_to` and the engine session;
+Stop cannot retract samples already returned. Borrowing the `AudioChunk` alone
+does not preserve that authorization. No production worker is connected in this
+change, and the microphone pipeline is unchanged.
+
+Nine synthetic tests verify sample-by-sample continuity across one minute of
+irregular blocks, exact split times after a long frame offset, initial and
+sub-millisecond gaps, capacity and trailing loss, final partial/empty EOF, startup,
+unsupported formats, cancelled or replaced sessions, returned-work guards and
+overflow. They establish offline assembly behavior only, with no model run,
+native audio, user-flow observation or transcription-quality result.
+
+The user goal remains timely context while following the conversation. This
+slice addresses the risk of turning separated speech into continuous input; it
+adds no rendered UI or listening-benefit evidence. Next, measure this combined
+handoff/timing/chunk path under sustained synthetic input and delayed consumers,
+recording resource use and discontinuities separately from native capture.
+Native format conversion, clock accuracy, source filtering, startup/cleanup and
+hardware budgets remain open. The broader integration, accessibility, delivery,
+support and participation/listening gates above remain open too.

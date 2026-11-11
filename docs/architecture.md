@@ -115,8 +115,11 @@ and explicit gaps. Its `timing` submodule binds one reader to a session and an
 explicit frame-zero origin, with checked absolute-frame conversion and
 frame-level discontinuities. Returned work still requires source/session guards.
 Native filtering, clock origin/drift, deadlines and actual source release remain
-unimplemented or unverified; the blocks are not transcription-ready audio. No
-runtime command instantiates this boundary, and the microphone path is unchanged.
+unimplemented or unverified. Its worker-side `chunks` submodule accepts only
+16 kHz mono, cuts continuous audio at three seconds and partial audio at every
+gap or clean EOF, and discards pending samples on cancellation/session changes.
+Returned chunks retain source/session guards; no recognizer or runtime command
+connects this boundary, and the microphone path is unchanged.
 
 1. Capture both sides of a synthetic call with headphones, with clear microphone/system permissions.
 2. Stop and pause promptly; test device disconnect and permission denial.
