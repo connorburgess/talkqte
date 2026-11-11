@@ -109,8 +109,10 @@ review/start/cancel boundary. It binds an immutable application selection to a
 one-use review and scoped Stop, reserving the operation until its pending start
 and returned stream have been released. Adapter work and destruction occur
 outside the state lock. [Synthetic acceptance](application-audio-boundary.md)
-establishes ownership only; native filtering, deadlines, audio handoff and actual
-source release remain unimplemented or unverified. No runtime command instantiates
+establishes ownership only. Its `handoff` submodule carries bounded synthetic
+audio with exact operation identity, immutable format, absolute frame positions
+and explicit gaps. Native filtering, clock mapping, deadlines and actual source
+release remain unimplemented or unverified. No runtime command instantiates
 this boundary, and the microphone path is unchanged.
 
 1. Capture both sides of a synthetic call with headphones, with clear microphone/system permissions.

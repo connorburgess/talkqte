@@ -1,6 +1,9 @@
 //! Development-only ownership for selected-application audio. No OS API,
-//! enumeration, permission request, audio buffer, or app command lives here.
+//! enumeration, permission request, or app command lives here. The handoff
+//! submodule accepts synthetic buffers without activating any capture.
 //! A future native adapter must independently prove the selection and filtering.
+
+pub mod handoff;
 
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -79,6 +82,7 @@ pub struct Snapshot {
 struct Operation {
     application: Application,
     cancelled: AtomicBool,
+    capturing: AtomicBool,
 }
 
 /// Opaque operation identity for scoped Stop and an allocation-free cancel
@@ -149,6 +153,7 @@ impl Gate {
         let control = Control(Arc::new(Operation {
             application,
             cancelled: AtomicBool::new(false),
+            capturing: AtomicBool::new(false),
         }));
         state.current = Some(control.clone());
         state.phase = Phase::Reviewing;
@@ -176,7 +181,10 @@ impl Gate {
         }
         let lease = review.lease.take().ok_or(Failure::ReviewChanged)?;
         state.phase = Phase::Starting;
-        Ok(Start { lease })
+        Ok(Start {
+            lease,
+            handoff_created: false,
+        })
     }
 
     /// Retire only this operation. During start/capture, Stopping remains
@@ -248,6 +256,7 @@ impl Review {
 #[must_use = "Dropping an unused start cancels it"]
 pub struct Start {
     lease: Lease,
+    handoff_created: bool,
 }
 
 impl Start {
@@ -284,6 +293,11 @@ impl Start {
                 && !self.lease.control.is_cancelled()
             {
                 state.phase = Phase::Capturing;
+                self.lease
+                    .control
+                    .0
+                    .capturing
+                    .store(true, Ordering::Release);
                 true
             } else {
                 false
