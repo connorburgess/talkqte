@@ -48,6 +48,10 @@ Granola startup status replies now respect newer connection results and the life
 
 The imported-note list also preserves newer import/removal events when a startup read completes late or fails, with [fictional list-recovery and UI/UX evidence](context-list-recovery.md). This prevents removed copies reappearing on screen; the owner subsequently confirmed basic native import/removal, while detailed account deletion and data-flow acceptance remain separate.
 
+### Microphone acceptance checkpoint — 11 November 2026
+
+The owner reports passing the activity-monitor checklist for initial Off state, permission denial/recovery, signal activity, Stop/restart and disconnect on app `4d647e7`. The [bounded record](native-validation.md#owner-reported-microphone-acceptance--11-november-2026) preserves those passes without inferring the unspecified input, OS or recovery sequence. The next device acceptance check must identify the opened input, observe disconnect/fallback and confirm release plus explicit restart. [Input visibility](microphone-input.md) now supplies the opened device name and an explicit stop/select-in-macOS/restart flow, with fictional Rust/browser checks and rendered UI review. Native label accuracy, device recovery and VoiceOver remain unverified. Live transcription, system audio and companion focus/Spaces/sharing remain separate gates; no broader reliability or user-benefit claim follows.
+
 ### Granola native checkpoint — 11 November 2026
 
 The owner confirmed adding and removing a real Granola note after updating the development checkout. This advances basic import beyond fictional tests. Source/date accuracy, refresh ordering, disconnect/reconnect during requests and retention/data-flow behavior were not separately reported; these are the next integration checks. See the [bounded observation](granola-import-validation.md#owner-observed-native-import-and-removal--11-november-2026). No user-outcome study or production-readiness claim follows from this check.

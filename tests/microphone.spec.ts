@@ -168,6 +168,7 @@ test('a delayed initial snapshot and older events cannot overwrite the microphon
       activity: 'quiet',
       canStart: true,
       message: null,
+      deviceName: null,
     }),
   );
   await expect(panel.getByRole('status')).toHaveText('On');
@@ -533,4 +534,102 @@ test('the live setup link fits narrow windows', async ({ page }) => {
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(320);
+});
+
+test('input label follows ordered capture state through stop, failure and explicit restart', async ({
+  page,
+}) => {
+  await nativePage(page);
+  const panel = page.getByRole('region', { name: 'Microphone', exact: true });
+  await expect(panel).not.toContainText('Input:');
+  const help = panel.locator('summary', { hasText: 'Change microphone' });
+  await help.focus();
+  await page.keyboard.press('Enter');
+  await expect(panel).toContainText('wait for Off');
+  expect(await page.evaluate(() => window.microphoneTest.calls)).not.toContain(
+    'start_microphone',
+  );
+  await page.keyboard.press('Enter');
+  await panel.getByRole('button', { name: 'Start microphone' }).click();
+  await expect(panel).not.toContainText('Input:');
+  await signal(page, {
+    revision: 10,
+    status: 'listening',
+    deviceName: 'Garden USB microphone',
+  });
+  await expect(panel).toContainText('Input: Garden USB microphone');
+  await panel.getByRole('button', { name: 'Stop microphone' }).click();
+  await expect(panel).toContainText('Releasing input: Garden USB microphone');
+  await signal(page, {
+    revision: 12,
+    status: 'off',
+    canStart: true,
+    deviceName: null,
+  });
+  await signal(page, {
+    revision: 11,
+    status: 'listening',
+    deviceName: 'Garden USB microphone',
+  });
+  await expect(panel).not.toContainText('Garden USB microphone');
+  await panel.getByRole('button', { name: 'Start microphone' }).click();
+  await signal(page, { status: 'listening', deviceName: 'Orchard headset' });
+  await expect(panel).toContainText('Input: Orchard headset');
+  await signal(page, {
+    status: 'error',
+    deviceName: null,
+    canStart: false,
+    message: 'The microphone stopped delivering audio.',
+  });
+  await expect(panel).not.toContainText('Orchard headset');
+  await expect(panel.getByRole('alert')).toContainText(
+    'stopped delivering audio',
+  );
+  await expect(panel.getByRole('button')).toBeDisabled();
+});
+
+test('live input name and change instructions remain reachable in Settings without changing capture', async ({
+  page,
+}) => {
+  await nativePage(page, '?live');
+  await page.getByRole('button', { name: 'Start live session' }).click();
+  await signal(page, {
+    status: 'listening',
+    deviceName: 'Garden USB microphone',
+  });
+  const panel = page.getByRole('region', { name: 'Microphone', exact: true });
+  await expect(panel).toContainText('Input: Garden USB microphone');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(panel).toContainText('Input: Garden USB microphone');
+  await panel.locator('summary').focus();
+  await page.keyboard.press('Enter');
+  await expect(panel).toContainText('System Settings → Sound → Input');
+  await expect(
+    panel.getByRole('button', { name: 'Stop live session' }),
+  ).toBeEnabled();
+  await expect(panel.locator('summary')).toBeFocused();
+  expect(await page.evaluate(() => window.microphoneTest.calls)).not.toContain(
+    'stop_microphone',
+  );
+});
+
+test('unknown and long input names do not hide narrow-window controls', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await nativePage(page);
+  await signal(page, { status: 'listening', deviceName: null });
+  const panel = page.getByRole('region', { name: 'Microphone', exact: true });
+  await expect(panel).toContainText('Input: name unavailable');
+  await signal(page, { deviceName: 'Fictional'.repeat(13) });
+  await panel.locator('summary').click();
+  await expect(panel).toContainText('wait for Off');
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+  const stop = panel.getByRole('button', { name: 'Stop microphone' });
+  await stop.scrollIntoViewIfNeeded();
+  await stop.focus();
+  await page.keyboard.press('Enter');
+  await expect(panel.getByRole('status')).toHaveText('Stopping…');
 });

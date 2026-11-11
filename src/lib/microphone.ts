@@ -9,6 +9,7 @@ export interface MicrophoneSnapshot {
   activity: 'quiet' | 'active';
   canStart: boolean;
   message: string | null;
+  deviceName: string | null;
 }
 
 export function microphoneLabel(state: MicrophoneSnapshot | null) {

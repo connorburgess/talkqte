@@ -87,6 +87,24 @@ On 8 November 2026 the owner ran a short check with the owner's explicit permiss
 
 These are the owner's observations, reported to the developer; no screen capture was taken. The owner noted the controls work but the interface needs polish. Not checked: permission denial, device disconnect or change, headphones or Bluetooth, other Macs or macOS versions, and long sessions. Microphone activity is still not connected to transcription or cues.
 
+## Owner-reported microphone acceptance — 11 November 2026
+
+The owner reported passing the five microphone checklist groups in **TalkQTE Acceptance Check**, an ad-hoc debug bundle whose launcher recorded app commit [`4d647e7`](https://github.com/connorburgess/talkqte/commit/4d647e7421529171d7b0d4a672f3bb89a2867297). This was the default-feature activity monitor, without `local-whisper`. These are owner-reported checklist results, not automated observations or a new transcription test.
+
+| Checklist group | Report and evidence limit |
+| --- | --- |
+| Initially Off; no access requested by the fictional demo | Reported pass. |
+| Permission denial leaves a responsive app with a clear failure | Reported pass; whether this used a fresh permission prompt or an existing permission decision was not separately described. |
+| Allow access in System Settings, quit/reopen, explicitly start | Reported pass. |
+| Signal/quiet indication, Stop/release, then start/stop again | Reported pass against the checklist; no timing measurements or device trace supplied. |
+| External input disconnect and explicit restart | Reported pass. Input model/connection, exact status, fallback behavior and reconnect sequence were not supplied, so a device-specific recovery path is not yet established. |
+
+The report did not repeat the Mac, macOS version or input route; do not inherit the configurations from earlier checks. No recordings, transcripts or desktop screenshots accompany this record. The owner requested clearer input-device visibility or a switching control. The next check should name the input and OS, record the disconnect message and any source change, confirm release, and verify an explicit restart after reconnecting. The broad microphone roadmap gate remains open for that evidence; the reported passes are preserved here.
+
+**UI/UX checkpoint:** the owner could complete the activity checklist but could not identify or change the input within TalkQTE. Device visibility is the next bounded improvement. Native companion placement was not fully accepted: the owner noted the absence of a bottom-left preset (the four implemented choices are bottom-right, top-center, top-left and top-right). Cross-app focus, Spaces, full-screen and screen-sharing checks have no new result. An unavailable desktop-control tool prevented the follow-up; that is not evidence of a TalkQTE defect.
+
+This does not validate live-session Stop/transcription drain, system audio, other devices, sustained operation or meeting usefulness. Keep those acceptance gates separate.
+
 ## Live session check
 
 On 9 November 2026 the owner ran the first live session on hardware, with the owner's explicit permission, from a `local-whisper` development build (`npm run tauri -- dev --features local-whisper`) of `main` at [`2faa84a`](https://github.com/connorburgess/talkqte/commit/2faa84a0783ffef1d780a48d1069bf44c6ce322d)'s parent, on an Apple M5 Pro Max with macOS 26.4, the built-in microphone, and the `tiny.en` model installed from Settings (78 MB). Two Parallels virtual machines were running at the time, with the Mac's memory at about 85%. Three fictional notes, written for the check, were imported from a file on the owner's desktop. Nothing was recorded, kept, exported, or sent; the owner quit the app afterwards.
