@@ -13,6 +13,7 @@ Use Node.js 22, Rust 1.97.1, and the [Tauri prerequisites](https://v2.tauri.app/
 ```sh
 npm run format:check
 npm run test:contributions
+npm run check:docs
 npm run build
 npx playwright install chromium webkit
 npm test

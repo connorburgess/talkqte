@@ -14,6 +14,8 @@
     "test:e2e": "playwright test",
     "test:contributions": "node --test scripts/check-contributions.test.mjs",
     "test:cue-lab": "node --test scripts/cue-lab.test.mjs",
+    "test:docs": "node --test scripts/check-docs.test.mjs",
+    "check:docs": "node scripts/check-docs.mjs",
     "lab:claude": "node scripts/cue-lab.mjs",
     "check": "tsc -b && playwright test",
     "format": "prettier --write .",
