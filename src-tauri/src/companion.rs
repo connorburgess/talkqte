@@ -114,14 +114,15 @@ fn frame_at(
     let width =
         ((logical_width * scale).round() as u32).min(area.0.saturating_sub(2 * margin).max(1));
     let logical_height = match mode {
-        Mode::Question => 340.0,
-        Mode::Details => 460.0,
-        Mode::AnsweredDetails => 560.0,
+        // Sized for the compact card: heading plus one source line.
+        Mode::Question => 240.0,
+        Mode::Details => 420.0,
+        Mode::AnsweredDetails => 520.0,
         _ => 76.0,
     } + if question && text_size == QuestionSize::Large {
         // Large text wraps more in the narrow window, and WebKit sets the
-        // font a little taller than Chromium: 80 px keeps both inside.
-        80.0
+        // font a little taller than Chromium: 60 px keeps both inside.
+        60.0
     } else {
         0.0
     };
@@ -462,11 +463,11 @@ mod tests {
                 size,
             )
         };
-        // One question's height, 120 px more for its context, 100 px more
-        // for an answer; large text adds 80 px to each.
-        assert_eq!(at(Mode::Question, QuestionSize::Standard).height, 340);
-        assert_eq!(at(Mode::Details, QuestionSize::Standard).height, 460);
-        assert_eq!(at(Mode::AnsweredDetails, QuestionSize::Large).height, 640);
+        // One compact question, 180 px more for its sources, 100 px more
+        // for an answer; large text adds 60 px to each.
+        assert_eq!(at(Mode::Question, QuestionSize::Standard).height, 240);
+        assert_eq!(at(Mode::Details, QuestionSize::Standard).height, 420);
+        assert_eq!(at(Mode::AnsweredDetails, QuestionSize::Large).height, 580);
         for size in [QuestionSize::Standard, QuestionSize::Large] {
             assert!(at(Mode::AnsweredDetails, size).height > at(Mode::Details, size).height);
             assert_eq!(

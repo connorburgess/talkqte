@@ -32,10 +32,12 @@ test('mixed sources stay distinct and keyboard disclosure holds the suggestion',
   await nativePage(page);
   await show(page, { ...mixedCue, aboutFocus: true });
   const question = page.getByRole('region', { name: 'Suggested question' });
-  await expect(question).toContainText('Suggestion with prior context');
+  await expect(question).toContainText(
+    'From Garden guide review · 2026-11-01 and 1 more',
+  );
   const sources = page.getByRole('list', { name: 'Cue sources', exact: true });
   await expect(sources).toBeHidden();
-  await question.getByRole('button', { name: 'Why?', exact: true }).focus();
+  await question.getByRole('button', { expanded: false }).focus();
   await page.keyboard.press('Enter');
   await expect(sources.getByRole('listitem')).toHaveCount(3);
   await expect(sources.getByRole('listitem').nth(0)).toContainText(
@@ -58,7 +60,7 @@ test('mixed sources stay distinct and keyboard disclosure holds the suggestion',
   await expect(question).not.toContainText(
     'came through sooner and stays longer',
   );
-  await question.getByRole('button', { name: 'Hide context' }).click();
+  await question.getByRole('button', { expanded: true }).click();
   await expect(sources).toBeHidden();
   await expect(question).toContainText('Kept here until you dismiss it.');
   await question.getByRole('button', { name: 'Dismiss', exact: true }).click();

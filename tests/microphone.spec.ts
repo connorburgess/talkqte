@@ -268,8 +268,8 @@ test('a live session is labelled live, has no end time, and cannot be exported',
     ),
   );
   const question = page.getByRole('region', { name: 'Suggested question' });
-  await expect(question).toContainText('Live question · Owner');
-  await question.getByRole('button', { name: 'Why?' }).click();
+  await expect(question).toContainText('From the live transcript');
+  await question.getByRole('button', { expanded: false }).click();
   await expect(question).toContainText('From the live transcript');
   await expect(question).not.toContainText('fictional');
   await page.getByRole('tab', { name: /Transcript/ }).click();

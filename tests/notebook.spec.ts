@@ -93,7 +93,7 @@ test('keeping a quoted line puts it in the notes with its time and lets the cue 
   await page.getByRole('button', { name: 'Try demo', exact: true }).click();
   await page.clock.runFor(51_200);
   const question = page.getByRole('region', { name: 'Suggested question' });
-  await expect(question).toContainText('Said');
+  await expect(question).toContainText('From this conversation');
   await question.getByRole('button', { name: 'Keep this line' }).click();
   await page.getByRole('tab', { name: 'Notes', exact: true }).click();
   await expect(question).toHaveCount(0);
@@ -335,8 +335,8 @@ test('a line about an imported note shows a reminder that names the note as its 
   await expect(
     question.getByRole('heading', { name: 'Garden welcome guide' }),
   ).toBeVisible();
-  await expect(question).toContainText('Reminder from your notes · 2026-10-28');
-  await question.getByRole('button', { name: 'Why?' }).click();
+  await expect(question).toContainText('From your notes · 2026-10-28');
+  await question.getByRole('button', { expanded: false }).click();
   await expect(question).toContainText('From your imported note, 2026-10-28');
   await expect(question).toContainText('not from this conversation');
   await expect(question).toContainText('tool shed');
@@ -363,7 +363,7 @@ for (const removeAll of [false, true]) {
     await page.getByRole('button', { name: 'Try demo', exact: true }).click();
     await page.clock.runFor(8200);
     const question = page.getByRole('region', { name: 'Suggested question' });
-    await question.getByRole('button', { name: 'Why?' }).click();
+    await question.getByRole('button', { expanded: false }).click();
     await expect(question).toContainText('tool shed');
     await expect(question).toContainText('Kept here until you dismiss it.');
     await page.getByRole('button', { name: 'Pause', exact: true }).click();

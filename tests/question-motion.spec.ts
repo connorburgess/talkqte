@@ -55,15 +55,14 @@ for (const surface of ['notebook', 'companion'] as const) {
     await page.clock.runFor(2_000);
     await expect.poll(events).toEqual(['arrival']);
     const disclosure = question.getByRole('button', {
-      name: 'Why?',
-      exact: true,
+      expanded: false,
     });
     await disclosure.focus();
     await page.keyboard.press('Enter');
     await expect(question.locator('blockquote')).toBeVisible();
     await expect.poll(events).toEqual(['arrival', 'source']);
     await expect(
-      question.getByRole('button', { name: 'Hide context' }),
+      question.getByRole('button', { expanded: true }),
     ).toBeFocused();
     // Actions must remain available before the reveal's animationend.
     expect(
@@ -96,14 +95,14 @@ test('reduced motion shows the complete question and source without animation', 
   expect(
     await question.evaluate((element) => element.getAnimations().length),
   ).toBe(0);
-  await question.getByRole('button', { name: 'Why?', exact: true }).click();
+  await question.getByRole('button', { expanded: false }).click();
   await expect(question.locator('blockquote')).toBeVisible();
   expect(
     await question.evaluate(
       (element) => element.getAnimations({ subtree: true }).length,
     ),
   ).toBe(0);
-  await question.getByRole('button', { name: 'Hide context' }).click();
+  await question.getByRole('button', { expanded: true }).click();
   await expect(question.locator('blockquote')).toBeHidden();
   await question.getByRole('button', { name: 'Dismiss' }).click();
   await expect(question).toHaveCount(0);

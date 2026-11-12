@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import { ChevronDown, ChevronUp, X } from 'lucide-react';
+import { ChevronRight, X } from 'lucide-react';
 import {
   clockTime,
   type Cue,
@@ -40,6 +40,40 @@ function Sources({ sources, label }: { sources: CueSource[]; label: string }) {
   );
 }
 
+/** An untouched cue softens over its last seconds; nothing counts down. */
+const LEAVING_MS = 4_000;
+function leaving(cue: Cue) {
+  return (
+    !cue.held &&
+    !cue.expanded &&
+    !cue.resolvedBy &&
+    cue.remainingMs > 0 &&
+    cue.remainingMs <= LEAVING_MS
+  );
+}
+
+/** One quiet line naming where the cue comes from; it opens the excerpts. */
+function sourceLine(cue: Cue, live: boolean) {
+  const notes = cue.sources?.filter(
+    (source) => source.provenance.kind === 'priorNote',
+  );
+  let line: string;
+  if (notes?.length) {
+    const first = notes[0].provenance;
+    line =
+      first.kind === 'priorNote'
+        ? `From ${first.title} · ${first.date}${
+            notes.length > 1 ? ` and ${notes.length - 1} more` : ''
+          }`
+        : '';
+  } else if (cue.note) {
+    line = `From your notes · ${cue.note.sourceDate}`;
+  } else {
+    line = live ? 'From the live transcript' : 'From this conversation';
+  }
+  return cue.aboutFocus ? `${line} · matches your focus` : line;
+}
+
 export function Question({
   cue,
   size,
@@ -64,34 +98,23 @@ export function Question({
   const contextId = useId();
   return (
     <section
-      className={`question question-${size}`}
+      className={`question question-${size}${leaving(cue) ? ' is-leaving' : ''}`}
       aria-label="Suggested question"
     >
       <h2 aria-live={announce ? 'polite' : undefined}>
         {cue.kind === 'Said' ? `“${cue.question}”` : cue.question}
       </h2>
-      <p className="question-meta">
-        {cue.note
-          ? `Reminder from your notes · ${cue.note.sourceDate}`
-          : hasPriorNotes(cue.sources)
-            ? 'Suggestion with prior context'
-            : `${live ? 'Live question' : 'Demo question'} · ${cue.kind}${
-                cue.aboutFocus ? ' · about what matters' : ''
-              }`}
-      </p>
       <button
-        className="question-disclosure"
+        className="question-source"
         aria-expanded={cue.expanded}
         aria-controls={contextId}
         aria-disabled={busy}
-        aria-label={cue.expanded ? 'Hide context' : undefined}
-        title={cue.expanded ? 'Hide context' : undefined}
         onClick={() => {
           if (!busy) onInspect(!cue.expanded);
         }}
       >
-        {cue.expanded ? <ChevronUp size={18} /> : 'Why?'}
-        {!cue.expanded && <ChevronDown size={16} />}
+        <span>{sourceLine(cue, live)}</span>
+        <ChevronRight size={16} aria-hidden="true" />
       </button>
       <div id={contextId} hidden={!cue.expanded} className="question-context">
         {cue.sources?.length ? (
@@ -103,13 +126,12 @@ export function Question({
           </>
         ) : (
           <>
-            <p>
-              {cue.note
-                ? `From your imported note, ${cue.note.sourceDate} · not from this conversation`
-                : live
-                  ? 'From the live transcript'
-                  : 'From the fictional transcript'}
-            </p>
+            {cue.note && (
+              <p>
+                From your imported note, {cue.note.sourceDate} · not from this
+                conversation
+              </p>
+            )}
             <blockquote className="evidence">“{cue.evidence}”</blockquote>
           </>
         )}

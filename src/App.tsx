@@ -1810,8 +1810,9 @@ function Notebook() {
               <div>
                 <h2>Glance view</h2>
                 <p>
-                  One complete question, with context tucked away. Open “Why?”
-                  to see the source and keep the question until you dismiss it.
+                  One cue at a time, with its source on one line beneath. Open
+                  the source to read the excerpts and keep the cue until you
+                  dismiss it.
                 </p>
                 <p
                   className={`appearance-example question-${state.questionSize}`}

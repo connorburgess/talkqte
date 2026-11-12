@@ -61,7 +61,7 @@ If a problem is not listed, the [feedback route](#reporting-a-problem) at the en
 | The companion is not visible                     | Hide only hides the window; it does not stop anything. Turn it back on with Settings → Floating question window.       |
 | The companion is on the wrong display            | It follows the notebook's display. Move the notebook to the display you want.                                          |
 | The companion sits over something important      | Settings → Companion position offers three corners and top center. Near-camera placement is optional, never automatic. |
-| A question stays after the conversation moved on | Choose Dismiss. Untouched questions expire on their own; one you opened with Why? stays until dismissed.               |
+| A question stays after the conversation moved on | Choose Dismiss. Untouched questions expire on their own; one whose source you opened stays until dismissed.               |
 
 ## Export
 

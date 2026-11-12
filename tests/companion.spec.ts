@@ -103,7 +103,7 @@ test('a question fits the narrow window used on a small display', async ({
     const bounds = await button.boundingBox();
     expect(bounds!.height).toBeGreaterThanOrEqual(44);
   }
-  await question.getByRole('button', { name: 'Why?' }).click();
+  await question.getByRole('button', { expanded: false }).click();
   await page.setViewportSize({ width: 360, height: 460 });
   await expect(question.locator('blockquote')).toBeVisible();
   await expectCompanionToFit(page);
@@ -117,7 +117,7 @@ test('a question fits the narrow window used on a small display', async ({
   await page.setViewportSize({ width: 360, height: 540 });
   await expectCompanionToFit(page);
   expect(await fitsSideways()).toBe(true);
-  await question.getByRole('button', { name: 'Hide context' }).click();
+  await question.getByRole('button', { expanded: true }).click();
   await page.setViewportSize({ width: 360, height: 420 });
   await expectCompanionToFit(page);
 });
@@ -220,7 +220,7 @@ test('a question answered by the conversation leaves, and the words that answere
     page.getByRole('heading', { name: 'What date should we aim for?' }),
   ).toHaveCount(0);
   await expect(question).toContainText("“Let's have it ready by Friday");
-  await expect(question).toContainText('Said');
+  await expect(question).toContainText('From this conversation');
   await expect(
     question.getByRole('button', { name: 'Keep this line' }),
   ).toBeVisible();
@@ -234,7 +234,7 @@ test('an answered question being read stays and shows the answer', async ({
   page,
 }) => {
   await page.clock.runFor(37_200);
-  await page.getByRole('button', { name: 'Why?' }).click();
+  await page.getByRole('button', { expanded: false }).click();
   // The native companion grows to 560 px for context with an answer.
   await page.setViewportSize({ width: 420, height: 560 });
   await page.clock.runFor(14_000);

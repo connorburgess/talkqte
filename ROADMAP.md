@@ -85,7 +85,7 @@ Test the in-conversation interaction before investing in automatic detection. Th
 - [ ] Compare no assistance with stable, human-selected questions in matched fictional conversations; counterbalance order.
 - [ ] Compare source-backed context reminders in a separate human-cued condition; check orientation and appropriate responses while the topic is still active.
 - [ ] Measure useful participation and listening comprehension together, with useful clarification specific to the question condition; include unsupported, already-answered, and late cues. Do not use saves or speaking speed as the success measure.
-- [ ] Check whether the **Why?** hold is discoverable or needs a separate Hold action.
+- [ ] Check whether holding a cue by opening its source line is discoverable or needs a separate Hold action.
 - [ ] Check the notebook's keyboard route, native VoiceOver, reading time, and announcement preferences with users' normal setups.
 - [ ] Test content, timing, and placement separately; keep a simpler manual interaction if automation does not add value.
 - [ ] Label fictional examples of cue use, natural resolution, correction, and topic changes; validate conversation-based outcome signals without equating use with usefulness or dismissal with failure. Eleven labeled fictional cases include at least one for each signal ([outcome labels](docs/cue-intelligence.md#outcome-labels)); each now has three authorized lab runs recorded on 8–10 November, but label review and validation of the signals in real conversations remain.

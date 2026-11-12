@@ -13,13 +13,11 @@ test('keyboard Dismiss returns to notes after removing a paused question', async
   const notes = page.getByRole('textbox', { name: 'Meeting notes' });
   // Native Tab navigation is checked separately; begin at the control so
   // this regression does not depend on the browser's tab-to-buttons setting.
-  await question.getByRole('button', { name: 'Why?' }).focus();
+  await question.getByRole('button', { expanded: false }).focus();
   await page.keyboard.press('Enter');
-  await expect(
-    question.getByRole('button', { name: 'Hide context' }),
-  ).toBeFocused();
+  await expect(question.getByRole('button', { expanded: true })).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(question.getByRole('button', { name: 'Why?' })).toBeFocused();
+  await expect(question.getByRole('button', { expanded: false })).toBeFocused();
   await expect(question.locator('blockquote')).toBeHidden();
   await question.getByRole('button', { name: 'Dismiss' }).focus();
   await expect(question.getByRole('button', { name: 'Dismiss' })).toBeFocused();
@@ -118,7 +116,7 @@ test('a delayed Dismiss acknowledgement does not take focus back from another no
   await expect(search).toHaveValue('garden');
 });
 
-test('Why reveals the source and keeps a question through later prompts and playback completion', async ({
+test('opening the source reveals it and keeps a question through later prompts and playback completion', async ({
   page,
 }) => {
   await page.clock.install();
@@ -131,21 +129,18 @@ test('Why reveals the source and keeps a question through later prompts and play
   );
   await expect(source).toBeHidden();
   const disclosure = question.getByRole('button', {
-    name: 'Why?',
-    exact: true,
+    expanded: false,
   });
   await disclosure.focus();
   await page.keyboard.press('Enter');
   await expect(source).toBeVisible();
-  await expect(
-    question.getByRole('button', { name: 'Hide context' }),
-  ).toBeFocused();
+  await expect(question.getByRole('button', { expanded: true })).toBeFocused();
   await page.clock.runFor(75_000);
   await expect(question.getByRole('heading')).toHaveText(
     'Who will take the first draft?',
   );
   await expect(question).toContainText('Earlier in the demo.');
-  await question.getByRole('button', { name: 'Hide context' }).click();
+  await question.getByRole('button', { expanded: true }).click();
   await expect(source).toBeHidden();
   await page.clock.runFor(30_000);
   await expect(page.getByRole('button', { name: 'Replay demo' })).toBeVisible();
@@ -177,17 +172,16 @@ test('appearance controls are discoverable, apply to questions, and survive demo
   await page.getByRole('button', { name: 'Try demo', exact: true }).click();
   await page.clock.runFor(8_200);
   const question = page.getByRole('region', { name: 'Suggested question' });
-  await expect(question.getByRole('heading')).toHaveCSS('font-size', '30px');
-  await question.getByRole('button', { name: 'Why?' }).click();
+  await expect(question.getByRole('heading')).toHaveCSS('font-size', '26px');
+  await question.getByRole('button', { expanded: false }).click();
   await page.getByRole('button', { name: 'End demo' }).click();
   await expect(question).toHaveCount(0);
   await page.getByRole('button', { name: 'Replay demo' }).click();
   await page.clock.runFor(8_200);
-  await expect(question.getByRole('button', { name: 'Why?' })).toHaveAttribute(
-    'aria-expanded',
-    'false',
-  );
-  await expect(question.getByRole('heading')).toHaveCSS('font-size', '30px');
+  await expect(
+    question.getByRole('button', { expanded: false }),
+  ).toHaveAttribute('aria-expanded', 'false');
+  await expect(question.getByRole('heading')).toHaveCSS('font-size', '26px');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(page.getByLabel('Position', { exact: true })).toHaveValue(
     'topCenter',
@@ -228,7 +222,7 @@ for (const size of ['standard', 'large'] as const) {
         () => document.querySelector('main')!.scrollHeight <= innerHeight,
       ),
     ).toBe(true);
-    await question.getByRole('button', { name: 'Why?' }).click();
+    await question.getByRole('button', { expanded: false }).click();
     // Context opens into a 460 px window (540 with large text), no longer 500.
     await page.setViewportSize({
       width: 420,
