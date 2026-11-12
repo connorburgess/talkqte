@@ -37,7 +37,7 @@ pub struct PcmSpan {
 /// One immutable 16 kHz mono float32 timeline. Any error permanently retires it.
 /// No resampling, clock reset, silence insertion or inference is performed.
 pub struct PcmReader {
-    origin: CMTime,
+    origin: Option<CMTime>,
     next_frame: u64,
     terminal: Option<PcmError>,
 }
@@ -48,10 +48,29 @@ impl PcmReader {
     pub fn new(origin: CMTime) -> Result<Self, PcmError> {
         numeric(origin)?;
         Ok(Self {
-            origin,
+            origin: Some(origin),
             next_frame: 0,
             terminal: None,
         })
+    }
+
+    /// Establish frame zero from the first fully validated source buffer.
+    /// This preserves source-clock phase; it supplies no session-clock mapping.
+    /// The host must convert source_origin through the actual stream clock
+    /// before binding any returned audio to a session. Arrival time is not used.
+    pub fn from_first_sample() -> Self {
+        Self {
+            origin: None,
+            next_frame: 0,
+            terminal: None,
+        }
+    }
+
+    /// The exact source timestamp used for frame zero. In first-sample mode it
+    /// is absent until a complete read succeeds, and never changes afterwards.
+    /// This value alone grants no source/session authority or delivery permission.
+    pub fn source_origin(&self) -> Option<CMTime> {
+        self.origin
     }
 
     /// Copy one bounded buffer into caller-owned scratch space. Only use the
@@ -126,7 +145,8 @@ impl PcmReader {
         if i128::from(duration.value) * RATE != frames as i128 * i128::from(duration.timescale) {
             return Err(PcmError::Time);
         }
-        let first_frame = frame_position(self.origin, pts)?;
+        let origin = self.origin.unwrap_or(pts);
+        let first_frame = frame_position(origin, pts)?;
         if first_frame < self.next_frame {
             return Err(PcmError::Overlap);
         }
@@ -162,6 +182,9 @@ impl PcmReader {
         if scratch[..frames].iter().any(|value| !value.is_finite()) {
             return Err(PcmError::NonFinite);
         }
+        // Invalid metadata, failed copying or non-finite samples must not
+        // establish an anchor. The terminal error still forbids later recovery.
+        self.origin = Some(origin);
         self.next_frame = end;
         Ok(PcmSpan {
             first_frame,
@@ -347,6 +370,88 @@ pub(crate) mod tests {
 
     fn pcm(samples: &[f32], pts: CMTime) -> CFRetained<CMSampleBuffer> {
         sample(format(), samples, pts, time(1, 16_000), true)
+    }
+
+    #[test]
+    fn first_source_timestamp_preserves_phase_and_later_gaps() {
+        let origin = time(10_000_001, 1_000_000);
+        let first = pcm(&[0.25; 8], origin);
+        let mut scratch = [0.0; MAX_SAMPLES];
+        // An arbitrary session/host origin is not necessarily on this source's
+        // 16 kHz sample grid. It must not be rounded into a fake frame position.
+        let mut fixed = PcmReader::new(time(10, 1)).unwrap();
+        assert_eq!(
+            unsafe { fixed.read(&first, &mut scratch) },
+            Err(PcmError::Time)
+        );
+        let mut reader = PcmReader::from_first_sample();
+        assert!(reader.source_origin().is_none());
+        assert_eq!(
+            unsafe { reader.read(&first, &mut scratch) }.unwrap(),
+            PcmSpan {
+                first_frame: 0,
+                frames: 8
+            }
+        );
+        assert_eq!(&scratch[..8], &[0.25; 8]);
+        let anchor = reader.source_origin().unwrap();
+        assert_eq!(
+            (anchor.value, anchor.timescale, anchor.epoch, anchor.flags),
+            (origin.value, origin.timescale, origin.epoch, origin.flags)
+        );
+        // A different timescale and twelve missing source frames preserve the
+        // same origin. Delayed delivery cannot reset the timeline to frame zero.
+        let later = pcm(&[-0.5; 4], time(10_001_251_000, 1_000_000_000));
+        assert_eq!(
+            unsafe { reader.read(&later, &mut scratch) }.unwrap(),
+            PcmSpan {
+                first_frame: 20,
+                frames: 4
+            }
+        );
+        assert_eq!(
+            reader.source_origin().map(|value| value.value),
+            Some(origin.value)
+        );
+        let wrong_phase = pcm(&[0.0; 4], time(10_002_002, 1_000_000));
+        assert_eq!(
+            unsafe { reader.read(&wrong_phase, &mut scratch) },
+            Err(PcmError::Time)
+        );
+        let valid_later = pcm(&[0.0; 4], time(10_003_001, 1_000_000));
+        assert_eq!(
+            unsafe { reader.read(&valid_later, &mut scratch) },
+            Err(PcmError::Time)
+        );
+        assert_eq!(
+            reader.source_origin().map(|value| value.value),
+            Some(origin.value)
+        );
+    }
+
+    #[test]
+    fn a_rejected_first_buffer_cannot_establish_or_replace_the_anchor() {
+        let origin = time(10_000_001, 1_000_000);
+        let mut invalid_time = origin;
+        invalid_time.flags = CMTimeFlags::empty();
+        for (first, error) in [
+            (pcm(&[f32::NAN; 8], origin), PcmError::NonFinite),
+            (
+                sample(format(), &[0.0; 8], origin, time(1, 16_000), false),
+                PcmError::Copy,
+            ),
+            (pcm(&[0.0; 8], invalid_time), PcmError::Time),
+        ] {
+            let mut reader = PcmReader::from_first_sample();
+            let mut scratch = [0.0; MAX_SAMPLES];
+            assert_eq!(unsafe { reader.read(&first, &mut scratch) }, Err(error));
+            assert!(reader.source_origin().is_none());
+            assert_eq!(
+                unsafe { reader.read(&pcm(&[0.0; 8], origin), &mut scratch) },
+                Err(error)
+            );
+            assert!(reader.source_origin().is_none());
+        }
     }
 
     #[test]

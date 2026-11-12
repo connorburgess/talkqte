@@ -101,7 +101,7 @@ non-finite samples fail closed. Buffers must contain 1–2,048 frames (at most
 native buffer sizes must inform any later change to this bound. The reader does
 not convert, clamp, pad or insert silence.
 
-The caller supplies an explicit source-clock origin. The reader checks numeric,
+The existing output supplies an explicit source-clock origin. The reader checks numeric,
 unrounded, nonnegative, epoch-zero `CMTime` values and uses wide rational
 arithmetic to map timestamps to exact frame offsets. Uniform per-frame timing
 and total duration must agree with the format and frame count. Fractional-frame
@@ -111,6 +111,28 @@ arrival time or the amount successfully queued. An inspected/copied interval
 consumes its source time even if the subsequent handoff is full. Any read error
 permanently retires this reader; the callback also cancels delivery
 and returns cleanup control to the native owner. No automatic restart is supplied.
+
+The separate `PcmReader::from_first_sample` mode can instead retain the first
+fully validated source timestamp as frame zero. This avoids assuming that an
+arbitrary session-start reading lies on the source's 16 kHz frame grid. Its
+`source_origin` is absent until metadata, PCM copying and finite-value checks all
+succeed; it then stays unchanged across later blocks, gaps and errors. Invalid
+first input permanently retires the reader without publishing an anchor. Later
+fractional-frame offsets and overlap are still rejected. This mode does not infer
+session time, and the current output/owner still use the explicit-origin path.
+Before integrating it, the owning worker must convert that exact source timestamp
+through the actual stream clock and an established session anchor; first arrival
+must never substitute for clock correspondence. No native buffer needs retaining
+to expose the copied timestamp. Apple describes the stream's nullable
+[`synchronizationClock`](https://developer.apple.com/documentation/screencapturekit/scstream/synchronizationclock)
+and [`CMSyncConvertTime`](https://developer.apple.com/documentation/coremedia/cmsyncconverttime%28_%3Afrom%3Ato%3A%29)
+for relating media clocks; that conversion is not implemented here.
+
+Two memory-only regressions cover a source phase rejected by an arbitrary fixed
+origin, exact cross-timescale offsets and gaps, immutable anchoring, later phase
+rejection and failure before anchoring (invalid time, missing backing or NaN).
+They construct CoreMedia buffers containing fictional samples, with no stream,
+device or permission request. They prove source-frame arithmetic only.
 
 This is a strict development acceptance contract, not proof that every supported
 Mac emits this layout or timestamp representation. The host still needs to
