@@ -136,7 +136,7 @@ and uses [`CMSyncConvertTime`](https://developer.apple.com/documentation/coremed
 to convert new source boundaries for that packet to the host clock. It obtains
 the clock once for that packet and performs conversion again for later packets,
 rather than assuming one fixed offset and identical source/host rates. A shared
-source boundary keeps its already-published session millisecond: the previous
+source boundary keeps its already-published rational session time: the previous
 block's end is the next contiguous block's start, or the start of its missing-frame
 gap. Re-estimating that same boundary must not create an overlap or an unmarked
 hole. New endpoints still use the current clock relationship; if a new endpoint
@@ -178,9 +178,33 @@ independent hardware-clock drift.
 between the runtime's Rust `Instant` and the native host clock or establish an
 uncertainty bound. That host measurement remains required before app activation.
 The native reader deliberately does not enter the synthetic nominal-rate
-chunker: converting packet endpoints does not resample audio or establish
-recognizer offsets when source and host rates differ. Drift-aware transcription
-chunk preparation remains a separate integration dependency.
+chunker. It now returns a `NativeBlock` retaining rational start/end session
+positions alongside the original source-owned `TimedBlock` envelope. Its
+`frame_ms` lookup projects an absolute frame boundary inside that block,
+including the exclusive end, and floors only the final answer. A split must
+retain this original mapping rather than start again from a rounded timestamp.
+Positions outside the block, including missing frames, are rejected. The
+`timing().belongs_to` guard still has to pass before samples or delayed results
+are used; a numeric lookup is not source/session authorization.
+
+Interior positions use a fixed linear interpolation between that block's two
+converted boundaries. This is a bounded mapping policy for at most 2,048 native
+mono samples (128 ms at 16 kHz), not measured intra-block clock accuracy. Keeping
+the original mapping also prevents a later clock re-estimate from retiming
+already returned work. Comparison happens before rounding: a backwards or flat
+time span for a nonempty block, or a backwards gap even within one millisecond,
+retires delivery and invalidates earlier work. Exact arithmetic that cannot be
+represented fails instead of clamping or falling back to nominal sample time.
+
+Five additional memory-only tests cover every possible split boundary of a
+2,048-sample block at relative rates 0.5, 1 and 2; fractional source phase;
+immutable shared boundaries after a timebase change; sub-millisecond backwards
+blocks and gaps; invalid ranges and arithmetic overflow. These establish the
+mapping policy, not native drift, recognition quality or latency. Chunk assembly
+must next carry these mappings through splits and gaps, and the transcription
+worker must apply them to recognized offsets with source/session checks at
+result delivery. No resampling, recognizer connection, app command, capture
+permission or default-build behavior changes here.
 
 Two memory-only regressions cover a source phase rejected by an arbitrary fixed
 origin, exact cross-timescale offsets and gaps, immutable anchoring, later phase
