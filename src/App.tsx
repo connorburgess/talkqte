@@ -326,10 +326,7 @@ function Notebook() {
   const [notesRatio, setNotesRatio] = useState(1 / 1.95);
   const listResizable = shellWidth >= 1000;
   const listDefault = shellWidth > 1200 ? 248 : shellWidth > 1150 ? 220 : 205;
-  const listMax = Math.max(
-    200,
-    Math.min(400, shellWidth - (shellWidth > 1200 ? 224 : 204) - 480),
-  );
+  const listMax = Math.max(200, Math.min(400, shellWidth - 480));
   const listWidth = boundWidth(preferredListWidth ?? listDefault, 200, listMax);
   const splitContent = shellWidth > 760 && gridWidth >= 600;
   const notesMax = Math.max(260, gridWidth - 28 - 290);
@@ -832,7 +829,12 @@ function Notebook() {
 
   return (
     <div className="app-shell" ref={measureShell}>
-      <aside className="sidebar">
+      <aside
+        className="meeting-list"
+        id="meeting-list"
+        aria-label="Notebook navigation"
+        style={listResizable ? { width: listWidth } : undefined}
+      >
         <a
           className="brand"
           href="#notebook"
@@ -854,33 +856,8 @@ function Notebook() {
             Notebook
           </button>
         </nav>
-        <div className="sidebar-bottom">
-          <button
-            className={view === 'settings' ? 'nav-item selected' : 'nav-item'}
-            aria-current={view === 'settings' ? 'page' : undefined}
-            onClick={() => setView('settings')}
-          >
-            <Settings size={19} />
-            Settings
-          </button>
-          <div className="version">
-            TalkQTE <span>Prototype 0.1</span>
-          </div>
-        </div>
-      </aside>
-
-      {view === 'notebook' && (
-        <aside
-          className="meeting-list"
-          id="meeting-list"
-          aria-label="Meeting list"
-          style={listResizable ? { width: listWidth } : undefined}
-        >
+        {view === 'notebook' && (
           <div className="meeting-list-content">
-            <div className="list-heading">
-              <h1>Notebook</h1>
-              <span>1</span>
-            </div>
             <label className="search">
               <Search size={17} />
               <input
@@ -956,19 +933,32 @@ function Notebook() {
                 </details>
               )}
           </div>
-          {listResizable && (
-            <PanelDivider
-              label="Meeting list"
-              controls="meeting-list"
-              className="list-divider"
-              value={listWidth}
-              min={200}
-              max={listMax}
-              onChange={setPreferredListWidth}
-            />
-          )}
-        </aside>
-      )}
+        )}
+        <div className="sidebar-bottom">
+          <button
+            className={view === 'settings' ? 'nav-item selected' : 'nav-item'}
+            aria-current={view === 'settings' ? 'page' : undefined}
+            onClick={() => setView('settings')}
+          >
+            <Settings size={19} />
+            Settings
+          </button>
+          <div className="version">
+            TalkQTE <span>Prototype 0.1</span>
+          </div>
+        </div>
+        {view === 'notebook' && listResizable && (
+          <PanelDivider
+            label="Meeting list"
+            controls="meeting-list"
+            className="list-divider"
+            value={listWidth}
+            min={200}
+            max={listMax}
+            onChange={setPreferredListWidth}
+          />
+        )}
+      </aside>
 
       <main
         className={`workspace ${view !== 'notebook' ? 'wide-workspace' : ''}`}

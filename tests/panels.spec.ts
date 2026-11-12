@@ -41,7 +41,7 @@ test.beforeEach(async ({ page }) => {
 test('dragging the notebook boundary changes width without losing notes', async ({
   page,
 }) => {
-  const list = page.getByRole('complementary', { name: 'Meeting list' });
+  const list = page.getByRole('complementary', { name: 'Notebook navigation' });
   const notes = page.locator('#notes-panel textarea');
   await notes.fill('Fictional garden meeting: confirm the seed delivery.');
   const before = await size(list);
@@ -117,7 +117,7 @@ test('Escape cancels a drag and a released pointer cannot keep resizing', async 
     name: 'Meeting list',
     exact: true,
   });
-  const list = page.getByRole('complementary', { name: 'Meeting list' });
+  const list = page.getByRole('complementary', { name: 'Notebook navigation' });
   const before = await size(list);
   await drag(page, divider, 80);
   await expect.poll(() => size(list)).toBe(before + 80);
