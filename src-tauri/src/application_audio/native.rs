@@ -8,12 +8,14 @@ use std::sync::{
     Arc,
 };
 
+mod chunks;
 mod clock;
 mod output;
 pub mod pcm;
 mod position;
 mod stream;
 mod task;
+pub use chunks::{NativeChunk, NativeChunker, MAX_SEGMENTS};
 pub use clock::{ClockBinding, NativeBlock, NativeReader};
 pub use stream::{NativeOwner, NativeTask, Selection};
 pub use task::{TaskControl, TaskSnapshot};
