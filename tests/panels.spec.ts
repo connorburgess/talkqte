@@ -206,7 +206,10 @@ test('narrow windows stack panels without overflow and restore preferred widths 
   await notes.fill('Fictional note stays while arranging the notebook.');
   for (const width of [1150, 1000, 880, 600, 375]) {
     await page.setViewportSize({ width, height: 800 });
-    if (width < 1000) await expect(page.getByRole('separator')).toHaveCount(0);
+    // The meeting list stops resizing below 1000 px. Notes and the question
+    // stack only once their container cannot fit both side by side.
+    if (width < 1000) await expect(listDivider).toHaveCount(0);
+    if (width <= 760) await expect(page.getByRole('separator')).toHaveCount(0);
     await noOverflow(page);
     await expect(notes).toHaveValue(
       'Fictional note stays while arranging the notebook.',
