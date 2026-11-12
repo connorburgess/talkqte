@@ -6,9 +6,10 @@ test('keyboard Dismiss returns to notes after removing a paused question', async
   await page.clock.install();
   await page.goto('/');
   await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(5_200);
+  await page.clock.runFor(8_200);
   await page.getByRole('button', { name: 'Pause', exact: true }).click();
   const question = page.getByRole('region', { name: 'Suggested question' });
+  await page.getByRole('tab', { name: 'Notes', exact: true }).click();
   const notes = page.getByRole('textbox', { name: 'Meeting notes' });
   // Native Tab navigation is checked separately; begin at the control so
   // this regression does not depend on the browser's tab-to-buttons setting.
@@ -35,7 +36,7 @@ test('a transcript reader returns to the selected tab after dismissing a questio
   await page.clock.install();
   await page.goto('/');
   await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(5_200);
+  await page.clock.runFor(8_200);
   const transcript = page.getByRole('tab', { name: /Transcript/ });
   await transcript.click();
   const dismiss = page.getByRole('button', { name: 'Dismiss', exact: true });
@@ -57,7 +58,7 @@ test('timed expiry and a remote companion response leave the current notebook co
   await page.clock.install();
   await page.goto('/');
   await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(5_200);
+  await page.clock.runFor(8_200);
   const search = page.getByRole('textbox', { name: 'Search meetings' });
   await search.focus();
   await page.clock.runFor(18_000);
@@ -100,7 +101,7 @@ test('a delayed Dismiss acknowledgement does not take focus back from another no
   });
   await page.goto('/');
   await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(5_200);
+  await page.clock.runFor(8_200);
   await page.evaluate(() => window.questionTest.holdNextResponse());
   const question = page.getByRole('region', { name: 'Suggested question' });
   await question.getByRole('button', { name: 'Dismiss' }).focus();
@@ -123,7 +124,7 @@ test('Why reveals the source and keeps a question through later prompts and play
   await page.clock.install();
   await page.goto('/');
   await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(5_200);
+  await page.clock.runFor(8_200);
   const question = page.getByRole('region', { name: 'Suggested question' });
   const source = question.getByText(
     '“Agreed. Someone can take the first draft of the welcome guide.”',
@@ -174,14 +175,14 @@ test('appearance controls are discoverable, apply to questions, and survive demo
   await page.getByLabel('Position', { exact: true }).selectOption('topCenter');
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();
   await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(5_200);
+  await page.clock.runFor(8_200);
   const question = page.getByRole('region', { name: 'Suggested question' });
   await expect(question.getByRole('heading')).toHaveCSS('font-size', '30px');
   await question.getByRole('button', { name: 'Why?' }).click();
   await page.getByRole('button', { name: 'End demo' }).click();
   await expect(question).toHaveCount(0);
   await page.getByRole('button', { name: 'Replay demo' }).click();
-  await page.clock.runFor(5_200);
+  await page.clock.runFor(8_200);
   await expect(question.getByRole('button', { name: 'Why?' })).toHaveAttribute(
     'aria-expanded',
     'false',
@@ -217,10 +218,10 @@ for (const size of ['standard', 'large'] as const) {
       preview.command('set_question_size', { value });
       preview.command('start_demo');
     }, size);
-    await page.clock.runFor(72_000);
+    await page.clock.runFor(8_200);
     const question = page.getByRole('region', { name: 'Suggested question' });
     await expect(question.getByRole('heading')).toHaveText(
-      'How will we choose between those options?',
+      'Who will take the first draft?',
     );
     expect(
       await page.evaluate(

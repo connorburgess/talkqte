@@ -306,7 +306,7 @@ mod tests {
             Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
             Mode::Compact
         );
-        engine.advance(5_200);
+        engine.advance(8_200);
         assert_eq!(
             Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
             Mode::Question
@@ -495,7 +495,7 @@ mod tests {
                 Mode::Compact
             );
             engine.start().unwrap();
-            engine.advance(5_200);
+            engine.advance(8_200);
             assert_eq!(
                 Mode::for_snapshot(&engine.cue_snapshot(), status),
                 Mode::Question
@@ -637,7 +637,7 @@ mod tests {
     fn reading_mode_stays_visible_after_playback_finishes() {
         let mut engine = Engine::default();
         engine.start().unwrap();
-        engine.advance(5_000);
+        engine.advance(8_000);
         engine.inspect_cue("1:s2", true).unwrap();
         engine.advance(200_000);
         assert_eq!(

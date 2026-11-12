@@ -59,7 +59,7 @@ test('dismisses a cue without turning it into a saved question', async ({
   page,
 }) => {
   await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(5200);
+  await page.clock.runFor(8200);
   await expect(
     page.getByRole('heading', { name: 'Who will take the first draft?' }),
   ).toBeVisible();
@@ -81,7 +81,7 @@ test('dismisses a cue without turning it into a saved question', async ({
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'End demo', exact: true }).click();
   await page.getByRole('button', { name: 'Replay demo', exact: true }).click();
-  await page.clock.runFor(5200);
+  await page.clock.runFor(8200);
   await expect(
     page.getByRole('heading', { name: 'Who will take the first draft?' }),
   ).toBeVisible();
@@ -95,6 +95,7 @@ test('keeping a quoted line puts it in the notes with its time and lets the cue 
   const question = page.getByRole('region', { name: 'Suggested question' });
   await expect(question).toContainText('Said');
   await question.getByRole('button', { name: 'Keep this line' }).click();
+  await page.getByRole('tab', { name: 'Notes', exact: true }).click();
   await expect(question).toHaveCount(0);
   await expect(
     page.getByRole('textbox', { name: 'Meeting notes' }),
@@ -108,7 +109,7 @@ test('pause freezes a question, resume lets it expire without saving it', async 
   page,
 }) => {
   await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(5200);
+  await page.clock.runFor(8200);
   await page.getByRole('button', { name: 'Pause', exact: true }).click();
   await page.clock.runFor(30_000);
   await expect(
@@ -238,7 +239,7 @@ test('narrow layout keeps the demo and question controls usable with reduced mot
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(5200);
+  await page.clock.runFor(8200);
   await expect(
     page.getByRole('button', { name: 'Dismiss', exact: true }),
   ).toBeVisible();
@@ -262,10 +263,10 @@ for (const width of [320, 880]) {
   }) => {
     await page.setViewportSize({ width, height: 844 });
     await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-    await page.clock.runFor(72_000);
+    await page.clock.runFor(8_200);
     await expect(
       page.getByRole('heading', {
-        name: 'How will we choose between those options?',
+        name: 'Who will take the first draft?',
       }),
     ).toBeVisible();
     expect(
@@ -329,7 +330,7 @@ test('a line about an imported note shows a reminder that names the note as its 
   await dialog.getByRole('checkbox', { name: /Garden welcome guide/ }).check();
   await dialog.getByRole('button', { name: 'Import 1 selected' }).click();
   await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(5200);
+  await page.clock.runFor(8200);
   const question = page.getByRole('region', { name: 'Suggested question' });
   await expect(
     question.getByRole('heading', { name: 'Garden welcome guide' }),
@@ -360,7 +361,7 @@ for (const removeAll of [false, true]) {
     await dialog.getByRole('checkbox', { name: /Visitor questions/ }).check();
     await dialog.getByRole('button', { name: 'Import 2 selected' }).click();
     await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-    await page.clock.runFor(5200);
+    await page.clock.runFor(8200);
     const question = page.getByRole('region', { name: 'Suggested question' });
     await question.getByRole('button', { name: 'Why?' }).click();
     await expect(question).toContainText('tool shed');
@@ -470,4 +471,29 @@ test('prior notes from a file are chosen, shown apart from the conversation, rem
     panel.getByRole('button', { name: 'Add notes from a file' }),
   ).toBeFocused();
   await expect(panel.getByRole('listitem')).toHaveCount(0);
+});
+
+test('starting the demo shows its conversation while notes remain available', async ({
+  page,
+}) => {
+  await page
+    .getByRole('textbox', { name: 'Meeting notes' })
+    .fill('My fictional practice note.');
+  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
+  await expect(page.getByRole('tab', { name: /Transcript/ })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await page.clock.runFor(8200);
+  await expect(
+    page.getByRole('tabpanel', { name: /Transcript/ }),
+  ).toContainText('Someone can take the first draft');
+  await page.getByRole('tab', { name: 'Notes', exact: true }).click();
+  await expect(
+    page.getByRole('textbox', { name: 'Meeting notes' }),
+  ).toHaveValue('My fictional practice note.');
+  await page.getByRole('button', { name: 'Pause', exact: true }).click();
+  await expect(
+    page.getByRole('tab', { name: 'Notes', exact: true }),
+  ).toHaveAttribute('aria-selected', 'true');
 });

@@ -2277,7 +2277,7 @@ mod tests {
     fn with_cue() -> Engine {
         let mut engine = Engine::default();
         engine.start().unwrap();
-        engine.advance(5_000);
+        engine.advance(8_000);
         engine
     }
 
@@ -2296,6 +2296,8 @@ mod tests {
 
     fn play(lines: &[(u64, &str)]) -> Engine {
         let mut engine = Engine::default();
+        // Custom scenarios own their length, independently of the bundled demo.
+        engine.demo.duration_ms = lines.last().map_or(600_000, |(at, _)| at + 600_000);
         engine.demo.segments = lines
             .iter()
             .enumerate()
@@ -2814,8 +2816,6 @@ mod tests {
             "Let's have it ready by Friday and try it with a few new visitors first."
         );
         assert_eq!(said.source_id, "s5");
-        e.advance(18_000);
-        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Decision");
     }
 
     #[test]
@@ -2888,11 +2888,11 @@ mod tests {
     fn replay_forgets_which_questions_were_shown() {
         let mut e = Engine::default();
         e.start().unwrap();
-        e.advance(5_000);
+        e.advance(8_000);
         assert!(e.state.cue.is_some());
         e.end();
         e.start().unwrap();
-        e.advance(5_000);
+        e.advance(8_000);
         assert_eq!(e.state.cue.as_ref().unwrap().kind, "Owner");
     }
 
@@ -3808,7 +3808,7 @@ mod tests {
             .unwrap();
         e.advance(100_000);
         e.start().unwrap();
-        e.advance(5_000);
+        e.advance(8_000);
         let new_id = e.state.cue.as_ref().unwrap().id.clone();
         assert_ne!(new_id, id);
         assert!(e.respond(&id, Response::Dismiss).is_err());
@@ -3822,7 +3822,7 @@ mod tests {
         let mut e = with_cue();
         e.pause().unwrap();
         e.advance(60_000);
-        assert_eq!(e.state.elapsed_ms, 5_000);
+        assert_eq!(e.state.elapsed_ms, 8_000);
         assert_eq!(e.state.cue.as_ref().unwrap().remaining_ms, 18_000);
         e.resume().unwrap();
         e.advance(18_000);
@@ -3831,13 +3831,30 @@ mod tests {
     }
 
     #[test]
+    fn an_expired_quote_leaves_no_pause_before_the_next_question() {
+        let mut e = play(&[
+            (10_000, "Let's have it ready by Friday."),
+            (28_000, "We could either print a guide or use a sign."),
+        ]);
+        e.advance(10_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, SAID);
+        e.advance(18_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Decision");
+    }
+
+    #[test]
     fn quiet_mode_leaves_space_after_expiry() {
-        let mut e = with_cue();
+        let mut e = play(&[
+            (8_000, "Someone can take the first draft."),
+            (37_000, "We should have it ready soon."),
+            (69_000, "We could either print a guide or use a sign."),
+        ]);
+        e.advance(8_000);
         e.set_sensitivity(Sensitivity::Quiet);
         e.advance(18_000);
         e.advance(14_000);
         assert!(e.state.cue.is_none());
-        e.advance(32_000);
+        e.advance(29_000);
         assert_eq!(e.state.cue.as_ref().unwrap().kind, "Decision");
     }
 
@@ -3850,7 +3867,7 @@ mod tests {
         assert_eq!(cue.id, "1:s2");
         assert!(cue.expanded && cue.held);
         assert_eq!(cue.remaining_ms, 0);
-        assert_eq!(e.state.transcript.len(), 6);
+        assert_eq!(e.state.transcript.len(), 7);
         // Collapsing cannot expire the content the user just opened.
         e.inspect_cue("1:s2", false).unwrap();
         assert!(!e.state.cue.as_ref().unwrap().expanded);
@@ -3871,14 +3888,14 @@ mod tests {
         assert!(e.state.cue.is_some());
         e.respond("1:s2", Response::Dismiss).unwrap();
         e.start().unwrap();
-        e.advance(5_000);
+        e.advance(8_000);
         assert!(e.inspect_cue("1:s2", true).is_err());
         assert!(!e.state.cue.as_ref().unwrap().held);
         e.inspect_cue("2:s2", true).unwrap();
         e.end();
         assert!(e.state.cue.is_none());
         e.start().unwrap();
-        e.advance(5_000);
+        e.advance(8_000);
         e.inspect_cue("3:s2", true).unwrap();
         e.advance(u64::MAX);
         e.start().unwrap();

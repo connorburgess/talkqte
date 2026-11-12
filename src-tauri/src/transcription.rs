@@ -344,10 +344,9 @@ mod tests {
         }
     }
 
-    // At 66 s the bundled demo has no open question and its cooldown has
-    // passed, so a recognized trigger raises a question.
+    // Worker tests use a live session, independent of demo pacing and its end.
     fn running_engine() -> Arc<Mutex<Engine>> {
-        let mut engine = Engine::default();
+        let mut engine = Engine::live();
         engine.start().unwrap();
         engine.advance(66_000);
         Arc::new(Mutex::new(engine))
@@ -382,8 +381,7 @@ mod tests {
         let engine = running_engine();
         let session = engine.lock().unwrap().session();
         {
-            // At 66 s the demo is quoting its 51 s line; let that go so the
-            // recognized speech has a clear companion (a quote leaves no pause).
+            // Begin with no held cue before the recognized speech arrives.
             let mut engine = engine.lock().unwrap();
             if let Some(cue) = engine.state.cue.clone() {
                 engine

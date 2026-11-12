@@ -53,7 +53,7 @@ test('companion stays compact between questions and preserves a paused question'
     expect(bounds!.height).toBeGreaterThanOrEqual(44);
   }
   await expectCompanionToFit(page);
-  await page.clock.runFor(5_200);
+  await page.clock.runFor(8_200);
   await page.setViewportSize({ width: 420, height: 420 });
   await expect(
     page.getByRole('heading', { name: 'Who will take the first draft?' }),
@@ -87,10 +87,10 @@ test('a question fits the narrow window used on a small display', async ({
   // Measured without the entrance animation, which scales the card briefly.
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 360, height: 340 });
-  await page.clock.runFor(72_000);
+  await page.clock.runFor(8_200);
   const question = page.getByRole('region', { name: 'Suggested question' });
   await expect(question.getByRole('heading')).toHaveText(
-    'How will we choose between those options?',
+    'Who will take the first draft?',
   );
   const fitsSideways = () =>
     page.evaluate(() => {
@@ -170,7 +170,7 @@ test('question controls remain usable with reduced motion and longer wrapping', 
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.clock.runFor(72_000);
+  await page.clock.runFor(8_200);
   await expect(
     page.getByRole('button', { name: 'Dismiss', exact: true }),
   ).toBeVisible();
@@ -194,7 +194,7 @@ test('question controls remain usable with reduced motion and longer wrapping', 
 test('questions expire quietly without requiring a response', async ({
   page,
 }) => {
-  await page.clock.runFor(5_200);
+  await page.clock.runFor(8_200);
   const question = page.getByRole('region', { name: 'Suggested question' });
   await expect(question).toBeVisible();
   await expect(question).not.toContainText(/\b\d+s\b/);
@@ -225,13 +225,9 @@ test('a question answered by the conversation leaves, and the words that answere
     question.getByRole('button', { name: 'Keep this line' }),
   ).toBeVisible();
   await expect(page.getByRole('status')).toHaveText('Demo running · Scripted');
-  // The quote leaves no pause behind it: the 69 s question arrives on time.
+  // The shorter voiced scene ends without leaving an unheld cue behind.
   await page.clock.runFor(18_500);
-  await expect(
-    page.getByRole('heading', {
-      name: 'How will we choose between those options?',
-    }),
-  ).toBeVisible();
+  await expect(question).toHaveCount(0);
 });
 
 test('an answered question being read stays and shows the answer', async ({
