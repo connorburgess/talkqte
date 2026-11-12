@@ -164,6 +164,11 @@ impl NativeBlock {
         &self.block
     }
 
+    /// Converted session times of the first frame and the exclusive end.
+    pub(super) fn bounds(&self) -> (Position, Position) {
+        (self.start, self.end)
+    }
+
     /// Project an absolute source-frame boundary, including the exclusive end.
     /// Split chunks must retain this original mapping instead of restarting
     /// from a rounded millisecond. Out-of-block positions (including gaps) fail.
@@ -371,7 +376,7 @@ impl Delivery {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::super::pcm::tests::time;
     use super::*;
     use crate::application_audio::{
@@ -439,6 +444,29 @@ mod tests {
                 &*((&*host as *const CMClock).cast::<CMClockOrTimebase>()),
             ))
         }
+    }
+
+    /// Real blocks from memory-only packets through the delivery path, read
+    /// one at a time. Each packet is (first source frame, frame count). The
+    /// returned guards keep the fictional operation approved and running.
+    pub(in crate::application_audio::native) fn native_blocks(
+        rate: f64,
+        packets: &[(u64, usize)],
+    ) -> (Gate, Control, Capture<()>, Vec<NativeBlock>) {
+        let (gate, control, start, mut input, mut delivery) = setup();
+        let capture = accept(start);
+        let base = timebase(rate);
+        let blocks = packets
+            .iter()
+            .map(|&(first, frames)| {
+                input.push(&control, first, &vec![0.25; frames]).unwrap();
+                delivery
+                    .try_next(7, |o, f| convert(&base, o, f))
+                    .unwrap()
+                    .unwrap()
+            })
+            .collect();
+        (gate, control, capture, blocks)
     }
 
     #[test]

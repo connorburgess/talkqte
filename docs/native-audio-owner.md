@@ -206,6 +206,35 @@ worker must apply them to recognized offsets with source/session checks at
 result delivery. No resampling, recognizer connection, app command, capture
 permission or default-build behavior changes here.
 
+### Native transcription chunks — 12 November 2026
+
+`NativeChunker` assembles native blocks into bounded mono chunks of at most
+three seconds on the worker that owns the `NativeReader`. It does not own the
+reader: the worker passes each block from `try_next` and calls `finish` only
+after the reader reports a clean close. Each chunk keeps one timing segment per
+block it holds, with that block's rational start and end. A block split by a full
+chunk computes its split boundary once and uses it on both sides.
+`NativeChunk::session_ms` maps a recognizer offset, measured in the chunk's
+nominal 16 kHz samples, to session time through the segment that holds it.
+Offsets beyond the chunk's audio, including its gap side, are refused rather
+than clamped.
+
+A gap ends the current chunk; audio is never joined across one. A chunk holds at
+most 256 segments, so a stream of unusually small blocks ends chunks early
+instead of growing the map. Stop, cancellation, a changed session or a block
+from another source retires the chunker and discards pending audio without a
+final flush. `belongs_to` still has to pass before a chunk's results are used.
+
+Six memory-only tests run real `NativeBlock`s through the clock delivery path at
+relative rates 0.5, 1 and 2. They check every recognizer millisecond of a full
+chunk and the remainder after a split, a gap, the segment limit, Stop, session
+replacement and a foreign block. A mutation check confirmed the tests fail if
+offsets are added to the floored chunk start, or if the split boundary is wrong.
+The transcription worker still accepts only `AudioChunk`; it is not connected to
+these chunks, and nothing here starts capture or recognition. Applying
+`session_ms` at result delivery, with the source/session check, is the next
+dependency. Actual drift and recognition quality remain native gates.
+
 Two memory-only regressions cover a source phase rejected by an arbitrary fixed
 origin, exact cross-timescale offsets and gaps, immutable anchoring, later phase
 rejection and failure before anchoring (invalid time, missing backing or NaN).
@@ -383,9 +412,9 @@ does not replace those terms or complete a distribution-license review.
 
 ## Next acceptance and UI/UX checkpoint
 
-The next dependencies are a measured runtime-to-host clock anchor, transcription
-chunk timing that accounts for source/host rate differences, and connecting the
-worker to explicit selection, session retirement and app shutdown.
+The next dependencies are applying native chunk timing to recognized offsets at
+result delivery, and connecting the worker to explicit selection, session
+retirement and app shutdown.
 The worker mechanism is tested; the app exit/recovery policy is not implemented. Verify callback
 allocation/latency and actual buffer sizes, and prepare explicit consent/selection
 before requesting a bounded native run. Do not add
