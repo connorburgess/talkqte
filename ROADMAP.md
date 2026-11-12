@@ -42,7 +42,7 @@ This track runs alongside the feature milestones below. The goal includes a depe
 - [x] Reconcile current capability descriptions with source and dated validation records, keeping development implementation, fictional checks and native/user acceptance distinct ([11 November checkpoint](docs/product-readiness.md#capability-description-checkpoint--11-november-2026)).
 - [x] Add automated contribution metadata, frontend, Rust, and desktop build checks.
 - [x] Configure required branch checks and dedicated secret scanning. Since 10 November 2026 a repository ruleset on `main` requires a pull request and all four CI jobs (macOS Rust and desktop build, Windows Arm Rust and desktop build, Frontend and browser behavior, Contribution metadata) on the exact head, and forbids force-pushes and deletion; repository admins can bypass it so the owner is never locked out. GitHub secret scanning and push protection are on; non-provider patterns and Dependabot security updates are off, by choice, because their pull requests would not carry the contributor sign-off this repository requires.
-- [ ] Enable external automated review when the prototype is ready for it; currently deferred.
+- [x] Enable selective external code review for consequential changes. Graphide is configured to run only on an explicit review request; ordinary PR opens and pushes do not trigger reviews. The [first focused request](https://github.com/connorburgess/talkqte/pull/155#issuecomment-6810973218) was accepted on 12 November 2026. Review findings supplement required checks and manual review; they do not establish native behavior or product readiness.
 
 ## Runnable prototype
 
