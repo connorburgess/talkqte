@@ -79,6 +79,16 @@ impl ClockBinding {
         })
     }
 
+    #[cfg(test)]
+    pub(crate) fn session_time_for_test(&self) -> Duration {
+        self.session_time
+    }
+
+    #[cfg(test)]
+    pub(crate) fn session_ms_for_test(&self, host: CMTime) -> Result<u64, TimingError> {
+        self.session_ms(host)
+    }
+
     fn session_ms(&self, host: CMTime) -> Result<u64, TimingError> {
         numeric(host)?;
         // Keep both native rational timestamps and the session fraction until
