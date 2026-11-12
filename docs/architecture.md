@@ -67,6 +67,18 @@ The runtime holds the live session's engine session ID, the microphone start's g
 
 The macOS bundle includes `NSMicrophoneUsageDescription`; the audio-input entitlement is configured in `Entitlements.plist` and is embedded when signing. For a local bundle check, use `APPLE_SIGNING_IDENTITY=- npm run tauri -- build --debug --bundles app` to ad-hoc sign with the configured entitlement. An unsigned development build is not evidence that entitlements were applied. Inspect the built bundle and signature without invoking microphone start automatically. Ad-hoc signing is not Developer ID signing or notarization.
 
+### Session clock precision
+
+The native runtime retains sub-millisecond active time between clock updates,
+including across demo pause/resume. Ready, paused and ended time does not advance
+playback; replay or engine replacement clears the previous session's remainder.
+Pausing live cues still leaves the session clock running. Deterministic runtime
+tests cover frequent fractional updates, cue expiry, pause, replay and replacement;
+all four regressions fail with the previous per-update truncation. This prevents
+cumulative rounding loss, but does not establish native audio clock correspondence,
+device drift, callback timing or live-meeting usefulness. Those remain separate
+acceptance gates before connecting application audio.
+
 ### Planned meeting pipeline
 
 ```text
