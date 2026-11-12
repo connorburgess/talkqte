@@ -26,10 +26,11 @@ process's audio. This configuration is not proof that delivered buffers have the
 requested format or that native filtering meets the intended scope.
 
 The constructor installs its own source-bound audio output on a dedicated serial
-queue. It accepts an explicit `ClockBinding` and returns a session-bound reader
-alongside the owner. The host must establish the correspondence between native
-source time and session time; neither callback arrival nor the first sample is
-used to guess it. The constructor remains unsafe because native buffer validity
+queue. It accepts an explicit host-clock/session `ClockBinding` and returns a
+`NativeReader` alongside the owner. The host must establish that measured
+correspondence, including fractional session time; the reader converts through
+the actual stream clock on the same worker. Neither callback arrival nor the
+first sample is used to guess session time. The constructor remains unsafe because native buffer validity
 and CoreMedia copying behavior require live-context validation. No caller exists
 in the app. Native objects stay on their constructing worker thread; no
 `unsafe Send` or `Sync` implementation is added.
@@ -101,7 +102,8 @@ non-finite samples fail closed. Buffers must contain 1–2,048 frames (at most
 native buffer sizes must inform any later change to this bound. The reader does
 not convert, clamp, pad or insert silence.
 
-The existing output supplies an explicit source-clock origin. The reader checks numeric,
+The native output uses the first validated sample as its source-frame origin.
+The PCM reader checks numeric,
 unrounded, nonnegative, epoch-zero `CMTime` values and uses wide rational
 arithmetic to map timestamps to exact frame offsets. Uniform per-frame timing
 and total duration must agree with the format and frame count. Fractional-frame
@@ -112,21 +114,73 @@ consumes its source time even if the subsequent handoff is full. Any read error
 permanently retires this reader; the callback also cancels delivery
 and returns cleanup control to the native owner. No automatic restart is supplied.
 
-The separate `PcmReader::from_first_sample` mode can instead retain the first
+The output uses `PcmReader::from_first_sample` to retain the first
 fully validated source timestamp as frame zero. This avoids assuming that an
 arbitrary session-start reading lies on the source's 16 kHz frame grid. Its
 `source_origin` is absent until metadata, PCM copying and finite-value checks all
 succeed; it then stays unchanged across later blocks, gaps and errors. Invalid
 first input permanently retires the reader without publishing an anchor. Later
 fractional-frame offsets and overlap are still rejected. This mode does not infer
-session time, and the current output/owner still use the explicit-origin path.
-Before integrating it, the owning worker must convert that exact source timestamp
-through the actual stream clock and an established session anchor; first arrival
-must never substitute for clock correspondence. No native buffer needs retaining
-to expose the copied timestamp. Apple describes the stream's nullable
+session time. The callback publishes only copied first-PTS metadata through a
+fixed atomic slot before the ring packet; it never queries a native clock or
+waits for the worker. The serial sample guard provides the single writer; a
+release/acquire ready flag protects the immutable fields. The worker never takes
+the callback's sample mutex.
+
+### Native clock mapping — 12 November 2026
+
+After the existing accepted-start guard yields a packet, `NativeReader` obtains
+the stream's nullable
 [`synchronizationClock`](https://developer.apple.com/documentation/screencapturekit/scstream/synchronizationclock)
-and [`CMSyncConvertTime`](https://developer.apple.com/documentation/coremedia/cmsyncconverttime%28_%3Afrom%3Ato%3A%29)
-for relating media clocks; that conversion is not implemented here.
+and uses [`CMSyncConvertTime`](https://developer.apple.com/documentation/coremedia/cmsyncconverttime%28_%3Afrom%3Ato%3A%29)
+to convert new source boundaries for that packet to the host clock. It obtains
+the clock once for that packet and performs conversion again for later packets,
+rather than assuming one fixed offset and identical source/host rates. A shared
+source boundary keeps its already-published session millisecond: the previous
+block's end is the next contiguous block's start, or the start of its missing-frame
+gap. Re-estimating that same boundary must not create an overlap or an unmarked
+hole. New endpoints still use the current clock relationship; if a new endpoint
+falls behind the retained boundary, delivery fails. This continuity policy does
+not resample audio or establish a bound on clock estimation error.
+CoreMedia may quantize converted host timestamps;
+the binding preserves their rational values and the session fraction until the
+final floor to milliseconds. Source sample-grid addition must be exactly
+representable or delivery fails.
+
+Missing clocks, invalid conversion, unsupported epochs, negative session time,
+overflow, backwards delivery or a changed session permanently retire the reader
+and cancel the operation. Stop during conversion also refuses the packet;
+already returned work must still pass its source/session check. Owner polling
+continues through native cleanup, including for a silent source. No start/Stop
+completion or release policy changes. The reader stays on its constructing
+worker; call it alongside `NativeOwner::poll`. `NativeTask::run` remains a
+blocking cleanup loop and does not consume audio.
+
+`NativeReader::dropped_frames()` reports queue-capacity loss even without a later
+packet. Retirement preserves the last observed counter, including trailing loss
+before Stop, clock failure or EOF. It is not a count of all native capture loss or
+proof that a callback racing retirement has completed.
+
+Eight clock tests use the same delivery path with memory-only CoreMedia timebases
+at relative rates 0.5, 1 and 2, explicit offsets, a source timestamp off the
+session-origin sample grid, fractional session time and a missing initial frame
+range. They also cover start/empty guards, Stop during conversion, session
+replacement, missing clocks, invalid/backwards time and overflow. A callback
+regression checks publication before delivery and no anchor from invalid input.
+Two regressions change a real memory timebase's anchor between packets, checking
+both directions of re-estimation and continuity through a real frame gap. Both
+fail against the earlier per-packet shared-boundary conversion. A third checks
+trailing queue-loss visibility before and after Stop, clock failure and EOF.
+These tests create no SCStream, device or permission request and do not measure
+independent hardware-clock drift.
+
+`ClockBinding::new` validates numbers; it does **not** measure correspondence
+between the runtime's Rust `Instant` and the native host clock or establish an
+uncertainty bound. That host measurement remains required before app activation.
+The native reader deliberately does not enter the synthetic nominal-rate
+chunker: converting packet endpoints does not resample audio or establish
+recognizer offsets when source and host rates differ. Drift-aware transcription
+chunk preparation remains a separate integration dependency.
 
 Two memory-only regressions cover a source phase rejected by an arbitrary fixed
 origin, exact cross-timescale offsets and gaps, immutable anchoring, later phase
@@ -136,7 +190,7 @@ device or permission request. They prove source-frame arithmetic only.
 
 This is a strict development acceptance contract, not proof that every supported
 Mac emits this layout or timestamp representation. The host still needs to
-establish the source-clock relationship to the engine's session clock. No native
+measure the host-clock relationship to the engine's session clock. No native
 buffer or borrowed byte pointer escapes the read; the output is copied into the
 caller's scratch prefix. A temporary retained format description is released
 within the call. The Rust layer allocates no payload during the read, but this
@@ -305,8 +359,9 @@ does not replace those terms or complete a distribution-license review.
 
 ## Next acceptance and UI/UX checkpoint
 
-The next dependencies are an established native-to-session clock origin and
-connecting the worker to explicit selection, session retirement and app shutdown.
+The next dependencies are a measured runtime-to-host clock anchor, transcription
+chunk timing that accounts for source/host rate differences, and connecting the
+worker to explicit selection, session retirement and app shutdown.
 The worker mechanism is tested; the app exit/recovery policy is not implemented. Verify callback
 allocation/latency and actual buffer sizes, and prepare explicit consent/selection
 before requesting a bounded native run. Do not add

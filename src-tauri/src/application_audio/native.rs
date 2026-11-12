@@ -8,11 +8,13 @@ use std::sync::{
     Arc,
 };
 
+mod clock;
 mod output;
 pub mod pcm;
 mod stream;
 mod task;
-pub use stream::{ClockBinding, NativeOwner, NativeTask, Selection};
+pub use clock::{ClockBinding, NativeReader};
+pub use stream::{NativeOwner, NativeTask, Selection};
 pub use task::{TaskControl, TaskSnapshot};
 
 const PENDING: u8 = 0;
