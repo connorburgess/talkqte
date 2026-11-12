@@ -52,6 +52,8 @@ For the local-first core, scaling includes resource use on supported devices, re
 
 The app accompanies a meeting in another application. Its small prompt window must not take keyboard focus. Keep the resting companion quiet and minimal; use rounded surfaces, readable type, and clearly named controls when a cue appears. The current notebook supports the fictional demo and optional notes; it is not a required step in the intended live experience.
 
+The integration direction is to bring cues into the existing note-taker workflow, with Granola first; an embedded presentation surface still needs supported provider access. The TalkQTE notebook can be an optional alternative workspace, with ongoing selected-note refresh as a separate planned capability. Manual import does not complete either integration.
+
 The current notebook is a prototype surface, not a requirement to build a meeting-management product. Additional saving, archives, summaries, and CRM work need a specific use case that supports participation. Integration readiness continues alongside the core work, with selected prior context as the first Granola candidate.
 
 ## Product principles
