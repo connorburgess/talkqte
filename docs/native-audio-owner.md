@@ -56,9 +56,10 @@ The owner polls bounded completion slots outside audio callbacks and UI work:
 **Abandonment is not recovery.** Dropping an unreleased owner cancels delivery but
 quarantines its native resources and grant until process exit. It deliberately
 cannot report release or allow overlap. Native capture may remain active because
-Drop is not an asynchronous Stop implementation. The eventual host must retain
-and poll the owner through cleanup, including app shutdown; an owner task panic
-and process-exit policy remain release blockers. This fallback is why this code
+Drop is not an asynchronous Stop implementation. The worker loop below can retain
+and poll the owner independently of its host handle. App shutdown integration
+and a process-exit policy remain release blockers; reporting an abandoned task
+does not recover it. This fallback is why this code
 must remain disconnected from normal app controls.
 
 The retained `SCStreamDelegate` closes delivery immediately when macOS reports
@@ -146,13 +147,47 @@ checks it on every poll, cancels delivery and initiates Stop even if the selecte
 application is silent. During pending startup it waits for completion before
 Stop, preserving the reservation; repeated polls cannot duplicate that request.
 No callback-state lock or native object crosses this closure signal. The host
-must keep polling and retire the reader when its session ends. No host task,
-shutdown policy, live permission flow or recognizer is added here.
+must retire the reader when its session ends. The worker below keeps polling,
+but app shutdown policy, live permission flow and recognition remain separate.
+
+## Owner worker and host control
+
+`NativeOwner::into_task` produces a `NativeTask` and a sendable `TaskControl`.
+Construct and run the task on the same dedicated worker thread; only the control
+and session reader cross to the host. The task is not Send and is not an abortable
+async future. It does not spawn a worker or enable capture by itself. The host
+must run it until `Released`, rather than discard it when a window, session or
+async caller ends. It must not occupy the UI thread or a shared worker pool whose
+shutdown depends on a bounded join.
+
+`TaskControl::stop` closes delivery atomically and wakes the worker without a
+status lock or join. Dropping the control does the same; if shared through an
+`Arc`, the last control owner requests Stop. The task retains native resources
+and the reservation independently, including while startup is pending. It polls
+completion slots at 20 ms intervals and wakes early for Stop/retry; this interval
+is not a native latency guarantee. A quiet source cannot prevent cleanup polling.
+
+Snapshots distinguish the last observed native stage, cancellation requested,
+and task abandonment. A native call in progress cannot hold the host's status or
+command mutex. The snapshot may still show an earlier stage while that call
+runs; `stop_requested` is not proof of native release. Only `Released` follows
+confirmed Stop, output removal, callback drain and resource release.
+
+One explicit cleanup retry can be pending at a time. A request made before a
+completed Stop/removal failure is rejected rather than retained for a future
+failure. Native retry calls run outside the shared mutex. No failure, timeout,
+lost host handle or repeated status read triggers an automatic retry or restart.
+Dropping an unrun task or unwinding its worker closes delivery, marks its snapshot
+abandoned and uses the existing resource quarantine. This can leave native capture
+active; it does not confirm Off, free the reservation, or recover the stream.
+If the control is gone and cleanup fails, the task continues holding that operation.
+The app still needs a visible stalled/failed state and an explicit exit/recovery
+policy before this development path can be enabled.
 
 ## Validation
 
-On the development Mac, all **357 Rust tests** pass with this feature enabled.
-The eleven ownership tests construct no native stream and request no access: ten
+On the development Mac, all **362 Rust tests** pass with this feature enabled.
+The eleven original ownership tests construct no native stream and request no access: ten
 scripted lifecycle tests and one test of the actual completion block. They cover cancellation before startup, cancelled
 late success, successful start followed by missing/delayed Stop completion,
 explicit retry after failed Stop with a stale old completion, failed output
@@ -177,8 +212,12 @@ with fictional CoreMedia objects: startup gating and explicit session mapping,
 queue overflow/gaps, invalid-sample retirement of returned work, Stop before
 invalid input, reentrant delivery, and abandoned-session/unexpected-output faults.
 These construct the Objective-C output object, but do not simulate native message
-dispatch or construct a ScreenCaptureKit stream. A compile-fail doctest
-also guards against making the native owner transferable across threads.
+dispatch or construct a ScreenCaptureKit stream. Five worker-control regressions
+add pending/running controller drop through real worker-thread cleanup, explicit
+Stop/removal retry and stale-control isolation, a deliberately blocked native Stop
+that leaves host controls responsive, unrun-task abandonment, and worker unwind.
+These use scripted native calls, not real capture. Two compile-fail doctests guard
+against moving the native owner or task across threads.
 
 ```sh
 cargo test --manifest-path src-tauri/Cargo.toml --locked --features native-audio-spike
@@ -217,8 +256,9 @@ does not replace those terms or complete a distribution-license review.
 
 ## Next acceptance and UI/UX checkpoint
 
-The immediate implementation dependency is the owner-task shutdown/recovery
-flow and an established native-to-session clock origin. Verify callback
+The next dependencies are an established native-to-session clock origin and
+connecting the worker to explicit selection, session retirement and app shutdown.
+The worker mechanism is tested; the app exit/recovery policy is not implemented. Verify callback
 allocation/latency and actual buffer sizes, and prepare explicit consent/selection
 before requesting a bounded native run. Do not add
 another generic queue or benchmark framework.

@@ -11,7 +11,9 @@ use std::sync::{
 mod output;
 pub mod pcm;
 mod stream;
-pub use stream::{ClockBinding, NativeOwner, Selection};
+mod task;
+pub use stream::{ClockBinding, NativeOwner, NativeTask, Selection};
+pub use task::{TaskControl, TaskSnapshot};
 
 const PENDING: u8 = 0;
 const SUCCEEDED: u8 = 1;
@@ -239,6 +241,9 @@ mod tests {
         removes: usize,
         drops: usize,
         consumer_closed: Arc<AtomicBool>,
+        panic_on_stop: bool,
+        dropped_on: Option<std::thread::ThreadId>,
+        pause_stop: Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>,
     }
     struct Fake(Arc<Mutex<Script>>, StreamFault);
     impl Driver for Fake {
@@ -256,7 +261,17 @@ mod tests {
             self.0.lock().unwrap().starts.push(slot);
         }
         fn stop(&mut self, slot: Arc<AtomicU8>) {
-            self.0.lock().unwrap().stops.push(slot);
+            let mut script = self.0.lock().unwrap();
+            assert!(!script.panic_on_stop, "scripted owner failure");
+            script.stops.push(slot);
+            let pause = script.pause_stop.take();
+            drop(script);
+            if let Some((entered, release)) = pause {
+                entered.send(()).unwrap();
+                release
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap();
+            }
         }
         fn remove_output(&mut self) -> bool {
             let mut s = self.0.lock().unwrap();
@@ -269,7 +284,9 @@ mod tests {
     }
     impl Drop for Fake {
         fn drop(&mut self) {
-            self.0.lock().unwrap().drops += 1;
+            let mut script = self.0.lock().unwrap();
+            script.drops += 1;
+            script.dropped_on = Some(std::thread::current().id());
         }
     }
     fn source() -> Application {
@@ -293,6 +310,206 @@ mod tests {
     }
     fn complete(slot: &AtomicU8, outcome: u8) {
         slot.store(outcome, Ordering::Release);
+    }
+
+    fn wait_for(mut condition: impl FnMut() -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !condition() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "worker did not advance"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn dropping_host_control_keeps_worker_until_late_start_stop_and_drain() {
+        use std::sync::mpsc::{channel, TryRecvError};
+        for during_start in [true, false] {
+            let (ready_tx, ready_rx) = channel();
+            let (done_tx, done_rx) = channel();
+            let worker = std::thread::spawn(move || {
+                let (gate, control, owner, script) = setup();
+                let (task, host) = task::Task::new(owner);
+                ready_tx.send((gate, control, script, host)).unwrap();
+                done_tx.send(task.run()).unwrap();
+            });
+            let worker_id = worker.thread().id();
+            let (gate, control, script, host) = ready_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            if !during_start {
+                complete(&script.lock().unwrap().starts[0], SUCCEEDED);
+                wait_for(|| host.snapshot().status.stage == Stage::Running);
+            }
+            drop(host);
+            assert!(control.is_cancelled());
+            busy(&gate);
+            if during_start {
+                assert!(script.lock().unwrap().stops.is_empty());
+                assert_eq!(done_rx.try_recv(), Err(TryRecvError::Empty));
+                complete(&script.lock().unwrap().starts[0], SUCCEEDED);
+            }
+            wait_for(|| script.lock().unwrap().stops.len() == 1);
+            assert_eq!(done_rx.try_recv(), Err(TryRecvError::Empty));
+            busy(&gate);
+            complete(&script.lock().unwrap().stops[0], SUCCEEDED);
+            wait_for(|| script.lock().unwrap().fence.is_some());
+            assert_eq!(script.lock().unwrap().drops, 0);
+            busy(&gate);
+            script
+                .lock()
+                .unwrap()
+                .fence
+                .as_ref()
+                .unwrap()
+                .store(true, Ordering::Release);
+            let status = done_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            assert_eq!(
+                status,
+                Status {
+                    stage: Stage::Released,
+                    problem: None
+                }
+            );
+            worker.join().unwrap();
+            let script = script.lock().unwrap();
+            assert_eq!(script.stops.len(), 1);
+            assert_eq!(script.drops, 1);
+            assert_eq!(script.dropped_on, Some(worker_id));
+            assert!(gate.review(source()).is_ok());
+        }
+    }
+
+    #[test]
+    fn task_retries_only_observed_cleanup_failures_and_never_a_later_operation() {
+        let (gate, _, owner, script) = setup();
+        let (mut task, host) = task::Task::new(owner);
+        assert!(!host.retry_cleanup());
+        complete(&script.lock().unwrap().starts[0], SUCCEEDED);
+        assert_eq!(task.step().stage, Stage::Running);
+        host.stop();
+        assert!(host.snapshot().stop_requested);
+        assert_eq!(task.step().stage, Stage::Stopping);
+        assert!(!host.retry_cleanup());
+        complete(&script.lock().unwrap().stops[0], FAILED);
+        assert_eq!(task.step().stage, Stage::StopFailed);
+        for _ in 0..3 {
+            assert_eq!(task.step().stage, Stage::StopFailed);
+        }
+        assert_eq!(script.lock().unwrap().stops.len(), 1);
+        assert!(host.retry_cleanup());
+        assert!(!host.retry_cleanup());
+        assert_eq!(task.step().stage, Stage::Stopping);
+        assert!(!host.retry_cleanup());
+        complete(&script.lock().unwrap().stops[0], SUCCEEDED);
+        assert_eq!(task.step().stage, Stage::Stopping); // old completion
+        script.lock().unwrap().remove_fails = true;
+        complete(&script.lock().unwrap().stops[1], SUCCEEDED);
+        assert_eq!(task.step().stage, Stage::RemoveFailed);
+        busy(&gate);
+        assert!(host.retry_cleanup());
+        script.lock().unwrap().remove_fails = false;
+        assert_eq!(task.step().stage, Stage::Draining);
+        assert!(!host.retry_cleanup());
+        script
+            .lock()
+            .unwrap()
+            .fence
+            .as_ref()
+            .unwrap()
+            .store(true, Ordering::Release);
+        assert_eq!(task.run().stage, Stage::Released);
+        assert!(!host.snapshot().abandoned);
+        assert_eq!(host.snapshot().status.stage, Stage::Released);
+        let mut review = gate.review(source()).unwrap();
+        let next_control = review.control();
+        let next_start = gate.approve(&mut review).unwrap();
+        host.stop();
+        assert!(!host.retry_cleanup());
+        drop(host);
+        assert!(!next_control.is_cancelled());
+        drop(next_start);
+    }
+
+    #[test]
+    fn blocked_native_stop_does_not_hold_host_status_or_command_lock() {
+        use std::sync::mpsc::channel;
+        use std::time::Duration;
+        let (ready_tx, ready_rx) = channel();
+        let worker = std::thread::spawn(move || {
+            let (_, _, owner, script) = setup();
+            let (task, host) = task::Task::new(owner);
+            ready_tx.send((script, Arc::new(host))).unwrap();
+            task.run()
+        });
+        let (script, host) = ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (entered_tx, entered_rx) = channel();
+        let (release_tx, release_rx) = channel();
+        script.lock().unwrap().pause_stop = Some((entered_tx, release_rx));
+        complete(&script.lock().unwrap().starts[0], SUCCEEDED);
+        wait_for(|| host.snapshot().status.stage == Stage::Running);
+        host.stop();
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (probe_tx, probe_rx) = channel();
+        let probe_host = host.clone();
+        let probe = std::thread::spawn(move || {
+            probe_host.stop();
+            probe_tx
+                .send((probe_host.snapshot(), probe_host.retry_cleanup()))
+                .unwrap();
+        });
+        let response = probe_rx.recv_timeout(Duration::from_secs(1));
+        // Always release the scripted native call, even if the probe timed out.
+        release_tx.send(()).unwrap();
+        probe.join().unwrap();
+        complete(&script.lock().unwrap().stops[0], SUCCEEDED);
+        wait_for(|| script.lock().unwrap().fence.is_some());
+        script
+            .lock()
+            .unwrap()
+            .fence
+            .as_ref()
+            .unwrap()
+            .store(true, Ordering::Release);
+        assert_eq!(worker.join().unwrap().stage, Stage::Released);
+        let (snapshot, retried) = response.expect("native call blocked host control");
+        assert!(snapshot.stop_requested);
+        assert!(!snapshot.abandoned && !retried);
+        assert_eq!(script.lock().unwrap().stops.len(), 1);
+    }
+
+    #[test]
+    fn dropping_unrun_task_reports_abandonment_without_releasing_its_grant() {
+        let (gate, _, owner, script) = setup();
+        let (task, host) = task::Task::new(owner);
+        drop(task);
+        let snapshot = host.snapshot();
+        assert!(snapshot.stop_requested && snapshot.abandoned);
+        assert_eq!(snapshot.status.stage, Stage::Starting);
+        assert!(!host.retry_cleanup());
+        assert_eq!(script.lock().unwrap().drops, 0);
+        busy(&gate);
+    }
+
+    #[test]
+    fn worker_unwind_reports_abandonment_instead_of_successful_stop() {
+        let (gate, _, owner, script) = setup();
+        let (task, host) = task::Task::new(owner);
+        script.lock().unwrap().panic_on_stop = true;
+        complete(&script.lock().unwrap().starts[0], SUCCEEDED);
+        host.stop();
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task.run()));
+        assert!(outcome.is_err());
+        let snapshot = host.snapshot();
+        assert!(snapshot.stop_requested && snapshot.abandoned);
+        assert_eq!(snapshot.status.stage, Stage::Stopping);
+        assert!(!host.retry_cleanup());
+        assert_eq!(script.lock().unwrap_or_else(|e| e.into_inner()).drops, 0);
+        busy(&gate);
     }
 
     #[test]

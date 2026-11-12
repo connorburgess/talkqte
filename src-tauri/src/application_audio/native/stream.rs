@@ -169,6 +169,33 @@ impl NativeOwner {
     pub fn retry_cleanup(&mut self) -> bool {
         self.0.retry_cleanup()
     }
+
+    /// Transfer polling to a task that stays on this constructing worker thread.
+    /// Send only the control handle to the host, then call NativeTask::run here.
+    pub fn into_task(self) -> (NativeTask, task::TaskControl) {
+        let (task, control) = task::Task::new(self.0);
+        (NativeTask(task), control)
+    }
+}
+
+/// Owns native cleanup independently of the host's control handle. Construct and
+/// run on the same dedicated worker; this is not an abortable async task.
+///
+/// ```compile_fail
+/// fn require_send<T: Send>() {}
+/// require_send::<talkqte_lib::application_audio::native::NativeTask>();
+/// ```
+#[must_use = "Run on the owning worker until Released; dropping the task abandons cleanup"]
+pub struct NativeTask(task::Task<Stream>);
+
+impl NativeTask {
+    /// Service native completions and explicit cleanup retries until Released.
+    /// A missing completion or unretried failure keeps this worker and the grant
+    /// reserved. Do not run on the UI thread, an audio callback or a shared pool
+    /// whose shutdown requires this operation to finish within a deadline.
+    pub fn run(self) -> Status {
+        self.0.run()
+    }
 }
 
 define_class!(
