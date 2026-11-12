@@ -391,24 +391,33 @@ host-clock binding in three stages. No app command calls it yet:
    through the worker's scheduling delay and use the bracket midpoint as an
    estimate. Preserve the full bracket width in nanosecond-capable `Duration`;
    reject reversed clocks, invalid host times, arithmetic overflow or a width
-   beyond the caller's explicit tolerance. There is no implicit retry or default
-   tolerance presented as a proven budget.
+   beyond the caller's explicit tolerance. A separate caller-supplied maximum
+   age runs from the original snapshot through runtime acceptance. An expired
+   snapshot is rejected before the host-clock call, and the age is checked again
+   after that call. A narrow read does not reset this budget. There is no implicit
+   retry or default tolerance presented as a proven budget.
 3. Reacquire the runtime lock and consume the measurement only if its exact live
    session, operation and source control remain current. Stop or replacement
-   during the read or before acceptance rejects it. The native owner's and
-   delivered blocks' ongoing cancellation checks remain necessary after this
+   during the read or before acceptance rejects it. The same age limit includes
+   time waiting to reacquire the runtime lock; reversed acceptance time is also
+   rejected. Age exactly at the limit is accepted, without millisecond rounding.
+   The native owner's and delivered blocks' ongoing cancellation checks remain
+   necessary after this
    acceptance; a clock measurement is not source permission.
 
-Five deterministic tests use injected instants and fictional host times. They
+Eight deterministic tests use injected instants and fictional host times. They
 cover fractional timing, delayed workers, exact tolerance boundaries, reversed
 and over-wide brackets, invalid timestamps, overflow, Stop/replacement races,
 source cancellation before the SDK read, invalid runtime states and live cue
-pause. These checks do not exercise a hardware clock or activate capture.
+pause. Three age regressions additionally cover expiry before the SDK read,
+a narrow read crossing the age limit, delayed acceptance and reversed time.
+These checks do not exercise a hardware clock or activate capture.
 
 The bracket describes read uncertainty only. It does not bound drift between
-Rust and CoreMedia clocks, account for suspension, or establish a maximum useful
-snapshot age. Before connecting the experiment, define and verify invalidation
-and remeasurement on suspension/clock changes, retain the uncertainty evidence,
+Rust and CoreMedia clocks, account for suspension, or establish a safe numerical
+age budget. The age check ends at acceptance: it is not a lifetime guarantee for
+the returned binding. Before connecting the experiment, define and verify
+invalidation and remeasurement on suspension/clock changes, retain the uncertainty evidence,
 and integrate source selection, consent and shutdown/recovery. Drift-aware
 transcription offsets and separately authorized native filtering/release checks
 remain dependencies. Normal microphone, UI, retention and provider behavior is
