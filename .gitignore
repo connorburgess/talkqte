@@ -37,7 +37,7 @@ models/
 *.db-*
 *.wav
 *.mp3
-!public/demo/welcome.mp3
+!src/demo/welcome.mp3
 *.m4a
 *.flac
 *.ogg

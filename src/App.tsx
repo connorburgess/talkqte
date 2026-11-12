@@ -831,13 +831,6 @@ function Notebook() {
 
   return (
     <div className="app-shell" ref={measureShell}>
-      <audio
-        ref={voices.audio}
-        src="/demo/welcome.mp3"
-        preload="auto"
-        onError={voices.fail}
-        aria-hidden="true"
-      />
       <aside
         className="meeting-list"
         id="meeting-list"
