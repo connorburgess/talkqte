@@ -133,10 +133,16 @@ After the existing accepted-start guard yields a packet, `NativeReader` obtains
 the stream's nullable
 [`synchronizationClock`](https://developer.apple.com/documentation/screencapturekit/scstream/synchronizationclock)
 and uses [`CMSyncConvertTime`](https://developer.apple.com/documentation/coremedia/cmsyncconverttime%28_%3Afrom%3Ato%3A%29)
-to convert the exact source timestamps for that packet's start, end and preceding
-gap to the host clock. It obtains the clock once for that packet and performs
-conversion again for later packets, rather than assuming one fixed offset and
-identical source/host rates. CoreMedia may quantize converted host timestamps;
+to convert new source boundaries for that packet to the host clock. It obtains
+the clock once for that packet and performs conversion again for later packets,
+rather than assuming one fixed offset and identical source/host rates. A shared
+source boundary keeps its already-published session millisecond: the previous
+block's end is the next contiguous block's start, or the start of its missing-frame
+gap. Re-estimating that same boundary must not create an overlap or an unmarked
+hole. New endpoints still use the current clock relationship; if a new endpoint
+falls behind the retained boundary, delivery fails. This continuity policy does
+not resample audio or establish a bound on clock estimation error.
+CoreMedia may quantize converted host timestamps;
 the binding preserves their rational values and the session fraction until the
 final floor to milliseconds. Source sample-grid addition must be exactly
 representable or delivery fails.
@@ -150,12 +156,21 @@ completion or release policy changes. The reader stays on its constructing
 worker; call it alongside `NativeOwner::poll`. `NativeTask::run` remains a
 blocking cleanup loop and does not consume audio.
 
-Five clock tests use the same delivery path with memory-only CoreMedia timebases
+`NativeReader::dropped_frames()` reports queue-capacity loss even without a later
+packet. Retirement preserves the last observed counter, including trailing loss
+before Stop, clock failure or EOF. It is not a count of all native capture loss or
+proof that a callback racing retirement has completed.
+
+Eight clock tests use the same delivery path with memory-only CoreMedia timebases
 at relative rates 0.5, 1 and 2, explicit offsets, a source timestamp off the
 session-origin sample grid, fractional session time and a missing initial frame
 range. They also cover start/empty guards, Stop during conversion, session
 replacement, missing clocks, invalid/backwards time and overflow. A callback
 regression checks publication before delivery and no anchor from invalid input.
+Two regressions change a real memory timebase's anchor between packets, checking
+both directions of re-estimation and continuity through a real frame gap. Both
+fail against the earlier per-packet shared-boundary conversion. A third checks
+trailing queue-loss visibility before and after Stop, clock failure and EOF.
 These tests create no SCStream, device or permission request and do not measure
 independent hardware-clock drift.
 

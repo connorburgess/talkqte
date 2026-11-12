@@ -193,6 +193,12 @@ impl NativeReader {
             })
         })
     }
+
+    /// Queue-capacity loss, including trailing drops without a later packet.
+    /// After retirement this is the last observed count, not a native loss total.
+    pub fn dropped_frames(&self) -> u64 {
+        self.delivery.dropped_frames()
+    }
 }
 
 // Same delivery path for native clocks and deterministic memory-only tests.
@@ -201,7 +207,9 @@ struct Delivery {
     origin: Arc<SourceOrigin>,
     binding: ClockBinding,
     terminal: Option<TimingError>,
-    last_end: Option<u64>,
+    /// Source frame and its already-delivered, floored session boundary.
+    last_end: Option<(u64, u64)>,
+    final_dropped_frames: u64,
 }
 
 impl Delivery {
@@ -212,7 +220,14 @@ impl Delivery {
             binding,
             terminal: None,
             last_end: None,
+            final_dropped_frames: 0,
         }
+    }
+
+    fn dropped_frames(&self) -> u64 {
+        self.reader
+            .as_ref()
+            .map_or(self.final_dropped_frames, Reader::dropped_frames)
     }
 
     fn try_next(
@@ -238,10 +253,25 @@ impl Delivery {
                 None => return Ok(None),
             };
             let origin = self.origin.get().ok_or(TimingError::Clock)?;
+            let end_frame = audio
+                .first_frame()
+                .checked_add((audio.samples().len() / audio.format().channels() as usize) as u64)
+                .ok_or(TimingError::Overflow)?;
             let block = TimedBlock::map_with(audio, session, |frame| {
+                // One source boundary gets one published session time. A later
+                // CoreMedia re-estimate must not create overlap or an unmarked
+                // hole at a shared block/gap boundary. New endpoints still use
+                // the current clock relation; no samples are inserted/resampled.
+                if let Some((previous_frame, previous_ms)) = self.last_end {
+                    if frame == previous_frame {
+                        return Ok(previous_ms);
+                    }
+                }
                 self.binding.session_ms(convert(origin, frame)?)
             })?;
-            if self.last_end.is_some_and(|end| block.start_ms() < end) {
+            if self.last_end.is_some_and(|(_, end)| {
+                block.start_ms() < end || block.gap().is_some_and(|gap| gap.start_ms < end)
+            }) {
                 return Err(TimingError::Clock);
             }
             // Stop can occur during clock conversion; never return usable audio
@@ -250,13 +280,14 @@ impl Delivery {
             if !block.belongs_to(session, &control) {
                 return Err(TimingError::Handoff(Rejected::Cancelled));
             }
-            self.last_end = Some(block.end_ms());
+            self.last_end = Some((end_frame, block.end_ms()));
             Ok(Some(block))
         })();
         if let Err(error) = result {
             if error != TimingError::Handoff(Rejected::NotReady) {
                 if let Some(reader) = self.reader.take() {
                     reader.control().0.cancelled.store(true, Ordering::Release);
+                    self.final_dropped_frames = reader.dropped_frames();
                 } // closes input; owner polls this even for a silent source
                 self.terminal = Some(error);
             }
@@ -391,6 +422,68 @@ mod tests {
     }
 
     #[test]
+    fn reestimated_clock_keeps_adjacent_packets_continuous() {
+        for host_micros in [6_999_000, 7_001_000] {
+            let (_gate, control, start, mut input, mut delivery) = setup();
+            let _capture = accept(start);
+            let base = timebase(1.0);
+            input.push(&control, 0, &[0.25; 64]).unwrap();
+            let first = delivery
+                .try_next(7, |o, f| convert(&base, o, f))
+                .unwrap()
+                .unwrap();
+            // Re-estimate the same source/host relationship between packets.
+            // This is an actual memory timebase update, not a fixed fake clock.
+            unsafe {
+                assert_eq!(
+                    base.set_rate_and_anchor_time(1.0, time(10, 1), time(host_micros, 1_000_000)),
+                    0
+                );
+            }
+            input.push(&control, 64, &[0.5; 64]).unwrap();
+            let second = delivery
+                .try_next(7, |o, f| convert(&base, o, f))
+                .unwrap()
+                .unwrap();
+            assert_eq!(second.start_ms(), first.end_ms());
+            assert!(second.gap().is_none());
+            assert!(second.end_ms() > second.start_ms());
+            assert_eq!(second.audio().samples(), &[0.5; 64]);
+            assert!(!control.is_cancelled());
+        }
+    }
+
+    #[test]
+    fn reestimated_clock_keeps_gap_start_at_delivered_boundary() {
+        for host_micros in [6_999_000, 7_001_000] {
+            let (_gate, control, start, mut input, mut delivery) = setup();
+            let _capture = accept(start);
+            let base = timebase(1.0);
+            input.push(&control, 0, &[0.25; 64]).unwrap();
+            let first = delivery
+                .try_next(7, |o, f| convert(&base, o, f))
+                .unwrap()
+                .unwrap();
+            unsafe {
+                assert_eq!(
+                    base.set_rate_and_anchor_time(1.0, time(10, 1), time(host_micros, 1_000_000)),
+                    0
+                );
+            }
+            input.push(&control, 128, &[0.5; 64]).unwrap();
+            let second = delivery
+                .try_next(7, |o, f| convert(&base, o, f))
+                .unwrap()
+                .unwrap();
+            let gap = second.gap().unwrap();
+            assert_eq!(gap.frames, 64);
+            assert_eq!(gap.start_ms, first.end_ms());
+            assert_eq!(gap.end_ms, second.start_ms());
+            assert!(gap.end_ms > gap.start_ms);
+        }
+    }
+
+    #[test]
     fn stop_during_conversion_and_changed_session_permanently_retire_delivery() {
         let (gate, control, start, mut input, mut delivery) = setup();
         let _capture = accept(start);
@@ -476,5 +569,49 @@ mod tests {
         let binding = ClockBinding::new(7, time(7, 1), Duration::from_millis(u64::MAX)).unwrap();
         assert_eq!(binding.session_ms(time(8, 1)), Err(TimingError::Overflow));
         assert_eq!(binding.session_ms(time(7, 1)), Ok(u64::MAX));
+    }
+
+    #[test]
+    fn trailing_queue_loss_remains_observable_after_stop_error_and_eof() {
+        for terminal in 0..3 {
+            let (gate, control, start, mut input, mut delivery) = setup();
+            let _capture = accept(start);
+            input.push(&control, 0, &[0.0; 16]).unwrap();
+            input.push(&control, 16, &[0.0; 16]).unwrap();
+            assert_eq!(input.push(&control, 32, &[0.0; 16]), Err(Rejected::Full));
+            assert_eq!(delivery.dropped_frames(), 16);
+            let base = timebase(1.0);
+            match terminal {
+                0 => {
+                    gate.stop(&control).unwrap();
+                    assert_eq!(
+                        delivery.try_next(7, |_, _| panic!("stopped")).err(),
+                        Some(TimingError::Handoff(Rejected::Cancelled))
+                    );
+                }
+                1 => {
+                    assert_eq!(
+                        delivery.try_next(7, |_, _| Err(TimingError::Clock)).err(),
+                        Some(TimingError::Clock)
+                    );
+                }
+                _ => {
+                    drop(input);
+                    for _ in 0..2 {
+                        delivery
+                            .try_next(7, |o, f| convert(&base, o, f))
+                            .unwrap()
+                            .unwrap();
+                    }
+                    assert_eq!(
+                        delivery.try_next(7, |_, _| panic!("closed")).err(),
+                        Some(TimingError::Handoff(Rejected::Closed))
+                    );
+                }
+            }
+            assert_eq!(delivery.dropped_frames(), 16);
+            assert!(delivery.try_next(7, |_, _| panic!("retired")).is_err());
+            assert_eq!(delivery.dropped_frames(), 16);
+        }
     }
 }
