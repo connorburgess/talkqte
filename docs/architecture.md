@@ -115,7 +115,10 @@ and explicit gaps. Its `timing` submodule binds one reader to a session and an
 explicit frame-zero origin, with checked absolute-frame conversion and
 frame-level discontinuities. Returned work still requires source/session guards.
 Native filtering, clock origin/drift, deadlines and actual source release remain
-unimplemented or unverified. Its worker-side `chunks` submodule accepts only
+unimplemented or unverified. The optional [native owner](native-audio-owner.md)
+now has a dedicated-worker loop and a sendable control handle. Native objects stay
+on their constructing thread through cleanup; host-handle loss requests Stop,
+and abandonment remains distinct from release. No app command enables this path. Its worker-side `chunks` submodule accepts only
 16 kHz mono, cuts continuous audio at three seconds and partial audio at every
 gap or clean EOF, and discards pending samples on cancellation/session changes.
 Returned chunks retain source/session guards; no recognizer or runtime command

@@ -25,6 +25,12 @@ Offline planning can define selection, cancellation generations, bounded queues 
 
 The [offline application-audio boundary](application-audio-boundary.md) now implements exact review ownership, one start attempt, cancellation and reservation through returned-resource cleanup. Nine fictional tests exercise these controls without OS access. The bounded synthetic handoff also preserves operation identity and frame gaps with eight additional tests. Native clock mapping, filtering, startup deadlines, rendered consent and actual release remain separate implementation/acceptance steps; the native capture permission gate does not block their independent offline preparation.
 
+The [development-only native owner](native-audio-owner.md) now binds an exact
+retained selection to positive application filtering and asynchronous
+start/Stop/output-removal/queue-drain ownership. Scripted completion tests and
+macOS compilation are preparation only; a selected-source callback, native
+selection/consent flow and device acceptance remain absent.
+
 Only then add the existing microphone, preserving source identity and mapping native timestamps into a shared session clock before any deliberate mixing. Use fictional Meet/Chrome and Zoom scenarios, wired headphones then speakers, to expose acoustic duplicates and timing drift. Source identity is not speaker identity. No provider integration, recording, upload or inference is needed for the capture-only stage.
 
 | Proposed acceptance gate | Smallest useful evidence; all remain open                                                                                                                                                                                                                                                                                |

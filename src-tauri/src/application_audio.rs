@@ -1,10 +1,13 @@
-//! Development-only ownership for selected-application audio. No OS API,
-//! enumeration, permission request, or app command lives here. The handoff
+//! Development-only ownership for selected-application audio. The default build
+//! has no OS API, enumeration, permission request or app command. The handoff
 //! submodule accepts synthetic buffers without activating any capture.
-//! A future native adapter must independently prove the selection and filtering.
+//! The optional native-audio-spike owner is unconnected to app commands.
+//! Native selection, sample handling and release still require acceptance.
 
 pub mod chunks;
 pub mod handoff;
+#[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+pub mod native;
 pub mod timing;
 
 use std::sync::{

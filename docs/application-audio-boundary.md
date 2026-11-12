@@ -3,8 +3,10 @@
 Development checkpoint, 11 November 2026. `src-tauri/src/application_audio.rs`
 implements an offline review/start/cancel boundary, synthetic audio handoff,
 session timing and chunk preparation for the source-only experiment in the
-[system-audio plan](system-audio-plan.md). It has no native adapter, OS enumeration,
+[system-audio plan](system-audio-plan.md). Its default build has no native adapter, OS enumeration,
 permission request, native audio delivery, Tauri command or app control.
+The optional [native owner](native-audio-owner.md) adds unconnected
+ScreenCaptureKit lifecycle code, not an enabled capture flow.
 The app remains microphone-only. This is not a capture capability or release.
 
 The goal is to receive relevant conversation context without accidentally

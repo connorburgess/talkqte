@@ -4,7 +4,7 @@
 use super::{Application, Control, Start};
 use rtrb::{Consumer, Producer, RingBuffer};
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
 
@@ -64,7 +64,7 @@ struct Packet {
 impl Start {
     /// Allocate a fixed ring on the startup worker, after exact-source approval.
     /// The adapter must keep both endpoints within this capture's lifetime and
-    /// only start its consumer after Start::run accepts the returned resource.
+    /// only deliver after Start::run or the native owner accepts the resource.
     /// One queue is allowed per approved operation.
     pub fn handoff(&mut self, format: Format, blocks: usize) -> Result<(Input, Reader), Rejected> {
         if self.lease.control.is_cancelled() {
@@ -79,6 +79,7 @@ impl Start {
         let (producer, consumer) = RingBuffer::new(blocks);
         self.handoff_created = true;
         let dropped = Arc::new(AtomicU64::new(0));
+        let consumer_closed = Arc::new(AtomicBool::new(false));
         Ok((
             Input {
                 producer,
@@ -87,6 +88,7 @@ impl Start {
                 next_frame: 0,
                 dropped_frames: 0,
                 dropped: dropped.clone(),
+                consumer_closed: consumer_closed.clone(),
             },
             Reader {
                 consumer,
@@ -94,6 +96,7 @@ impl Start {
                 format,
                 next_frame: 0,
                 dropped,
+                consumer_closed,
             },
         ))
     }
@@ -109,9 +112,17 @@ pub struct Input {
     next_frame: u64,
     dropped_frames: u64,
     dropped: Arc<AtomicU64>,
+    consumer_closed: Arc<AtomicBool>,
 }
 
 impl Input {
+    /// Clone before startup so the owner can detect silent consumer retirement
+    /// without borrowing the callback producer or acquiring a lock.
+    #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+    pub(super) fn consumer_closed_signal(&self) -> Arc<AtomicBool> {
+        self.consumer_closed.clone()
+    }
+
     /// first_frame is an absolute frame position on this operation's fixed-rate
     /// clock, starting at zero. It must include missing frames; never derive it
     /// from successfully queued samples. A trusted adapter must bind source to
@@ -128,7 +139,7 @@ impl Input {
         if !Arc::ptr_eq(&self.control.0, &source.0) {
             return Err(Rejected::ForeignSource);
         }
-        if self.producer.is_abandoned() {
+        if self.consumer_closed.load(Ordering::Acquire) || self.producer.is_abandoned() {
             return Err(Rejected::Closed);
         }
         let channels = self.format.channels as usize;
@@ -178,6 +189,13 @@ pub struct Reader {
     format: Format,
     next_frame: u64,
     dropped: Arc<AtomicU64>,
+    consumer_closed: Arc<AtomicBool>,
+}
+
+impl Drop for Reader {
+    fn drop(&mut self) {
+        self.consumer_closed.store(true, Ordering::Release);
+    }
 }
 
 impl Reader {
