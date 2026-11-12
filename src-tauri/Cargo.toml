@@ -59,7 +59,7 @@ objc2-screen-capture-kit = { version = "=0.3.2", optional = true, default-featur
 objc2-foundation = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "NSObject", "NSArray", "NSDictionary", "NSError", "NSString"] }
 dispatch2 = { version = "=0.3.1", optional = true }
 
-objc2-core-media = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "CMBase", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer", "CMTime", "objc2-core-audio-types"] }
+objc2-core-media = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "CMBase", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer", "CMSync", "CMTime", "objc2-core-audio-types"] }
 objc2-core-audio-types = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "CoreAudioBaseTypes"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

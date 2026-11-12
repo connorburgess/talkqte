@@ -12,6 +12,7 @@ pub enum TimingError {
     Handoff(Rejected),
     SessionChanged,
     Overflow,
+    Clock,
 }
 
 /// A missing frame range. Millisecond endpoints are floored independently, so
@@ -115,7 +116,15 @@ pub struct TimedBlock {
 
 impl TimedBlock {
     fn map(audio: Block, session: u64, origin_ms: u64) -> Result<Self, TimingError> {
-        let time = |frame| frame_ms(origin_ms, frame, audio.format().sample_rate());
+        let rate = audio.format().sample_rate();
+        Self::map_with(audio, session, |frame| frame_ms(origin_ms, frame, rate))
+    }
+
+    pub(super) fn map_with(
+        audio: Block,
+        session: u64,
+        mut time: impl FnMut(u64) -> Result<u64, TimingError>,
+    ) -> Result<Self, TimingError> {
         let first = audio.first_frame();
         let frames = (audio.samples().len() / audio.format().channels() as usize) as u64;
         let end = first.checked_add(frames).ok_or(TimingError::Overflow)?;
@@ -134,6 +143,9 @@ impl TimedBlock {
                 end_ms: start_ms,
             })
         };
+        if end_ms < start_ms || gap.is_some_and(|gap| gap.start_ms > gap.end_ms) {
+            return Err(TimingError::Clock);
+        }
         Ok(Self {
             audio,
             session,

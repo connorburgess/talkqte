@@ -1,4 +1,4 @@
-use super::{pcm::PcmReader, StreamFault};
+use super::{clock::SourceOrigin, pcm::PcmReader, StreamFault};
 use crate::application_audio::handoff::{Input, Rejected, MAX_SAMPLES};
 use objc2::{define_class, msg_send, rc::Retained, AnyThread, DefinedClass};
 use objc2_core_media::CMSampleBuffer;
@@ -15,6 +15,7 @@ struct Samples {
 pub(super) struct Callback {
     fault: Arc<StreamFault>,
     samples: Mutex<Samples>,
+    origin: Arc<SourceOrigin>,
 }
 
 impl Callback {
@@ -49,6 +50,10 @@ impl Callback {
                 return;
             }
         };
+        // The PCM reader sets its origin only after validating the whole buffer.
+        // Publish copied metadata before the ring packet, without consulting a clock.
+        self.origin
+            .publish(pcm.source_origin().expect("validated PCM origin"));
         match input.push(
             &self.fault.control,
             span.first_frame,
@@ -94,10 +99,15 @@ define_class!(
 );
 
 impl AudioOutput {
+    pub(super) fn origin(&self) -> Arc<SourceOrigin> {
+        self.ivars().origin.clone()
+    }
+
     pub(super) fn new(input: Input, pcm: PcmReader, fault: Arc<StreamFault>) -> Retained<Self> {
         // All storage is created before native start, outside the audio callback.
         let this = Self::alloc().set_ivars(Callback {
             fault,
+            origin: Arc::new(SourceOrigin::default()),
             samples: Mutex::new(Samples {
                 pcm,
                 input,
@@ -121,6 +131,10 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     fn setup() -> (Gate, Control, Start, Retained<AudioOutput>, Reader) {
+        setup_with(PcmReader::new(time(10, 1)).unwrap())
+    }
+
+    fn setup_with(pcm: PcmReader) -> (Gate, Control, Start, Retained<AudioOutput>, Reader) {
         let gate = Gate::default();
         let application =
             Application::new("fictional-player".into(), "Fictional player".into()).unwrap();
@@ -128,11 +142,7 @@ mod tests {
         let control = review.control();
         let mut start = gate.approve(&mut review).unwrap();
         let (input, reader) = start.handoff(Format::new(16_000, 1).unwrap(), 1).unwrap();
-        let output = AudioOutput::new(
-            input,
-            PcmReader::new(time(10, 1)).unwrap(),
-            Arc::new(StreamFault::new(control.clone())),
-        );
+        let output = AudioOutput::new(input, pcm, Arc::new(StreamFault::new(control.clone())));
         (gate, control, start, output, reader)
     }
 
@@ -152,6 +162,46 @@ mod tests {
         // SAFETY: immutable, memory-backed fictional CoreMedia buffer lives
         // through exactly the same receive function called by the output method.
         unsafe { output.ivars().receive(&buffer, SCStreamOutputType::Audio) };
+    }
+
+    #[test]
+    fn first_validated_timestamp_is_published_before_packet_and_never_replaced() {
+        let (_gate, control, start, output, mut reader) =
+            setup_with(PcmReader::from_first_sample());
+        let origin = output.origin();
+        assert!(origin.get().is_none());
+        let buffer = sample(
+            format(),
+            &[0.25; 16],
+            time(10_000_001, 1_000_000),
+            time(1, 16_000),
+            true,
+        );
+        unsafe { output.ivars().receive(&buffer, SCStreamOutputType::Audio) };
+        assert_eq!(
+            origin.get().map(|t| (t.value, t.timescale)),
+            Some((10_000_001, 1_000_000))
+        );
+        let _capture = accept(start);
+        assert_eq!(reader.try_next().unwrap().unwrap().first_frame(), 0);
+        let invalid = sample(
+            format(),
+            &[f32::NAN; 16],
+            time(10_001_001, 1_000_000),
+            time(1, 16_000),
+            true,
+        );
+        unsafe { output.ivars().receive(&invalid, SCStreamOutputType::Audio) };
+        assert!(control.is_cancelled());
+        assert_eq!(
+            origin.get().map(|t| (t.value, t.timescale)),
+            Some((10_000_001, 1_000_000))
+        );
+
+        let (_gate, control, _start, output, _reader) = setup_with(PcmReader::from_first_sample());
+        unsafe { output.ivars().receive(&invalid, SCStreamOutputType::Audio) };
+        assert!(control.is_cancelled());
+        assert!(output.origin().get().is_none());
     }
 
     #[test]
