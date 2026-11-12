@@ -24,7 +24,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
@@ -32,6 +32,9 @@ use tauri_plugin_dialog::DialogExt;
 struct Runtime {
     engine: Engine,
     last_tick: Instant,
+    /// Active time below one millisecond, retained across syncs and demo pause.
+    tick_remainder: Duration,
+    tick_session: u64,
     export: Option<String>,
     /// The running live session, if any. Finish it outside this lock, because
     /// delivering transcript lines takes the lock.
@@ -54,6 +57,8 @@ impl Default for Runtime {
         Self {
             engine: Engine::default(),
             last_tick: Instant::now(),
+            tick_remainder: Duration::ZERO,
+            tick_session: 0,
             export: None,
             live: None,
             live_start: live_control::StartGate::default(),
@@ -69,10 +74,25 @@ impl Default for Runtime {
 
 impl Runtime {
     fn sync(&mut self) {
-        let now = Instant::now();
-        self.engine
-            .advance(now.duration_since(self.last_tick).as_millis() as u64);
+        self.sync_at(Instant::now());
+    }
+
+    fn sync_at(&mut self, now: Instant) {
+        let delta = now.duration_since(self.last_tick);
         self.last_tick = now;
+        if self.tick_session != self.engine.session() {
+            // Replay and a replacement engine each issue a new session ID.
+            self.tick_session = self.engine.session();
+            self.tick_remainder = Duration::ZERO;
+        }
+        if self.engine.state.status == engine::Status::Running {
+            let elapsed = delta + self.tick_remainder;
+            let millis = elapsed.as_millis();
+            self.tick_remainder =
+                Duration::from_nanos(u64::from(elapsed.subsec_nanos() % 1_000_000));
+            self.engine
+                .advance(u64::try_from(millis).unwrap_or(u64::MAX));
+        }
         self.processing_reviews.reconcile(&self.engine);
     }
 }
@@ -1451,5 +1471,96 @@ mod processing_capture_tests {
                 expected
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod session_clock_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn frequent_syncs_preserve_elapsed_time_and_demo_cue_timing() {
+        let mut runtime = Runtime::default();
+        runtime.engine.start().unwrap();
+        let origin = runtime.last_tick;
+        let mut expected = Engine::default();
+        expected.start().unwrap();
+        // The same duration must have the same effect regardless of how often
+        // commands, transcript delivery and the timer synchronize the clock.
+        for tick in 1..=10_000 {
+            runtime.sync_at(origin + Duration::from_micros(tick * 1_500));
+        }
+        expected.advance(15_000);
+        assert_eq!(runtime.engine.state.elapsed_ms, 15_000);
+        assert_eq!(
+            runtime.engine.state.transcript.len(),
+            expected.state.transcript.len()
+        );
+        assert_eq!(
+            runtime.engine.state.cue.as_ref().map(|c| &c.id),
+            expected.state.cue.as_ref().map(|c| &c.id)
+        );
+        assert_eq!(
+            runtime.engine.state.cue.as_ref().unwrap().remaining_ms,
+            8_000
+        );
+        runtime.sync_at(origin + Duration::from_millis(15_000));
+        assert_eq!(runtime.engine.state.elapsed_ms, 15_000);
+        runtime.sync_at(origin + Duration::from_millis(23_000));
+        assert!(runtime.engine.state.cue.is_none());
+    }
+
+    #[test]
+    fn pause_excludes_idle_time_but_keeps_the_same_sessions_fraction() {
+        let mut runtime = Runtime::default();
+        let origin = runtime.last_tick;
+        runtime.sync_at(origin + Duration::from_micros(10_750));
+        runtime.engine.start().unwrap();
+        runtime.sync_at(origin + Duration::from_micros(11_250));
+        runtime.engine.pause().unwrap();
+        runtime.sync_at(origin + Duration::from_micros(20_999_750));
+        assert_eq!(runtime.engine.state.elapsed_ms, 0);
+        runtime.engine.resume().unwrap();
+        runtime.sync_at(origin + Duration::from_micros(21_000_250));
+        assert_eq!(runtime.engine.state.elapsed_ms, 1);
+    }
+
+    #[test]
+    fn replay_and_engine_replacement_do_not_inherit_a_fraction() {
+        for replace in [false, true] {
+            let mut runtime = Runtime::default();
+            let origin = runtime.last_tick;
+            runtime.engine.start().unwrap();
+            runtime.sync_at(origin + Duration::from_micros(900));
+            runtime.engine.end();
+            runtime.sync_at(origin + Duration::from_secs(10));
+            if replace {
+                runtime.engine = carry_over(&runtime.engine, Engine::live());
+            }
+            runtime.engine.start().unwrap();
+            runtime.sync_at(origin + Duration::from_micros(10_000_500));
+            assert_eq!(runtime.engine.state.elapsed_ms, 0);
+            runtime.sync_at(origin + Duration::from_micros(10_001_000));
+            assert_eq!(runtime.engine.state.elapsed_ms, 1);
+        }
+    }
+
+    #[test]
+    fn pausing_live_cues_does_not_pause_the_session_clock() {
+        let mut runtime = Runtime {
+            engine: Engine::live(),
+            ..Runtime::default()
+        };
+        let origin = runtime.last_tick;
+        runtime.engine.start().unwrap();
+        runtime.sync_at(origin + Duration::from_micros(500));
+        runtime.engine.set_live_cues_paused(true).unwrap();
+        runtime.sync_at(origin + Duration::from_micros(1_000));
+        assert_eq!(runtime.engine.state.elapsed_ms, 1);
+        runtime.engine.set_live_cues_paused(false).unwrap();
+        runtime.sync_at(origin + Duration::from_micros(1_500));
+        runtime.sync_at(origin + Duration::from_micros(2_000));
+        assert_eq!(runtime.engine.state.elapsed_ms, 2);
     }
 }
