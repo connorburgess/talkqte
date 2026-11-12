@@ -11,9 +11,10 @@ use std::sync::{
 mod clock;
 mod output;
 pub mod pcm;
+mod position;
 mod stream;
 mod task;
-pub use clock::{ClockBinding, NativeReader};
+pub use clock::{ClockBinding, NativeBlock, NativeReader};
 pub use stream::{NativeOwner, NativeTask, Selection};
 pub use task::{TaskControl, TaskSnapshot};
 

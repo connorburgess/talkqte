@@ -1,5 +1,6 @@
 //! Worker-side source-clock conversion. Nothing here reads a native clock from
 //! the audio callback, substitutes arrival time, or authorizes a source.
+use super::position::Position;
 use crate::application_audio::{
     handoff::{Reader, Rejected},
     timing::{TimedBlock, TimingError},
@@ -86,10 +87,10 @@ impl ClockBinding {
 
     #[cfg(test)]
     pub(crate) fn session_ms_for_test(&self, host: CMTime) -> Result<u64, TimingError> {
-        self.session_ms(host)
+        self.session_position(host)?.millis()
     }
 
-    fn session_ms(&self, host: CMTime) -> Result<u64, TimingError> {
+    fn session_position(&self, host: CMTime) -> Result<Position, TimingError> {
         numeric(host)?;
         // Keep both native rational timestamps and the session fraction until
         // the final floor to milliseconds. No per-packet accumulated rounding.
@@ -109,7 +110,7 @@ impl ClockBinding {
             return Err(TimingError::Clock);
         }
         let denominator = scale.checked_mul(1_000_000).ok_or(TimingError::Overflow)?;
-        u64::try_from(total / denominator).map_err(|_| TimingError::Overflow)
+        Position::new(total as u128, denominator as u128)
     }
 }
 
@@ -147,6 +148,36 @@ fn source_time(origin: CMTime, frame: u64) -> Result<CMTime, TimingError> {
     })
 }
 
+/// Source-owned samples plus an immutable, rational mapping inside this block.
+/// The mapping linearly interpolates the two converted boundaries. It neither
+/// resamples samples nor proves the device clock was linear inside the block.
+/// Recheck timing().belongs_to before using samples or committing delayed work.
+pub struct NativeBlock {
+    block: TimedBlock,
+    start: Position,
+    end: Position,
+}
+
+impl NativeBlock {
+    /// Rounded envelope, exact source frames, samples and source/session guard.
+    pub fn timing(&self) -> &TimedBlock {
+        &self.block
+    }
+
+    /// Project an absolute source-frame boundary, including the exclusive end.
+    /// Split chunks must retain this original mapping instead of restarting
+    /// from a rounded millisecond. Out-of-block positions (including gaps) fail.
+    /// This numeric lookup does not grant source/session authority.
+    pub fn frame_ms(&self, frame: u64) -> Result<u64, TimingError> {
+        let audio = self.block.audio();
+        let offset = frame
+            .checked_sub(audio.first_frame())
+            .ok_or(TimingError::Clock)?;
+        let frames = (audio.samples().len() / audio.format().channels() as usize) as u64;
+        self.start.interpolate(self.end, offset, frames)?.millis()
+    }
+}
+
 /// Same-worker native reader. Start must be accepted before consumption; every
 /// block converts its absolute source boundaries through the actual stream clock.
 /// It deliberately cannot enter the nominal-rate synthetic chunker: corrected
@@ -179,7 +210,7 @@ impl NativeReader {
     /// Call beside NativeOwner::poll on the constructing worker. Missing clock,
     /// conversion failure or session change retires delivery; continue polling
     /// the owner until cleanup completes. Recheck belongs_to before using work.
-    pub fn try_next(&mut self, current_session: u64) -> Result<Option<TimedBlock>, TimingError> {
+    pub fn try_next(&mut self, current_session: u64) -> Result<Option<NativeBlock>, TimingError> {
         let mut clocks = None;
         self.delivery.try_next(current_session, |origin, frame| {
             // This closure runs only after the accepted-start reader guard and
@@ -217,8 +248,8 @@ struct Delivery {
     origin: Arc<SourceOrigin>,
     binding: ClockBinding,
     terminal: Option<TimingError>,
-    /// Source frame and its already-delivered, floored session boundary.
-    last_end: Option<(u64, u64)>,
+    /// Source frame and its already-delivered rational session boundary.
+    last_end: Option<(u64, Position)>,
     final_dropped_frames: u64,
 }
 
@@ -244,7 +275,7 @@ impl Delivery {
         &mut self,
         session: u64,
         mut convert: impl FnMut(CMTime, u64) -> Result<CMTime, TimingError>,
-    ) -> Result<Option<TimedBlock>, TimingError> {
+    ) -> Result<Option<NativeBlock>, TimingError> {
         if let Some(error) = self.terminal {
             return Err(error);
         }
@@ -267,31 +298,64 @@ impl Delivery {
                 .first_frame()
                 .checked_add((audio.samples().len() / audio.format().channels() as usize) as u64)
                 .ok_or(TimingError::Overflow)?;
-            let block = TimedBlock::map_with(audio, session, |frame| {
-                // One source boundary gets one published session time. A later
-                // CoreMedia re-estimate must not create overlap or an unmarked
-                // hole at a shared block/gap boundary. New endpoints still use
-                // the current clock relation; no samples are inserted/resampled.
-                if let Some((previous_frame, previous_ms)) = self.last_end {
+            let mut position = |frame| {
+                // Reuse the complete published fraction at shared boundaries.
+                if let Some((previous_frame, previous_time)) = self.last_end {
                     if frame == previous_frame {
-                        return Ok(previous_ms);
+                        return Ok(previous_time);
                     }
                 }
-                self.binding.session_ms(convert(origin, frame)?)
-            })?;
-            if self.last_end.is_some_and(|(_, end)| {
-                block.start_ms() < end || block.gap().is_some_and(|gap| gap.start_ms < end)
-            }) {
+                self.binding.session_position(convert(origin, frame)?)
+            };
+            let first = audio.first_frame();
+            let start = position(first)?;
+            let end = position(end_frame)?;
+            if !start.precedes(end)? {
                 return Err(TimingError::Clock);
             }
+            let gap_start = if audio.gap_frames() == 0 {
+                None
+            } else {
+                let frame = first
+                    .checked_sub(audio.gap_frames())
+                    .ok_or(TimingError::Overflow)?;
+                let time = position(frame)?;
+                if start.precedes(time)? {
+                    return Err(TimingError::Clock);
+                }
+                Some((frame, time))
+            };
+            if let Some((_, previous)) = self.last_end {
+                if start.precedes(previous)?
+                    || match gap_start {
+                        Some((_, time)) => time.precedes(previous)?,
+                        None => false,
+                    }
+                {
+                    return Err(TimingError::Clock);
+                }
+            }
+            let block = TimedBlock::map_with(audio, session, |frame| {
+                if frame == first {
+                    start.millis()
+                } else if frame == end_frame {
+                    end.millis()
+                } else {
+                    let (gap_frame, time) = gap_start.ok_or(TimingError::Clock)?;
+                    if frame != gap_frame {
+                        return Err(TimingError::Clock);
+                    }
+                    time.millis()
+                }
+            })?;
             // Stop can occur during clock conversion; never return usable audio
             // just because the ring's earlier cancellation check passed.
             let control = self.reader.as_ref().expect("active reader").control();
             if !block.belongs_to(session, &control) {
                 return Err(TimingError::Handoff(Rejected::Cancelled));
             }
-            self.last_end = Some((end_frame, block.end_ms()));
-            Ok(Some(block))
+            self.last_end = Some((end_frame, end));
+            Ok(Some(NativeBlock { block, start, end }))
         })();
         if let Err(error) = result {
             if error != TimingError::Handoff(Rejected::NotReady) {
@@ -394,19 +458,139 @@ mod tests {
                 .try_next(7, |o, f| convert(&base, o, f))
                 .unwrap()
                 .unwrap();
-            assert_eq!((block.start_ms(), block.end_ms()), (start_ms, end_ms));
-            assert_eq!(block.gap().unwrap().start_ms, gap_ms);
-            assert_eq!(block.gap().unwrap().frames, 16);
-            assert_eq!(block.audio().samples(), &[0.25; 16]);
-            assert!(block.belongs_to(7, &control));
+            assert_eq!(
+                (block.timing().start_ms(), block.timing().end_ms()),
+                (start_ms, end_ms)
+            );
+            assert_eq!(block.timing().gap().unwrap().start_ms, gap_ms);
+            assert_eq!(block.timing().gap().unwrap().frames, 16);
+            assert_eq!(block.timing().audio().samples(), &[0.25; 16]);
+            assert!(block.timing().belongs_to(7, &control));
             input.push(&control, 32, &[0.5; 16]).unwrap();
             let next = delivery
                 .try_next(7, |o, f| convert(&base, o, f))
                 .unwrap()
                 .unwrap();
-            assert_eq!(next.start_ms(), end_ms);
-            assert!(next.gap().is_none());
+            assert_eq!(next.timing().start_ms(), end_ms);
+            assert!(next.timing().gap().is_none());
         }
+    }
+
+    #[test]
+    fn every_split_frame_preserves_fractional_phase_and_native_rate() {
+        for (rate, phase_ns, frame_ns) in [
+            (0.5, 2_000, 125_000),
+            (1.0, 1_000, 62_500),
+            (2.0, 500, 31_250),
+        ] {
+            let (_gate, control, start, mut input, mut delivery) = setup();
+            let _capture = accept(start);
+            let base = timebase(rate);
+            input.push(&control, 13, &[0.25; 2_048]).unwrap();
+            let block = delivery
+                .try_next(7, |o, f| convert(&base, o, f))
+                .unwrap()
+                .unwrap();
+            // Treat each boundary as a possible chunk split or recognizer offset.
+            // Expected values come from the explicit fixture's clock relation.
+            for frame in 13..=2_061 {
+                let expected = (250_600_000 + phase_ns + frame * frame_ns) / 1_000_000;
+                assert_eq!(
+                    block.frame_ms(frame),
+                    Ok(expected),
+                    "rate {rate}, frame {frame}"
+                );
+            }
+            assert_eq!(block.frame_ms(13), Ok(block.timing().start_ms()));
+            assert_eq!(block.frame_ms(2_061), Ok(block.timing().end_ms()));
+            for outside in [0, 12, 2_062, u64::MAX] {
+                assert_eq!(block.frame_ms(outside), Err(TimingError::Clock));
+            }
+        }
+    }
+
+    #[test]
+    fn fractional_shared_boundary_is_retained_after_reestimation() {
+        let (_gate, control, start, mut input, mut delivery) = setup();
+        let _capture = accept(start);
+        let base = timebase(1.0);
+        input.push(&control, 0, &[0.25; 64]).unwrap();
+        let first = delivery
+            .try_next(7, |o, f| convert(&base, o, f))
+            .unwrap()
+            .unwrap();
+        unsafe {
+            assert_eq!(
+                base.set_rate_and_anchor_time(1.0, time(10, 1), time(7_000_100, 1_000_000)),
+                0
+            );
+        }
+        input.push(&control, 64, &[0.5; 64]).unwrap();
+        let second = delivery
+            .try_next(7, |o, f| convert(&base, o, f))
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.end, second.start);
+        for offset in 0..=64 {
+            // 4.1ms across the second block, starting at the old 254.601ms end.
+            let expected = (254_601_000 + 4_100_000 * offset / 64) / 1_000_000;
+            assert_eq!(second.frame_ms(64 + offset), Ok(expected));
+            // Later clock changes cannot retime work already returned.
+            assert_eq!(
+                first.frame_ms(offset),
+                Ok((250_601_000 + 62_500 * offset) / 1_000_000)
+            );
+        }
+    }
+
+    #[test]
+    fn fractional_backwards_or_flat_block_retires_previously_returned_work() {
+        for end_micros in [7_000_750, 7_001_000] {
+            let (_gate, control, start, mut input, mut delivery) = setup();
+            let _capture = accept(start);
+            input.push(&control, 0, &[0.0; 16]).unwrap();
+            let previous = delivery
+                .try_next(7, |_, frame| {
+                    Ok(time(7_000_000 + frame as i64 * 1_000 / 16, 1_000_000))
+                })
+                .unwrap()
+                .unwrap();
+            input.push(&control, 16, &[0.0; 16]).unwrap();
+            // Both times floor to 251ms. One goes backwards, one is flat;
+            // neither is a valid mapping for a nonempty block of later frames.
+            assert_eq!(
+                delivery
+                    .try_next(7, |_, _| Ok(time(end_micros, 1_000_000)))
+                    .err(),
+                Some(TimingError::Clock)
+            );
+            assert!(control.is_cancelled());
+            assert!(!previous.timing().belongs_to(7, &control));
+            assert_eq!(
+                delivery.try_next(7, |_, _| panic!("retired")).err(),
+                Some(TimingError::Clock)
+            );
+        }
+    }
+
+    #[test]
+    fn fractional_backwards_gap_is_rejected_before_rounding() {
+        let (_gate, control, start, mut input, mut delivery) = setup();
+        let _capture = accept(start);
+        input.push(&control, 16, &[0.0; 16]).unwrap();
+        let result = delivery.try_next(7, |_, frame| {
+            Ok(time(
+                match frame {
+                    0 => 7_000_200, // missing range begins after the next block starts
+                    16 => 7_000_100,
+                    32 => 7_000_300,
+                    _ => unreachable!(),
+                },
+                1_000_000,
+            ))
+        });
+        assert_eq!(result.err(), Some(TimingError::Clock));
+        assert!(control.is_cancelled());
     }
 
     #[test]
@@ -455,10 +639,10 @@ mod tests {
                 .try_next(7, |o, f| convert(&base, o, f))
                 .unwrap()
                 .unwrap();
-            assert_eq!(second.start_ms(), first.end_ms());
-            assert!(second.gap().is_none());
-            assert!(second.end_ms() > second.start_ms());
-            assert_eq!(second.audio().samples(), &[0.5; 64]);
+            assert_eq!(second.timing().start_ms(), first.timing().end_ms());
+            assert!(second.timing().gap().is_none());
+            assert!(second.timing().end_ms() > second.timing().start_ms());
+            assert_eq!(second.timing().audio().samples(), &[0.5; 64]);
             assert!(!control.is_cancelled());
         }
     }
@@ -485,10 +669,10 @@ mod tests {
                 .try_next(7, |o, f| convert(&base, o, f))
                 .unwrap()
                 .unwrap();
-            let gap = second.gap().unwrap();
+            let gap = second.timing().gap().unwrap();
             assert_eq!(gap.frames, 64);
-            assert_eq!(gap.start_ms, first.end_ms());
-            assert_eq!(gap.end_ms, second.start_ms());
+            assert_eq!(gap.start_ms, first.timing().end_ms());
+            assert_eq!(gap.end_ms, second.timing().start_ms());
             assert!(gap.end_ms > gap.start_ms);
         }
     }
@@ -524,7 +708,7 @@ mod tests {
             delivery.try_next(8, |_, _| panic!("new session")).err(),
             Some(TimingError::SessionChanged)
         );
-        assert!(!previous.belongs_to(7, &control));
+        assert!(!previous.timing().belongs_to(7, &control));
         assert_eq!(
             delivery.try_next(7, |_, _| panic!("old session")).err(),
             Some(TimingError::SessionChanged)
@@ -560,7 +744,7 @@ mod tests {
             });
             assert_eq!(result.err(), Some(TimingError::Clock));
             assert!(control.is_cancelled());
-            assert!(!previous.belongs_to(7, &control));
+            assert!(!previous.timing().belongs_to(7, &control));
             assert_eq!(
                 delivery.try_next(7, |_, _| panic!("retired")).err(),
                 Some(TimingError::Clock)
@@ -577,8 +761,11 @@ mod tests {
         assert!(source_time(time(1, i32::MAX), 1).is_err());
         assert!(source_time(time(i64::MAX, 16_000), 1).is_err());
         let binding = ClockBinding::new(7, time(7, 1), Duration::from_millis(u64::MAX)).unwrap();
-        assert_eq!(binding.session_ms(time(8, 1)), Err(TimingError::Overflow));
-        assert_eq!(binding.session_ms(time(7, 1)), Ok(u64::MAX));
+        assert_eq!(
+            binding.session_ms_for_test(time(8, 1)),
+            Err(TimingError::Overflow)
+        );
+        assert_eq!(binding.session_ms_for_test(time(7, 1)), Ok(u64::MAX));
     }
 
     #[test]
