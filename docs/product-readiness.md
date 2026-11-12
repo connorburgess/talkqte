@@ -117,6 +117,24 @@ The Granola adapter, OAuth flow, and fictional listing fixtures now exist. Rust 
 
 An integration is ready only after a user can connect, understand access, select context, recover from a failure, disconnect, and manage imported copies. A mock is preparation; account-level validation and the full user flow are separate release gates. Any writeback needs a verified endpoint plus reviewed content and destination.
 
+### Connected workflow direction
+
+The primary Granola integration goal is to make TalkQTE's timely cues available in the user's Granola workflow without requiring a second notebook. Verify a documented extension or presentation surface before promising cues inside Granola. A separate companion alongside Granola may be useful, but is not an embedded integration. Cue display is distinct from writing to the meeting record; unused suggestions must not become notes or action items automatically.
+
+For someone who prefers the TalkQTE notebook, ongoing refresh of explicitly selected Granola notes is a separate planned capability. The current import/reimport flow is manual. Before adding refresh, verify when edited notes become available, provider limits and permitted access. Show source/date/revision and last successful refresh; handle older replies, missing/deleted or revoked content, offline periods and reconnect without widening the selected scope. Removal must prevent a pending refresh from restoring a copy. Stop refresh and Disconnect must remain reachable, with local copies handled explicitly. No durable retention or new writeback is implied.
+
+Official [Granola MCP documentation](https://docs.granola.ai/help-center/sharing/integrations/mcp), rechecked 12 November 2026, describes listing and reading accessible notes, with Basic-plan access limited to the last 30 days and transcript tools on paid plans. It does not establish a live event feed or a cue-presentation extension. Verify live input, prior-note refresh, cue presentation and writeback independently; do not scrape private app storage or inject unsupported UI to fill those gaps. Local TalkQTE operation remains independent of Granola availability.
+
+The large navigation/prior-context panels are temporary. The next notebook layout should provide one compact navigation area and on-demand context management, preserving source disclosure and disconnect/removal controls. More permanent tabs, a meeting archive or a second note-management workflow need a demonstrated use case. UI acceptance covers keyboard/focus, narrow windows, loading/failure/recovery and visible independent Stop; a smaller layout alone is not evidence of lower cognitive load.
+
+### Voiced practice demo
+
+Make the existing fictional scenario audible with natural-sounding synthetic speakers and synchronized transcript/cues. Generate a bounded set of clips during development and bundle them for local replay; do not require a model account or a new API request each time the demo runs. Disclose that the conversation and voices are synthetic. Keep text-only playback and accessible mute, pause/resume, replay and End controls.
+
+Offer a deliberate pause to practise responding aloud without capturing or evaluating the response, then continue the scripted conversation. Ignoring a cue and continuing to listen must remain a valid choice. Adaptive replies and actual speech recognition are separate capabilities requiring explicit processing/capture choices and validation; do not imply the script heard the participant.
+
+Acceptance: check all spoken lines against the fictional script, audible quality and speaker distinction, no overlapping or clipped turns, cue/text/audio alignment, immediate pause/End and correct replay, keyboard access and audio failure recovery. Compare useful participation and listening comprehension separately from technical playback checks. Record generation/model provenance and asset rights without account details or credentials. Review the concrete script and a bounded generation budget before a provider run; no unattended generation, billing change or API fallback. No user-outcome evidence is established by this demo.
+
 ## Distribution and first use
 
 Plan both how people find TalkQTE and how they receive a maintained application.
