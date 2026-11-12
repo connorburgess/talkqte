@@ -55,8 +55,8 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "AVCaptureDevice", "AVMediaFormat", "block2"] }
 
 # Direct bindings for the isolated native ownership experiment.
-objc2-screen-capture-kit = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "SCStream", "SCShareableContent", "block2", "dispatch2", "objc2-core-media", "objc2-core-graphics"] }
-objc2-foundation = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "NSObject", "NSArray", "NSError", "NSString"] }
+objc2-screen-capture-kit = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "SCStream", "SCError", "SCShareableContent", "block2", "dispatch2", "objc2-core-media", "objc2-core-graphics"] }
+objc2-foundation = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "NSObject", "NSArray", "NSDictionary", "NSError", "NSString"] }
 dispatch2 = { version = "=0.3.1", optional = true }
 
 objc2-core-media = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "CMBase", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer", "CMTime", "objc2-core-audio-types"] }

@@ -13,7 +13,8 @@ use objc2_core_media::CMTime;
 use objc2_foundation::{NSArray, NSError, NSObject, NSObjectProtocol};
 use objc2_screen_capture_kit::{
     SCContentFilter, SCDisplay, SCRunningApplication, SCStream, SCStreamConfiguration,
-    SCStreamDelegate, SCStreamOutput, SCStreamOutputType, SCWindow,
+    SCStreamDelegate, SCStreamErrorCode, SCStreamErrorDomain, SCStreamOutput, SCStreamOutputType,
+    SCWindow,
 };
 use std::sync::atomic::AtomicU64;
 
@@ -248,6 +249,28 @@ fn completion(slot: Arc<AtomicU8>) -> RcBlock<dyn Fn(*mut NSError)> {
     })
 }
 
+fn stop_completion(slot: Arc<AtomicU8>) -> RcBlock<dyn Fn(*mut NSError)> {
+    RcBlock::new(move |error: *mut NSError| {
+        // This is a Stop completion, not an audio callback. Inspect only the
+        // borrowed error's domain/code; retain no error or diagnostic text.
+        // SAFETY: ScreenCaptureKit supplies a valid NSError for this callback,
+        // or null on success. The framework domain exists since macOS 12.3.
+        let outcome = match unsafe { error.as_ref() } {
+            None => SUCCEEDED,
+            Some(error)
+                if error.code() == SCStreamErrorCode::AttemptToStopStreamState.0
+                    && error
+                        .domain()
+                        .isEqualToString(unsafe { SCStreamErrorDomain }) =>
+            {
+                ALREADY_STOPPED
+            }
+            Some(_) => FAILED,
+        };
+        let _ = slot.compare_exchange(PENDING, outcome, Ordering::Release, Ordering::Relaxed);
+    })
+}
+
 impl Driver for Stream {
     fn consumer_closed(&self) -> bool {
         self.consumer_closed.load(Ordering::Acquire)
@@ -265,7 +288,7 @@ impl Driver for Stream {
         }
     }
     fn stop(&mut self, slot: Arc<AtomicU8>) {
-        self.stop = Some(completion(slot));
+        self.stop = Some(stop_completion(slot));
         // SAFETY: one outstanding Stop; retries replace only a completed block.
         unsafe {
             self.stream
@@ -273,7 +296,7 @@ impl Driver for Stream {
         }
     }
     fn remove_output(&mut self) -> bool {
-        // SAFETY: successful Stop was observed; the retained exact output is
+        // SAFETY: Stop succeeded or explicitly reported already stopped; the exact output is
         // removed before enqueuing a fence on its sole serial callback queue.
         unsafe {
             self.stream
@@ -304,5 +327,45 @@ mod tests {
         completion(fresh.clone()).call((std::ptr::null_mut(),));
         assert_eq!(fresh.load(Ordering::Acquire), SUCCEEDED);
         assert_eq!(slot.load(Ordering::Acquire), FAILED);
+    }
+
+    #[test]
+    fn stop_completion_accepts_only_the_specific_framework_not_running_error() {
+        use objc2_foundation::ns_string;
+        // Memory-only NSError fixtures; no capture, stream or permission API.
+        let domain = unsafe { SCStreamErrorDomain };
+        for (domain, code, expected) in [
+            (
+                domain,
+                SCStreamErrorCode::AttemptToStopStreamState.0,
+                ALREADY_STOPPED,
+            ),
+            (
+                ns_string!("FictionalErrorDomain"),
+                SCStreamErrorCode::AttemptToStopStreamState.0,
+                FAILED,
+            ),
+            (
+                domain,
+                SCStreamErrorCode::FailedToStopAudioCapture.0,
+                FAILED,
+            ),
+            (domain, SCStreamErrorCode::FailedToStart.0, FAILED),
+        ] {
+            let error = unsafe { NSError::errorWithDomain_code_userInfo(domain, code, None) };
+            let ptr = Retained::as_ptr(&error).cast_mut();
+            let slot = Arc::new(AtomicU8::new(PENDING));
+            let block = stop_completion(slot.clone());
+            block.call((ptr,));
+            block.call((std::ptr::null_mut(),));
+            assert_eq!(slot.load(Ordering::Acquire), expected);
+            // This error must not turn a failed start into successful capture.
+            let start = Arc::new(AtomicU8::new(PENDING));
+            completion(start.clone()).call((ptr,));
+            assert_eq!(start.load(Ordering::Acquire), FAILED);
+        }
+        let slot = Arc::new(AtomicU8::new(PENDING));
+        stop_completion(slot.clone()).call((std::ptr::null_mut(),));
+        assert_eq!(slot.load(Ordering::Acquire), SUCCEEDED);
     }
 }

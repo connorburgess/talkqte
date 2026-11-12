@@ -18,6 +18,8 @@ pub use task::{TaskControl, TaskSnapshot};
 const PENDING: u8 = 0;
 const SUCCEEDED: u8 = 1;
 const FAILED: u8 = 2;
+// Only a Stop completion may report the framework's specific not-running error.
+const ALREADY_STOPPED: u8 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
@@ -184,7 +186,7 @@ impl<D: Driver> Owner<D> {
             }
             Stage::Running if lease.control.is_cancelled() => self.stop(),
             Stage::Stopping => match self.completion.load(Ordering::Acquire) {
-                SUCCEEDED => self.remove_and_drain(),
+                SUCCEEDED | ALREADY_STOPPED => self.remove_and_drain(),
                 FAILED => {
                     self.status = Status {
                         stage: Stage::StopFailed,
@@ -709,6 +711,49 @@ mod tests {
         busy(&gate);
         finish(&mut owner, &script);
         assert_eq!(owner.poll().problem, Some(Problem::StartFailed));
+    }
+
+    #[test]
+    fn not_running_stop_after_start_failure_or_stream_fault_still_removes_and_drains() {
+        for failed_start in [true, false] {
+            let (gate, control, mut owner, script) = setup();
+            complete(
+                &script.lock().unwrap().starts[0],
+                if failed_start { FAILED } else { SUCCEEDED },
+            );
+            owner.poll();
+            if !failed_start {
+                owner.resources.as_ref().unwrap().0 .1.record();
+                owner.poll();
+            }
+            assert!(control.is_cancelled());
+            assert_eq!(owner.status.stage, Stage::Stopping);
+            busy(&gate);
+            let stop = script.lock().unwrap().stops[0].clone();
+            complete(&stop, ALREADY_STOPPED);
+            script.lock().unwrap().remove_fails = true;
+            assert_eq!(owner.poll().stage, Stage::RemoveFailed);
+            busy(&gate);
+            assert!(script.lock().unwrap().fence.is_none());
+            script.lock().unwrap().remove_fails = false;
+            assert!(owner.retry_cleanup());
+            assert_eq!(owner.poll().stage, Stage::Draining);
+            busy(&gate);
+            {
+                let script = script.lock().unwrap();
+                assert_eq!(script.starts.len(), 1);
+                assert_eq!(script.stops.len(), 1);
+                assert_eq!(script.drops, 0);
+                script
+                    .fence
+                    .as_ref()
+                    .unwrap()
+                    .store(true, Ordering::Release);
+            }
+            assert_eq!(owner.poll().stage, Stage::Released);
+            assert_eq!(script.lock().unwrap().drops, 1);
+            assert!(gate.review(control.0.application.clone()).is_ok());
+        }
     }
 
     #[test]

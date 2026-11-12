@@ -70,6 +70,8 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --features native-audio-spike
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --features native-audio-spike -- -D warnings
       - run: npm run tauri -- build --debug --bundles app

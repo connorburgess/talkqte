@@ -41,7 +41,8 @@ The owner polls bounded completion slots outside audio callbacks and UI work:
   but retains the operation until start completes. Late success triggers Stop;
   it never becomes accepted capture. A failed start is conservatively stopped
   too; failure is not taken as proof that all native resources are released.
-- Stop completion must succeed before removing the exact audio output. A fence
+- Stop completion must succeed or report the framework's specific already-stopped
+  error before removing the exact audio output. A fence
   on its dedicated serial queue must then execute before resources and the
   operation reservation are released, in that order.
 - Failed Stop or output removal retains the reservation. Cleanup retry is explicit;
@@ -193,8 +194,10 @@ late success, successful start followed by missing/delayed Stop completion,
 explicit retry after failed Stop with a stale old completion, failed output
 removal, failed start and owner abandonment. A real session-reader retirement
 also exercises pending/running owner cleanup without any sample callback; it
-keeps new reviews blocked through confirmed Stop and drain. The completion block keeps only the first result, without reading or retaining
-the error object. The lifecycle tests assert that another review
+keeps new reviews blocked through confirmed Stop and drain. The start completion
+block keeps only the first result without reading the error object. The Stop
+completion reads only its borrowed error's domain/code and retains no error or
+diagnostic text. The lifecycle tests assert that another review
 remains blocked until successful Stop and queue drain, and that resources are
 released once. Two added fault tests cover pending startup, running capture,
 pending Stop, repeated faults and isolation from a later operation. They invoke
@@ -225,9 +228,33 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --featu
 ```
 
 These commands run fictional tests; they do not run capture. macOS CI includes
-the feature tests/lint, while the desktop bundle retains default features.
+both default-feature and native-feature tests/lint; the desktop bundle retains
+default features.
 Compilation on a current SDK does not establish macOS 14 runtime availability,
 filter behavior, dispatch completion ordering or native release.
+
+### Already-stopped cleanup — 12 November 2026
+
+The external review identified a recovery dead end: after failed startup or an
+OS stop, another Stop request can report that the stream is already stopped.
+Treating that result as an ordinary failure would retain the source indefinitely.
+Apple documents [`attemptToStopStreamState`](https://developer.apple.com/documentation/screencapturekit/scstreamerror/attempttostopstreamstate)
+as a stopped or nonexistent stream. Only this code in `SCStreamErrorDomain`,
+returned by the outstanding Stop completion, now allows output removal and the
+queue fence. Other domains, other failures and a pending completion still retain
+the reservation. A failed start or callback fault alone never proves release.
+
+Memory-only error fixtures exercise the actual completion block, including
+foreign-domain collisions, audio-stop failure, first-result handling and rejection
+of the same error by start completion. Scripted owner checks cover failed start
+and stream fault, including output-removal failure/retry and reservation retention
+until the queue drains. No device experiment establishes which error a particular
+macOS version returns or how quickly resources are released.
+
+Both new regressions fail with the previous Stop classification/cleanup behavior
+and pass with the fix. The full local checks pass with 364 feature tests, 333
+default-feature tests, both compile-fail doctests and warnings-denied Clippy in
+both configurations. These are offline checks, not native release measurements.
 
 ## Binding and dependency decision
 
