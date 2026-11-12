@@ -23,6 +23,8 @@ pub(crate) struct Measurement {
     snapshot: Snapshot,
     binding: ClockBinding,
     width: Duration,
+    measured_at: Instant,
+    max_age: Duration,
 }
 
 /// The full read bracket, not a device drift estimate or a confidence interval.
@@ -96,6 +98,14 @@ impl Runtime {
         &self,
         measurement: Measurement,
     ) -> Result<MeasuredBinding, TimingError> {
+        self.accept_native_clock_at(measurement, Instant::now())
+    }
+
+    fn accept_native_clock_at(
+        &self,
+        measurement: Measurement,
+        now: Instant,
+    ) -> Result<MeasuredBinding, TimingError> {
         let snapshot = &measurement.snapshot;
         if snapshot.session != self.engine.session()
             || self.native_clock_operation()? != snapshot.operation
@@ -103,6 +113,13 @@ impl Runtime {
         {
             return Err(TimingError::SessionChanged);
         }
+        // Include the runtime queue/lock wait in the same age budget. A read
+        // with a narrow bracket must not refresh an old snapshot's lifetime.
+        now.checked_duration_since(measurement.measured_at)
+            .ok_or(TimingError::Clock)?;
+        now.checked_duration_since(self.last_tick)
+            .ok_or(TimingError::Clock)?;
+        snapshot.check_age(now, measurement.max_age)?;
         Ok(MeasuredBinding {
             binding: measurement.binding,
             bracket_width: measurement.width,
@@ -112,18 +129,35 @@ impl Runtime {
 
 impl Snapshot {
     /// Call on the native owner worker, with NO Runtime mutex held. One bounded
-    /// attempt only; max_width is explicit host policy, not a universal budget.
-    pub(crate) fn measure(self, max_width: Duration) -> Result<Measurement, TimingError> {
-        self.measure_with(max_width, Instant::now, || {
+    /// attempt only. Both limits are explicit host policy, not proven budgets.
+    /// max_age runs from snapshot through acceptance; it is not renewed by the
+    /// read and does not establish validity after acceptance or across sleep.
+    pub(crate) fn measure(
+        self,
+        max_width: Duration,
+        max_age: Duration,
+    ) -> Result<Measurement, TimingError> {
+        self.measure_with(max_width, max_age, Instant::now, || {
             // SAFETY: the framework's singleton host clock is valid for this
             // synchronous read. No capture object or borrowed callback is used.
             unsafe { CMClock::host_time_clock().time() }
         })
     }
 
+    fn check_age(&self, now: Instant, max_age: Duration) -> Result<Duration, TimingError> {
+        let age = now
+            .checked_duration_since(self.at)
+            .ok_or(TimingError::Clock)?;
+        if age > max_age {
+            return Err(TimingError::Clock);
+        }
+        Ok(age)
+    }
+
     fn measure_with(
         self,
         max_width: Duration,
+        max_age: Duration,
         mut now: impl FnMut() -> Instant,
         read_host: impl FnOnce() -> CMTime,
     ) -> Result<Measurement, TimingError> {
@@ -131,6 +165,7 @@ impl Snapshot {
             return Err(TimingError::SessionChanged);
         }
         let before = now();
+        let delay = self.check_age(before, max_age)?;
         let host = read_host();
         let after = now();
         if self.control.is_cancelled() {
@@ -142,9 +177,7 @@ impl Snapshot {
         if width > max_width {
             return Err(TimingError::Clock);
         }
-        let delay = before
-            .checked_duration_since(self.at)
-            .ok_or(TimingError::Clock)?;
+        self.check_age(after, max_age)?;
         // Preserve fractional milliseconds and scheduling delay. The host read
         // occurred somewhere in this bracket; the midpoint is only an estimate.
         let midpoint = self
@@ -157,6 +190,8 @@ impl Snapshot {
             snapshot: self,
             binding,
             width,
+            measured_at: after,
+            max_age,
         })
     }
 }
@@ -196,7 +231,7 @@ mod tests {
         max: Duration,
     ) -> Result<Measurement, TimingError> {
         let mut times = [before, after].into_iter();
-        snapshot.measure_with(max, || times.next().unwrap(), host)
+        snapshot.measure_with(max, Duration::from_secs(1), || times.next().unwrap(), host)
     }
 
     #[test]
@@ -222,7 +257,9 @@ mod tests {
             Duration::from_nanos(11_750_250)
         );
         runtime.sync_at(before + Duration::from_millis(1));
-        let accepted = runtime.accept_native_clock(measurement).unwrap();
+        let accepted = runtime
+            .accept_native_clock_at(measurement, runtime.last_tick)
+            .unwrap();
         assert_eq!(accepted.bracket_width, Duration::from_nanos(501));
     }
 
@@ -244,6 +281,7 @@ mod tests {
             let mut times = [before, after].into_iter();
             let result = snapshot.measure_with(
                 Duration::from_millis(1),
+                Duration::from_secs(1),
                 || times.next().unwrap(),
                 || {
                     let mut value = host();
@@ -268,6 +306,7 @@ mod tests {
             let snapshot = runtime.native_clock_snapshot_at(&control, at).unwrap();
             let measurement = snapshot.measure_with(
                 Duration::ZERO,
+                Duration::from_secs(1),
                 || at,
                 || {
                     match case {
@@ -316,10 +355,85 @@ mod tests {
         let snapshot = runtime.native_clock_snapshot_at(&control, at).unwrap();
         gate.stop(&control).unwrap();
         assert!(matches!(
-            snapshot.measure_with(Duration::ZERO, || at, || panic!("cancelled read")),
+            snapshot.measure_with(
+                Duration::ZERO,
+                Duration::from_secs(1),
+                || at,
+                || panic!("cancelled read")
+            ),
             Err(TimingError::SessionChanged)
         ));
         assert!(runtime.native_clock_snapshot_at(&control, at).is_err());
+    }
+
+    #[test]
+    fn expired_snapshot_never_calls_the_host_clock() {
+        let (mut runtime, _gate, _review, control) = setup();
+        let at = runtime.last_tick;
+        let snapshot = runtime.native_clock_snapshot_at(&control, at).unwrap();
+        let result = snapshot.measure_with(
+            Duration::from_millis(1),
+            Duration::from_millis(10),
+            || at + Duration::from_millis(10) + Duration::from_nanos(1),
+            || panic!("expired snapshot must not query the host clock"),
+        );
+        assert!(matches!(result, Err(TimingError::Clock)));
+    }
+
+    #[test]
+    fn narrow_read_cannot_extend_the_snapshot_budget() {
+        let (mut runtime, _gate, _review, control) = setup();
+        let at = runtime.last_tick;
+        let snapshot = runtime.native_clock_snapshot_at(&control, at).unwrap();
+        let mut times = [
+            at + Duration::from_millis(10),
+            at + Duration::from_millis(10) + Duration::from_nanos(1),
+        ]
+        .into_iter();
+        // The one-nanosecond read meets its own width budget, but crosses the
+        // total snapshot-age limit. A new short read cannot reset that limit.
+        let result = snapshot.measure_with(
+            Duration::from_millis(1),
+            Duration::from_millis(10),
+            || times.next().unwrap(),
+            host,
+        );
+        assert!(matches!(result, Err(TimingError::Clock)));
+    }
+
+    #[test]
+    fn runtime_wait_counts_toward_age_and_acceptance_cannot_reverse_time() {
+        for case in 0..4 {
+            let (mut runtime, _gate, _review, control) = setup();
+            let at = runtime.last_tick;
+            let snapshot = runtime.native_clock_snapshot_at(&control, at).unwrap();
+            let mut times =
+                [at + Duration::from_millis(2), at + Duration::from_millis(3)].into_iter();
+            let measurement = snapshot
+                .measure_with(
+                    Duration::from_millis(1),
+                    Duration::from_millis(10),
+                    || times.next().unwrap(),
+                    host,
+                )
+                .unwrap();
+            let accept_at = match case {
+                0 => at + Duration::from_millis(10),
+                1 => at + Duration::from_millis(10) + Duration::from_nanos(1),
+                2 => at + Duration::from_millis(3) - Duration::from_nanos(1),
+                _ => {
+                    runtime.sync_at(at + Duration::from_millis(8));
+                    at + Duration::from_millis(7)
+                }
+            };
+            let result = runtime.accept_native_clock_at(measurement, accept_at);
+            if case == 0 {
+                // Age equality is accepted without rounding to milliseconds.
+                assert_eq!(result.unwrap().bracket_width, Duration::from_millis(1));
+            } else {
+                assert!(matches!(result, Err(TimingError::Clock)), "case {case}");
+            }
+        }
     }
 
     #[test]
@@ -350,7 +464,9 @@ mod tests {
                     Duration::ZERO,
                 )
                 .unwrap();
-                assert!(runtime.accept_native_clock(measurement).is_ok());
+                assert!(runtime
+                    .accept_native_clock_at(measurement, at + Duration::from_millis(1))
+                    .is_ok());
             } else {
                 assert!(
                     matches!(snapshot, Err(TimingError::SessionChanged)),
