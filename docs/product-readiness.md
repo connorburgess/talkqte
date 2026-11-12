@@ -154,3 +154,14 @@ The roadmap's full future feature set need not block a clearly scoped pilot. Eac
 At each planning pass, read the current product goal, roadmap, research notes, and this plan. Identify the most important unmet readiness condition for the next milestone, then choose a small task with observable evidence. Record which area it advances, the acceptance check, dependencies, and remaining gap in the relevant PR or roadmap entry. A feature PR need not solve every area; consequential gaps must become named follow-up work.
 
 The support matrix and resource targets, Granola connection decision, and installation/update plans already exist. The next evidence is native source selection and Stop/recovery, the remaining Granola account checks, native accessibility, and—when distribution is authorized—clean installation and upgrade recovery. Human-cued participation/listening validation remains a separate gate; a production cue provider is still unselected. Review coverage across all areas at milestone boundaries. Add another component, tool or integration only when it resolves a named failure or is needed for the next acceptance check; do not extend preparation merely because native or participant evidence is waiting.
+
+### Capability and documentation review
+
+Before checking off a roadmap item or merging a change to capabilities, setup, usage, or limitations, compare the resulting behavior with README.md and the relevant usage, privacy, platform, and troubleshooting guidance. Record this review in the PR, including when no documentation edit is needed:
+
+- State what a person can do in the normal app, what requires a developer feature or separate connection, and what remains planned or disconnected. Proposed PR code is not merged functionality.
+- Match each changed claim to evidence from the reviewed commit. Distinguish automated fictional checks, observed native/account behavior, and user-outcome evidence; state checks not run and remaining acceptance dependencies.
+- Check that setup commands, feature flags, permissions, model requirements, controls, failure recovery, and data-lifecycle descriptions still match the supported path. Update affected instructions in the same PR; do not promote a build or component test into an end-to-end guarantee.
+- Record **Documentation review: updated [files] because [behavior changed]**, or **Documentation review: unchanged [files] because [existing wording remains accurate]**, with evidence links as appropriate. A roadmap box covers only its stated scope; broader acceptance items stay open.
+
+At milestone boundaries, also review the whole discover → install → first use → Stop/recovery → update/support journey and any affected website claims. Record inconsistencies and the next release blocker in the milestone evidence. Keep the README a concise entry point and detailed validation in the relevant documents; do not add features or rewrite accurate material merely to complete this review.

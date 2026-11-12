@@ -2,6 +2,8 @@
 
 This is a development plan. An unchecked item may be partly implemented; it remains open until its stated scope and acceptance checks are complete. Checked items establish only the capability and evidence described, not a supported release or demonstrated user benefit.
 
+Each check-off includes a [capability and documentation review](docs/product-readiness.md#capability-and-documentation-review): compare the delivered scope and acceptance evidence with the README and affected guidance, then record updates or why no edit is needed in the PR. Review the complete user journey again at milestone boundaries.
+
 The product goal is timely context that helps someone stay grounded and respond during the conversation. Clarification questions are the first bounded cue type. Saving and note-taking are secondary use cases to validate, not required proof of value. Current public presentation should explain a clearly labeled fictional concept and invite people to follow development; recruitment and downloads remain later stages.
 
 ## Development milestones
