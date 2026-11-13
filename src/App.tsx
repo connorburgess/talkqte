@@ -601,8 +601,12 @@ function Notebook() {
       // The card only shows in the notebook, so the panel is already here.
       setTab('notes');
       setTimeout(() => {
-        const add = document.querySelector<HTMLElement>(
-          '[aria-label="Prior context"] button',
+        const panel = document.querySelector<HTMLDetailsElement>(
+          '[aria-label="Prior context"] details',
+        );
+        if (panel) panel.open = true;
+        const add = panel?.querySelector<HTMLElement>(
+          'button.secondary-button',
         );
         add?.scrollIntoView({ block: 'center' });
         add?.focus();

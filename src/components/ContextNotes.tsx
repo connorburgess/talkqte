@@ -182,146 +182,167 @@ export function ContextNotes({
 
   return (
     <section className="context-panel" aria-label="Prior context">
-      <div className="context-heading">
-        <div>
+      <details className="context-disclosure">
+        <summary
+          aria-disabled={working || undefined}
+          onClick={(event) => {
+            // Keep cancellation and disconnect reachable while a request is pending.
+            if (working && event.currentTarget.closest('details')?.open)
+              event.preventDefault();
+          }}
+        >
           <strong>Prior context</strong>
           <span className="muted small">
-            Notes you chose from a file or from Granola · not from this
-            conversation · kept in memory, never exported
+            {items.length === 1
+              ? '1 note selected'
+              : `${items.length} notes selected`}
+            {granola.connected ? ' · Granola connected' : ''}
           </span>
-        </div>
-        <div className="context-actions">
-          {items.length > 0 && (
-            <button
-              className="text-button"
-              disabled={busy || working}
-              onClick={() =>
-                void run(async () => {
-                  // This button unmounts with the list; focus moves to Add.
-                  returnFocus.current = true;
-                  const removed = await bridge.removeAllContext();
-                  onNotice(
-                    removed === 1
-                      ? '1 imported note removed.'
-                      : `${removed} imported notes removed.`,
-                  );
-                })
-              }
-            >
-              Remove all
-            </button>
-          )}
-          <button
-            ref={addButton}
-            className="secondary-button"
-            disabled={busy || working}
-            onClick={pick}
-          >
-            <FileText size={15} />
-            Add notes from a file
-          </button>
-          {bridge.desktop &&
-            (granola.connected ? (
-              <>
-                <button
-                  className="secondary-button"
-                  disabled={busy || working}
-                  ref={granolaButton}
-                  onClick={chooseGranola}
-                >
-                  <Link2 size={15} />
-                  {listing ? 'Loading Granola notes…' : 'Choose Granola notes'}
-                </button>
-                <button
-                  className="text-button"
-                  disabled={busy || (working && !listing)}
-                  onClick={disconnectGranola}
-                >
-                  Disconnect Granola
-                </button>
-              </>
-            ) : signingIn ? (
-              <button className="text-button" onClick={cancelSignIn}>
-                Cancel sign-in
-              </button>
-            ) : (
+        </summary>
+        <div className="context-heading">
+          <div>
+            <span className="muted small">
+              Notes you chose from a file or from Granola · not from this
+              conversation · kept in memory, never exported
+            </span>
+          </div>
+          <div className="context-actions">
+            {items.length > 0 && (
               <button
-                ref={connectButton}
-                className="secondary-button"
-                disabled={busy || working}
-                onClick={connectGranola}
-              >
-                <Link2 size={15} />
-                Connect Granola
-              </button>
-            ))}
-        </div>
-      </div>
-      {granola.connected && (
-        <p className="muted small connection-terms" role="status">
-          Granola connected as you.{' '}
-          {granola.tools.includes('get_meetings')
-            ? 'TalkQTE may list and read the notes you choose from the last 30 days'
-            : 'This account offers no note access to TalkQTE'}
-          {granola.tools.includes('query_granola_meetings')
-            ? ', and may ask its assistant one question when you press Suggest from Granola'
-            : ''}
-          ; it reads no transcripts and writes nothing back. Disconnect forgets
-          the sign-in; imported notes stay until you remove them.
-        </p>
-      )}
-      {signingIn && (
-        <p className="muted small" role="status">
-          Sign in to Granola in your browser, then return here. Nothing is read
-          until you choose notes.
-        </p>
-      )}
-      {listing && (
-        <p className="muted small" role="status">
-          Loading recent notes… You can disconnect while you wait.
-        </p>
-      )}
-      {items.length > 0 ? (
-        <ul className="context-list">
-          {items.map((item) => (
-            <li key={`${item.provider}:${item.sourceId}`}>
-              <div>
-                <strong>{item.title}</strong>
-                <span className="muted small">
-                  {item.sourceDate} ·{' '}
-                  {item.provider === 'granola' ? 'From Granola' : 'From a file'}
-                </span>
-                <p>{item.excerpt}</p>
-              </div>
-              <button
-                className="icon-button"
-                aria-label={`Remove ${item.title} (${item.sourceDate})`}
-                title="Remove"
+                className="text-button"
                 disabled={busy || working}
                 onClick={() =>
-                  void run(() =>
-                    bridge.command('remove_context_item', {
-                      provider: item.provider,
-                      sourceId: item.sourceId,
-                    }),
-                  )
+                  void run(async () => {
+                    // This button unmounts with the list; focus moves to Add.
+                    returnFocus.current = true;
+                    const removed = await bridge.removeAllContext();
+                    onNotice(
+                      removed === 1
+                        ? '1 imported note removed.'
+                        : `${removed} imported notes removed.`,
+                    );
+                  })
                 }
               >
-                <X size={15} />
+                Remove all
               </button>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="muted small">
-          No prior notes selected.{' '}
-          {granola.connected
-            ? 'Choose Granola notes from the last 30 days, or add a file.'
-            : 'Connect Granola to choose from your notes of the last 30 days, or add a file.'}{' '}
-          A TalkQTE notes file is a JSON file with a list of notes, each with an
-          id, a date, and text.
-        </p>
-      )}
+            )}
+            <button
+              ref={addButton}
+              className="secondary-button"
+              disabled={busy || working}
+              onClick={pick}
+            >
+              <FileText size={15} />
+              Add notes from a file
+            </button>
+            {bridge.desktop &&
+              (granola.connected ? (
+                <>
+                  <button
+                    className="secondary-button"
+                    disabled={busy || working}
+                    ref={granolaButton}
+                    onClick={chooseGranola}
+                  >
+                    <Link2 size={15} />
+                    {listing
+                      ? 'Loading Granola notes…'
+                      : 'Choose Granola notes'}
+                  </button>
+                  <button
+                    className="text-button"
+                    disabled={busy || (working && !listing)}
+                    onClick={disconnectGranola}
+                  >
+                    Disconnect Granola
+                  </button>
+                </>
+              ) : signingIn ? (
+                <button className="text-button" onClick={cancelSignIn}>
+                  Cancel sign-in
+                </button>
+              ) : (
+                <button
+                  ref={connectButton}
+                  className="secondary-button"
+                  disabled={busy || working}
+                  onClick={connectGranola}
+                >
+                  <Link2 size={15} />
+                  Connect Granola
+                </button>
+              ))}
+          </div>
+        </div>
+        {granola.connected && (
+          <p className="muted small connection-terms" role="status">
+            Granola connected as you.{' '}
+            {granola.tools.includes('get_meetings')
+              ? 'TalkQTE may list and read the notes you choose from the last 30 days'
+              : 'This account offers no note access to TalkQTE'}
+            {granola.tools.includes('query_granola_meetings')
+              ? ', and may ask its assistant one question when you press Suggest from Granola'
+              : ''}
+            ; it reads no transcripts and writes nothing back. Disconnect
+            forgets the sign-in; imported notes stay until you remove them.
+          </p>
+        )}
+        {signingIn && (
+          <p className="muted small" role="status">
+            Sign in to Granola in your browser, then return here. Nothing is
+            read until you choose notes.
+          </p>
+        )}
+        {listing && (
+          <p className="muted small" role="status">
+            Loading recent notes… You can disconnect while you wait.
+          </p>
+        )}
+        {items.length > 0 ? (
+          <ul className="context-list">
+            {items.map((item) => (
+              <li key={`${item.provider}:${item.sourceId}`}>
+                <div>
+                  <strong>{item.title}</strong>
+                  <span className="muted small">
+                    {item.sourceDate} ·{' '}
+                    {item.provider === 'granola'
+                      ? 'From Granola'
+                      : 'From a file'}
+                  </span>
+                  <p>{item.excerpt}</p>
+                </div>
+                <button
+                  className="icon-button"
+                  aria-label={`Remove ${item.title} (${item.sourceDate})`}
+                  title="Remove"
+                  disabled={busy || working}
+                  onClick={() =>
+                    void run(() =>
+                      bridge.command('remove_context_item', {
+                        provider: item.provider,
+                        sourceId: item.sourceId,
+                      }),
+                    )
+                  }
+                >
+                  <X size={15} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="muted small">
+            No prior notes selected.{' '}
+            {granola.connected
+              ? 'Choose Granola notes from the last 30 days, or add a file.'
+              : 'Connect Granola to choose from your notes of the last 30 days, or add a file.'}{' '}
+            A TalkQTE notes file is a JSON file with a list of notes, each with
+            an id, a date, and text.
+          </p>
+        )}
+      </details>
       <dialog
         ref={dialog}
         className="export-dialog context-dialog"

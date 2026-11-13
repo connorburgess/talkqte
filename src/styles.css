@@ -827,6 +827,21 @@ svg {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.context-disclosure > summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding: 10px 4px;
+}
+.context-disclosure > summary span {
+  margin-left: 12px;
+}
+.context-disclosure > summary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+.context-disclosure[open] > summary {
+  margin-bottom: 12px;
+}
 .context-heading {
   display: flex;
   flex-wrap: wrap;
