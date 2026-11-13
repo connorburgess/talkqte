@@ -71,7 +71,9 @@ test('every state names its source and capture state, and every control says it 
   page,
 }) => {
   const { mock, picker, frame } = await openMock(page);
-  await expect(mock).toContainText('does not capture audio');
+  await expect(mock).toContainText(
+    'the preview starts and stops nothing, connects to no meeting, and generates no AI cues',
+  );
   const capture: Record<string, string> = {
     idle: 'Example not started',
     starting: 'Simulated start. This example loads and connects nothing',
@@ -84,12 +86,14 @@ test('every state names its source and capture state, and every control says it 
   for (const state of allStates) {
     await picker.selectOption(state);
     await expect(frame).toContainText(
-      'this example is not connected to audio, a meeting, or AI',
+      'every control here is simulated and only changes the example',
     );
     await expect(frame).toContainText(
-      'Fictional sample conversation. This example connects no microphone, app or meeting',
+      'Source and Capture are real and read-only',
     );
-    await expect(frame).toContainText(capture[state]);
+    await expect(frame).toContainText(
+      `Simulated Fictional sample conversation. ${capture[state]}`,
+    );
     await expect(simulated(frame, 'Stop')).toHaveCount(
       activeStates.includes(state) ? 1 : 0,
     );
@@ -212,7 +216,7 @@ test('a keyboard walk starts, cancels, pauses, stops and recovers, moving focus 
   await expect(frame).toContainText(
     'No example session yet. This example captures nothing.',
   );
-  await expect(mock).not.toContainText('A real live session is running');
+  await expect(mock).not.toContainText('Its controls are above');
   await simulated(frame, 'Start').press('Enter');
   await expect(status).toHaveText('Preview state: Starting');
   await expect(frame).toContainText('No conversation text yet');
@@ -472,7 +476,7 @@ test('real session Stop remains separate from the simulated Stop', async ({
   await expect(
     page.getByRole('region', { name: 'Live session layout preview' }),
   ).toContainText(
-    'A real live session is running. Its status and Stop are above; this example is separate.',
+    'A real live session is running. Its controls are above; nothing in this preview starts or stops it.',
   );
   const realStop = page.getByRole('button', {
     name: 'Stop live session',

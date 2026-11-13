@@ -91,6 +91,16 @@
 .mock-facts dd {
   margin: 0;
 }
+.mock-tag {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 8px;
+  border: 1px solid #8fa58c;
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
 .mock-status {
   margin-top: 12px;
   color: var(--muted);

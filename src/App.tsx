@@ -1173,7 +1173,9 @@ function Notebook() {
         )}
 
         {view === 'live-mock' && (
-          <LiveSessionMock capturing={preparing || live || finishing} />
+          <LiveSessionMock
+            real={{ microphone, preparing, cancelling, live, finishing }}
+          />
         )}
         {view === 'notebook' && (
           <div className="notebook-body">
