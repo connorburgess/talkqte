@@ -198,6 +198,7 @@ impl Runtime {
     /// Call under the runtime lock BEFORE draining queued transcription.
     pub(crate) fn take_live_for_stop(&mut self) -> Option<Live> {
         self.live_start.cancel();
+        self.retire_live_source();
         self.processing_reviews.clear();
         self.engine.begin_live_stop();
         self.live.take()
