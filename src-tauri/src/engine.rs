@@ -1639,16 +1639,18 @@ fn suggest(text: &str) -> Vec<(&'static str, String)> {
             .split_whitespace()
             .map(|word| word.trim_matches(|character: char| !character.is_alphanumeric()))
             .collect();
-        sentence_words.windows(2).any(|pair| {
+        sentence_words.windows(2).enumerate().any(|(index, pair)| {
             is_word(pair[0], "someone")
                 && ["can", "should", "could"]
                     .iter()
                     .any(|verb| is_word(pair[1], verb))
+                && !says_what_people_notice(&sentence_words[index + 1..])
         })
     }) {
         found.push(("Owner", "Who will take the first draft?".into()));
     }
-    if words.iter().any(|word| is_word(word, "soon")) {
+    if (0..words.len()).any(|index| is_word(words[index], "soon") && !farewell_soon(&words, index))
+    {
         found.push(("Timing", "What date should we aim for?".into()));
     }
     if words
@@ -1669,6 +1671,56 @@ fn suggest(text: &str) -> Vec<(&'static str, String)> {
         }
     }
     found
+}
+
+/// Whether the words from "can", "should", or "could" onwards, after
+/// "someone", make a general remark instead of leaving a task open: "someone
+/// can always tell when the bread is fresh", "someone should never have to
+/// ask", "someone could see it from the road". That is "always" or "never"
+/// next, or after "can" or "could" a verb of noticing. "Tell" counts only
+/// before a clause ("tell when", "tell that"), so "someone can tell the
+/// caterer" is still a task, and so is "someone could see to the booking".
+fn says_what_people_notice(words: &[&str]) -> bool {
+    let at = |index: usize| words.get(index).map(|word| word.to_lowercase());
+    let next = at(1).unwrap_or_default();
+    if matches!(next.as_str(), "always" | "never") {
+        return true;
+    }
+    if at(0).as_deref() == Some("should") {
+        return false;
+    }
+    let after = at(2).unwrap_or_default();
+    match next.as_str() {
+        "hear" | "notice" | "smell" | "feel" | "spot" => true,
+        "see" => after != "to",
+        "tell" => matches!(
+            after.as_str(),
+            "when" | "if" | "that" | "whether" | "by" | "from" | "how" | "what" | "why" | "where"
+        ),
+        _ => false,
+    }
+}
+
+/// Whether the "soon" at `index` belongs to a goodbye or a good wish, which
+/// sets no deadline: "see you all soon", "talk soon", "speak soon", "catch
+/// up soon", "get well soon". "See" must be followed by "you", "y'all", or
+/// "everyone" within the four words before "soon".
+fn farewell_soon(words: &[&str], index: usize) -> bool {
+    let before = |back: usize| {
+        index
+            .checked_sub(back)
+            .map(|at| words[at].to_lowercase().replace('’', "'"))
+            .unwrap_or_default()
+    };
+    if matches!(before(1).as_str(), "talk" | "speak" | "chat")
+        || (before(2) == "catch" && before(1) == "up")
+        || (before(2) == "get" && before(1) == "well")
+    {
+        return true;
+    }
+    (2..=4).any(|back| {
+        before(back) == "see" && matches!(before(back - 1).as_str(), "you" | "y'all" | "everyone")
+    })
 }
 
 /// The distinctive words of a note's title: alphabetic, at least
@@ -3326,6 +3378,113 @@ mod tests {
     }
 
     #[test]
+    fn remarks_about_what_people_notice_and_goodbyes_raise_no_question() {
+        for line in [
+            "Someone can always tell when the bread is fresh. It was lovely last week.",
+            "Someone can never find the stapler in here.",
+            "Someone should never have to ask twice.",
+            "Someone could always tell he was joking.",
+            "Someone can tell when the paint is still wet.",
+            "Someone could hear it from the car park.",
+            "Someone can see the banner from the road.",
+            "Someone could smell the bonfire all afternoon.",
+            "Lovely. We'll see you all soon, thanks for coming.",
+            "See you soon!",
+            "See everyone soon.",
+            "See you both again soon.",
+            "Talk soon.",
+            "Speak soon, and thanks again.",
+            "Let’s catch up soon.",
+            "Get well soon, Maya.",
+        ] {
+            let e = play_statement(line);
+            assert!(e.state.cue.is_none(), "raised by: {line}");
+        }
+    }
+
+    #[test]
+    fn open_tasks_and_vague_deadlines_near_those_phrases_still_raise_a_question() {
+        for (line, kind) in [
+            ("Someone can take the first draft.", "Owner"),
+            ("Someone can tell the caterer about the change.", "Owner"),
+            ("Someone could see to the hall booking.", "Owner"),
+            ("Someone should hear back from the printer first.", "Owner"),
+            (
+                "Someone can always tell, but someone should fix it.",
+                "Owner",
+            ),
+            ("We need the draft soon.", "Timing"),
+            ("The printer wants the files soon.", "Timing"),
+            (
+                "See you soon, and the report needs to go out soon.",
+                "Timing",
+            ),
+            ("I'll see the printer and it should come soon.", "Timing"),
+            ("We should talk about it soon.", "Timing"),
+        ] {
+            let e = play_statement(line);
+            let cue = e
+                .state
+                .cue
+                .as_ref()
+                .unwrap_or_else(|| panic!("nothing raised by: {line}"));
+            assert_eq!(cue.kind, kind, "{line}");
+        }
+    }
+
+    #[test]
+    fn a_remark_or_goodbye_leaves_other_cue_decisions_alone() {
+        // A question on screen stays through a remark and a goodbye, and an
+        // answer still withdraws it.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (3_000, "Someone can always tell when it's rushed."),
+            (5_000, "Talk soon."),
+            (7_000, "I'll take it."),
+        ]);
+        e.advance(1_000);
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.advance(4_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().id, id);
+        e.advance(2_000);
+        assert!(e.state.cue.is_none());
+        // A topic change still withdraws, and the goodbye after it adds
+        // nothing; neither reaches the notes.
+        let mut e = play(&[
+            (1_000, "We need the draft soon."),
+            (4_000, "Moving on to the budget."),
+            (20_000, "See you all soon."),
+        ]);
+        e.advance(1_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Timing");
+        e.advance(19_000);
+        assert!(e.state.cue.is_none());
+        assert!(e.state.notes.is_empty());
+        // A question asked of the user is still shown; one put to someone
+        // else by name, or a repeat within two minutes, still is not.
+        let mut e = named_session();
+        e.ingest(e.session(), live("w1", 1_000, "Sam, will we see you soon?"))
+            .unwrap();
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
+        let mut e = named_session();
+        e.ingest(
+            e.session(),
+            live("w1", 1_000, "Alex, can someone take the draft soon?"),
+        )
+        .unwrap();
+        assert!(e.state.cue.is_none());
+        let mut e = play(&[
+            (1_000, "We need the draft soon."),
+            (25_000, "We really need it soon."),
+        ]);
+        e.advance(1_000);
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&id, Response::Dismiss).unwrap();
+        e.advance(24_000);
+        assert!(e.state.cue.is_none(), "repeated within two minutes");
+    }
+
+    #[test]
     fn someone_should_or_could_also_leaves_the_owner_open() {
         for line in [
             "Someone should look at the compost bins soon.",
@@ -4317,8 +4476,8 @@ mod tests {
             ("repeat-of-a-group-question", "show"),
             ("topic-change-in-other-words", "quiet"),
             ("topic-change-look-alike", "quiet"),
-            ("plain-idiom", "show"),
-            ("plain-goodbye", "show"),
+            ("plain-idiom", "quiet"),
+            ("plain-goodbye", "quiet"),
             ("plain-approval", "quiet"),
             ("missing-owner-in-other-words", "quiet"),
         ];
@@ -4327,7 +4486,7 @@ mod tests {
             .map(|(id, action)| (id.to_string(), *action))
             .collect();
         assert_eq!(results, recorded);
-        assert_eq!((matched, cases.len()), (14, 23));
+        assert_eq!((matched, cases.len()), (16, 23));
         // Doing nothing at all would match every case labeled quiet.
         let quiet = cases
             .iter()
