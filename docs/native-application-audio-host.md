@@ -131,15 +131,18 @@ unconfirmed capture when the process exits has not been checked.
 
 ## Tests
 
-Sixteen tests cover the host, and one projection test covers the snapshot
+Seventeen tests cover the host, and one projection test covers the snapshot
 fields: no `microphone` or `source` without a source, both reported beside a
-combined `capture` with one, and an event when only the source changes. In the
-host, one test checks that the published copy matches the host's own status
-from approval through a failed Stop, its retry and release. Twelve run the
-host against the real source-worker
-ordering, with a fictional clock read, a memory-only clock feed, a scripted
-owner and a real `Mutex<Runtime>`; one checks the decisions made before the
-native request; two are table checks:
+combined `capture` with one, and an event when only the source changes.
+Fourteen run the host against the real source-worker ordering, with a
+fictional clock read, a memory-only clock feed, a scripted owner and a real
+`Mutex<Runtime>`. The scripted owner keeps a reported problem through a retry
+and release, as the real owner does. One test checks the decisions made before
+the native request, and two are table checks:
+
+- The published copy that fills the snapshot matches the host's own status
+  from approval, before any status read, through a failed Stop, its retry and
+  release.
 
 - Listing is refused without the acknowledgement and the backend is never
   asked. Review is explicit, a replaced or cancelled review cannot start, and
@@ -149,6 +152,10 @@ native request; two are table checks:
 - A failed Stop reads `cleanupFailed` across further polls with no automatic
   retry and no new selection. One retry is accepted, a second is refused, and
   the retry releases it.
+- A Stop failure stays reported while cleanup is unconfirmed, including after
+  a retry that fails again. Once a retry's release is confirmed, the run ends
+  Off with no problem: the owner still carries the old failure, but it no
+  longer describes anything.
 - When the retried Stop fails again, that newly reported failure allows one
   more retry. When the retried Stop is never answered, no further retry is
   accepted, however long it stays unanswered.
