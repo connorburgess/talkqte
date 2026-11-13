@@ -84,6 +84,12 @@
   padding-bottom: 16px;
   border-bottom: 1px solid #b9c8b6;
 }
+.mock-real .mock-facts {
+  margin: 0;
+}
+.mock-real section {
+  margin-top: 12px;
+}
 .mock-facts div {
   display: flex;
   gap: 8px;
@@ -174,6 +180,32 @@
 }
 .mock-speaker {
   font-weight: 700;
+}
+.mock-lines {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.mock-lines li {
+  overflow-wrap: anywhere;
+}
+.mock-lines li + li {
+  margin-top: 6px;
+}
+.mock-lines time {
+  color: var(--muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.mock-session h3 .mock-tag,
+.mock-real-heading .mock-tag {
+  vertical-align: 1px;
+}
+/* Same look as the section headings below it, one level up in the outline. */
+.mock-real-heading {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 14px;
 }
 .mock-notes {
   list-style: none;

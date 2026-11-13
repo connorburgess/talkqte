@@ -1,5 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { describeCapture, type RealCapture } from './LiveCaptureStatus';
+import {
+  describeCapture,
+  describeTranscript,
+  type RealCapture,
+} from './LiveCaptureStatus';
+import { clockTime } from '../lib/types';
 import './live-mock.css';
 
 type MockState =
@@ -96,6 +101,7 @@ export function LiveSessionMock({
   real: RealCapture;
 }) {
   const actual = describeCapture(real);
+  const heard = describeTranscript(real);
   const [state, setState] = useState<MockState>('idle');
   const [noteIds, setNoteIds] = useState(fictionalNotes.map(({ id }) => id));
   // A cue that was showing when the session paused stays until dismissed.
@@ -139,8 +145,8 @@ export function LiveSessionMock({
     <section className="live-mock" aria-labelledby="mock-title">
       <h1 id="mock-title">Live session layout preview</h1>
       <p>
-        Source and Capture show the app’s real state, read-only. Everything else
-        is a fictional example.
+        Source, Capture and Transcript show the app’s real state, read-only.
+        Everything else is a fictional example.
       </p>
       {actual.underway && (
         <p className="mock-real-session">
@@ -177,27 +183,45 @@ export function LiveSessionMock({
         ref={frame}
       >
         <p className="mock-banner">
-          Source and Capture are real and read-only · every control here is
-          simulated and only changes the example · the preview starts and stops
-          no capture, connects to no meeting, and generates no AI cues
+          Source, Capture and Transcript are real and read-only · every control
+          here is simulated and only changes the example · the preview starts
+          and stops no capture, connects to no meeting, and generates no AI cues
         </p>
-        <dl className="mock-facts mock-real">
-          <div>
-            <dt>Source</dt>
-            <dd>
-              <span className="mock-tag">Real</span> {actual.source}
-            </dd>
-          </div>
-          <div>
-            <dt>Capture</dt>
-            <dd>
-              <span className="mock-tag">Real</span> {actual.capture}
-              {actual.detail && (
-                <span className="mock-detail"> {actual.detail}</span>
-              )}
-            </dd>
-          </div>
-        </dl>
+        <div className="mock-real">
+          <dl className="mock-facts">
+            <div>
+              <dt>Source</dt>
+              <dd>
+                <span className="mock-tag">Real</span> {actual.source}
+              </dd>
+            </div>
+            <div>
+              <dt>Capture</dt>
+              <dd>
+                <span className="mock-tag">Real</span> {actual.capture}
+                {actual.detail && (
+                  <span className="mock-detail"> {actual.detail}</span>
+                )}
+              </dd>
+            </div>
+          </dl>
+          <section aria-labelledby="real-transcript-title">
+            <h2 id="real-transcript-title" className="mock-real-heading">
+              <span className="mock-tag">Real</span> Transcript
+            </h2>
+            <p className="mock-empty">{heard.note}</p>
+            {heard.lines.length > 0 && (
+              <ol className="mock-lines" aria-label="Real transcript lines">
+                {heard.lines.map((line) => (
+                  <li key={line.id}>
+                    <span className="mock-speaker">{line.speaker}</span>{' '}
+                    <time>{clockTime(line.atMs)}</time> {line.text}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+        </div>
         <div className="mock-session-header">
           <div>
             <h2 ref={title} tabIndex={-1}>
@@ -382,12 +406,19 @@ export function LiveSessionMock({
 
         {active && (
           <section aria-labelledby="mock-conversation-title">
-            <h3 id="mock-conversation-title">Conversation</h3>
+            <h3 id="mock-conversation-title">
+              <span className="mock-tag">Simulated</span> Example conversation
+            </h3>
             {inConversation ? (
-              <p>
-                <span className="mock-speaker">Alex (fictional line)</span>{' '}
-                {spokenLine}
-              </p>
+              <ol
+                className="mock-lines"
+                aria-label="Simulated example conversation lines"
+              >
+                <li>
+                  <span className="mock-speaker">Alex (fictional line)</span>{' '}
+                  {spokenLine}
+                </li>
+              </ol>
             ) : (
               <p className="mock-empty">
                 No conversation text yet. This example adds a fictional line

@@ -1,5 +1,6 @@
 import { desktop } from '../lib/bridge';
 import { microphoneLabel, type Microphone } from '../lib/microphone';
+import type { Segment, Snapshot } from '../lib/types';
 
 /** What the notebook already knows about the microphone and live session. */
 export interface RealCapture {
@@ -8,6 +9,7 @@ export interface RealCapture {
   cancelling: boolean;
   live: boolean;
   finishing: boolean;
+  session: RealSession;
 }
 
 /**
@@ -96,4 +98,67 @@ export function describeCapture(
   // sentence above already says.
   const detail = error || (state.status === 'stopping' ? null : state.message);
   return { source, capture, detail, underway };
+}
+
+/** The session snapshot fields the transcript view reads. */
+export interface RealSession {
+  live: boolean;
+  status: Snapshot['status'];
+  transcript: Segment[];
+}
+
+/** How many recent real lines the compact layout shows. */
+export const realLinesShown = 5;
+
+/**
+ * Words for the real transcript. Only a live session's lines are real; the
+ * scripted demo's lines are fictional and never shown as real. A running
+ * session is not the same as a listening microphone: the session starts
+ * before permission is granted and keeps running while it stops.
+ */
+export function describeTranscript(
+  { session, preparing, cancelling, finishing, microphone }: RealCapture,
+  onDesktop = desktop,
+) {
+  if (!onDesktop)
+    return {
+      note: 'This browser preview has no live session, so there is no real transcript.',
+      lines: [],
+    };
+  const lines = session.live ? session.transcript.slice(-realLinesShown) : [];
+  const source =
+    session.status === 'ended'
+      ? 'From the live session that has ended, transcribed on this device.'
+      : 'From the live session, transcribed on this device.';
+  const count =
+    lines.length && session.transcript.length > lines.length
+      ? ` Showing the latest ${lines.length} of ${session.transcript.length}; the notebook’s Transcript tab has all of them.`
+      : '';
+  let note: string;
+  if (!session.live)
+    note =
+      preparing && cancelling
+        ? 'The start was cancelled, so no lines will appear.'
+        : preparing
+          ? 'A live session is being prepared. Its lines appear here once it is transcribing.'
+          : session.status === 'running' || session.status === 'paused'
+            ? 'No live session. The demo’s scripted lines are fictional and are not shown here.'
+            : 'No live session, so there is no real transcript.';
+  else if (session.status === 'ended')
+    note = lines.length
+      ? source + count
+      : 'The live session ended without transcribed lines.';
+  else if (finishing)
+    note =
+      (lines.length ? source + count + ' ' : '') +
+      'Stopping. Lines from audio already captured may still appear.';
+  else if (lines.length) note = source + count;
+  else
+    note =
+      microphone.state?.status === 'listening'
+        ? 'No lines yet. Lines from the microphone appear a few seconds after they are spoken.'
+        : microphone.state?.status === 'starting'
+          ? 'No lines yet. The microphone is not listening yet.'
+          : 'No lines. The microphone is not listening.';
+  return { note, lines };
 }
