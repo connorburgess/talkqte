@@ -137,7 +137,7 @@ The notebook's **Prior context** section now opens on demand and shows the selec
 
 The compact navigation and on-demand context section remain prototype choices to validate together, including source disclosure and disconnect/removal controls. More permanent tabs, a meeting archive or a second note-management workflow need a demonstrated use case. UI acceptance covers keyboard/focus, narrow windows, loading/failure/recovery and visible independent Stop; a smaller layout alone is not evidence of lower cognitive load.
 
-The live layout preview presents fictional session states with an authored reminder and a separate preview Stop. Fictional browser checks cover the states, narrow layout, focus restoration and separation from a simulated live-session Stop. The preview neither connects a meeting nor captures audio or generates cues. Native keyboard and screen-reader behavior, real capture control, comprehension and the complete connected live flow remain unverified; the roadmap acceptance stays open.
+The live layout preview presents fictional session states with an authored reminder and simulated start, pause, resume, retry and Stop controls. Fictional browser checks cover the states, narrow layout, focus restoration and separation from a simulated live-session Stop. The preview neither connects a meeting nor captures audio or generates cues. Native keyboard and screen-reader behavior, real capture control, comprehension and the complete connected live flow remain unverified; the roadmap acceptance stays open.
 
 ### Voiced practice demo
 

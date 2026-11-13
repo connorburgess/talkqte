@@ -93,3 +93,35 @@ test('real session Stop remains separate from the fictional preview', async ({
   await realStop.click();
   await expect(realStop).toHaveCount(0);
 });
+
+test('preview controls walk through a fictional session and recover from failure', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page
+    .getByRole('button', { name: 'Live layout preview' })
+    .press('Enter');
+  const mock = page.getByRole('region', {
+    name: 'Live session layout preview',
+  });
+  const state = mock.getByLabel('Preview a state');
+  await mock.getByRole('button', { name: 'Start preview' }).press('Enter');
+  await expect(state).toHaveValue('starting');
+  await expect(state).toBeFocused();
+  await mock
+    .getByRole('button', { name: 'Show listening example' })
+    .press('Enter');
+  await expect(state).toHaveValue('listening');
+  await mock.getByRole('button', { name: 'Pause preview' }).press('Enter');
+  await expect(state).toHaveValue('paused');
+  await expect(mock).toContainText('not a capture control');
+  await mock.getByRole('button', { name: 'Resume preview' }).press('Enter');
+  await expect(state).toHaveValue('listening');
+  await mock.getByRole('button', { name: 'Stop preview' }).press('Enter');
+  await expect(state).toHaveValue('stopped');
+  await state.selectOption('failed');
+  await mock.getByRole('button', { name: 'Retry preview' }).press('Enter');
+  await expect(state).toHaveValue('starting');
+  await mock.getByRole('button', { name: 'Stop preview' }).press('Enter');
+  await expect(state).toHaveValue('stopped');
+});
