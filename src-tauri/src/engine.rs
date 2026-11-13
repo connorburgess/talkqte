@@ -2395,6 +2395,12 @@ fn resolves(kind: &str, text: &str) -> bool {
     resolves_with(kind, text, &TASKS)
 }
 
+/// Short words a volunteer may say before "Leave it with me".
+const VOLUNTEER_LEAD_INS: [&str; 13] = [
+    "oh", "ok", "okay", "right", "yes", "yeah", "sure", "fine", "look", "well", "so", "just",
+    "honestly",
+];
+
 /// The verbs a volunteer uses to take a task on: "I'll take it".
 const CORE_TASKS: [&str; 6] = ["take", "draft", "write", "handle", "own", "lead"];
 /// Those, plus verbs for sending, sorting, and booking: "I'll send it",
@@ -2503,15 +2509,30 @@ fn resolves_with(kind: &str, text: &str, tasks: &[&str]) -> bool {
                     .map(|(word, _)| word.as_str())
                     .unwrap_or("")
             };
+            // Where the sentence starts after short words such as "Oh" or
+            // "Just".
+            let opens = words
+                .iter()
+                .take_while(|(word, _)| VOLUNTEER_LEAD_INS.contains(&word.as_str()))
+                .count();
+            // "Leave that with me", "Leave the compost with me": the speaker
+            // takes it on without a task verb. It must open the sentence,
+            // with one to four words between "leave" and "with me", so
+            // "Leave with me after the meeting" and "They left it with me"
+            // do not count, and nor does "Leave it with Maya", which hands
+            // the task to someone who has not said yes.
+            let leave_it_with_me = at(opens) == "leave"
+                && (opens + 2..=opens + 5).any(|with| at(with) == "with" && at(with + 1) == "me");
             (0..words.len()).any(|index| match kind {
                 "Owner" => {
                     let (subject, capital) = &words[index];
-                    matches!(at(index + 1), "will" | "can")
-                        && tasks.contains(&at(index + 2))
-                        && (subject == "i"
-                            || (*capital
-                                && subject.chars().all(char::is_alphabetic)
-                                && !NOT_OWNERS.contains(&subject.as_str())))
+                    (index == opens && leave_it_with_me)
+                        || (matches!(at(index + 1), "will" | "can")
+                            && tasks.contains(&at(index + 2))
+                            && (subject == "i"
+                                || (*capital
+                                    && subject.chars().all(char::is_alphabetic)
+                                    && !NOT_OWNERS.contains(&subject.as_str()))))
                 }
                 "Timing" => {
                     at(index) == "tomorrow"
@@ -2908,6 +2929,125 @@ mod tests {
                 "withdrawn by: {not_an_answer}"
             );
         }
+    }
+
+    #[test]
+    fn leave_it_with_me_answers_an_owner_question() {
+        for answer in [
+            "Leave that with me.",
+            "Leave the compost with me, I'll get it ordered today.",
+            "Oh, just leave it with me.",
+            "Yes, leave the checklist with me and Maya.",
+            "Leave that one with me. I can do it Sunday morning.",
+        ] {
+            let mut e = play(&[
+                (1_000, "Someone should send the checklist."),
+                (3_000, answer),
+            ]);
+            e.advance(1_000);
+            assert_eq!(e.state.cue.as_ref().unwrap().kind, "Owner", "{answer}");
+            e.advance(2_000);
+            assert!(e.state.cue.is_none(), "not withdrawn by: {answer}");
+            assert!(e.state.notes.is_empty(), "nothing is kept: {answer}");
+        }
+        for not_an_answer in [
+            // Questions, with or without a question mark, negations, hedges.
+            "Can I leave it with you?",
+            "Leave it with me?",
+            "Should we leave it with me",
+            "Don't leave it with me, I'm away.",
+            "Maybe leave it with me.",
+            // Handed to someone who has not said yes, or to the group.
+            "Leave it with Maya.",
+            "Leave it with us.",
+            // Not opening the sentence, departing, or in the past.
+            "They left it with me last year.",
+            "Leave with me after the meeting.",
+            "We could leave the boxes in the hall with me watching them.",
+            "If it helps, leave it with me.",
+        ] {
+            let mut e = play(&[
+                (1_000, "Someone should send the checklist."),
+                (3_000, not_an_answer),
+            ]);
+            e.advance(3_000);
+            assert_eq!(
+                e.state.cue.as_ref().map(|cue| cue.kind.as_str()),
+                Some("Owner"),
+                "withdrawn by: {not_an_answer}"
+            );
+        }
+        // Only an owner question: a date or a choice is not answered by it.
+        for (trigger, kind) in [
+            ("We need the draft soon.", "Timing"),
+            ("We could use either the hall or the shed.", "Decision"),
+        ] {
+            let mut e = play(&[(1_000, trigger), (3_000, "Leave that with me.")]);
+            e.advance(3_000);
+            assert_eq!(e.state.cue.as_ref().unwrap().kind, kind, "{trigger}");
+        }
+    }
+
+    #[test]
+    fn leave_it_with_me_follows_the_answer_lifecycle() {
+        // Answered before the question was ever shown: it is never shown.
+        let mut e = play(&[
+            (1_000, "Someone can take the minutes."),
+            (2_000, "Leave it with me."),
+        ]);
+        e.advance(3_000);
+        assert!(e.state.cue.is_none());
+        assert!(e.cue_snapshot().cue.is_none());
+        // Answered in the same line as a question put to the group: no
+        // open question is raised.
+        let e = play_statement("Who can take the minutes? Leave it with me.");
+        assert!(e.state.cue.is_none());
+        // A question being read stays and shows the answer.
+        let mut e = play(&[
+            (1_000, "Someone can take the minutes."),
+            (4_000, "Leave it with me."),
+        ]);
+        e.advance(1_000);
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.inspect_cue(&id, true).unwrap();
+        e.advance(3_000);
+        let cue = e.state.cue.as_ref().unwrap();
+        assert_eq!(cue.id, id);
+        assert_eq!(
+            cue.resolved_by.as_ref().unwrap().evidence,
+            "Leave it with me."
+        );
+        // A question asked of the user by name is not answered by someone
+        // else volunteering; it waits for the user.
+        let mut e = named_session();
+        e.ingest(
+            e.session(),
+            live("w1", 1_000, "Sam, can someone take the minutes?"),
+        )
+        .unwrap();
+        e.ingest(e.session(), live("w2", 3_000, "Leave it with me."))
+            .unwrap();
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
+        // After a topic change withdrew the question, a later "leave it
+        // with me" has nothing to answer and raises nothing.
+        let mut e = play(&[
+            (1_000, "Someone can take the minutes."),
+            (4_000, "Moving on to the budget."),
+            (6_000, "Leave it with me."),
+        ]);
+        e.advance(6_000);
+        assert!(e.state.cue.is_none());
+        // Once answered, the same question is not raised again within two
+        // minutes.
+        let mut e = play(&[
+            (1_000, "Someone can take the minutes."),
+            (4_000, "Leave it with me."),
+            (30_000, "Someone can take the minutes."),
+        ]);
+        e.advance(1_000);
+        assert!(e.state.cue.is_some());
+        e.advance(29_000);
+        assert!(e.state.cue.is_none(), "repeated within two minutes");
     }
 
     #[test]
@@ -4486,7 +4626,7 @@ mod tests {
             ("correction-without-a-phrase", "quiet"),
             ("answered-at-once", "quiet"),
             ("answered-in-the-same-line", "show"),
-            ("answered-in-other-words", "quiet"),
+            ("answered-in-other-words", "resolved"),
             ("asked-of-someone-else", "quiet"),
             ("handed-to-someone-else", "quiet"),
             ("asked-of-the-user", "show"),
@@ -4507,7 +4647,7 @@ mod tests {
             .map(|(id, action)| (id.to_string(), *action))
             .collect();
         assert_eq!(results, recorded);
-        assert_eq!((matched, cases.len()), (16, 23));
+        assert_eq!((matched, cases.len()), (17, 23));
         // Doing nothing at all would match every case labeled quiet.
         let quiet = cases
             .iter()
@@ -4539,7 +4679,7 @@ mod tests {
             ("server-cupboard", "quiet"),
             ("tombola-owner-lost", "quiet"),
             ("gate-shift-taken", "quiet"),
-            ("compost-bins-later", "quiet"),
+            ("compost-bins-later", "resolved"),
             ("permit-form-sometime", "show"),
             ("floor-plan-when-free", "quiet"),
             ("stall-list-thursday", "quiet"),
@@ -4575,7 +4715,7 @@ mod tests {
             .map(|(id, action)| (id.to_string(), *action))
             .collect();
         assert_eq!(results, recorded);
-        assert_eq!((matched, cases.len()), (22, 34));
+        assert_eq!((matched, cases.len()), (23, 34));
         // Doing nothing at all would match every case labeled quiet.
         let quiet = cases
             .iter()
