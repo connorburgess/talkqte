@@ -99,16 +99,29 @@ lock, at approval and on every status read, through a lock that is never held
 while another is taken. The copy can lag a release by one refresh, never a
 start, and the host lock is never taken under the runtime lock.
 
-**The notebook does not read the new fields yet.** It still renders the
-combined `capture` as microphone text, so a failed or abandoned application
-cleanup with the microphone off shows a message about waiting for the
-microphone, and it offers **Cancel start** only while `capture` reads Off.
-The interface change that fixes both is to offer Cancel start from
-`microphone`, word the microphone row from `microphone`, and show `source` in
-its own row: `cleanupFailed` with its retry, `abandoned` as possibly still
-capturing until TalkQTE quits, and `stalled` as an unanswered Stop. That
-change is in the notebook and outside this lane. Until it lands, do not judge
-a device run by the notebook.
+### What the notebook shows
+
+Each piece below appears only when a snapshot carries the development fields;
+a default build renders exactly as before.
+
+- **Cue processing panel.** It has a line of its own for the source, in the
+  same wording as the table above: for example "Stopping application audio
+  from Fictional player failed. It may still be captured until cleanup is
+  retried." It has separate wording for a stopping, an unanswered (`stalled`)
+  and an abandoned source. The panel stays visible while the source may
+  still be capturing, even after the live session has ended. It shows the
+  state only and offers no retry; the host's retry is reached only through
+  its command.
+- **Microphone wording and controls.** Microphone wording and the panel's
+  own Stop and Cancel start follow `microphone`. These controls appear only
+  when the panel is mounted on its own, as in its tests. In the notebook,
+  Stop live session and Cancel start sit in the microphone area and follow
+  the live startup state, so a stuck source never affected them.
+- **Live layout preview.** Its Real rows never say or imply that nothing is
+  captured while the source may be capturing. With the microphone off they
+  read "No microphone open." and "The microphone is off." instead.
+  `describeCapture` also returns the source's own line, ready for a row of
+  its own; the preview does not render that row yet.
 
 ## Quitting
 

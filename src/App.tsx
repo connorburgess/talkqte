@@ -1161,7 +1161,11 @@ function Notebook() {
         {bridge.desktop && (
           <div
             className="notebook-processing"
-            hidden={view !== 'settings' && !state.live}
+            hidden={
+              view !== 'settings' &&
+              !state.live &&
+              !capture.state?.source?.mayBeCapturing
+            }
           >
             <ProcessingControl
               status={{
@@ -1198,6 +1202,7 @@ function Notebook() {
                 status: state.status,
                 transcript: state.transcript,
               },
+              source: capture.state?.source,
             }}
           />
         )}

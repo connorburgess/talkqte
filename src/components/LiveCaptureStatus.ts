@@ -1,6 +1,7 @@
 import { desktop } from '../lib/bridge';
 import { microphoneLabel, type Microphone } from '../lib/microphone';
 import type { Segment, Snapshot } from '../lib/types';
+import { describeSource, type SourceCapture } from '../lib/processing';
 
 /** What the notebook already knows about the microphone and live session. */
 export interface RealCapture {
@@ -10,6 +11,8 @@ export interface RealCapture {
   live: boolean;
   finishing: boolean;
   session: RealSession;
+  /** Development builds only: a selected-application source. */
+  source?: SourceCapture | null;
 }
 
 /**
@@ -18,16 +21,50 @@ export interface RealCapture {
  * known to be off, the text never says that nothing is captured.
  */
 export function describeCapture(
-  { microphone, preparing, cancelling, live, finishing }: RealCapture,
+  real: RealCapture,
   onDesktop = desktop,
-) {
+): {
+  source: string;
+  capture: string;
+  detail: string | null;
+  underway: string | null;
+  /** A line of its own for a selected-application source, or null. */
+  application: string | null;
+} {
   if (!onDesktop)
     return {
       source: 'None. This browser preview cannot open a microphone.',
       capture: 'Off. This browser preview captures nothing.',
       detail: null,
       underway: null,
+      application: null,
     };
+  const described = describeMicrophone(real);
+  const application = describeSource(real.source);
+  if (!real.source?.mayBeCapturing) return { ...described, application };
+  // The application may still be captured, so no line about the microphone
+  // may say or imply that nothing is.
+  return {
+    ...described,
+    source:
+      described.source === 'None open.'
+        ? 'No microphone open.'
+        : described.source,
+    capture:
+      described.capture === 'Off. Nothing is being captured.'
+        ? 'The microphone is off.'
+        : described.capture,
+    application,
+  };
+}
+
+function describeMicrophone({
+  microphone,
+  preparing,
+  cancelling,
+  live,
+  finishing,
+}: RealCapture) {
   const { state, error } = microphone;
   const underway = finishing
     ? 'A real live session is stopping.'
