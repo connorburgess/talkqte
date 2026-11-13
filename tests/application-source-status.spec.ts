@@ -10,8 +10,11 @@ import type {} from './fixtures/native-microphone';
 // stream or permission is involved, so they establish wording, not capture.
 
 type Mic = 'off' | 'starting' | 'running';
+type PanelMic = Mic | 'unknown';
 type Stuck = 'stopping' | 'stalled' | 'cleanupFailed' | 'abandoned';
 const microphones: Mic[] = ['off', 'starting', 'running'];
+// The panel also sees an unknown microphone, which the live layout does not.
+const panelMicrophones: PanelMic[] = [...microphones, 'unknown'];
 const stuck: Stuck[] = ['stopping', 'stalled', 'cleanupFailed', 'abandoned'];
 
 function source(state: Stuck): SourceCapture {
@@ -27,7 +30,13 @@ function source(state: Stuck): SourceCapture {
 
 // What the native combination gives for each microphone state with a source
 // that may still be capturing (see overall_capture in the host).
-const combined = { off: 'stopping', starting: 'starting', running: 'running' };
+const combined = {
+  off: 'stopping',
+  starting: 'starting',
+  running: 'running',
+  // Folded to stopping, never unknown: a source may still be capturing.
+  unknown: 'stopping',
+};
 
 const sourceWords: Record<Stuck, string> = {
   stopping:
@@ -40,10 +49,12 @@ const sourceWords: Record<Stuck, string> = {
     'Application audio from Fictional player was never confirmed stopped. It may still be captured until TalkQTE quits.',
 };
 
-const microphoneWords: Record<Mic, string> = {
+const microphoneWords: Record<PanelMic, string> = {
   off: 'Microphone is off.',
   starting: 'Starting microphone… you can stop while it starts.',
   running: 'Microphone is on. Stop capture to stop listening.',
+  unknown:
+    'Microphone status is unknown. Use Stop capture to request that it stops.',
 };
 
 async function processingControl(page: Page) {
@@ -72,7 +83,7 @@ test('each stuck source reads in its own words beside the microphone', async ({
   page,
 }) => {
   const panel = await processingControl(page);
-  for (const mic of microphones)
+  for (const mic of panelMicrophones)
     for (const state of stuck) {
       await send(page, {
         capture: combined[mic] as ProcessingSnapshot['capture'],
@@ -96,6 +107,28 @@ test('each stuck source reads in its own words beside the microphone', async ({
         ).toHaveCount(0);
       } else await expect(stop, label).toBeEnabled();
     }
+});
+
+test('an unknown microphone keeps Stop usable during startup beside a stuck source', async ({
+  page,
+}) => {
+  // As without a source: an unknown microphone offers Stop capture, which
+  // also cancels startup, rather than claiming it is off.
+  const panel = await processingControl(page);
+  for (const state of stuck) {
+    await send(page, {
+      startup: 'loading',
+      capture: 'stopping',
+      microphone: 'unknown',
+      source: source(state),
+    });
+    await expect(
+      panel.getByRole('button', { name: 'Stop capture', exact: true }),
+      state,
+    ).toBeEnabled();
+    await expect(panel.getByText(sourceWords[state]), state).toBeVisible();
+  }
+  await send(page, { startup: 'idle' });
 });
 
 test('Cancel start stays available while a stuck source keeps capture combined', async ({
