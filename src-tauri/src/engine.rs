@@ -888,7 +888,15 @@ impl Engine {
         let correction = corrects(&segment.text);
         // A direct question is preserved while the user answers, so a topic
         // phrase does not clear it.
-        if topic_shift(&segment.text)
+        // Putting something off counts as a topic change only when it is
+        // the subject of the unread question on screen; otherwise it is an
+        // ordinary line and the question and repeat history stay.
+        let deferred = self
+            .state
+            .cue
+            .as_ref()
+            .is_some_and(|cue| deferred_subject(&segment.text, &cue.evidence));
+        if (topic_shift(&segment.text) || deferred)
             && !self
                 .state
                 .cue
@@ -1988,9 +1996,10 @@ const HEDGES: [&str; 5] = ["maybe", "perhaps", "might", "probably", "possibly"];
 /// where it goes, which must end the sentence. "Let's leave the door open",
 /// "Let's table the proposal", and "Let's leave later" lack one of them and
 /// do not count; neither does a sentence with a second clause or one that
-/// keeps something open or sets time aside. It does not check what is being
-/// put off.
-fn defers(words: &[String]) -> bool {
+/// keeps something open or sets time aside. Returns the words for what is
+/// put off ("the cover choice", "that"); `deferred_subject` decides whether
+/// they are about the question on screen.
+fn defers(words: &[String]) -> Option<&[String]> {
     const OPENINGS: [&[&str]; 4] = [&["let's"], &["we'll"], &["we", "can"], &["we", "will"]];
     // Verbs that need an occasion after them to mean putting something off.
     const VERBS: [&[&str]; 6] = [
@@ -2027,13 +2036,10 @@ fn defers(words: &[String]) -> bool {
     let starts = |words: &[String], phrase: &[&str]| {
         words.len() >= phrase.len() && words.iter().zip(phrase).all(|(word, part)| word == part)
     };
-    let Some(rest) = OPENINGS
+    let rest = OPENINGS
         .iter()
         .find(|opening| starts(words, opening))
-        .map(|opening| &words[opening.len()..])
-    else {
-        return false;
-    };
+        .map(|opening| &words[opening.len()..])?;
     // Words that make the part between verb and occasion more than the
     // thing put off: a second clause ("… and leave the budget for later"),
     // keeping something open ("leave the vote open until next week"), or
@@ -2045,50 +2051,38 @@ fn defers(words: &[String]) -> bool {
     // The thing put off is one to four words, and the occasion ends the
     // sentence: "for later questions" is not an occasion.
     let put_off = |verbs: &[&[&str]], occasions: &[&[&str]]| {
-        verbs.iter().any(|verb| {
-            starts(rest, verb)
-                && occasions.iter().any(|occasion| {
-                    rest.len()
-                        .checked_sub(occasion.len())
-                        .filter(|at| (verb.len() + 1..=verb.len() + 4).contains(at))
-                        .is_some_and(|at| {
-                            starts(&rest[at..], occasion)
-                                && !rest[verb.len()..at]
-                                    .iter()
-                                    .any(|word| NOT_PUT_OFF.contains(&word.as_str()))
-                        })
-                })
+        verbs.iter().find_map(|verb| {
+            if !starts(rest, verb) {
+                return None;
+            }
+            occasions.iter().find_map(|occasion| {
+                let at = rest
+                    .len()
+                    .checked_sub(occasion.len())
+                    .filter(|at| (verb.len() + 1..=verb.len() + 4).contains(at))?;
+                let object = &rest[verb.len()..at];
+                (starts(&rest[at..], occasion)
+                    && !object
+                        .iter()
+                        .any(|word| NOT_PUT_OFF.contains(&word.as_str())))
+                .then_some(object)
+            })
         })
     };
     put_off(&VERBS, &OCCASIONS)
-        || put_off(&RETURNS, &OCCASIONS)
-        || put_off(&RETURNS, &RETURN_OCCASIONS)
+        .or_else(|| put_off(&RETURNS, &OCCASIONS))
+        .or_else(|| put_off(&RETURNS, &RETURN_OCCASIONS))
 }
 
-/// An explicit statement, at the start of a sentence, that the conversation
-/// is moving to another topic: "Moving on, ...", "OK, next item.", "Let's
-/// move on to ...", "On another note, ...". Putting the subject off to a
-/// later occasion counts too ("Let's leave that for another meeting"; see
-/// `defers`). Phrases inside a sentence ("Before we move on, ...", "The
-/// trucks are moving on Tuesday") do not count, nor do questions, negations,
-/// or hedges.
-fn topic_shift(text: &str) -> bool {
-    const OPENINGS: [&[&str]; 9] = [
-        &["moving", "on"],
-        &["let's", "move", "on"],
-        &["next", "item"],
-        &["next", "topic"],
-        &["on", "another", "note"],
-        &["on", "a", "different", "note"],
-        &["switching", "topics"],
-        &["changing", "topics"],
-        &["new", "topic"],
-    ];
+/// The statements of a line as lowercase words, without the short words
+/// people say first ("OK", "so", "anyway"). Sentences that end with or open
+/// like a question, or contain a negation or hedge, are left out.
+fn plain_statements(text: &str) -> Vec<Vec<String>> {
     // Short words people say before changing topic.
     const LEAD_INS: [&str; 7] = ["ok", "okay", "alright", "right", "so", "great", "anyway"];
     text.split_inclusive(['.', '?', '!', ';'])
         .filter(|sentence| !sentence.trim_end().ends_with('?'))
-        .any(|sentence| {
+        .filter_map(|sentence| {
             let words: Vec<String> = sentence
                 .split_whitespace()
                 .map(|word| {
@@ -2104,7 +2098,7 @@ fn topic_shift(text: &str) -> bool {
                 .iter()
                 .take_while(|word| LEAD_INS.contains(&word.as_str()))
                 .count();
-            let words = &words[start..];
+            let words = words[start..].to_vec();
             let excluded = words
                 .first()
                 .is_none_or(|first| QUESTION_OPENERS.contains(&first.as_str()))
@@ -2113,18 +2107,65 @@ fn topic_shift(text: &str) -> bool {
                         || word.ends_with("n't")
                         || HEDGES.contains(&word.as_str())
                 });
-            // Moving to the next slide or page continues the same topic.
-            let presentation = words.windows(2).any(|pair| {
-                pair[0] == "next" && matches!(pair[1].as_str(), "slide" | "page" | "screen")
-            });
-            !excluded
-                && !presentation
-                && (defers(words)
-                    || OPENINGS.iter().any(|opening| {
-                        words
-                            .starts_with(&opening.iter().map(|w| w.to_string()).collect::<Vec<_>>())
-                    }))
+            (!excluded).then_some(words)
         })
+        .collect()
+}
+
+/// Whether a line puts off the subject of a question raised from `source`:
+/// a sentence that `defers` something, where what is put off is "that",
+/// "it", or "this", or shares a distinctive word (five letters or more, not
+/// a common meeting word) with the source line. "Let's leave the poster
+/// design for another meeting" says nothing about a question raised from
+/// "Someone should write the welcome letter", so that question stays. This
+/// is a word match: a short or differently worded subject ("the rota",
+/// "the covers" for "cover") is missed, which leaves the question in place.
+fn deferred_subject(text: &str, source: &str) -> bool {
+    // Words about the conversation itself, which say nothing about a subject.
+    const GENERIC: [&str; 8] = [
+        "someone", "somebody", "anyone", "everyone", "question", "matter", "whole", "entire",
+    ];
+    let source_terms: Vec<String> = note_terms(source)
+        .into_iter()
+        .filter(|term| !GENERIC.contains(&term.as_str()))
+        .collect();
+    plain_statements(text).iter().any(|words| {
+        defers(words).is_some_and(|object| {
+            object.iter().any(|word| {
+                matches!(word.as_str(), "that" | "it" | "this") || source_terms.contains(word)
+            })
+        })
+    })
+}
+
+/// An explicit statement, at the start of a sentence, that the conversation
+/// is moving to another topic: "Moving on, ...", "OK, next item.", "Let's
+/// move on to ...", "On another note, ...". Phrases inside a sentence
+/// ("Before we move on, ...", "The trucks are moving on Tuesday") do not
+/// count, nor do questions, negations, or hedges. Putting the question's
+/// own subject off to a later occasion is handled by `deferred_subject`.
+fn topic_shift(text: &str) -> bool {
+    const OPENINGS: [&[&str]; 9] = [
+        &["moving", "on"],
+        &["let's", "move", "on"],
+        &["next", "item"],
+        &["next", "topic"],
+        &["on", "another", "note"],
+        &["on", "a", "different", "note"],
+        &["switching", "topics"],
+        &["changing", "topics"],
+        &["new", "topic"],
+    ];
+    plain_statements(text).iter().any(|words| {
+        // Moving to the next slide or page continues the same topic.
+        let presentation = words.windows(2).any(|pair| {
+            pair[0] == "next" && matches!(pair[1].as_str(), "slide" | "page" | "screen")
+        });
+        !presentation
+            && OPENINGS.iter().any(|opening| {
+                words.starts_with(&opening.iter().map(|w| w.to_string()).collect::<Vec<_>>())
+            })
+    })
 }
 
 /// How soon after a line a correction can take it back.
@@ -3018,12 +3059,14 @@ mod tests {
     #[test]
     fn putting_the_subject_off_to_a_later_occasion_withdraws_an_unread_question() {
         for change in [
-            "Let's leave the cover choice for another meeting. Now, the urgent security incident.",
+            // "That", "it", or "this" stands for what was just said.
             "OK, let's park that for next time.",
-            "We'll save the rota for the next meeting.",
-            "We can postpone the signage question until later.",
+            "We'll save this for the next meeting.",
+            "We can postpone it until later.",
             "Let’s come back to that later.",
+            // Or what is put off shares a word with the question's line.
             "So we'll revisit the draft next time.",
+            "Let's leave the Draft question for another meeting. Now, the budget.",
         ] {
             let mut e = play(&[
                 (1_000, "Someone can take the first draft."),
@@ -3035,6 +3078,49 @@ mod tests {
             assert!(e.state.cue.is_none(), "still shown after: {change}");
             assert!(e.state.notes.is_empty(), "nothing is kept: {change}");
         }
+    }
+
+    #[test]
+    fn putting_off_something_else_leaves_the_question_and_its_history() {
+        for line in [
+            // Another subject entirely.
+            "Let's leave the poster design for another meeting.",
+            "We'll save the rota for the next meeting.",
+            "We can postpone the signage question until later.",
+            // Words shared only with the fixed question, not the line.
+            "Let's leave the first item for later.",
+            // A different form of the word is missed, which keeps the question.
+            "Let's leave the drafts for later.",
+            // Words about the conversation are not a subject.
+            "Let's leave someone else's question for later.",
+        ] {
+            let mut e = play(&[(1_000, "Someone can take the first draft."), (4_000, line)]);
+            e.advance(4_000);
+            assert!(e.state.cue.is_some(), "withdrawn after: {line}");
+        }
+        // With no question on screen, putting something off is an ordinary
+        // line: a question dismissed a moment ago is not asked again.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (12_000, "Let's leave that for another meeting."),
+            (30_000, "Someone can take the first draft."),
+        ]);
+        e.advance(1_000);
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&id, Response::Dismiss).unwrap();
+        e.advance(29_000);
+        assert!(e.state.cue.is_none(), "repeated within two minutes");
+        // An explicit topic change still starts the history afresh.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (12_000, "Moving on to the newsletter."),
+            (30_000, "Someone can take the first draft."),
+        ]);
+        e.advance(1_000);
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&id, Response::Dismiss).unwrap();
+        e.advance(29_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Owner");
     }
 
     #[test]
@@ -3077,7 +3163,7 @@ mod tests {
 
     #[test]
     fn putting_something_off_follows_the_topic_change_lifecycle() {
-        let deferral = "Let's leave the cover choice for another meeting.";
+        let deferral = "Let's leave that for another meeting.";
         // A question being read stays in place.
         let mut e = play(&[
             (1_000, "Someone can take the first draft."),
@@ -4144,7 +4230,7 @@ mod tests {
         let recorded = [
             ("deferral-next-month", "quiet"),
             ("deferral-look-alike", "quiet"),
-            ("deferral-of-something-else", "withdraw"),
+            ("deferral-of-something-else", "quiet"),
             ("correction-cancelled", "withdraw"),
             ("correction-of-something-else", "quiet"),
             ("correction-without-a-phrase", "quiet"),
@@ -4171,7 +4257,7 @@ mod tests {
             .map(|(id, action)| (id.to_string(), *action))
             .collect();
         assert_eq!(results, recorded);
-        assert_eq!((matched, cases.len()), (13, 23));
+        assert_eq!((matched, cases.len()), (14, 23));
         // Doing nothing at all would match every case labeled quiet.
         let quiet = cases
             .iter()
