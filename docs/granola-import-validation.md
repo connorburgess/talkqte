@@ -6,7 +6,7 @@ The owner reports that adding a Granola note and removing it both succeeded in t
 
 Sign-in, listing and requested Focus suggestions had already been observed. This new report does not independently verify displayed source/date accuracy, rejection of unselected provider content, newer/older reimport ordering, disconnect during a real request, or provider/OS retention. Those checks remain explicit integration acceptance work. It also supplies no live transcript input, writeback, meeting-usefulness or user-outcome evidence.
 
-Next account check: deliberately reimport a known updated note, confirm its source/date and absence of duplicates, then verify disconnect/reconnect and failure recovery without retaining private content. Keep existing notebook operation available throughout. Native accessibility and participation/listening validation remain separate.
+Next account check: deliberately reimport a known updated note, confirm its source/date and absence of duplicates, then verify disconnect/reconnect and failure recovery without retaining private content. The [owner procedure](granola-account-acceptance.md) sets out these steps, with what to record and which roadmap item each settles. Keep existing notebook operation available throughout. Native accessibility and participation/listening validation remain separate.
 
 The dated development checkpoints below retain their original evidence scope. Their references to an unconfirmed first account import describe the state before this owner report.
 
