@@ -42,7 +42,7 @@
   .mock-session-header {
     flex-direction: column;
   }
-  .mock-session-header button {
+  .mock-session-header .mock-stop {
     order: -1;
   }
 }

@@ -51,7 +51,7 @@ export function LiveSessionMock() {
           </div>
           {active && (
             <button
-              className="secondary-button"
+              className="secondary-button mock-stop"
               onClick={() => returnToSelector('stopped')}
             >
               Stop preview
