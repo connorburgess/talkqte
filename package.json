@@ -16,7 +16,7 @@
     "test:cue-lab": "node --test scripts/cue-lab.test.mjs",
     "test:docs": "node --test scripts/check-docs.test.mjs",
     "check:docs": "node scripts/check-docs.mjs",
-    "test:release": "node --test scripts/release-preflight.test.mjs scripts/third-party-notices.test.mjs scripts/release-build.test.mjs scripts/release-data-snapshot.test.mjs",
+    "test:release": "node --test scripts/release-preflight.test.mjs scripts/third-party-notices.test.mjs scripts/release-build.test.mjs scripts/release-data-snapshot.test.mjs scripts/is-main.test.mjs",
     "build:release": "node scripts/release-build.mjs",
     "notices": "node scripts/third-party-notices.mjs",
     "check:notices": "node scripts/third-party-notices.mjs --check",
