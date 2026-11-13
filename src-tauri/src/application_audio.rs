@@ -99,6 +99,21 @@ impl Control {
     pub fn is_cancelled(&self) -> bool {
         self.0.cancelled.load(Ordering::Acquire)
     }
+
+    /// Close this operation with one atomic store and no gate lock, so a
+    /// caller may hold another lock. Delivery, readers and returned work
+    /// refuse from here on. The gate keeps reporting its earlier phase until
+    /// the operation's owner observes this and stops or releases its resource.
+    pub(crate) fn cancel(&self) {
+        self.0.cancelled.store(true, Ordering::Release);
+    }
+
+    /// Identity of the reviewed operation, not of its application or name.
+    #[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
+    #[cfg_attr(not(test), allow(dead_code))] // Its only caller has no caller yet.
+    pub(crate) fn same_operation(&self, other: &Control) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
 }
 
 struct State {

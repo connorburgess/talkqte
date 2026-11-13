@@ -11,6 +11,7 @@ pub mod engine;
 pub mod granola;
 pub mod live;
 mod live_control;
+mod live_source;
 mod microphone;
 pub mod model;
 #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
@@ -42,6 +43,9 @@ struct Runtime {
     /// delivering transcript lines takes the lock.
     live: Option<Live>,
     live_start: live_control::StartGate,
+    /// The approved application-audio source feeding the live session, if
+    /// any. Dropping it cancels that source's operation.
+    live_source: Option<live_source::LiveSource>,
     processing_reviews: processing_reviews::Reviews,
     processing_status: engine::ProcessingTracker,
     /// Prior notes the user imported this session, in memory only.
@@ -64,6 +68,7 @@ impl Default for Runtime {
             export: None,
             live: None,
             live_start: live_control::StartGate::default(),
+            live_source: None,
             processing_reviews: processing_reviews::Reviews::default(),
             processing_status: engine::ProcessingTracker::default(),
             context: context::ContextStore::default(),
@@ -96,6 +101,7 @@ impl Runtime {
                 .advance(u64::try_from(millis).unwrap_or(u64::MAX));
         }
         self.processing_reviews.reconcile(&self.engine);
+        self.reconcile_live_source();
     }
 }
 
