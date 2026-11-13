@@ -93,6 +93,8 @@ impl Timed for NativeChunk {
 
     // Every path that stops or replaces a source cancels its control first,
     // so the chunk's own control answers for the source without the gate.
+    // Releasing the capture cancels it too: after a clean end of input, keep
+    // the capture until Worker::finish returns, or queued audio is withheld.
     fn current(&self, session: u64) -> bool {
         self.session == session && !self.control.is_cancelled()
     }

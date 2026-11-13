@@ -416,22 +416,30 @@ The transcription worker's queue now accepts any chunk that supplies its own
 timing (`transcription::Timed`), and a `NativeChunk` is one. The chunk travels
 through the queue with its mapping, so a line recognized seconds later is still
 timed by `NativeChunk::session_ms`, not by a floored start plus a nominal
-offset. An offset outside the chunk's audio is skipped and counted, never
-clamped. Microphone chunks keep their existing nominal timing and behavior.
+offset. An offset the chunk cannot map, which in practice means one outside its
+audio, is skipped and counted, never clamped. Microphone chunks keep their existing nominal timing and behavior.
 
 The worker asks the chunk whether its source is still current before
 recognition and again before each delivered line. A chunk whose source was
-stopped or replaced, or that belongs to another session, is not recognized; if
-Stop arrives while the recognizer is busy, its lines are discarded. Both cases
-are counted in `Stats::stale`. The worker itself keeps running, so this does
-not depend on the caller also cancelling it. The check reads the chunk's own
-cancellation flag, which every stop and replacement path in the gate sets.
+stopped or replaced, or that was made for a session other than the worker's, is
+not recognized; if Stop arrives while the recognizer is busy or between two
+lines, the undelivered lines are discarded. Each such chunk is counted once in
+`Stats::stale`, including one that produced no lines. The worker itself keeps
+running, so this does not depend on the caller also cancelling it. Whether the
+worker's session is still the engine's remains the engine's check at delivery.
+
+The check reads the chunk's own cancellation flag, which every stop and
+replacement path in the gate sets. Releasing the capture sets it as well, so a
+future caller that wants queued audio transcribed after a clean end of input
+must keep the capture until the worker has finished. No caller exists yet, and
+that ordering is untested.
 
 Three memory-only tests queue real native chunks at relative rates 0.5, 1 and
 2 with a scripted recognizer: delivered times across a split block, an
 out-of-range offset, Stop during recognition with a second chunk waiting, and a
-chunk from another session. Two default-build tests cover the same contract
-with a synthetic clock. A mutation check confirmed the native tests fail with
+chunk from another session. Five default-build tests cover the same contract
+with a synthetic clock, plus a stop between two lines of one chunk and a
+stopped chunk with no recognized lines. A mutation check confirmed the native tests fail with
 nominal timing or without the source check.
 
 Nothing creates a native chunk in the app: no capture path, recognizer

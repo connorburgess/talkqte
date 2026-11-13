@@ -44,9 +44,10 @@ pub trait Timed: Send + 'static {
     /// outside the audio. Must not decrease as the offset grows.
     fn session_ms(&self, offset_ms: u64) -> Option<u64>;
     /// False once the source that produced this audio has stopped or been
-    /// replaced, or when the audio belongs to another session. The worker
-    /// asks again before each delivery, because a stop cannot retract audio
-    /// already handed to the recognizer.
+    /// replaced, or when the audio was made for a session other than the
+    /// worker's. The worker asks again before each delivery, because a stop
+    /// cannot retract audio already handed to the recognizer. Whether the
+    /// worker's session is still the engine's is the sink's check.
     fn current(&self, session: u64) -> bool;
 }
 
@@ -320,15 +321,17 @@ fn run<C: Timed, T: Transcriber, S: FnMut(u64, Segment) -> Result<(), String>>(
             .filter_map(|item| Some((chunk.session_ms(item.offset_ms)?, item)))
             .collect();
         stats.out_of_range += (recognized_lines - timed.len()) as u64;
+        // The source may have ended during recognition, even though the
+        // session and this worker carry on. Checked once here, so a chunk
+        // with no deliverable lines is still counted, and again per line.
+        let mut withheld = !chunk.current(session);
         for (at_ms, item) in timed {
             // A stop during inference or delivery discards what is left.
             if stopped() {
                 return stats;
             }
-            // So does the end of this chunk's source, even though the
-            // session and this worker carry on.
-            if !chunk.current(session) {
-                stats.stale += 1;
+            if withheld || !chunk.current(session) {
+                withheld = true;
                 break;
             }
             let segment = Segment {
@@ -342,6 +345,9 @@ fn run<C: Timed, T: Transcriber, S: FnMut(u64, Segment) -> Result<(), String>>(
                 Ok(()) => stats.accepted += 1,
                 Err(_) => stats.rejected += 1,
             }
+        }
+        if withheld {
+            stats.stale += 1;
         }
         completed.fetch_add(1, Ordering::Release);
     }
@@ -757,8 +763,8 @@ mod tests {
         assert_eq!((stats.chunks, stats.failures, stats.accepted), (2, 1, 1));
     }
 
-    /// Audio whose source clock runs at half the nominal rate and can stop
-    /// independently of the worker.
+    /// Audio for session 3 whose source clock runs at half the nominal rate
+    /// and can stop independently of the worker.
     struct Slow {
         audio: AudioChunk,
         live: Arc<AtomicBool>,
@@ -774,8 +780,8 @@ mod tests {
             Some(nominal + offset_ms)
         }
 
-        fn current(&self, _: u64) -> bool {
-            self.live.load(Ordering::Acquire)
+        fn current(&self, session: u64) -> bool {
+            session == 3 && self.live.load(Ordering::Acquire)
         }
     }
 
@@ -845,6 +851,68 @@ mod tests {
             "queued audio not recognized"
         );
         assert_eq!((stats.chunks, stats.accepted, stats.stale), (1, 0, 2));
+        assert!(delivered.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_source_that_stops_between_two_lines_withholds_the_second() {
+        let live = Arc::new(AtomicBool::new(true));
+        let stop = live.clone();
+        let (report, delivered) = mpsc::channel();
+        // The source stops as the first line is delivered.
+        let sink = move |_, segment: Segment| {
+            stop.store(false, Ordering::Release);
+            let _ = report.send(segment.at_ms);
+            Ok(())
+        };
+        let lines = vec![Ok(vec![(0, "One."), (100, "Two.")])];
+        let worker = Worker::start(3, 2, script(lines), sink);
+        let audio = chunk(10_000);
+        assert!(worker.submit(Slow { audio, live }).is_ok());
+        let stats = worker.finish(Duration::from_secs(5));
+        assert_eq!((stats.accepted, stats.stale), (1, 1));
+        assert_eq!(delivered.try_iter().collect::<Vec<_>>(), [10_000]);
+    }
+
+    #[test]
+    fn stale_audio_is_counted_even_when_nothing_was_recognized() {
+        let live = Arc::new(AtomicBool::new(true));
+        let (started, recognizing) = mpsc::channel();
+        let (open, gate) = mpsc::channel();
+        let script = Script {
+            started: Some(started),
+            gate: Some(gate),
+            ..script(vec![Ok(vec![])])
+        };
+        let (sink, _delivered) = collected();
+        let worker = Worker::start(3, 2, script, sink);
+        let audio = chunk(10_000);
+        assert!(worker
+            .submit(Slow {
+                audio,
+                live: live.clone()
+            })
+            .is_ok());
+        recognizing.recv().unwrap();
+        live.store(false, Ordering::Release);
+        open.send(()).unwrap();
+        assert_eq!(worker.finish(Duration::from_secs(5)).stale, 1);
+    }
+
+    #[test]
+    fn audio_made_for_another_session_is_never_recognized() {
+        let calls = Arc::new(AtomicU64::new(0));
+        let script = Script {
+            calls: calls.clone(),
+            ..script(vec![Ok(vec![(0, "Hello.")])])
+        };
+        let (sink, delivered) = collected();
+        let worker = Worker::start(4, 2, script, sink);
+        let live = Arc::new(AtomicBool::new(true));
+        let audio = chunk(10_000);
+        assert!(worker.submit(Slow { audio, live }).is_ok());
+        let stats = worker.finish(Duration::from_secs(5));
+        assert_eq!((calls.load(Ordering::SeqCst), stats.stale), (0, 1));
         assert!(delivered.try_recv().is_err());
     }
 }
