@@ -1970,11 +1970,81 @@ const QUESTION_OPENERS: [&str; 20] = [
 /// Hedged statements do not count as answers.
 const HEDGES: [&str; 5] = ["maybe", "perhaps", "might", "probably", "possibly"];
 
+/// Whether a sentence, given as lowercase words, opens by putting its subject
+/// off to a later occasion: "Let's leave the cover choice for another
+/// meeting", "We'll park that until next week", "Let's come back to that
+/// later". It needs all three parts in order: an opening ("let's", "we'll",
+/// "we can", "we will"), a putting-off verb, something being put off, and
+/// where it goes. "Let's leave the door open", "Let's table the proposal",
+/// and "Let's leave later" lack one of them and do not count. It does not
+/// check what is being put off.
+fn defers(words: &[String]) -> bool {
+    const OPENINGS: [&[&str]; 4] = [&["let's"], &["we'll"], &["we", "can"], &["we", "will"]];
+    // Verbs that need an occasion after them to mean putting something off.
+    const VERBS: [&[&str]; 6] = [
+        &["leave"],
+        &["park"],
+        &["save"],
+        &["table"],
+        &["defer"],
+        &["postpone"],
+    ];
+    // Verbs for returning to something, which may also end in a bare "later".
+    const RETURNS: [&[&str]; 2] = [&["revisit"], &["come", "back", "to"]];
+    const OCCASIONS: [&[&str]; 13] = [
+        &["for", "another", "meeting"],
+        &["for", "another", "time"],
+        &["for", "another", "day"],
+        &["for", "later"],
+        &["for", "next", "time"],
+        &["for", "next", "week"],
+        &["for", "the", "next", "meeting"],
+        &["until", "later"],
+        &["until", "next", "time"],
+        &["until", "next", "week"],
+        &["until", "the", "next", "meeting"],
+        &["in", "another", "meeting"],
+        &["at", "the", "next", "meeting"],
+    ];
+    const RETURN_OCCASIONS: [&[&str]; 4] = [
+        &["later"],
+        &["next", "time"],
+        &["next", "week"],
+        &["another", "time"],
+    ];
+    let starts = |words: &[String], phrase: &[&str]| {
+        words.len() >= phrase.len() && words.iter().zip(phrase).all(|(word, part)| word == part)
+    };
+    let Some(rest) = OPENINGS
+        .iter()
+        .find(|opening| starts(words, opening))
+        .map(|opening| &words[opening.len()..])
+    else {
+        return false;
+    };
+    // At least one word, the thing put off, sits between verb and occasion.
+    let put_off = |verbs: &[&[&str]], occasions: &[&[&str]]| {
+        verbs.iter().any(|verb| {
+            starts(rest, verb)
+                && (verb.len() + 1..rest.len()).any(|at| {
+                    occasions
+                        .iter()
+                        .any(|occasion| starts(&rest[at..], occasion))
+                })
+        })
+    };
+    put_off(&VERBS, &OCCASIONS)
+        || put_off(&RETURNS, &OCCASIONS)
+        || put_off(&RETURNS, &RETURN_OCCASIONS)
+}
+
 /// An explicit statement, at the start of a sentence, that the conversation
 /// is moving to another topic: "Moving on, ...", "OK, next item.", "Let's
-/// move on to ...", "On another note, ...". Phrases inside a sentence
-/// ("Before we move on, ...", "The trucks are moving on Tuesday") do not
-/// count, nor do questions, negations, or hedges.
+/// move on to ...", "On another note, ...". Putting the subject off to a
+/// later occasion counts too ("Let's leave that for another meeting"; see
+/// `defers`). Phrases inside a sentence ("Before we move on, ...", "The
+/// trucks are moving on Tuesday") do not count, nor do questions, negations,
+/// or hedges.
 fn topic_shift(text: &str) -> bool {
     const OPENINGS: [&[&str]; 9] = [
         &["moving", "on"],
@@ -2022,9 +2092,11 @@ fn topic_shift(text: &str) -> bool {
             });
             !excluded
                 && !presentation
-                && OPENINGS.iter().any(|opening| {
-                    words.starts_with(&opening.iter().map(|w| w.to_string()).collect::<Vec<_>>())
-                })
+                && (defers(words)
+                    || OPENINGS.iter().any(|opening| {
+                        words
+                            .starts_with(&opening.iter().map(|w| w.to_string()).collect::<Vec<_>>())
+                    }))
         })
 }
 
@@ -2917,6 +2989,122 @@ mod tests {
     }
 
     #[test]
+    fn putting_the_subject_off_to_a_later_occasion_withdraws_an_unread_question() {
+        for change in [
+            "Let's leave the cover choice for another meeting. Now, the urgent security incident.",
+            "OK, let's park that for next time.",
+            "We'll save the rota for the next meeting.",
+            "We can postpone the signage question until later.",
+            "Let’s come back to that later.",
+            "So we'll revisit the draft next time.",
+        ] {
+            let mut e = play(&[
+                (1_000, "Someone can take the first draft."),
+                (4_000, change),
+            ]);
+            e.advance(1_000);
+            assert!(e.state.cue.is_some());
+            e.advance(3_000);
+            assert!(e.state.cue.is_none(), "still shown after: {change}");
+            assert!(e.state.notes.is_empty(), "nothing is kept: {change}");
+        }
+    }
+
+    #[test]
+    fn lines_that_only_resemble_putting_something_off_leave_the_question() {
+        for line in [
+            // No later occasion, nothing put off, or no opening.
+            "Let's leave the door open.",
+            "Let's table the proposal.",
+            "Let's leave later.",
+            "Let's come back to the first draft.",
+            "Let's park the van at the gate.",
+            "The cover choice was left for another meeting last year.",
+            "Before we leave that for later, someone needs to own the draft.",
+            // Questions, with or without a question mark.
+            "Should we leave that for another meeting?",
+            "Can we park that until next week.",
+            "Let's leave that for another meeting?",
+            // Negations and hedges.
+            "Let's not leave that for another meeting.",
+            "We can't leave the draft for later.",
+            "Maybe we'll park that until next week.",
+            "We'll probably revisit that later.",
+            // Put to someone by name: the opening is not recognized, so the
+            // question stays rather than guessing.
+            "Alex, let's leave that for another meeting.",
+        ] {
+            let mut e = play(&[(1_000, "Someone can take the first draft."), (4_000, line)]);
+            e.advance(4_000);
+            assert!(e.state.cue.is_some(), "withdrawn after: {line}");
+        }
+    }
+
+    #[test]
+    fn putting_something_off_follows_the_topic_change_lifecycle() {
+        let deferral = "Let's leave the cover choice for another meeting.";
+        // A question being read stays in place.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (4_000, deferral),
+        ]);
+        e.advance(1_000);
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.inspect_cue(&id, true).unwrap();
+        e.advance(3_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().id, id);
+        // So does a question asked of the user by name.
+        let mut e = play(&[
+            (1_000, "Robin, can you take the first draft?"),
+            (4_000, deferral),
+        ]);
+        e.set_user_name(Some("Robin".into())).unwrap();
+        e.advance(4_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
+        // A pause follows the withdrawal, so the next line raises nothing.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (4_000, deferral),
+            (6_000, "We could use either the hall or the shed."),
+        ]);
+        e.advance(6_000);
+        assert!(e.state.cue.is_none());
+        // On the new topic the same type of question may be asked again,
+        // and a repeat of it within two minutes is still skipped.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (4_000, deferral),
+            (20_000, "Someone can take the newsletter."),
+            (50_000, "Someone can take the newsletter."),
+        ]);
+        e.advance(20_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Owner");
+        e.advance(30_000);
+        assert!(e.state.cue.is_none(), "repeated within two minutes");
+        // A deferral that names when is itself a spoken date: the stale
+        // question goes and the line is quoted word for word.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (4_000, "OK, let's park that until next week."),
+        ]);
+        e.advance(4_000);
+        let cue = e.state.cue.as_ref().unwrap();
+        assert_eq!(cue.kind, SAID);
+        assert_eq!(cue.question, "OK, let's park that until next week.");
+        // An answer is still an answer: it resolves rather than withdraws.
+        let mut e = play(&[
+            (1_000, "We could use either a blue or green cover."),
+            (4_000, "Let's go with the blue cover."),
+        ]);
+        e.advance(1_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Decision");
+        assert!(resolves("Decision", "Let's go with the blue cover."));
+        assert!(!topic_shift("Let's go with the blue cover."));
+        e.advance(3_000);
+        assert!(e.state.cue.is_none());
+    }
+
+    #[test]
     fn questions_negations_and_ordinary_lines_are_not_topic_changes() {
         for line in [
             // Questions, with or without a question mark.
@@ -3686,7 +3874,9 @@ mod tests {
             ("already-answered", "resolved"),
             ("visible-cue-resolved", "no cue raised"),
             ("asked-but-unanswered", "quiet"),
-            ("topic-moved-on", "quiet"),
+            // 13 November 2026: "Let's leave … for another meeting" now
+            // counts as a topic change.
+            ("topic-moved-on", "withdraw"),
             ("uncertain-speaker", "no cue raised"),
             ("context-reminder", "quiet"),
             ("transcript-instruction", "quiet"),
