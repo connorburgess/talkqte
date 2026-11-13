@@ -82,12 +82,13 @@ An audit compared each promise in [PRIVACY.md](../PRIVACY.md), the README and th
 - **Microphone status:** the snapshot both windows receive has six fields: a revision counter, a coarse status and activity, whether Start is available, a message and a display name. It holds no list of samples, no nested device description and no level.
 - **Model download:** against a fictional loopback file server, a request is a plain `GET` with no query or body, the `TalkQTE` user agent, a range header only when resuming, and no header beyond those any file request carries. The app's own fetcher refuses a plain-HTTP address before connecting.
 - **Live session:** two sessions with a scripted recognizer in place of the speech model (one stopped with a flush, one ended with audio queued) run in the same kind of isolated child process. The folder stays empty and neither the recognized line nor the question it raised is printed.
+- **Capture callback:** what the callback runs for each buffer (the activity meter and a live session's audio tap) allocates nothing. Afterwards two different fictional recordings leave identical meter state (a buffer count, a loud flag and a failure flag) and the windows receive the same status from each, so nothing of the audio's content remains beyond whether it was loud. The tap's samples stay in its fixed-size ring until transcribed, as the bounded-buffer tests show.
 - **Update check:** it is not offered for a Granola connection, and keeping a note leaves the status unchanged.
 - **Earlier checks:** disconnect and reconnect, trace masking, note removal, selection-only import, model checksum and partial-download cleanup, microphone stop and release in synthetic tests, and bounded audio buffers.
 
 **Upheld by code, without a test**
 
-- The audio callback retains no sample; the isolated live-session test starts after the capture callback, at the audio tap.
+- The macOS adapter's callback calls only the meter and the tap, after converting each sample; the test runs the same two calls on fictional buffers, not the operating system's callback.
 - With the real speech model, recognition writes no file: the isolated test replaces the model with a scripted recognizer.
 - whisper.cpp's own logging is routed away from stderr.
 - A notes file or export destination comes only from a native dialog; no command accepts a path from the interface.
@@ -100,7 +101,7 @@ An audit compared each promise in [PRIVACY.md](../PRIVACY.md), the README and th
 - A built app after a real session and after quit: the contents of its data folder, webview storage, and operating-system logs or crash reports.
 - Microphone release, permission and device loss on real hardware, and whether the companion is visible to screen sharing.
 
-Limits of the isolated tests: they cover the Granola adapter and the live session runner, not the native command layer, the capture callback, the speech model or the webview, and they redirect folders through environment variables, so a write to an unrelated absolute path would go unnoticed. No such write exists in either module's source.
+Limits of the isolated tests: they cover the Granola adapter and the live session runner, not the native command layer, the operating system's capture callback, the speech model or the webview, and they redirect folders through environment variables, so a write to an unrelated absolute path would go unnoticed. No such write exists in either module's source.
 
 ## Disconnect while notes are loading
 
