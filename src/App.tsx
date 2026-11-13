@@ -1193,6 +1193,11 @@ function Notebook() {
               cancelling,
               live,
               finishing,
+              session: {
+                live: state.live,
+                status: state.status,
+                transcript: state.transcript,
+              },
             }}
           />
         )}
