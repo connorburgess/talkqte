@@ -37,6 +37,17 @@ pub(crate) enum Refused {
     Occupied,
 }
 
+/// Why the source sink did not take a line.
+#[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum LineRefused {
+    /// The source is not attached to this running session. Its worker should
+    /// stop capturing and recognizing: no later line can be accepted either.
+    NotAttached,
+    /// The engine refused this line, for example as out of order.
+    Engine(String),
+}
+
 impl Runtime {
     /// The startup operation of the live session a source may feed now. Demo,
     /// ended, stopping and mismatched states have none.
@@ -95,12 +106,14 @@ impl Runtime {
         session: u64,
         control: &Control,
         segment: crate::engine::Segment,
-    ) -> Result<(), String> {
+    ) -> Result<(), LineRefused> {
         self.sync();
         if !self.live_source_accepts(session, control) {
-            return Err("That audio source is not attached to this live session.".into());
+            return Err(LineRefused::NotAttached);
         }
-        self.engine.ingest(session, segment)
+        self.engine
+            .ingest(session, segment)
+            .map_err(LineRefused::Engine)
     }
 
     /// With the runtime lock held, immediately before a line from this source
@@ -377,9 +390,15 @@ mod tests {
         runtime
             .ingest_source_line(session, &source.control, line("a1", 0))
             .unwrap();
-        assert!(runtime
-            .ingest_source_line(session, &stranger.control, line("b1", 0))
-            .is_err());
+        assert_eq!(
+            runtime.ingest_source_line(session, &stranger.control, line("b1", 0)),
+            Err(LineRefused::NotAttached)
+        );
+        // An engine refusal is a different answer: the source stays attached.
+        assert!(matches!(
+            runtime.ingest_source_line(session, &source.control, line("a1", 0)),
+            Err(LineRefused::Engine(_))
+        ));
         assert!(runtime
             .ingest_source_line(session + 1, &source.control, line("a2", 0))
             .is_err());
@@ -387,9 +406,10 @@ mod tests {
         // this source's lines are refused all the same.
         runtime.take_live_for_stop().unwrap();
         assert_eq!(runtime.engine.state.status, Status::Running);
-        assert!(runtime
-            .ingest_source_line(session, &source.control, line("a3", 0))
-            .is_err());
+        assert_eq!(
+            runtime.ingest_source_line(session, &source.control, line("a3", 0)),
+            Err(LineRefused::NotAttached)
+        );
         runtime.engine.ingest(session, line("m1", 0)).unwrap();
         let ids: Vec<_> = runtime
             .engine

@@ -101,9 +101,11 @@ impl Timed for NativeChunk {
 }
 
 /// Assembles native blocks into at most three-second chunks on the worker
-/// that owns the NativeReader. Each push returns at most one chunk. A gap,
-/// the segment limit, or clean end of input can end a shorter chunk. Stop,
-/// cancellation and session replacement never flush pending audio.
+/// that owns the NativeReader. Each push returns at most one chunk. A gap or
+/// the segment limit can end a shorter chunk. Stop, cancellation and session
+/// replacement never flush pending audio. `finish` can release the last
+/// partial chunk at a clean end of input, but the source worker discards it
+/// by decision and never calls `finish`.
 pub struct NativeChunker {
     control: Control,
     session: u64,

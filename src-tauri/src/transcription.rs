@@ -204,6 +204,14 @@ impl<C: Timed> Worker<C> {
             .saturating_sub(self.completed.load(Ordering::Acquire))
     }
 
+    /// False once the worker thread has ended, including after a panic in
+    /// the recognizer or the sink. Audio submitted afterwards is never
+    /// recognized, so a caller that keeps capturing should stop.
+    pub fn is_running(&self) -> bool {
+        // The thread holds the only other reference to this counter.
+        Arc::strong_count(&self.completed) > 1
+    }
+
     /// A handle that cancels this worker from another thread, like `cancel`.
     pub fn cancel_handle(&self) -> CancelHandle {
         CancelHandle(self.cancelled.clone())

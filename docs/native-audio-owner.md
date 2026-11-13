@@ -210,8 +210,9 @@ permission or default-build behavior changes here.
 
 `NativeChunker` assembles native blocks into bounded mono chunks of at most
 three seconds on the worker that owns the `NativeReader`. It does not own the
-reader: the worker passes each block from `try_next` and calls `finish` only
-after the reader reports a clean close. Each chunk keeps one timing segment per
+reader: the worker passes each block from `try_next`. `finish` can release the
+last partial chunk after a clean close, but the source worker added later
+discards that audio by decision and never calls it. Each chunk keeps one timing segment per
 block it holds, with that block's rational start and end. A block split by a full
 chunk computes its split boundary once and uses it on both sides.
 `NativeChunk::session_ms` maps a recognizer offset, measured in the chunk's
@@ -431,10 +432,9 @@ running, so this does not depend on the caller also cancelling it. Whether the
 worker's session is still the engine's remains the engine's check at delivery.
 
 The check reads the chunk's own cancellation flag, which every stop and
-replacement path in the gate sets. Releasing the capture sets it as well, so a
-future caller that wants queued audio transcribed after a clean end of input
-must keep the capture until the worker has finished. No caller exists yet, and
-that ordering is untested.
+replacement path in the gate sets. Releasing the capture sets it as well. The
+source worker added later cancels on any end of input, so queued audio is
+withheld by decision and nothing is transcribed after a clean end.
 
 Three memory-only tests queue real native chunks at relative rates 0.5, 1 and
 2 with a scripted recognizer: delivered times across a split block, an
@@ -613,7 +613,8 @@ thread and explicit clock limits. In order, it:
 1. snapshots the session under the runtime lock, reads the host clock without
    it, and accepts the measurement under the lock again. Acceptance attaches
    the source. Any refusal ends here, before a native request is sent;
-2. begins the native owner for exactly that selection with the accepted
+2. starts the transcription worker, so a thread that cannot start fails
+   before anything is asked of the OS, then begins the native owner for exactly that selection with the accepted
    binding. The owner still refuses a selection that differs from the review;
 3. loops on that worker until the owner reports `Released`: poll native
    completions first on every pass, then move available blocks into
@@ -622,23 +623,41 @@ thread and explicit clock limits. In order, it:
 The host passes in a sendable `Monitor`. The loop records the owner's stage in
 it on every pass, so a failed Stop or output removal is visible while the loop
 is still running. `Monitor::retry_cleanup` accepts one explicit retry of such
-an observed failure; a request made before a failure is refused, not saved.
-Nothing retries by itself. The monitor holds no native object and its lock is
-never held across a native call or together with the runtime lock.
+an observed failure. It is refused before a failure, while a retry is waiting
+or being performed, and after the retry until a new failure is observed: the
+loop polls again after performing a retry and records that stage, as the owner
+task does. Nothing retries by itself. The monitor holds no native object and
+its lock is never held across a native call or together with the runtime lock.
 
-If the runtime is unavailable when a line arrives (its lock is poisoned), the
-sink cancels the source. Nothing could be delivered or stopped through that
-runtime, so the worker stops listening and continues native cleanup.
+If the loop ends any other way than through `Released`, for example by a panic
+on its thread, the monitor reports `abandoned` and delivery is closed. This is
+not a Stop: the owner quarantines its native resources, capture may still be
+running, and no retry is accepted. The host must show that state, not Off.
+
+The worker stops listening, by cancelling the source and continuing native
+cleanup, whenever capturing would serve nothing:
+
+- the sink finds the source is not attached. The line is refused with a typed
+  not-attached answer, distinct from an engine refusal such as an out-of-order
+  line, which leaves the source running;
+- the runtime is unavailable (its lock is poisoned) when a line arrives;
+- every 50 passes, about once a second when idle, the loop asks the runtime
+  whether the source is still attached, and stops on "no" or no answer. A
+  silent source is therefore covered too;
+- the transcription worker thread has ended, for example after a recognizer
+  panic.
 
 Recognized lines enter the engine through `Runtime::ingest_source_line` and
-nowhere else. With the runtime lock held it syncs, checks that this exact
+nowhere else. Like attaching, it is compiled only with the feature or in tests;
+the default app build contains neither. With the runtime lock held it syncs, checks that this exact
 source is attached to this running session, and only then calls the engine. A
 line from a source that is not attached is refused even when its session number
 is right and its audio was recognized. The sink check sits behind the worker's
 own source check, so it also closes the window where Stop arrives between that
 check and the commit.
 
-Attachment is now the only way for native audio to reach a session:
+Attachment is now the only supported way for native audio to reach a session.
+Three things hold that, with the caveat after them:
 
 - `ClockBinding::new` is crate-private. Outside tests only the clock
   measurement calls it, and the binding leaves the runtime only through
@@ -686,9 +705,10 @@ audio on Stop. The two differ on purpose; this has not been tried with people.
 
 ### Tests
 
-Six native-feature tests run the worker loop with the memory-only clock feed,
-a scripted owner (running until cancelled, then two polls of stopping, then
-released) and a scripted recognizer. A seventh covers preparation alone.
+Ten native-feature tests use the memory-only clock feed, a scripted owner
+(running until cancelled, then two polls of stopping, then released) and a
+scripted recognizer. Nine run the worker and loop joined as `run` joins them;
+one covers preparation alone.
 
 - An attached source puts its first line in the engine at the clock's time.
   While the recognizer holds the second chunk the session is stopped, or in a
@@ -699,31 +719,42 @@ released) and a scripted recognizer. A seventh covers preparation alone.
   The queued audio contains two real gaps, which end chunks instead of joining
   audio.
 - A source whose binding was built directly, with the same numbers an accepted
-  one would hold, is read, chunked and recognized, and its line is refused at
-  the sink. The transcript stays empty and the live session is undisturbed.
+  one would hold, is read, chunked and recognized once. Its line is refused at
+  the sink, the transcript stays empty, and that refusal stops the source with
+  no further recognition. The live session is undisturbed.
+- The same unattached source with no audio at all is stopped by the periodic
+  attachment check.
 - A scripted Stop failure stays visible in the monitor across further polls
-  with no automatic retry and the gate still reserved; one explicit retry then
-  releases. A retry requested before the failure is refused.
+  with no automatic retry and the gate still reserved. A retry requested before
+  the failure is refused; one explicit retry is performed once and releases;
+  further requests during and after it are refused.
+- A loop that panics leaves the monitor abandoned, with delivery closed, a
+  last stage other than released, and retry refused.
+- A recognizer that panics ends the transcription worker, and the loop stops
+  the source.
 - A valid block from a different operation is refused by the chunker, and the
   worker cancels its own source without recognizing its queued audio.
 - A clean end of input ends the loop with the source cancelled and the
-  trailing audio unrecognized. Here the reader's own retirement cancels it.
+  trailing audio unrecognized. Here the reader's own retirement cancels it, and
+  the test does not require that any line was recognized first.
 - An unavailable runtime cancels the source.
 - Preparation with a real host-clock read attaches one source, refuses a second
   as `Occupied` without stopping the first, and refuses after Stop without
   reading the clock.
 
-One default-build test drives the sink directly: an attached source's line is
-accepted, a line from an unattached source of the same application is refused,
-and after Stop the source's line is refused while a microphone line for the
-same session is still accepted.
+One test compiled in every build's test run drives the sink directly: an
+attached source's line is accepted, a repeated line gets an engine refusal, a
+line from an unattached source of the same application gets the not-attached
+answer, and after Stop the source's line is refused while a microphone line for
+the same session is still accepted.
 
-Mutation checks, each restored afterwards: without the sink's attachment check
-the default-build sink test and the unattached-source test fail; without the
-worker's cancel at the end of reading the foreign-block test fails; without
-the unavailable-runtime cancel or without performing the retry, their tests
-fail. The threaded tests are bounded by a five-second watchdog so a regression
-fails instead of hanging.
+Mutation checks, each restored afterwards. Without the sink's attachment check
+the sink test and the unattached-source test fail. Each of these also makes
+its own test fail: no cancel at the end of reading, no cancel for an
+unavailable runtime, the retry not performed, the status not refreshed after a
+retry, a dead worker ignored, no periodic attachment check, no cancel on a
+not-attached refusal, and no abandoned mark. The threaded tests are bounded by
+a five-second watchdog so a regression fails instead of hanging.
 
 Not covered:
 
@@ -733,6 +764,8 @@ Not covered:
   are not exercised through this loop.
 - Real callbacks, Stop latency, and a native completion that never arrives.
   The loop then keeps the worker and gate reserved by design, with no UI.
+- A transcription thread that cannot be started. `run` starts it before the
+  native request, but that ordering is not exercised by a test.
 - A full transcription queue. The loop reads as fast as audio arrives, so a
   slow recognizer drops the newest chunks; they are counted, not retried.
 - A transcription worker that does not stop within its two-second wait after
