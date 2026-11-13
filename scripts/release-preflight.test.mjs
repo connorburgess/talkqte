@@ -304,10 +304,10 @@ test('a bundle over the size tripwire fails and says which limit applied', (t) =
   );
 });
 
-test('build-machine home folders in the executable are counted, not printed', (t) => {
+test('build-machine home folders are counted, not printed, and fail a release', (t) => {
   const { root, app } = fixture(t, {
     executable:
-      'panic at /Users/fictional-builder/.cargo/registry/src/lib.rs\0',
+      'panic at /Users/fictional-builder/.cargo/registry/src/lib.rs\0/Users/Shared/data\0',
   });
   const result = preflight({ root, app, run: tools() });
   const paths = result.findings.find(
@@ -316,6 +316,22 @@ test('build-machine home folders in the executable are counted, not printed', (t
   assert.equal(paths.level, 'note');
   assert.match(paths.message, /1 home folder/);
   assert.doesNotMatch(paths.message, /fictional-builder/);
+
+  for (const options of [{ strictPaths: true }, { expect: 'signed' }])
+    assert.deepEqual(
+      failures(preflight({ root, app, run: tools(), ...options })),
+      [
+        'build paths: the executable embeds paths under 1 home folder(s) of the build machine; build with `npm run build:release`, which remaps them',
+      ],
+    );
+
+  const remapped = fixture(t, {
+    executable: 'panic at /build/cargo/registry/src/lib.rs\0',
+  });
+  assert.deepEqual(
+    failures(preflight({ ...remapped, run: tools(), strictPaths: true })),
+    [],
+  );
 });
 
 test('an executable needing a newer macOS than the bundle declares fails', (t) => {

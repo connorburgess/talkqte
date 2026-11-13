@@ -74,7 +74,7 @@ It exits 0 when every check passes, 1 when any fails (each failure names the che
 | Signature (`signed`)       | It is not Developer ID Application, its certificate chain does not meet Apple's Developer ID requirement, it has no team, hardened runtime or secure timestamp, it fails `codesign --verify --deep --strict`, or its embedded entitlements differ from the file. |
 | Notarization (`notarized`) | `xcrun stapler validate` fails, or `spctl` does not answer `Notarized Developer ID`.                                                                                                                                                                             |
 
-It also notes, without failing, how many home folders of the build machine appear in the executable (the names are not printed).
+A plain bundle check notes how many home folders of the build machine appear in the executable (the names are not printed). With `--strict-paths`, and always with `--expect signed` or `notarized`, any such path is a failure.
 
 Limits: the signature and notarization checks read the output of `codesign`, `stapler` and `spctl` on the Mac that runs them. Their tests use fictional tool output, and the signature fields and the Developer ID requirement were compared once against an installed third-party application. No TalkQTE artifact has ever passed `--expect signed` or `--expect notarized`. A Mac with developer tools is not a clean Mac, so a pass here does not replace step 5. In a restricted sandbox `codesign` reports the signing authority as unavailable and `--expect signed` fails; run it in an ordinary terminal.
 
@@ -84,7 +84,7 @@ CI runs the script's tests in the frontend job and the default (`--expect bundle
 
 | #   | Step                           | State                      | What exists, and what is left                                                                                                                                                                                    |
 | --- | ------------------------------ | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Build a release candidate      | Scriptable now             | The command is below. A release build with `local-whisper` was made once for the size measurement; a disk image and a path-remapped build have not been made.                                                    |
+| 1   | Build a release candidate      | Scriptable now             | The command is below. One remapped release build without `local-whisper` was made and inspected; a disk image and a remapped build with `local-whisper` have not been made.                                      |
 | 2   | Sign with Developer ID         | Owner                      | Entitlements and hardened-runtime configuration are in place. Needs Apple Developer Program membership and a Developer ID Application certificate.                                                               |
 | 3   | Notarize                       | Owner                      | Needs notary credentials for the same team. No submission has been made.                                                                                                                                         |
 | 4   | Staple and verify the artifact | Scriptable now, then Owner | `--expect notarized` is written and tested with fictional output; it needs the notarized artifact.                                                                                                               |
@@ -101,12 +101,14 @@ CI runs the script's tests in the frontend job and the default (`--expect bundle
 npm ci
 npm run notices && git diff --exit-code src-tauri/THIRD-PARTY-NOTICES.txt   # regenerate; commit any change first
 npm run check:release
-npm run tauri -- build --bundles app,dmg --features local-whisper
+npm run build:release -- --bundles app,dmg --features local-whisper
 ```
 
 `local-whisper` needs CMake and a C++ toolchain. The result is arm64 only when built on Apple silicon, which matches the [proposed supported setup](budgets.md#proposed-first-supported-setup); a universal build is a separate, unmeasured choice.
 
-The executable records the build folder's path. On a personal Mac that publishes the account's home-folder name. Either build the candidate under a neutral account or folder, or remap the prefix, for example `RUSTFLAGS="--remap-path-prefix=$HOME=/build"`. The remap has not been tried here, and the bundled C++ speech library may record paths separately; check the result with the pre-flight's build-paths line.
+`npm run build:release` (`scripts/release-build.mjs`) passes its arguments to `tauri build` and adds three things. It stops if the third-party notices are out of date. It tells the Rust and C compilers to record neutral paths (`/build/home`, `/build/cargo`, `/build/talkqte`, `/build/target`) in place of the home folder, Cargo's folder, the checkout and the build folder, because a plain build embeds the dependency sources' full paths, which on a personal Mac publishes the account's home-folder name. It then runs the pre-flight on the finished bundle with build paths treated as a failure. It supplies no signing identity or credential.
+
+Checked on 13 November 2026 with `npm run build:release -- --bundles app` (release profile, arm64, without `local-whisper`): the 15.6 MiB bundle's executable contained no path under a home folder, the checkout or the build folder, and 523 remapped `/build/cargo/` dependency paths; the earlier plain debug build contained 719 home-folder paths. Not checked: a build with `local-whisper`, whose C++ speech library relies on the `-ffile-prefix-map` flags this script sets; a debug build, which also records object-file locations that the remap does not cover; and a checkout that itself lives under the home folder, which the same remap rules are expected to cover.
 
 ### 2–4. Sign, notarize, staple, verify
 
@@ -195,7 +197,7 @@ Gaps: 19 crates (the `objc2` family, `block2`, `dispatch2`, `dasp_sample`, `allo
 1. **Apple Developer Program membership** and where the Developer ID certificate and notary credentials are kept. Every **Owner** step waits on this.
 2. **Minimum macOS:** the bundle declares 13.0 while the proposed supported setup is 14 or later. Either raise `minimumSystemVersion` to match, or include macOS 13 in the clean-Mac test.
 3. **Microphone permission text:** it describes monitoring only. If the release includes live transcription, decide whether the prompt should say that speech is transcribed on the Mac. Any new wording must match [PRIVACY.md](../PRIVACY.md) and what is implemented.
-4. **Where the candidate is built:** a neutral folder or account, or a remapped path, so the executable does not publish a home-folder name.
+4. **Where the candidate is built:** settled for the Rust code by `npm run build:release`, which remaps build paths and fails if a home-folder path remains. Confirm it on the first build with `local-whisper`.
 5. **Disk image or zip** as the download, and whether the first candidates include `local-whisper`.
 
 ## Remaining steps, in order

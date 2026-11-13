@@ -14,6 +14,8 @@
 // --expect signed requires a Developer ID signature with the hardened runtime.
 // --expect notarized also requires a stapled ticket and Gatekeeper's verdict.
 // --max-size-mib N overrides the size tripwire; --root DIR reads another tree.
+// --strict-paths fails on build-machine home folders in the executable, as
+// --expect signed and notarized always do.
 //
 // A pass is evidence about one artifact on the Mac that ran the check. It is
 // not a clean-machine installation test; see docs/release-path.md.
@@ -587,13 +589,16 @@ export function checkBundle(app, sources, options = {}) {
 
   if (executableStat?.isFile()) {
     const paths = new Set(
-      readFileSync(executable, 'latin1').match(/\/Users\/[^/\0\s"']+\//g) ?? [],
+      (
+        readFileSync(executable, 'latin1').match(/\/Users\/[^/\0\s"']+\//g) ??
+        []
+      ).filter((path) => path !== '/Users/Shared/'),
     );
     if (paths.size)
       findings.push(
-        note(
+        (release || options.strictPaths ? fail : note)(
           'build paths',
-          `the executable embeds paths under ${paths.size} home folder(s) of the build machine; build a release where that folder name may be published, or remap it`,
+          `the executable embeds paths under ${paths.size} home folder(s) of the build machine; build with \`npm run build:release\`, which remaps them`,
         ),
       );
     else
@@ -813,7 +818,8 @@ export function parseArguments(argv) {
       options.maxSizeMib = Number(value());
       if (!(options.maxSizeMib > 0))
         throw new Error('--max-size-mib takes a positive number');
-    } else if (argument === '--root') options.root = resolve(value());
+    } else if (argument === '--strict-paths') options.strictPaths = true;
+    else if (argument === '--root') options.root = resolve(value());
     else if (argument.startsWith('-'))
       throw new Error(`unknown option ${argument}`);
     else if (options.app) throw new Error('give one .app path');
@@ -835,7 +841,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   } catch (error) {
     console.error(`release-preflight: ${error.message}`);
     console.error(
-      'usage: node scripts/release-preflight.mjs [--expect bundle|signed|notarized] [--max-size-mib N] [--root DIR] [path/to/App.app]',
+      'usage: node scripts/release-preflight.mjs [--expect bundle|signed|notarized] [--max-size-mib N] [--strict-paths] [--root DIR] [path/to/App.app]',
     );
     process.exit(2);
   }
