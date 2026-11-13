@@ -3923,6 +3923,113 @@ mod tests {
         assert_eq!(matched, 7, "of 11; 5 before 13 November 2026");
     }
 
+    /// The same suite from each fixture's own starting state, as the cue lab
+    /// sees it: where a case lists a visible cue, that cue is put in place
+    /// after its source line instead of waiting for the rules to raise one.
+    /// This measures suppression and resolution separately from detection.
+    /// The cue's rule type is chosen here from the fixture's wording, which
+    /// the rules themselves never do.
+    #[test]
+    fn rules_from_each_fixtures_own_starting_cue() {
+        let suite: serde_json::Value =
+            serde_json::from_str(include_str!("../../scripts/fixtures/cue-lab.json")).unwrap();
+        let mut results = vec![];
+        let mut matched = 0;
+        for case in suite.as_array().unwrap() {
+            let mut e = Engine::live();
+            e.start().unwrap();
+            let existing = &case["existingCue"];
+            let seed = (!existing.is_null()).then(|| {
+                let text = existing["text"].as_str().unwrap();
+                let kind = if text.starts_with("Who will") {
+                    "Owner"
+                } else if text.starts_with("How will we choose") {
+                    "Decision"
+                } else if text.starts_with("What new date") {
+                    "Timing"
+                } else {
+                    panic!("no rule type for: {text}")
+                };
+                (kind, text, existing["sourceIds"][0].as_str().unwrap())
+            });
+            let mut seeded: Option<String> = None;
+            let mut action = "quiet";
+            for (index, event) in case["events"].as_array().unwrap().iter().enumerate() {
+                let at = 1_000 + index as u64 * 2_000;
+                e.advance(at - e.state.elapsed_ms);
+                let id = event["id"].as_str().unwrap();
+                let text = event["text"].as_str().unwrap();
+                let before = e.state.cue.clone();
+                e.ingest(e.session(), live(id, at, text)).unwrap();
+                if let (Some(cue), None) = (&before, &e.state.cue) {
+                    action = if resolves(&cue.kind, text) {
+                        "resolved"
+                    } else {
+                        "withdraw"
+                    };
+                }
+                if let Some((kind, question, source)) = seed.filter(|(_, _, source)| *source == id)
+                {
+                    let cue_id = format!("{}:{id}", e.generation);
+                    e.cue_deadline = at + CUE_MS;
+                    e.unshown = None;
+                    e.last_shown.retain(|(shown, _)| shown != kind);
+                    e.last_shown.push((kind.into(), at));
+                    e.state.cue = Some(Cue {
+                        sources: Vec::new(),
+                        id: cue_id.clone(),
+                        kind: kind.into(),
+                        question: question.into(),
+                        evidence: text.into(),
+                        source_id: source.into(),
+                        remaining_ms: CUE_MS,
+                        total_ms: CUE_MS,
+                        held: false,
+                        expanded: false,
+                        resolved_by: None,
+                        note: None,
+                        about_focus: false,
+                    });
+                    seeded = Some(cue_id);
+                }
+            }
+            match (&seeded, &e.state.cue) {
+                // The visible cue is still the one the case started with.
+                (Some(id), Some(cue)) => assert_eq!(&cue.id, id, "a second cue replaced it"),
+                (None, Some(_)) => action = "show",
+                _ => {}
+            }
+            let expected = case["expected"]["action"].as_str().unwrap();
+            let id = case["id"].as_str().unwrap();
+            eprintln!("{id:24} rules={action:10} expected={expected}");
+            matched += usize::from(action == expected);
+            results.push((id.to_string(), action));
+            // Nothing from an unused cue reaches the notes.
+            assert!(e.state.notes.is_empty(), "{id}");
+            assert!(!e.markdown().contains("Who will"), "{id}");
+        }
+        // Recorded 13 November 2026 in docs/cue-intelligence.md.
+        let recorded = [
+            ("missing-owner", "show"),
+            ("already-answered", "resolved"),
+            ("visible-cue-resolved", "resolved"),
+            ("asked-but-unanswered", "quiet"),
+            ("topic-moved-on", "withdraw"),
+            ("uncertain-speaker", "quiet"),
+            ("context-reminder", "show"),
+            ("transcript-instruction", "quiet"),
+            ("context-corrected", "quiet"),
+            ("paraphrased-use", "resolved"),
+            ("repeated-trigger", "quiet"),
+        ];
+        let recorded: Vec<(String, &str)> = recorded
+            .iter()
+            .map(|(id, action)| (id.to_string(), *action))
+            .collect();
+        assert_eq!(results, recorded);
+        assert_eq!(matched, 9);
+    }
+
     #[test]
     fn a_question_answered_while_catching_up_is_never_shown() {
         let mut e = play(&[
