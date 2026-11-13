@@ -998,7 +998,8 @@ impl Runtime {
         if let Some(connection) = self.granola.take() {
             connection.disconnect();
         }
-        self.refresh.disconnect();
+        // Visible to the windows only through `disconnect_granola` below.
+        self.disconnect_update_checks();
         if let Some(cancel) = &self.granola_sign_in {
             cancel.store(true, Ordering::Relaxed);
         }
@@ -1159,12 +1160,18 @@ fn stop_granola_update_check(state: tauri::State<AppState>) {
 /// Forgets the Granola session. Imported notes stay until removed, as they
 /// would for a file; nothing is written back.
 #[tauri::command]
-fn disconnect_granola(state: tauri::State<AppState>) -> Result<GranolaStatus, String> {
-    state
-        .0
-        .lock()
-        .map(|mut runtime| runtime.disconnect_granola())
-        .map_err(|_| "The notebook is unavailable.".into())
+fn disconnect_granola(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<GranolaStatus, String> {
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    let before = runtime.engine.state.revision;
+    let status = runtime.disconnect_granola();
+    // A reminder's warning may lose its confirmation time.
+    if runtime.engine.state.revision != before {
+        publish(&app, &mut runtime);
+    }
+    Ok(status)
 }
 
 /// A live session's parts: the engine session it feeds, the microphone start

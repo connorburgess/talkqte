@@ -49,10 +49,10 @@ const selections: string[][] = [];
 // Granola connection offers this check yet.
 type Failure = Exclude<
   UpdateCheckReport['status'],
-  'checked' | 'cancelled' | 'reimported'
+  'checked' | 'cancelled' | 'reimported' | 'removed' | 'removedOrReimported'
 >;
 /** The check that ended because an import returned all of its notes. */
-let reimported = 0;
+let ended: { id: number; status: UpdateCheckReport['status'] } | null = null;
 interface Provider {
   changed?: string[];
   missing?: string[];
@@ -70,15 +70,30 @@ const checkRequests: string[][] = [];
 let stopRequests = 0;
 const heldChecks: Array<(how: 'answer' | 'timeout') => void> = [];
 const isGranola = (item: ContextItem) => item.provider === 'granola';
-function forget(sourceId?: string) {
+/** As in Rust: why notes left a pending check, so an emptied one says so. */
+let leftBy = { removed: false, reimported: false };
+function forget(sourceId?: string, why: 'removed' | 'reimported' = 'removed') {
   freshness = freshness.filter(
     (note) => sourceId !== undefined && note.sourceId !== sourceId,
   );
   if (!check) return;
+  const before = check.selection.length;
   check.selection = check.selection.filter(
     (id) => sourceId !== undefined && id !== sourceId,
   );
-  if (check.selection.length === 0) check = null;
+  if (check.selection.length !== before) leftBy[why] = true;
+  if (check.selection.length === 0) {
+    ended = {
+      id: check.id,
+      status:
+        leftBy.removed && leftBy.reimported
+          ? 'removedOrReimported'
+          : leftBy.reimported
+            ? 'reimported'
+            : 'removed',
+    };
+    check = null;
+  }
 }
 function record(
   sourceId: string,
@@ -142,6 +157,7 @@ async function checkUpdates(): Promise<UpdateCheckReport> {
   if (selection.length === 0) throw new Error('No Granola notes are selected.');
   const id = ++checkId;
   check = { id, selection };
+  leftBy = { removed: false, reimported: false };
   checkRequests.push([...selection]);
   const plan = { ...provider };
   if (plan.hold) {
@@ -154,7 +170,7 @@ async function checkUpdates(): Promise<UpdateCheckReport> {
     else unsettled = false;
   }
   if (check?.id !== id)
-    return report(reimported === id ? 'reimported' : 'cancelled');
+    return report(ended?.id === id ? ended.status : 'cancelled');
   const kept = check.selection.filter((sourceId) =>
     items.some((item) => isGranola(item) && item.sourceId === sourceId),
   );
@@ -170,8 +186,19 @@ async function checkUpdates(): Promise<UpdateCheckReport> {
       rateLimited: 'rateLimited',
       unsupportedFormat: 'unsupportedFormat',
     };
+    // Stands in for a check whose earlier, confirmed batch reported these
+    // withdrawals before a later batch failed: a provider failure keeps
+    // them, a failed workspace binding applies none. Rust tests the batches.
+    const binding =
+      plan.fail === 'workspaceChanged' || plan.fail === 'workspaceUnverified';
     for (const sourceId of kept)
-      record(sourceId, 'notVerified', reason[plan.fail]);
+      record(
+        sourceId,
+        'notVerified',
+        !binding && plan.withdrawn?.includes(sourceId)
+          ? 'withdrawn'
+          : reason[plan.fail],
+      );
     return report(plan.fail);
   }
   let changed = false;
@@ -244,7 +271,9 @@ export async function command(name: string, args: unknown) {
       generation++;
       check = null;
       // What could not be confirmed stays marked after disconnecting.
-      freshness = freshness.filter((note) => note.state === 'notVerified');
+      freshness = freshness
+        .filter((note) => note.state === 'notVerified')
+        .map((note) => ({ ...note, verifiedAtMs: null }));
       return status();
     case 'check_granola_updates':
       return checkUpdates();
@@ -346,9 +375,7 @@ export async function command(name: string, args: unknown) {
         );
       pending = false;
       // An import is a fresh read: earlier findings about these notes end.
-      const pendingCheck = check?.id;
-      for (const id of ids) forget(id);
-      if (pendingCheck && !check) reimported = pendingCheck;
+      for (const id of ids) forget(id, 'reimported');
       await emit('context:changed', items);
       return {
         added: items.length,
