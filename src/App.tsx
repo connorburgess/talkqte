@@ -41,6 +41,10 @@ import {
 } from './components/PanelDivider';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
 import { useCaptureControl } from './lib/useCaptureControl';
+import {
+  microphoneNotCapturing,
+  sourceOnlyApplication,
+} from './lib/processing';
 
 const floating = new URLSearchParams(location.search).get('window') === 'cue';
 
@@ -158,7 +162,11 @@ function FloatingQuestion() {
                       ? state.cuesPaused
                         ? 'Mic still on'
                         : 'Mic on · Local'
-                      : microphoneLabel(mic)
+                      : state.sourceSession
+                        ? state.cuesPaused
+                          ? 'App audio still on'
+                          : 'App audio · Local'
+                        : microphoneLabel(mic)
                     : microphoneControl
                       ? microphone.stopPending && mic?.status !== 'stopping'
                         ? 'Stop requested…'
@@ -182,7 +190,9 @@ function FloatingQuestion() {
                     title={
                       state.cuesPaused
                         ? 'Resume cues'
-                        : 'Pause cues; microphone and transcript continue'
+                        : state.sourceSession && mic?.status !== 'listening'
+                          ? 'Pause cues; application audio and transcript continue'
+                          : 'Pause cues; microphone and transcript continue'
                     }
                     disabled={busy}
                     onClick={() =>
@@ -355,6 +365,9 @@ function Notebook() {
   const { state, error, setError, busy, run } = useSession<Snapshot>();
   const microphone = useMicrophone();
   const capture = useCaptureControl();
+  // A session fed by a selected application alone, with the microphone off
+  // (development builds only); null otherwise.
+  const sourceApp = sourceOnlyApplication(capture.state, microphone.state);
   const [startPending, setStartPending] = useState(false);
   const [startInstalled, setStartInstalled] = useState(false);
   useEffect(() => {
@@ -1124,6 +1137,7 @@ function Notebook() {
           cancelling={cancelling}
           processingConfigured={!!capture.state?.processor}
           sourceMayBeCapturing={!!capture.state?.source?.mayBeCapturing}
+          sourceSession={sourceApp}
           action={
             preparing ? (
               <button
@@ -1227,6 +1241,7 @@ function Notebook() {
               processingPhase: capture.state?.phase ?? null,
               preparing,
               finishing,
+              sourceSession: !!sourceApp,
             }}
             realCueControls={{
               busy,
@@ -1308,11 +1323,18 @@ function Notebook() {
                     {preparing
                       ? 'Local speech model · capture status shown above'
                       : finishing
-                        ? 'Waiting for microphone release and remaining transcription.'
+                        ? capture.state?.source?.mayBeCapturing &&
+                          microphoneNotCapturing(microphone.state)
+                          ? 'Ending the live session. Application audio is shown under Cue processing.'
+                          : 'Waiting for microphone release and remaining transcription.'
                         : state.live
                           ? state.cuesPaused && live
-                            ? 'Microphone and transcript continue. Stop live session to stop listening.'
-                            : 'Your microphone · transcribed on this device · not saved'
+                            ? sourceApp
+                              ? 'Application audio and transcript continue. Stop live session to stop listening.'
+                              : 'Microphone and transcript continue. Stop live session to stop listening.'
+                            : sourceApp
+                              ? `Audio from ${sourceApp} · transcribed on this device · not saved`
+                              : 'Your microphone · transcribed on this device · not saved'
                           : 'Scripted conversation · separate from microphone'}
                   </span>
                 </div>
@@ -1335,7 +1357,9 @@ function Notebook() {
                         title={
                           state.cuesPaused
                             ? 'Only new speech can raise a cue after resuming.'
-                            : 'Clear the current cue; microphone and transcript continue.'
+                            : sourceApp
+                              ? 'Clear the current cue; application audio and transcript continue.'
+                              : 'Clear the current cue; microphone and transcript continue.'
                         }
                         onClick={toggleLiveCues}
                       >
@@ -1530,7 +1554,9 @@ function Notebook() {
                   >
                     <p className="muted small">
                       {state.live
-                        ? 'Your microphone · transcribed on this device'
+                        ? sourceApp
+                          ? `Audio from ${sourceApp} · transcribed on this device`
+                          : 'Your microphone · transcribed on this device'
                         : 'Scripted conversation · not from microphone audio'}
                     </p>
                     {state.transcript.length ? (
@@ -1552,7 +1578,9 @@ function Notebook() {
                         <h2>A conversation starts here.</h2>
                         <p>
                           {state.live
-                            ? 'Lines from your microphone appear here a few seconds after they are spoken.'
+                            ? sourceApp
+                              ? 'Lines from the application appear here a few seconds after they are heard.'
+                              : 'Lines from your microphone appear here a few seconds after they are spoken.'
                             : 'Try the demo to watch the fictional transcript arrive.'}
                         </p>
                       </div>

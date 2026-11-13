@@ -59,6 +59,9 @@ export interface CueSnapshot {
   companionPosition: 'bottomRight' | 'topCenter' | 'topLeft' | 'topRight';
   questionSize: 'standard' | 'large';
   sensitivity: 'balanced' | 'quiet' | 'focused';
+  /** Development builds only: the running session is fed by a selected
+   * application alone, with no microphone. */
+  sourceSession?: boolean;
 }
 export interface Snapshot extends CueSnapshot {
   title: string;

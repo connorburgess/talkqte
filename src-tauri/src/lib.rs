@@ -52,6 +52,8 @@ struct Runtime {
     /// The approved application-audio source feeding the live session, if
     /// any. Dropping it cancels that source's operation.
     live_source: Option<live_source::LiveSource>,
+    /// A live session started for an application source alone, if any.
+    source_session: Option<live_source::SourceSession>,
     processing_reviews: processing_reviews::Reviews,
     processing_status: engine::ProcessingTracker,
     /// Prior notes the user imported this session, in memory only.
@@ -77,6 +79,7 @@ impl Default for Runtime {
             live: None,
             live_start: live_control::StartGate::default(),
             live_source: None,
+            source_session: None,
             processing_reviews: processing_reviews::Reviews::default(),
             processing_status: engine::ProcessingTracker::default(),
             context: context::ContextStore::default(),
@@ -133,7 +136,7 @@ struct AppState(Mutex<Runtime>);
 // Emit while holding the state lock, preserving revision order across commands/ticks.
 fn publish(app: &tauri::AppHandle, runtime: &mut Runtime) {
     let _ = app.emit_to("main", "session:changed", &runtime.engine.state);
-    let cue_state = runtime.engine.cue_snapshot();
+    let cue_state = runtime.cue_snapshot();
     let _ = app.emit_to("cue", "cue:changed", &cue_state);
     publish_processing(app, runtime);
 }
@@ -245,7 +248,7 @@ fn snapshot(
 ) -> Result<serde_json::Value, String> {
     let runtime = state.0.lock().map_err(|_| "The demo is unavailable.")?;
     if window.label() == "cue" {
-        serde_json::to_value(runtime.engine.cue_snapshot())
+        serde_json::to_value(runtime.cue_snapshot())
     } else {
         serde_json::to_value(&runtime.engine.state)
     }

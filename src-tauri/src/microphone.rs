@@ -206,6 +206,17 @@ impl Controller {
         self.0.try_lock().ok().map(|state| state.snapshot.status)
     }
 
+    /// Whether the microphone is not capturing, read without waiting: see
+    /// `not_capturing`. None while the controller is busy, which callers must
+    /// treat as possibly capturing.
+    #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+    pub fn try_not_capturing(&self) -> Option<bool> {
+        self.0
+            .try_lock()
+            .ok()
+            .map(|state| not_capturing(state.snapshot.status, state.snapshot.can_start))
+    }
+
     /// Read authority without waiting behind native device startup. The
     /// atomic generation is updated under the state lock before device work.
     /// A busy lock means unknown status, not unknown operation ownership.
@@ -482,9 +493,37 @@ pub async fn start_microphone(
     app: tauri::AppHandle,
     state: tauri::State<'_, Controller>,
 ) -> Result<(), String> {
-    start(app, state.inner().clone(), None, None)
+    let may_start = |app: &tauri::AppHandle| {
+        app.state::<crate::AppState>()
+            .0
+            .lock()
+            .is_ok_and(|runtime| runtime.microphone_may_start())
+    };
+    if !may_start(&app) {
+        return Err("Stop the live session before checking the microphone.".into());
+    }
+    // Checked again once the start is reserved, so a session that began in
+    // between still refuses it before any permission request.
+    let owner = app.clone();
+    let refused = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let noted = refused.clone();
+    let on_reserved: OnReserved = Box::new(move |_| {
+        let allowed = may_start(&owner);
+        if !allowed {
+            noted.store(true, std::sync::atomic::Ordering::Release);
+        }
+        allowed
+    });
+    start(app, state.inner().clone(), None, Some(on_reserved))
         .await
         .map(|_| ())
+        .map_err(|error| {
+            if refused.load(std::sync::atomic::Ordering::Acquire) {
+                "Stop the live session before checking the microphone.".into()
+            } else {
+                error
+            }
+        })
 }
 
 /// Called with the start's generation and the tap's chunker once capture has
@@ -494,6 +533,15 @@ pub type OnTap = Box<dyn FnOnce(u64, crate::audio_tap::Chunker) + Send>;
 /// Records a reserved capture generation in its owning session before any
 /// permission request. Return false if that session has stopped or changed.
 pub type OnReserved = Box<dyn FnOnce(u64) -> bool + Send>;
+
+/// Off, or failed with its device already released, so a new start may
+/// follow. A failure whose cleanup is still pending, or any open state, may
+/// still be capturing. The processing status maps an error the same way.
+/// Used by the development build's application-audio source session.
+#[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+pub fn not_capturing(status: Status, can_start: bool) -> bool {
+    status == Status::Off || (status == Status::Error && can_start)
+}
 
 /// Starts capture. With `tap`, the callback also feeds a transcription tap
 /// with chunks of the given length, and `OnTap` receives its chunker only if

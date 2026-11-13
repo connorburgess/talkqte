@@ -12,6 +12,18 @@ use crate::{
     Runtime,
 };
 
+/// A live session started for one source alone, with that source's control,
+/// so the session's Stop also stops a source that has not attached yet.
+/// Only a development build or a test starts one.
+#[cfg_attr(
+    not(any(all(target_os = "macos", feature = "native-audio-spike"), test)),
+    allow(dead_code)
+)]
+pub(crate) struct SourceSession {
+    session: u64,
+    control: Control,
+}
+
 /// Held by the runtime while the source may feed the session. Dropping it,
 /// for any reason, cancels the source: an unattached source must not deliver.
 pub(crate) struct LiveSource {
@@ -94,6 +106,11 @@ impl Runtime {
     /// fails its source check from here on; it is discarded, not flushed.
     pub(crate) fn retire_live_source(&mut self) {
         self.live_source = None;
+        // A source-only session's source stops with the session, even before
+        // it has attached. The session itself ends through the Stop path.
+        if let Some(own) = &self.source_session {
+            own.control.cancel();
+        }
     }
 
     /// The transcript sink for application audio: the one place a recognized
@@ -135,6 +152,17 @@ impl Runtime {
     /// without passing through Stop still retires its source, and a source
     /// that stopped by itself frees the session for an explicit new one.
     pub(crate) fn reconcile_live_source(&mut self) {
+        // A session for an application alone whose source was stopped before
+        // it attached has nothing left to wait for. End it now, as when an
+        // attached source stops, rather than when the worker's run returns.
+        let unattached_and_stopped = self
+            .source_session
+            .as_ref()
+            .filter(|own| own.control.is_cancelled() && self.live_source.is_none())
+            .map(|own| own.session);
+        if let Some(session) = unattached_and_stopped {
+            self.end_source_session(session);
+        }
         let Some(source) = &self.live_source else {
             return;
         };
@@ -142,8 +170,115 @@ impl Runtime {
             || source.session != self.engine.session()
             || self.live_source_operation() != Some(source.operation.as_str())
         {
+            let session = source.session;
             self.live_source = None;
+            // A session that only this source fed has nothing left to hear.
+            self.end_source_session(session);
         }
+    }
+
+    /// The companion's snapshot: the engine's, plus whether the running
+    /// session is fed by an application alone, so it never reads a bare Off
+    /// for a session whose microphone was never used.
+    pub(crate) fn cue_snapshot(&self) -> crate::engine::CueSnapshot {
+        let mut snapshot = self.engine.cue_snapshot();
+        snapshot.source_session = self.source_session_running();
+        snapshot
+    }
+
+    /// A session for an application alone is running and its source has not
+    /// been stopped.
+    pub(crate) fn source_session_running(&self) -> bool {
+        self.source_session.as_ref().is_some_and(|own| {
+            !own.control.is_cancelled()
+                && self.live_session() == Some(own.session)
+                && self.engine.session() == own.session
+                && self.engine.state.status == Status::Running
+                && !self.engine.is_live_stopping()
+        })
+    }
+
+    /// Whether a standalone microphone check may start now. Not while any
+    /// live session runs: a session for an application alone says the
+    /// microphone is not used, and its Stop would not release a check that
+    /// started inside it.
+    pub(crate) fn microphone_may_start(&self) -> bool {
+        self.live.is_none()
+    }
+
+    fn live_session(&self) -> Option<u64> {
+        self.live.as_ref().map(|live| live.session)
+    }
+
+    /// Start a live session that only an application source will feed. No
+    /// model is loaded and no microphone is opened here; the source's worker
+    /// loads its own recognizer. Refused while any session or the demo runs,
+    /// as an ordinary live start is.
+    #[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
+    pub(crate) fn begin_source_session(
+        &mut self,
+        control: &Control,
+    ) -> Result<u64, crate::application_audio::Failure> {
+        use crate::application_audio::Failure;
+        self.sync();
+        if control.is_cancelled() {
+            return Err(Failure::Cancelled);
+        }
+        // Another session, the demo, or a start still loading: busy, as an
+        // ordinary start would be told.
+        let starting = self
+            .live_start
+            .control()
+            .map_err(|_| Failure::Unavailable)?
+            .1
+            != StartupState::Idle;
+        if self.live.is_some()
+            || starting
+            || matches!(self.engine.state.status, Status::Running | Status::Paused)
+        {
+            return Err(Failure::Busy);
+        }
+        let ticket = self.begin_live_start().map_err(|_| Failure::Unavailable)?;
+        let session = self
+            .install_live_start(&ticket)
+            .map_err(|_| Failure::Unavailable)?;
+        // The ticket ends here, so startup reads idle; the operation it set
+        // stays current for the source's attachment and for Stop.
+        drop(ticket);
+        self.source_session = Some(SourceSession {
+            session,
+            control: control.clone(),
+        });
+        Ok(session)
+    }
+
+    /// Whether the running live session is one started for a source alone.
+    #[cfg(test)]
+    pub(crate) fn is_source_session(&self, session: u64) -> bool {
+        self.source_session
+            .as_ref()
+            .is_some_and(|own| own.session == session)
+            && self.live_session() == Some(session)
+    }
+
+    /// End a source-only session, if `session` is still it. There is no
+    /// microphone to release and no transcript to drain: the source's audio
+    /// was already discarded when it stopped. Returns whether it ended.
+    pub(crate) fn end_source_session(&mut self, session: u64) -> bool {
+        if !self
+            .source_session
+            .as_ref()
+            .is_some_and(|own| own.session == session)
+        {
+            return false;
+        }
+        if let Some(own) = self.source_session.take() {
+            own.control.cancel();
+        }
+        if self.live_session() == Some(session) {
+            drop(self.take_live_for_stop());
+        }
+        self.engine.finish_live_stop(session)
     }
 }
 
@@ -480,5 +615,202 @@ mod tests {
                 assert_eq!(source.control.is_cancelled(), case == 4);
             }
         }
+    }
+
+    #[test]
+    fn a_source_session_starts_without_a_microphone_and_is_refused_beside_another() {
+        // Another live session, or the demo, is running: nothing starts.
+        let mut running = live();
+        let before = running.engine.session();
+        let source = source("fictional-player");
+        use crate::application_audio::Failure;
+        assert_eq!(
+            running.begin_source_session(&source.control),
+            Err(Failure::Busy)
+        );
+        assert_eq!(running.engine.session(), before);
+        assert!(!running.is_source_session(before));
+        let mut demo = Runtime::default();
+        demo.engine.start().unwrap();
+        assert_eq!(
+            demo.begin_source_session(&source.control),
+            Err(Failure::Busy)
+        );
+        // A start that is still loading is busy too.
+        let mut loading = Runtime::default();
+        let _ticket = loading.begin_live_start().unwrap();
+        assert_eq!(
+            loading.begin_source_session(&source.control),
+            Err(Failure::Busy)
+        );
+        // A stopped source starts no session.
+        let mut idle = Runtime::default();
+        let stopped = self::source("fictional-player");
+        stopped.gate.stop(&stopped.control).unwrap();
+        assert_eq!(
+            idle.begin_source_session(&stopped.control),
+            Err(Failure::Cancelled)
+        );
+        assert!(idle.live.is_none());
+
+        let mut runtime = Runtime::default();
+        let session = runtime.begin_source_session(&source.control).unwrap();
+        assert!(runtime.is_source_session(session));
+        let live = runtime.live.as_ref().unwrap();
+        assert!(live.microphone.is_none() && live.runner.is_none());
+        assert_eq!(runtime.engine.state.status, Status::Running);
+        assert!(runtime.engine.state.live);
+        // Startup reads idle; the session's operation stays current, so the
+        // source can attach and Stop can name it.
+        let (_, startup) = runtime.live_start.control().unwrap();
+        assert_eq!(startup, StartupState::Idle);
+        assert!(runtime.live_source_operation().is_some());
+        runtime.attach_live_source(&source.control).unwrap();
+    }
+
+    #[test]
+    fn stopping_a_source_session_stops_its_source_even_before_it_attaches() {
+        let mut runtime = Runtime::default();
+        let source = source("fictional-player");
+        let session = runtime.begin_source_session(&source.control).unwrap();
+        assert!(!source.control.is_cancelled());
+        // Stop live session, before the source has attached.
+        drop(runtime.take_live_for_stop().unwrap());
+        assert!(
+            source.control.is_cancelled(),
+            "the pending source stops too"
+        );
+        assert!(runtime.engine.finish_live_stop(session));
+        runtime.sync();
+        assert!(!runtime.is_source_session(session));
+        assert_eq!(
+            runtime.attach_live_source(&source.control),
+            Err(Refused::SessionChanged)
+        );
+    }
+
+    #[test]
+    fn a_source_session_ends_when_its_attached_source_stops_by_itself() {
+        let mut runtime = Runtime::default();
+        let source = source("fictional-player");
+        let session = runtime.begin_source_session(&source.control).unwrap();
+        runtime.attach_live_source(&source.control).unwrap();
+        runtime.sync();
+        assert_eq!(runtime.engine.state.status, Status::Running);
+        // The source's own Stop, or a stream failure: the next sync detaches
+        // it and ends the session that only it fed.
+        source.gate.stop(&source.control).unwrap();
+        runtime.sync();
+        assert!(runtime.live.is_none() && runtime.live_source.is_none());
+        assert_eq!(runtime.engine.state.status, Status::Ended);
+        assert!(!runtime.is_source_session(session));
+        // An ordinary live session does not end when its source stops.
+        let mut ordinary = live();
+        let other = self::source("fictional-player");
+        ordinary.attach_live_source(&other.control).unwrap();
+        other.gate.stop(&other.control).unwrap();
+        ordinary.sync();
+        assert_eq!(ordinary.engine.state.status, Status::Running);
+        assert!(ordinary.live.is_some());
+    }
+
+    #[test]
+    fn ending_a_source_session_twice_or_after_a_replacement_changes_nothing() {
+        let mut runtime = Runtime::default();
+        let source = source("fictional-player");
+        let session = runtime.begin_source_session(&source.control).unwrap();
+        assert!(runtime.end_source_session(session));
+        assert!(!runtime.end_source_session(session));
+        // A later ordinary session is not ended by the old session's step.
+        let ticket = runtime.begin_live_start().unwrap();
+        let next = runtime.install_live_start(&ticket).unwrap();
+        assert!(!runtime.end_source_session(session));
+        assert_eq!(runtime.engine.session(), next);
+        assert_eq!(runtime.engine.state.status, Status::Running);
+    }
+
+    #[test]
+    fn the_notebook_stop_reaches_a_source_session_through_its_displayed_target() {
+        use crate::capture_control::StopPlan;
+        let mut runtime = Runtime::default();
+        let source = source("fictional-player");
+        let session = runtime.begin_source_session(&source.control).unwrap();
+        // The target the notebook shows: this session's operation and the
+        // microphone controller's current generation, which has none here.
+        let target = StopTarget {
+            operation: runtime.live_start.control().unwrap().0,
+            microphone: "0".into(),
+        };
+        let StopPlan { live, microphone } = runtime.prepare_capture_stop(&target).unwrap();
+        let live = live.expect("the session was taken for Stop");
+        assert_eq!(live.session, session);
+        assert!(live.microphone.is_none() && live.runner.is_none());
+        assert_eq!(
+            microphone, 0,
+            "only the displayed generation, none of its own"
+        );
+        assert!(source.control.is_cancelled(), "the source stops with it");
+        // finish_live then ends the engine session.
+        assert!(runtime.engine.finish_live_stop(session));
+        assert!(!runtime.source_session_running());
+    }
+
+    #[test]
+    fn the_companion_learns_of_a_source_session_only_while_it_runs() {
+        let mut runtime = Runtime::default();
+        let plain = serde_json::to_value(runtime.cue_snapshot()).unwrap();
+        assert!(plain.get("sourceSession").is_none());
+        let source = source("fictional-player");
+        runtime.begin_source_session(&source.control).unwrap();
+        runtime.attach_live_source(&source.control).unwrap();
+        let running = serde_json::to_value(runtime.cue_snapshot()).unwrap();
+        assert_eq!(running["sourceSession"], true);
+        assert!(
+            !runtime.microphone_may_start(),
+            "no microphone check inside it"
+        );
+        // Its source is stopped: the flag goes at once, before the session
+        // itself has ended.
+        source.gate.stop(&source.control).unwrap();
+        assert!(serde_json::to_value(runtime.cue_snapshot())
+            .unwrap()
+            .get("sourceSession")
+            .is_none());
+        runtime.sync();
+        assert!(runtime.live.is_none());
+        assert!(runtime.microphone_may_start());
+        // An ordinary live session never carries it, and also refuses a
+        // standalone microphone check.
+        let ordinary = live();
+        assert!(serde_json::to_value(ordinary.cue_snapshot())
+            .unwrap()
+            .get("sourceSession")
+            .is_none());
+        assert!(!ordinary.microphone_may_start());
+    }
+
+    #[test]
+    fn a_source_session_ends_on_sync_when_its_source_is_stopped_before_attaching() {
+        let mut runtime = Runtime::default();
+        let source = source("fictional-player");
+        let session = runtime.begin_source_session(&source.control).unwrap();
+        runtime.sync();
+        assert!(
+            runtime.source_session_running(),
+            "still loading, not stopped"
+        );
+        assert_eq!(runtime.engine.state.status, Status::Running);
+        // Stop application audio while the worker is still loading its
+        // recognizer: the source never attached.
+        source.gate.stop(&source.control).unwrap();
+        runtime.sync();
+        assert!(
+            runtime.live.is_none(),
+            "ended at once, not when the run returns"
+        );
+        assert_eq!(runtime.engine.state.status, Status::Ended);
+        assert!(!runtime.is_source_session(session));
+        // The worker's own end step later changes nothing.
+        assert!(!runtime.end_source_session(session));
     }
 }

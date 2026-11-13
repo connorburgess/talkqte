@@ -42,6 +42,21 @@ pub(crate) trait Backend {
     /// Run the approved start for the listed application `source` until its
     /// native cleanup is released. Blocks this worker.
     fn run(&mut self, source: &str, start: Start, monitor: Monitor) -> Result<Report, Refused>;
+    /// Start a live session for the source alone, with no microphone. The
+    /// returned step ends that session, if it is still the current one.
+    /// `control` is the approved start's; the session's Stop cancels it.
+    fn begin_session(&mut self, control: &Control) -> Result<Box<dyn FnOnce()>, Failure>;
+}
+
+/// Runs its step when dropped, including while unwinding.
+struct OnDrop(Option<Box<dyn FnOnce()>>);
+
+impl Drop for OnDrop {
+    fn drop(&mut self) {
+        if let Some(step) = self.0.take() {
+            step();
+        }
+    }
 }
 
 type Factory = Box<dyn FnOnce() -> Box<dyn Backend> + Send>;
@@ -70,6 +85,8 @@ struct View {
     application: Option<String>,
     /// Identifies the review or operation for Start, Stop and retry.
     operation: Option<String>,
+    /// The live session was started for this source alone.
+    source_session: bool,
     choices: Vec<Choice>,
     problem: Option<Problem>,
     /// What the last released operation did, for acceptance records.
@@ -143,12 +160,26 @@ pub(crate) enum Error {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub(crate) enum Action {
     Snapshot,
-    List { acknowledged: bool },
+    List {
+        acknowledged: bool,
+    },
     CancelList,
-    Review { source: String },
-    Start { review: String },
-    Stop { operation: String },
-    RetryCleanup { operation: String },
+    Review {
+        source: String,
+    },
+    Start {
+        review: String,
+    },
+    /// Start a live session fed by this application alone.
+    StartSession {
+        review: String,
+    },
+    Stop {
+        operation: String,
+    },
+    RetryCleanup {
+        operation: String,
+    },
 }
 
 enum Ended {
@@ -224,6 +255,10 @@ enum Command {
         start: Start,
         monitor: Monitor,
         finish: Finish,
+        /// Start a live session for this source alone first.
+        session_only: bool,
+        /// Set once that session has begun.
+        session_started: Arc<AtomicBool>,
     },
 }
 
@@ -237,6 +272,11 @@ struct Active {
     stopping_since: Option<Instant>,
     /// Stop or exit was asked of this host for this operation.
     stop_requested: bool,
+    /// The live session was started for this source alone.
+    session_only: bool,
+    /// The worker has begun that session. Until then nothing says the
+    /// session has no microphone, since it may not be this source's.
+    session_started: Arc<AtomicBool>,
 }
 
 struct State {
@@ -282,6 +322,8 @@ impl Host {
                 can_retry: false,
                 application: None,
                 problem: None,
+                operation: None,
+                source_session: false,
             }),
             state: Mutex::new(State {
                 revision: 0,
@@ -315,6 +357,7 @@ impl Host {
             Action::CancelList => self.cancel_list(),
             Action::Review { source } => self.review(&source),
             Action::Start { review } => self.start(&review),
+            Action::StartSession { review } => self.start_session(&review),
             Action::Stop { operation } => match self.stop(&operation)? {
                 true => Ok(()),
                 false => Err(Error::Changed),
@@ -369,10 +412,33 @@ impl Host {
                             start,
                             monitor,
                             finish,
-                        } => match backend.run(&source, start, monitor) {
-                            Ok(report) => finish.set(Ended::Released(report)),
-                            Err(refused) => finish.set(Ended::Refused(refused)),
-                        },
+                            session_only,
+                            session_started,
+                        } => {
+                            // The session ends however the run ends,
+                            // unwinding included, and before the outcome is
+                            // reported, so Off never shows beside it.
+                            let session = if session_only {
+                                match backend.begin_session(&start.control()) {
+                                    Ok(end) => {
+                                        session_started.store(true, Ordering::Release);
+                                        Some(OnDrop(Some(end)))
+                                    }
+                                    Err(failure) => {
+                                        finish.set(Ended::Refused(Refused::Start(failure)));
+                                        continue;
+                                    }
+                                }
+                            } else {
+                                None
+                            };
+                            let outcome = backend.run(&source, start, monitor);
+                            drop(session);
+                            match outcome {
+                                Ok(report) => finish.set(Ended::Released(report)),
+                                Err(refused) => finish.set(Ended::Refused(refused)),
+                            }
+                        }
                     }
                 }
             });
@@ -439,6 +505,17 @@ impl Host {
 
     /// The person approved exactly the application under review.
     pub(crate) fn start(&self, review: &str) -> Result<(), Error> {
+        self.start_with(review, false)
+    }
+
+    /// As `start`, in a live session started for this source alone: no model
+    /// is loaded for it and no microphone is opened. Refused, with nothing
+    /// started, while another session or the demo runs.
+    pub(crate) fn start_session(&self, review: &str) -> Result<(), Error> {
+        self.start_with(review, true)
+    }
+
+    fn start_with(&self, review: &str, session_only: bool) -> Result<(), Error> {
         let mut state = self.lock();
         self.idle(&mut state)?;
         if !state.review.as_ref().is_some_and(|(id, _)| id == review) {
@@ -454,6 +531,7 @@ impl Host {
         let control = start.control();
         let monitor = Monitor::default();
         let ended = Arc::new(Mutex::new(None));
+        let session_started = Arc::new(AtomicBool::new(false));
         let worker = self.worker(&mut state)?;
         // Before the worker can act on it: from here the shared capture
         // state must not read Off.
@@ -464,6 +542,9 @@ impl Host {
             can_retry: false,
             application: Some(application.name().to_owned()),
             problem: None,
+            operation: Some(id.clone()),
+            // Not until the worker has begun the session.
+            source_session: false,
         });
         worker
             .send(Command::Run {
@@ -471,6 +552,8 @@ impl Host {
                 start,
                 monitor: monitor.clone(),
                 finish: Finish(ended.clone()),
+                session_only,
+                session_started: session_started.clone(),
             })
             .map_err(|_| Error::Unavailable)?;
         // The retained selections are consumed by this start.
@@ -485,6 +568,8 @@ impl Host {
             ended,
             stopping_since: None,
             stop_requested: false,
+            session_only,
+            session_started,
         });
         Ok(())
     }
@@ -548,6 +633,13 @@ impl Host {
             // Stopped here before anything started. The refusal then only
             // reflects that Stop, whatever step noticed it.
             Some(Ended::Refused(_)) if active.stop_requested => None,
+            // The source's own session began and was stopped before the
+            // source did. Any other changed session is still reported.
+            Some(Ended::Refused(Refused::Clock(TimingError::SessionChanged)))
+                if active.session_only && active.session_started.load(Ordering::Acquire) =>
+            {
+                None
+            }
             Some(Ended::Refused(refused)) => refusal_problem(*refused),
             Some(Ended::Unwound) | None => return,
         };
@@ -613,6 +705,15 @@ impl Host {
                 .as_ref()
                 .map(|active| active.id.clone())
                 .or(state.review.as_ref().map(|(id, _)| id.clone())),
+            // Only while that session's source is starting or capturing:
+            // once it is stopped the session has ended or is ending, and a
+            // later session may well have a microphone.
+            source_session: state.active.as_ref().is_some_and(|active| {
+                active.session_only
+                    && active.session_started.load(Ordering::Acquire)
+                    && !active.control.is_cancelled()
+                    && matches!(phase, Phase::Starting | Phase::Listening)
+            }),
             choices: state
                 .listed
                 .iter()
@@ -671,6 +772,8 @@ impl Host {
             can_retry: view.can_retry,
             application: view.application.clone(),
             problem: view.problem,
+            operation: view.operation.clone(),
+            source_session: view.source_session,
         });
         if state.last.as_ref() != Some(&view) {
             state.revision += 1;
@@ -717,6 +820,25 @@ fn active_phase(abandoned: bool, stage: Option<Stage>, cancelled: bool) -> Phase
     }
 }
 
+/// Before a session for the source alone begins: a recognizer must be
+/// available, or the session would end as soon as it began after clearing the
+/// previous one; and the microphone must read off, since the session says it
+/// is not used. A microphone that cannot be read counts as not off.
+/// `microphone_not_capturing` is the controller's reading (off, or failed
+/// with its device released); None means it could not be read.
+pub(crate) fn session_preflight(
+    microphone_not_capturing: Option<bool>,
+    recognizer_available: bool,
+) -> Result<(), Failure> {
+    if !recognizer_available {
+        return Err(Failure::Unavailable);
+    }
+    if microphone_not_capturing != Some(true) {
+        return Err(Failure::Busy);
+    }
+    Ok(())
+}
+
 fn native_problem(problem: NativeProblem) -> Problem {
     match problem {
         NativeProblem::StreamFailed => Problem::StreamFailed,
@@ -736,6 +858,7 @@ fn refusal_problem(refused: Refused) -> Option<Problem> {
         Refused::Start(Failure::PermissionDenied) => Problem::PermissionDenied,
         Refused::Start(Failure::SourceUnavailable) => Problem::SourceUnavailable,
         Refused::Start(Failure::Unavailable) => Problem::Unavailable,
+        Refused::Start(Failure::Busy) => Problem::SessionBusy,
         Refused::Start(_) => Problem::StartFailed,
     })
 }
@@ -809,6 +932,30 @@ pub(crate) mod app {
     }
 
     impl Backend for Native {
+        fn begin_session(&mut self, control: &Control) -> Result<Box<dyn FnOnce()>, Failure> {
+            // The same check the recognizer load makes first. Whisper builds
+            // verify the model again when loading; that can still fail.
+            let recognizer_available = cfg!(feature = "local-whisper")
+                && crate::model_path(&self.app).is_some_and(|(path, _)| path.is_file());
+            let controller = self
+                .app
+                .state::<crate::microphone::Controller>()
+                .inner()
+                .clone();
+            let access = AppAccess(self.app.clone());
+            let session = access
+                .with(|runtime| {
+                    // Under the runtime lock, which a standalone microphone
+                    // start also consults, so the two cannot interleave.
+                    session_preflight(controller.try_not_capturing(), recognizer_available)?;
+                    runtime.begin_source_session(control)
+                })
+                .ok_or(Failure::Unavailable)??;
+            Ok(Box::new(move || {
+                access.with(|runtime| runtime.end_source_session(session));
+            }))
+        }
+
         fn list(&mut self, cancelled: &AtomicBool) -> Result<Vec<Application>, Failure> {
             self.selections.clear();
             // SAFETY: reached only through Host::list, which requires the

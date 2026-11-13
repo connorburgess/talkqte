@@ -172,6 +172,7 @@ export function ProcessingControl({
     snapshot?.capture,
     snapshot?.microphone,
     snapshot?.startup,
+    snapshot?.source?.phase,
   ]);
 
   // Disabling removes the button that was pressed. When that drops focus to
@@ -299,6 +300,14 @@ export function ProcessingControl({
   // capture that includes a selected application; otherwise they are one.
   const microphone = snapshot?.microphone ?? capture;
   const sourceLine = describeSource(snapshot?.source);
+  // Offered while the source is starting or capturing and Stop has not yet
+  // been asked; afterwards the line says how cleanup is going.
+  const sourceOperation =
+    snapshot?.source &&
+    (snapshot.source.phase === 'starting' ||
+      snapshot.source.phase === 'listening')
+      ? snapshot.source.operation
+      : null;
   const startup = snapshot?.startup;
   const cancelStart =
     microphone === 'off' && (startup === 'loading' || startup === 'cancelling');
@@ -371,6 +380,33 @@ export function ProcessingControl({
         >
           {sourceLine}
         </p>
+      )}
+      {sourceOperation && (
+        // The source's own Stop: it ends exactly this application source,
+        // and a session started for it alone, without touching a microphone.
+        <div className="processing-actions">
+          <button
+            className="secondary-button"
+            disabled={busy === 'source'}
+            onClick={() =>
+              void act('source', async () => {
+                // This button goes once Stop is under way, which the status
+                // event can report before the command replies. Keep focus in
+                // the panel either way; drop the intent if the request fails.
+                restoreFocus.current = true;
+                try {
+                  await processingApi.stopSource(sourceOperation);
+                } catch (error) {
+                  restoreFocus.current = false;
+                  throw error;
+                }
+              })
+            }
+          >
+            <Square size={17} />
+            {busy === 'source' ? 'Stopping…' : 'Stop application audio'}
+          </button>
+        </div>
       )}
       {!status && startup && startup !== 'idle' && (
         <p role="status" className="processing-muted">

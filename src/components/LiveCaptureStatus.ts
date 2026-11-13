@@ -1,7 +1,11 @@
 import { desktop } from '../lib/bridge';
 import { microphoneLabel, type Microphone } from '../lib/microphone';
 import type { Segment, Snapshot } from '../lib/types';
-import { describeSource, type SourceCapture } from '../lib/processing';
+import {
+  describeSource,
+  microphoneNotCapturing,
+  type SourceCapture,
+} from '../lib/processing';
 
 /** What the notebook already knows about the microphone and live session. */
 export interface RealCapture {
@@ -51,9 +55,15 @@ export function describeCapture(
         ? 'No microphone open.'
         : described.source,
     capture:
-      described.capture === 'Off. Nothing is being captured.'
-        ? 'The microphone is off.'
-        : described.capture,
+      real.source.sourceSession &&
+      (real.source.phase === 'starting' || real.source.phase === 'listening') &&
+      real.live &&
+      !real.finishing &&
+      microphoneNotCapturing(real.microphone.state)
+        ? 'Live session running from application audio. The microphone is not used.'
+        : described.capture === 'Off. Nothing is being captured.'
+          ? 'The microphone is off.'
+          : described.capture,
     application,
   };
 }
@@ -154,7 +164,14 @@ export const realLinesShown = 5;
  * before permission is granted and keeps running while it stops.
  */
 export function describeTranscript(
-  { session, preparing, cancelling, finishing, microphone }: RealCapture,
+  {
+    session,
+    preparing,
+    cancelling,
+    finishing,
+    microphone,
+    source: application,
+  }: RealCapture,
   onDesktop = desktop,
 ) {
   if (!onDesktop)
@@ -190,12 +207,22 @@ export function describeTranscript(
       (lines.length ? source + count + ' ' : '') +
       'Stopping. Lines from audio already captured may still appear.';
   else if (lines.length) note = source + count;
-  else
+  else {
+    // Only for a session the application feeds alone, with the microphone off.
+    const alone =
+      application?.sourceSession && microphoneNotCapturing(microphone.state)
+        ? application.phase
+        : null;
     note =
-      microphone.state?.status === 'listening'
-        ? 'No lines yet. Lines from the microphone appear a few seconds after they are spoken.'
-        : microphone.state?.status === 'starting'
-          ? 'No lines yet. The microphone is not listening yet.'
-          : 'No lines. The microphone is not listening.';
+      alone === 'listening'
+        ? 'No lines yet. Lines from the application appear a few seconds after they are heard.'
+        : alone === 'starting'
+          ? 'No lines yet. Application audio is starting.'
+          : microphone.state?.status === 'listening'
+            ? 'No lines yet. Lines from the microphone appear a few seconds after they are spoken.'
+            : microphone.state?.status === 'starting'
+              ? 'No lines yet. The microphone is not listening yet.'
+              : 'No lines. The microphone is not listening.';
+  }
   return { note, lines };
 }

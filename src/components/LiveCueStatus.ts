@@ -15,6 +15,8 @@ export interface RealCueInput {
   /** A live session is being prepared or is stopping. */
   preparing: boolean;
   finishing: boolean;
+  /** Development builds only: the session runs from an application alone. */
+  sourceSession?: boolean;
 }
 
 const where = 'in the notebook, and in the companion when it is shown';
@@ -106,7 +108,9 @@ export function describeCue(input: RealCueInput, onDesktop = desktop) {
   if (!cue)
     return none(
       input.cuesPaused
-        ? 'Cues are paused; the microphone and transcript continue.'
+        ? input.sourceSession
+          ? 'Cues are paused; the application audio and transcript continue.'
+          : 'Cues are paused; the microphone and transcript continue.'
         : '',
     );
   const kept = 'Kept until you dismiss it.';
