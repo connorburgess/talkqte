@@ -5,36 +5,36 @@ type MockState =
   'idle' | 'starting' | 'listening' | 'cue' | 'paused' | 'stopped' | 'failed';
 
 const states: { value: MockState; label: string; capture: string }[] = [
-  { value: 'idle', label: 'Idle', capture: 'Not started' },
+  { value: 'idle', label: 'Idle', capture: 'Example not started' },
   {
     value: 'starting',
     label: 'Starting',
-    capture: 'Simulated start. Nothing is loading or connecting',
+    capture: 'Simulated start. This example loads and connects nothing',
   },
   {
     value: 'listening',
     label: 'Listening',
-    capture: 'Simulated listening. No audio is captured',
+    capture: 'Simulated listening. This example captures no audio',
   },
   {
     value: 'cue',
     label: 'Cue shown',
-    capture: 'Simulated listening. No audio is captured',
+    capture: 'Simulated listening. This example captures no audio',
   },
   {
     value: 'paused',
     label: 'Paused',
-    capture: 'Simulated pause. No audio was captured',
+    capture: 'Simulated pause. This example captured no audio',
   },
   {
     value: 'stopped',
     label: 'Stopped',
-    capture: 'Simulated stop. Nothing was captured or saved',
+    capture: 'Simulated stop. This example captured and saved nothing',
   },
   {
     value: 'failed',
     label: 'Failed',
-    capture: 'Simulated failure. Nothing was captured',
+    capture: 'Simulated failure. This example captured nothing',
   },
 ];
 
@@ -70,8 +70,8 @@ export function LayoutSwitch({
   onChange: (view: View) => void;
 }) {
   const options: { value: View; label: string }[] = [
-    { value: 'notebook', label: live ? 'Session notebook' : 'Demo notebook' },
-    { value: 'live-mock', label: 'Live layout preview' },
+    { value: 'notebook', label: live ? 'Session' : 'Demo' },
+    { value: 'live-mock', label: 'Layout preview' },
   ];
   return (
     <div className="layout-switch" role="group" aria-label="Layout">
@@ -88,7 +88,12 @@ export function LayoutSwitch({
   );
 }
 
-export function LiveSessionMock() {
+export function LiveSessionMock({
+  capturing = false,
+}: {
+  /** A real session is starting, running or finishing outside this example. */
+  capturing?: boolean;
+}) {
   const [state, setState] = useState<MockState>('idle');
   const [noteIds, setNoteIds] = useState(fictionalNotes.map(({ id }) => id));
   // A cue that was showing when the session paused stays until dismissed.
@@ -132,9 +137,15 @@ export function LiveSessionMock() {
     <section className="live-mock" aria-labelledby="mock-title">
       <h1 id="mock-title">Live session layout preview</h1>
       <p>
-        This is a fictional, interactive layout preview. It does not capture
-        audio, connect to a meeting, or generate AI cues.
+        This is a fictional, interactive layout preview. The preview does not
+        capture audio, connect to a meeting, or generate AI cues.
       </p>
+      {capturing && (
+        <p className="mock-real-session">
+          A real live session is running. Its status and Stop are above; this
+          example is separate.
+        </p>
+      )}
       <label className="mock-state-picker">
         Preview a state
         <select
@@ -164,8 +175,8 @@ export function LiveSessionMock() {
         ref={frame}
       >
         <p className="mock-banner">
-          Simulated layout · its controls only change this example · not
-          connected to audio, a meeting, or AI
+          Simulated layout · its controls only change this example · this
+          example is not connected to audio, a meeting, or AI
         </p>
         <div className="mock-session-header">
           <div>
@@ -176,8 +187,8 @@ export function LiveSessionMock() {
               <div>
                 <dt>Source</dt>
                 <dd>
-                  Fictional sample conversation. No microphone, app or meeting
-                  is connected
+                  Fictional sample conversation. This example connects no
+                  microphone, app or meeting
                 </dd>
               </div>
               <div>
@@ -208,8 +219,8 @@ export function LiveSessionMock() {
             <>
               <p>
                 {state === 'idle'
-                  ? 'No session yet. Nothing is being captured.'
-                  : 'The simulated session has ended. Nothing was captured or saved.'}
+                  ? 'No example session yet. This example captures nothing.'
+                  : 'The simulated session has ended. This example captured and saved nothing.'}
               </p>
               <button
                 className="secondary-button"
@@ -225,8 +236,8 @@ export function LiveSessionMock() {
           {state === 'starting' && (
             <>
               <p>
-                Simulated start. Nothing is loading and no connection is being
-                made. Stop cancels this start.
+                Simulated start. This example loads nothing and makes no
+                connection. Stop cancels this start.
               </p>
               <button
                 className="secondary-button"
@@ -239,8 +250,8 @@ export function LiveSessionMock() {
           {state === 'failed' && (
             <>
               <p>
-                Simulated failure: the fictional source did not start. Nothing
-                was captured, and prior context is unchanged.
+                Simulated failure: the fictional source did not start. This
+                example captured nothing, and prior context is unchanged.
               </p>
               <button
                 className="secondary-button"

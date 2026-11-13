@@ -15,7 +15,7 @@ async function openMock(page: Page) {
   await page.goto('/');
   await page
     .getByRole('group', { name: 'Layout' })
-    .getByRole('button', { name: 'Live layout preview' })
+    .getByRole('button', { name: 'Layout preview', exact: true })
     .press('Enter');
   const mock = page.getByRole('region', {
     name: 'Live session layout preview',
@@ -73,21 +73,21 @@ test('every state names its source and capture state, and every control says it 
   const { mock, picker, frame } = await openMock(page);
   await expect(mock).toContainText('does not capture audio');
   const capture: Record<string, string> = {
-    idle: 'Not started',
-    starting: 'Simulated start. Nothing is loading or connecting',
-    listening: 'Simulated listening. No audio is captured',
-    cue: 'Simulated listening. No audio is captured',
-    paused: 'Simulated pause. No audio was captured',
-    stopped: 'Simulated stop. Nothing was captured or saved',
-    failed: 'Simulated failure. Nothing was captured',
+    idle: 'Example not started',
+    starting: 'Simulated start. This example loads and connects nothing',
+    listening: 'Simulated listening. This example captures no audio',
+    cue: 'Simulated listening. This example captures no audio',
+    paused: 'Simulated pause. This example captured no audio',
+    stopped: 'Simulated stop. This example captured and saved nothing',
+    failed: 'Simulated failure. This example captured nothing',
   };
   for (const state of allStates) {
     await picker.selectOption(state);
     await expect(frame).toContainText(
-      'not connected to audio, a meeting, or AI',
+      'this example is not connected to audio, a meeting, or AI',
     );
     await expect(frame).toContainText(
-      'Fictional sample conversation. No microphone, app or meeting is connected',
+      'Fictional sample conversation. This example connects no microphone, app or meeting',
     );
     await expect(frame).toContainText(capture[state]);
     await expect(simulated(frame, 'Stop')).toHaveCount(
@@ -207,9 +207,12 @@ test('removing the quoted note withdraws the cue, and an empty prior context can
 test('a keyboard walk starts, cancels, pauses, stops and recovers, moving focus to the next control', async ({
   page,
 }) => {
-  const { picker, frame } = await openMock(page);
+  const { mock, picker, frame } = await openMock(page);
   const status = frame.getByRole('status');
-  await expect(frame).toContainText('No session yet');
+  await expect(frame).toContainText(
+    'No example session yet. This example captures nothing.',
+  );
+  await expect(mock).not.toContainText('A real live session is running');
   await simulated(frame, 'Start').press('Enter');
   await expect(status).toHaveText('Preview state: Starting');
   await expect(frame).toContainText('No conversation text yet');
@@ -230,7 +233,7 @@ test('a keyboard walk starts, cancels, pauses, stops and recovers, moving focus 
   await expect(simulated(frame, 'Pause')).toBeFocused();
   await simulated(frame, 'Stop').press('Enter');
   await expect(picker).toHaveValue('stopped');
-  await expect(frame).toContainText('Nothing was captured or saved');
+  await expect(frame).toContainText('This example captured and saved nothing');
 
   await picker.selectOption('failed');
   await expect(frame).toContainText('the fictional source did not start');
@@ -257,13 +260,16 @@ test('Tab reaches Stop first, then the session, cue and prior-context controls i
   }
 });
 
-test('the layout switch moves between the demo notebook and the live layout preview', async ({
+test('the layout switch moves between the demo notebook and the live layout preview, keeping focus', async ({
   page,
 }) => {
   await page.goto('/');
   const layout = page.getByRole('group', { name: 'Layout' });
-  const demo = layout.getByRole('button', { name: 'Demo notebook' });
-  const live = layout.getByRole('button', { name: 'Live layout preview' });
+  const demo = layout.getByRole('button', { name: 'Demo', exact: true });
+  const live = layout.getByRole('button', {
+    name: 'Layout preview',
+    exact: true,
+  });
   const tryDemo = page.getByRole('button', { name: 'Try demo', exact: true });
   await expect(tryDemo).toBeVisible();
   await expect(demo).toHaveAttribute('aria-pressed', 'true');
@@ -297,9 +303,9 @@ test('the layout switch moves between the demo notebook and the live layout prev
 });
 
 for (const width of [480, 320]) {
-  test(`states fit a ${width}px window and active states keep Stop in view`, async ({
-    page,
-  }) => {
+  test(`states and controls fit a ${width}px window horizontally${
+    width === 480 ? ', and active states keep Stop in view' : ''
+  }`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
     await page.goto('/');
     await expect(
@@ -342,6 +348,68 @@ for (const width of [480, 320]) {
       expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   });
 }
+
+// 880 is the desktop window's minimum width; 1000 with the sidebar at its
+// widest is the least room the notebook toolbar gets.
+for (const { width, widestSidebar } of [
+  { width: 880, widestSidebar: false },
+  { width: 1000, widestSidebar: true },
+]) {
+  test(`the switch keeps the toolbar to one row of its usual height at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 640 });
+    await page.goto('/');
+    const toolbar = page.locator('.toolbar');
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    // Settings has no switch, so its toolbar is the height to keep.
+    const usual = (await toolbar.boundingBox())!.height;
+    await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+    if (widestSidebar) {
+      await page.getByRole('separator').first().focus();
+      await page.keyboard.press('End');
+    }
+    const layout = page.getByRole('group', { name: 'Layout' });
+    const panelSizes = page.getByText('Panel sizes', { exact: true });
+    for (const view of ['Demo', 'Layout preview']) {
+      await layout.getByRole('button', { name: view, exact: true }).click();
+      const box = (await toolbar.boundingBox())!;
+      expect(box.height).toBe(usual);
+      // Left to right, nothing overlaps or leaves the toolbar.
+      let edge = box.x;
+      for (const item of await toolbar.locator('> *').all()) {
+        const bounds = (await item.boundingBox())!;
+        expect(bounds.x).toBeGreaterThanOrEqual(edge);
+        edge = bounds.x + bounds.width;
+      }
+      expect(edge).toBeLessThanOrEqual(box.x + box.width);
+    }
+    await layout.getByRole('button', { name: 'Demo', exact: true }).click();
+    // Panel sizes stays on one line beside the switch, after it in Tab order.
+    await expect(panelSizes).toBeVisible();
+    expect((await panelSizes.boundingBox())!.height).toBeLessThan(48);
+    if (testInfo.project.name !== 'chromium') return;
+    await layout.getByRole('button', { name: 'Demo', exact: true }).focus();
+    await page.keyboard.press('Tab');
+    await expect(
+      layout.getByRole('button', { name: 'Layout preview', exact: true }),
+    ).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(panelSizes).toBeFocused();
+  });
+}
+
+test('below the desktop minimum the switch takes the first toolbar row', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 800, height: 700 });
+  await page.goto('/');
+  const layout = page.getByRole('group', { name: 'Layout' });
+  const switchBox = (await layout.boundingBox())!;
+  const breadcrumb = (await page.locator('.breadcrumb').boundingBox())!;
+  expect(switchBox.y + switchBox.height).toBeLessThanOrEqual(breadcrumb.y);
+  expect(await fitsHorizontally(page)).toBe(true);
+});
 
 test('the cue arrives with the question entrance, and reduced motion removes it without losing content', async ({
   page,
@@ -391,10 +459,18 @@ test('real session Stop remains separate from the simulated Stop', async ({
   const layout = page.getByRole('group', { name: 'Layout' });
   // A running session is not called a demo.
   await expect(
-    layout.getByRole('button', { name: 'Session notebook' }),
+    layout.getByRole('button', { name: 'Session', exact: true }),
   ).toHaveAttribute('aria-pressed', 'true');
   await expect(layout.getByRole('button', { name: 'Demo' })).toHaveCount(0);
-  await layout.getByRole('button', { name: 'Live layout preview' }).click();
+  await layout
+    .getByRole('button', { name: 'Layout preview', exact: true })
+    .click();
+  // The example says the real session is separate and where its Stop is.
+  await expect(
+    page.getByRole('region', { name: 'Live session layout preview' }),
+  ).toContainText(
+    'A real live session is running. Its status and Stop are above; this example is separate.',
+  );
   const realStop = page.getByRole('button', {
     name: 'Stop live session',
     exact: true,

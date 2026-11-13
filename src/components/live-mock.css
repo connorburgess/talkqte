@@ -13,11 +13,11 @@
   padding: 3px;
   border: 1px solid #cfd2c7;
   border-radius: var(--radius-control);
-  margin: 0 auto 0 20px;
+  margin: 0 auto 0 4px;
 }
 .layout-switch button {
   min-height: 44px;
-  padding: 6px 14px;
+  padding: 6px 12px;
   border: 0;
   border-radius: 13px;
   background: transparent;
@@ -32,6 +32,10 @@
 .layout-switch button[aria-pressed='true'] {
   background: var(--forest);
   color: #f4f4e9;
+}
+.mock-real-session {
+  margin-top: 12px;
+  font-weight: 700;
 }
 .mock-state-picker {
   display: grid;
@@ -178,16 +182,37 @@
 .mock-note-meta {
   font-size: 14px;
 }
-@media (max-width: 1100px) {
-  /* Too narrow for one row: the switch takes its own instead of clipping. */
+/* From the desktop minimum width up, the toolbar stays one row at its usual
+   height. The breadcrumb gives way first; the switch already names the view. */
+.toolbar:has(.layout-switch) {
+  gap: 12px;
+}
+.toolbar:has(.layout-switch) > * {
+  flex-shrink: 0;
+}
+.toolbar:has(.layout-switch) > .prototype-label,
+.toolbar:has(.layout-switch) > .layout-controls > summary {
+  white-space: nowrap;
+}
+.toolbar:has(.layout-switch) > .breadcrumb {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.toolbar:has(.layout-switch) > .breadcrumb > * {
+  flex-shrink: 0;
+}
+@media (max-width: 879px) {
+  /* Browser-only widths: the switch takes the first row, so the order on
+     screen still matches the Tab order. */
   .toolbar:has(.layout-switch) {
     height: auto;
     flex-wrap: wrap;
-    gap: 8px;
+    row-gap: 8px;
     padding-block: 10px;
   }
   .layout-switch {
-    order: 3;
+    order: -1;
     flex: 1 0 100%;
     margin: 0;
   }
@@ -211,7 +236,7 @@
   .layout-switch button {
     padding-inline: 8px;
   }
-  /* Stop leads the frame so it stays in view on a short, narrow window. */
+  /* Stop leads the frame, which keeps it in view in a 480 by 800 window. */
   .mock-session {
     display: flex;
     flex-direction: column;

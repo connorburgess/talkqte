@@ -1141,7 +1141,9 @@ function Notebook() {
           </div>
         )}
 
-        {view === 'live-mock' && <LiveSessionMock />}
+        {view === 'live-mock' && (
+          <LiveSessionMock capturing={preparing || live || finishing} />
+        )}
         {view === 'notebook' && (
           <div className="notebook-body">
             <div className="meeting-header">
