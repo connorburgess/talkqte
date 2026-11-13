@@ -47,7 +47,7 @@ Without both variables the test is skipped. It sends the clip through the real w
 - when a cue is shown, and whether it expired, was withdrawn, or was cleared by End;
 - the worker's counts and its largest backlog.
 
-It prints no transcript text. Clips over 128 MiB (about 70 minutes at 16 kHz) are refused. With `--report-every-ms`, it prints the backlog and line count periodically. Memory and CPU appear too when `ps` is available, which it is not under `sandbox-exec`. At the end it prints the speech-to-transcript delay: median, 95th percentile, and maximum.
+It prints no transcript or cue text: a cue is reported by its kind, source ID and length, because a quoted line or an open question repeats what was said. Clips over 128 MiB (about 70 minutes at 16 kHz) are refused. With `--report-every-ms`, it prints the backlog and line count periodically. Memory and CPU appear too when `ps` is available, which it is not under `sandbox-exec`. At the end it prints the speech-to-transcript delay: median, 95th percentile, and maximum.
 
 With `--end-at-ms`, the session ends at that moment. The check fails unless audio was still queued or being transcribed at End, so an End between chunks cannot pass vacuously. Work already in progress is then allowed to finish, so late lines meet the engine's own refusal. The check fails if anything changes after End.
 
