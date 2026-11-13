@@ -1213,6 +1213,7 @@ function Notebook() {
               },
               source: capture.state?.source,
             }}
+            realContext={contextItems}
             realCue={{
               live: state.live,
               status: state.status,
