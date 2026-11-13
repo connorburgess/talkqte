@@ -5,6 +5,8 @@ import {
   type RealCapture,
 } from './LiveCaptureStatus';
 import { clockTime } from '../lib/types';
+import type { RealCueInput } from './LiveCueStatus';
+import { RealCue } from './RealCue';
 import './live-mock.css';
 
 type MockState =
@@ -96,9 +98,12 @@ export function LayoutSwitch({
 
 export function LiveSessionMock({
   real,
+  realCue,
 }: {
   /** The notebook's own microphone and live-session state, shown read-only. */
   real: RealCapture;
+  /** The notebook's own cue for a live session, shown read-only. */
+  realCue: RealCueInput;
 }) {
   const actual = describeCapture(real);
   const heard = describeTranscript(real);
@@ -145,8 +150,8 @@ export function LiveSessionMock({
     <section className="live-mock" aria-labelledby="mock-title">
       <h1 id="mock-title">Live session layout preview</h1>
       <p>
-        Source, Capture and Transcript show the app’s real state, read-only.
-        Everything else is a fictional example.
+        Source, Capture, Transcript and Cue show the app’s real state,
+        read-only. Everything else is a fictional example.
       </p>
       {actual.underway && (
         <p className="mock-real-session">
@@ -183,9 +188,10 @@ export function LiveSessionMock({
         ref={frame}
       >
         <p className="mock-banner">
-          Source, Capture and Transcript are real and read-only · every control
-          here is simulated and only changes the example · the preview starts
-          and stops no capture, connects to no meeting, and generates no AI cues
+          Source, Capture, Transcript and Cue are real and read-only · every
+          control here is simulated and only changes the example · the preview
+          starts and stops no capture, connects to no meeting, and generates no
+          cues of its own
         </p>
         <div className="mock-real">
           <dl className="mock-facts">
@@ -221,6 +227,7 @@ export function LiveSessionMock({
               </ol>
             )}
           </section>
+          <RealCue input={realCue} />
         </div>
         <div className="mock-session-header">
           <div>
@@ -330,7 +337,9 @@ export function LiveSessionMock({
 
         {inConversation && (
           <section aria-labelledby="mock-cue-area-title">
-            <h3 id="mock-cue-area-title">Cue</h3>
+            <h3 id="mock-cue-area-title">
+              <span className="mock-tag">Simulated</span> Example cue
+            </h3>
             {cueShown ? (
               <div className="question mock-cue">
                 <p className="mock-cue-text">{citedNote.text}</p>
@@ -388,7 +397,7 @@ export function LiveSessionMock({
                 <p>
                   {withdrawn
                     ? 'The example cue was withdrawn because the fictional note it quotes was removed.'
-                    : 'No cue right now. One cue at a time appears here.'}
+                    : 'No example cue right now. One cue at a time appears here.'}
                 </p>
                 {state === 'listening' && cueAvailable && (
                   <button
