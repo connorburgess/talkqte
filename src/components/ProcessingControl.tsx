@@ -172,6 +172,7 @@ export function ProcessingControl({
     snapshot?.capture,
     snapshot?.microphone,
     snapshot?.startup,
+    snapshot?.source?.phase,
   ]);
 
   // Disabling removes the button that was pressed. When that drops focus to
@@ -388,9 +389,12 @@ export function ProcessingControl({
             className="secondary-button"
             disabled={busy === 'source'}
             onClick={() =>
-              void act('source', () =>
-                processingApi.stopSource(sourceOperation),
-              )
+              void act('source', async () => {
+                await processingApi.stopSource(sourceOperation);
+                // This button goes once Stop is under way; keep focus in
+                // the panel rather than dropping it to the page.
+                restoreFocus.current = true;
+              })
             }
           >
             <Square size={17} />

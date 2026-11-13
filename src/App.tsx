@@ -1113,7 +1113,10 @@ function Notebook() {
           processingConfigured={!!capture.state?.processor}
           sourceMayBeCapturing={!!capture.state?.source?.mayBeCapturing}
           sourceSession={
-            capture.state?.source?.sourceSession
+            // Only while the microphone is known to be off: the wording says
+            // it is not used.
+            capture.state?.source?.sourceSession &&
+            capture.state.microphone === 'off'
               ? capture.state.source.application || 'the selected application'
               : null
           }

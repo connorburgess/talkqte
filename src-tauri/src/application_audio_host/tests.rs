@@ -149,12 +149,7 @@ fn applications() -> Vec<Application> {
 
 impl Backend for Fake {
     fn begin_session(&mut self, control: &Control) -> Result<Box<dyn FnOnce()>, Failure> {
-        let session = self
-            .runtime
-            .lock()
-            .unwrap()
-            .begin_source_session(control)
-            .map_err(|_| Failure::Busy)?;
+        let session = self.runtime.lock().unwrap().begin_source_session(control)?;
         let runtime = self.runtime.clone();
         Ok(Box::new(move || {
             // A poisoned lock here would mean a test already failed.
@@ -1176,7 +1171,11 @@ fn a_source_session_is_refused_while_another_session_runs_and_leaves_it_alone() 
     let fixture = fixture(true);
     let session = fixture.runtime.lock().unwrap().engine.session();
     fixture.start_session();
+    // Approval publishes a start, but not yet a session of the source's own:
+    // the session it would claim has no microphone is the microphone's.
+    assert!(!fixture.host.published().source_session);
     let off = fixture.wait("refusal", |view| view.problem.is_some());
+    assert!(!off.source_session && !fixture.host.published().source_session);
     assert_eq!(
         (off.phase, off.problem),
         (Phase::Off, Some(Problem::SessionBusy))

@@ -257,6 +257,8 @@ enum Command {
         finish: Finish,
         /// Start a live session for this source alone first.
         session_only: bool,
+        /// Set once that session has begun.
+        session_started: Arc<AtomicBool>,
     },
 }
 
@@ -272,6 +274,9 @@ struct Active {
     stop_requested: bool,
     /// The live session was started for this source alone.
     session_only: bool,
+    /// The worker has begun that session. Until then nothing says the
+    /// session has no microphone, since it may not be this source's.
+    session_started: Arc<AtomicBool>,
 }
 
 struct State {
@@ -408,13 +413,17 @@ impl Host {
                             monitor,
                             finish,
                             session_only,
+                            session_started,
                         } => {
                             // The session ends however the run ends,
                             // unwinding included, and before the outcome is
                             // reported, so Off never shows beside it.
                             let session = if session_only {
                                 match backend.begin_session(&start.control()) {
-                                    Ok(end) => Some(OnDrop(Some(end))),
+                                    Ok(end) => {
+                                        session_started.store(true, Ordering::Release);
+                                        Some(OnDrop(Some(end)))
+                                    }
                                     Err(failure) => {
                                         finish.set(Ended::Refused(Refused::Start(failure)));
                                         continue;
@@ -522,6 +531,7 @@ impl Host {
         let control = start.control();
         let monitor = Monitor::default();
         let ended = Arc::new(Mutex::new(None));
+        let session_started = Arc::new(AtomicBool::new(false));
         let worker = self.worker(&mut state)?;
         // Before the worker can act on it: from here the shared capture
         // state must not read Off.
@@ -533,7 +543,8 @@ impl Host {
             application: Some(application.name().to_owned()),
             problem: None,
             operation: Some(id.clone()),
-            source_session: session_only,
+            // Not until the worker has begun the session.
+            source_session: false,
         });
         worker
             .send(Command::Run {
@@ -542,6 +553,7 @@ impl Host {
                 monitor: monitor.clone(),
                 finish: Finish(ended.clone()),
                 session_only,
+                session_started: session_started.clone(),
             })
             .map_err(|_| Error::Unavailable)?;
         // The retained selections are consumed by this start.
@@ -557,6 +569,7 @@ impl Host {
             stopping_since: None,
             stop_requested: false,
             session_only,
+            session_started,
         });
         Ok(())
     }
@@ -620,9 +633,10 @@ impl Host {
             // Stopped here before anything started. The refusal then only
             // reflects that Stop, whatever step noticed it.
             Some(Ended::Refused(_)) if active.stop_requested => None,
-            // The source's own session was stopped before the source began.
+            // The source's own session began and was stopped before the
+            // source did. Any other changed session is still reported.
             Some(Ended::Refused(Refused::Clock(TimingError::SessionChanged)))
-                if active.session_only =>
+                if active.session_only && active.session_started.load(Ordering::Acquire) =>
             {
                 None
             }
@@ -691,10 +705,9 @@ impl Host {
                 .as_ref()
                 .map(|active| active.id.clone())
                 .or(state.review.as_ref().map(|(id, _)| id.clone())),
-            source_session: state
-                .active
-                .as_ref()
-                .is_some_and(|active| active.session_only),
+            source_session: state.active.as_ref().is_some_and(|active| {
+                active.session_only && active.session_started.load(Ordering::Acquire)
+            }),
             choices: state
                 .listed
                 .iter()
@@ -895,11 +908,20 @@ pub(crate) mod app {
 
     impl Backend for Native {
         fn begin_session(&mut self, control: &Control) -> Result<Box<dyn FnOnce()>, Failure> {
+            // A session for the application alone says the microphone is
+            // not used, so it starts only while the microphone is off. A
+            // controller that cannot be read now counts as not off.
+            let microphone = self
+                .app
+                .state::<crate::microphone::Controller>()
+                .try_status();
+            if microphone != Some(crate::microphone::Status::Off) {
+                return Err(Failure::Busy);
+            }
             let access = AppAccess(self.app.clone());
             let session = access
                 .with(|runtime| runtime.begin_source_session(control))
-                .ok_or(Failure::Unavailable)?
-                .map_err(|_| Failure::Busy)?;
+                .ok_or(Failure::Unavailable)??;
             Ok(Box::new(move || {
                 access.with(|runtime| runtime.end_source_session(session));
             }))

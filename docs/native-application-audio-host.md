@@ -3,8 +3,8 @@
 13 November 2026. With the `native-audio-spike` Cargo feature on macOS, the app
 now has one path that can select an application and start the
 [source worker](native-audio-owner.md#source-worker-and-transcript-sink--13-november-2026).
-It is not in a default build. The notebook shows its status but offers no
-controls for it. It was not run:
+It is not in a default build. The notebook shows its status and a Stop for
+it, but nothing to list, review or start. It was not run:
 no application was listed, no permission prompt was shown and no stream was
 created for this change. Roadmap item **T2** stays open.
 
@@ -57,8 +57,13 @@ audio, with no microphone.
 - The worker begins the live session itself, through the same startup gate as
   Start live session, but loads no model for the session and opens no
   microphone. The source's worker loads its own recognizer, as before. It is
-  refused, with nothing started, while another live session or the demo runs,
-  and the status says `sessionBusy`.
+  refused, with nothing started, while another live session, a live start or
+  the demo runs, and while the microphone is not off (an activity check, for
+  example, or a controller that cannot be read). The status then says
+  `sessionBusy`.
+- The status marks the session as the source's own only once the worker has
+  begun it, so nothing says the microphone is not used before that. The
+  notebook's wording also requires the microphone to read off.
 - The session's Stop stops its source, including a source that has not
   attached yet: the source's control is registered with the session when the
   session begins.
@@ -254,7 +259,7 @@ stream as the reported outcome, a second complete operation after the first,
 exit while listing or reviewing, a fault in the worker outside its loop, and
 everything in the app wiring.
 
-#Four runtime tests cover the session itself: it starts with no microphone
+Four runtime tests cover the session itself: it starts with no microphone
 and is refused beside another session, the demo or a stopped source; its Stop
 stops a source that has not attached; it ends when its attached source stops,
 while an ordinary session does not; and ending it twice, or after a
@@ -295,12 +300,11 @@ build is run on a device.
 
 Against the [selected-application acceptance gates](system-audio-plan.md):
 
-- **The plan's first step cannot be done through this host.** The plan tests
-  one fictional source alone before combining it with the microphone. A start
-  here needs a running live session, which today begins with the microphone
-  and local recognition. A source-only run needs either a session that can
-  start without the microphone or a separate harness; that is undecided.
-- **Consent and UI/UX: open.** There is no rendered flow. The acknowledgement
+- **The plan's first step: possible in code, not run.** `startSession` runs one
+  application's audio with no microphone, as the plan's first step needs. It
+  has been exercised only with scripted native answers.
+- **Consent and UI/UX: open.** There is no rendered flow for listing,
+  reviewing or starting; only the source's line and its Stop are rendered. The acknowledgement
   is a flag the future interface sets on each request; Rust refuses to list
   without it but cannot know that the notice was shown. Truthful naming on
   macOS 14.0, keyboard selection, Cancel and Stop without losing focus, and

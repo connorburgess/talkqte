@@ -152,17 +152,6 @@ impl Runtime {
     /// without passing through Stop still retires its source, and a source
     /// that stopped by itself frees the session for an explicit new one.
     pub(crate) fn reconcile_live_source(&mut self) {
-        if self
-            .source_session
-            .as_ref()
-            .is_some_and(|own| Some(own.session) != self.live_session())
-        {
-            // Ended some other way, for example by Stop live session. Its
-            // source, attached or not, has nothing left to feed.
-            if let Some(own) = self.source_session.take() {
-                own.control.cancel();
-            }
-        }
         let Some(source) = &self.live_source else {
             return;
         };
@@ -186,13 +175,33 @@ impl Runtime {
     /// loads its own recognizer. Refused while any session or the demo runs,
     /// as an ordinary live start is.
     #[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
-    pub(crate) fn begin_source_session(&mut self, control: &Control) -> Result<u64, String> {
+    pub(crate) fn begin_source_session(
+        &mut self,
+        control: &Control,
+    ) -> Result<u64, crate::application_audio::Failure> {
+        use crate::application_audio::Failure;
         self.sync();
         if control.is_cancelled() {
-            return Err("The application source was stopped.".into());
+            return Err(Failure::Cancelled);
         }
-        let ticket = self.begin_live_start()?;
-        let session = self.install_live_start(&ticket)?;
+        // Another session, the demo, or a start still loading: busy, as an
+        // ordinary start would be told.
+        let starting = self
+            .live_start
+            .control()
+            .map_err(|_| Failure::Unavailable)?
+            .1
+            != StartupState::Idle;
+        if self.live.is_some()
+            || starting
+            || matches!(self.engine.state.status, Status::Running | Status::Paused)
+        {
+            return Err(Failure::Busy);
+        }
+        let ticket = self.begin_live_start().map_err(|_| Failure::Unavailable)?;
+        let session = self
+            .install_live_start(&ticket)
+            .map_err(|_| Failure::Unavailable)?;
         // The ticket ends here, so startup reads idle; the operation it set
         // stays current for the source's attachment and for Stop.
         drop(ticket);
@@ -574,17 +583,34 @@ mod tests {
         let mut running = live();
         let before = running.engine.session();
         let source = source("fictional-player");
-        assert!(running.begin_source_session(&source.control).is_err());
+        use crate::application_audio::Failure;
+        assert_eq!(
+            running.begin_source_session(&source.control),
+            Err(Failure::Busy)
+        );
         assert_eq!(running.engine.session(), before);
         assert!(!running.is_source_session(before));
         let mut demo = Runtime::default();
         demo.engine.start().unwrap();
-        assert!(demo.begin_source_session(&source.control).is_err());
+        assert_eq!(
+            demo.begin_source_session(&source.control),
+            Err(Failure::Busy)
+        );
+        // A start that is still loading is busy too.
+        let mut loading = Runtime::default();
+        let _ticket = loading.begin_live_start().unwrap();
+        assert_eq!(
+            loading.begin_source_session(&source.control),
+            Err(Failure::Busy)
+        );
         // A stopped source starts no session.
         let mut idle = Runtime::default();
         let stopped = self::source("fictional-player");
         stopped.gate.stop(&stopped.control).unwrap();
-        assert!(idle.begin_source_session(&stopped.control).is_err());
+        assert_eq!(
+            idle.begin_source_session(&stopped.control),
+            Err(Failure::Cancelled)
+        );
         assert!(idle.live.is_none());
 
         let mut runtime = Runtime::default();

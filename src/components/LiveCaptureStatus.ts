@@ -51,7 +51,10 @@ export function describeCapture(
         ? 'No microphone open.'
         : described.source,
     capture:
-      real.source.sourceSession && real.live
+      real.source.sourceSession &&
+      real.live &&
+      !real.finishing &&
+      real.microphone.state?.status === 'off'
         ? 'Live session running from application audio. The microphone is not used.'
         : described.capture === 'Off. Nothing is being captured.'
           ? 'The microphone is off.'
@@ -200,12 +203,15 @@ export function describeTranscript(
       'Stopping. Lines from audio already captured may still appear.';
   else if (lines.length) note = source + count;
   else
-    note = application?.sourceSession
-      ? 'No lines yet. Lines from the application appear a few seconds after they are heard.'
-      : microphone.state?.status === 'listening'
-        ? 'No lines yet. Lines from the microphone appear a few seconds after they are spoken.'
-        : microphone.state?.status === 'starting'
-          ? 'No lines yet. The microphone is not listening yet.'
-          : 'No lines. The microphone is not listening.';
+    note =
+      application?.sourceSession && application.phase === 'listening'
+        ? 'No lines yet. Lines from the application appear a few seconds after they are heard.'
+        : application?.sourceSession && application.phase === 'starting'
+          ? 'No lines yet. Application audio is starting.'
+          : microphone.state?.status === 'listening'
+            ? 'No lines yet. Lines from the microphone appear a few seconds after they are spoken.'
+            : microphone.state?.status === 'starting'
+              ? 'No lines yet. The microphone is not listening yet.'
+              : 'No lines. The microphone is not listening.';
   return { note, lines };
 }

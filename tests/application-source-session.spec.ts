@@ -208,3 +208,90 @@ test('the live layout says a source session runs without the microphone', async 
   );
   await expect(preview).not.toContainText('The microphone is not listening');
 });
+
+test("focus stays in the panel when the source's own Stop goes away", async ({
+  page,
+}) => {
+  const panel = await panelAlone(page);
+  await sendAlone(page, {
+    capture: 'running',
+    microphone: 'off',
+    source: source('listening', true),
+  });
+  await panel
+    .getByRole('button', { name: 'Stop application audio', exact: true })
+    .click();
+  // Stop is under way; the button is replaced by the stopping line.
+  await sendAlone(page, {
+    capture: 'stopping',
+    microphone: 'off',
+    source: source('stopping', true),
+  });
+  await expect(
+    panel.getByRole('button', { name: 'Stop application audio' }),
+  ).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const panel = document
+          .querySelector('#processing-title')
+          ?.closest('section');
+        return !!panel && panel.contains(document.activeElement);
+      }),
+    )
+    .toBe(true);
+});
+
+test('with the microphone not off, nothing says the microphone is not used', async ({
+  page,
+}) => {
+  const { microphone } = await notebook(page);
+  await page.evaluate(() => window.liveTest.start());
+  // The fixture's live start leaves the microphone listening; a source
+  // reported as having its own session must not be believed over it.
+  await page.evaluate((value) => window.captureTest.send(value), {
+    capture: 'running',
+    microphone: 'running',
+    source: source('listening', true),
+  } satisfies Partial<ProcessingSnapshot>);
+  await expect(microphone).toContainText(
+    'Your microphone is transcribed on this device.',
+  );
+  await expect(microphone).not.toContainText('the microphone is not used');
+  await page
+    .getByRole('group', { name: 'Layout', exact: true })
+    .getByRole('button', { name: 'Layout preview', exact: true })
+    .press('Enter');
+  const preview = page.getByRole('region', {
+    name: 'Live session layout preview',
+  });
+  await expect(preview).not.toContainText('The microphone is not used');
+});
+
+test('the live layout follows the source session through starting and stopping', async ({
+  page,
+}) => {
+  await notebook(page);
+  await sourceSession(page, 'starting');
+  await page
+    .getByRole('group', { name: 'Layout', exact: true })
+    .getByRole('button', { name: 'Layout preview', exact: true })
+    .press('Enter');
+  const preview = page.getByRole('region', {
+    name: 'Live session layout preview',
+  });
+  await expect(preview).toContainText(
+    'No lines yet. Application audio is starting.',
+  );
+  await expect(preview).not.toContainText('Lines from the application appear');
+  // The live session is finishing: the Capture row says so, not "running".
+  await page.evaluate((value) => window.captureTest.send(value), {
+    phase: 'stopping',
+    capture: 'stopping',
+    microphone: 'off',
+    source: source('stopping', true),
+  } satisfies Partial<ProcessingSnapshot>);
+  await expect(preview).not.toContainText(
+    'Live session running from application audio',
+  );
+});
