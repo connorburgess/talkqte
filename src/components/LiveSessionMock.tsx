@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { describeCapture, type RealCapture } from './LiveCaptureStatus';
 import './live-mock.css';
 
 type MockState =
@@ -89,11 +90,12 @@ export function LayoutSwitch({
 }
 
 export function LiveSessionMock({
-  capturing = false,
+  real,
 }: {
-  /** A real session is starting, running or finishing outside this example. */
-  capturing?: boolean;
+  /** The notebook's own microphone and live-session state, shown read-only. */
+  real: RealCapture;
 }) {
+  const actual = describeCapture(real);
   const [state, setState] = useState<MockState>('idle');
   const [noteIds, setNoteIds] = useState(fictionalNotes.map(({ id }) => id));
   // A cue that was showing when the session paused stays until dismissed.
@@ -137,13 +139,13 @@ export function LiveSessionMock({
     <section className="live-mock" aria-labelledby="mock-title">
       <h1 id="mock-title">Live session layout preview</h1>
       <p>
-        This is a fictional, interactive layout preview. The preview does not
-        capture audio, connect to a meeting, or generate AI cues.
+        Source and Capture show the app’s real state, read-only. Everything else
+        is a fictional example.
       </p>
-      {capturing && (
+      {actual.underway && (
         <p className="mock-real-session">
-          A real live session is running. Its status and Stop are above; this
-          example is separate.
+          {actual.underway} Its controls are above; nothing in this preview
+          starts or stops it.
         </p>
       )}
       <label className="mock-state-picker">
@@ -171,13 +173,31 @@ export function LiveSessionMock({
       <div
         className="mock-session"
         role="group"
-        aria-label="Fictional session preview"
+        aria-label="Session layout preview"
         ref={frame}
       >
         <p className="mock-banner">
-          Simulated layout · its controls only change this example · this
-          example is not connected to audio, a meeting, or AI
+          Source and Capture are real and read-only · every control here is
+          simulated and only changes the example · the preview starts and stops
+          no capture, connects to no meeting, and generates no AI cues
         </p>
+        <dl className="mock-facts mock-real">
+          <div>
+            <dt>Source</dt>
+            <dd>
+              <span className="mock-tag">Real</span> {actual.source}
+            </dd>
+          </div>
+          <div>
+            <dt>Capture</dt>
+            <dd>
+              <span className="mock-tag">Real</span> {actual.capture}
+              {actual.detail && (
+                <span className="mock-detail"> {actual.detail}</span>
+              )}
+            </dd>
+          </div>
+        </dl>
         <div className="mock-session-header">
           <div>
             <h2 ref={title} tabIndex={-1}>
@@ -185,15 +205,11 @@ export function LiveSessionMock({
             </h2>
             <dl className="mock-facts">
               <div>
-                <dt>Source</dt>
+                <dt>Example</dt>
                 <dd>
-                  Fictional sample conversation. This example connects no
-                  microphone, app or meeting
+                  <span className="mock-tag">Simulated</span> Fictional sample
+                  conversation. {current.capture}
                 </dd>
-              </div>
-              <div>
-                <dt>Capture</dt>
-                <dd>{current.capture}</dd>
               </div>
             </dl>
           </div>
@@ -272,7 +288,9 @@ export function LiveSessionMock({
           )}
           {state === 'paused' && (
             <>
-              <p>Simulated pause. This is not a capture control.</p>
+              <p>
+                Simulated pause. This example’s Pause is not a capture control.
+              </p>
               <button
                 className="secondary-button"
                 data-mock-focus="resume"
