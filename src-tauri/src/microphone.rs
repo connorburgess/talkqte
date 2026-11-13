@@ -593,7 +593,46 @@ pub fn refresh(app: &tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicUsize;
+    use std::{
+        alloc::{GlobalAlloc, Layout, System},
+        cell::Cell,
+        sync::atomic::AtomicUsize,
+    };
+
+    /// Counts the allocations a thread makes while it has counting on, so a
+    /// test can show that the capture callback allocates nothing. Other
+    /// threads, and code outside the counted span, are unaffected.
+    struct CountingAllocator;
+
+    thread_local! {
+        static COUNTING: Cell<bool> = const { Cell::new(false) };
+        static ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    unsafe impl GlobalAlloc for CountingAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            if COUNTING.try_with(Cell::get).unwrap_or(false) {
+                let _ = ALLOCATIONS.try_with(|count| count.set(count.get() + 1));
+            }
+            unsafe { System.alloc(layout) }
+        }
+
+        unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(pointer, layout) }
+        }
+    }
+
+    #[global_allocator]
+    static ALLOCATOR: CountingAllocator = CountingAllocator;
+
+    /// Allocations `work` makes on this thread.
+    fn allocations_during(work: impl FnOnce()) -> usize {
+        ALLOCATIONS.set(0);
+        COUNTING.set(true);
+        work();
+        COUNTING.set(false);
+        ALLOCATIONS.get()
+    }
 
     struct FakeStream {
         starts: Arc<AtomicUsize>,
@@ -928,6 +967,65 @@ mod tests {
         assert!(!meter.active.load(Ordering::Acquire));
         meter.observe([f32::MAX].into_iter());
         assert!(meter.active.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn the_capture_callback_keeps_only_whether_audio_was_loud_and_allocates_nothing() {
+        // Two different stretches of fictional speech, as a device would
+        // deliver them, each followed by near silence.
+        let first: Vec<f32> = (0..MAX_METER_SAMPLES * 2)
+            .map(|i| (i as f32 * 0.37).sin() * 0.6)
+            .collect();
+        let second: Vec<f32> = (0..480)
+            .map(|i| {
+                if i % 7 == 0 {
+                    f32::NAN
+                } else {
+                    -0.9 + i as f32 / 600.0
+                }
+            })
+            .collect();
+        let quiet = vec![0.001_f32; 480];
+        let (controllers, meters): (Vec<_>, Vec<_>) = (0..2)
+            .map(|_| {
+                let (controller, meter, _, now) = running();
+                ((controller, now), meter)
+            })
+            .unzip();
+        // A live session's tap receives the same buffers in the callback.
+        let (mut tap, _chunker) = crate::audio_tap::tap(48_000, 1, 3_000);
+
+        // Exactly what the callback runs for each buffer.
+        let allocations = allocations_during(|| {
+            for (meter, speech) in meters.iter().zip([&first, &second]) {
+                for buffer in [speech, &quiet] {
+                    meter.observe(buffer.iter().copied());
+                    tap.push_interleaved(buffer.iter().copied());
+                }
+            }
+        });
+        assert_eq!(allocations, 0, "the callback allocated");
+
+        // Nothing distinguishes the two recordings afterwards: each meter
+        // holds a buffer count, a loud flag and a failure flag, the same for
+        // both, and the windows then receive the same status from each.
+        let state = |meter: &Meter| {
+            (
+                meter.blocks.load(Ordering::Acquire),
+                meter.active.load(Ordering::Acquire),
+                meter.failed.load(Ordering::Acquire),
+            )
+        };
+        assert_eq!(state(&meters[0]), (2, true, false));
+        assert_eq!(state(&meters[0]), state(&meters[1]));
+        let sent: Vec<_> = controllers
+            .iter()
+            .map(|(controller, now)| {
+                serde_json::to_value(controller.poll(*now).unwrap().snapshot).unwrap()
+            })
+            .collect();
+        assert_eq!(sent[0], sent[1]);
+        assert_eq!(sent[0]["activity"], "active");
     }
 
     #[test]

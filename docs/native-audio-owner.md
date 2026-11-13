@@ -641,9 +641,13 @@ cleanup, whenever capturing would serve nothing:
   not-attached answer, distinct from an engine refusal such as an out-of-order
   line, which leaves the source running;
 - the runtime is unavailable (its lock is poisoned) when a line arrives;
-- every 50 passes, about once a second when idle, the loop asks the runtime
-  whether the source is still attached, and stops on "no" or no answer. A
-  silent source is therefore covered too;
+- every 50 passes the loop asks the runtime whether the source is still
+  attached, and stops on "no" or no answer. A silent source is therefore
+  covered too. On a responsive machine 50 idle passes take about a second, but
+  the interval is counted in passes, not time: a starved or throttled thread
+  makes fewer passes. At macOS background priority, where timers are
+  coalesced, it took more than five seconds locally. This check is a backstop;
+  Stop, session replacement and the sink cancel the source directly;
 - the transcription worker thread has ended, for example after a recognizer
   panic.
 
@@ -755,6 +759,13 @@ unavailable runtime, the retry not performed, the status not refreshed after a
 retry, a dead worker ignored, no periodic attachment check, no cancel on a
 not-attached refusal, and no abandoned mark. The threaded tests are bounded by
 a five-second watchdog so a regression fails instead of hanging.
+
+The silent unattached source test counts passes instead of waiting: it runs
+the loop without parking and asserts that the first poll to see the
+cancellation is the one right after the 50th pass. An earlier version waited
+up to five seconds of wall time for it, and failed on a loaded CI runner
+without any change to the loop; the same version fails every time when run at
+macOS background priority.
 
 Not covered:
 

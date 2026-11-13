@@ -14,7 +14,7 @@ const activeStates = ['starting', 'listening', 'cue', 'paused'];
 async function openMock(page: Page) {
   await page.goto('/');
   await page
-    .getByRole('group', { name: 'Layout' })
+    .getByRole('group', { name: 'Layout', exact: true })
     .getByRole('button', { name: 'Layout preview', exact: true })
     .press('Enter');
   const mock = page.getByRole('region', {
@@ -23,7 +23,7 @@ async function openMock(page: Page) {
   return {
     mock,
     picker: mock.getByLabel('Preview a state'),
-    frame: mock.getByRole('group', { name: 'Fictional session preview' }),
+    frame: mock.getByRole('group', { name: 'Session layout preview' }),
   };
 }
 
@@ -71,7 +71,12 @@ test('every state names its source and capture state, and every control says it 
   page,
 }) => {
   const { mock, picker, frame } = await openMock(page);
-  await expect(mock).toContainText('does not capture audio');
+  await expect(mock).toContainText(
+    'Source and Capture show the app’s real state, read-only. Everything else is a fictional example.',
+  );
+  await expect(mock).toContainText(
+    'the preview starts and stops no capture, connects to no meeting, and generates no AI cues',
+  );
   const capture: Record<string, string> = {
     idle: 'Example not started',
     starting: 'Simulated start. This example loads and connects nothing',
@@ -84,12 +89,14 @@ test('every state names its source and capture state, and every control says it 
   for (const state of allStates) {
     await picker.selectOption(state);
     await expect(frame).toContainText(
-      'this example is not connected to audio, a meeting, or AI',
+      'every control here is simulated and only changes the example',
     );
     await expect(frame).toContainText(
-      'Fictional sample conversation. This example connects no microphone, app or meeting',
+      'Source and Capture are real and read-only',
     );
-    await expect(frame).toContainText(capture[state]);
+    await expect(frame).toContainText(
+      `Simulated Fictional sample conversation. ${capture[state]}`,
+    );
     await expect(simulated(frame, 'Stop')).toHaveCount(
       activeStates.includes(state) ? 1 : 0,
     );
@@ -212,7 +219,7 @@ test('a keyboard walk starts, cancels, pauses, stops and recovers, moving focus 
   await expect(frame).toContainText(
     'No example session yet. This example captures nothing.',
   );
-  await expect(mock).not.toContainText('A real live session is running');
+  await expect(mock).not.toContainText('Its controls are above');
   await simulated(frame, 'Start').press('Enter');
   await expect(status).toHaveText('Preview state: Starting');
   await expect(frame).toContainText('No conversation text yet');
@@ -227,7 +234,9 @@ test('a keyboard walk starts, cancels, pauses, stops and recovers, moving focus 
   await expect(status).toHaveText('Preview state: Listening');
   await expect(simulated(frame, 'Pause')).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(frame).toContainText('This is not a capture control');
+  await expect(frame).toContainText(
+    'This example’s Pause is not a capture control.',
+  );
   await expect(simulated(frame, 'Resume')).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(simulated(frame, 'Pause')).toBeFocused();
@@ -264,7 +273,7 @@ test('the layout switch moves between the demo notebook and the live layout prev
   page,
 }) => {
   await page.goto('/');
-  const layout = page.getByRole('group', { name: 'Layout' });
+  const layout = page.getByRole('group', { name: 'Layout', exact: true });
   const demo = layout.getByRole('button', { name: 'Demo', exact: true });
   const live = layout.getByRole('button', {
     name: 'Layout preview',
@@ -345,7 +354,7 @@ for (const width of [480, 320]) {
     await expectInside(frame.getByRole('button'), frame);
     expect(await fitsHorizontally(page)).toBe(true);
 
-    const layout = page.getByRole('group', { name: 'Layout' });
+    const layout = page.getByRole('group', { name: 'Layout', exact: true });
     await expectInside(layout.getByRole('button'), layout);
     for (const button of await layout.getByRole('button').all())
       expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
@@ -372,7 +381,7 @@ for (const { width, widestSidebar } of [
       await page.getByRole('separator').first().focus();
       await page.keyboard.press('End');
     }
-    const layout = page.getByRole('group', { name: 'Layout' });
+    const layout = page.getByRole('group', { name: 'Layout', exact: true });
     const panelSizes = page.getByText('Panel sizes', { exact: true });
     for (const view of ['Demo', 'Layout preview']) {
       await layout.getByRole('button', { name: view, exact: true }).click();
@@ -407,7 +416,7 @@ test('below the desktop minimum the switch takes the first toolbar row', async (
 }) => {
   await page.setViewportSize({ width: 800, height: 700 });
   await page.goto('/');
-  const layout = page.getByRole('group', { name: 'Layout' });
+  const layout = page.getByRole('group', { name: 'Layout', exact: true });
   const switchBox = (await layout.boundingBox())!;
   const breadcrumb = (await page.locator('.breadcrumb').boundingBox())!;
   expect(switchBox.y + switchBox.height).toBeLessThanOrEqual(breadcrumb.y);
@@ -459,7 +468,7 @@ test('real session Stop remains separate from the simulated Stop', async ({
   await page
     .getByRole('button', { name: 'Start live session', exact: true })
     .click();
-  const layout = page.getByRole('group', { name: 'Layout' });
+  const layout = page.getByRole('group', { name: 'Layout', exact: true });
   // A running session is not called a demo.
   await expect(
     layout.getByRole('button', { name: 'Session', exact: true }),
@@ -472,7 +481,7 @@ test('real session Stop remains separate from the simulated Stop', async ({
   await expect(
     page.getByRole('region', { name: 'Live session layout preview' }),
   ).toContainText(
-    'A real live session is running. Its status and Stop are above; this example is separate.',
+    'A real live session is running. Its controls are above; nothing in this preview starts or stops it.',
   );
   const realStop = page.getByRole('button', {
     name: 'Stop live session',

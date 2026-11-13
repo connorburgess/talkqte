@@ -85,3 +85,9 @@ test('the data snapshot script runs through a linked path', (t) => {
   assert.equal(result.status, 2);
   assert.match(result.stderr, /give a command: record or compare/);
 });
+
+test('the cue lab runs through a linked path', (t) => {
+  const result = runLinked(linkedScripts(t), 'cue-lab');
+  assert.equal(result.status, 0, result.stderr);
+  assert.notEqual(result.stdout.trim(), '');
+});
