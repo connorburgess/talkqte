@@ -62,6 +62,8 @@ fn agent(https_only: bool) -> ureq::Agent {
         .timeout_recv_body(Some(Duration::from_secs(30)))
         .https_only(https_only)
         .http_status_as_error(false)
+        // Every request, sign-in included, names this app to Granola.
+        .user_agent(CLIENT_NAME)
         .build()
         .into()
 }
@@ -211,11 +213,23 @@ pub fn sign_in(
     open_url: &dyn Fn(&str) -> Result<(), String>,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Tokens, String> {
+    sign_in_at(RESOURCE, true, &granola_host, open_url, cancelled)
+}
+
+/// The sign-in against any resource; tests use a local fictional server
+/// and say which hosts they trust in place of granola.ai.
+fn sign_in_at(
+    resource: &str,
+    https_only: bool,
+    granola_host: &dyn Fn(&str) -> bool,
+    open_url: &dyn Fn(&str) -> Result<(), String>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Tokens, String> {
     if cancelled() {
         return Err("Sign-in cancelled.".into());
     }
-    let agent = agent(true);
-    let origin = RESOURCE
+    let agent = agent(https_only);
+    let origin = resource
         .strip_suffix("/mcp")
         .ok_or("The Granola endpoint is not as expected.")?;
     let resource_metadata: Value = get_json(
@@ -233,8 +247,12 @@ pub fn sign_in(
     }
     let server: Value = get_json(
         &agent,
-        &well_known(&authorization_server, "oauth-authorization-server")
-            .ok_or("Granola's sign-in server address is not as expected.")?,
+        &well_known(
+            &authorization_server,
+            "oauth-authorization-server",
+            https_only,
+        )
+        .ok_or("Granola's sign-in server address is not as expected.")?,
     )?;
     if server["issuer"]
         .as_str()
@@ -311,7 +329,7 @@ pub fn sign_in(
             ("redirect_uri", &redirect_uri),
             ("client_id", &client_id),
             ("code_verifier", &verifier),
-            ("resource", RESOURCE),
+            ("resource", resource),
         ]))
         .map_err(|_| "Granola's sign-in service could not be reached.")?;
     let token =
@@ -336,14 +354,18 @@ fn granola_host(url: &str) -> bool {
 
 /// The well-known document for an issuer: after the host and before any
 /// path the issuer carries, as RFC 8414 describes.
-fn well_known(issuer: &str, suffix: &str) -> Option<String> {
-    let rest = issuer.strip_prefix("https://")?;
+fn well_known(issuer: &str, suffix: &str, https_only: bool) -> Option<String> {
+    // Plain http is for a test's loopback server only.
+    let (scheme, rest) = issuer.split_once("://")?;
+    if scheme != "https" && (https_only || scheme != "http") {
+        return None;
+    }
     let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
     let path = path.trim_matches('/');
     Some(if path.is_empty() {
-        format!("https://{host}/.well-known/{suffix}")
+        format!("{scheme}://{host}/.well-known/{suffix}")
     } else {
-        format!("https://{host}/.well-known/{suffix}/{path}")
+        format!("{scheme}://{host}/.well-known/{suffix}/{path}")
     })
 }
 
@@ -1714,18 +1736,25 @@ mod tests {
         assert!(!granola_host("https://evil.com@mcp-auth.granola.ai/"));
         assert!(!granola_host("https://notgranola.ai/"));
         assert_eq!(
-            well_known("https://mcp-auth.granola.ai", "oauth-authorization-server").unwrap(),
+            well_known(
+                "https://mcp-auth.granola.ai",
+                "oauth-authorization-server",
+                true
+            )
+            .unwrap(),
             "https://mcp-auth.granola.ai/.well-known/oauth-authorization-server"
         );
         assert_eq!(
             well_known(
                 "https://mcp-auth.granola.ai/tenant/a/",
-                "oauth-authorization-server"
+                "oauth-authorization-server",
+                true
             )
             .unwrap(),
             "https://mcp-auth.granola.ai/.well-known/oauth-authorization-server/tenant/a"
         );
-        assert!(well_known("http://mcp-auth.granola.ai", "x").is_none());
+        assert!(well_known("http://mcp-auth.granola.ai", "x", true).is_none());
+        assert!(well_known("ftp://127.0.0.1", "x", false).is_none());
     }
 
     #[test]
@@ -1785,6 +1814,132 @@ mod tests {
         assert!(wait_for_callback(&listener, "expected", &|| true)
             .unwrap_err()
             .contains("cancelled"));
+    }
+
+    /// The `User-Agent` values in a request head.
+    fn user_agents(head: &str) -> Vec<&str> {
+        head.lines()
+            .filter_map(|line| line.split_once(':'))
+            .filter(|(name, _)| name.eq_ignore_ascii_case("user-agent"))
+            .map(|(_, value)| value.trim())
+            .collect()
+    }
+
+    #[test]
+    fn every_sign_in_request_names_talkqte_as_its_user_agent() {
+        // A fictional sign-in service on a loopback port: resource and
+        // server metadata, client registration and the token exchange.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let seen = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+        let (log, base) = (seen.clone(), origin.clone());
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { break };
+                let mut buffer = vec![0u8; 16384];
+                let mut read = 0;
+                let (head, body) = loop {
+                    let n = stream.read(&mut buffer[read..]).unwrap_or(0);
+                    read += n;
+                    let text = String::from_utf8_lossy(&buffer[..read]).into_owned();
+                    if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                        let length: usize = head
+                            .lines()
+                            .find_map(|line| {
+                                line.to_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .map(|value| value.trim().parse().unwrap_or(0))
+                            })
+                            .unwrap_or(0);
+                        if body.len() >= length || n == 0 {
+                            break (head.to_string(), body.to_string());
+                        }
+                    } else if n == 0 {
+                        break (text, String::new());
+                    }
+                };
+                let path = head.split(' ').nth(1).unwrap_or("").to_string();
+                let reply = match path.as_str() {
+                    "/.well-known/oauth-protected-resource" => {
+                        json!({"authorization_servers": [base]})
+                    }
+                    "/.well-known/oauth-authorization-server" => json!({
+                        "issuer": base,
+                        "authorization_endpoint": format!("{base}/authorize"),
+                        "token_endpoint": format!("{base}/token"),
+                        "registration_endpoint": format!("{base}/register"),
+                    }),
+                    "/register" => json!({"client_id": "fictional-client"}),
+                    "/token" => json!({"access_token": "fictional-token"}),
+                    _ => json!({}),
+                }
+                .to_string();
+                log.lock().unwrap().push((head, body));
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                        reply.len()
+                    )
+                    .as_bytes(),
+                );
+            }
+        });
+        // The fictional browser returns to the loopback address at once.
+        let browser = |url: &str| {
+            let query = url.split_once('?').unwrap().1;
+            let value = |name: &str| {
+                query
+                    .split('&')
+                    .find_map(|pair| pair.strip_prefix(&format!("{name}=")))
+                    .map(percent_decode)
+                    .unwrap()
+            };
+            let (redirect, state) = (value("redirect_uri"), value("state"));
+            let address = redirect
+                .strip_prefix("http://")
+                .and_then(|rest| rest.strip_suffix("/callback"))
+                .unwrap()
+                .to_string();
+            std::thread::spawn(move || {
+                let mut stream = TcpStream::connect(address).unwrap();
+                stream
+                    .write_all(
+                        format!(
+                            "GET /callback?code=fictional-code&state={state} HTTP/1.1\r\nHost: x\r\n\r\n"
+                        )
+                        .as_bytes(),
+                    )
+                    .unwrap();
+                let mut page = String::new();
+                let _ = stream.read_to_string(&mut page);
+            });
+            Ok(())
+        };
+        let trusted = |url: &str| url.starts_with(&origin);
+        let tokens = sign_in_at(&format!("{origin}/mcp"), false, &trusted, &browser, &|| {
+            false
+        })
+        .unwrap();
+        assert_eq!(tokens.access_token, "fictional-token");
+        let seen = seen.lock().unwrap().clone();
+        let lines: Vec<&str> = seen
+            .iter()
+            .map(|(head, _)| head.lines().next().unwrap())
+            .collect();
+        assert_eq!(
+            lines,
+            [
+                "GET /.well-known/oauth-protected-resource HTTP/1.1",
+                "GET /.well-known/oauth-authorization-server HTTP/1.1",
+                "POST /register HTTP/1.1",
+                "POST /token HTTP/1.1",
+            ],
+            "discovery, registration and the token exchange, nothing else"
+        );
+        for (head, _) in &seen {
+            assert_eq!(user_agents(head), ["TalkQTE"], "{head}");
+        }
+        assert!(seen[3].1.contains("code=fictional-code"));
     }
 
     /// How the fictional server answers: normally (as JSON or an event
@@ -2008,6 +2163,10 @@ mod tests {
             assert!(seen.iter().all(|(head, _)| head
                 .to_lowercase()
                 .contains("authorization: bearer fictional-token")));
+            // Once, although both the agent and the request name it.
+            for (head, _) in &seen {
+                assert_eq!(user_agents(head), ["TalkQTE"], "{head}");
+            }
             assert!(
                 !seen[0].0.to_lowercase().contains("mcp-session-id"),
                 "none before the server issues one"
