@@ -68,6 +68,12 @@ impl Timed for AudioChunk {
     }
 }
 
+impl<T: Transcriber + ?Sized> Transcriber for Box<T> {
+    fn transcribe(&mut self, chunk: &AudioChunk) -> Result<Vec<Recognized>, String> {
+        (**self).transcribe(chunk)
+    }
+}
+
 /// Text recognized within a chunk, offset from the chunk's start.
 pub struct Recognized {
     pub offset_ms: u64,

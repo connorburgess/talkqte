@@ -1,9 +1,8 @@
 //! Private preparation for the disconnected native audio experiment. Snapshot
 //! under Runtime, measure on its owning worker, then validate under Runtime.
 //! Acceptance attaches the source to the live session, so that session's Stop
-//! or replacement cancels it. No command calls this yet; it neither starts
+//! or replacement cancels it. Called by the source worker; it neither starts
 //! capture nor grants permission.
-#![allow(dead_code)]
 
 use crate::{
     application_audio::{native::ClockBinding, timing::TimingError, Control},
@@ -442,6 +441,17 @@ pub(crate) mod tests {
                 assert!(matches!(result, Err(TimingError::Clock)), "case {case}");
             }
         }
+    }
+
+    /// The measuring step alone, for a caller that snapshots and accepts
+    /// through the runtime itself. Same fictional host time as `accepted`.
+    pub(crate) fn measure_fictional(snapshot: Snapshot) -> Result<Measurement, TimingError> {
+        snapshot.measure_with(
+            Duration::from_secs(1),
+            Duration::from_secs(5),
+            Instant::now,
+            || CMTime { value: 7, ..host() },
+        )
     }
 
     /// Host time 7 s is where the memory-only test timebase places source

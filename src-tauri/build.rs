@@ -1,6 +1,18 @@
+/// The development-only application-audio command exists, and is allowed,
+/// only in a macOS build with the `native-audio-spike` feature.
+fn with_development_commands(commands: &[&'static str]) -> &'static [&'static str] {
+    let mut commands = commands.to_vec();
+    if std::env::var_os("CARGO_FEATURE_NATIVE_AUDIO_SPIKE").is_some()
+        && std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos")
+    {
+        commands.push("application_audio");
+    }
+    commands.leak()
+}
+
 fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
-        tauri_build::AppManifest::new().commands(&[
+        tauri_build::AppManifest::new().commands(with_development_commands(&[
             "snapshot",
             "processing_snapshot",
             "stop_capture",
@@ -50,7 +62,7 @@ fn main() {
             "remove_model",
             "start_live_session",
             "stop_live_session",
-        ]),
+        ])),
     ))
     .expect("Tauri build configuration failed");
 }
