@@ -363,8 +363,20 @@ for (const size of ['standard', 'large'] as const) {
           document.querySelector('main')!.scrollHeight <= innerHeight &&
           document.documentElement.scrollWidth <= innerWidth,
       );
+    // The card's own content height: the companion window no longer
+    // scrolls, and the card's scrollHeight is its full height whenever the
+    // content fits, so measure where the content ends instead.
     const height = () =>
-      page.evaluate(() => document.querySelector('main')!.scrollHeight);
+      question.evaluate(
+        (card) =>
+          Math.max(
+            ...[...card.children].map(
+              (child) => child.getBoundingClientRect().bottom,
+            ),
+          ) -
+          card.getBoundingClientRect().top +
+          card.scrollTop,
+      );
     let id = 0;
     const show = async (cue: Cue) => {
       await page.evaluate((value) => window.liveTest.setCue(value), {
@@ -398,9 +410,11 @@ for (const size of ['standard', 'large'] as const) {
         expect(await fits(), `${width} ${title} collapsed`).toBe(true);
         // Open for reading: the warning costs no height of its own. Whether
         // the unwarned reminder itself fits depends on the platform's fonts
-        // (it does not at 360 px in CI's Linux WebKit), so compare the two.
+        // (it scrolls inside the card at 360 px in CI's Linux WebKit), so
+        // compare the two.
         await page.setViewportSize({ width, height: expanded });
         await show({ ...plain, expanded: true, held: true });
+        await expect(question.locator('blockquote')).toBeVisible();
         const plainHeight = await height();
         await show({ ...warned, expanded: true, held: true });
         await expect(question.locator('blockquote')).toBeVisible();
