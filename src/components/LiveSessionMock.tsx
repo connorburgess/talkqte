@@ -1,27 +1,133 @@
-import { useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import './live-mock.css';
 
 type MockState =
   'idle' | 'starting' | 'listening' | 'cue' | 'paused' | 'stopped' | 'failed';
 
-const states: { value: MockState; label: string }[] = [
-  { value: 'idle', label: 'Idle' },
-  { value: 'starting', label: 'Starting' },
-  { value: 'listening', label: 'Listening' },
-  { value: 'cue', label: 'Cue shown' },
-  { value: 'paused', label: 'Paused' },
-  { value: 'stopped', label: 'Stopped' },
-  { value: 'failed', label: 'Failed' },
+const states: { value: MockState; label: string; capture: string }[] = [
+  { value: 'idle', label: 'Idle', capture: 'Not started' },
+  {
+    value: 'starting',
+    label: 'Starting',
+    capture: 'Simulated start. Nothing is loading or connecting',
+  },
+  {
+    value: 'listening',
+    label: 'Listening',
+    capture: 'Simulated listening. No audio is captured',
+  },
+  {
+    value: 'cue',
+    label: 'Cue shown',
+    capture: 'Simulated listening. No audio is captured',
+  },
+  {
+    value: 'paused',
+    label: 'Paused',
+    capture: 'Simulated pause. No audio was captured',
+  },
+  {
+    value: 'stopped',
+    label: 'Stopped',
+    capture: 'Simulated stop. Nothing was captured or saved',
+  },
+  {
+    value: 'failed',
+    label: 'Failed',
+    capture: 'Simulated failure. Nothing was captured',
+  },
 ];
+
+const fictionalNotes = [
+  {
+    id: 'planning',
+    title: 'Fictional planning notes',
+    date: '6 November 2026',
+    text: 'Robin offered to draft the plan before Friday.',
+  },
+  {
+    id: 'venue',
+    title: 'Fictional venue notes',
+    date: '30 October 2026',
+    text: 'The community hall is free on Thursday afternoons.',
+  },
+];
+/** The example cue quotes this note, so removing the note withdraws the cue. */
+const citedNote = fictionalNotes[0];
+const spokenLine = 'Who can bring the first draft to the review?';
+
+type View = 'notebook' | 'live-mock';
+
+/** The one connected control: it changes which layout is on screen. */
+export function LayoutSwitch({
+  view,
+  live,
+  onChange,
+}: {
+  view: string;
+  /** A real session is running in the notebook, so it is not a demo. */
+  live: boolean;
+  onChange: (view: View) => void;
+}) {
+  const options: { value: View; label: string }[] = [
+    { value: 'notebook', label: live ? 'Session notebook' : 'Demo notebook' },
+    { value: 'live-mock', label: 'Live layout preview' },
+  ];
+  return (
+    <div className="layout-switch" role="group" aria-label="Layout">
+      {options.map(({ value, label }) => (
+        <button
+          key={value}
+          aria-pressed={view === value}
+          onClick={() => onChange(value)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export function LiveSessionMock() {
   const [state, setState] = useState<MockState>('idle');
-  const selector = useRef<HTMLSelectElement>(null);
-  const returnToSelector = (next: MockState) => {
+  const [noteIds, setNoteIds] = useState(fictionalNotes.map(({ id }) => id));
+  // A cue that was showing when the session paused stays until dismissed.
+  const [cueKept, setCueKept] = useState(false);
+  const [whyOpen, setWhyOpen] = useState(false);
+  // Removing the quoted note takes the cue away; say so until the next action.
+  const [withdrawn, setWithdrawn] = useState(false);
+  const whyId = useId();
+  const frame = useRef<HTMLDivElement>(null);
+  const title = useRef<HTMLHeadingElement>(null);
+  const focusNext = useRef<string | null>(null);
+
+  // A simulated action removes the control that was pressed. Focus goes to
+  // the control that takes its place, as it would in a connected session.
+  useEffect(() => {
+    const key = focusNext.current;
+    if (!key) return;
+    focusNext.current = null;
+    (
+      frame.current?.querySelector<HTMLElement>(`[data-mock-focus="${key}"]`) ??
+      title.current
+    )?.focus();
+  });
+
+  const go = (next: MockState, focus: string, keepCue = false) => {
     setState(next);
-    selector.current?.focus();
+    setCueKept(keepCue);
+    if (!keepCue) setWhyOpen(false);
+    setWithdrawn(false);
+    focusNext.current = focus;
   };
+
+  const current = states.find((item) => item.value === state)!;
   const active = ['starting', 'listening', 'cue', 'paused'].includes(state);
+  const inConversation = ['listening', 'cue', 'paused'].includes(state);
+  const notes = fictionalNotes.filter(({ id }) => noteIds.includes(id));
+  const cueAvailable = noteIds.includes(citedNote.id);
+  const cueShown = state === 'cue' || (state === 'paused' && cueKept);
+
   return (
     <section className="live-mock" aria-labelledby="mock-title">
       <h1 id="mock-title">Live session layout preview</h1>
@@ -32,9 +138,17 @@ export function LiveSessionMock() {
       <label className="mock-state-picker">
         Preview a state
         <select
-          ref={selector}
           value={state}
-          onChange={(event) => setState(event.target.value as MockState)}
+          onChange={(event) => {
+            const next = event.target.value as MockState;
+            setState(next);
+            setCueKept(false);
+            setWhyOpen(false);
+            setWithdrawn(false);
+            // "Cue shown" needs the note the cue quotes.
+            if (next === 'cue' && !cueAvailable)
+              setNoteIds(fictionalNotes.map(({ id }) => id));
+          }}
         >
           {states.map(({ value, label }) => (
             <option key={value} value={value}>
@@ -43,111 +157,274 @@ export function LiveSessionMock() {
           ))}
         </select>
       </label>
-      <div className="mock-session" aria-label="Fictional session preview">
+      <div
+        className="mock-session"
+        role="group"
+        aria-label="Fictional session preview"
+        ref={frame}
+      >
+        <p className="mock-banner">
+          Simulated layout · its controls only change this example · not
+          connected to audio, a meeting, or AI
+        </p>
         <div className="mock-session-header">
           <div>
-            <h2>Fictional planning conversation</h2>
-            <p>Preview source: fictional sample · Preview captures no audio</p>
+            <h2 ref={title} tabIndex={-1}>
+              Fictional planning conversation
+            </h2>
+            <dl className="mock-facts">
+              <div>
+                <dt>Source</dt>
+                <dd>
+                  Fictional sample conversation. No microphone, app or meeting
+                  is connected
+                </dd>
+              </div>
+              <div>
+                <dt>Capture</dt>
+                <dd>{current.capture}</dd>
+              </div>
+            </dl>
           </div>
           {active && (
             <button
               className="secondary-button mock-stop"
-              onClick={() => returnToSelector('stopped')}
+              data-mock-focus="stop"
+              onClick={() => go('stopped', 'start')}
             >
-              Stop preview
+              Stop (simulated)
             </button>
           )}
         </div>
-        <p role="status">
-          Preview state: {states.find((item) => item.value === state)?.label}
+        <p role="status" className="mock-status">
+          Preview state: {current.label}
+          {cueShown && `. Example cue: ${citedNote.text}`}
+          {withdrawn &&
+            '. The example cue was withdrawn because the fictional note it quotes was removed.'}
         </p>
-        {(state === 'idle' || state === 'stopped') && (
-          <button
-            className="secondary-button"
-            onClick={() => returnToSelector('starting')}
-          >
-            Start preview
-          </button>
-        )}
-        {state === 'failed' && (
-          <>
-            <p>Fictional connection failed. Retry the preview to continue.</p>
-            <button
-              className="secondary-button"
-              onClick={() => returnToSelector('starting')}
-            >
-              Retry preview
-            </button>
-          </>
-        )}
-        {state === 'starting' && (
-          <>
-            <p>Example: preparing a session. No connection is being made.</p>
-            <button
-              className="secondary-button"
-              onClick={() => returnToSelector('listening')}
-            >
-              Show listening example
-            </button>
-          </>
-        )}
-        {(state === 'listening' || state === 'cue' || state === 'paused') && (
-          <div className="mock-conversation">
-            {(state === 'listening' || state === 'cue') && (
-              <button
-                className="secondary-button"
-                onClick={() => returnToSelector('paused')}
-              >
-                Pause preview
-              </button>
-            )}
-            {state === 'paused' && (
-              <button
-                className="secondary-button"
-                onClick={() => returnToSelector('listening')}
-              >
-                Resume preview
-              </button>
-            )}
-            <section aria-labelledby="mock-context-title">
-              <h3 id="mock-context-title">Prior context</h3>
+
+        <div className="mock-transport">
+          {(state === 'idle' || state === 'stopped') && (
+            <>
               <p>
-                Fictional note: Robin offered to draft the plan before Friday.
+                {state === 'idle'
+                  ? 'No session yet. Nothing is being captured.'
+                  : 'The simulated session has ended. Nothing was captured or saved.'}
               </p>
-            </section>
-            <section aria-labelledby="mock-conversation-title">
-              <h3 id="mock-conversation-title">Conversation</h3>
-              <p>Alex: Who can bring the first draft to the review?</p>
-            </section>
-            {state === 'cue' && (
-              <section aria-labelledby="mock-cue-title">
-                <h3 id="mock-cue-title">Example context reminder</h3>
-                <p>Robin offered to draft the plan before Friday.</p>
-                <details>
-                  <summary>Why this example?</summary>
-                  <p>
-                    It refers to the fictional prior note and Alex’s example
-                    question above.
-                  </p>
-                </details>
+              <button
+                className="secondary-button"
+                data-mock-focus="start"
+                onClick={() => go('starting', 'stop')}
+              >
+                {state === 'idle'
+                  ? 'Start (simulated)'
+                  : 'Start again (simulated)'}
+              </button>
+            </>
+          )}
+          {state === 'starting' && (
+            <>
+              <p>
+                Simulated start. Nothing is loading and no connection is being
+                made. Stop cancels this start.
+              </p>
+              <button
+                className="secondary-button"
+                onClick={() => go('listening', 'pause')}
+              >
+                Finish start (simulated)
+              </button>
+            </>
+          )}
+          {state === 'failed' && (
+            <>
+              <p>
+                Simulated failure: the fictional source did not start. Nothing
+                was captured, and prior context is unchanged.
+              </p>
+              <button
+                className="secondary-button"
+                onClick={() => go('starting', 'stop')}
+              >
+                Retry (simulated)
+              </button>
+            </>
+          )}
+          {(state === 'listening' || state === 'cue') && (
+            <button
+              className="secondary-button"
+              data-mock-focus="pause"
+              onClick={() => go('paused', 'resume', state === 'cue')}
+            >
+              Pause (simulated)
+            </button>
+          )}
+          {state === 'paused' && (
+            <>
+              <p>Simulated pause. This is not a capture control.</p>
+              <button
+                className="secondary-button"
+                data-mock-focus="resume"
+                onClick={() =>
+                  go(cueKept ? 'cue' : 'listening', 'pause', cueKept)
+                }
+              >
+                Resume (simulated)
+              </button>
+            </>
+          )}
+        </div>
+
+        {inConversation && (
+          <section aria-labelledby="mock-cue-area-title">
+            <h3 id="mock-cue-area-title">Cue</h3>
+            {cueShown ? (
+              <div className="question mock-cue">
+                <p className="mock-cue-text">{citedNote.text}</p>
+                <p className="question-meta">
+                  Example cue · written by hand, not generated by AI
+                </p>
+                <button
+                  className="question-disclosure"
+                  data-mock-focus="why"
+                  aria-expanded={whyOpen}
+                  aria-controls={whyId}
+                  onClick={() => setWhyOpen(!whyOpen)}
+                >
+                  {whyOpen ? 'Hide sources (simulated)' : 'Why? (simulated)'}
+                </button>
+                <div id={whyId} hidden={!whyOpen} className="question-context">
+                  <p>Prior notes are not from this conversation.</p>
+                  <ul
+                    className="evidence-sources"
+                    aria-label="Example cue sources"
+                    role="list"
+                  >
+                    <li>
+                      <p className="source-title">{citedNote.title}</p>
+                      <p className="source-label">
+                        Fictional sample · {citedNote.date} · prior note
+                      </p>
+                      <blockquote className="evidence">
+                        “{citedNote.text}”
+                      </blockquote>
+                    </li>
+                    <li>
+                      <p className="source-label">
+                        This conversation · fictional line · Alex
+                      </p>
+                      <blockquote className="evidence">
+                        “{spokenLine}”
+                      </blockquote>
+                    </li>
+                  </ul>
+                </div>
                 <button
                   className="text-button"
-                  onClick={() => returnToSelector('listening')}
+                  onClick={() =>
+                    state === 'paused'
+                      ? go('paused', 'resume')
+                      : go('listening', 'show-cue')
+                  }
                 >
-                  Dismiss example
+                  Dismiss (simulated)
                 </button>
-              </section>
+              </div>
+            ) : (
+              <div className="mock-empty">
+                <p>
+                  {withdrawn
+                    ? 'The example cue was withdrawn because the fictional note it quotes was removed.'
+                    : 'No cue right now. One cue at a time appears here.'}
+                </p>
+                {state === 'listening' && cueAvailable && (
+                  <button
+                    className="secondary-button"
+                    data-mock-focus="show-cue"
+                    onClick={() => go('cue', 'why')}
+                  >
+                    Show example cue (simulated)
+                  </button>
+                )}
+              </div>
             )}
-            {state === 'paused' && (
-              <p>Preview paused. This is not a capture control.</p>
+          </section>
+        )}
+
+        {active && (
+          <section aria-labelledby="mock-conversation-title">
+            <h3 id="mock-conversation-title">Conversation</h3>
+            {inConversation ? (
+              <p>
+                <span className="mock-speaker">Alex (fictional line)</span>{' '}
+                {spokenLine}
+              </p>
+            ) : (
+              <p className="mock-empty">
+                No conversation text yet. This example adds a fictional line
+                once the simulated start finishes.
+              </p>
             )}
-          </div>
+          </section>
         )}
-        {(state === 'idle' || state === 'stopped') && (
-          <p>
-            Start the preview or choose a state above to inspect the layout.
-          </p>
-        )}
+
+        <section aria-labelledby="mock-context-title">
+          <h3 id="mock-context-title">Prior context</h3>
+          {notes.length ? (
+            <ul className="mock-notes" role="list">
+              {notes.map((note, index) => (
+                <li key={note.id}>
+                  <div>
+                    <p className="mock-note-title">{note.title}</p>
+                    <p className="mock-note-meta">
+                      Fictional sample · {note.date} · not from this
+                      conversation
+                    </p>
+                    <p>{note.text}</p>
+                  </div>
+                  <button
+                    className="secondary-button"
+                    data-mock-focus={`remove-${note.id}`}
+                    aria-label={`Remove (simulated): ${note.title}`}
+                    onClick={() => {
+                      const next = notes[index + 1] ?? notes[index - 1];
+                      setNoteIds(noteIds.filter((id) => id !== note.id));
+                      if (note.id === citedNote.id && cueShown) {
+                        if (state === 'cue') setState('listening');
+                        setCueKept(false);
+                        setWhyOpen(false);
+                        setWithdrawn(true);
+                      }
+                      focusNext.current = next
+                        ? `remove-${next.id}`
+                        : 'restore';
+                    }}
+                  >
+                    Remove (simulated)
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mock-empty">
+              No prior notes selected. The example cue needs a fictional note to
+              quote.
+            </p>
+          )}
+          {notes.length < fictionalNotes.length && (
+            <button
+              className="secondary-button"
+              data-mock-focus="restore"
+              onClick={() => {
+                setNoteIds(fictionalNotes.map(({ id }) => id));
+                setWithdrawn(false);
+                focusNext.current = `remove-${fictionalNotes[0].id}`;
+              }}
+            >
+              Restore fictional notes (simulated)
+            </button>
+          )}
+        </section>
       </div>
     </section>
   );

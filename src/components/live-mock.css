@@ -4,6 +4,34 @@
 }
 .live-mock > p {
   max-width: 65ch;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.layout-switch {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid #cfd2c7;
+  border-radius: var(--radius-control);
+  margin: 0 auto 0 20px;
+}
+.layout-switch button {
+  min-height: 44px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.layout-switch button:hover {
+  background: #e9ecdf;
+}
+.layout-switch button[aria-pressed='true'] {
+  background: var(--forest);
+  color: #f4f4e9;
 }
 .mock-state-picker {
   display: grid;
@@ -18,8 +46,18 @@
 .mock-session {
   padding: 24px;
   border: 1px solid #b9c8b6;
-  border-radius: 20px;
+  border-radius: var(--radius-panel);
   background: #f7f7ed;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.mock-banner {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed #8fa58c;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
 }
 .mock-session-header {
   display: flex;
@@ -30,16 +68,166 @@
 .mock-session-header h2 {
   margin-top: 0;
 }
-.mock-conversation section {
+.mock-session-header h2:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+.mock-facts {
+  margin: 12px 0 0;
+}
+.mock-facts div {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.mock-facts dt {
+  flex: 0 0 68px;
+  color: var(--muted);
+}
+.mock-facts dd {
+  margin: 0;
+}
+.mock-status {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.mock-transport {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  margin-top: 16px;
+}
+.mock-transport p {
+  flex: 1 1 280px;
+}
+.mock-session section {
   border-top: 1px solid #b9c8b6;
   margin-top: 20px;
   padding-top: 12px;
+}
+.mock-session h3 {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.mock-empty,
+.mock-note-meta {
+  color: var(--muted);
+}
+.mock-empty .secondary-button,
+.mock-notes + .secondary-button,
+.mock-empty + .secondary-button {
+  margin-top: 12px;
+}
+.mock-cue {
+  max-width: 480px;
+}
+.mock-cue-text {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+.mock-cue .text-button {
+  min-height: 44px;
+  margin-top: 4px;
+  color: #f4f4e9;
+  font-size: 16px;
+}
+.mock-cue .text-button:hover {
+  color: #dae4cf;
+}
+.mock-cue .text-button:focus-visible {
+  outline-color: #f4f4e9;
+}
+.mock-cue .question-disclosure {
+  display: flex;
+}
+/* The mock keeps a text label when open, so it needs the full width. */
+.mock-cue .question-disclosure[aria-expanded='true'] {
+  width: auto;
+  justify-content: flex-start;
+  color: #f4f4e9;
+  text-decoration: underline;
+}
+.mock-speaker {
+  font-weight: 700;
+}
+.mock-notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.mock-notes li {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 16px;
+}
+.mock-notes li + li {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.mock-note-title {
+  font-weight: 700;
+}
+.mock-note-meta {
+  font-size: 14px;
+}
+@media (max-width: 1100px) {
+  /* Too narrow for one row: the switch takes its own instead of clipping. */
+  .toolbar:has(.layout-switch) {
+    height: auto;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-block: 10px;
+  }
+  .layout-switch {
+    order: 3;
+    flex: 1 0 100%;
+    margin: 0;
+  }
+  .layout-switch button {
+    flex: 1;
+  }
 }
 @media (max-width: 600px) {
   .live-mock {
     padding: 20px;
   }
+  .mock-state-picker {
+    margin: 16px 0;
+  }
+  /* Long simulated labels wrap instead of leaving the frame or the switch. */
+  .mock-session .secondary-button,
+  .layout-switch button {
+    max-width: 100%;
+    white-space: normal;
+  }
+  .layout-switch button {
+    padding-inline: 8px;
+  }
+  /* Stop leads the frame so it stays in view on a short, narrow window. */
+  .mock-session {
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+  }
   .mock-session-header {
+    order: -1;
+  }
+  .mock-banner {
+    margin: 12px 0 0;
+    padding: 12px 0 0;
+    border-top: 1px dashed #8fa58c;
+    border-bottom: 0;
+  }
+  .mock-session-header,
+  .mock-notes li {
     flex-direction: column;
   }
   .mock-session-header .mock-stop {
