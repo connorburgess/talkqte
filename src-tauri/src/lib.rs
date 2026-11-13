@@ -161,7 +161,19 @@ fn publish_processing(app: &tauri::AppHandle, runtime: &mut Runtime) -> engine::
     let (generation, microphone) = controller.control_snapshot();
     let capture = capture_state(microphone);
     #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
-    let capture = application_audio_host::with_source(app, capture);
+    let source = application_audio_host::source_status(app).map(|source| {
+        let combined = application_audio_host::overall_capture(capture, source.phase);
+        (combined, (capture, source))
+    });
+    #[cfg(not(all(target_os = "macos", feature = "native-audio-spike")))]
+    let source: Option<(
+        engine::CaptureState,
+        (engine::CaptureState, engine::SourceCapture),
+    )> = None;
+    let (capture, source) = match source {
+        Some((combined, source)) => (combined, Some(source)),
+        None => (capture, None),
+    };
     let (operation, mut startup) = runtime
         .live_start
         .control()
@@ -174,11 +186,12 @@ fn publish_processing(app: &tauri::AppHandle, runtime: &mut Runtime) -> engine::
         operation,
         microphone: generation.to_string(),
     };
-    let (snapshot, changed) = runtime.processing_status.update_with_capture_control(
+    let (snapshot, changed) = runtime.processing_status.update_with_source(
         &runtime.engine,
         capture,
         target,
         startup,
+        source,
     );
     if changed {
         let _ = app.emit_to("main", "processing:changed", &snapshot);

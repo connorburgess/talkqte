@@ -150,8 +150,10 @@ export function LiveSessionMock({
     <section className="live-mock" aria-labelledby="mock-title">
       <h1 id="mock-title">Live session layout preview</h1>
       <p>
-        Source, Capture, Transcript and Cue show the app’s real state,
-        read-only. Everything else is a fictional example.
+        {actual.application
+          ? 'Source, Capture, Application audio, Transcript and Cue show the app’s real state, read-only.'
+          : 'Source, Capture, Transcript and Cue show the app’s real state, read-only.'}{' '}
+        Everything else is a fictional example.
       </p>
       {actual.underway && (
         <p className="mock-real-session">
@@ -188,10 +190,12 @@ export function LiveSessionMock({
         ref={frame}
       >
         <p className="mock-banner">
-          Source, Capture, Transcript and Cue are real and read-only · every
-          control here is simulated and only changes the example · the preview
-          starts and stops no capture, connects to no meeting, and generates no
-          cues of its own
+          {actual.application
+            ? 'Source, Capture, Application audio, Transcript and Cue are real'
+            : 'Source, Capture, Transcript and Cue are real'}{' '}
+          and read-only · every control here is simulated and only changes the
+          example · the preview starts and stops no capture, connects to no
+          meeting, and generates no cues of its own
         </p>
         <div className="mock-real">
           <dl className="mock-facts">
@@ -210,6 +214,14 @@ export function LiveSessionMock({
                 )}
               </dd>
             </div>
+            {actual.application && (
+              <div>
+                <dt>Application audio</dt>
+                <dd>
+                  <span className="mock-tag">Real</span> {actual.application}
+                </dd>
+              </div>
+            )}
           </dl>
           <section aria-labelledby="real-transcript-title">
             <h2 id="real-transcript-title" className="mock-real-heading">

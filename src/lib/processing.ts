@@ -54,6 +54,52 @@ export interface ProcessingSnapshot {
   approved: ProcessingScope | null;
   issue: ProcessingIssue;
   lastDecision: 'quiet' | 'cue' | null;
+  /** Development builds only: the microphone alone, beside a combined capture. */
+  microphone?: ProcessingSnapshot['capture'];
+  /** Development builds only: the selected-application source. */
+  source?: SourceCapture;
+}
+/** The selected-application source in a development build. Off only when
+ * nothing was started or native cleanup was confirmed. */
+export interface SourceCapture {
+  phase:
+    | 'off'
+    | 'listing'
+    | 'reviewing'
+    | 'starting'
+    | 'listening'
+    | 'stopping'
+    | 'cleanupFailed'
+    | 'abandoned';
+  mayBeCapturing: boolean;
+  stalled: boolean;
+  canRetry: boolean;
+  application: string | null;
+  problem: string | null;
+}
+/** One sentence for the source, or null when there is nothing to say. Never
+ * says that nothing is captured while the source may be capturing. */
+export function describeSource(source: SourceCapture | null | undefined) {
+  if (!source || source.phase === 'off') return null;
+  const app = source.application || 'the selected application';
+  switch (source.phase) {
+    case 'listing':
+      return 'Application audio: waiting for macOS to list applications.';
+    case 'reviewing':
+      return `Application audio: ${app} is selected but not started.`;
+    case 'starting':
+      return `Application audio from ${app} is starting.`;
+    case 'listening':
+      return `Application audio from ${app} is being captured, including all of its windows.`;
+    case 'stopping':
+      return source.stalled
+        ? `macOS has not confirmed that application audio from ${app} stopped. It may still be captured.`
+        : `Stopping application audio from ${app}. It may be captured until macOS confirms.`;
+    case 'cleanupFailed':
+      return `Stopping application audio from ${app} failed. It may still be captured. A retry exists only as a development command.`;
+    case 'abandoned':
+      return `Application audio from ${app} was never confirmed stopped. It may still be captured. Nothing in TalkQTE can stop it; whether quitting does has not been checked.`;
+  }
 }
 export interface ProcessingReview {
   id: string;

@@ -15,13 +15,13 @@ use crate::{
         timing::TimingError,
         Application, Control, Failure, Gate, Review, Start, SCOPE_NOTICE,
     },
-    engine::CaptureState,
+    engine::{CaptureState, SourceCapture},
     native_source::{Monitor, Refused, Report},
 };
 use serde::{Deserialize, Serialize};
 use std::{
     sync::{
-        atomic::{AtomicBool, AtomicU8, Ordering},
+        atomic::{AtomicBool, Ordering},
         mpsc::{channel, Sender},
         Arc, Mutex, Weak,
     },
@@ -46,68 +46,8 @@ pub(crate) trait Backend {
 
 type Factory = Box<dyn FnOnce() -> Box<dyn Backend> + Send>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-#[repr(u8)]
-pub(crate) enum Phase {
-    /// Nothing was started, or native cleanup was confirmed.
-    Off,
-    /// Asking the OS for applications; its own prompt may be showing.
-    Listing,
-    /// One application is under review. Nothing is captured.
-    Reviewing,
-    Starting,
-    Listening,
-    /// Stop was requested and native cleanup has not been confirmed.
-    Stopping,
-    /// The OS reported that Stop or output removal failed. The application
-    /// may still be captured until an explicit retry succeeds.
-    CleanupFailed,
-    /// The worker ended without confirming cleanup. The application may still
-    /// be captured until TalkQTE quits; nothing here can stop it.
-    Abandoned,
-}
-
-impl Phase {
-    const ALL: [Self; 8] = [
-        Self::Off,
-        Self::Listing,
-        Self::Reviewing,
-        Self::Starting,
-        Self::Listening,
-        Self::Stopping,
-        Self::CleanupFailed,
-        Self::Abandoned,
-    ];
-
-    pub(crate) fn may_be_capturing(self) -> bool {
-        matches!(
-            self,
-            Self::Starting
-                | Self::Listening
-                | Self::Stopping
-                | Self::CleanupFailed
-                | Self::Abandoned
-        )
-    }
-}
-
-/// Why the last attempt ended, or what is wrong now. Labels only.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum Problem {
-    NoLiveSession,
-    SessionHasSource,
-    ClockRefused,
-    PermissionDenied,
-    SourceUnavailable,
-    ListFailed,
-    StartFailed,
-    StreamFailed,
-    StopFailed,
-    RemoveFailed,
-    Unavailable,
-}
+/// The phase and problem labels are shared with the processing snapshot.
+pub(crate) use crate::engine::{SourcePhase as Phase, SourceProblem as Problem};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -319,10 +259,12 @@ struct State {
 struct Inner {
     gate: Gate,
     state: Mutex<State>,
-    /// The phase last computed, readable without the state lock. Written
+    /// The status last computed, readable without the state lock. Written
     /// only under that lock: by a start, before the worker is asked, and by
-    /// every status read. It can lag a release, never a start.
-    phase: AtomicU8,
+    /// every status read. It can lag a release, never a start. A leaf lock:
+    /// nothing else is taken while it is held, so a reader that holds the
+    /// runtime lock cannot wait on the host.
+    published: Mutex<SourceCapture>,
 }
 
 #[derive(Clone)]
@@ -333,7 +275,14 @@ impl Host {
     pub(crate) fn new(backend: impl FnOnce() -> Box<dyn Backend> + Send + 'static) -> Self {
         Self(Arc::new(Inner {
             gate: Gate::default(),
-            phase: AtomicU8::new(Phase::Off as u8),
+            published: Mutex::new(SourceCapture {
+                phase: Phase::Off,
+                may_be_capturing: false,
+                stalled: false,
+                can_retry: false,
+                application: None,
+                problem: None,
+            }),
             state: Mutex::new(State {
                 revision: 0,
                 last: None,
@@ -508,7 +457,14 @@ impl Host {
         let worker = self.worker(&mut state)?;
         // Before the worker can act on it: from here the shared capture
         // state must not read Off.
-        self.0.phase.store(Phase::Starting as u8, Ordering::Release);
+        self.publish(SourceCapture {
+            phase: Phase::Starting,
+            may_be_capturing: true,
+            stalled: false,
+            can_retry: false,
+            application: Some(application.name().to_owned()),
+            problem: None,
+        });
         worker
             .send(Command::Run {
                 source: application.selection_id().to_owned(),
@@ -692,15 +648,30 @@ impl Host {
         Some(snapshot)
     }
 
-    /// The phase as of the last start or status read, without taking the
+    /// The status as of the last start or status read, without taking the
     /// host lock, for callers that already hold another lock.
-    pub(crate) fn phase_hint(&self) -> Phase {
-        Phase::ALL[usize::from(self.0.phase.load(Ordering::Acquire)) % Phase::ALL.len()]
+    pub(crate) fn published(&self) -> SourceCapture {
+        self.0
+            .published
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    fn publish(&self, status: SourceCapture) {
+        *self.0.published.lock().unwrap_or_else(|e| e.into_inner()) = status;
     }
 
     fn read(&self, state: &mut State, now: Instant) -> Snapshot {
         let view = self.view(state, now);
-        self.0.phase.store(view.phase as u8, Ordering::Release);
+        self.publish(SourceCapture {
+            phase: view.phase,
+            may_be_capturing: view.may_be_capturing,
+            stalled: view.stalled,
+            can_retry: view.can_retry,
+            application: view.application.clone(),
+            problem: view.problem,
+        });
         if state.last.as_ref() != Some(&view) {
             state.revision += 1;
             state.last = Some(view.clone());
@@ -777,9 +748,10 @@ fn new_id() -> Result<String, Error> {
 
 /// The capture state the rest of the app shows, with this source included:
 /// never Off or Unknown while the selected application may be captured. A
-/// starting microphone stays Starting whatever the source is doing, because
-/// the notebook disables its Stop control while capture reads Stopping, and a
-/// stuck source must not take Stop away from a microphone that is starting.
+/// starting microphone stays Starting whatever the source is doing, so a
+/// reader that disables Stop while capture reads Stopping (as the processing
+/// panel did before it read the microphone alone) never loses Stop for a
+/// microphone that is starting.
 pub(crate) fn overall_capture(microphone: CaptureState, source: Phase) -> CaptureState {
     if !source.may_be_capturing() {
         return microphone;
@@ -986,14 +958,11 @@ pub(crate) mod app {
         Ok(())
     }
 
-    /// The microphone's capture state with this source included. Called with
-    /// the runtime lock held, so it reads the phase without the host lock:
-    /// nothing in the host can then stall the runtime.
-    pub(crate) fn with_source(app: &tauri::AppHandle, microphone: CaptureState) -> CaptureState {
-        match app.try_state::<Host>() {
-            None => microphone,
-            Some(host) => overall_capture(microphone, host.phase_hint()),
-        }
+    /// The source's status for the processing snapshot. Called with the
+    /// runtime lock held, so it reads the published copy, never the host
+    /// lock: nothing in the host can then stall the runtime.
+    pub(crate) fn source_status(app: &tauri::AppHandle) -> Option<SourceCapture> {
+        app.try_state::<Host>().map(|host| host.published())
     }
 
     pub(crate) fn exit(app: &tauri::AppHandle) {
@@ -1003,7 +972,7 @@ pub(crate) mod app {
     }
 }
 
-pub(crate) use app::{exit, install, with_source};
+pub(crate) use app::{exit, install, source_status};
 
 #[cfg(test)]
 mod tests;
