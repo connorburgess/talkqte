@@ -41,10 +41,9 @@
       "trigger": "put a small sign with a link by the gate",
       "notBeforeMs": 56000,
       "cue": "A gate sign needs council approval, about two weeks",
-      "noteIds": ["garden-committee", "visitor-schedule"],
+      "noteIds": ["garden-committee"],
       "support": [
-        "Gate signs need the council's approval, which usually takes about two weeks",
-        "Three volunteers asked for printed copies"
+        "Gate signs need the council's approval, which usually takes about two weeks"
       ],
       "estimatedSpokenEndMs": 55760
     }
