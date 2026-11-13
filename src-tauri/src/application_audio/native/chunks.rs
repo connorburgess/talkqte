@@ -1,8 +1,8 @@
 //! Worker-side transcription chunks for native blocks. Each chunk keeps the
 //! exact rational mapping of every block it holds, so a recognizer offset
 //! inside the chunk maps to corrected session time. A floored chunk start plus
-//! a nominal 16 kHz offset would lose that correction. No recognizer is
-//! connected here.
+//! a nominal 16 kHz offset would lose that correction. A transcription worker
+//! can queue these chunks, but no capture path creates one in the app.
 
 use super::{clock::NativeBlock, position::Position};
 use crate::application_audio::{
@@ -11,7 +11,7 @@ use crate::application_audio::{
     timing::TimingError,
     Control,
 };
-use crate::transcription::{AudioChunk, SAMPLE_RATE};
+use crate::transcription::{AudioChunk, Timed, SAMPLE_RATE};
 use std::sync::Arc;
 
 /// Timing segments one chunk may hold. Typical native blocks fill a chunk
@@ -77,6 +77,24 @@ impl NativeChunk {
             .start
             .interpolate(segment.end, sample - segment.first, segment.frames)?
             .millis()
+    }
+}
+
+/// Lets the transcription worker carry a native chunk through its queue and
+/// time each recognized line on the chunk's own clock mapping.
+impl Timed for NativeChunk {
+    fn audio(&self) -> &AudioChunk {
+        &self.audio
+    }
+
+    fn session_ms(&self, offset_ms: u64) -> Option<u64> {
+        NativeChunk::session_ms(self, offset_ms).ok()
+    }
+
+    // Every path that stops or replaces a source cancels its control first,
+    // so the chunk's own control answers for the source without the gate.
+    fn current(&self, session: u64) -> bool {
+        self.session == session && !self.control.is_cancelled()
     }
 }
 
@@ -225,6 +243,14 @@ impl NativeChunker {
 mod tests {
     use super::super::clock::tests::native_blocks;
     use super::*;
+    use crate::transcription::{Recognized, Transcriber, Worker};
+    use std::{
+        sync::{
+            atomic::{AtomicU64, Ordering},
+            mpsc,
+        },
+        time::Duration,
+    };
 
     /// Fixture clock relations from the clock tests: (timebase rate, source
     /// phase in ns, session ns per source frame). Rates other than 1 model a
@@ -389,5 +415,160 @@ mod tests {
         assert!(!chunk.belongs_to(8, &control));
         gate.stop(&control).unwrap();
         assert!(!chunk.belongs_to(7, &control));
+    }
+
+    /// Returns the same scripted offsets for every chunk, counting calls.
+    /// With a gate, reports each call and waits for the test to open it.
+    struct Script {
+        offsets: Vec<u64>,
+        calls: Arc<AtomicU64>,
+        gate: Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>,
+    }
+
+    impl Transcriber for Script {
+        fn transcribe(&mut self, _: &AudioChunk) -> Result<Vec<Recognized>, String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if let Some((started, open)) = &self.gate {
+                let _ = started.send(());
+                let _ = open.recv();
+            }
+            Ok(self
+                .offsets
+                .iter()
+                .map(|&offset_ms| Recognized {
+                    offset_ms,
+                    speaker: "Speaker 1".into(),
+                    text: format!("Line at {offset_ms}."),
+                })
+                .collect())
+        }
+    }
+
+    fn collect() -> (
+        impl FnMut(u64, crate::engine::Segment) -> Result<(), String> + Send + 'static,
+        mpsc::Receiver<u64>,
+    ) {
+        let (report, delivered) = mpsc::channel();
+        let sink = move |_, segment: crate::engine::Segment| {
+            let _ = report.send(segment.at_ms);
+            Ok(())
+        };
+        (sink, delivered)
+    }
+
+    fn chunks(control: &Control, blocks: Vec<NativeBlock>) -> Vec<NativeChunk> {
+        let mut chunker = NativeChunker::new(control.clone(), 7);
+        let mut ready = Vec::new();
+        for block in blocks {
+            ready.extend(chunker.push(block, 7).unwrap());
+        }
+        ready.extend(chunker.finish(7).unwrap());
+        ready
+    }
+
+    #[test]
+    fn a_queued_chunk_times_recognized_lines_on_the_native_clock() {
+        for (rate, phase, frame_ns) in RATES {
+            let (_gate, control, _capture, blocks) =
+                native_blocks(rate, &contiguous(13, 24, 2_048));
+            let ready = chunks(&control, blocks);
+            assert_eq!(ready.len(), 2, "a full chunk and the split remainder");
+            let calls = Arc::new(AtomicU64::new(0));
+            // Out of order, with one offset past each chunk's audio.
+            let script = Script {
+                offsets: vec![72, 0, 3_001, 40],
+                calls: calls.clone(),
+                gate: None,
+            };
+            let (sink, delivered) = collect();
+            let worker = Worker::start(7, 4, script, sink);
+            for chunk in ready {
+                assert!(worker.submit(chunk).is_ok());
+            }
+            let stats = worker.finish(Duration::from_secs(5));
+            assert_eq!(
+                (
+                    stats.chunks,
+                    stats.accepted,
+                    stats.out_of_range,
+                    stats.stale
+                ),
+                (2, 6, 2, 0),
+                "rate {rate}"
+            );
+            let times: Vec<u64> = delivered.try_iter().collect();
+            let at = |chunk_frame: u64, offset: u64| {
+                expected(phase, frame_ns, 13 + chunk_frame + offset * 16)
+            };
+            assert_eq!(
+                times,
+                [
+                    at(0, 0),
+                    at(0, 40),
+                    at(0, 72),
+                    at(48_000, 0),
+                    at(48_000, 40),
+                    at(48_000, 72)
+                ],
+                "rate {rate}"
+            );
+            if rate != 1.0 {
+                // A floored start plus the nominal offset would be wrong here.
+                assert_ne!(times[2], times[0] + 72, "rate {rate}");
+            }
+        }
+    }
+
+    #[test]
+    fn stop_during_recognition_withholds_the_result_and_skips_queued_audio() {
+        let (gate, control, _capture, blocks) = native_blocks(1.0, &contiguous(13, 30, 2_048));
+        let ready = chunks(&control, blocks);
+        assert_eq!(ready.len(), 2);
+        let calls = Arc::new(AtomicU64::new(0));
+        let (started, recognizing) = mpsc::channel();
+        let (open, opened) = mpsc::channel();
+        let script = Script {
+            offsets: vec![0, 100],
+            calls: calls.clone(),
+            gate: Some((started, opened)),
+        };
+        let (sink, delivered) = collect();
+        let worker = Worker::start(7, 4, script, sink);
+        for chunk in ready {
+            assert!(worker.submit(chunk).is_ok());
+        }
+        recognizing.recv().unwrap(); // The first chunk is being recognized.
+        gate.stop(&control).unwrap();
+        open.send(()).unwrap();
+        // The worker itself was never cancelled: the source's Stop alone
+        // keeps both chunks out of the transcript.
+        let stats = worker.finish(Duration::from_secs(5));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "queued audio not recognized"
+        );
+        assert_eq!((stats.chunks, stats.accepted, stats.stale), (1, 0, 2));
+        assert!(delivered.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_chunk_from_another_session_is_never_recognized() {
+        let (_gate, control, _capture, blocks) = native_blocks(1.0, &contiguous(13, 2, 2_048));
+        let ready = chunks(&control, blocks);
+        let calls = Arc::new(AtomicU64::new(0));
+        let script = Script {
+            offsets: vec![0],
+            calls: calls.clone(),
+            gate: None,
+        };
+        let (sink, delivered) = collect();
+        let worker = Worker::start(8, 4, script, sink);
+        for chunk in ready {
+            assert!(worker.submit(chunk).is_ok());
+        }
+        let stats = worker.finish(Duration::from_secs(5));
+        assert_eq!((calls.load(Ordering::SeqCst), stats.stale), (0, 1));
+        assert!(delivered.try_recv().is_err());
     }
 }

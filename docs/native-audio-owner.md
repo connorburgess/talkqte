@@ -410,10 +410,37 @@ applicable dependency licenses in any future distributed bundle. The pinned
 also records Apple SDK provenance and Xcode licensing considerations. This record
 does not replace those terms or complete a distribution-license review.
 
+### Native timing at result delivery — 13 November 2026
+
+The transcription worker's queue now accepts any chunk that supplies its own
+timing (`transcription::Timed`), and a `NativeChunk` is one. The chunk travels
+through the queue with its mapping, so a line recognized seconds later is still
+timed by `NativeChunk::session_ms`, not by a floored start plus a nominal
+offset. An offset outside the chunk's audio is skipped and counted, never
+clamped. Microphone chunks keep their existing nominal timing and behavior.
+
+The worker asks the chunk whether its source is still current before
+recognition and again before each delivered line. A chunk whose source was
+stopped or replaced, or that belongs to another session, is not recognized; if
+Stop arrives while the recognizer is busy, its lines are discarded. Both cases
+are counted in `Stats::stale`. The worker itself keeps running, so this does
+not depend on the caller also cancelling it. The check reads the chunk's own
+cancellation flag, which every stop and replacement path in the gate sets.
+
+Three memory-only tests queue real native chunks at relative rates 0.5, 1 and
+2 with a scripted recognizer: delivered times across a split block, an
+out-of-range offset, Stop during recognition with a second chunk waiting, and a
+chunk from another session. Two default-build tests cover the same contract
+with a synthetic clock. A mutation check confirmed the native tests fail with
+nominal timing or without the source check.
+
+Nothing creates a native chunk in the app: no capture path, recognizer
+connection, command or permission request is added. Actual drift, recognizer
+offset accuracy on real audio, and Stop latency on a device remain untested.
+
 ## Next acceptance and UI/UX checkpoint
 
-The next dependencies are applying native chunk timing to recognized offsets at
-result delivery, and connecting the worker to explicit selection, session
+The next dependency is connecting a worker to explicit selection, session
 retirement and app shutdown.
 The worker mechanism is tested; the app exit/recovery policy is not implemented. Verify callback
 allocation/latency and actual buffer sizes, and prepare explicit consent/selection
