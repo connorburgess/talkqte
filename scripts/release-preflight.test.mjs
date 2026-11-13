@@ -39,6 +39,49 @@ const plist = (entries) =>
     )
     .join('\n')}\n</dict>\n</plist>\n`;
 
+/** A minimal fictional 64-bit Mach-O executable: a header, one load command
+ * per [path, weak] library, then `payload` as plain bytes. */
+function machO(libraries, payload = '') {
+  const commands = libraries.map(([path, weak]) => {
+    const name = Buffer.from(`${path}\0`);
+    const size = Math.ceil((24 + name.length) / 8) * 8;
+    const command = Buffer.alloc(size);
+    command.writeUInt32LE(weak ? 0x80000018 : 0xc, 0);
+    command.writeUInt32LE(size, 4);
+    command.writeUInt32LE(24, 8);
+    name.copy(command, 24);
+    return command;
+  });
+  const header = Buffer.alloc(32);
+  header.writeUInt32LE(0xfeedfacf, 0);
+  header.writeUInt32LE(0x0100000c, 4);
+  header.writeUInt32LE(2, 12);
+  header.writeUInt32LE(commands.length, 16);
+  header.writeUInt32LE(
+    commands.reduce((total, command) => total + command.length, 0),
+    20,
+  );
+  return Buffer.concat([header, ...commands, Buffer.from(payload, 'latin1')]);
+}
+
+/** A universal file holding the given slices. */
+function universal(...slices) {
+  const header = Buffer.alloc(8 + slices.length * 20);
+  header.writeUInt32BE(0xcafebabe, 0);
+  header.writeUInt32BE(slices.length, 4);
+  let offset = header.length;
+  slices.forEach((slice, index) => {
+    header.writeUInt32BE(offset, 8 + index * 20 + 8);
+    header.writeUInt32BE(slice.length, 8 + index * 20 + 12);
+    offset += slice.length;
+  });
+  return Buffer.concat([header, ...slices]);
+}
+
+const SYSTEM = ['/usr/lib/libSystem.B.dylib'];
+const SPIKE =
+  '/System/Library/Frameworks/ScreenCaptureKit.framework/Versions/A/ScreenCaptureKit';
+
 function write(root, path, content) {
   mkdirSync(dirname(join(root, path)), { recursive: true });
   writeFileSync(join(root, path), content);
@@ -99,7 +142,15 @@ function fixture(t, change = {}) {
   };
   change.info?.(info);
   write(app, 'Contents/Info.plist', plist(info));
-  write(app, 'Contents/MacOS/orchard', change.executable ?? 'fictional code');
+  write(
+    app,
+    'Contents/MacOS/orchard',
+    change.binary ??
+      machO(
+        change.libraries ?? [SYSTEM],
+        change.executable ?? 'fictional code',
+      ),
+  );
   chmodSync(join(app, 'Contents/MacOS/orchard'), 0o755);
   write(app, 'Contents/Resources/icon.icns', 'icon');
   // Written last, so its digests cover the lockfiles above.
@@ -767,4 +818,72 @@ test('a development feature switched on by the configuration fails', (t) => {
     '[package]\nname = "orchard"\nversion = "1.4.2"\n\n[features]\nnative-audio-spike = ["dep:fictional-spike"]\nlocal-whisper = ["dep:fictional-whisper"]\n',
   );
   assert.deepEqual(failures(preflight({ root: declaredOnly.root })), []);
+});
+
+test("an executable that loads the development feature's framework fails", (t) => {
+  const expected =
+    'development features in the app: the executable loads ScreenCaptureKit, which only native-audio-spike links; it was built with that development feature';
+  for (const libraries of [
+    [SYSTEM, [SPIKE]],
+    [SYSTEM, [SPIKE, true]],
+  ]) {
+    const { root, app } = fixture(t, { libraries });
+    assert.deepEqual(failures(preflight({ root, app, run: tools() })), [
+      expected,
+    ]);
+  }
+  const mixed = fixture(t, {
+    binary: universal(machO([SYSTEM]), machO([SYSTEM, [SPIKE]])),
+  });
+  assert.deepEqual(failures(preflight({ ...mixed, run: tools() })), [expected]);
+
+  const plain = fixture(t, {
+    libraries: [
+      SYSTEM,
+      [
+        '/System/Library/Frameworks/AVFoundation.framework/Versions/A/AVFoundation',
+      ],
+      [
+        '/System/Library/Frameworks/ScreenCaptureKitHelper.framework/Versions/A/ScreenCaptureKitHelper',
+      ],
+    ],
+  });
+  const result = preflight({ ...plain, run: tools() });
+  assert.deepEqual(failures(result), []);
+  assert.match(
+    result.findings.find(
+      (finding) => finding.check === 'development features in the app',
+    ).message,
+    /none of ScreenCaptureKit among 3 linked libraries/,
+  );
+});
+
+test('an executable the check cannot read fails a release and is noted otherwise', (t) => {
+  const { root, app } = fixture(t, {
+    binary: Buffer.from('#!/bin/sh\necho fictional\n'),
+  });
+  const local = preflight({ root, app, run: tools() });
+  assert.deepEqual(failures(local), []);
+  assert.equal(
+    local.findings.find(
+      (finding) => finding.check === 'development features in the app',
+    ).level,
+    'note',
+  );
+  assert.deepEqual(
+    failures(preflight({ root, app, expect: 'signed', run: tools() })),
+    ['development features in the app: not inspected: not a Mach-O executable'],
+  );
+});
+
+test('the framework marker stops counting once release builds link its crate', (t) => {
+  const { root } = fixture(t);
+  write(
+    root,
+    'src-tauri/NOTICES.txt',
+    `Fictional notices\n${inputsLine(root)}\n\nobjc2-screen-capture-kit 0.3.2\n  Declared licence: Zlib OR Apache-2.0 OR MIT\n`,
+  );
+  assert.deepEqual(failures(preflight({ root })), [
+    'development features: objc2-screen-capture-kit is now linked into release builds, so ScreenCaptureKit no longer shows that a bundle was built with native-audio-spike; update DEVELOPMENT_FRAMEWORKS in scripts/release-preflight.mjs',
+  ]);
 });

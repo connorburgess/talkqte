@@ -328,10 +328,10 @@ test('the live layout names Application audio among its real parts only with a s
   const banner = preview.locator('.mock-banner');
   // Without the development fields, the text is as before.
   await expect(preview).toContainText(
-    'Source, Capture and Transcript show the app’s real state, read-only. Everything else is a fictional example.',
+    'Source, Capture, Transcript and Cue show the app’s real state, read-only. Everything else is a fictional example.',
   );
   await expect(banner).toContainText(
-    'Source, Capture and Transcript are real and read-only',
+    'Source, Capture, Transcript and Cue are real and read-only',
   );
   await page.evaluate((value) => window.captureTest.send(value), {
     capture: 'stopping',
@@ -339,10 +339,10 @@ test('the live layout names Application audio among its real parts only with a s
     source: source('abandoned'),
   } satisfies Partial<ProcessingSnapshot>);
   await expect(preview).toContainText(
-    'Source, Capture, Application audio and Transcript show the app’s real state, read-only. Everything else is a fictional example.',
+    'Source, Capture, Application audio, Transcript and Cue show the app’s real state, read-only. Everything else is a fictional example.',
   );
   await expect(banner).toContainText(
-    'Source, Capture, Application audio and Transcript are real and read-only',
+    'Source, Capture, Application audio, Transcript and Cue are real and read-only',
   );
 });
 

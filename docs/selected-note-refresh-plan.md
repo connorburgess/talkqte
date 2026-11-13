@@ -47,7 +47,7 @@ What the slice does, in `src-tauri/src/context_refresh.rs`:
 
 Not covered by this slice: an interval or any automatic refresh, choosing a subset of the kept notes, applying the [reminder policy](#reminders-from-copies-a-check-could-not-confirm) to evaluated cues, measured timeout and rate-limit values, and request-rate or device-cost measurement. Acceptance items 1 to 5 above are met only in part and only for a single explicit check; item 6 has keyboard-activation and narrow-window browser checks, not screen-reader evidence. Evidence and limits are in the [validation record](granola-import-validation.md#explicit-update-check-against-a-simulated-provider).
 
-Next blocker: a provider-supported workspace identity. Acceptance check: in a separately authorized account session, establish whether Granola exposes one through a documented tool or field, record only its shape, and only then decide whether the real connection may offer the check.
+Next blocker: a provider-supported workspace identity. Acceptance check: in a separately authorized account session ([step 6 of the owner procedure](granola-account-acceptance.md#6-does-granola-expose-a-workspace-or-account-identity)), establish whether Granola exposes one through a documented tool or field, record only its shape, and only then decide whether the real connection may offer the check.
 
 ## Reminders from copies a check could not confirm
 

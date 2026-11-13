@@ -189,6 +189,16 @@
 .mock-lines li {
   overflow-wrap: anywhere;
 }
+/* The real cue is plain text, not the card: it has no controls here. */
+.mock-real-cue-text {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.mock-real-cue > * + * {
+  margin-top: 6px;
+}
 .mock-lines li + li {
   margin-top: 6px;
 }
