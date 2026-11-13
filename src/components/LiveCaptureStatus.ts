@@ -1,7 +1,11 @@
 import { desktop } from '../lib/bridge';
 import { microphoneLabel, type Microphone } from '../lib/microphone';
 import type { Segment, Snapshot } from '../lib/types';
-import { describeSource, type SourceCapture } from '../lib/processing';
+import {
+  describeSource,
+  microphoneNotCapturing,
+  type SourceCapture,
+} from '../lib/processing';
 
 /** What the notebook already knows about the microphone and live session. */
 export interface RealCapture {
@@ -55,7 +59,7 @@ export function describeCapture(
       (real.source.phase === 'starting' || real.source.phase === 'listening') &&
       real.live &&
       !real.finishing &&
-      real.microphone.state?.status === 'off'
+      microphoneNotCapturing(real.microphone.state)
         ? 'Live session running from application audio. The microphone is not used.'
         : described.capture === 'Off. Nothing is being captured.'
           ? 'The microphone is off.'
@@ -206,7 +210,7 @@ export function describeTranscript(
   else {
     // Only for a session the application feeds alone, with the microphone off.
     const alone =
-      application?.sourceSession && microphone.state?.status === 'off'
+      application?.sourceSession && microphoneNotCapturing(microphone.state)
         ? application.phase
         : null;
     note =

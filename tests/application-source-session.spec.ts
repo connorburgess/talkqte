@@ -449,3 +449,66 @@ test('the live layout cue controls credit the application in a session with no m
     'the microphone and transcript continue',
   );
 });
+
+test('focus stays in the panel when the stopping event arrives before the reply', async ({
+  page,
+}) => {
+  const panel = await panelAlone(page);
+  await sendAlone(page, {
+    capture: 'running',
+    microphone: 'off',
+    source: source('listening', true),
+  });
+  await page.evaluate(
+    (value) => window.processingTest.publishBeforeSourceReply(value),
+    {
+      capture: 'stopping',
+      microphone: 'off',
+      source: source('stopping', true),
+    } satisfies Partial<ProcessingSnapshot>,
+  );
+  await panel
+    .getByRole('button', { name: 'Stop application audio', exact: true })
+    .click();
+  await expect(
+    panel.getByRole('button', { name: 'Stop application audio' }),
+  ).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const panel = document
+          .querySelector('#processing-title')
+          ?.closest('section');
+        return !!panel && panel.contains(document.activeElement);
+      }),
+    )
+    .toBe(true);
+});
+
+test('a failed microphone counts as unused only once its device is released', async ({
+  page,
+}) => {
+  const { microphone } = await notebook(page);
+  await sourceSession(page, 'listening');
+  // Failed and released, for example after a denied permission.
+  await page.evaluate((value) => window.microphoneTest.send(value), {
+    status: 'error' as const,
+    canStart: true,
+    message: 'Check microphone permission in System Settings.',
+    deviceName: null,
+  });
+  await expect(microphone).toContainText(
+    'Audio from Fictional player is transcribed on this device; the microphone is not used.',
+  );
+  // Failed with its cleanup still pending: it may still be capturing.
+  await page.evaluate((value) => window.microphoneTest.send(value), {
+    status: 'error' as const,
+    canStart: false,
+    message: 'The fictional input stopped responding.',
+    deviceName: null,
+  });
+  await expect(microphone).not.toContainText('the microphone is not used');
+  await expect(page.locator('.notebook-body')).not.toContainText(
+    'Audio from Fictional player · transcribed',
+  );
+});

@@ -41,7 +41,10 @@ import {
 } from './components/PanelDivider';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
 import { useCaptureControl } from './lib/useCaptureControl';
-import { sourceOnlyApplication } from './lib/processing';
+import {
+  microphoneNotCapturing,
+  sourceOnlyApplication,
+} from './lib/processing';
 
 const floating = new URLSearchParams(location.search).get('window') === 'cue';
 
@@ -364,10 +367,7 @@ function Notebook() {
   const capture = useCaptureControl();
   // A session fed by a selected application alone, with the microphone off
   // (development builds only); null otherwise.
-  const sourceApp = sourceOnlyApplication(
-    capture.state,
-    microphone.state?.status,
-  );
+  const sourceApp = sourceOnlyApplication(capture.state, microphone.state);
   const [startPending, setStartPending] = useState(false);
   const [startInstalled, setStartInstalled] = useState(false);
   useEffect(() => {
@@ -1324,7 +1324,7 @@ function Notebook() {
                       ? 'Local speech model · capture status shown above'
                       : finishing
                         ? capture.state?.source?.mayBeCapturing &&
-                          microphone.state?.status === 'off'
+                          microphoneNotCapturing(microphone.state)
                           ? 'Ending the live session. Application audio is shown under Cue processing.'
                           : 'Waiting for microphone release and remaining transcription.'
                         : state.live

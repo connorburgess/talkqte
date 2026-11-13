@@ -167,7 +167,7 @@ impl Backend for Fake {
                 crate::microphone::Status::Off
             };
             session_preflight(
-                Some(microphone),
+                Some(crate::microphone::not_capturing(microphone, true)),
                 !self.script.recognizer_missing.load(Ordering::SeqCst),
             )?;
             runtime.begin_source_session(control)?
@@ -1277,4 +1277,41 @@ fn the_source_session_flag_holds_only_from_its_start_until_its_source_is_stopped
     assert!(!stopping.source_session && !fixture.host.published().source_session);
     fixture.script.stop_hangs.store(false, Ordering::SeqCst);
     fixture.wait_phase(Phase::Off);
+}
+
+#[test]
+fn a_failed_microphone_blocks_a_source_session_only_while_it_may_still_capture() {
+    use crate::microphone::{not_capturing, Status};
+    // Failed and released, for example after a denied permission: nothing is
+    // captured and a start may follow, so the session may begin.
+    assert_eq!(
+        session_preflight(Some(not_capturing(Status::Error, true)), true),
+        Ok(())
+    );
+    assert_eq!(
+        session_preflight(Some(not_capturing(Status::Off, true)), true),
+        Ok(())
+    );
+    // Failed with its cleanup pending, or open in any way: possibly capturing.
+    for status in [
+        Status::Error,
+        Status::Starting,
+        Status::Listening,
+        Status::Stopping,
+    ] {
+        assert_eq!(
+            session_preflight(Some(not_capturing(status, false)), true),
+            Err(Failure::Busy),
+            "{status:?}"
+        );
+    }
+    for status in [Status::Starting, Status::Listening, Status::Stopping] {
+        assert!(!not_capturing(status, true), "{status:?}");
+    }
+    // A controller that cannot be read is not taken as idle.
+    assert_eq!(session_preflight(None, true), Err(Failure::Busy));
+    assert_eq!(
+        session_preflight(Some(true), false),
+        Err(Failure::Unavailable)
+    );
 }

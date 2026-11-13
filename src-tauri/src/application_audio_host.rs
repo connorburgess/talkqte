@@ -824,14 +824,16 @@ fn active_phase(abandoned: bool, stage: Option<Stage>, cancelled: bool) -> Phase
 /// available, or the session would end as soon as it began after clearing the
 /// previous one; and the microphone must read off, since the session says it
 /// is not used. A microphone that cannot be read counts as not off.
+/// `microphone_not_capturing` is the controller's reading (off, or failed
+/// with its device released); None means it could not be read.
 pub(crate) fn session_preflight(
-    microphone: Option<crate::microphone::Status>,
+    microphone_not_capturing: Option<bool>,
     recognizer_available: bool,
 ) -> Result<(), Failure> {
     if !recognizer_available {
         return Err(Failure::Unavailable);
     }
-    if microphone != Some(crate::microphone::Status::Off) {
+    if microphone_not_capturing != Some(true) {
         return Err(Failure::Busy);
     }
     Ok(())
@@ -945,7 +947,7 @@ pub(crate) mod app {
                 .with(|runtime| {
                     // Under the runtime lock, which a standalone microphone
                     // start also consults, so the two cannot interleave.
-                    session_preflight(controller.try_status(), recognizer_available)?;
+                    session_preflight(controller.try_not_capturing(), recognizer_available)?;
                     runtime.begin_source_session(control)
                 })
                 .ok_or(Failure::Unavailable)??;

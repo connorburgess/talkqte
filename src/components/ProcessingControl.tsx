@@ -390,10 +390,16 @@ export function ProcessingControl({
             disabled={busy === 'source'}
             onClick={() =>
               void act('source', async () => {
-                await processingApi.stopSource(sourceOperation);
-                // This button goes once Stop is under way; keep focus in
-                // the panel rather than dropping it to the page.
+                // This button goes once Stop is under way, which the status
+                // event can report before the command replies. Keep focus in
+                // the panel either way; drop the intent if the request fails.
                 restoreFocus.current = true;
+                try {
+                  await processingApi.stopSource(sourceOperation);
+                } catch (error) {
+                  restoreFocus.current = false;
+                  throw error;
+                }
               })
             }
           >

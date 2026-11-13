@@ -58,9 +58,11 @@ audio, with no microphone.
   Start live session, but loads no model for the session and opens no
   microphone. The source's worker loads its own recognizer, as before. It is
   refused, with nothing started and nothing cleared, while another live
-  session, a live start or the demo runs, and while the microphone is not off
-  (an activity check, for example, or a controller that cannot be read); the
-  status then says `sessionBusy`. It is also refused, as `unavailable`, when
+  session, a live start or the demo runs, and while the microphone may be
+  capturing: open in any way (an activity check, for example), failed with its
+  cleanup still pending, or behind a controller that cannot be read. The
+  status then says `sessionBusy`. A microphone that failed and has released
+  its device, for example after a denied permission, does not block it. It is also refused, as `unavailable`, when
   the build has no local transcription or no installed model, so it never
   clears the previous session only to end at once. A model that is present but
   fails its checksum is still found only when the source's worker loads it.
@@ -71,9 +73,10 @@ audio, with no microphone.
   Either refusal says "Stop the live session before checking the microphone."
 - The status marks the session as the source's own only from when the worker
   has begun it until its source is stopped, and only while that source is
-  starting or capturing. The notebook's wording also requires both the
-  processing snapshot and the microphone's own status to read the microphone
-  off, so a microphone that has just started is never called unused.
+  starting or capturing. The notebook's wording also requires the processing
+  snapshot to read the microphone off and the microphone's own status to read
+  off, or failed with its device released, by the same rule the native side
+  uses. A microphone that has just started is never called unused.
 - The session's Stop stops its source, including a source that has not
   attached yet: the source's control is registered with the session when the
   session begins.
