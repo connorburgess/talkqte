@@ -19,7 +19,7 @@ use crate::context::{ContextItem, ContextStore, Provider, SourceError};
 use serde::Serialize;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    mpsc, Arc,
+    mpsc, Arc, Mutex, PoisonError,
 };
 use std::time::{Duration, Instant};
 
@@ -147,14 +147,23 @@ pub struct Fetched {
 pub struct Ticket {
     id: u64,
     selection: Vec<String>,
+    /// The notebook's current selection for this check, which shrinks when
+    /// a note is removed; shared so a removed note is not asked about.
+    live: Live,
     workspace: Option<String>,
     cancelled: Arc<AtomicBool>,
     settled: Arc<AtomicBool>,
 }
 
+type Live = Arc<Mutex<Vec<String>>>;
+
+fn live_ids(live: &Live) -> std::sync::MutexGuard<'_, Vec<String>> {
+    live.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 struct Current {
     id: u64,
-    selection: Vec<String>,
+    selection: Live,
     cancelled: Arc<AtomicBool>,
 }
 
@@ -207,14 +216,16 @@ impl Refresh {
         let cancelled = Arc::new(AtomicBool::new(false));
         let settled = Arc::new(AtomicBool::new(false));
         self.settled = Some(settled.clone());
+        let live = Arc::new(Mutex::new(selection.clone()));
         self.current = Some(Current {
             id: self.next,
-            selection: selection.clone(),
+            selection: live.clone(),
             cancelled: cancelled.clone(),
         });
         Ok(Ticket {
             id: self.next,
             selection,
+            live,
             workspace: self.workspace.clone(),
             cancelled,
             settled,
@@ -244,11 +255,13 @@ impl Refresh {
         }
         let source_id = source_id.trim();
         self.notes.retain(|entry| entry.source_id != source_id);
-        if let Some(current) = &mut self.current {
-            current.selection.retain(|id| id != source_id);
-            if current.selection.is_empty() {
-                self.stop();
-            }
+        let emptied = self.current.as_ref().is_some_and(|current| {
+            let mut selection = live_ids(&current.selection);
+            selection.retain(|id| id != source_id);
+            selection.is_empty()
+        });
+        if emptied {
+            self.stop();
         }
     }
 
@@ -283,10 +296,10 @@ impl Refresh {
                 .find(|item| item.provider == Provider::Granola && item.source_id == id)
                 .map(|item| item.revision)
         };
-        let selection: Vec<String> = current
-            .selection
-            .into_iter()
+        let selection: Vec<String> = live_ids(&current.selection)
+            .iter()
             .filter(|id| kept(store, id).is_some())
+            .cloned()
             .collect();
         let fetched = match result {
             Ok(fetched) => fetched,
@@ -474,9 +487,14 @@ fn workspace_of(source: &mut dyn RefreshSource) -> Result<String, CheckError> {
 fn request(
     source: &mut dyn RefreshSource,
     selection: &[String],
+    still_selected: &dyn Fn(&str) -> bool,
     expected: Option<&str>,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Fetched, CheckError> {
+    // A check stopped before it began sends nothing at all.
+    if cancelled() {
+        return Err(CheckError::Cancelled);
+    }
     // Fail closed before any note identifier leaves the device.
     let workspace = workspace_of(source)?;
     if expected.is_some_and(|expected| expected != workspace) {
@@ -487,7 +505,16 @@ fn request(
         if cancelled() {
             return Err(CheckError::Cancelled);
         }
-        items.extend(source.fetch_available(batch).map_err(CheckError::Source)?);
+        // A note removed since the check began is not asked about.
+        let batch: Vec<String> = batch
+            .iter()
+            .filter(|id| still_selected(id))
+            .cloned()
+            .collect();
+        if batch.is_empty() {
+            continue;
+        }
+        items.extend(source.fetch_available(&batch).map_err(CheckError::Source)?);
         if cancelled() {
             return Err(CheckError::Cancelled);
         }
@@ -509,6 +536,7 @@ pub fn run(
 ) -> Result<Fetched, CheckError> {
     let (sender, receiver) = mpsc::channel();
     let selection = ticket.selection.clone();
+    let live = ticket.live.clone();
     let expected = ticket.workspace.clone();
     let cancelled = ticket.cancelled.clone();
     let settle = Settle(ticket.settled.clone());
@@ -516,9 +544,13 @@ pub fn run(
         .name("granola-update-check".into())
         .spawn(move || {
             let settle = settle;
-            let result = request(source.as_mut(), &selection, expected.as_deref(), &|| {
-                cancelled.load(Ordering::Acquire)
-            });
+            let result = request(
+                source.as_mut(),
+                &selection,
+                &|id| live_ids(&live).iter().any(|kept| kept == id),
+                expected.as_deref(),
+                &|| cancelled.load(Ordering::Acquire),
+            );
             // The request has ended once the connection clone is dropped.
             // Mark that before handing over the result, so whoever receives
             // it can start the next check at once.
@@ -539,7 +571,10 @@ pub fn run(
         match receiver.recv_timeout(remaining.min(POLL)) {
             Ok(result) => return result,
             Err(mpsc::RecvTimeoutError::Timeout) if remaining.is_zero() => {
-                return Err(CheckError::TimedOut)
+                // The check has ended for the person, so the worker must
+                // not go on to another batch once the sent request returns.
+                ticket.cancelled.store(true, Ordering::Release);
+                return Err(CheckError::TimedOut);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -1083,8 +1118,8 @@ mod tests {
         let ticket = refresh.begin(&store).unwrap();
         let result = run(&ticket, source, Duration::from_millis(60));
         has_started.recv_timeout(LONG).unwrap();
-        let report = refresh.apply(&ticket, result, &mut store, NOW);
-        assert_eq!(report.status, CheckStatus::TimedOut);
+        // The held reply arrives before the notebook has applied the
+        // timeout; the worker must already know the check is over.
         release.send(()).unwrap();
         wait_until_settled(&refresh);
         assert_eq!(
@@ -1092,6 +1127,65 @@ mod tests {
             1,
             "no request after the timeout"
         );
+        let report = refresh.apply(&ticket, result, &mut store, NOW);
+        assert_eq!(report.status, CheckStatus::TimedOut);
+    }
+
+    #[test]
+    fn a_note_removed_during_the_first_batch_is_not_requested_in_the_second() {
+        let ids: Vec<String> = (0..20).map(|n| format!("n{n}")).collect();
+        let pairs: Vec<(&str, u64)> = ids.iter().map(|id| (id.as_str(), EARLIER)).collect();
+        let mut store = store(&pairs);
+        let mut refresh = Refresh::default();
+        let (source, has_started, release) = held(vec![Ok(vec![]), Ok(vec![])]);
+        let asked = source.asked.clone();
+        let ticket = refresh.begin(&store).unwrap();
+        let result = std::thread::scope(|scope| {
+            let waiting = scope.spawn(|| run(&ticket, source, LONG));
+            has_started.recv_timeout(LONG).unwrap();
+            assert!(store.remove(Provider::Granola, "n15"));
+            refresh.forget(Provider::Granola, "n15");
+            release.send(()).unwrap();
+            waiting.join().unwrap()
+        });
+        let asked = asked.lock().unwrap().clone();
+        assert_eq!(asked.len(), 2);
+        assert_eq!(asked[1].len(), 9);
+        assert!(!asked[1].contains(&"n15".to_string()));
+        let report = refresh.apply(&ticket, result, &mut store, NOW);
+        assert_eq!(report.status, CheckStatus::Checked);
+        assert_eq!(report.notes.len(), 19);
+    }
+
+    #[test]
+    fn a_check_stopped_before_its_worker_starts_asks_for_nothing() {
+        struct Counting(Box<Fictional>, Arc<Mutex<u32>>);
+        impl RefreshSource for Counting {
+            fn binding_supported(&self) -> bool {
+                true
+            }
+            fn workspace(&mut self) -> Result<Option<String>, SourceError> {
+                *self.1.lock().unwrap() += 1;
+                self.0.workspace()
+            }
+            fn fetch_available(
+                &mut self,
+                selection: &[String],
+            ) -> Result<Vec<ContextItem>, SourceError> {
+                self.0.fetch_available(selection)
+            }
+        }
+        let store = store(&[("n1", EARLIER)]);
+        let mut refresh = Refresh::default();
+        let (source, asked) = provider(&[Some("garden-club")], vec![]);
+        let workspaces = Arc::new(Mutex::new(0));
+        let ticket = refresh.begin(&store).unwrap();
+        refresh.stop();
+        let source = Box::new(Counting(source, workspaces.clone()));
+        assert_eq!(run(&ticket, source, LONG), Err(CheckError::Cancelled));
+        wait_until_settled(&refresh);
+        assert_eq!(*workspaces.lock().unwrap(), 0, "no workspace request");
+        assert!(asked.lock().unwrap().is_empty());
     }
 
     #[test]
