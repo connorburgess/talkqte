@@ -82,31 +82,33 @@ failure the OS reported, so it offers no retry. An abandoned operation accepts
 no retry and blocks any new selection until the app is restarted, because
 nothing in the process can still stop that stream.
 
-The processing status's capture state is combined with this phase: it never
-reads Off or Unknown while `mayBeCapturing` is true. With the microphone off, a
-failed, unanswered or abandoned cleanup reads `stopping` there. A microphone
-that is starting keeps reading `starting` whatever the source is doing: the
-notebook disables its Stop control while capture reads `stopping`, and a stuck
-source must not take Stop away from a starting microphone. That path runs
-with the runtime lock held, so it reads the phase from an atomic the host
-writes under its own lock, at approval and on every status read. It can lag a
-release by one refresh, never a start, and the host lock is never taken under
-the runtime lock.
+The processing status reports the source beside the microphone instead of
+inside it. In a development build its snapshot has three capture fields:
 
-**The notebook's wording is wrong for this case.** It renders that shared
-state as microphone text, so in a development build a failed or abandoned
-application cleanup with the microphone off would show a message about waiting
-for the microphone, and nothing in the notebook shows this host's own status.
-The interface is outside this change; do not judge a device run by the
-notebook until it shows the application-audio status.
+- `capture`: the microphone and the source combined. It never reads Off or
+  Unknown while `mayBeCapturing` is true, and a starting microphone keeps
+  reading `starting` whatever the source is doing. A reader that knows only
+  this field therefore never understates capture.
+- `microphone`: the microphone alone.
+- `source`: this host's phase, `mayBeCapturing`, `stalled`, `canRetry`, the
+  application name and the problem label.
 
-One control is still affected. The notebook offers **Cancel start** only while
-capture reads Off. If an earlier application source is stuck in `stopping`,
-`cleanupFailed` or `abandoned` and the microphone has not begun starting, the
-shared state reads `stopping`, so a new live session's model loading shows a
-disabled Stop instead of Cancel start until the microphone itself starts. The
-fix is for the source to have its own field in the processing snapshot instead
-of sharing the microphone's; that is the next step, with the interface.
+A default build has neither `microphone` nor `source`; its snapshot is
+unchanged. The runtime fills both from a copy the host publishes under its own
+lock, at approval and on every status read, through a lock that is never held
+while another is taken. The copy can lag a release by one refresh, never a
+start, and the host lock is never taken under the runtime lock.
+
+**The notebook does not read the new fields yet.** It still renders the
+combined `capture` as microphone text, so a failed or abandoned application
+cleanup with the microphone off shows a message about waiting for the
+microphone, and it offers **Cancel start** only while `capture` reads Off.
+The interface change that fixes both is to offer Cancel start from
+`microphone`, word the microphone row from `microphone`, and show `source` in
+its own row: `cleanupFailed` with its retry, `abandoned` as possibly still
+capturing until TalkQTE quits, and `stalled` as an unanswered Stop. That
+change is in the notebook and outside this lane. Until it lands, do not judge
+a device run by the notebook.
 
 ## Quitting
 
@@ -116,7 +118,12 @@ unconfirmed capture when the process exits has not been checked.
 
 ## Tests
 
-Fifteen tests cover the host. Twelve run it against the real source-worker
+Sixteen tests cover the host, and one projection test covers the snapshot
+fields: no `microphone` or `source` without a source, both reported beside a
+combined `capture` with one, and an event when only the source changes. In the
+host, one test checks that the published copy matches the host's own status
+from approval through a failed Stop, its retry and release. Twelve run the
+host against the real source-worker
 ordering, with a fictional clock read, a memory-only clock feed, a scripted
 owner and a real `Mutex<Runtime>`; one checks the decisions made before the
 native request; two are table checks:

@@ -781,7 +781,7 @@ fn stop_before_the_worker_begins_ends_off_without_blaming_the_session() {
     let operation = fixture.start();
     // Approved: the shared capture state must not read Off from here on,
     // even before anyone has read the status again.
-    assert!(fixture.host.phase_hint().may_be_capturing());
+    assert!(fixture.host.published().phase.may_be_capturing());
     let deadline = Instant::now() + WAIT;
     while fixture.script.runs.load(Ordering::SeqCst) == 0 {
         assert!(
@@ -798,7 +798,7 @@ fn stop_before_the_worker_begins_ends_off_without_blaming_the_session() {
     let off = fixture.wait_phase(Phase::Off);
     // The live session is running; the person stopped the start.
     assert_eq!(off.problem, None);
-    assert_eq!(fixture.host.phase_hint(), Phase::Off);
+    assert_eq!(fixture.host.published().phase, Phase::Off);
     assert_eq!(fixture.script.begins.load(Ordering::SeqCst), 0);
     assert!(fixture
         .runtime
@@ -880,6 +880,55 @@ fn an_unanswered_listing_can_be_cancelled_and_a_refused_one_says_why() {
         (Phase::Off, Some(Problem::PermissionDenied))
     );
     assert!(denied.choices.is_empty());
+}
+
+#[test]
+fn the_published_status_follows_the_host_through_failure_retry_and_release() {
+    // What the processing snapshot reports for the source is the published
+    // copy; it must match what the host itself says at each step.
+    let matches = |fixture: &Fixture| {
+        let view = fixture.view();
+        let published = fixture.host.published();
+        assert_eq!(
+            (
+                published.phase,
+                published.may_be_capturing,
+                published.can_retry,
+                published.stalled,
+                published.problem,
+                published.application.clone()
+            ),
+            (
+                view.phase,
+                view.may_be_capturing,
+                view.can_retry,
+                view.stalled,
+                view.problem,
+                view.application.clone()
+            )
+        );
+        published
+    };
+    let fixture = fixture(true);
+    fixture.script.stop_failures.store(1, Ordering::SeqCst);
+    fixture.script.start_pending.store(true, Ordering::SeqCst);
+    let operation = fixture.start();
+    // Before any status read, approval alone has published a start.
+    let early = fixture.host.published();
+    assert_eq!(early.phase, Phase::Starting);
+    assert_eq!(early.application.as_deref(), Some("Fictional player"));
+    assert!(early.may_be_capturing);
+    fixture.script.start_pending.store(false, Ordering::SeqCst);
+    fixture.wait_phase(Phase::Listening);
+    matches(&fixture);
+    fixture.host.stop(&operation).unwrap();
+    fixture.wait_phase(Phase::CleanupFailed);
+    let failed = matches(&fixture);
+    assert!(failed.can_retry && failed.problem == Some(Problem::StopFailed));
+    fixture.host.retry_cleanup(&operation).unwrap();
+    fixture.wait_phase(Phase::Off);
+    let off = matches(&fixture);
+    assert!(!off.may_be_capturing && off.application.is_none());
 }
 
 #[test]
