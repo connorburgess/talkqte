@@ -1052,7 +1052,7 @@ fn a_source_session_starts_without_a_microphone_and_ends_with_its_own_stop_or_th
     use crate::engine::Status;
     for by_session in [false, true] {
         let fixture = fixture(false);
-        assert_eq!(fixture.session().0, false, "no live session to begin with");
+        assert!(!fixture.session().0, "no live session to begin with");
         let operation = fixture.start_session();
         let listening = fixture.wait_phase(Phase::Listening);
         assert!(listening.source_session && listening.may_be_capturing);
@@ -1145,7 +1145,7 @@ fn a_source_session_stopped_before_its_source_begins_ends_off_and_asks_nothing()
             );
             std::thread::sleep(Duration::from_millis(2));
         }
-        assert_eq!(fixture.session().0, true, "the session was started first");
+        assert!(fixture.session().0, "the session was started first");
         assert_eq!(fixture.view().phase, Phase::Starting);
         if by_session {
             let mut runtime = fixture.runtime.lock().unwrap();
