@@ -1717,7 +1717,7 @@ impl NoteSource for Connection {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -1861,10 +1861,10 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn every_sign_in_request_names_talkqte_as_its_user_agent() {
-        // A fictional sign-in service on a loopback port: resource and
-        // server metadata, client registration and the token exchange.
+    /// A fictional sign-in service on a loopback port: resource and server
+    /// metadata, client registration and the token exchange. Returns its
+    /// origin and the requests it saw.
+    pub(crate) fn fictional_sign_in_service() -> (String, Seen) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
         let seen = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
@@ -1920,8 +1920,12 @@ mod tests {
                 );
             }
         });
-        // The fictional browser returns to the loopback address at once.
-        let browser = |url: &str| {
+        (origin, seen)
+    }
+
+    /// A fictional browser that returns to the loopback address at once.
+    pub(crate) fn fictional_browser(url: &str) -> Result<(), String> {
+        {
             let query = url.split_once('?').unwrap().1;
             let value = |name: &str| {
                 query
@@ -1950,12 +1954,29 @@ mod tests {
                 let _ = stream.read_to_string(&mut page);
             });
             Ok(())
-        };
-        let trusted = |url: &str| url.starts_with(&origin);
-        let tokens = sign_in_at(&format!("{origin}/mcp"), false, &trusted, &browser, &|| {
-            false
-        })
-        .unwrap();
+        }
+    }
+
+    /// The real sign-in against a fictional service, trusting only its origin.
+    pub(crate) fn sign_in_through(
+        origin: &str,
+        open_url: &dyn Fn(&str) -> Result<(), String>,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<Tokens, String> {
+        let trusted = |url: &str| url.starts_with(origin);
+        sign_in_at(
+            &format!("{origin}/mcp"),
+            false,
+            &trusted,
+            open_url,
+            cancelled,
+        )
+    }
+
+    #[test]
+    fn every_sign_in_request_names_talkqte_as_its_user_agent() {
+        let (origin, seen) = fictional_sign_in_service();
+        let tokens = sign_in_through(&origin, &fictional_browser, &|| false).unwrap();
         assert_eq!(tokens.access_token, "fictional-token");
         let seen = seen.lock().unwrap().clone();
         let lines: Vec<&str> = seen
@@ -1978,11 +1999,127 @@ mod tests {
         assert!(seen[3].1.contains("code=fictional-code"));
     }
 
+    /// One whole session, from sign-in to disconnect. Run only in a child
+    /// process by the test below, which redirects that process's home, app
+    /// data and temporary folders and reads everything it prints.
+    #[test]
+    #[ignore = "run in a child process by the test below"]
+    fn isolated_granola_session() {
+        let (origin, _) = fictional_sign_in_service();
+        let tokens = sign_in_through(&origin, &fictional_browser, &|| false).unwrap();
+        let (endpoint, _) = fictional_server(Answer::TaggedListing);
+        let shared = Shared::new(Connection::open_at(&endpoint, &tokens, false).unwrap());
+        let (notes, _) = shared.list_recent().unwrap();
+        assert_eq!(notes.len(), 2);
+        let fetched = shared.clone().fetch(&["m2".into()]).unwrap();
+        assert_eq!(
+            fetched[0].excerpt,
+            "Visitors asked where to find watering cans."
+        );
+        assert!(!shared.suggest_focus().unwrap().is_empty());
+        // A failed request is part of a session too.
+        let (failing, _) = fictional_server(Answer::RpcError("Unauthorized: token expired"));
+        assert!(Connection::open_at(&failing, &tokens, false).is_err());
+        shared.disconnect();
+    }
+
+    #[test]
+    fn a_session_writes_no_file_and_prints_nothing_unless_the_trace_is_enabled() {
+        for trace in [false, true] {
+            let folder = std::env::temp_dir().join(format!(
+                "talkqte-granola-isolated-{}-{trace}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&folder);
+            std::fs::create_dir_all(&folder).unwrap();
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child
+                .args([
+                    "granola::tests::isolated_granola_session",
+                    "--exact",
+                    "--ignored",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .current_dir(&folder)
+                .env_remove("TALKQTE_GRANOLA_TRACE");
+            // Wherever the app or a library would keep data, a cache or a
+            // temporary file on macOS, Windows or Linux.
+            for name in [
+                "HOME",
+                "USERPROFILE",
+                "APPDATA",
+                "LOCALAPPDATA",
+                "TMPDIR",
+                "TEMP",
+                "TMP",
+                "XDG_DATA_HOME",
+                "XDG_CONFIG_HOME",
+                "XDG_CACHE_HOME",
+                "XDG_STATE_HOME",
+            ] {
+                child.env(name, &folder);
+            }
+            if trace {
+                child.env("TALKQTE_GRANOLA_TRACE", "1");
+            }
+            let output = child.output().unwrap();
+            let printed = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let left: Vec<_> = std::fs::read_dir(&folder)
+                .unwrap()
+                .flatten()
+                .map(|entry| entry.file_name())
+                .collect();
+            let _ = std::fs::remove_dir_all(&folder);
+            assert!(
+                output.status.success() && printed.contains("1 passed"),
+                "the session did not run: {printed}"
+            );
+            assert!(left.is_empty(), "the session left files: {left:?}");
+            for private in [
+                "fictional-token",
+                "fictional-code",
+                "fictional-client",
+                "gardener@example.com",
+                "robin@example.com",
+                "Garden welcome guide",
+                "Visitor questions",
+                "watering cans",
+                "launch plan",
+                "compost bins",
+            ] {
+                assert!(!printed.contains(private), "printed {private}: {printed}");
+            }
+            assert_eq!(
+                printed.contains("granola trace:"),
+                trace,
+                "the trace follows TALKQTE_GRANOLA_TRACE: {printed}"
+            );
+            if trace {
+                for label in [
+                    "tools/list",
+                    "list_meetings result",
+                    "get_meetings result",
+                    "query_granola_meetings result",
+                ] {
+                    assert!(
+                        printed.contains(&format!("granola trace: {label}:")),
+                        "{label}"
+                    );
+                }
+            }
+        }
+    }
+
     /// How the fictional server answers: normally (as JSON or an event
     /// stream), with an HTTP status, with a JSON-RPC error, or with a tool
     /// result that reports failure.
     #[derive(Clone, Copy)]
-    enum Answer {
+    pub(crate) enum Answer {
         Json,
         EventStream,
         TaggedListing,
@@ -1995,9 +2132,9 @@ mod tests {
     /// A fictional MCP server on a loopback port with fixed notes; it logs
     /// each request's head and body.
     /// The requests a fictional server saw: each one's head and body.
-    type Seen = Arc<Mutex<Vec<(String, String)>>>;
+    pub(crate) type Seen = Arc<Mutex<Vec<(String, String)>>>;
 
-    fn fictional_server(answer: Answer) -> (String, Seen) {
+    pub(crate) fn fictional_server(answer: Answer) -> (String, Seen) {
         fictional_server_with_gate(answer, None)
     }
 
@@ -2152,7 +2289,7 @@ mod tests {
         (endpoint, seen)
     }
 
-    fn tokens() -> Tokens {
+    pub(crate) fn tokens() -> Tokens {
         Tokens {
             access_token: "fictional-token".into(),
         }
