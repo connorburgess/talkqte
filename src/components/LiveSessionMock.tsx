@@ -12,6 +12,12 @@ import {
 } from './LiveCueStatus';
 import { RealCue, type RealCueControls } from './RealCue';
 import { RealContext } from './RealContext';
+import {
+  RealStop,
+  realStopNames,
+  stopsSession,
+  type RealStopInput,
+} from './RealStop';
 import './live-mock.css';
 
 type MockState =
@@ -106,6 +112,7 @@ export function LiveSessionMock({
   realCue,
   realCueControls,
   realContext,
+  realStop,
 }: {
   /** The notebook's own microphone and live-session state, shown read-only. */
   real: RealCapture;
@@ -113,6 +120,8 @@ export function LiveSessionMock({
   realCue: RealCueInput;
   /** The notebook's own handlers for the real cue and cue pause. */
   realCueControls: RealCueControls;
+  /** The running session's Stop, as the notebook holds it. */
+  realStop: RealStopInput;
   /** The prior notes selected in the notebook, shown read-only. */
   realContext: ContextItem[];
 }) {
@@ -161,20 +170,31 @@ export function LiveSessionMock({
     : 'Source, Capture, Transcript, Cue and Prior context';
   // While a live session offers real controls, the text must not call the
   // layout read-only or every control simulated.
-  const realControls = listNames(realControlNames(realCue));
+  const stops = realStopNames(realStop);
+  const controlNames = [...stops, ...realControlNames(realCue)];
+  const realControls = listNames(controlNames);
+  const act = controlNames.length === 1 ? 'acts' : 'act';
+  // Cue controls need a live session; a source Stop alone may not have one.
+  const target =
+    stopsSession(realStop) || realControlNames(realCue).length
+      ? 'the real live session'
+      : 'the real application audio';
+  const sessionStop = stopsSession(realStop);
 
   return (
     <section className="live-mock" aria-labelledby="mock-title">
       <h1 id="mock-title">Live session layout preview</h1>
       <p>
         {realControls
-          ? `${realParts} show the app’s real state. ${realControls} in the Real Cue section act on the real live session; everything else is a fictional example.`
+          ? `${realParts} show the app’s real state. ${realControls} ${act} on ${target}; everything else is a fictional example.`
           : `${realParts} show the app’s real state, read-only. Everything else is a fictional example.`}
       </p>
       {actual.underway && (
         <p className="mock-real-session">
-          {actual.underway} Its Stop and other controls are above; nothing in
-          this preview starts or stops it.
+          {actual.underway}{' '}
+          {sessionStop
+            ? 'You can stop it here or with its controls above; nothing in this preview starts it.'
+            : 'Its Stop and other controls are above; nothing in this preview starts or stops it.'}
         </p>
       )}
       <label className="mock-state-picker">
@@ -207,10 +227,13 @@ export function LiveSessionMock({
       >
         <p className="mock-banner">
           {realControls
-            ? `${realParts} are real · ${realControls} act on the real session; every control marked (simulated) only changes the example`
+            ? `${realParts} are real · ${realControls} ${act} on ${target}; every control marked (simulated) only changes the example`
             : `${realParts} are real and read-only · every control here is simulated and only changes the example`}{' '}
-          · the preview starts and stops no capture, connects to no meeting, and
-          generates no cues of its own
+          ·{' '}
+          {stops.length
+            ? 'the preview starts no capture'
+            : 'the preview starts and stops no capture'}
+          , connects to no meeting, and generates no cues of its own
         </p>
         <div className="mock-real">
           <dl className="mock-facts">
@@ -222,7 +245,7 @@ export function LiveSessionMock({
             </div>
             <div>
               <dt>Capture</dt>
-              <dd>
+              <dd id="real-capture-state" tabIndex={-1}>
                 <span className="mock-tag">Real</span> {actual.capture}
                 {actual.detail && (
                   <span className="mock-detail"> {actual.detail}</span>
@@ -238,6 +261,10 @@ export function LiveSessionMock({
               </div>
             )}
           </dl>
+          <RealStop
+            input={realStop}
+            fallback={() => document.getElementById('real-capture-state')}
+          />
           <section aria-labelledby="real-transcript-title">
             <h2 id="real-transcript-title" className="mock-real-heading">
               <span className="mock-tag">Real</span> Transcript

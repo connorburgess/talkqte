@@ -215,6 +215,16 @@
 .mock-real-pause {
   margin-top: 12px;
 }
+.mock-real-stop {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+#real-capture-state:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
 .mock-real-heading:focus-visible {
   outline: 3px solid var(--accent);
   outline-offset: 3px;

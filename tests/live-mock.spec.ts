@@ -483,12 +483,11 @@ test('real session Stop remains separate from the simulated Stop', async ({
   await expect(
     page.getByRole('region', { name: 'Live session layout preview' }),
   ).toContainText(
-    'A real live session is running. Its Stop and other controls are above; nothing in this preview starts or stops it.',
+    'A real live session is running. You can stop it here or with its controls above; nothing in this preview starts it.',
   );
-  const realStop = page.getByRole('button', {
-    name: 'Stop live session',
-    exact: true,
-  });
+  const realStop = page
+    .getByRole('region', { name: 'Microphone', exact: true })
+    .getByRole('button', { name: 'Stop live session', exact: true });
   await expect(realStop).toBeEnabled();
   await page.getByLabel('Preview a state').selectOption('listening');
   await page

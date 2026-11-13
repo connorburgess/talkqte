@@ -142,6 +142,7 @@ test('a demo started after a live session replaces its lines; none are shown as 
     .press('Enter');
   await say(page, 'A fictional line from the live session.');
   await page
+    .getByRole('region', { name: 'Microphone', exact: true })
     .getByRole('button', { name: 'Stop live session', exact: true })
     .press('Enter');
   const { real, realLines } = await openPreview(page);
@@ -199,6 +200,7 @@ test('stopping without lines says so, then the session ends without lines', asyn
   const { real } = await openPreview(page);
   await page.evaluate(() => window.captureTest.holdDrain());
   await page
+    .getByRole('region', { name: 'Microphone', exact: true })
     .getByRole('button', { name: 'Stop live session', exact: true })
     .press('Enter');
   await expect(real).toContainText(
@@ -269,6 +271,7 @@ test('a live session’s lines appear in the real list only, from preparing to a
     ).toHaveCount(1);
   }
   await page
+    .getByRole('region', { name: 'Microphone', exact: true })
     .getByRole('button', { name: 'Stop live session', exact: true })
     .press('Enter');
   await expect(real).toContainText(
