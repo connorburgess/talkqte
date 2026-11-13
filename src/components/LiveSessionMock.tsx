@@ -61,17 +61,54 @@ export function LiveSessionMock() {
         <p role="status">
           Preview state: {states.find((item) => item.value === state)?.label}
         </p>
+        {(state === 'idle' || state === 'stopped') && (
+          <button
+            className="secondary-button"
+            onClick={() => returnToSelector('starting')}
+          >
+            Start preview
+          </button>
+        )}
         {state === 'failed' && (
-          <p>
-            Fictional connection failed. Choose another preview state to
-            continue.
-          </p>
+          <>
+            <p>Fictional connection failed. Retry the preview to continue.</p>
+            <button
+              className="secondary-button"
+              onClick={() => returnToSelector('starting')}
+            >
+              Retry preview
+            </button>
+          </>
         )}
         {state === 'starting' && (
-          <p>Example: preparing a session. No connection is being made.</p>
+          <>
+            <p>Example: preparing a session. No connection is being made.</p>
+            <button
+              className="secondary-button"
+              onClick={() => returnToSelector('listening')}
+            >
+              Show listening example
+            </button>
+          </>
         )}
         {(state === 'listening' || state === 'cue' || state === 'paused') && (
           <div className="mock-conversation">
+            {(state === 'listening' || state === 'cue') && (
+              <button
+                className="secondary-button"
+                onClick={() => returnToSelector('paused')}
+              >
+                Pause preview
+              </button>
+            )}
+            {state === 'paused' && (
+              <button
+                className="secondary-button"
+                onClick={() => returnToSelector('listening')}
+              >
+                Resume preview
+              </button>
+            )}
             <section aria-labelledby="mock-context-title">
               <h3 id="mock-context-title">Prior context</h3>
               <p>
@@ -107,7 +144,9 @@ export function LiveSessionMock() {
           </div>
         )}
         {(state === 'idle' || state === 'stopped') && (
-          <p>Choose a state above to inspect the layout.</p>
+          <p>
+            Start the preview or choose a state above to inspect the layout.
+          </p>
         )}
       </div>
     </section>
