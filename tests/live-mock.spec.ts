@@ -221,7 +221,7 @@ test('a keyboard walk starts, cancels, pauses, stops and recovers, moving focus 
   await expect(frame).toContainText(
     'No example session yet. This example captures nothing.',
   );
-  await expect(mock).not.toContainText('Its controls are above');
+  await expect(mock).not.toContainText('Stop and other controls are above');
   await simulated(frame, 'Start').press('Enter');
   await expect(status).toHaveText('Preview state: Starting');
   await expect(frame).toContainText('No conversation text yet');
@@ -483,7 +483,7 @@ test('real session Stop remains separate from the simulated Stop', async ({
   await expect(
     page.getByRole('region', { name: 'Live session layout preview' }),
   ).toContainText(
-    'A real live session is running. Its controls are above; nothing in this preview starts or stops it.',
+    'A real live session is running. Its Stop and other controls are above; nothing in this preview starts or stops it.',
   );
   const realStop = page.getByRole('button', {
     name: 'Stop live session',

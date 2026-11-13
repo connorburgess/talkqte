@@ -199,6 +199,26 @@
 .mock-real-cue > * + * {
   margin-top: 6px;
 }
+/* Real controls act on the session: a solid forest edge sets them apart
+   from the example's controls, which are labelled (simulated). */
+.mock-real .mock-real-control {
+  /* styles.css loads after this file, so its .secondary-button border would
+     otherwise win. */
+  border: 2px solid var(--forest);
+  color: var(--forest);
+}
+.mock-real-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.mock-real-pause {
+  margin-top: 12px;
+}
+.mock-real-heading:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
 .mock-lines li + li {
   margin-top: 6px;
 }
