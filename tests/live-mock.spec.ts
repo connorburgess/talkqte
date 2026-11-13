@@ -125,3 +125,50 @@ test('preview controls walk through a fictional session and recover from failure
   await mock.getByRole('button', { name: 'Stop preview' }).press('Enter');
   await expect(state).toHaveValue('stopped');
 });
+
+test('fictional states fit horizontally and active states expose Stop at narrow width', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 480, height: 800 });
+  await page.goto('/');
+  await page
+    .getByRole('button', { name: 'Live layout preview' })
+    .press('Enter');
+  const mock = page.getByRole('region', {
+    name: 'Live session layout preview',
+  });
+  const selector = mock.getByLabel('Preview a state');
+  for (const value of [
+    'idle',
+    'starting',
+    'listening',
+    'cue',
+    'paused',
+    'stopped',
+    'failed',
+  ]) {
+    await selector.selectOption(value);
+    await expect(mock.getByRole('status')).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    if (['starting', 'listening', 'cue', 'paused'].includes(value)) {
+      const stop = mock.getByRole('button', {
+        name: 'Stop preview',
+        exact: true,
+      });
+      await expect(stop).toBeVisible();
+      const bounds = await stop.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.y).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(480);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(800);
+      await stop.press('Enter');
+      await expect(selector).toHaveValue('stopped');
+      await expect(selector).toBeFocused();
+    }
+  }
+});
