@@ -33,7 +33,7 @@ On macOS, `src-tauri/src/companion_macos.rs` selects a native titled frame with 
 
 Export preparation stores a Markdown snapshot in Rust. The subsequent native save dialog writes that exact snapshot, not a new version assembled after the user reviews it. The frontend cannot supply an arbitrary filesystem destination to the export command.
 
-The browser preview uses `src/lib/preview.ts`, a development-only simulation. Its UI tests complement the Rust engine tests; they do not test Rust IPC, native dialogs, or native windows. There is currently no full meeting-audio pipeline, system-audio capture, database, or integration adapter.
+The browser preview uses `src/lib/preview.ts`, a development-only simulation. Its UI tests complement the Rust engine tests; they do not test Rust IPC, native dialogs, or native windows. There is currently no full meeting-audio pipeline, system-audio capture, or database. The note-file and Granola adapters are described below.
 
 The engine exposes one transcript input boundary for a future transcription worker: `Engine::ingest(session, segment)`. A worker records `Engine::session()` when it starts and attaches that value to each segment. Ending or replaying issues a new session, so late work for an earlier session is rejected. Input is accepted only while the session is running, at or before the current elapsed time, in order, with a unique short ID, a speaker label up to 80 characters, and 1–1,000 characters of text. Rejected input leaves state unchanged. Times are on the engine's session clock, which advances on native ticks and stops while paused. A worker must convert audio timestamps to that clock, or its segments will be rejected as coming from the future. IDs must not reuse a bundled demo ID. Accepted segments use the same cue, answer, and stale-cue rules as the demo. The in-memory transcript keeps the latest 400 segments; duplicate IDs are detected only within those. Once a session has supplied lines, the Markdown export stops labelling its transcript as fictional demo content. `src-tauri/src/transcription.rs` provides the worker that calls it. It is created for one session ID, and its capture side hands over 16 kHz mono chunks with `submit`, which does not wait for the worker. A full queue, a cancelled worker, or a chunk over 30 seconds is counted as dropped and handed back, so a capture callback can reuse the buffer. A replaceable `Transcriber` runs on the worker thread. Recognized lines are delivered in time order through `ingest`, and lines with offsets outside their chunk are skipped. Segment IDs include a per-worker number, so restarting a worker within a session never repeats one. `cancel` stops delivery at once, discards queued chunks, and is safe to call while holding the engine lock. `stop` also waits up to two seconds for a recognizer call in progress; if it does not return, the thread is detached and delivers nothing more. Call `stop` without holding the engine lock, because delivery takes it. A recognizer error skips one chunk. Segments the engine refuses, for example after End, are counted and change nothing. The worker keeps no audio. The optional `local-whisper` Cargo feature adds `LocalWhisper`, which runs whisper.cpp in-process on the worker thread from a given model file, with no network access or audio files; it is off by default. `Engine::live()` creates a session without scripted demo lines. In `local-whisper` builds, the live session below starts a worker. See the [local transcription check](local-transcription.md).
 
@@ -65,7 +65,7 @@ The runtime owns one bounded `processing_reviews::Reviews` store for processing 
 
 The runtime holds the live session's engine session ID, the microphone start's generation, and the runner. `stop_live_session`, also allowed for the companion, takes these out under the lock, releases that microphone start only (a later capture is never stopped by a stale request), then outside the lock hands the remaining audio to the worker and waits up to 10 seconds before ending the engine session, only if it is still that session. A second Stop finds nothing to stop. `stop_microphone` during a live session does the same. The native timer ends a live session whose microphone start is no longer starting or listening, for example after a refused permission or a device failure; it reads the microphone state without waiting. `end_demo` during a live session ends it at once and cancels the worker before joining its runner, so queued audio is discarded. A replacement engine continues session numbering from the one it replaces, so late lines from a live session are refused by the next session. The live clock and transcription cannot be paused. The separately validated `set_live_cues_paused` command, available in both windows, clears the current cue (including a held one) and suppresses new cues while transcript ingestion continues. Resume records the current elapsed time; delayed lines at or before that boundary remain in the transcript but cannot raise cues. Both snapshots expose `cuesPaused`, and Stop/new-session resets it. `export_preview` still refuses live sessions, so their transcripts are never written out. See [cue pause acceptance](live-cue-pause.md). `live_status` reports whether the build includes the feature and whether the model file exists. The model path is `TALKQTE_WHISPER_MODEL` (a developer file, not checksum-checked) or `models/ggml-tiny.en.bin` in the app data folder, which is checked against its pinned SHA-256 before loading. `src-tauri/src/model.rs` downloads that file only on an explicit `download_model` command from the main window, through a `Fetch` interface so tests never use the network; the HTTPS client is compiled only with `local-whisper`. Progress goes to the main window as `model:changed`, and `cancel_model_download` and `remove_model` complete the controls. The cue snapshot carries a `live` flag so the companion can label the session. Tests run the session with synthetic audio and a scripted recognizer; real-hardware checks are pending.
 
-The macOS bundle includes `NSMicrophoneUsageDescription`; the audio-input entitlement is configured in `Entitlements.plist` and is embedded when signing. For a local bundle check, use `APPLE_SIGNING_IDENTITY=- npm run tauri -- build --debug --bundles app` to ad-hoc sign with the configured entitlement. An unsigned development build is not evidence that entitlements were applied. Inspect the built bundle and signature without invoking microphone start automatically. Ad-hoc signing is not Developer ID signing or notarization.
+The macOS bundle requires macOS 14.0 or later and includes `NSMicrophoneUsageDescription`, which covers both the activity check and live transcription, and the generated third-party notices at `Contents/Resources/THIRD-PARTY-NOTICES.txt` ([release path](release-path.md#third-party-notices)); the audio-input entitlement is configured in `Entitlements.plist` and is embedded when signing. For a local bundle check, use `APPLE_SIGNING_IDENTITY=- npm run tauri -- build --debug --bundles app` to ad-hoc sign with the configured entitlement. An unsigned development build is not evidence that entitlements were applied. Inspect the built bundle and signature without invoking microphone start automatically. Ad-hoc signing is not Developer ID signing or notarization.
 
 ### Session clock precision
 
@@ -135,8 +135,19 @@ on their constructing thread through cleanup; host-handle loss requests Stop,
 and abandonment remains distinct from release. No app command enables this path. Its worker-side `chunks` submodule accepts only
 16 kHz mono, cuts continuous audio at three seconds and partial audio at every
 gap or clean EOF, and discards pending samples on cancellation/session changes.
-Returned chunks retain source/session guards; no recognizer or runtime command
-connects this boundary, and the microphone path is unchanged.
+Returned chunks retain source/session guards, and the microphone path is unchanged.
+
+`src-tauri/src/live_source.rs`, compiled in every build, lets the runtime hold at
+most one application-audio source attached to the running live session. Stopping
+or replacing that session cancels the attached source under the runtime lock,
+and a line from a source that is not attached is refused. In an ordinary build
+nothing ever attaches a source, so this changes no app behavior.
+`src-tauri/src/native_source.rs` is the development-only host loop that would
+attach one: it is compiled only on macOS with the `native-audio-spike` feature,
+and moves native blocks through the chunker and a transcription worker to that
+source sink. No command, picker, enumeration or permission request calls it, and
+it has not been run against a device, so nothing in the app starts application
+audio. See [ownership, sink and tests](native-audio-owner.md#live-session-ownership-of-the-source--13-november-2026).
 
 1. Capture both sides of a synthetic call with headphones, with clear microphone/system permissions.
 2. Stop and pause promptly; test device disconnect and permission denial.
@@ -156,7 +167,6 @@ The [system-audio decision record](system-audio-plan.md) compares ScreenCaptureK
 - [Apple microphone authorization](https://developer.apple.com/documentation/avfoundation/requesting-authorization-to-capture-and-save-media)
 - [ScreenCaptureKit Rust bindings](https://docs.rs/screencapturekit/latest/screencapturekit/)
 - [whisper.cpp](https://github.com/ggml-org/whisper.cpp)
-
 
 ### Evaluator lifecycle development boundary
 
