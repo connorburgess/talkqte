@@ -23,6 +23,10 @@ The distinction is how the software is used or distributed, not whether its user
 
 For commercial terms, open a [licensing inquiry](https://github.com/connorburgess/talkqte/issues/new?title=Commercial%20licensing%20inquiry) requesting a private contact. Keep confidential business details out of public issues. A commercial agreement is separate from buying the project; an inquiry does not grant permission.
 
+## Name and logo
+
+The software license does not grant rights to the TalkQTE name or logo. A modified version shared with others needs its own name and icon. See the [name and logo guide](TRADEMARKS.md) for what is fine without asking and what needs permission.
+
 ## Previously published Apache-2.0 material
 
 TalkQTE was previously published under Apache-2.0. For reference, the main-branch snapshot at [`f61fa6c`](https://github.com/connorburgess/talkqte/tree/f61fa6ce1dd1e06d1375026e2708c978455cf77f) contains that license. Other commits and branches published under Apache-2.0 retain those grants too; this reference is not an exhaustive cutoff list.
