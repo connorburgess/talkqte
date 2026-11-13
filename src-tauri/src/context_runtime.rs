@@ -34,6 +34,14 @@ impl Runtime {
         (outcome, self.sync_prior_notes())
     }
 
+    /// Ends the update checks of a retired connection. The times it
+    /// confirmed copies are forgotten, so a displayed reminder's warning
+    /// may change; returns whether a visible cue changed.
+    pub(crate) fn disconnect_update_checks(&mut self) -> bool {
+        self.refresh.disconnect();
+        self.sync_prior_notes()
+    }
+
     /// Applies a finished update check. Unless it was retired, the engine
     /// is brought up to date even when no copy changed, because the result
     /// decides which notes may remind and with what warning. The flag is
@@ -49,7 +57,10 @@ impl Runtime {
             .apply(ticket, result, &mut self.context, now_ms);
         let retired = matches!(
             report.status,
-            CheckStatus::Cancelled | CheckStatus::Reimported
+            CheckStatus::Cancelled
+                | CheckStatus::Reimported
+                | CheckStatus::Removed
+                | CheckStatus::RemovedOrReimported
         );
         let changed = (!retired).then(|| self.sync_prior_notes());
         (report, changed)
@@ -235,6 +246,44 @@ mod tests {
         let (outcome, _) = runtime.merge_imported_notes(Provider::Granola, &ids(), notes());
         assert_eq!(outcome.unchanged, 2);
         assert_eq!(reminder(&mut runtime, COMPOST).unwrap().unconfirmed, None);
+    }
+
+    #[test]
+    fn disconnecting_updates_a_displayed_warning_and_asks_for_a_publish() {
+        let mut runtime = runtime();
+        check(
+            &mut runtime,
+            Fictional {
+                reply: Ok(notes()),
+                withdrawn: vec![],
+            },
+        );
+        // n1 is confirmed at NOW, then not returned by a later check.
+        check(
+            &mut runtime,
+            Fictional {
+                reply: Ok(notes().into_iter().skip(1).collect()),
+                withdrawn: vec![],
+            },
+        );
+        let shown = reminder(&mut runtime, GUIDE).unwrap();
+        assert_eq!(
+            shown.unconfirmed.map(|warning| warning.last_confirmed_ms),
+            Some(Some(NOW))
+        );
+        assert!(
+            runtime.disconnect_update_checks(),
+            "the windows must be told"
+        );
+        let note = runtime.engine.state.cue.as_ref().unwrap().note.clone();
+        assert_eq!(
+            note.unwrap()
+                .unconfirmed
+                .map(|warning| warning.last_confirmed_ms),
+            Some(None)
+        );
+        // Nothing else to update: no publish is asked for.
+        assert!(!runtime.disconnect_update_checks());
     }
 
     #[test]

@@ -7,6 +7,14 @@ import type {
   UpdateCheckReport,
 } from '../lib/types';
 
+/** Checks that ended without a result, so nothing from them is shown. */
+const ended: string[] = [
+  'cancelled',
+  'reimported',
+  'removed',
+  'removedOrReimported',
+];
+
 type Outcome =
   | { status: UpdateCheckReport['status']; retryAfterS: number | null }
   | { status: 'failed'; message: string };
@@ -77,8 +85,7 @@ export function useGranolaUpdateCheck() {
         const report = await bridge.checkGranolaUpdates();
         // Stop can arrive just after the result was applied; say what
         // happened instead of claiming nothing changed.
-        const applied =
-          report.status !== 'cancelled' && report.status !== 'reimported';
+        const applied = !ended.includes(report.status);
         if (
           current !== run.current &&
           !(applied && current === stopped.current)
@@ -126,12 +133,16 @@ function summary(outcome: Outcome, freshness: NoteFreshness[]) {
     }
     case 'cancelled':
       return 'Check stopped. Nothing was changed. A request already sent may still finish at Granola; its answer is discarded.';
+    case 'removed':
+      return 'Check ended: the notes it was checking were removed, so there was nothing left to check.';
+    case 'removedOrReimported':
+      return 'Check ended: the notes it was checking were removed or imported again, so there was nothing left to check.';
     case 'reimported':
       return 'Check ended: these notes were imported again, so there was nothing left to check.';
     case 'timedOut':
       return 'Granola did not answer in time. Your copies were kept and are not verified. The earlier request must finish before you can check again.';
     case 'workspaceUnverified':
-      return 'TalkQTE could not confirm which Granola workspace is active, so it did not ask about your notes. Your copies were kept.';
+      return 'TalkQTE could not confirm which Granola workspace is active, so nothing from this check was used. Your copies were kept.';
     case 'workspaceChanged':
       return 'The active Granola workspace changed, so nothing was updated. Disconnect and connect again to check notes in the current workspace.';
     case 'unavailable':
@@ -139,7 +150,7 @@ function summary(outcome: Outcome, freshness: NoteFreshness[]) {
     case 'expired':
       return 'Granola’s sign-in has expired. Your copies were kept. Disconnect and connect again to check them.';
     case 'revoked':
-      return 'Granola withdrew this app’s access. Your copies stay until you remove them, but are not used for reminders until a later check or import returns them. Disconnect, and connect again only if you want to.';
+      return 'Granola withdrew this app’s access. The notes this check covered stay until you remove them, but are not used for reminders until a later check or import returns them. Notes imported while it ran are not affected. Disconnect, and connect again only if you want to.';
     case 'rateLimited':
       return `Granola asked for a pause${
         outcome.retryAfterS ? ` of about ${outcome.retryAfterS} seconds` : ''
@@ -160,8 +171,7 @@ export function GranolaUpdateCheck({
 }) {
   const { checking, outcome, freshness } = updates;
   if (count === 0) return null;
-  const quiet =
-    !outcome || ['checked', 'cancelled', 'reimported'].includes(outcome.status);
+  const quiet = !outcome || ['checked', ...ended].includes(outcome.status);
   return (
     <div className="context-updates">
       <button

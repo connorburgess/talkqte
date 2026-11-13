@@ -72,7 +72,7 @@ test('every state names its source and capture state, and every control says it 
 }) => {
   const { mock, picker, frame } = await openMock(page);
   await expect(mock).toContainText(
-    'Source and Capture show the app’s real state, read-only. Everything else is a fictional example.',
+    'Source, Capture and Transcript show the app’s real state, read-only. Everything else is a fictional example.',
   );
   await expect(mock).toContainText(
     'the preview starts and stops no capture, connects to no meeting, and generates no AI cues',
@@ -92,7 +92,7 @@ test('every state names its source and capture state, and every control says it 
       'every control here is simulated and only changes the example',
     );
     await expect(frame).toContainText(
-      'Source and Capture are real and read-only',
+      'Source, Capture and Transcript are real and read-only',
     );
     await expect(frame).toContainText(
       `Simulated Fictional sample conversation. ${capture[state]}`,
