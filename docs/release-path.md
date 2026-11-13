@@ -64,6 +64,7 @@ It exits 0 when every check passes, 1 when any fails (each failure names the che
 | Version                    | The five version files (six places, counting both entries in `package-lock.json`) disagree, or the version is not `MAJOR.MINOR.PATCH`; with a bundle, when its `Info.plist` differs.                                                                             |
 | Bundle identifier          | It is not a reverse-domain name or ends in `.app`; with a bundle, when its `Info.plist` differs.                                                                                                                                                                 |
 | Signing configuration      | A signing identity is committed in `tauri.conf.json`, the hardened runtime is turned off, or a `tauri.macos.conf.json` appears (Tauri would merge it and this check does not read it).                                                                           |
+| Development features       | The crate's default features or `build.features` in `tauri.conf.json` switch on `native-audio-spike`, directly or through another feature. A built bundle is not yet inspected for it.                                                                           |
 | Entitlements               | The file requests anything beyond the reviewed list (today only audio input), or an entitlement lacks its usage description.                                                                                                                                     |
 | Usage descriptions         | The bundle's permission texts are missing, empty, extra, or differ from `src-tauri/Info.plist`.                                                                                                                                                                  |
 | Updater                    | One is configured without an https endpoint and a public key. With none configured it prints a note.                                                                                                                                                             |
@@ -103,6 +104,8 @@ npm run notices && git diff --exit-code src-tauri/THIRD-PARTY-NOTICES.txt   # re
 npm run check:release
 npm run build:release -- --bundles app,dmg --features local-whisper
 ```
+
+Never build a candidate with `native-audio-spike`. It is a development feature that adds application-audio capture code which is not part of the reviewed release. `npm run build:release` refuses before building (exit 2) when anything asks for it: a `--features`/`-f` list, cargo arguments after `--` (including `--all-features`), an inline or file `--config`, `TAURI_CONFIG`, `RUSTFLAGS`, or the crate's default features and `tauri.conf.json`. The pre-flight fails a configuration that switches it on. Neither can yet tell from a finished bundle whether it was built with the feature, so a bundle built by hand with plain `tauri build` is not covered; checking the executable is the next step once the capture code is on `main`.
 
 `local-whisper` needs CMake and a C++ toolchain. The result is arm64 only when built on Apple silicon, which matches the [proposed supported setup](budgets.md#proposed-first-supported-setup); a universal build is a separate, unmeasured choice.
 
@@ -226,7 +229,7 @@ Gaps: 16 crates (`objc2` and its framework crates, `block2`, `dispatch2`, `dasp_
 
 ## Remaining steps, in order
 
-1. Make decisions 1–5. For every candidate, regenerate the third-party notices (`npm run notices`) and commit any change before building.
+1. Make decisions 1–5. For every candidate, regenerate the third-party notices (`npm run notices`) and commit any change before building, and build only with `npm run build:release`, never with `native-audio-spike`.
 2. Build, sign, notarize and staple candidate A (steps 1–4); run the pre-flight with `--expect notarized` and keep its output.
 3. Install candidate A on a clean Mac and run steps 5–6.
 4. Raise the version, build candidate B the same way, and run steps 7 and 9 on the same Mac, keeping the data snapshot comparisons.

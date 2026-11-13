@@ -746,6 +746,19 @@ function Notebook() {
       stop?.();
     };
   }, []);
+  // Starting the demo replaces the button that was pressed. When that drops
+  // focus to the page, it goes to Pause; focus that has moved to another
+  // control or application is left alone.
+  const demoPause = useRef<HTMLButtonElement>(null);
+  const demoStarted = useRef(false);
+  useEffect(() => {
+    if (!demoStarted.current || busy) return;
+    if (error) demoStarted.current = false;
+    if (!demoStarted.current || !demoPause.current) return;
+    demoStarted.current = false;
+    if (document.hasFocus() && document.activeElement === document.body)
+      demoPause.current.focus();
+  }, [busy, error, state?.status]);
   const returnToExport = useRef(false);
   useEffect(() => {
     if (preview !== null) modal.current?.showModal();
@@ -1173,7 +1186,15 @@ function Notebook() {
         )}
 
         {view === 'live-mock' && (
-          <LiveSessionMock capturing={preparing || live || finishing} />
+          <LiveSessionMock
+            real={{
+              microphone: { state: microphone.state, error: microphone.error },
+              preparing,
+              cancelling,
+              live,
+              finishing,
+            }}
+          />
         )}
         {view === 'notebook' && (
           <div className="notebook-body">
@@ -1296,6 +1317,7 @@ function Notebook() {
                 ) : active ? (
                   <>
                     <button
+                      ref={demoPause}
                       className="secondary-button"
                       disabled={busy}
                       onClick={() =>
@@ -1363,6 +1385,7 @@ function Notebook() {
                       onClick={() =>
                         void run(() => {
                           setNotice('');
+                          demoStarted.current = true;
                           return bridge.command('start_demo');
                         })
                       }

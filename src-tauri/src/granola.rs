@@ -2026,58 +2026,15 @@ pub(crate) mod tests {
     #[test]
     fn a_session_writes_no_file_and_prints_nothing_unless_the_trace_is_enabled() {
         for trace in [false, true] {
-            let folder = std::env::temp_dir().join(format!(
-                "talkqte-granola-isolated-{}-{trace}",
-                std::process::id()
-            ));
-            let _ = std::fs::remove_dir_all(&folder);
-            std::fs::create_dir_all(&folder).unwrap();
-            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
-            child
-                .args([
-                    "granola::tests::isolated_granola_session",
-                    "--exact",
-                    "--ignored",
-                    "--nocapture",
-                    "--test-threads=1",
-                ])
-                .current_dir(&folder)
-                .env_remove("TALKQTE_GRANOLA_TRACE");
-            // Wherever the app or a library would keep data, a cache or a
-            // temporary file on macOS, Windows or Linux.
-            for name in [
-                "HOME",
-                "USERPROFILE",
-                "APPDATA",
-                "LOCALAPPDATA",
-                "TMPDIR",
-                "TEMP",
-                "TMP",
-                "XDG_DATA_HOME",
-                "XDG_CONFIG_HOME",
-                "XDG_CACHE_HOME",
-                "XDG_STATE_HOME",
-            ] {
-                child.env(name, &folder);
-            }
-            if trace {
-                child.env("TALKQTE_GRANOLA_TRACE", "1");
-            }
-            let output = child.output().unwrap();
-            let printed = format!(
-                "{}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let left: Vec<_> = std::fs::read_dir(&folder)
-                .unwrap()
-                .flatten()
-                .map(|entry| entry.file_name())
-                .collect();
-            let _ = std::fs::remove_dir_all(&folder);
-            assert!(
-                output.status.success() && printed.contains("1 passed"),
-                "the session did not run: {printed}"
+            let variables: &[(&str, &str)] = if trace {
+                &[("TALKQTE_GRANOLA_TRACE", "1")]
+            } else {
+                &[]
+            };
+            let crate::test_isolation::Isolated { left, printed } = crate::test_isolation::run(
+                "granola::tests::isolated_granola_session",
+                variables,
+                &["TALKQTE_GRANOLA_TRACE"],
             );
             assert!(left.is_empty(), "the session left files: {left:?}");
             for private in [

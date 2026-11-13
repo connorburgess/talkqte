@@ -1,0 +1,99 @@
+import { desktop } from '../lib/bridge';
+import { microphoneLabel, type Microphone } from '../lib/microphone';
+
+/** What the notebook already knows about the microphone and live session. */
+export interface RealCapture {
+  microphone: Pick<Microphone, 'state' | 'error'>;
+  preparing: boolean;
+  cancelling: boolean;
+  live: boolean;
+  finishing: boolean;
+}
+
+/**
+ * Words for the real source and capture state. Read-only: it describes the
+ * snapshots the notebook holds and sends no command. Where the state is not
+ * known to be off, the text never says that nothing is captured.
+ */
+export function describeCapture(
+  { microphone, preparing, cancelling, live, finishing }: RealCapture,
+  onDesktop = desktop,
+) {
+  if (!onDesktop)
+    return {
+      source: 'None. This browser preview cannot open a microphone.',
+      capture: 'Off. This browser preview captures nothing.',
+      detail: null,
+      underway: null,
+    };
+  const { state, error } = microphone;
+  const underway = finishing
+    ? 'A real live session is stopping.'
+    : preparing
+      ? 'A real live session is being prepared.'
+      : live
+        ? 'A real live session is running.'
+        : !state || state.status === 'off'
+          ? null
+          : state.status === 'starting'
+            ? 'The real microphone is starting.'
+            : state.status !== 'error'
+              ? 'The real microphone is in use.'
+              : state.canStart
+                ? null
+                : 'The real microphone is being released after a failure.';
+  if (!state)
+    return {
+      source: 'Unknown.',
+      // The hook's own message, shown as the detail, says it is unavailable.
+      capture: error
+        ? 'Unknown. The microphone may be open.'
+        : 'Checking microphone status…',
+      detail: error || null,
+      underway,
+    };
+  const opened = ['starting', 'listening', 'stopping'].includes(state.status);
+  // After a failure the device stays held until cleanup allows a new start.
+  const releasing = state.status === 'error' && !state.canStart;
+  const source = opened
+    ? `Microphone${
+        state.deviceName || state.status === 'listening'
+          ? `: ${state.deviceName || 'name unavailable'}`
+          : ''
+      }`
+    : releasing
+      ? 'Microphone, being released.'
+      : 'None open.';
+  const session = `Microphone: ${microphoneLabel(state).replace(/…$/, '')}`;
+  let capture: string;
+  // A session in progress is named first, with the microphone's own status,
+  // so an earlier failure cannot stand in for it.
+  if (finishing)
+    capture =
+      state.status === 'stopping'
+        ? 'Stopping the live session. The microphone is being released.'
+        : `Stopping the live session. ${session}.`;
+  else if (preparing)
+    capture = cancelling
+      ? `Start cancelled. Waiting for preparation to finish. ${session}.`
+      : `Preparing a live session. ${session}.`;
+  else if (live)
+    capture =
+      state.status === 'listening'
+        ? 'Listening. A live session is transcribing this microphone on this device.'
+        : `Live session running. ${session}.`;
+  else if (state.status === 'error')
+    capture = releasing
+      ? 'Failed. The microphone is still being released.'
+      : 'Failed. The microphone is not open.';
+  else if (state.status === 'stopping')
+    capture = 'Stopping. The microphone is being released.';
+  else if (state.status === 'starting') capture = 'Starting the microphone.';
+  else if (state.status === 'listening')
+    capture = 'Listening for an activity check only. Nothing is transcribed.';
+  else capture = 'Off. Nothing is being captured.';
+  // Native sends "Stopping microphone…" with the stopping status, which the
+  // sentence above already says.
+  const detail = error || (state.status === 'stopping' ? null : state.message);
+  return { source, capture, detail, underway };
+}

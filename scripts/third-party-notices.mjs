@@ -16,6 +16,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMain } from './is-main.mjs';
 
 const REPOSITORY = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -371,7 +372,7 @@ export async function generate(root = REPOSITORY) {
   );
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const check = process.argv.includes('--check');
   const path = join(REPOSITORY, NOTICES_PATH);
   let fresh;

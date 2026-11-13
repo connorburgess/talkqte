@@ -129,6 +129,18 @@ fn the_notebook_learns_connection_state_and_tool_names_but_never_identity() {
             "freshness": [],
         })
     );
+    // Keeping a note changes neither: no check has run, and none is
+    // offered for a Granola connection, which names no workspace.
+    let kept = crate::context::NoteSource::fetch(
+        &mut runtime.granola.clone().unwrap(),
+        &["m2".to_string()],
+    )
+    .unwrap();
+    let outcome = runtime
+        .context
+        .merge(context::Provider::Granola, &["m2".to_string()], kept);
+    assert_eq!(outcome.added, 1);
+    assert_eq!(status_of(granola_status_now(&runtime)), status);
     // What the chooser receives: titles and dates to choose by.
     let listing = serde_json::to_string(&notes).unwrap();
     assert!(listing.contains("Garden welcome guide"));

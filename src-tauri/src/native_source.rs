@@ -32,8 +32,28 @@ use std::{
 /// Not a latency bound for Stop or delivery.
 const POLL: Duration = Duration::from_millis(20);
 /// Passes between checks that the source is still attached, so a source that
-/// produces no lines is also stopped when it should not be capturing.
+/// produces no lines is also stopped when it should not be capturing. Counted
+/// in passes, not time: a throttled or starved thread makes fewer passes, so
+/// in wall time this check has no upper bound.
 const ATTACHED_EVERY: u32 = 50;
+
+/// How the loop paces itself. The app always uses `Pace::APP`; tests choose a
+/// pace so that what they assert depends on passes, not on runner speed.
+#[derive(Clone, Copy)]
+struct Pace {
+    /// Park this long on a pass that found no audio.
+    poll: Duration,
+    /// Ask the runtime whether the source is attached on every pass whose
+    /// number is a multiple of this.
+    attached_every: u32,
+}
+
+impl Pace {
+    const APP: Self = Self {
+        poll: POLL,
+        attached_every: ATTACHED_EVERY,
+    };
+}
 
 /// How the worker reaches the runtime. `with` runs its closure under the
 /// runtime lock and returns `None` when the runtime is unavailable. An app
@@ -306,10 +326,33 @@ fn pump<A: Access, S: Source>(
     runtime: A,
     session: u64,
     control: Control,
+    source: S,
+    worker: Worker<NativeChunk>,
+    bracket_width: Duration,
+    monitor: Monitor,
+) -> Report {
+    pump_paced(
+        runtime,
+        session,
+        control,
+        source,
+        worker,
+        bracket_width,
+        monitor,
+        Pace::APP,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pump_paced<A: Access, S: Source>(
+    runtime: A,
+    session: u64,
+    control: Control,
     mut source: S,
     worker: Worker<NativeChunk>,
     bracket_width: Duration,
     monitor: Monitor,
+    pace: Pace,
 ) -> Report {
     let mut abandon = Abandon {
         monitor: &monitor,
@@ -342,7 +385,7 @@ fn pump<A: Access, S: Source>(
         }
         passes = passes.wrapping_add(1);
         if reading && !control.is_cancelled() {
-            let attached = !passes.is_multiple_of(ATTACHED_EVERY)
+            let attached = !passes.is_multiple_of(pace.attached_every)
                 || runtime.with(|runtime| runtime.live_source_accepts(session, &control))
                     == Some(true);
             if !attached || !worker.is_running() {
@@ -375,7 +418,7 @@ fn pump<A: Access, S: Source>(
             control.cancel();
         }
         if idle {
-            thread::park_timeout(POLL);
+            thread::park_timeout(pace.poll);
         }
     }
 }
@@ -415,12 +458,32 @@ mod tests {
         foreign: Option<(Feed, Capture<()>)>,
         /// Fail on the second poll, as an unexpected fault in the loop would.
         panics: bool,
+        /// Polls so far, and the number of the first poll that found the
+        /// operation cancelled (zero until then).
+        polls: Arc<AtomicU64>,
+        first_cancelled_poll: Arc<AtomicU64>,
+        /// Fail rather than poll forever if nothing cancels the operation.
+        poll_limit: u64,
     }
 
     impl Source for Scripted {
         fn poll(&mut self) -> Status {
             if self.panics && std::mem::replace(&mut self.stopping, 1) == 1 {
                 panic!("fictional fault in the source worker");
+            }
+            let poll = self.polls.fetch_add(1, Ordering::SeqCst) + 1;
+            if self.control.is_cancelled() {
+                let _ = self.first_cancelled_poll.compare_exchange(
+                    0,
+                    poll,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                );
+            } else {
+                assert!(
+                    poll <= self.poll_limit,
+                    "still not cancelled after {poll} polls"
+                );
             }
             let stage = if self.capture.is_none() {
                 Stage::Released
@@ -545,6 +608,9 @@ mod tests {
                 retries: Arc::default(),
                 foreign: None,
                 panics: false,
+                polls: Arc::default(),
+                first_cancelled_poll: Arc::default(),
+                poll_limit: u64::MAX,
             }
         }
 
@@ -756,15 +822,56 @@ mod tests {
     }
 
     #[test]
-    fn a_silent_unattached_source_is_stopped_without_waiting_for_a_line() {
-        let mut fixture = fixture();
-        let binding = unattached(&fixture);
-        let source = fixture.scripted(binding);
-        let runtime = fixture.runtime.clone();
-        let report = pump_alone(&mut fixture, runtime, source);
-        assert_eq!(report.status.stage, Stage::Released);
-        assert_eq!((report.worker.chunks, report.worker.rejected), (0, 0));
-        assert!(fixture.control.is_cancelled());
+    fn a_silent_unattached_source_is_stopped_at_the_first_attachment_check() {
+        // Counted in passes, with no parking and no watchdog, so the result
+        // does not depend on how fast or busy the machine is. The app's own
+        // interval is one of the cases.
+        for every in [ATTACHED_EVERY, 3] {
+            let mut fixture = fixture();
+            let binding = unattached(&fixture);
+            let mut source = fixture.scripted(binding);
+            source.poll_limit = 10 * u64::from(every);
+            let (polls, first_cancelled) =
+                (source.polls.clone(), source.first_cancelled_poll.clone());
+            let worker = start_worker(
+                fixture.runtime.clone(),
+                fixture.session,
+                &fixture.control,
+                Silent,
+            );
+            let report = pump_paced(
+                fixture.runtime.clone(),
+                fixture.session,
+                fixture.control.clone(),
+                source,
+                worker,
+                Duration::ZERO,
+                Monitor::default(),
+                Pace {
+                    poll: Duration::ZERO,
+                    attached_every: every,
+                },
+            );
+            // Pass `every` asks the runtime and cancels; the next poll is the
+            // first to see it. Not one pass sooner or later.
+            assert_eq!(
+                first_cancelled.load(Ordering::SeqCst),
+                u64::from(every) + 1,
+                "every {every}"
+            );
+            assert_eq!(report.status.stage, Stage::Released);
+            assert_eq!((report.worker.chunks, report.worker.rejected), (0, 0));
+            assert!(fixture.control.is_cancelled());
+            // Two polls of stopping, then released.
+            assert_eq!(polls.load(Ordering::SeqCst), u64::from(every) + 3);
+        }
+    }
+
+    struct Silent;
+    impl Transcriber for Silent {
+        fn transcribe(&mut self, _: &AudioChunk) -> Result<Vec<Recognized>, String> {
+            Ok(Vec::new())
+        }
     }
 
     struct Crashes;

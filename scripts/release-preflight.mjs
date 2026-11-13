@@ -30,6 +30,7 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMain } from './is-main.mjs';
 import { NOTICES_IN_BUNDLE, staleReason } from './third-party-notices.mjs';
 
 const REPOSITORY = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -71,6 +72,56 @@ const DEVELOPMENT_ONLY = [
  * Apple's root, through the Developer ID authority, to a Developer ID leaf. */
 const DEVELOPER_ID_REQUIREMENT =
   'anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists';
+
+/** Cargo features for development only. A release must not compile them in:
+ * `native-audio-spike` adds application-audio capture code paths that are not
+ * part of the reviewed release. */
+export const DEVELOPMENT_FEATURES = ['native-audio-spike'];
+
+/** The `[features]` table of a Cargo.toml as { feature: [entries] }. */
+export function cargoFeatureTable(manifest) {
+  const table =
+    /^\[features\][^\n]*\n((?:(?!\[)[^\n]*(?:\n|$))*)/m.exec(manifest)?.[1] ??
+    '';
+  const uncommented = table.replace(/#[^\n]*/g, '');
+  const features = {};
+  for (const [, name, items] of uncommented.matchAll(
+    /^\s*([A-Za-z0-9_-]+)\s*=\s*\[([^\]]*)\]/gm,
+  ))
+    features[name] = [...items.matchAll(/["']([^"']+)["']/g)].map(
+      (match) => match[1],
+    );
+  return features;
+}
+
+/** Every feature switched on by `start`, following features that switch on
+ * others. `dep:` entries and `crate/feature` entries name dependencies, not
+ * features of this crate, and are not followed. */
+export function featureClosure(table, start) {
+  const enabled = new Set();
+  const pending = [...start];
+  while (pending.length) {
+    const name = pending.pop();
+    if (enabled.has(name)) continue;
+    enabled.add(name);
+    for (const entry of table[name] ?? [])
+      if (!entry.startsWith('dep:') && !entry.includes('/'))
+        pending.push(entry);
+  }
+  return enabled;
+}
+
+/** Development features a plain build of this configuration would include:
+ * the crate's default features, and Tauri's `build.features`. */
+export function configuredDevelopmentFeatures(manifest, config) {
+  const table = cargoFeatureTable(manifest);
+  const start = [
+    ...(table.default ? ['default'] : []),
+    ...(Array.isArray(config.build?.features) ? config.build.features : []),
+  ];
+  const enabled = featureClosure(table, start);
+  return DEVELOPMENT_FEATURES.filter((name) => enabled.has(name));
+}
 
 const ok = (check, message) => ({ level: 'ok', check, message });
 const fail = (check, message) => ({ level: 'fail', check, message });
@@ -207,10 +258,15 @@ function readSources(root) {
     `^name = "${crate}"\\r?\\nversion = "([^"]+)"`,
     'm',
   ).exec(read('src-tauri/Cargo.lock'))?.[1];
+  const developmentFeatures = configuredDevelopmentFeatures(
+    read('src-tauri/Cargo.toml'),
+    config,
+  );
   const entitlementsPath = config.bundle?.macOS?.entitlements;
   const noticesPath = config.bundle?.macOS?.files?.[NOTICES_IN_BUNDLE];
   return {
     config,
+    developmentFeatures,
     noticesPath,
     notices:
       noticesPath && existsSync(join(root, 'src-tauri', noticesPath))
@@ -254,6 +310,18 @@ export function checkSources(root = REPOSITORY) {
   }
   const { config, versions, entitlements, entitlementsPath, usage } = sources;
   const findings = [];
+
+  findings.push(
+    sources.developmentFeatures.length
+      ? fail(
+          'development features',
+          `${sources.developmentFeatures.join(', ')} is switched on by the crate's default features or tauri.conf.json build.features; a release must not include it`,
+        )
+      : ok(
+          'development features',
+          `${DEVELOPMENT_FEATURES.join(', ')} not switched on by default or by tauri.conf.json`,
+        ),
+  );
 
   const missing = versions.filter(([, version]) => !version);
   const distinct = new Set(versions.map(([, version]) => version));
@@ -834,7 +902,7 @@ export function parseArguments(argv) {
   return options;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   let options;
   try {
     options = parseArguments(process.argv.slice(2));
