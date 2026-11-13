@@ -51,6 +51,8 @@ type Failure = Exclude<UpdateCheckReport['status'], 'checked' | 'cancelled'>;
 interface Provider {
   changed?: string[];
   missing?: string[];
+  /** Notes the provider itself reports as no longer available. */
+  withdrawn?: string[];
   fail?: Failure;
   hold?: boolean;
 }
@@ -85,7 +87,13 @@ function record(
       (item) => isGranola(item) && item.sourceId === sourceId,
     )!.revision,
     state,
-    reason,
+    // A withdrawn copy stays withheld until a check or import returns it.
+    reason:
+      state === 'notVerified' &&
+      earlier &&
+      (earlier.reason === 'withdrawn' || earlier.reason === 'revoked')
+        ? earlier.reason
+        : reason,
     verifiedAtMs:
       state === 'notVerified' ? (earlier?.verifiedAtMs ?? null) : CHECKED_AT_MS,
     providerUpdatedAtMs: null,
@@ -165,7 +173,9 @@ async function checkUpdates(): Promise<UpdateCheckReport> {
     const item = items.find(
       (item) => isGranola(item) && item.sourceId === sourceId,
     )!;
-    if (plan.missing?.includes(sourceId))
+    if (plan.withdrawn?.includes(sourceId))
+      record(sourceId, 'notVerified', 'withdrawn');
+    else if (plan.missing?.includes(sourceId))
       record(sourceId, 'notVerified', 'missing');
     else if (
       plan.changed?.includes(sourceId) &&
@@ -227,7 +237,8 @@ export async function command(name: string, args: unknown) {
       pending = false;
       generation++;
       check = null;
-      freshness = [];
+      // What could not be confirmed stays marked after disconnecting.
+      freshness = freshness.filter((note) => note.state === 'notVerified');
       return status();
     case 'check_granola_updates':
       return checkUpdates();
@@ -328,6 +339,8 @@ export async function command(name: string, args: unknown) {
             },
         );
       pending = false;
+      // An import is a fresh read: earlier findings about these notes end.
+      for (const id of ids) forget(id);
       await emit('context:changed', items);
       return {
         added: items.length,

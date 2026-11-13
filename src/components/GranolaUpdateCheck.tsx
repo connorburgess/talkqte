@@ -43,6 +43,10 @@ export function useGranolaUpdateCheck() {
     freshness,
     checking,
     outcome,
+    /** Replaces the findings with the notebook's own after an import. */
+    sync(notes: NoteFreshness[]) {
+      setFreshness(notes);
+    },
     /** Drops findings about copies that were removed or imported again. */
     keepOnly(items: ContextItem[]) {
       setFreshness((notes) => {
@@ -132,7 +136,7 @@ function summary(outcome: Outcome, freshness: NoteFreshness[]) {
     case 'expired':
       return 'Granola’s sign-in has expired. Your copies were kept. Disconnect and connect again to check them.';
     case 'revoked':
-      return 'Granola withdrew this app’s access. Your copies stay until you remove them. Disconnect, and connect again only if you want to.';
+      return 'Granola withdrew this app’s access. Your copies stay until you remove them, but are not used for reminders until a later check or import returns them. Disconnect, and connect again only if you want to.';
     case 'rateLimited':
       return `Granola asked for a pause${
         outcome.retryAfterS ? ` of about ${outcome.retryAfterS} seconds` : ''
@@ -207,7 +211,13 @@ const unverified: Partial<
     'Granola gave no update time for this note, so it cannot be compared. This copy was kept.',
   unreadable:
     'Granola’s reply had no readable date or text. This copy was kept.',
+  withdrawn:
+    'Granola reported that this note is no longer available to you. This copy was kept, but it is not used for reminders until a later check or import returns the note. Remove it if you no longer need it.',
+  revoked:
+    'Granola withdrew this app’s access. This copy was kept, but it is not used for reminders until a later check or import returns the note.',
 };
+/** Copies left out of reminders; the others stay eligible with a warning. */
+const withheld = ['withdrawn', 'revoked'];
 
 /** The per-note result of the last check, in words rather than color. */
 export function GranolaNoteFreshness({
@@ -224,6 +234,8 @@ export function GranolaNoteFreshness({
           Not verified.{' '}
           {(reason && unverified[reason]) ||
             'The last check could not confirm this copy; it was kept.'}
+          {!(reason && withheld.includes(reason)) &&
+            ' A reminder from this note says it could not be verified.'}
           {verifiedAtMs !== null && (
             <>
               {' '}

@@ -15,7 +15,7 @@
 //!
 //! Network work runs on its own thread, never under the notebook lock.
 
-use crate::context::{ContextItem, ContextStore, Provider, SourceError};
+use crate::context::{ContextItem, ContextStore, MergeOutcome, Provider, SourceError, Unconfirmed};
 use serde::Serialize;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -40,6 +40,12 @@ pub trait RefreshSource {
     /// The selected notes the provider returned. A note it omits is simply
     /// absent; other notes it volunteers are dropped by the caller.
     fn fetch_available(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError>;
+    /// Identifiers from the last `fetch_available` that the provider itself
+    /// reported as no longer available to this person. An omitted note is
+    /// not one of these. No real adapter reports any.
+    fn withdrawn(&mut self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// Why a kept copy could not be confirmed as the provider's latest.
@@ -48,6 +54,9 @@ pub trait RefreshSource {
 pub enum Unverified {
     /// The provider did not return the note. Not proof of deletion.
     Missing,
+    /// The provider reported the note as no longer available to this
+    /// person. The copy is kept but not used for reminders.
+    Withdrawn,
     /// The reply carried no usable update time.
     Unversioned,
     /// The reply was older than the kept copy.
@@ -139,6 +148,7 @@ pub enum CheckError {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Fetched {
     items: Vec<ContextItem>,
+    withdrawn: Vec<String>,
     workspace: String,
 }
 
@@ -240,11 +250,85 @@ impl Refresh {
         }
     }
 
-    /// Disconnect also forgets what earlier checks of that connection found.
+    /// Disconnect ends the workspace binding and forgets which copies the
+    /// retired connection confirmed. What it could not confirm stays, so a
+    /// reminder keeps its warning and a withdrawn copy stays out of
+    /// reminders until a later check or import.
     pub fn disconnect(&mut self) {
         self.stop();
         self.workspace = None;
-        self.notes.clear();
+        self.notes
+            .retain(|entry| entry.state == Freshness::NotVerified);
+    }
+
+    /// Merges an import the person asked for and ends the earlier finding
+    /// about each note the provider actually returned in usable form at
+    /// the kept revision or a newer one. An older, unreadable or absent
+    /// reply leaves the finding, and with it any warning or withholding.
+    pub fn merge_import(
+        &mut self,
+        store: &mut ContextStore,
+        provider: Provider,
+        selection: &[String],
+        fetched: Vec<ContextItem>,
+    ) -> MergeOutcome {
+        let mut total = MergeOutcome::default();
+        for item in fetched {
+            let (id, revision) = (item.source_id.trim().to_string(), item.revision);
+            let outcome = store.merge(provider, selection, vec![item]);
+            let returned = outcome.added + outcome.updated == 1
+                || (outcome.unchanged == 1
+                    && store.items().iter().any(|kept| {
+                        kept.provider == provider
+                            && kept.source_id == id
+                            && kept.revision == revision
+                    }));
+            if returned {
+                self.forget(provider, &id);
+            }
+            total.added += outcome.added;
+            total.updated += outcome.updated;
+            total.unchanged += outcome.unchanged;
+            total.over_limit += outcome.over_limit;
+            total.rejected += outcome.rejected;
+        }
+        total
+    }
+
+    /// The notes a reminder may quote, with the warning it must carry.
+    /// A copy the last check could not confirm stays eligible but says so.
+    /// A copy whose access the provider reported as withdrawn is left out
+    /// until a later check or import; it stays in the store and the panel.
+    pub fn eligible(&self, store: &ContextStore) -> Vec<(ContextItem, Option<Unconfirmed>)> {
+        store
+            .items()
+            .iter()
+            .filter_map(|item| {
+                let finding = self.notes.iter().find(|entry| {
+                    item.provider == Provider::Granola
+                        && entry.source_id == item.source_id
+                        && entry.revision == item.revision
+                        && entry.state == Freshness::NotVerified
+                });
+                match finding {
+                    None => Some((item.clone(), None)),
+                    Some(entry)
+                        if matches!(
+                            entry.reason,
+                            Some(Unverified::Withdrawn | Unverified::Revoked)
+                        ) =>
+                    {
+                        None
+                    }
+                    Some(entry) => Some((
+                        item.clone(),
+                        Some(Unconfirmed {
+                            last_confirmed_ms: entry.verified_at_ms,
+                        }),
+                    )),
+                }
+            })
+            .collect()
     }
 
     /// A removed note leaves the selection at once, so a pending result
@@ -352,6 +436,20 @@ impl Refresh {
             let Some(kept_revision) = kept(store, id) else {
                 continue;
             };
+            if fetched
+                .withdrawn
+                .iter()
+                .any(|withdrawn| withdrawn.trim() == id)
+            {
+                self.record(
+                    id,
+                    kept_revision,
+                    Freshness::NotVerified,
+                    Some(Unverified::Withdrawn),
+                    None,
+                );
+                continue;
+            }
             let Some(item) = fetched
                 .items
                 .iter()
@@ -411,11 +509,22 @@ impl Refresh {
         {
             // A later failure keeps the time of the last successful check of
             // the same revision.
-            entry.verified_at_ms =
-                verified_at_ms.or(entry.verified_at_ms.filter(|_| entry.revision == revision));
+            let same_copy = entry.revision == revision;
+            entry.verified_at_ms = verified_at_ms.or(entry.verified_at_ms.filter(|_| same_copy));
+            // A copy the provider reported as withdrawn stays withheld until
+            // a check or import actually returns it; a later check that
+            // merely fails or omits it says nothing new.
+            let still_withheld = same_copy
+                && state == Freshness::NotVerified
+                && matches!(
+                    entry.reason,
+                    Some(Unverified::Withdrawn | Unverified::Revoked)
+                );
             entry.revision = revision;
             entry.state = state;
-            entry.reason = reason;
+            if !still_withheld {
+                entry.reason = reason;
+            }
         } else {
             self.notes.push(Entry {
                 source_id: source_id.to_string(),
@@ -501,6 +610,7 @@ fn request(
         return Err(CheckError::WorkspaceChanged);
     }
     let mut items = Vec::new();
+    let mut withdrawn = Vec::new();
     for batch in selection.chunks(BATCH) {
         if cancelled() {
             return Err(CheckError::Cancelled);
@@ -515,6 +625,14 @@ fn request(
             continue;
         }
         items.extend(source.fetch_available(&batch).map_err(CheckError::Source)?);
+        // Only what was asked about can be reported as withdrawn.
+        withdrawn.extend(
+            source
+                .withdrawn()
+                .into_iter()
+                .map(|id| id.trim().to_string())
+                .filter(|id| batch.contains(id)),
+        );
         if cancelled() {
             return Err(CheckError::Cancelled);
         }
@@ -522,7 +640,11 @@ fn request(
             return Err(CheckError::WorkspaceChanged);
         }
     }
-    Ok(Fetched { items, workspace })
+    Ok(Fetched {
+        items,
+        withdrawn,
+        workspace,
+    })
 }
 
 /// Runs the check's requests one at a time on their own thread and waits
@@ -632,6 +754,8 @@ mod tests {
         replies: VecDeque<Result<Vec<ContextItem>, SourceError>>,
         asked: Arc<Mutex<Vec<Vec<String>>>>,
         gate: Option<Gate>,
+        /// Identifiers this provider reports as no longer available.
+        withdrawn: Vec<String>,
     }
 
     impl RefreshSource for Fictional {
@@ -657,6 +781,9 @@ mod tests {
             }
             self.replies.pop_front().unwrap_or(Ok(vec![]))
         }
+        fn withdrawn(&mut self) -> Vec<String> {
+            self.withdrawn.clone()
+        }
     }
 
     type Asked = Arc<Mutex<Vec<Vec<String>>>>;
@@ -672,6 +799,7 @@ mod tests {
                 replies: replies.into(),
                 asked: asked.clone(),
                 gate: None,
+                withdrawn: vec![],
             }),
             asked,
         )
@@ -862,9 +990,14 @@ mod tests {
         assert_eq!(report.status, CheckStatus::WorkspaceChanged);
         assert!(asked.lock().unwrap().is_empty());
         assert_eq!(store.items()[0].revision, LATER);
-        // Disconnecting ends that binding along with the earlier findings.
+        // Disconnecting ends that binding. The copy stays marked as not
+        // confirmed until a later check says otherwise.
         refresh.disconnect();
-        assert!(refresh.freshness(&store).is_empty());
+        let kept = refresh.freshness(&store);
+        assert_eq!(
+            (kept[0].state, kept[0].reason),
+            (Freshness::NotVerified, Some(Unverified::Workspace))
+        );
         let (source, _) = provider(
             &[Some("allotment")],
             vec![Ok(vec![note(
@@ -881,8 +1014,6 @@ mod tests {
 
     #[test]
     fn provider_failures_are_distinct_keep_every_copy_and_are_not_retried() {
-        let mut store = store(&[("n1", EARLIER)]);
-        let mut refresh = Refresh::default();
         for (error, status, reason, retry_after_s) in [
             (
                 SourceError::Interrupted,
@@ -923,6 +1054,8 @@ mod tests {
                 None,
             ),
         ] {
+            let mut store = store(&[("n1", EARLIER)]);
+            let mut refresh = Refresh::default();
             let (source, asked) = provider(
                 &[Some("garden-club")],
                 vec![
@@ -995,6 +1128,7 @@ mod tests {
         // Even a success that raced the stop is not applied.
         let late = Ok(Fetched {
             items: vec![note("n1", LATER, "A late fictional reply.")],
+            withdrawn: vec![],
             workspace: "garden-club".into(),
         });
         let report = refresh.apply(&ticket, late, &mut store, NOW);
@@ -1033,7 +1167,13 @@ mod tests {
         release.send(()).unwrap();
         let report = refresh.apply(&ticket, result, &mut store, NOW);
         assert_eq!(report.status, CheckStatus::Cancelled);
-        assert!(report.notes.is_empty());
+        // What the retired connection confirmed is forgotten; the note it
+        // did not return stays marked.
+        assert_eq!(report.notes.len(), 1);
+        assert_eq!(
+            state(&report, "n1"),
+            (Freshness::NotVerified, Some(Unverified::Missing))
+        );
         // Disconnect keeps the imported copies exactly as they were.
         assert_eq!(store.items().len(), 2);
         assert!(store.items().iter().all(|item| item.revision == EARLIER));
@@ -1043,6 +1183,7 @@ mod tests {
         let replacement = refresh.begin(&store).unwrap();
         let late = Ok(Fetched {
             items: vec![note("n1", LATER, "A late fictional reply.")],
+            withdrawn: vec![],
             workspace: "garden-club".into(),
         });
         assert_eq!(
@@ -1064,6 +1205,7 @@ mod tests {
                     note("n1", LATER, "A newer copy of the removed note."),
                     note("n2", LATER, "A newer copy of the kept note."),
                 ],
+                withdrawn: vec![],
                 workspace: "garden-club".into(),
             })
         };
@@ -1210,6 +1352,281 @@ mod tests {
             vec![note("n1", LATER, "Imported again by choice.")],
         );
         assert!(refresh.freshness(&store).is_empty());
+    }
+
+    /// Three fictional notes with titles a spoken line can name.
+    fn titled_store() -> ContextStore {
+        let mut store = ContextStore::default();
+        let notes: Vec<ContextItem> = [
+            ("n1", "Garden welcome guide"),
+            ("n2", "Compost rota handover"),
+            ("n3", "Seed swap budget"),
+        ]
+        .into_iter()
+        .map(|(id, title)| ContextItem {
+            title: title.into(),
+            ..note(id, EARLIER, "Robin will label the watering cans.")
+        })
+        .collect();
+        let ids: Vec<String> = notes.iter().map(|note| note.source_id.clone()).collect();
+        store.merge(Provider::Granola, &ids, notes);
+        store
+    }
+
+    fn unchanged(store: &ContextStore, ids: &[&str]) -> Vec<ContextItem> {
+        store
+            .items()
+            .iter()
+            .filter(|item| ids.contains(&item.source_id.as_str()))
+            .cloned()
+            .collect()
+    }
+
+    /// The reminder, if any, that a new live session raises for one line.
+    fn reminder(
+        refresh: &Refresh,
+        store: &ContextStore,
+        line: &str,
+    ) -> Option<crate::engine::NoteRef> {
+        let mut engine = crate::engine::Engine::live();
+        engine.start().unwrap();
+        engine.advance(10_000);
+        engine.set_prior_notes(refresh.eligible(store));
+        engine
+            .ingest(
+                engine.session(),
+                crate::engine::Segment {
+                    id: "w1".into(),
+                    at_ms: 9_000,
+                    speaker: "Speaker 1".into(),
+                    text: line.into(),
+                },
+            )
+            .unwrap();
+        engine.state.cue.and_then(|cue| cue.note)
+    }
+
+    const GUIDE: &str = "Let's get the welcome guide sorted before the garden day.";
+    const COMPOST: &str = "Let's get the compost rota handover sorted today.";
+
+    #[test]
+    fn an_unconfirmed_copy_reminds_with_a_warning_and_a_withdrawn_copy_does_not_remind() {
+        let mut store = titled_store();
+        let mut refresh = Refresh::default();
+        // Before any check, a reminder carries no warning.
+        assert_eq!(reminder(&refresh, &store, GUIDE).unwrap().unconfirmed, None);
+        let (source, _) = provider(
+            &[Some("garden-club")],
+            vec![Ok(unchanged(&store, &["n1", "n2", "n3"]))],
+        );
+        check(&mut refresh, &mut store, source, NOW);
+        assert_eq!(reminder(&refresh, &store, GUIDE).unwrap().unconfirmed, None);
+        assert!(reminder(&refresh, &store, COMPOST).is_some());
+
+        // A later check: one note is not returned, one is reported as
+        // withdrawn, one is unchanged.
+        let (mut source, _) =
+            provider(&[Some("garden-club")], vec![Ok(unchanged(&store, &["n3"]))]);
+        source.withdrawn = vec!["n2".into(), "never-selected".into()];
+        let report = check(&mut refresh, &mut store, source, NOW + 60_000);
+        assert_eq!(
+            state(&report, "n1"),
+            (Freshness::NotVerified, Some(Unverified::Missing))
+        );
+        assert_eq!(
+            state(&report, "n2"),
+            (Freshness::NotVerified, Some(Unverified::Withdrawn))
+        );
+        assert_eq!(report.notes.len(), 3);
+        // Both copies are kept; neither is treated as deleted.
+        assert_eq!(store.items().len(), 3);
+
+        let warned = reminder(&refresh, &store, GUIDE).unwrap();
+        assert_eq!(
+            warned.unconfirmed,
+            Some(Unconfirmed {
+                last_confirmed_ms: Some(NOW)
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&warned).unwrap()["unconfirmed"]["lastConfirmedMs"],
+            NOW
+        );
+        assert_eq!(reminder(&refresh, &store, COMPOST), None);
+
+        // A check that cannot reach the provider says nothing new about
+        // the withdrawn copy, and disconnecting does not restore it.
+        let (source, _) = provider(&[Some("garden-club")], vec![Err(SourceError::Interrupted)]);
+        let report = check(&mut refresh, &mut store, source, NOW + 90_000);
+        assert_eq!(
+            state(&report, "n2"),
+            (Freshness::NotVerified, Some(Unverified::Withdrawn))
+        );
+        assert_eq!(reminder(&refresh, &store, COMPOST), None);
+        refresh.disconnect();
+        assert_eq!(reminder(&refresh, &store, COMPOST), None);
+        assert!(reminder(&refresh, &store, GUIDE)
+            .unwrap()
+            .unconfirmed
+            .is_some());
+
+        // A later check that returns both notes restores plain reminders.
+        let (source, _) = provider(
+            &[Some("garden-club")],
+            vec![Ok(unchanged(&store, &["n1", "n2", "n3"]))],
+        );
+        check(&mut refresh, &mut store, source, NOW + 120_000);
+        assert_eq!(reminder(&refresh, &store, GUIDE).unwrap().unconfirmed, None);
+        let restored = reminder(&refresh, &store, COMPOST).unwrap();
+        assert_eq!(restored.unconfirmed, None);
+        assert!(serde_json::to_value(&restored)
+            .unwrap()
+            .get("unconfirmed")
+            .is_none());
+    }
+
+    #[test]
+    fn withdrawn_access_keeps_every_copy_out_of_reminders_until_it_is_imported_again() {
+        let mut store = titled_store();
+        // A file note that shares an identifier is a different note.
+        let mut file = note("n2", 1, "From a fictional file.");
+        file.provider = Provider::File;
+        file.title = "Compost rota handover".into();
+        let mut refresh = Refresh::default();
+        let (source, _) = provider(&[Some("garden-club")], vec![Err(SourceError::Revoked)]);
+        let report = check(&mut refresh, &mut store, source, NOW);
+        assert_eq!(report.status, CheckStatus::Revoked);
+        assert_eq!(store.items().len(), 3);
+        assert!(refresh.eligible(&store).is_empty());
+        assert_eq!(reminder(&refresh, &store, GUIDE), None);
+        store.merge(Provider::File, &["n2".into()], vec![file]);
+        assert_eq!(
+            reminder(&refresh, &store, COMPOST).unwrap().provider,
+            "file"
+        );
+        store.remove(Provider::File, "n2");
+
+        // A later check that fails, or that simply does not return the
+        // notes, says nothing new: they stay out of reminders.
+        for reply in [Err(SourceError::Interrupted), Ok(vec![])] {
+            let (source, _) = provider(&[Some("garden-club")], vec![reply]);
+            check(&mut refresh, &mut store, source, NOW + 60_000);
+            assert!(refresh.eligible(&store).is_empty());
+        }
+        refresh.disconnect();
+        assert!(refresh.eligible(&store).is_empty());
+
+        // Importing again restores a note only if Granola returns it in
+        // usable form at the kept revision or a newer one.
+        let ids: Vec<String> = ["n1", "n2", "n3"].map(String::from).into();
+        let mut older = unchanged(&store, &["n1"]);
+        older[0].revision = EARLIER - 1;
+        let mut unreadable = unchanged(&store, &["n2"]);
+        unreadable[0].excerpt = " ".into();
+        let outcome = refresh.merge_import(
+            &mut store,
+            Provider::Granola,
+            &ids,
+            older.into_iter().chain(unreadable).collect(),
+        );
+        assert_eq!((outcome.unchanged, outcome.rejected), (1, 1));
+        assert!(refresh.eligible(&store).is_empty());
+
+        let again = unchanged(&store, &["n1"]);
+        let mut newer = unchanged(&store, &["n3"]);
+        newer[0].revision = LATER;
+        let outcome = refresh.merge_import(
+            &mut store,
+            Provider::Granola,
+            &ids,
+            again.into_iter().chain(newer).collect(),
+        );
+        assert_eq!((outcome.unchanged, outcome.updated), (1, 1));
+        assert_eq!(reminder(&refresh, &store, GUIDE).unwrap().unconfirmed, None);
+        assert_eq!(refresh.eligible(&store).len(), 2);
+        assert_eq!(reminder(&refresh, &store, COMPOST), None);
+    }
+
+    #[test]
+    fn a_copy_never_confirmed_says_so_and_other_failures_keep_it_eligible() {
+        for error in [
+            SourceError::Interrupted,
+            SourceError::Expired,
+            SourceError::RateLimited {
+                retry_after: Duration::from_secs(7),
+            },
+            SourceError::UnsupportedFormat,
+        ] {
+            let mut store = titled_store();
+            let mut refresh = Refresh::default();
+            let (source, _) = provider(&[Some("garden-club")], vec![Err(error)]);
+            check(&mut refresh, &mut store, source, NOW);
+            assert_eq!(
+                reminder(&refresh, &store, GUIDE).unwrap().unconfirmed,
+                Some(Unconfirmed {
+                    last_confirmed_ms: None
+                })
+            );
+        }
+        // Older, undated and unreadable replies keep the last confirmed time.
+        let mut store = titled_store();
+        let mut refresh = Refresh::default();
+        let (source, _) = provider(
+            &[Some("garden-club")],
+            vec![Ok(unchanged(&store, &["n1", "n2", "n3"]))],
+        );
+        check(&mut refresh, &mut store, source, NOW);
+        let mut replies = unchanged(&store, &["n1", "n2", "n3"]);
+        replies[0].revision = EARLIER - 1;
+        replies[1].revision = 1;
+        replies[2].revision = LATER;
+        replies[2].source_date = String::new();
+        let (source, _) = provider(&[Some("garden-club")], vec![Ok(replies)]);
+        check(&mut refresh, &mut store, source, NOW + 60_000);
+        let eligible = refresh.eligible(&store);
+        assert_eq!(eligible.len(), 3);
+        assert!(eligible.iter().all(|(_, warning)| *warning
+            == Some(Unconfirmed {
+                last_confirmed_ms: Some(NOW)
+            })));
+    }
+
+    #[test]
+    fn a_held_reminder_is_cleared_when_its_copy_stops_being_confirmed() {
+        for withdrawn in [false, true] {
+            let mut store = titled_store();
+            let mut refresh = Refresh::default();
+            let mut engine = crate::engine::Engine::live();
+            engine.start().unwrap();
+            engine.advance(10_000);
+            engine.set_prior_notes(refresh.eligible(&store));
+            engine
+                .ingest(
+                    engine.session(),
+                    crate::engine::Segment {
+                        id: "w1".into(),
+                        at_ms: 9_000,
+                        speaker: "Speaker 1".into(),
+                        text: GUIDE.into(),
+                    },
+                )
+                .unwrap();
+            let id = engine.state.cue.as_ref().unwrap().id.clone();
+            engine.inspect_cue(&id, true).unwrap();
+            assert!(engine.state.cue.as_ref().unwrap().held);
+
+            let (mut source, _) = provider(
+                &[Some("garden-club")],
+                vec![Ok(unchanged(&store, &["n2", "n3"]))],
+            );
+            if withdrawn {
+                source.withdrawn = vec!["n1".into()];
+            }
+            check(&mut refresh, &mut store, source, NOW);
+            engine.set_prior_notes(refresh.eligible(&store));
+            // Cleared, not relabeled under the reader's eyes.
+            assert!(engine.state.cue.is_none());
+        }
     }
 
     #[test]

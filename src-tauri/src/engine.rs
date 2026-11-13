@@ -123,6 +123,9 @@ pub struct NoteRef {
     pub title: String,
     pub source_date: String,
     pub provider: String,
+    /// Set when the last update check could not confirm the quoted copy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unconfirmed: Option<crate::context::Unconfirmed>,
 }
 
 /// The cue kind for a reminder drawn from an imported note.
@@ -429,6 +432,7 @@ const NOTE_STOP_WORDS: &[&str] = &[
 struct NoteTerms {
     key: String,
     item: ContextItem,
+    unconfirmed: Option<crate::context::Unconfirmed>,
     terms: Vec<String>,
 }
 
@@ -1101,6 +1105,7 @@ impl Engine {
                         title: note.item.title,
                         source_date: note.item.source_date,
                         provider: note.item.provider.id().into(),
+                        unconfirmed: note.unconfirmed,
                     }),
                     about_focus: false,
                 });
@@ -1329,12 +1334,24 @@ impl Engine {
     /// its provider identity and revision, including across engine replacement.
     /// An unchanged import leaves a held cue and pending evaluation alone.
     pub fn set_notes(&mut self, notes: Vec<ContextItem>) {
+        self.set_prior_notes(notes.into_iter().map(|item| (item, None)).collect());
+    }
+
+    /// As `set_notes`, with the warning a reminder must carry for a copy
+    /// the last update check could not confirm. A change to that warning
+    /// counts as a change to the note, so a displayed reminder is cleared
+    /// instead of keeping or gaining words under the reader's eyes.
+    pub fn set_prior_notes(
+        &mut self,
+        notes: Vec<(ContextItem, Option<crate::context::Unconfirmed>)>,
+    ) {
         let notes: Vec<_> = notes
             .into_iter()
-            .map(|item| NoteTerms {
+            .map(|(item, unconfirmed)| NoteTerms {
                 terms: note_terms(&item.title),
                 key: format!("{}:{}", item.provider.id(), item.source_id),
                 item,
+                unconfirmed,
             })
             .collect();
         if self.notes == notes {

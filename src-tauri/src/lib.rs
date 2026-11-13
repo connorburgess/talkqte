@@ -717,7 +717,10 @@ struct PickedNotes {
 fn publish_context(app: &tauri::AppHandle, runtime: &mut Runtime) {
     // The engine may quote an imported note as a context reminder.
     let before = runtime.engine.state.revision;
-    runtime.engine.set_notes(runtime.context.items().to_vec());
+    // A copy the last update check could not confirm carries a warning; one
+    // the provider reported as withdrawn is left out (context_refresh.rs).
+    let eligible = runtime.refresh.eligible(&runtime.context);
+    runtime.engine.set_prior_notes(eligible);
     runtime.processing_reviews.reconcile(&runtime.engine);
     if runtime.engine.state.revision != before {
         // A changed or removed note may be visible in either window, even held.
@@ -828,8 +831,12 @@ async fn import_context_notes(
         _ => "The selected notes could not be read. Nothing was imported. Try again, or cancel to choose other notes.",
     })?;
     runtime.pending_import = None;
-    let outcome = runtime.context.merge(provider, &ids, fetched);
-    publish_context(&app, &mut runtime);
+    let runtime = &mut *runtime;
+    // Also ends earlier update-check findings about the notes it returns.
+    let outcome = runtime
+        .refresh
+        .merge_import(&mut runtime.context, provider, &ids, fetched);
+    publish_context(&app, runtime);
     Ok(outcome)
 }
 
@@ -1096,7 +1103,9 @@ async fn check_granola_updates(
     let report = runtime
         .refresh
         .apply(&ticket, result, &mut runtime.context, now_ms);
-    if report.store_changed {
+    if report.status != context_refresh::CheckStatus::Cancelled {
+        // Also when no copy changed: the result decides which notes may
+        // remind and with what warning.
         publish_context(&app, runtime);
     }
     Ok(report)

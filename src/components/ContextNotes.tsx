@@ -191,6 +191,12 @@ export function ContextNotes({
       const current = operation.current;
       setImporting(true);
       const outcome = await bridge.importContextNotes(chosen);
+      // Rust decides which earlier findings the import ended.
+      if (pickedFrom === 'granola')
+        void bridge
+          .granolaStatus()
+          .then((status) => updates.sync(status.freshness ?? []))
+          .catch(() => {});
       if (current !== operation.current) return;
       setPicked(null);
       const parts = [

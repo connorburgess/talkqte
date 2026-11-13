@@ -137,3 +137,18 @@ PLAYWRIGHT_PORT=1432 npm test -- tests/granola-updates.spec.ts
 ```
 
 Unverified: whether Granola exposes a workspace identity, when an edited note becomes visible through `get_meetings`, what it returns for a note that was deleted, unshared or moved, real timeout and rate-limit behavior, native VoiceOver, and whether freshness labels help anyone during a conversation.
+
+## Reminders from copies a check could not confirm
+
+13 November 2026 (N2). The [reminder policy](selected-note-refresh-plan.md#reminders-from-copies-a-check-could-not-confirm) is implemented and checked with fictional providers only. The signed-in Granola connection cannot run a check, so the app's behavior on a real account is unchanged. No account, network, capture or model was used.
+
+Rust acceptance calls the store, the check and the cue engine directly with a scripted fictional source and a named clock; it does not run the app's commands, whose calls into this policy are untested. A line naming a note raises a reminder with no warning before any check and after a confirming one. After a check in which one note is not returned and another is reported as withdrawn, the first still reminds and carries the time it was last confirmed, the second raises no reminder, and both copies remain in the store. A later check that returns both restores plain reminders, which is the control for the withheld case. Offline, expired, rate-limited and unreadable-format checks keep a never-confirmed copy eligible with no confirmation time; older, undated and unreadable replies keep the earlier confirmation time. Withdrawn app access holds back every Granola copy while a file note with the same identifier still reminds. A later check that fails or omits the notes, and disconnecting, do not restore them. An import that returns an older or unreadable reply does not either; one that returns the note at the kept or a newer revision does. A reminder held open is cleared when its copy becomes unconfirmed or withdrawn.
+
+Browser acceptance renders fictional reminders in the notebook and the companion: the warning and its time are visible without opening **Why?**, "No check on record has confirmed it" appears when there is no time, and a reminder without the flag shows no warning. In the panel, a withdrawn note says it is kept but not used for reminders and never uses the word "deleted"; a not-returned note says a reminder from it will carry a warning; a later check that cannot reach the provider leaves the withdrawn note withheld; after disconnecting, confirmations disappear while both unconfirmed labels stay; importing the notes again clears them. The browser fixture restates the rules in TypeScript and does not run the engine, so it shows wording and layout, not eligibility.
+
+```sh
+cargo test --manifest-path src-tauri/Cargo.toml --locked --lib context_refresh
+PLAYWRIGHT_PORT=1432 npm test -- tests/granola-unverified-reminders.spec.ts tests/granola-updates.spec.ts
+```
+
+Unverified: whether Granola reports a withdrawn note at all, the native command path and native companion sizing with the extra line, screen-reader announcement of the warning, evaluated cues that cite prior notes, and whether people find the warning useful.
