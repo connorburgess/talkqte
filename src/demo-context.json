@@ -1,0 +1,53 @@
+{
+  "purpose": "Fictional, human-authored planning fixture; not connected to demo playback or live cues.",
+  "notes": [
+    {
+      "id": "garden-committee",
+      "title": "Garden committee",
+      "date": "2025-10-28",
+      "text": "Sam offered to draft the welcome guide and would like a co-writer. Gate signs need the council's approval, which usually takes about two weeks."
+    },
+    {
+      "id": "visitor-schedule",
+      "title": "Visitor schedule",
+      "date": "2025-11-03",
+      "text": "Next new-visitor group: Saturday 22 November, 10 am. Three volunteers asked for printed copies to hand out."
+    }
+  ],
+  "opportunities": [
+    {
+      "id": "draft-offer",
+      "segmentId": "s2",
+      "trigger": "Someone can take the first draft",
+      "notBeforeMs": 8000,
+      "cue": "Sam offered to draft this on 28 Oct",
+      "noteIds": ["garden-committee"],
+      "support": ["Sam offered to draft the welcome guide"],
+      "estimatedSpokenEndMs": 7680
+    },
+    {
+      "id": "visitor-date",
+      "segmentId": "s4",
+      "trigger": "before the next group of visitors arrives",
+      "notBeforeMs": 38000,
+      "cue": "Next visitor group: Sat 22 Nov",
+      "noteIds": ["visitor-schedule"],
+      "support": ["Saturday 22 November, 10 am"],
+      "estimatedSpokenEndMs": 38000
+    },
+    {
+      "id": "sign-approval",
+      "segmentId": "s6",
+      "trigger": "put a small sign with a link by the gate",
+      "notBeforeMs": 56000,
+      "cue": "A gate sign needs council approval, about two weeks",
+      "noteIds": ["garden-committee", "visitor-schedule"],
+      "support": [
+        "Gate signs need the council's approval, which usually takes about two weeks",
+        "Three volunteers asked for printed copies"
+      ],
+      "estimatedSpokenEndMs": 55760
+    }
+  ],
+  "timingNote": "Estimated from a fictional audio transcript; listen and verify exact trigger-word timing before playback integration."
+}

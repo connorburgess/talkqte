@@ -49,6 +49,7 @@ jobs:
       - run: npm ci
       - run: npm run test:contributions
       - run: npm run test:cue-lab
+      - run: npm run test:demo-context
       - run: npm run format:check
       - run: npm run build
       - run: npx playwright install --with-deps chromium webkit
