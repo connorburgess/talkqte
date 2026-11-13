@@ -157,6 +157,17 @@ export function ProcessingControl({
     }
   }, [review, editing, snapshot?.capture, snapshot?.startup]);
 
+  // Disabling removes the button that was pressed. When that drops focus to
+  // the page, it goes to Review processing; focus that has moved to another
+  // control or application is left alone.
+  const disabled = useRef(false);
+  useEffect(() => {
+    if (!disabled.current || busy) return;
+    disabled.current = false;
+    if (document.hasFocus() && document.activeElement === document.body)
+      launcher.current?.focus();
+  }, [busy, snapshot]);
+
   async function closeReview() {
     const ticket = ++serial.current;
     restoreFocus.current = true;
@@ -425,9 +436,10 @@ export function ProcessingControl({
               capture === 'stopping' ||
               !!status?.failed
             }
-            onClick={() =>
-              void act('disable', () => processingApi.disable(snapshot!))
-            }
+            onClick={() => {
+              disabled.current = true;
+              void act('disable', () => processingApi.disable(snapshot!));
+            }}
           >
             Disable processing
           </button>
