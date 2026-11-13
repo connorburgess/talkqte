@@ -98,7 +98,7 @@ Cases that still differ, and why they were left alone:
 
 The [Claude lab record](claude-cue-lab.md#validation-record) covers three runs per case on 8–10 November: 10 of 11 expected actions matched in every pass (7 of eight), with no action changing between runs. No lab run was made for the 13 November changes. The sole lab disagreement is `missing-owner`, where staying quiet to avoid duplicating the speakers' own question is defensible; the expected label still needs human review and is unchanged here, so the rules' "show" counts as a match only while that label stands. All 33 request times span 2,969–5,768 ms including CLI startup. The 22 repeat requests averaged about 155 reported output tokens each; this is not a billing or allowance measure.
 
-These counts describe the two prototypes on eleven fictional cases, not an accuracy estimate for equivalent evaluators or real meetings. The 13 November rules were written with these cases in view, so the suite no longer tests them independently; a larger suite with cases written by someone else is needed to estimate how often the new phrases withdraw a question wrongly. The [held-out cases](#held-out-cases) below are a first step.
+These counts describe the two prototypes on eleven fictional cases, not an accuracy estimate for equivalent evaluators or real meetings. The 13 November rules were written with these cases in view, so the suite no longer tests them independently; a larger suite with cases written by someone else is needed to estimate how often the new phrases withdraw a question wrongly. The [held-out cases](#held-out-cases) and the [independent cases](#independent-cases) below are first steps.
 
 The owner rule recognizes "someone can", "someone should", and "someone could". Volunteer verbs include "send", "sort", and "book", allowing `paraphrased-use` to resolve. The suite's questions beginning "Who's" are outside the open-question rule. The `context-reminder` case supplies no imported note, so it does not exercise the app's title-word reminder feature. Whatever the trigger, the owner question's wording is fixed ("Who will take the first draft?"), so on these fixtures it asks about a draft while the speakers discuss a checklist. Paraphrased triggers, corrections without a correction phrase, and topic shifts in other words remain gaps.
 
@@ -169,6 +169,88 @@ The 13 of 23 above is the only held-out measurement. Each change below was writt
 | 14 November 2026 | "Someone can/should/could" before "always" or "never", or "can/could" before a verb of noticing, raises no owner question; "soon" in a goodbye or good wish raises no deadline question | `plain-idiom` and `plain-goodbye`: show, now quiet as labeled | 16 of 23 | 7 of 11 (6 counting strictly) / 9 of 11, unchanged |
 
 The owner has decided that `already-answered` in the original suite is not to be fixed by delaying every question, so no timing change is proposed for the answered cases here.
+
+### Independent cases
+
+Recorded 14 November 2026. `scripts/fixtures/cue-rules-independent.json` holds 34 fictional conversations written by another lane, which did not read the engine's rules or their written descriptions and did not run the rules on its cases. Each has an expected action and a one-line reason. **The labels await the owner's review.** The cases were wired into the replay and scored before any rule was changed for them; this measurement changes no rule. No lab or model run was made.
+
+The fixture records what its author had read, and that limits how independent the set is:
+
+- PRODUCT.md, and the structure and action names of the held-out file with its description of a held-out case.
+- The opening held-out cases, seen while reading that structure (`deferral-next-month`, `deferral-look-alike`, `deferral-of-something-else` and `correction-cancelled`).
+- The browser preview's demo stand-in, `src/lib/preview.ts`, during unrelated work. It contains a subset of the engine's Said rule: its time words, commitment words and hedges. One match below (`storeroom-chairs`) comes from exactly that rule.
+
+`rules_on_the_independent_fictional_cases` in `engine.rs` replays the cases exactly as the held-out ones (same helper): lines two seconds apart with one speaker label, the fixture's cue on screen where a case lists one, and the session name where a case gives one.
+
+| Case                      | Group               | Expected | Rules                  |
+| ------------------------- | ------------------- | -------- | ---------------------- |
+| storeroom-chairs          | no owner            | show     | show (a Said quote)    |
+| server-cupboard           | no owner            | show     | quiet                  |
+| tombola-owner-lost        | correction          | show     | quiet                  |
+| gate-shift-taken          | answered later      | resolved | quiet                  |
+| compost-bins-later        | answered later      | resolved | quiet                  |
+| permit-form-sometime      | vague deadline      | show     | show                   |
+| floor-plan-when-free      | vague deadline      | show     | quiet                  |
+| stall-list-thursday       | answered later      | resolved | quiet                  |
+| seed-order-twentieth      | answered later      | resolved | quiet                  |
+| cake-stall-tables         | asked by name       | show     | show (Asked you)       |
+| lift-name-at-end          | asked by name       | show     | show (Asked you)       |
+| posters-praise            | plain               | quiet    | quiet                  |
+| as-maren-said             | plain               | quiet    | quiet                  |
+| urn-for-idris             | another addressee   | quiet    | quiet                  |
+| desks-via-hana            | another addressee   | quiet    | quiet                  |
+| anyone-seen-gazebo        | uncertain addressee | quiet    | show (Open question)   |
+| you-grab-the-float        | uncertain addressee | quiet    | quiet                  |
+| caretaker-keys-again      | repeat              | quiet    | quiet                  |
+| risk-form-again           | repeat              | quiet    | quiet                  |
+| bouncy-castle-to-parking  | topic change        | withdraw | withdraw               |
+| carpet-tiles-same-subject | topic change        | quiet    | quiet                  |
+| skip-or-trailer-settled   | answered later      | resolved | resolved               |
+| work-party-parked         | deferral            | withdraw | quiet                  |
+| shed-colour-not-tonight   | deferral            | withdraw | quiet                  |
+| floor-not-moving          | correction          | withdraw | quiet                  |
+| minibus-already-booked    | correction          | resolved | quiet                  |
+| tomato-glut               | plain               | quiet    | quiet                  |
+| lead-and-urn-covered      | plain               | quiet    | quiet                  |
+| thanks-and-tea            | plain               | quiet    | quiet                  |
+| rhetorical-cake-stall     | plain               | quiet    | quiet                  |
+| t-shirts-arrived          | plain               | quiet    | quiet                  |
+| hall-already-swept        | plain               | quiet    | quiet                  |
+| skip-date-on-sheet        | plain               | quiet    | quiet                  |
+| new-office-windows        | plain               | quiet    | quiet                  |
+| **Matches**               |                     |          | **22 of 34**           |
+
+The rules match 22 of 34 by action. Read it with these limits:
+
+- **Strict count.** `storeroom-chairs` matches by action only. Its label describes a task with no owner; the rules quote "somebody has to get those out before the doors open on Saturday" as a Said cue because of "before … Saturday" and raise no owner question, since only "someone can/should/could" counts. Counting strictly, the rules match 21 of 34.
+- **Against doing nothing.** 17 of the 34 cases are labeled quiet, so a companion that did nothing would match 17. The rules get 6 of the 17 cases that need an action (5 strictly) and take a wrong action on 1 of the 17 quiet cases.
+- **Trivial quiet matches.** Several quiet matches are quiet because no rule recognized anything in the line, not because the rules weighed the evidence.
+- **Independence.** The author had not read the rules, but had read the preview's copy of the Said word lists and the first four held-out cases, as listed above.
+- **Scale.** Thirty-four fictional conversations give no rate for real meetings, and this score is not to be added to the original eleven or the held-out 23.
+
+The twelve misses, and whether a phrase rule could fix each without guessing meaning. None is implemented here. Every miss below has a phrase that would fix that one case. Fitting eleven phrases to eleven sentences would make this score meaningless, so the misses are grouped by whether the same family of phrase also failed on the held-out set.
+
+| Miss | What happened | A phrase rule could fix it? | Also missed on the held-out set |
+| --- | --- | --- | --- |
+| compost-bins-later | "Leave that with me. I can do it Sunday morning." does not resolve the owner question | Yes: "leave … with me" as a volunteer phrase | Yes, `answered-in-other-words` |
+| server-cupboard | "The server cupboard still has to be emptied before the movers turn up" raises nothing | Only narrowly: a passive "has to be / needs to be …" with no one named. Many such lines name an owner later, and every new trigger adds interruptions | Yes, `missing-owner-in-other-words` (missing owner without "someone can/should/could") |
+| tombola-owner-lost | "So the tombola hasn't got anybody" raises nothing | Only narrowly: "hasn't got anybody/anyone" as a no-owner trigger; the rules exclude negations elsewhere, so this would be a deliberate exception | Yes, same family |
+| work-party-parked | "Let's park that until we've seen what the weather does, and come back to it in September" is not a deferral: "and" marks a second clause, and neither occasion is in the list | Yes, narrowly: "until we've …" and "in <month>" as occasions, and a second clause that is itself a deferral of "it" or "that" | Yes, `deferral-next-month` |
+| shed-colour-not-tonight | "Let's not get into that tonight" is excluded as a negation | Yes, narrowly: "let's not get into that/it" as a deferral of "that", an exception to the negation exclusion | Yes, same family |
+| floor-not-moving | "Sorry, scrap that." is not a correction phrase; "scratch that" is | Yes: add "scrap that" | No; the held-out correction miss needed meaning |
+| gate-shift-taken | "I'll do the gate" does not resolve the owner question; "do" was left out of the volunteer verbs because "I'll do Tuesday" is about availability | Yes, narrowly: "I'll do the …" only when what follows shares a distinctive word with the question's line, as the deferral check does | No |
+| stall-list-thursday | "by early I mean Thursday at noon" does not resolve the timing question; only "by/before/until" directly before a day counts | Yes: a weekday followed by "at" and a time | No |
+| seed-order-twentieth | "Then let's order on the twentieth." does not resolve the timing question | Yes: "on the" with an ordinal as a date | No |
+| minibus-already-booked | "Farah booked it last week" does not resolve the owner question; only "will" or "can" with a volunteer verb counts | Yes, narrowly: a capitalized name with a past-tense volunteer verb ("booked", "sent", "took") and "it" or "that". "I'm wrong" as a correction phrase would withdraw the question, not resolve it as labeled | No |
+| floor-plan-when-free | "once I get a minute" raises no deadline question; only "soon" counts | Yes: a short list such as "once I get a minute/chance", "when I get a chance", "at some point" | No |
+| anyone-seen-gazebo | "Does anyone know if we still have the gazebo…?" raises an Open question cue; the label says a question to the whole room is not clearly for the listener | Not a phrase gap. The open-question rule exists to show such questions, so the label and the rule disagree on purpose. An exclusion for "does anyone know if/whether…" is possible if the owner agrees with the label | No |
+
+Families that missed on both sets:
+- volunteering in other words ("leave … with me");
+- a missing owner said without "someone can/should/could";
+- deferrals said in other words.
+
+Those families are the better candidates, though a fix to any of them must then be measured on cases neither lane has seen. `anyone-seen-gazebo` needs the owner to decide between the label and the open-question rule.
 
 ### Outcome labels
 
