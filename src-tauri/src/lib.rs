@@ -52,6 +52,8 @@ struct Runtime {
     /// The approved application-audio source feeding the live session, if
     /// any. Dropping it cancels that source's operation.
     live_source: Option<live_source::LiveSource>,
+    /// A live session started for an application source alone, if any.
+    source_session: Option<live_source::SourceSession>,
     processing_reviews: processing_reviews::Reviews,
     processing_status: engine::ProcessingTracker,
     /// Prior notes the user imported this session, in memory only.
@@ -77,6 +79,7 @@ impl Default for Runtime {
             live: None,
             live_start: live_control::StartGate::default(),
             live_source: None,
+            source_session: None,
             processing_reviews: processing_reviews::Reviews::default(),
             processing_status: engine::ProcessingTracker::default(),
             context: context::ContextStore::default(),

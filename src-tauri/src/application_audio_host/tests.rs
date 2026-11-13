@@ -148,6 +148,22 @@ fn applications() -> Vec<Application> {
 }
 
 impl Backend for Fake {
+    fn begin_session(&mut self, control: &Control) -> Result<Box<dyn FnOnce()>, Failure> {
+        let session = self
+            .runtime
+            .lock()
+            .unwrap()
+            .begin_source_session(control)
+            .map_err(|_| Failure::Busy)?;
+        let runtime = self.runtime.clone();
+        Ok(Box::new(move || {
+            // A poisoned lock here would mean a test already failed.
+            if let Ok(mut runtime) = runtime.lock() {
+                runtime.end_source_session(session);
+            }
+        }))
+    }
+
     fn list(&mut self, cancelled: &AtomicBool) -> Result<Vec<Application>, Failure> {
         self.script.lists.fetch_add(1, Ordering::SeqCst);
         while self.script.list_waits.load(Ordering::SeqCst) {
@@ -280,6 +296,35 @@ impl Fixture {
         let operation = self.start();
         self.wait_phase(Phase::Listening);
         operation
+    }
+}
+
+impl Fixture {
+    /// List, review the first application and start it in a session of its
+    /// own.
+    fn start_session(&self) -> String {
+        self.host.list(true).unwrap();
+        let listed = self.wait("choices", |view| !view.choices.is_empty());
+        self.host.review(&listed.choices[0].id).unwrap();
+        let operation = self.view().operation.unwrap();
+        self.host.start_session(&operation).unwrap();
+        operation
+    }
+
+    /// The live session's state: whether one runs, whether it is a source
+    /// session, whether it has a microphone, and the engine's status.
+    fn session(&self) -> (bool, bool, bool, crate::engine::Status) {
+        let runtime = self.runtime.lock().unwrap();
+        let session = runtime.engine.session();
+        (
+            runtime.live.is_some(),
+            runtime.is_source_session(session),
+            runtime
+                .live
+                .as_ref()
+                .is_some_and(|live| live.microphone.is_some()),
+            runtime.engine.state.status,
+        )
     }
 }
 
@@ -1000,4 +1045,151 @@ fn every_native_stage_maps_to_a_phase_that_does_not_understate_capture() {
     }
     assert_eq!(active_phase(false, None, false), Phase::Starting);
     assert_eq!(active_phase(false, None, true), Phase::Stopping);
+}
+
+#[test]
+fn a_source_session_starts_without_a_microphone_and_ends_with_its_own_stop_or_the_session_stop() {
+    use crate::engine::Status;
+    for by_session in [false, true] {
+        let fixture = fixture(false);
+        assert_eq!(fixture.session().0, false, "no live session to begin with");
+        let operation = fixture.start_session();
+        let listening = fixture.wait_phase(Phase::Listening);
+        assert!(listening.source_session && listening.may_be_capturing);
+        let published = fixture.host.published();
+        assert!(published.source_session);
+        assert_eq!(published.operation.as_deref(), Some(operation.as_str()));
+        // A live session of its own, with no microphone and no model loaded
+        // by the session itself.
+        assert_eq!(
+            fixture.session(),
+            (true, true, false, Status::Running),
+            "by session {by_session}"
+        );
+        fixture.script.stop_hangs.store(true, Ordering::SeqCst);
+        if by_session {
+            // Stop live session, as the notebook does it.
+            let mut runtime = fixture.runtime.lock().unwrap();
+            let session = runtime.engine.session();
+            drop(runtime.take_live_for_stop().unwrap());
+            assert!(runtime.engine.finish_live_stop(session));
+        } else {
+            // The source's own Stop.
+            assert_eq!(fixture.host.stop(&operation), Ok(true));
+        }
+        let stopping = fixture.view();
+        assert_eq!(stopping.phase, Phase::Stopping, "by session {by_session}");
+        assert!(stopping.may_be_capturing);
+        fixture.script.stop_hangs.store(false, Ordering::SeqCst);
+        let off = fixture.wait_phase(Phase::Off);
+        assert_eq!(off.problem, None);
+        let (live, source_session, microphone, status) = fixture.session();
+        assert!(
+            !live && !source_session && !microphone,
+            "by session {by_session}"
+        );
+        assert_eq!(status, Status::Ended);
+        assert_eq!(fixture.script.captures.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[test]
+fn a_source_session_ends_when_cleanup_fails_or_the_worker_faults_but_capture_stays_reported() {
+    use crate::engine::Status;
+    // Cleanup fails: nothing can be delivered any more, so the session ends,
+    // while the source keeps reading as possibly capturing.
+    let fixture = fixture(false);
+    fixture.script.stop_failures.store(1, Ordering::SeqCst);
+    let operation = fixture.start_session();
+    fixture.wait_phase(Phase::Listening);
+    fixture.host.stop(&operation).unwrap();
+    let failed = fixture.wait_phase(Phase::CleanupFailed);
+    assert!(failed.may_be_capturing && failed.source_session);
+    fixture.runtime.lock().unwrap().sync();
+    let (live, _, _, status) = fixture.session();
+    assert!(!live, "the source's session ended");
+    assert_eq!(status, Status::Ended);
+    assert_eq!(fixture.view().phase, Phase::CleanupFailed);
+    assert_eq!(fixture.host.retry_cleanup(&operation), Ok(true));
+    fixture.wait_phase(Phase::Off);
+
+    // The worker faults: the session ends as it unwinds, and the source reads
+    // abandoned rather than off.
+    let fixture = self::fixture(false);
+    fixture.start_session();
+    fixture.wait_phase(Phase::Listening);
+    fixture.script.panics.store(true, Ordering::SeqCst);
+    let abandoned = fixture.wait_phase(Phase::Abandoned);
+    assert!(abandoned.may_be_capturing);
+    let deadline = Instant::now() + WAIT;
+    while fixture.session().0 {
+        assert!(Instant::now() < deadline, "the session outlived its worker");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(fixture.session().3, Status::Ended);
+    assert_eq!(fixture.view().phase, Phase::Abandoned);
+}
+
+#[test]
+fn a_source_session_stopped_before_its_source_begins_ends_off_and_asks_nothing() {
+    use crate::engine::Status;
+    for by_session in [false, true] {
+        let fixture = fixture(false);
+        fixture.script.run_waits.store(true, Ordering::SeqCst);
+        let operation = fixture.start_session();
+        let deadline = Instant::now() + WAIT;
+        while fixture.script.runs.load(Ordering::SeqCst) == 0 {
+            assert!(
+                Instant::now() < deadline,
+                "the worker never took the request"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(fixture.session().0, true, "the session was started first");
+        assert_eq!(fixture.view().phase, Phase::Starting);
+        if by_session {
+            let mut runtime = fixture.runtime.lock().unwrap();
+            let session = runtime.engine.session();
+            drop(runtime.take_live_for_stop().unwrap());
+            runtime.engine.finish_live_stop(session);
+        } else {
+            fixture.host.stop(&operation).unwrap();
+        }
+        assert_eq!(
+            fixture.view().phase,
+            Phase::Stopping,
+            "by session {by_session}"
+        );
+        fixture.script.run_waits.store(false, Ordering::SeqCst);
+        let off = fixture.wait_phase(Phase::Off);
+        assert_eq!(off.problem, None, "by session {by_session}");
+        assert_eq!(fixture.script.begins.load(Ordering::SeqCst), 0);
+        let (live, _, _, status) = fixture.session();
+        assert!(!live);
+        assert_eq!(status, Status::Ended);
+    }
+}
+
+#[test]
+fn a_source_session_is_refused_while_another_session_runs_and_leaves_it_alone() {
+    use crate::engine::Status;
+    let fixture = fixture(true);
+    let session = fixture.runtime.lock().unwrap().engine.session();
+    fixture.start_session();
+    let off = fixture.wait("refusal", |view| view.problem.is_some());
+    assert_eq!(
+        (off.phase, off.problem),
+        (Phase::Off, Some(Problem::SessionBusy))
+    );
+    assert!(!off.may_be_capturing);
+    assert_eq!(fixture.script.runs.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.script.begins.load(Ordering::SeqCst), 0);
+    let runtime = fixture.runtime.lock().unwrap();
+    assert_eq!(
+        runtime.engine.session(),
+        session,
+        "the running session is untouched"
+    );
+    assert_eq!(runtime.engine.state.status, Status::Running);
+    assert!(!runtime.is_source_session(session));
 }

@@ -25,6 +25,8 @@ function source(state: Stuck): SourceCapture {
     canRetry: state === 'cleanupFailed',
     application: 'Fictional player',
     problem: state === 'cleanupFailed' ? 'stopFailed' : null,
+    operation: 'fictional-operation',
+    sourceSession: false,
   };
 }
 
@@ -198,6 +200,8 @@ test('a snapshot without the development fields renders as before', async ({
       canRetry: false,
       application: null,
       problem: null,
+      operation: null,
+      sourceSession: false,
     },
   });
   await expect(
@@ -374,6 +378,8 @@ const offSource: SourceCapture = {
   canRetry: false,
   application: null,
   problem: null,
+  operation: null,
+  sourceSession: false,
 };
 
 test('with no live session a stuck source keeps the panel visible until it is off', async ({

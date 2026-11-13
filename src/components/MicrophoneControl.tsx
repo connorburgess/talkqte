@@ -39,6 +39,7 @@ export function MicrophoneControl({
   action,
   processingConfigured = false,
   sourceMayBeCapturing = false,
+  sourceSession = null,
 }: {
   microphone: Microphone;
   live?: boolean;
@@ -48,6 +49,9 @@ export function MicrophoneControl({
   processingConfigured?: boolean;
   /** Development builds only: a selected application may still be captured. */
   sourceMayBeCapturing?: boolean;
+  /** Development builds only: the application a live session was started
+   * for alone, with no microphone. */
+  sourceSession?: string | null;
 }) {
   const { state, error, busy, active, start, stop } = microphone;
   if (live || preparing)
@@ -84,12 +88,15 @@ export function MicrophoneControl({
           </p>
         ) : (
           <p>
-            Your microphone is transcribed on this device. Audio is not
-            recorded.
+            {sourceSession
+              ? `Audio from ${sourceSession} is transcribed on this device; the microphone is not used. Audio is not recorded.`
+              : 'Your microphone is transcribed on this device. Audio is not recorded.'}
             {processingConfigured
               ? ' Cue processing has separate permissions below.'
               : ' The transcript is not saved or sent.'}{' '}
-            Stop live session to release the microphone.
+            {sourceSession
+              ? 'Stop live session to end it.'
+              : 'Stop live session to release the microphone.'}
           </p>
         )}
         {(error || state?.message) && (

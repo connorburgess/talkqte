@@ -48,6 +48,31 @@ A start needs a running live session with no other application source. If
 there is none, or the build has no local transcription, the start ends before
 any native request and the status says why.
 
+### A session for one application alone
+
+`startSession`, naming the review, starts the source in a live session of its
+own instead of joining one. This is the plan's first step: one application's
+audio, with no microphone.
+
+- The worker begins the live session itself, through the same startup gate as
+  Start live session, but loads no model for the session and opens no
+  microphone. The source's worker loads its own recognizer, as before. It is
+  refused, with nothing started, while another live session or the demo runs,
+  and the status says `sessionBusy`.
+- The session's Stop stops its source, including a source that has not
+  attached yet: the source's control is registered with the session when the
+  session begins.
+- The session ends when its attached source stops for any reason, including
+  the source's own Stop, a stream failure, a failed cleanup or an abandoned
+  worker. Nothing could be delivered any more. A failed or abandoned cleanup
+  still reads as possibly capturing after the session has ended. If the source
+  never attaches, the worker ends the session when its run ends, also while
+  unwinding.
+- A session stopped before its source began ends Off with no problem.
+
+Starting a session for an application, like listing, is reached only through
+the development command; the notebook offers no Start for it.
+
 ## The status
 
 The status says **Off only when nothing was started or native cleanup was
@@ -143,10 +168,10 @@ unconfirmed capture when the process exits has not been checked.
 
 ## Tests
 
-Seventeen tests cover the host, and one projection test covers the snapshot
+Twenty-one tests cover the host, and one projection test covers the snapshot
 fields: no `microphone` or `source` without a source, both reported beside a
 combined `capture` with one, and an event when only the source changes.
-Fourteen run the host against the real source-worker ordering, with a
+Eighteen run the host against the real source-worker ordering, with a
 fictional clock read, a memory-only clock feed, a scripted owner and a real
 `Mutex<Runtime>`. The scripted owner keeps a reported problem through a retry
 and release, as the real owner does. One test checks the decisions made before
@@ -155,6 +180,17 @@ the native request, and two are table checks:
 - The published copy that fills the snapshot matches the host's own status
   from approval, before any status read, through a failed Stop, its retry and
   release.
+- A session for an application alone starts with no live session beforehand,
+  has no microphone, and ends with the source's own Stop or with Stop live
+  session; the source reads Stopping until release and the session reads
+  ended.
+- In such a session, a failed cleanup ends the session on the next sync while
+  the source still reads as possibly capturing, and a faulted worker ends the
+  session as it unwinds while the source reads abandoned.
+- Stopped before its source begins, by either Stop, the session ends Off with
+  no problem and no native request.
+- It is refused, as `sessionBusy` and with nothing started, beside another
+  live session, which is left running.
 
 - Listing is refused without the acknowledgement and the backend is never
   asked. Review is explicit, a replaced or cancelled review cannot start, and
@@ -218,15 +254,33 @@ stream as the reported outcome, a second complete operation after the first,
 exit while listing or reviewing, a fault in the worker outside its loop, and
 everything in the app wiring.
 
-### Known gap for the next step
+#Four runtime tests cover the session itself: it starts with no microphone
+and is refused beside another session, the demo or a stopped source; its Stop
+stops a source that has not attached; it ends when its attached source stops,
+while an ordinary session does not; and ending it twice, or after a
+replacement, changes nothing.
 
-When the processing panel is mounted on its own, as in its tests, its Stop
-capture control follows the microphone alone and ignores a source that is
-starting or listening: with the microphone off it shows no Stop at all. In the
-notebook this panel shows no Stop of its own, and Stop live session ends the
-source through the live session. A session that captures an application
-without the microphone would hit this gap, so the step that adds such a
-session must give the source its own Stop.
+Browser tests in Chromium and WebKit, with fixtures in place of the native
+side, cover the source's own Stop (offered while starting or capturing, also
+with the microphone off, and asking only for that operation), its absence once
+Stop is under way or without the fields, the microphone panel's wording in a
+session for an application alone and in an ordinary one, and the live
+layout's Capture row and transcript note.
+
+## The source's own Stop
+
+The processing panel offers **Stop application audio** beside the source's
+line while the source is starting or capturing, in the notebook and when the
+panel is mounted on its own. It asks the host to stop exactly that operation
+and touches no microphone. In a session for the application alone it also ends
+the session, as above. Once Stop is under way, or cleanup failed or was
+abandoned, it is not offered; the line says how cleanup is going.
+
+In a session for an application alone, the microphone panel says the
+application's audio is transcribed on this device and that the microphone is
+not used, and Stop live session ends the session. The live layout's Capture row
+says the session runs from application audio, and its transcript note says
+lines come from the application.
 
 ## Not run, and the gates that stay open
 

@@ -51,9 +51,11 @@ export function describeCapture(
         ? 'No microphone open.'
         : described.source,
     capture:
-      described.capture === 'Off. Nothing is being captured.'
-        ? 'The microphone is off.'
-        : described.capture,
+      real.source.sourceSession && real.live
+        ? 'Live session running from application audio. The microphone is not used.'
+        : described.capture === 'Off. Nothing is being captured.'
+          ? 'The microphone is off.'
+          : described.capture,
     application,
   };
 }
@@ -154,7 +156,14 @@ export const realLinesShown = 5;
  * before permission is granted and keeps running while it stops.
  */
 export function describeTranscript(
-  { session, preparing, cancelling, finishing, microphone }: RealCapture,
+  {
+    session,
+    preparing,
+    cancelling,
+    finishing,
+    microphone,
+    source: application,
+  }: RealCapture,
   onDesktop = desktop,
 ) {
   if (!onDesktop)
@@ -191,8 +200,9 @@ export function describeTranscript(
       'Stopping. Lines from audio already captured may still appear.';
   else if (lines.length) note = source + count;
   else
-    note =
-      microphone.state?.status === 'listening'
+    note = application?.sourceSession
+      ? 'No lines yet. Lines from the application appear a few seconds after they are heard.'
+      : microphone.state?.status === 'listening'
         ? 'No lines yet. Lines from the microphone appear a few seconds after they are spoken.'
         : microphone.state?.status === 'starting'
           ? 'No lines yet. The microphone is not listening yet.'

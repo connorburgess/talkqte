@@ -187,6 +187,9 @@ mockIPC(
         });
         return;
       }
+      case 'application_audio':
+        // Development builds only; recorded in calls, answered with nothing.
+        return null;
       default:
         throw `Unexpected fictional command: ${command}`;
     }

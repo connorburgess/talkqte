@@ -63,6 +63,7 @@ let delayProcessingSnapshot = new URLSearchParams(location.search).has(
   'delay-processing',
 );
 const stopTargets: StopTarget[] = [];
+const applicationAudio: unknown[] = [];
 async function sendProcessing(value: Partial<ProcessingSnapshot>) {
   processing = {
     ...processing,
@@ -259,6 +260,10 @@ mockIPC(
     if (permissionFixture.commands.includes(command))
       return permissionFixture.command(command, args);
     switch (command) {
+      case 'application_audio':
+        // Development builds only: record what the notebook asked for.
+        applicationAudio.push(structuredClone(args));
+        return null;
       case 'processing_snapshot':
         if (delayProcessingSnapshot)
           return new Promise<ProcessingSnapshot>((resolve) =>
@@ -525,6 +530,7 @@ declare global {
       send: typeof sendProcessing;
       state: () => ProcessingSnapshot;
       targets: StopTarget[];
+      applicationAudio: unknown[];
       releaseStart: () => void;
       holdStart: () => void;
       failStart: (message: string) => void;
@@ -572,6 +578,7 @@ window.captureTest = {
   send: sendProcessing,
   state: () => structuredClone(processing),
   targets: stopTargets,
+  applicationAudio,
   holdStart: () => {
     heldStart = true;
   },

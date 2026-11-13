@@ -209,6 +209,9 @@ pub enum SourceProblem {
     StopFailed,
     RemoveFailed,
     Unavailable,
+    /// A source-only session was asked for while another session or the demo
+    /// was running. Nothing was started.
+    SessionBusy,
 }
 
 /// What the notebook needs to describe the source truthfully. Metadata only:
@@ -224,6 +227,10 @@ pub struct SourceCapture {
     pub can_retry: bool,
     pub application: Option<String>,
     pub problem: Option<SourceProblem>,
+    /// Identifies the review or operation, for the source's own Stop.
+    pub operation: Option<String>,
+    /// The live session was started for this source alone; no microphone.
+    pub source_session: bool,
 }
 
 struct ScopeKey {
@@ -641,6 +648,8 @@ mod tests {
             can_retry: true,
             application: Some("Fictional player".into()),
             problem: Some(SourceProblem::StopFailed),
+            operation: Some("fictional-operation".into()),
+            source_session: false,
         };
         let (with, changed) = t.update_with_source(
             &e,

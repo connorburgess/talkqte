@@ -299,6 +299,14 @@ export function ProcessingControl({
   // capture that includes a selected application; otherwise they are one.
   const microphone = snapshot?.microphone ?? capture;
   const sourceLine = describeSource(snapshot?.source);
+  // Offered while the source is starting or capturing and Stop has not yet
+  // been asked; afterwards the line says how cleanup is going.
+  const sourceOperation =
+    snapshot?.source &&
+    (snapshot.source.phase === 'starting' ||
+      snapshot.source.phase === 'listening')
+      ? snapshot.source.operation
+      : null;
   const startup = snapshot?.startup;
   const cancelStart =
     microphone === 'off' && (startup === 'loading' || startup === 'cancelling');
@@ -371,6 +379,24 @@ export function ProcessingControl({
         >
           {sourceLine}
         </p>
+      )}
+      {sourceOperation && (
+        // The source's own Stop: it ends exactly this application source,
+        // and a session started for it alone, without touching a microphone.
+        <div className="processing-actions">
+          <button
+            className="secondary-button"
+            disabled={busy === 'source'}
+            onClick={() =>
+              void act('source', () =>
+                processingApi.stopSource(sourceOperation),
+              )
+            }
+          >
+            <Square size={17} />
+            {busy === 'source' ? 'Stopping…' : 'Stop application audio'}
+          </button>
+        </div>
       )}
       {!status && startup && startup !== 'idle' && (
         <p role="status" className="processing-muted">

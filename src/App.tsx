@@ -1112,6 +1112,11 @@ function Notebook() {
           cancelling={cancelling}
           processingConfigured={!!capture.state?.processor}
           sourceMayBeCapturing={!!capture.state?.source?.mayBeCapturing}
+          sourceSession={
+            capture.state?.source?.sourceSession
+              ? capture.state.source.application || 'the selected application'
+              : null
+          }
           action={
             preparing ? (
               <button

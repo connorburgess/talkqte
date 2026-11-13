@@ -76,6 +76,10 @@ export interface SourceCapture {
   canRetry: boolean;
   application: string | null;
   problem: string | null;
+  /** The review or operation, for the source's own Stop. */
+  operation: string | null;
+  /** The live session was started for this source alone; no microphone. */
+  sourceSession: boolean;
 }
 /** One sentence for the source, or null when there is nothing to say. Never
  * says that nothing is captured while the source may be capturing. */
@@ -121,6 +125,11 @@ export const noteKey = (note: NoteSelection) =>
   JSON.stringify([note.provider, note.sourceId, note.revision]);
 export const processingApi = {
   snapshot: () => invoke<ProcessingSnapshot>('processing_snapshot'),
+  /** Development builds only: Stop exactly this application source. */
+  stopSource: (operation: string) =>
+    invoke<unknown>('application_audio', {
+      action: { kind: 'stop', operation },
+    }).then(() => {}),
   listen: (receive: (snapshot: ProcessingSnapshot) => void) =>
     listen<ProcessingSnapshot>('processing:changed', ({ payload }) =>
       receive(payload),
