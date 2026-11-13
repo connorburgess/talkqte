@@ -519,10 +519,12 @@ pub fn run(
             let result = request(source.as_mut(), &selection, expected.as_deref(), &|| {
                 cancelled.load(Ordering::Acquire)
             });
-            // Drop the connection clone before reporting the request ended.
+            // The request has ended once the connection clone is dropped.
+            // Mark that before handing over the result, so whoever receives
+            // it can start the next check at once.
             drop(source);
-            let _ = sender.send(result);
             drop(settle);
+            let _ = sender.send(result);
         });
     if spawned.is_err() {
         // The closure, and with it the completion flag, was dropped unrun.
