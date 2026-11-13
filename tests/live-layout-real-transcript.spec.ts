@@ -333,6 +333,8 @@ test('headings and list names tell a screen reader which lines are real', async 
   ).toBeVisible();
   await expect(realLines).toBeVisible();
   await expect(exampleLines).toBeVisible();
+  // WebKit drops list semantics under list-style none unless the role is set.
+  await expect(realLines).toHaveAttribute('role', 'list');
   // The real lines come before the fictional conversation heading, so they
   // are not read as part of it.
   const order = await preview.evaluate((root) => {

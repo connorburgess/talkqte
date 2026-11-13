@@ -72,7 +72,7 @@ test('every state names its source and capture state, and every control says it 
 }) => {
   const { mock, picker, frame } = await openMock(page);
   await expect(mock).toContainText(
-    'Source, Capture, Transcript and Cue show the app’s real state, read-only. Everything else is a fictional example.',
+    'Source, Capture, Transcript, Cue and Prior context show the app’s real state, read-only. Everything else is a fictional example.',
   );
   await expect(mock).toContainText(
     'the preview starts and stops no capture, connects to no meeting, and generates no cues of its own',
@@ -92,7 +92,7 @@ test('every state names its source and capture state, and every control says it 
       'every control here is simulated and only changes the example',
     );
     await expect(frame).toContainText(
-      'Source, Capture, Transcript and Cue are real and read-only',
+      'Source, Capture, Transcript, Cue and Prior context are real and read-only',
     );
     await expect(frame).toContainText(
       `Simulated Fictional sample conversation. ${capture[state]}`,
@@ -166,7 +166,9 @@ test('removing the quoted note withdraws the cue, and an empty prior context can
   page,
 }) => {
   const { picker, frame } = await openMock(page);
-  const notes = frame.getByRole('region', { name: 'Prior context' });
+  const notes = frame.getByRole('region', {
+    name: 'Simulated Example prior context',
+  });
   await expect(notes.getByRole('listitem')).toHaveCount(2);
   await expect(notes).toContainText('not from this conversation');
   await picker.selectOption('cue');
