@@ -213,6 +213,9 @@ const COUNT_WORDS: &[&str] = &[
     "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "couple", "few",
 ];
 
+/// Words that may sit between a count and its unit: "two working days".
+const DAY_KINDS: &[&str] = &["full", "whole", "working", "business", "calendar"];
+
 /// Sentences of a line, split at a full stop, question mark, exclamation
 /// mark, or semicolon followed by a space or the end: "10.30" and "Mr."
 /// stay whole.
@@ -285,12 +288,19 @@ fn said_line(text: &str) -> Option<String> {
                             | "friday"
                     )
             });
-            let count_of_days = words.windows(2).any(|pair| {
-                (COUNT_WORDS.contains(&pair[0].as_str()) || is_number(&pair[0]))
-                    && matches!(
-                        pair[1].as_str(),
-                        "day" | "days" | "week" | "weeks" | "hours"
-                    )
+            // "two days", and "two working days" or "two full working days":
+            // up to two of a few words that say which days are counted.
+            let count_of_days = words.iter().enumerate().any(|(i, word)| {
+                (COUNT_WORDS.contains(&word.as_str()) || is_number(word)) && {
+                    let kinds = words[i + 1..]
+                        .iter()
+                        .take(2)
+                        .take_while(|w| DAY_KINDS.contains(&w.as_str()))
+                        .count();
+                    words.get(i + 1 + kinds).is_some_and(|unit| {
+                        matches!(unit.as_str(), "day" | "days" | "week" | "weeks" | "hours")
+                    })
+                }
             });
             let end_of = words.windows(3).any(|w| {
                 w[0] == "end"
@@ -3667,6 +3677,9 @@ mod tests {
             "Legal needs it back by March 3rd.",
             "I'll share the slides Friday.",
             "I'll send it today at 10.30.",
+            "Legal needs two full working days after the draft is ready.",
+            "The printer takes three business days.",
+            "We need 5 working days before the fair.",
         ] {
             let e = play_statement(line);
             let cue = e
@@ -3689,6 +3702,11 @@ mod tests {
             "Share the weekend photos when you can.",
             "We may ship it in two days.",
             "Send it by Friday. Scratch that, Monday.",
+            "Does legal need two full working days?",
+            "Legal might need three business days.",
+            "Does legal need two working days",
+            "We had two full working groups ready.",
+            "It takes two full lovely sunny days.",
         ] {
             let e = play_statement(line);
             assert!(
@@ -3878,7 +3896,11 @@ mod tests {
             // counts as a topic change.
             ("topic-moved-on", "withdraw"),
             ("uncertain-speaker", "no cue raised"),
-            ("context-reminder", "quiet"),
+            // 13 November 2026: a count such as "two full working days" is
+            // now a time, so the first line is quoted as a Said cue. The
+            // action matches the label; the rules still do not connect that
+            // line to the later "Can we commit to Friday?".
+            ("context-reminder", "show"),
             ("transcript-instruction", "quiet"),
             // Labels added 9 November 2026; run once each in the Claude lab
             // the same day (all three matched).
@@ -3891,6 +3913,14 @@ mod tests {
             .map(|(id, action)| (id.to_string(), *action))
             .collect();
         assert_eq!(results, baseline);
+        let matched = suite
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(&results)
+            .filter(|(case, (_, action))| case["expected"]["action"] == *action)
+            .count();
+        assert_eq!(matched, 7, "of 11; 5 before 13 November 2026");
     }
 
     #[test]
@@ -4173,6 +4203,47 @@ mod tests {
             e.ingest(e.session(), live("w1", 1_000, line)).unwrap();
             assert!(e.state.cue.is_none(), "{line}");
         }
+    }
+
+    #[test]
+    fn a_count_of_working_days_follows_the_addressee_and_repeat_rules() {
+        // Put to someone else by name, or to an uncertain addressee as a
+        // question: nothing is quoted.
+        for line in [
+            "Alex, does legal need two full working days?",
+            "Does legal need two full working days, Alex?",
+            "Does anyone know if legal needs two full working days",
+        ] {
+            let mut e = named_session();
+            e.ingest(e.session(), live("w1", 1_000, line)).unwrap();
+            assert!(
+                e.state.cue.as_ref().is_none_or(|cue| cue.kind != SAID),
+                "{line}"
+            );
+        }
+        // Asked of the user, the question itself is shown, not a quote.
+        let mut e = named_session();
+        let asked = "Sam, does legal need two full working days?";
+        e.ingest(e.session(), live("w1", 1_000, asked)).unwrap();
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
+        // Said once, then dismissed: the same words are not quoted again
+        // within two minutes, and nothing was kept in the notes.
+        let line = "Legal needs two full working days after the draft is ready.";
+        let mut e = play(&[(1_000, line), (25_000, line)]);
+        e.advance(1_000);
+        let first = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&first, Response::Dismiss).unwrap();
+        e.advance(24_000);
+        assert!(e.state.cue.is_none(), "repeated within two minutes");
+        assert!(e.state.notes.is_empty());
+        // After a topic change the pause applies as after any withdrawal.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (4_000, "Moving on to the budget."),
+            (6_000, line),
+        ]);
+        e.advance(6_000);
+        assert!(e.state.cue.is_none());
     }
 
     #[test]
