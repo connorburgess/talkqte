@@ -4,9 +4,10 @@ import {
   describeTranscript,
   type RealCapture,
 } from './LiveCaptureStatus';
-import { clockTime } from '../lib/types';
+import { clockTime, type ContextItem } from '../lib/types';
 import type { RealCueInput } from './LiveCueStatus';
 import { RealCue } from './RealCue';
+import { RealContext } from './RealContext';
 import './live-mock.css';
 
 type MockState =
@@ -99,11 +100,14 @@ export function LayoutSwitch({
 export function LiveSessionMock({
   real,
   realCue,
+  realContext,
 }: {
   /** The notebook's own microphone and live-session state, shown read-only. */
   real: RealCapture;
   /** The notebook's own cue for a live session, shown read-only. */
   realCue: RealCueInput;
+  /** The prior notes selected in the notebook, shown read-only. */
+  realContext: ContextItem[];
 }) {
   const actual = describeCapture(real);
   const heard = describeTranscript(real);
@@ -151,8 +155,8 @@ export function LiveSessionMock({
       <h1 id="mock-title">Live session layout preview</h1>
       <p>
         {actual.application
-          ? 'Source, Capture, Application audio, Transcript and Cue show the app’s real state, read-only.'
-          : 'Source, Capture, Transcript and Cue show the app’s real state, read-only.'}{' '}
+          ? 'Source, Capture, Application audio, Transcript, Cue and Prior context show the app’s real state, read-only.'
+          : 'Source, Capture, Transcript, Cue and Prior context show the app’s real state, read-only.'}{' '}
         Everything else is a fictional example.
       </p>
       {actual.underway && (
@@ -191,8 +195,8 @@ export function LiveSessionMock({
       >
         <p className="mock-banner">
           {actual.application
-            ? 'Source, Capture, Application audio, Transcript and Cue are real'
-            : 'Source, Capture, Transcript and Cue are real'}{' '}
+            ? 'Source, Capture, Application audio, Transcript, Cue and Prior context are real'
+            : 'Source, Capture, Transcript, Cue and Prior context are real'}{' '}
           and read-only · every control here is simulated and only changes the
           example · the preview starts and stops no capture, connects to no
           meeting, and generates no cues of its own
@@ -244,6 +248,7 @@ export function LiveSessionMock({
             )}
           </section>
           <RealCue input={realCue} />
+          <RealContext items={realContext} />
         </div>
         <div className="mock-session-header">
           <div>
@@ -454,7 +459,9 @@ export function LiveSessionMock({
         )}
 
         <section aria-labelledby="mock-context-title">
-          <h3 id="mock-context-title">Prior context</h3>
+          <h3 id="mock-context-title">
+            <span className="mock-tag">Simulated</span> Example prior context
+          </h3>
           {notes.length ? (
             <ul className="mock-notes" role="list">
               {notes.map((note, index) => (
