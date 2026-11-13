@@ -1,6 +1,6 @@
 # Troubleshooting
 
-What the current prototype shows when something goes wrong, what it means, and what to do. Every quoted message is one the app actually displays; the last table lists the rarer ones. This page covers the macOS developer build; there is no released version, and nothing here is a support commitment.
+What the current prototype shows when something goes wrong, what it means, and what to do. Every quoted message is one the app actually displays; the last table lists the rarer ones. This page covers the macOS developer build, whose bundle requires macOS 14.0 or later; there is no released version, and nothing here is a support commitment.
 
 If a problem is not listed, the [feedback route](#reporting-a-problem) at the end says what to include.
 
