@@ -1199,6 +1199,13 @@ function Notebook() {
                 transcript: state.transcript,
               },
             }}
+            realCue={{
+              live: state.live,
+              status: state.status,
+              cuesPaused: state.cuesPaused,
+              cue: state.cue,
+              processor: capture.state?.processor ?? null,
+            }}
           />
         )}
         {view === 'notebook' && (
