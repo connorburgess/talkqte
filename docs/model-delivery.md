@@ -82,5 +82,5 @@ UI/UX checkpoint: preserve a clear setup state so the person can tell when a liv
 ## Next steps
 
 - Score text accuracy for `tiny.en` and `base.en` against the script of several fictional clips, including faster speech and background noise, before offering `base.en`.
-- Check the setup card and the Settings flow on a clean Mac; add the update path.
+- Check the setup card and the Settings flow on a clean Mac; add the update path. The [release path](release-path.md#7-upgrade) gives the clean-Mac and upgrade procedure, including the model checksum comparison.
 - Publish the GitHub Releases copy with its checksum when the first build that uses it is prepared.

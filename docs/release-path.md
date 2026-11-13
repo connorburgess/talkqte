@@ -1,0 +1,178 @@
+# macOS release path
+
+Status: plan and pre-flight checks, 13 November 2026. **No signed, notarized or installable release exists.** Nothing here has been run with a Developer ID certificate, sent to Apple's notary service, or installed on a clean Mac. This page records what the repository already settles, what a script can check today, and the exact steps left for the owner. It supports the open roadmap item "Prove a signed, notarized installation and a recoverable upgrade on a clean supported Mac"; that item stays open until every step below marked **Owner** has recorded evidence.
+
+Each step has one of three states:
+
+- **In place:** configured in the repository and checked by the pre-flight or by CI.
+- **Scriptable now:** a command exists and needs no credentials, but its release-level result needs an artifact only the owner can produce.
+- **Owner:** needs the Apple Developer account, the signing certificate, a clean Mac, or a decision.
+
+## Current state
+
+Read from `main` at `b0971d0` and from one debug build made for this page.
+
+| Subject               | State                                                                                                                                                                                                                                                                                                                         |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bundle identifier     | `com.talkqte.desktop` in `src-tauri/tauri.conf.json`. It names the data folder and the microphone permission record, so it must not change between releases.                                                                                                                                                                  |
+| Version               | `0.1.0`, stated separately in `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` and `src-tauri/tauri.conf.json`. The bundle takes its version from `tauri.conf.json`. Nothing kept them equal before the pre-flight.                                                                        |
+| Entitlements          | `src-tauri/Entitlements.plist` requests only `com.apple.security.device.audio-input`. They are embedded only when the bundle is signed.                                                                                                                                                                                       |
+| Hardened runtime      | Not set in the configuration. Tauri documents its default as on when a build is signed; that has not been observed on a signed TalkQTE build, and a build without a real signature has no runtime flag to inspect.                                                                                                            |
+| Permission text       | `src-tauri/Info.plist` supplies `NSMicrophoneUsageDescription`. Its wording describes microphone monitoring and does not mention live transcription; see [open decisions](#open-decisions-for-the-owner).                                                                                                                     |
+| Minimum macOS         | `13.0` in the configuration and in the built executable. The [proposed supported setup](budgets.md#proposed-first-supported-setup) is macOS 14 or later; see [open decisions](#open-decisions-for-the-owner).                                                                                                                 |
+| Bundle targets        | `app` only. No disk image is configured; one is produced by passing `--bundles app,dmg`.                                                                                                                                                                                                                                      |
+| Live transcription    | Compiled only with `--features local-whisper`. The default build, which CI makes, has no live session. A release intended for live use must pass that feature.                                                                                                                                                                |
+| Updater               | None. No updater plugin, endpoint or update-signing key exists. An update is a manual replacement of the app.                                                                                                                                                                                                                 |
+| Data on disk          | The optional speech model at `~/Library/Application Support/com.talkqte.desktop/models/ggml-tiny.en.bin`, checked against a pinned SHA-256 before each use ([model delivery](model-delivery.md#what-is-implemented)). Notes, transcripts, settings and the Granola connection live in memory only ([privacy](../PRIVACY.md)). |
+| Other per-app folders | The system web view and macOS create `~/Library/WebKit/com.talkqte.desktop`, `~/Library/Caches/com.talkqte.desktop` and `~/Library/Preferences/com.talkqte.desktop.plist`. Their presence was seen on the development Mac; the app's own code writes nothing there.                                                           |
+| Earlier measurements  | A release bundle with `local-whisper`, ad-hoc signed, arm64: 15.3 MiB, 4.7 MB zipped ([operating estimates](operating-estimates.md#measured)). Disk image, universal and notarized builds were not measured. [Platforms](platforms.md) records Windows and Ubuntu builds only; it has no macOS installation evidence.         |
+
+### What the debug bundle contains
+
+`npm run tauri -- build --debug --bundles app` on an Apple M5 Pro (macOS 26.4, arm64), without `local-whisper`:
+
+| Item                | Observation                                                                                                                                                                                          |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Files               | `Contents/Info.plist` (1,208 bytes), `Contents/MacOS/talkqte` (48,221,528 bytes), `Contents/Resources/icon.icns` (48,211 bytes). Nothing else.                                                       |
+| Size                | 48,270,947 bytes (46.0 MiB). This is a debug build; it is not a download size.                                                                                                                       |
+| `Info.plist`        | Identifier, version `0.1.0`, minimum macOS `13.0` and the microphone text all match the configuration.                                                                                               |
+| Executable          | arm64 only; `LC_BUILD_VERSION` minimum macOS 13.0.                                                                                                                                                   |
+| Signature           | Ad-hoc and applied by the linker to the executable only: no sealed resources, no bound `Info.plist`, no team, no hardened runtime, no entitlements. `codesign --verify --deep --strict` fails on it. |
+| Build-machine paths | The executable contains paths under the building user's home folder (from compiler panic locations and debug information). See step 1.                                                               |
+| Frontend            | Embedded in the executable; no loose web files, source maps or model weights are in the bundle.                                                                                                      |
+
+A copy signed ad-hoc with `--options runtime` and the entitlements file carried exactly the one requested entitlement. That confirms the entitlements file is well formed. It is not Developer ID signing.
+
+## Pre-flight script
+
+`scripts/release-preflight.mjs` signs nothing, uploads nothing and never launches the app. The configuration, bundle and `--expect signed` checks work offline. `--expect notarized` runs `xcrun stapler validate`, which asks Apple's ticket service about the artifact, and `spctl`, which may also go online.
+
+```sh
+npm run check:release                                             # configuration only
+node scripts/release-preflight.mjs path/to/TalkQTE.app            # plus a built bundle
+node scripts/release-preflight.mjs --expect signed path/to/TalkQTE.app
+node scripts/release-preflight.mjs --expect notarized path/to/TalkQTE.app
+```
+
+It exits 0 when every check passes, 1 when any fails (each failure names the check and the reason), and 2 for a usage error.
+
+| Check                      | Fails when                                                                                                                                                                                                                                                       |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Version                    | The five version files (six places, counting both entries in `package-lock.json`) disagree, or the version is not `MAJOR.MINOR.PATCH`; with a bundle, when its `Info.plist` differs.                                                                             |
+| Bundle identifier          | It is not a reverse-domain name or ends in `.app`; with a bundle, when its `Info.plist` differs.                                                                                                                                                                 |
+| Signing configuration      | A signing identity is committed in `tauri.conf.json`, the hardened runtime is turned off, or a `tauri.macos.conf.json` appears (Tauri would merge it and this check does not read it).                                                                           |
+| Entitlements               | The file requests anything beyond the reviewed list (today only audio input), or an entitlement lacks its usage description.                                                                                                                                     |
+| Usage descriptions         | The bundle's permission texts are missing, empty, extra, or differ from `src-tauri/Info.plist`.                                                                                                                                                                  |
+| Updater                    | One is configured without an https endpoint and a public key. With none configured it prints a note.                                                                                                                                                             |
+| Development-only files     | The bundle holds source maps, source files, environment files, keys, certificates or profiles, logs, debug symbols, databases, speech model weights, or a link that is absolute or leads outside the bundle.                                                     |
+| Size                       | The bundle is over a tripwire: 80 MiB by default, 40 MiB for `--expect signed` or `notarized`. These catch a debug build or a bundled model; they are not budgets.                                                                                               |
+| Architectures              | The executable needs a newer macOS than the bundle declares.                                                                                                                                                                                                     |
+| Signature (`signed`)       | It is not Developer ID Application, its certificate chain does not meet Apple's Developer ID requirement, it has no team, hardened runtime or secure timestamp, it fails `codesign --verify --deep --strict`, or its embedded entitlements differ from the file. |
+| Notarization (`notarized`) | `xcrun stapler validate` fails, or `spctl` does not answer `Notarized Developer ID`.                                                                                                                                                                             |
+
+It also notes, without failing, how many home folders of the build machine appear in the executable (the names are not printed).
+
+Limits: the signature and notarization checks read the output of `codesign`, `stapler` and `spctl` on the Mac that runs them. Their tests use fictional tool output, and the signature fields and the Developer ID requirement were compared once against an installed third-party application. No TalkQTE artifact has ever passed `--expect signed` or `--expect notarized`. A Mac with developer tools is not a clean Mac, so a pass here does not replace step 5. In a restricted sandbox `codesign` reports the signing authority as unavailable and `--expect signed` fails; run it in an ordinary terminal.
+
+CI runs the script's tests in the frontend job and the default (`--expect bundle`) check on the debug bundle, which has no Developer ID signature, in the macOS job. CI holds no signing secret and makes no release.
+
+## Steps
+
+| #   | Step                           | State                      | What exists, and what is left                                                                                                                                                                                    |
+| --- | ------------------------------ | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Build a release candidate      | Scriptable now             | The command is below. A release build with `local-whisper` was made once for the size measurement; a disk image and a path-remapped build have not been made.                                                    |
+| 2   | Sign with Developer ID         | Owner                      | Entitlements and hardened-runtime configuration are in place. Needs Apple Developer Program membership and a Developer ID Application certificate.                                                               |
+| 3   | Notarize                       | Owner                      | Needs notary credentials for the same team. No submission has been made.                                                                                                                                         |
+| 4   | Staple and verify the artifact | Scriptable now, then Owner | `--expect notarized` is written and tested with fictional output; it needs the notarized artifact.                                                                                                               |
+| 5   | Install on a clean Mac         | Owner                      | Needs a Mac that has never held developer tools or TalkQTE. Procedure below.                                                                                                                                     |
+| 6   | First launch and permissions   | Owner                      | The microphone text is in the bundle (checked). The prompt, refusal and recovery on a clean Mac have not been observed.                                                                                          |
+| 7   | Upgrade with data migration    | Owner                      | Only the speech model persists and no stored format needs converting today. Needs two signed candidates. Procedure below.                                                                                        |
+| 8   | Update deferral during a call  | Not implemented            | No updater exists, so nothing can interrupt a call automatically. Deferral must be designed with the updater; see [update deferral](#update-deferral-during-a-call).                                             |
+| 9   | Rollback                       | Owner                      | Reinstalling the previous candidate is the only route. It is expected to be safe while nothing with a stored format persists; it has not been tried.                                                             |
+| 10  | Uninstall                      | Owner                      | Moving the app to the Trash is expected to leave the folders listed above, including the model; this has not been tried. No in-app removal of everything exists; **Remove model** in Settings deletes the model. |
+
+### 1. Build
+
+```sh
+npm ci
+npm run check:release
+npm run tauri -- build --bundles app,dmg --features local-whisper
+```
+
+`local-whisper` needs CMake and a C++ toolchain. The result is arm64 only when built on Apple silicon, which matches the [proposed supported setup](budgets.md#proposed-first-supported-setup); a universal build is a separate, unmeasured choice.
+
+The executable records the build folder's path. On a personal Mac that publishes the account's home-folder name. Either build the candidate under a neutral account or folder, or remap the prefix, for example `RUSTFLAGS="--remap-path-prefix=$HOME=/build"`. The remap has not been tried here, and the bundled C++ speech library may record paths separately; check the result with the pre-flight's build-paths line.
+
+### 2–4. Sign, notarize, staple, verify
+
+Tauri signs during the build when `APPLE_SIGNING_IDENTITY` is set, and submits to the notary service and staples the app when notary credentials are also in the environment (`APPLE_API_ISSUER`, `APPLE_API_KEY` and `APPLE_API_KEY_PATH`, or `APPLE_ID`, `APPLE_PASSWORD` and `APPLE_TEAM_ID`), according to its [macOS signing guide](https://v2.tauri.app/distribute/sign/macos/). This has not been run for TalkQTE. Keep every one of these values out of the repository, shell history and logs.
+
+Then, in an ordinary terminal:
+
+```sh
+node scripts/release-preflight.mjs --expect notarized src-tauri/target/release/bundle/macos/TalkQTE.app
+spctl --assess --type open --context context:primary-signature -vv src-tauri/target/release/bundle/dmg/TalkQTE_0.1.0_aarch64.dmg
+```
+
+If the disk image itself is not accepted, submit and staple it separately with `xcrun notarytool submit <dmg> --wait` (which needs the notary credentials, for example through `--keychain-profile`) and `xcrun stapler staple <dmg>`. Whether Tauri's build already covers the disk image is to be confirmed on the first run. Record the candidate's SHA-256 (`shasum -a 256 <dmg>`) with the evidence.
+
+### 5–6. Clean-Mac installation and first launch
+
+A clean Mac here means a supported Apple silicon Mac, or a fresh macOS virtual machine on one, with no Xcode or Command Line Tools, no Rust or Node, and no earlier TalkQTE folders. A virtual machine can show Gatekeeper and installation behavior; microphone behavior there is not evidence for real hardware.
+
+1. Download the disk image with a browser so that macOS marks it as downloaded. Confirm with `xattr -p com.apple.quarantine <dmg>`.
+2. Turn networking off, so the first launch cannot fetch the notarization ticket. Open the image, drag TalkQTE to Applications, and open the app from Applications. Pass: it opens with the ordinary "downloaded from the Internet" confirmation and no warning about an unidentified developer or damage. This first launch is the one that shows the stapled ticket working offline.
+3. Turn networking on, quit and open it again. Pass: it opens without a further confirmation.
+4. Start the fictional demo. Pass: no permission prompt and no network request is needed.
+5. Choose **Start microphone** or **Start live session**. Pass: the prompt shows the text from `src-tauri/Info.plist`. Refuse once and confirm the app explains recovery; then allow in System Settings and confirm it works after reopening.
+6. Download the speech model, quit, reopen. Pass: the model is still installed and a live session starts.
+
+Record the Mac model, macOS version, candidate SHA-256, and each result.
+
+### 7. Upgrade
+
+Needs a second signed candidate with a higher version (all five version files changed together; the pre-flight enforces this).
+
+1. On the clean Mac with the first candidate and the model installed: `shasum -a 256 ~/Library/Application\ Support/com.talkqte.desktop/models/ggml-tiny.en.bin`.
+2. Quit TalkQTE. Replace it in Applications with the second candidate.
+3. Open it. Pass: no new Gatekeeper warning; the microphone permission is still granted without a new prompt; the model shows as installed with the same SHA-256; a live session starts.
+
+The microphone grant is tied to the bundle identifier and signing identity. It is expected to survive between two builds signed by the same team and to be lost between an ad-hoc build and a signed one; both are expectations to observe, not results.
+
+Nothing else persists, so there is no stored format to convert yet. When a setting, note store or connection is first written to disk, that change must add a format version, a migration test from the previous release's data, and a refusal (not a silent reset) when it meets data from a newer version, as the [readiness plan](product-readiness.md#production-and-scaling-approach) requires. If a future version pins a different model, the [model delivery plan](model-delivery.md#updates-and-compatibility) calls for keeping the old model until the new one is verified; that is not built.
+
+### Update deferral during a call
+
+Today an update happens only when the person quits TalkQTE and replaces it, so it cannot interrupt a call. That is the absence of an updater, not a deferral feature. Whether Finder refuses to replace the app while it is running has not been checked.
+
+Before any automatic updater is added it needs, and this page does not provide:
+
+- an owner decision on the update-signing key's custody ([operating estimates](operating-estimates.md#operating-costs));
+- a rule in the Rust runtime that no download is applied and no restart is offered while a live session, microphone monitoring or a model download is active, with a test for each;
+- a check only when the person asks or at launch, never mid-session, and a visible "later" that holds until the session ends;
+- recovery from an interrupted installation to the previous working version.
+
+The pre-flight already fails an updater configured without an https endpoint and a public key.
+
+### 9. Rollback
+
+1. From the upgraded state in step 7, quit and replace the app with the first candidate.
+2. Pass: it opens, the model is still installed with the same SHA-256, and a live session starts.
+
+An older version that pins a different model would report the newer file as damaged and offer a fresh download; no such pair of versions exists yet. Once anything with a stored format persists, rollback must be tested against data written by the newer version.
+
+## Open decisions for the owner
+
+1. **Apple Developer Program membership** and where the Developer ID certificate and notary credentials are kept. Every **Owner** step waits on this.
+2. **Minimum macOS:** the bundle declares 13.0 while the proposed supported setup is 14 or later. Either raise `minimumSystemVersion` to match, or include macOS 13 in the clean-Mac test.
+3. **Microphone permission text:** it describes monitoring only. If the release includes live transcription, decide whether the prompt should say that speech is transcribed on the Mac. Any new wording must match [PRIVACY.md](../PRIVACY.md) and what is implemented.
+4. **Where the candidate is built:** a neutral folder or account, or a remapped path, so the executable does not publish a home-folder name.
+5. **Disk image or zip** as the download, and whether the first candidates include `local-whisper`.
+
+## Remaining steps, in order
+
+1. Make decisions 1–5.
+2. Build, sign, notarize and staple candidate A (steps 1–4); run the pre-flight with `--expect notarized` and keep its output.
+3. Install candidate A on a clean Mac and run steps 5–6.
+4. Raise the version, build candidate B the same way, and run steps 7 and 9 on the same Mac.
+5. Record the evidence here, measure the signed bundle and disk image for the [operating estimates](operating-estimates.md#follow-up), and only then review the roadmap item. Update deferral stays open until an updater is designed.
