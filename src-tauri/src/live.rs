@@ -228,6 +228,47 @@ mod tests {
         assert_eq!((report.tap_overruns, report.refused_chunks), (0, 0));
     }
 
+    /// One whole live session with a scripted recognizer: speech, a cue, a
+    /// flushing Stop, then a second session ended with audio still queued.
+    /// Run only in a child process by the test below.
+    #[test]
+    #[ignore = "run in a child process by the test below"]
+    fn isolated_live_session() {
+        for flush in [true, false] {
+            let engine = live_engine();
+            let session = engine.lock().unwrap().session();
+            let (mut input, chunker) = tap(16_000, 1, 1_000);
+            let (sink, outcomes) = sink(&engine);
+            let live = LiveSession::start(
+                chunker,
+                session,
+                0,
+                Loudness("Someone can take the first draft."),
+                sink,
+            );
+            input.push_interleaved(std::iter::repeat_n(0.5, SAMPLE_RATE));
+            assert!(outcomes.recv_timeout(Duration::from_secs(5)).unwrap());
+            assert_eq!(engine.lock().unwrap().state.transcript.len(), 1);
+            input.push_interleaved(std::iter::repeat_n(0.5, SAMPLE_RATE / 2));
+            if flush {
+                assert_eq!(live.stop().worker.chunks, 2);
+            } else {
+                live.end();
+            }
+        }
+    }
+
+    #[test]
+    fn a_live_session_writes_no_file_and_prints_nothing() {
+        let crate::test_isolation::Isolated { left, printed } =
+            crate::test_isolation::run("live::tests::isolated_live_session", &[], &[]);
+        assert!(left.is_empty(), "the session left files: {left:?}");
+        // Neither what was heard nor the question it raised.
+        for private in ["Someone can take", "first draft"] {
+            assert!(!printed.contains(private), "printed {private}: {printed}");
+        }
+    }
+
     #[test]
     fn silence_produces_no_lines() {
         let engine = live_engine();

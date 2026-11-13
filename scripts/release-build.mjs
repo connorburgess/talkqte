@@ -13,6 +13,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMain } from './is-main.mjs';
 import { preflight } from './release-preflight.mjs';
 
 const REPOSITORY = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -89,7 +90,7 @@ export function bundlePath({ targetDir, args, productName }) {
   );
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
   const run = (command, commandArgs, options = {}) => {
     const result = spawnSync(command, commandArgs, {

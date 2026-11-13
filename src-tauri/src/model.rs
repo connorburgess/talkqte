@@ -397,13 +397,23 @@ pub fn available_space(path: &Path) -> Option<u64> {
     }
 }
 
-/// The HTTPS fetcher, built only with local transcription.
-#[cfg(feature = "local-whisper")]
+/// The HTTPS fetcher. The app uses it only with local transcription; tests
+/// build it too, to check what a request carries.
+#[cfg(any(feature = "local-whisper", test))]
 pub struct Https;
 
-#[cfg(feature = "local-whisper")]
+#[cfg(any(feature = "local-whisper", test))]
 impl Fetch for Https {
     fn get(&self, url: &str, offset: u64) -> Result<Response, FetchError> {
+        request_file(url, offset, true)
+    }
+}
+
+/// One file request. `https_only` is false only in a test against a
+/// loopback server; the app always passes true.
+#[cfg(any(feature = "local-whisper", test))]
+fn request_file(url: &str, offset: u64, https_only: bool) -> Result<Response, FetchError> {
+    {
         use std::time::Duration;
         // Every step has a limit, so a silent server cannot hold a download
         // (or its Cancel) for long. The body limit covers one attempt; a
@@ -415,7 +425,7 @@ impl Fetch for Https {
             .timeout_send_request(Some(Duration::from_secs(15)))
             .timeout_recv_response(Some(Duration::from_secs(30)))
             .timeout_recv_body(Some(Duration::from_secs(60)))
-            .https_only(true)
+            .https_only(https_only)
             // Statuses are read here, so a rate limit and a missing file
             // can be told apart from a dropped connection.
             .http_status_as_error(false)
@@ -1024,6 +1034,116 @@ mod tests {
     fn free_space_can_be_measured_on_this_platform() {
         if cfg!(unix) {
             assert!(available_space(&std::env::temp_dir()).is_some_and(|bytes| bytes > 0));
+        }
+    }
+
+    /// A fictional file server on a loopback port that honors ranges and
+    /// records each request's head and body.
+    fn fictional_file_server() -> (String, std::sync::Arc<Mutex<Vec<String>>>) {
+        use std::io::Write;
+        const FILE: &[u8] = b"0123456789";
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!(
+            "http://{}/fictional/ggml-tiny.en.bin",
+            listener.local_addr().unwrap()
+        );
+        let seen = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { break };
+                let mut received = Vec::new();
+                let mut buffer = [0u8; 4096];
+                while !received.windows(4).any(|end| end == b"\r\n\r\n") {
+                    match stream.read(&mut buffer) {
+                        Ok(0) | Err(_) => break,
+                        Ok(read) => received.extend_from_slice(&buffer[..read]),
+                    }
+                }
+                let request = String::from_utf8_lossy(&received).into_owned();
+                let offset = request.lines().find_map(|line| {
+                    line.to_lowercase()
+                        .strip_prefix("range: bytes=")?
+                        .strip_suffix('-')?
+                        .parse::<usize>()
+                        .ok()
+                });
+                log.lock().unwrap().push(request);
+                let head = match offset {
+                    Some(offset) => format!(
+                        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {offset}-9/10\r\nContent-Length: {}\r\n",
+                        FILE.len() - offset
+                    ),
+                    None => format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n", FILE.len()),
+                };
+                let _ = stream.write_all(format!("{head}Connection: close\r\n\r\n").as_bytes());
+                let _ = stream.write_all(&FILE[offset.unwrap_or(0)..]);
+            }
+        });
+        (url, seen)
+    }
+
+    #[test]
+    fn a_download_request_carries_the_app_name_a_resume_offset_and_nothing_personal() {
+        let (url, seen) = fictional_file_server();
+        let read = |response: Response| {
+            let mut body = vec![];
+            let mut reader = response.body;
+            reader.read_to_end(&mut body).unwrap();
+            (response.resumed, body)
+        };
+        assert_eq!(
+            read(request_file(&url, 0, false).unwrap()),
+            (false, b"0123456789".to_vec())
+        );
+        assert_eq!(
+            read(request_file(&url, 4, false).unwrap()),
+            (true, b"456789".to_vec())
+        );
+        // The app's own fetcher refuses anything but HTTPS before connecting.
+        assert!(Https.get(&url, 0).is_err());
+
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 2, "one request each, and none over plain HTTP");
+        for (request, range) in seen.iter().zip([None, Some("bytes=4-")]) {
+            let (head, body) = request.split_once("\r\n\r\n").unwrap();
+            assert_eq!(
+                head.lines().next(),
+                Some("GET /fictional/ggml-tiny.en.bin HTTP/1.1"),
+                "a plain file request with no query"
+            );
+            assert!(body.is_empty(), "nothing is uploaded");
+            let headers: Vec<(String, &str)> = head
+                .lines()
+                .skip(1)
+                .filter_map(|line| line.split_once(':'))
+                .map(|(name, value)| (name.to_lowercase(), value.trim()))
+                .collect();
+            let values = |wanted: &str| -> Vec<&str> {
+                headers
+                    .iter()
+                    .filter(|(name, _)| name == wanted)
+                    .map(|(_, value)| *value)
+                    .collect()
+            };
+            assert_eq!(values("user-agent"), ["TalkQTE"]);
+            assert_eq!(values("range"), range.into_iter().collect::<Vec<_>>());
+            // Only what any file request has: no account, cookie, referrer
+            // or content of the person's.
+            for (name, _) in &headers {
+                assert!(
+                    [
+                        "host",
+                        "user-agent",
+                        "accept",
+                        "accept-encoding",
+                        "range",
+                        "connection"
+                    ]
+                    .contains(&name.as_str()),
+                    "unexpected header {name}"
+                );
+            }
         }
     }
 
