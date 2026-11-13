@@ -1,5 +1,5 @@
 import { desktop } from '../lib/bridge';
-import type { ProcessorSummary } from '../lib/processing';
+import type { ProcessingSnapshot, ProcessorSummary } from '../lib/processing';
 import type { Cue, CueSource, Snapshot } from '../lib/types';
 
 /** The notebook state the real cue view reads. */
@@ -10,6 +10,11 @@ export interface RealCueInput {
   cue: Cue | null;
   /** The processor approved for this session, as the review screen shows it. */
   processor: ProcessorSummary | null;
+  /** The processing phase; its panel offers Pause cues only while on. */
+  processingPhase: ProcessingSnapshot['phase'] | null;
+  /** A live session is being prepared or is stopping. */
+  preparing: boolean;
+  finishing: boolean;
 }
 
 const where = 'in the notebook, and in the companion when it is shown';
@@ -67,12 +72,28 @@ const hasPriorNotes = (sources?: CueSource[]) =>
  * cues come from a fictional script and are never shown as real.
  */
 export function describeCue(input: RealCueInput, onDesktop = desktop) {
+  // The notebook offers its own Pause cues only for a running live session
+  // without cue processing; with processing, the processing panel owns it.
+  const running =
+    onDesktop &&
+    input.live &&
+    input.status === 'running' &&
+    !input.preparing &&
+    !input.finishing;
+  const pause: 'available' | 'processor' | null = !running
+    ? null
+    : !input.processor
+      ? 'available'
+      : input.processingPhase === 'active' || input.processingPhase === 'paused'
+        ? 'processor'
+        : null;
   const none = (reason = '') => ({
     note: reason ? `None. ${reason}` : 'None.',
     cue: null,
     origin: null,
     status: null,
     resolution: null,
+    pause,
   });
   if (!onDesktop) return none('This browser preview has no live session.');
   if (!input.live)
@@ -88,25 +109,42 @@ export function describeCue(input: RealCueInput, onDesktop = desktop) {
         ? 'Cues are paused; the microphone and transcript continue.'
         : '',
     );
-  const kept = `Kept until you dismiss it ${where}.`;
+  const kept = 'Kept until you dismiss it.';
   const resolution = cue.resolvedBy
     ? hasPriorNotes(cue.resolvedBy.sources)
-      ? `Marked resolved from the sources below. ${kept}`
-      : `Answered later in the conversation, in the line below. ${kept}`
+      ? `Marked resolved from these sources. ${kept}`
+      : `Answered later in the conversation. ${kept}`
     : null;
-  const actions =
-    cue.kind === 'Said'
-      ? 'Why?, Dismiss and Keep this line'
-      : 'Why? and Dismiss';
   return {
     note: null,
     cue,
     origin: cueOrigin(cue, input.processor),
-    status: resolution
-      ? null
-      : cue.held
-        ? kept
-        : `${actions} for this cue are ${where}; the layout only shows it.`,
+    status: [
+      resolution ? null : cue.held ? kept : null,
+      // Keep this line stays in the notebook and companion for now.
+      cue.kind === 'Said' ? `Keep this line is ${where}.` : null,
+    ]
+      .filter(Boolean)
+      .join(' '),
     resolution,
+    pause,
   };
+}
+
+/** The real controls the layout shows now, by their visible names. */
+export function realControlNames(input: RealCueInput, onDesktop = desktop) {
+  const { cue, pause } = describeCue(input, onDesktop);
+  return [
+    ...(cue ? [cue.expanded ? 'Hide sources' : 'Why?', 'Dismiss'] : []),
+    ...(pause === 'available'
+      ? [input.cuesPaused ? 'Resume cues' : 'Pause cues']
+      : []),
+  ];
+}
+
+/** Joins names as “A”, “A and B” or “A, B and C”. */
+export function listNames(names: string[]) {
+  return names.length < 2
+    ? names.join('')
+    : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
