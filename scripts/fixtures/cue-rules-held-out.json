@@ -1,0 +1,423 @@
+{
+  "status": "Fictional held-out cases. Labels written by the rules lane on 13 November 2026, before the rules were run on them, and awaiting the owner's review.",
+  "replay": "Lines arrive two seconds apart with one speaker label, as in a live transcript. Where a case has an existingCue, that cue is on screen after its source line. userName, when present, is the session-only name from Settings.",
+  "cases": [
+    {
+      "id": "deferral-next-month",
+      "category": "deferral",
+      "events": [
+        { "id": "e1", "text": "Someone could book the hall for the bake sale." },
+        {
+          "id": "e2",
+          "text": "We'll pick that up at the committee meeting next month. On to the raffle."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Owner",
+        "text": "Who will book the hall?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "withdraw",
+        "reason": "The speaker puts the booking off to a later meeting and starts another subject."
+      }
+    },
+    {
+      "id": "deferral-look-alike",
+      "category": "deferral",
+      "events": [
+        { "id": "e1", "text": "Someone should update the volunteer rota." },
+        {
+          "id": "e2",
+          "text": "Let's leave room in it for the new volunteers."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Owner",
+        "text": "Who will update the volunteer rota?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "quiet",
+        "reason": "Leaving room in the rota is about the rota, not putting it off; it still has no owner."
+      }
+    },
+    {
+      "id": "deferral-of-something-else",
+      "category": "deferral",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Someone should write the welcome letter this week."
+        },
+        {
+          "id": "e2",
+          "text": "Let's leave the poster design for another meeting."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Owner",
+        "text": "Who will write the welcome letter?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "quiet",
+        "reason": "The poster was put off, not the letter; the letter still has no owner."
+      }
+    },
+    {
+      "id": "correction-cancelled",
+      "category": "correction",
+      "events": [
+        {
+          "id": "e1",
+          "text": "The plant sale is happening soon, so we need a date for the flyers."
+        },
+        {
+          "id": "e2",
+          "text": "Sorry, scratch that, the plant sale was cancelled."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Timing",
+        "text": "What date is the plant sale?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "withdraw",
+        "reason": "The speaker takes back the line the question came from."
+      }
+    },
+    {
+      "id": "correction-of-something-else",
+      "category": "correction",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Someone should collect the keys from the office."
+        },
+        {
+          "id": "e2",
+          "text": "Oh wait, I said Tuesday earlier for the delivery and I meant Thursday."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Owner",
+        "text": "Who will collect the keys?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "quiet",
+        "reason": "The correction is about the delivery day; nobody has taken the keys."
+      }
+    },
+    {
+      "id": "correction-without-a-phrase",
+      "category": "correction",
+      "events": [
+        {
+          "id": "e1",
+          "text": "We could hold it in either the hall or the marquee."
+        },
+        {
+          "id": "e2",
+          "text": "Oh, hang on, the marquee went back to the hire company last week, so it's the hall."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Decision",
+        "text": "How will we choose between the hall and the marquee?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "withdraw",
+        "reason": "One of the two options no longer exists, so there is no choice left to ask about."
+      }
+    },
+    {
+      "id": "answered-at-once",
+      "category": "already-answered",
+      "events": [
+        { "id": "e1", "text": "Could someone take the minutes today?" },
+        { "id": "e2", "text": "Yes, I'll take them." }
+      ],
+      "existingCue": null,
+      "expected": {
+        "action": "quiet",
+        "reason": "The request is answered by the next line, so there is nothing to prompt."
+      }
+    },
+    {
+      "id": "answered-in-the-same-line",
+      "category": "already-answered",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Someone should water the seedlings over the weekend, and Priya has already said she'll do it."
+        }
+      ],
+      "existingCue": null,
+      "expected": {
+        "action": "quiet",
+        "reason": "The same line names who is doing it."
+      }
+    },
+    {
+      "id": "answered-in-other-words",
+      "category": "already-answered",
+      "events": [
+        { "id": "e1", "text": "We still need someone to order the compost." },
+        {
+          "id": "e2",
+          "text": "Leave the compost with me, I'll get it ordered today."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Owner",
+        "text": "Who will order the compost?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "resolved",
+        "reason": "A speaker takes the task on, in words other than the question's."
+      }
+    },
+    {
+      "id": "asked-of-someone-else",
+      "category": "another-addressee",
+      "userName": "Robin",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Dana, could you send the invoice to the printer by Thursday?"
+        }
+      ],
+      "existingCue": null,
+      "expected": {
+        "action": "quiet",
+        "reason": "The request is put to Dana by name, not to the user."
+      }
+    },
+    {
+      "id": "handed-to-someone-else",
+      "category": "another-addressee",
+      "userName": "Robin",
+      "events": [
+        {
+          "id": "e1",
+          "text": "I think Dana should answer this one: who will run the stall on Sunday?"
+        }
+      ],
+      "existingCue": null,
+      "expected": {
+        "action": "quiet",
+        "reason": "The speaker hands the question to Dana before asking it."
+      }
+    },
+    {
+      "id": "asked-of-the-user",
+      "category": "another-addressee",
+      "userName": "Robin",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Dana has the keys sorted. Robin, what do you think about moving the stall indoors?"
+        }
+      ],
+      "existingCue": null,
+      "expected": {
+        "action": "show",
+        "reason": "The question is put to the user by name."
+      }
+    },
+    {
+      "id": "asked-of-the-user-without-a-comma",
+      "category": "another-addressee",
+      "userName": "Robin",
+      "events": [
+        {
+          "id": "e1",
+          "text": "What about you Robin, can you cover Saturday morning?"
+        }
+      ],
+      "existingCue": null,
+      "expected": {
+        "action": "show",
+        "reason": "The question is put to the user by name, though no comma sets the name off."
+      }
+    },
+    {
+      "id": "you-could-be-either",
+      "category": "uncertain-addressee",
+      "userName": "Robin",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Robin and Dana were both at the site visit. Can you tell us how it went?"
+        }
+      ],
+      "existingCue": null,
+      "expected": {
+        "action": "quiet",
+        "reason": "\"You\" could mean either of the two people just named."
+      }
+    },
+    {
+      "id": "name-mentioned-not-addressed",
+      "category": "uncertain-addressee",
+      "userName": "Robin",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Robin's group already looked at the fence quotes, didn't they?"
+        }
+      ],
+      "existingCue": null,
+      "expected": {
+        "action": "quiet",
+        "reason": "The user is spoken about, and it is unclear whether the question is for them."
+      }
+    },
+    {
+      "id": "repeat-in-other-words",
+      "category": "repeat",
+      "events": [
+        { "id": "e1", "text": "Someone should chase the caterer." },
+        {
+          "id": "e2",
+          "text": "As I said, we need somebody to chase the caterer."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Owner",
+        "text": "Who will chase the caterer?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "quiet",
+        "reason": "The same need is restated; a second question would duplicate the one on screen."
+      }
+    },
+    {
+      "id": "repeat-of-a-group-question",
+      "category": "repeat",
+      "events": [
+        { "id": "e1", "text": "Does anyone have the code for the gate?" },
+        { "id": "e2", "text": "Sorry, does anybody have the gate code?" }
+      ],
+      "existingCue": null,
+      "expected": {
+        "action": "show",
+        "reason": "An open question to the group is worth showing once; the repeat adds nothing."
+      }
+    },
+    {
+      "id": "topic-change-in-other-words",
+      "category": "topic-change",
+      "events": [
+        {
+          "id": "e1",
+          "text": "We could do either a quiz night or a film night."
+        },
+        {
+          "id": "e2",
+          "text": "Anyway, that's enough about the social. Treasurer's report next."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Decision",
+        "text": "How will we choose between a quiz night and a film night?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "withdraw",
+        "reason": "The speaker closes the subject and starts the next agenda item."
+      }
+    },
+    {
+      "id": "topic-change-look-alike",
+      "category": "topic-change",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Someone should phone the council about the skip."
+        },
+        {
+          "id": "e2",
+          "text": "Before we move on, can we agree who is phoning the council?"
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Owner",
+        "text": "Who will phone the council?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "quiet",
+        "reason": "The speaker stays on the subject and asks the same thing; it is still unanswered."
+      }
+    },
+    {
+      "id": "plain-idiom",
+      "category": "plain",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Someone can always tell when the bread is fresh. It was lovely last week."
+        }
+      ],
+      "existingCue": null,
+      "expected": {
+        "action": "quiet",
+        "reason": "A remark about bread; no task is waiting for an owner."
+      }
+    },
+    {
+      "id": "plain-goodbye",
+      "category": "plain",
+      "events": [
+        {
+          "id": "e1",
+          "text": "The new shed arrived and it looks great."
+        },
+        { "id": "e2", "text": "Lovely. We'll see you all soon, thanks for coming." }
+      ],
+      "existingCue": null,
+      "expected": {
+        "action": "quiet",
+        "reason": "A goodbye; \"soon\" is not a deadline anyone needs to pin down."
+      }
+    },
+    {
+      "id": "plain-approval",
+      "category": "plain",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Thanks everyone, the minutes from last time are approved."
+        },
+        { "id": "e2", "text": "Great, and the accounts were signed off in March." }
+      ],
+      "existingCue": null,
+      "expected": {
+        "action": "quiet",
+        "reason": "Finished business, with nothing open."
+      }
+    },
+    {
+      "id": "missing-owner-in-other-words",
+      "category": "plain",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Nobody has picked up the banner printing yet, and the fair is on the 14th."
+        }
+      ],
+      "existingCue": null,
+      "expected": {
+        "action": "show",
+        "reason": "A task with a date coming and no owner, said without the word \"someone\"."
+      }
+    }
+  ]
+}
