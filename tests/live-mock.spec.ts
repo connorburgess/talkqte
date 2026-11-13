@@ -14,7 +14,7 @@ const activeStates = ['starting', 'listening', 'cue', 'paused'];
 async function openMock(page: Page) {
   await page.goto('/');
   await page
-    .getByRole('group', { name: 'Layout' })
+    .getByRole('group', { name: 'Layout', exact: true })
     .getByRole('button', { name: 'Layout preview', exact: true })
     .press('Enter');
   const mock = page.getByRole('region', {
@@ -23,7 +23,7 @@ async function openMock(page: Page) {
   return {
     mock,
     picker: mock.getByLabel('Preview a state'),
-    frame: mock.getByRole('group', { name: 'Fictional session preview' }),
+    frame: mock.getByRole('group', { name: 'Session layout preview' }),
   };
 }
 
@@ -234,7 +234,9 @@ test('a keyboard walk starts, cancels, pauses, stops and recovers, moving focus 
   await expect(status).toHaveText('Preview state: Listening');
   await expect(simulated(frame, 'Pause')).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(frame).toContainText('This is not a capture control');
+  await expect(frame).toContainText(
+    'This example’s Pause is not a capture control.',
+  );
   await expect(simulated(frame, 'Resume')).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(simulated(frame, 'Pause')).toBeFocused();
@@ -271,7 +273,7 @@ test('the layout switch moves between the demo notebook and the live layout prev
   page,
 }) => {
   await page.goto('/');
-  const layout = page.getByRole('group', { name: 'Layout' });
+  const layout = page.getByRole('group', { name: 'Layout', exact: true });
   const demo = layout.getByRole('button', { name: 'Demo', exact: true });
   const live = layout.getByRole('button', {
     name: 'Layout preview',
@@ -352,7 +354,7 @@ for (const width of [480, 320]) {
     await expectInside(frame.getByRole('button'), frame);
     expect(await fitsHorizontally(page)).toBe(true);
 
-    const layout = page.getByRole('group', { name: 'Layout' });
+    const layout = page.getByRole('group', { name: 'Layout', exact: true });
     await expectInside(layout.getByRole('button'), layout);
     for (const button of await layout.getByRole('button').all())
       expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
@@ -379,7 +381,7 @@ for (const { width, widestSidebar } of [
       await page.getByRole('separator').first().focus();
       await page.keyboard.press('End');
     }
-    const layout = page.getByRole('group', { name: 'Layout' });
+    const layout = page.getByRole('group', { name: 'Layout', exact: true });
     const panelSizes = page.getByText('Panel sizes', { exact: true });
     for (const view of ['Demo', 'Layout preview']) {
       await layout.getByRole('button', { name: view, exact: true }).click();
@@ -414,7 +416,7 @@ test('below the desktop minimum the switch takes the first toolbar row', async (
 }) => {
   await page.setViewportSize({ width: 800, height: 700 });
   await page.goto('/');
-  const layout = page.getByRole('group', { name: 'Layout' });
+  const layout = page.getByRole('group', { name: 'Layout', exact: true });
   const switchBox = (await layout.boundingBox())!;
   const breadcrumb = (await page.locator('.breadcrumb').boundingBox())!;
   expect(switchBox.y + switchBox.height).toBeLessThanOrEqual(breadcrumb.y);
@@ -466,7 +468,7 @@ test('real session Stop remains separate from the simulated Stop', async ({
   await page
     .getByRole('button', { name: 'Start live session', exact: true })
     .click();
-  const layout = page.getByRole('group', { name: 'Layout' });
+  const layout = page.getByRole('group', { name: 'Layout', exact: true });
   // A running session is not called a demo.
   await expect(
     layout.getByRole('button', { name: 'Session', exact: true }),

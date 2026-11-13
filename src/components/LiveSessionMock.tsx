@@ -173,7 +173,7 @@ export function LiveSessionMock({
       <div
         className="mock-session"
         role="group"
-        aria-label="Fictional session preview"
+        aria-label="Session layout preview"
         ref={frame}
       >
         <p className="mock-banner">
@@ -181,27 +181,29 @@ export function LiveSessionMock({
           simulated and only changes the example · the preview starts and stops
           no capture, connects to no meeting, and generates no AI cues
         </p>
+        <dl className="mock-facts mock-real">
+          <div>
+            <dt>Source</dt>
+            <dd>
+              <span className="mock-tag">Real</span> {actual.source}
+            </dd>
+          </div>
+          <div>
+            <dt>Capture</dt>
+            <dd>
+              <span className="mock-tag">Real</span> {actual.capture}
+              {actual.detail && (
+                <span className="mock-detail"> {actual.detail}</span>
+              )}
+            </dd>
+          </div>
+        </dl>
         <div className="mock-session-header">
           <div>
             <h2 ref={title} tabIndex={-1}>
               Fictional planning conversation
             </h2>
             <dl className="mock-facts">
-              <div>
-                <dt>Source</dt>
-                <dd>
-                  <span className="mock-tag">Real</span> {actual.source}
-                </dd>
-              </div>
-              <div>
-                <dt>Capture</dt>
-                <dd>
-                  <span className="mock-tag">Real</span> {actual.capture}
-                  {actual.detail && (
-                    <span className="mock-detail"> {actual.detail}</span>
-                  )}
-                </dd>
-              </div>
               <div>
                 <dt>Example</dt>
                 <dd>
@@ -286,7 +288,9 @@ export function LiveSessionMock({
           )}
           {state === 'paused' && (
             <>
-              <p>Simulated pause. This is not a capture control.</p>
+              <p>
+                Simulated pause. This example’s Pause is not a capture control.
+              </p>
               <button
                 className="secondary-button"
                 data-mock-focus="resume"

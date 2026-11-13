@@ -35,16 +35,19 @@ export function describeCapture(
         ? 'A real live session is running.'
         : !state || state.status === 'off'
           ? null
-          : state.status !== 'error'
-            ? 'The real microphone is in use.'
-            : state.canStart
-              ? null
-              : 'The real microphone is being released after a failure.';
+          : state.status === 'starting'
+            ? 'The real microphone is starting.'
+            : state.status !== 'error'
+              ? 'The real microphone is in use.'
+              : state.canStart
+                ? null
+                : 'The real microphone is being released after a failure.';
   if (!state)
     return {
       source: 'Unknown.',
+      // The hook's own message, shown as the detail, says it is unavailable.
       capture: error
-        ? 'Status unavailable. The microphone may be open.'
+        ? 'Unknown. The microphone may be open.'
         : 'Checking microphone status…',
       detail: error || null,
       underway,
@@ -89,5 +92,8 @@ export function describeCapture(
   else if (state.status === 'listening')
     capture = 'Listening for an activity check only. Nothing is transcribed.';
   else capture = 'Off. Nothing is being captured.';
-  return { source, capture, detail: error || state.message, underway };
+  // Native sends "Stopping microphone…" with the stopping status, which the
+  // sentence above already says.
+  const detail = error || (state.status === 'stopping' ? null : state.message);
+  return { source, capture, detail, underway };
 }

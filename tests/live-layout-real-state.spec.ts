@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { MicrophoneSnapshot } from '../src/lib/microphone';
 import type {} from './fixtures/native-microphone';
 
@@ -24,14 +24,14 @@ async function native(page: Page, query = '') {
 
 async function openPreview(page: Page) {
   await page
-    .getByRole('group', { name: 'Layout' })
+    .getByRole('group', { name: 'Layout', exact: true })
     .getByRole('button', { name: 'Layout preview', exact: true })
     .press('Enter');
   const preview = page.getByRole('region', {
     name: 'Live session layout preview',
   });
   const frame = preview.getByRole('group', {
-    name: 'Fictional session preview',
+    name: 'Session layout preview',
   });
   const row = (name: string) =>
     frame.locator('dt', { hasText: name }).locator('+ dd');
@@ -47,9 +47,19 @@ async function openPreview(page: Page) {
 const signal = (page: Page, state: Partial<MicrophoneSnapshot>) =>
   page.evaluate((value) => window.microphoneTest.send(value), state);
 
-// Statements about the app, not about the example, that nothing is captured.
-const nothingCaptured =
-  /nothing is being captured|preview captures nothing|not capturing/i;
+// While a real microphone or session is active, no sentence about the app
+// may say that nothing is captured, in any phrasing. Sentences that name the
+// example or call themselves simulated are about the example and are skipped.
+async function expectNoClaimThatNothingIsCaptured(preview: Locator) {
+  const sentences = (await preview.innerText())
+    .split(/(?<=[.!?…])\s+|\n+|\s·\s/)
+    .filter((sentence) => !/example|simulated/i.test(sentence));
+  expect(sentences.length).toBeGreaterThan(3);
+  for (const sentence of sentences)
+    expect(sentence).not.toMatch(
+      /\bnothing\b.*captur|captur\w*\s+nothing|\bnot\b.*captur/i,
+    );
+}
 
 test('the browser preview reports that it has no microphone, and the example stays simulated', async ({
   page,
@@ -127,15 +137,16 @@ test('a microphone-only check shows starting, listening with its input, and stop
   await signal(page, {
     status: 'starting',
     canStart: false,
-    message: 'Waiting for microphone permission…',
+    message: 'Checking microphone access…',
   });
   await expect(source).toHaveText('Real Microphone');
   await expect(capture).toHaveText(
-    'Real Starting the microphone. Waiting for microphone permission…',
+    'Real Starting the microphone. Checking microphone access…',
   );
   await expect(preview).toContainText(
-    'The real microphone is in use. Its controls are above; nothing in this preview starts or stops it.',
+    'The real microphone is starting. Its controls are above; nothing in this preview starts or stops it.',
   );
+  await expectNoClaimThatNothingIsCaptured(preview);
   await signal(page, {
     status: 'listening',
     message: null,
@@ -145,23 +156,30 @@ test('a microphone-only check shows starting, listening with its input, and stop
   await expect(capture).toHaveText(
     'Real Listening for an activity check only. Nothing is transcribed.',
   );
+  await expect(preview).toContainText('The real microphone is in use.');
   // While the real microphone is open, no line claims that nothing is
   // captured, whatever the example shows.
   for (const state of ['idle', 'listening', 'stopped', 'failed']) {
     await preview.getByLabel('Preview a state').selectOption(state);
-    await expect(preview).not.toContainText(nothingCaptured);
+    await expectNoClaimThatNothingIsCaptured(preview);
     await expect(capture).toContainText('Listening for an activity check');
   }
   await expect(frame).toContainText(
     'Simulated Fictional sample conversation. Simulated failure',
   );
-  await signal(page, { status: 'stopping' });
+  // Native sends this message with the stopping status; it is not repeated.
+  await signal(page, { status: 'stopping', message: 'Stopping microphone…' });
   await expect(source).toHaveText('Real Microphone: Fictional USB microphone');
   await expect(capture).toHaveText(
     'Real Stopping. The microphone is being released.',
   );
-  await expect(preview).not.toContainText(nothingCaptured);
-  await signal(page, { status: 'off', canStart: true, deviceName: null });
+  await expectNoClaimThatNothingIsCaptured(preview);
+  await signal(page, {
+    status: 'off',
+    canStart: true,
+    message: null,
+    deviceName: null,
+  });
   await expect(capture).toHaveText('Real Off. Nothing is being captured.');
   await expect(preview).not.toContainText('Its controls are above');
 });
@@ -195,7 +213,7 @@ test('a denied permission and a device failure show the native message and wheth
   await expect(preview).toContainText(
     'The real microphone is being released after a failure. Its controls are above; nothing in this preview starts or stops it.',
   );
-  await expect(preview).not.toContainText(nothingCaptured);
+  await expectNoClaimThatNothingIsCaptured(preview);
   await signal(page, { status: 'error', canStart: true });
   await expect(source).toHaveText('Real None open.');
   await expect(preview).not.toContainText('Its controls are above');
@@ -215,7 +233,7 @@ test('a cancelled start is shown as cancelled until preparation finishes', async
   await expect(capture).toHaveText(
     'Real Start cancelled. Waiting for preparation to finish. Microphone: Off.',
   );
-  await expect(preview).not.toContainText(nothingCaptured);
+  await expectNoClaimThatNothingIsCaptured(preview);
   await page.evaluate(() => window.captureTest.releaseStart());
   await expect(capture).toHaveText('Real Off. Nothing is being captured.');
 });
@@ -231,7 +249,7 @@ test('a live session shows preparing, listening and stopping, and only the real 
   await expect(capture).toHaveText(
     'Real Preparing a live session. Microphone: Off.',
   );
-  await expect(preview).not.toContainText(nothingCaptured);
+  await expectNoClaimThatNothingIsCaptured(preview);
   await expect(preview).toContainText(
     'A real live session is being prepared. Its controls are above; nothing in this preview starts or stops it.',
   );
@@ -247,7 +265,7 @@ test('a live session shows preparing, listening and stopping, and only the real 
   await preview.getByLabel('Preview a state').selectOption('listening');
   await frame.getByRole('button', { name: 'Stop (simulated)' }).press('Enter');
   await expect(frame).toContainText('Simulated stop.');
-  await expect(preview).not.toContainText(nothingCaptured);
+  await expectNoClaimThatNothingIsCaptured(preview);
   await expect(capture).toContainText('Listening. A live session');
   const realStop = page.getByRole('button', {
     name: 'Stop live session',
@@ -262,7 +280,7 @@ test('a live session shows preparing, listening and stopping, and only the real 
     'Real Stopping the live session. The microphone is being released.',
   );
   await expect(preview).toContainText('A real live session is stopping.');
-  await expect(preview).not.toContainText(nothingCaptured);
+  await expectNoClaimThatNothingIsCaptured(preview);
   await page.evaluate(() => window.captureTest.finishStop());
   await expect(capture).toHaveText('Real Off. Nothing is being captured.');
   await expect(preview).not.toContainText('Its controls are above');
@@ -275,7 +293,7 @@ test('until the first native status arrives the rows say it is unknown, not off'
   const { preview, source, capture } = await openPreview(page);
   await expect(source).toHaveText('Real Unknown.');
   await expect(capture).toHaveText('Real Checking microphone status…');
-  await expect(preview).not.toContainText(nothingCaptured);
+  await expectNoClaimThatNothingIsCaptured(preview);
   await page.evaluate(() =>
     window.microphoneTest.resolveSnapshot({
       revision: 1,

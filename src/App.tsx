@@ -1174,7 +1174,13 @@ function Notebook() {
 
         {view === 'live-mock' && (
           <LiveSessionMock
-            real={{ microphone, preparing, cancelling, live, finishing }}
+            real={{
+              microphone: { state: microphone.state, error: microphone.error },
+              preparing,
+              cancelling,
+              live,
+              finishing,
+            }}
           />
         )}
         {view === 'notebook' && (

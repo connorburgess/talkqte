@@ -79,6 +79,11 @@
 .mock-facts {
   margin: 12px 0 0;
 }
+.mock-real {
+  margin: 0 0 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #b9c8b6;
+}
 .mock-facts div {
   display: flex;
   gap: 8px;
@@ -252,20 +257,16 @@
     flex-direction: column;
     padding: 16px;
   }
+  /* The header's parts join the column so only Stop is lifted. */
   .mock-session-header {
-    order: -1;
+    display: contents;
   }
-  .mock-banner {
-    margin: 12px 0 0;
-    padding: 12px 0 0;
-    border-top: 1px dashed #8fa58c;
-    border-bottom: 0;
-  }
-  .mock-session-header,
   .mock-notes li {
     flex-direction: column;
   }
   .mock-session-header .mock-stop {
     order: -1;
+    align-self: flex-start;
+    margin-bottom: 12px;
   }
 }
