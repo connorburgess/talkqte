@@ -957,8 +957,8 @@ fn the_shared_capture_state_is_never_off_while_the_source_may_be_capturing() {
             }
         }
     }
-    // A starting microphone is never shown as stopping: the notebook would
-    // disable its Stop control for a start it could otherwise cancel.
+    // A starting microphone is never shown as stopping, so a reader that
+    // disables Stop on stopping cannot lose it for a start it could cancel.
     for phase in phases {
         assert_ne!(overall_capture(Starting, phase), Stopping, "{phase:?}");
         if phase != Phase::Listening {

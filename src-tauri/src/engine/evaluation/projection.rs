@@ -176,7 +176,8 @@ pub enum SourcePhase {
     /// may still be captured until an explicit retry succeeds.
     CleanupFailed,
     /// The worker ended without confirming cleanup. The application may still
-    /// be captured until TalkQTE quits; nothing here can stop it.
+    /// be captured and nothing in TalkQTE can stop it; whether quitting does
+    /// has not been checked.
     Abandoned,
 }
 

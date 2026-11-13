@@ -11,6 +11,16 @@ import {
 } from '../lib/processing';
 import './processing.css';
 
+/** Present to assistive technology, absent from the visual layout. */
+const visuallyHidden = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  overflow: 'hidden',
+  clipPath: 'inset(50%)',
+  whiteSpace: 'nowrap',
+} as const;
+
 const issues = {
   scopeChanged:
     'An approved source changed. Processing is off. Review the sources again to continue.',
@@ -156,7 +166,13 @@ export function ProcessingControl({
       restoreFocus.current = false;
       (launcher.current ?? statusHeading.current)?.focus();
     }
-  }, [review, editing, snapshot?.capture, snapshot?.startup]);
+  }, [
+    review,
+    editing,
+    snapshot?.capture,
+    snapshot?.microphone,
+    snapshot?.startup,
+  ]);
 
   // Disabling removes the button that was pressed. When that drops focus to
   // the page, it goes to Review processing; focus that has moved to another
@@ -345,8 +361,14 @@ export function ProcessingControl({
                   : 'Microphone status is unknown. Use Stop capture to request that it stops.'}
         </p>
       )}
-      {sourceLine && (
-        <p className="processing-capture" role="status">
+      {snapshot?.source && (
+        // Mounted whenever the snapshot reports a source, so its first line
+        // is announced as a change. Kept out of the layout while empty.
+        <p
+          className="processing-capture"
+          role="status"
+          style={sourceLine ? undefined : visuallyHidden}
+        >
           {sourceLine}
         </p>
       )}

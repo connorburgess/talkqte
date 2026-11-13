@@ -3,7 +3,8 @@
 13 November 2026. With the `native-audio-spike` Cargo feature on macOS, the app
 now has one path that can select an application and start the
 [source worker](native-audio-owner.md#source-worker-and-transcript-sink--13-november-2026).
-It is not in a default build, has no interface in the notebook, and was not run:
+It is not in a default build. The notebook shows its status but offers no
+controls for it. It was not run:
 no application was listed, no permission prompt was shown and no stream was
 created for this change. Roadmap item **T2** stays open.
 
@@ -60,7 +61,7 @@ confirmed**. Everything else is one of:
 | `listening`     | The OS confirmed the start and Stop has not been requested.                                                          |
 | `stopping`      | Stop was requested, by this host, the live session or the worker, and native cleanup has not been confirmed.         |
 | `cleanupFailed` | The OS reported that Stop or output removal failed. The application may still be captured until a retry succeeds.    |
-| `abandoned`     | The worker ended without confirming cleanup. The application may still be captured until TalkQTE quits.              |
+| `abandoned`     | The worker ended without confirming cleanup. The application may still be captured; nothing in TalkQTE can stop it.  |
 
 `mayBeCapturing` is true for the last five. `stalled` becomes true when one
 unbroken spell of `stopping`, counted from the first status read that saw it,
@@ -87,7 +88,8 @@ inside it. In a development build its snapshot has three capture fields:
 
 - `capture`: the microphone and the source combined. It never reads Off or
   Unknown while `mayBeCapturing` is true, and a starting microphone keeps
-  reading `starting` whatever the source is doing. A reader that knows only
+  reading `starting` whatever the source is doing, so a reader that offers
+  Stop from this field alone keeps offering it. A reader that knows only
   this field therefore never understates capture.
 - `microphone`: the microphone alone.
 - `source`: this host's phase, `mayBeCapturing`, `stalled`, `canRetry`, the
@@ -106,18 +108,28 @@ a default build renders exactly as before.
 
 - **Cue processing panel.** It has a line of its own for the source, in the
   same wording as the table above: for example "Stopping application audio
-  from Fictional player failed. It may still be captured until cleanup is
-  retried." It has separate wording for a stopping, an unanswered (`stalled`)
-  and an abandoned source. The panel stays visible while the source may
+  from Fictional player failed. It may still be captured. A retry exists only
+  as a development command." For an abandoned source it says nothing in
+  TalkQTE can stop it and that whether quitting does has not been checked.
+  It has separate wording for a stopping, an unanswered (`stalled`)
+  and an abandoned source. The line is a status region that is mounted
+  whenever the snapshot reports a source, so its first sentence is announced
+  as a change. The panel stays visible while the source may
   still be capturing, even after the live session has ended. It shows the
   state only and offers no retry; the host's retry is reached only through
   its command.
-- **Microphone wording and controls.** Microphone wording and the panel's
-  own Stop and Cancel start follow `microphone`. These controls appear only
+- **Microphone wording and controls.** Microphone wording, the panel's own
+  Stop and Cancel start, and returning focus after Stop follow `microphone`. These controls appear only
   when the panel is mounted on its own, as in its tests. In the notebook,
   Stop live session and Cancel start sit in the microphone area and follow
   the live startup state, so a stuck source never affected them.
-- **Live layout preview.** Its Real rows never say or imply that nothing is
+- **Microphone panel.** Outside a live session it normally says "Activity
+  check only. No recording, transcription, or system audio." While the source
+  may be capturing it says instead that the microphone is not recorded or
+  transcribed and that audio from a selected application may still be
+  captured, pointing to Cue processing.
+- **Live layout preview.** Its intro and banner name Application audio among
+  the real parts while a source is reported. Its Real rows never say or imply that nothing is
   captured while the source may be capturing. With the microphone off they
   read "No microphone open." and "The microphone is off." instead.
   The source has a Real row of its own, Application audio, in the same
@@ -205,6 +217,16 @@ Not exercised: a failed output removal and its retry, a failed or faulted
 stream as the reported outcome, a second complete operation after the first,
 exit while listing or reviewing, a fault in the worker outside its loop, and
 everything in the app wiring.
+
+### Known gap for the next step
+
+When the processing panel is mounted on its own, as in its tests, its Stop
+capture control follows the microphone alone and ignores a source that is
+starting or listening: with the microphone off it shows no Stop at all. In the
+notebook this panel shows no Stop of its own, and Stop live session ends the
+source through the live session. A session that captures an application
+without the microphone would hit this gap, so the step that adds such a
+session must give the source its own Stop.
 
 ## Not run, and the gates that stay open
 

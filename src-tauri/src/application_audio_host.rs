@@ -748,9 +748,10 @@ fn new_id() -> Result<String, Error> {
 
 /// The capture state the rest of the app shows, with this source included:
 /// never Off or Unknown while the selected application may be captured. A
-/// starting microphone stays Starting whatever the source is doing, because
-/// the notebook disables its Stop control while capture reads Stopping, and a
-/// stuck source must not take Stop away from a microphone that is starting.
+/// starting microphone stays Starting whatever the source is doing, so a
+/// reader that disables Stop while capture reads Stopping (as the processing
+/// panel did before it read the microphone alone) never loses Stop for a
+/// microphone that is starting.
 pub(crate) fn overall_capture(microphone: CaptureState, source: Phase) -> CaptureState {
     if !source.may_be_capturing() {
         return microphone;

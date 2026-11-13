@@ -96,9 +96,9 @@ export function describeSource(source: SourceCapture | null | undefined) {
         ? `macOS has not confirmed that application audio from ${app} stopped. It may still be captured.`
         : `Stopping application audio from ${app}. It may be captured until macOS confirms.`;
     case 'cleanupFailed':
-      return `Stopping application audio from ${app} failed. It may still be captured until cleanup is retried.`;
+      return `Stopping application audio from ${app} failed. It may still be captured. A retry exists only as a development command.`;
     case 'abandoned':
-      return `Application audio from ${app} was never confirmed stopped. It may still be captured until TalkQTE quits.`;
+      return `Application audio from ${app} was never confirmed stopped. It may still be captured. Nothing in TalkQTE can stop it; whether quitting does has not been checked.`;
   }
 }
 export interface ProcessingReview {

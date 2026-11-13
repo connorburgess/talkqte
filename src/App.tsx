@@ -1111,6 +1111,7 @@ function Notebook() {
           preparing={preparing}
           cancelling={cancelling}
           processingConfigured={!!capture.state?.processor}
+          sourceMayBeCapturing={!!capture.state?.source?.mayBeCapturing}
           action={
             preparing ? (
               <button

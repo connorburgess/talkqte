@@ -38,6 +38,7 @@ export function MicrophoneControl({
   cancelling = false,
   action,
   processingConfigured = false,
+  sourceMayBeCapturing = false,
 }: {
   microphone: Microphone;
   live?: boolean;
@@ -45,6 +46,8 @@ export function MicrophoneControl({
   cancelling?: boolean;
   action?: ReactNode;
   processingConfigured?: boolean;
+  /** Development builds only: a selected application may still be captured. */
+  sourceMayBeCapturing?: boolean;
 }) {
   const { state, error, busy, active, start, stop } = microphone;
   if (live || preparing)
@@ -136,8 +139,10 @@ export function MicrophoneControl({
       </div>
       <MicrophoneInput state={state} />
       <p>
-        Activity check only. No recording, transcription, or system audio. Demo
-        questions are scripted.
+        {sourceMayBeCapturing
+          ? 'Activity check only. No recording or transcription from the microphone. Audio from a selected application may still be captured; see Cue processing below.'
+          : 'Activity check only. No recording, transcription, or system audio.'}{' '}
+        Demo questions are scripted.
       </p>
       {active && state?.status !== 'error' && (
         <p>

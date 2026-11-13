@@ -145,7 +145,9 @@ export function LiveSessionMock({
     <section className="live-mock" aria-labelledby="mock-title">
       <h1 id="mock-title">Live session layout preview</h1>
       <p>
-        Source, Capture and Transcript show the app’s real state, read-only.
+        {actual.application
+          ? 'Source, Capture, Application audio and Transcript show the app’s real state, read-only.'
+          : 'Source, Capture and Transcript show the app’s real state, read-only.'}{' '}
         Everything else is a fictional example.
       </p>
       {actual.underway && (
@@ -183,9 +185,12 @@ export function LiveSessionMock({
         ref={frame}
       >
         <p className="mock-banner">
-          Source, Capture and Transcript are real and read-only · every control
-          here is simulated and only changes the example · the preview starts
-          and stops no capture, connects to no meeting, and generates no AI cues
+          {actual.application
+            ? 'Source, Capture, Application audio and Transcript are real'
+            : 'Source, Capture and Transcript are real'}{' '}
+          and read-only · every control here is simulated and only changes the
+          example · the preview starts and stops no capture, connects to no
+          meeting, and generates no AI cues
         </p>
         <div className="mock-real">
           <dl className="mock-facts">

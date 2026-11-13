@@ -44,9 +44,9 @@ const sourceWords: Record<Stuck, string> = {
   stalled:
     'macOS has not confirmed that application audio from Fictional player stopped. It may still be captured.',
   cleanupFailed:
-    'Stopping application audio from Fictional player failed. It may still be captured until cleanup is retried.',
+    'Stopping application audio from Fictional player failed. It may still be captured. A retry exists only as a development command.',
   abandoned:
-    'Application audio from Fictional player was never confirmed stopped. It may still be captured until TalkQTE quits.',
+    'Application audio from Fictional player was never confirmed stopped. It may still be captured. Nothing in TalkQTE can stop it; whether quitting does has not been checked.',
 };
 
 const microphoneWords: Record<PanelMic, string> = {
@@ -319,4 +319,156 @@ test('the live layout reads as before without the development fields', async ({
   await expect(sourceRow).toHaveText('Real None open.');
   await expect(capture).toHaveText('Real Off. Nothing is being captured.');
   await expect(application).toHaveCount(0);
+});
+
+test('the live layout names Application audio among its real parts only with a source', async ({
+  page,
+}) => {
+  const { preview } = await livePreview(page);
+  const banner = preview.locator('.mock-banner');
+  // Without the development fields, the text is as before.
+  await expect(preview).toContainText(
+    'Source, Capture and Transcript show the app’s real state, read-only. Everything else is a fictional example.',
+  );
+  await expect(banner).toContainText(
+    'Source, Capture and Transcript are real and read-only',
+  );
+  await page.evaluate((value) => window.captureTest.send(value), {
+    capture: 'stopping',
+    microphone: 'off',
+    source: source('abandoned'),
+  } satisfies Partial<ProcessingSnapshot>);
+  await expect(preview).toContainText(
+    'Source, Capture, Application audio and Transcript show the app’s real state, read-only. Everything else is a fictional example.',
+  );
+  await expect(banner).toContainText(
+    'Source, Capture, Application audio and Transcript are real and read-only',
+  );
+});
+
+// The notebook itself, with the full app on the fictional native side.
+
+async function notebook(page: Page) {
+  await page.route('**/*', async (route) => {
+    if (route.request().resourceType() !== 'document') return route.continue();
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      body: (await response.text()).replace(
+        '/src/main.tsx',
+        '/tests/fixtures/native-microphone.ts',
+      ),
+    });
+  });
+  await page.goto('/');
+  return {
+    microphone: page.getByRole('region', { name: 'Microphone', exact: true }),
+    panel: page.getByRole('region', { name: 'Cue processing', exact: true }),
+  };
+}
+
+const offSource: SourceCapture = {
+  phase: 'off',
+  mayBeCapturing: false,
+  stalled: false,
+  canRetry: false,
+  application: null,
+  problem: null,
+};
+
+test('with no live session a stuck source keeps the panel visible until it is off', async ({
+  page,
+}) => {
+  const { panel } = await notebook(page);
+  await expect(panel).toBeHidden();
+  for (const state of stuck) {
+    await page.evaluate((value) => window.captureTest.send(value), {
+      capture: 'stopping',
+      microphone: 'off',
+      source: source(state),
+    } satisfies Partial<ProcessingSnapshot>);
+    await expect(panel, state).toBeVisible();
+    await expect(panel.getByText(sourceWords[state]), state).toBeVisible();
+  }
+  await page.evaluate((value) => window.captureTest.send(value), {
+    capture: 'off',
+    microphone: 'off',
+    source: offSource,
+  } satisfies Partial<ProcessingSnapshot>);
+  await expect(panel).toBeHidden();
+});
+
+test('the microphone panel claims no system audio only when no source may be captured', async ({
+  page,
+}) => {
+  const { microphone } = await notebook(page);
+  const plain =
+    'Activity check only. No recording, transcription, or system audio. Demo questions are scripted.';
+  await expect(microphone).toContainText(plain);
+  for (const state of stuck) {
+    await page.evaluate((value) => window.captureTest.send(value), {
+      capture: 'stopping',
+      microphone: 'off',
+      source: source(state),
+    } satisfies Partial<ProcessingSnapshot>);
+    await expect(microphone, state).not.toContainText('system audio');
+    await expect(microphone, state).toContainText(
+      'Activity check only. No recording or transcription from the microphone. Audio from a selected application may still be captured; see Cue processing below.',
+    );
+  }
+  await page.evaluate((value) => window.captureTest.send(value), {
+    capture: 'off',
+    microphone: 'off',
+    source: offSource,
+  } satisfies Partial<ProcessingSnapshot>);
+  await expect(microphone).toContainText(plain);
+});
+
+test('focus returns after Stop when only the microphone changes beside a stuck source', async ({
+  page,
+}) => {
+  const panel = await processingControl(page);
+  await send(page, {
+    capture: 'running',
+    microphone: 'running',
+    source: source('cleanupFailed'),
+  });
+  await panel
+    .getByRole('button', { name: 'Stop capture', exact: true })
+    .click();
+  // The combined state stays stopping throughout, because the source is
+  // stuck; only the microphone moves from stopping to off.
+  await send(page, { capture: 'stopping', microphone: 'stopping' });
+  await expect(panel.getByRole('button', { name: 'Stopping…' })).toBeDisabled();
+  await send(page, { capture: 'stopping', microphone: 'off' });
+  await expect(
+    page.getByRole('heading', { name: 'Cue processing' }),
+  ).toBeFocused();
+});
+
+test('the source status is mounted before its first line, so the line is announced', async ({
+  page,
+}) => {
+  const panel = await processingControl(page);
+  await send(page, { source: offSource, microphone: 'running' });
+  const live = panel.locator('p.processing-capture[role="status"]');
+  await expect(live).toHaveCount(1);
+  await expect(live).toHaveText('');
+  // Mark this element, then check the line arrives in the same one.
+  await live.evaluate((element) => element.setAttribute('data-probe', 'kept'));
+  await send(page, {
+    capture: 'stopping',
+    microphone: 'off',
+    source: source('stopping'),
+  });
+  await expect(panel.locator('[data-probe="kept"]')).toHaveText(
+    sourceWords.stopping,
+  );
+  // Without the development fields there is no such element at all.
+  await send(page, {
+    source: undefined,
+    microphone: undefined,
+    capture: 'off',
+  });
+  await expect(live).toHaveCount(0);
 });
