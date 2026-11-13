@@ -32,7 +32,7 @@ import { Question } from './components/Question';
 import { ProcessingControl } from './components/ProcessingControl';
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { ContextNotes } from './components/ContextNotes';
-import { LiveSessionMock } from './components/LiveSessionMock';
+import { LayoutSwitch, LiveSessionMock } from './components/LiveSessionMock';
 import { SetupCard, type SetupTarget } from './components/SetupCard';
 import {
   PanelDivider,
@@ -1026,6 +1026,9 @@ function Notebook() {
               </>
             )}
           </div>
+          {view !== 'settings' && (
+            <LayoutSwitch view={view} live={state.live} onChange={setView} />
+          )}
           {view === 'notebook' && (listResizable || splitContent) && (
             <details
               className="layout-controls"
@@ -1169,7 +1172,9 @@ function Notebook() {
           </div>
         )}
 
-        {view === 'live-mock' && <LiveSessionMock />}
+        {view === 'live-mock' && (
+          <LiveSessionMock capturing={preparing || live || finishing} />
+        )}
         {view === 'notebook' && (
           <div className="notebook-body">
             <div className="meeting-header">
