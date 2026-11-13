@@ -52,6 +52,8 @@ struct Scripted {
     feed: Feed,
     _input: Input,
     stage: Stage,
+    /// Kept once set, through a retry and release, as the real owner does.
+    problem: Option<NativeProblem>,
 }
 
 impl Source for Scripted {
@@ -102,9 +104,12 @@ impl Source for Scripted {
             }
             unchanged => unchanged,
         };
+        if self.stage == Stage::StopFailed {
+            self.problem = Some(NativeProblem::StopFailed);
+        }
         Status {
             stage: self.stage,
-            problem: (self.stage == Stage::StopFailed).then_some(NativeProblem::StopFailed),
+            problem: self.problem,
         }
     }
 
@@ -186,6 +191,7 @@ impl Backend for Fake {
                     feed: Feed::new(reader, binding, 1.0),
                     _input: input,
                     stage: Stage::Starting,
+                    problem: None,
                     script,
                 })
             },
@@ -427,6 +433,42 @@ fn a_failed_stop_reads_cleanup_failed_until_one_explicit_retry_releases_it() {
     assert_eq!(fixture.script.retries.load(Ordering::SeqCst), 1);
     assert!(!off.may_be_capturing);
     assert_eq!(fixture.host.retry_cleanup(&operation), Ok(false));
+}
+
+#[test]
+fn a_stop_failure_is_reported_until_a_retry_confirms_release_and_then_cleared() {
+    // The retry succeeds: release is confirmed, so Stop failed no longer
+    // describes anything, even though the owner still carries it.
+    let fixture = fixture(true);
+    fixture.script.stop_failures.store(1, Ordering::SeqCst);
+    let operation = fixture.listening();
+    fixture.host.stop(&operation).unwrap();
+    let failed = fixture.wait_phase(Phase::CleanupFailed);
+    assert_eq!(failed.problem, Some(Problem::StopFailed));
+    assert_eq!(fixture.host.retry_cleanup(&operation), Ok(true));
+    let off = fixture.wait_phase(Phase::Off);
+    assert_eq!(off.problem, None, "release was confirmed");
+    assert!(!off.may_be_capturing);
+
+    // The retry fails again: cleanup is still unconfirmed, so the failure
+    // stays reported with the application still possibly captured.
+    let fixture = self::fixture(true);
+    fixture.script.stop_failures.store(2, Ordering::SeqCst);
+    let operation = fixture.listening();
+    fixture.host.stop(&operation).unwrap();
+    fixture.wait_phase(Phase::CleanupFailed);
+    assert_eq!(fixture.host.retry_cleanup(&operation), Ok(true));
+    let deadline = Instant::now() + WAIT;
+    while fixture.script.retries.load(Ordering::SeqCst) == 0 {
+        assert!(Instant::now() < deadline, "the retry was not performed");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let again = fixture.wait("the second failure", |view| view.can_retry);
+    assert_eq!(
+        (again.phase, again.problem),
+        (Phase::CleanupFailed, Some(Problem::StopFailed))
+    );
+    assert!(again.may_be_capturing);
 }
 
 #[test]

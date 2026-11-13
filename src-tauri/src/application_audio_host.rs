@@ -574,7 +574,20 @@ impl Host {
         let problem = match &*active.ended.lock().unwrap_or_else(|e| e.into_inner()) {
             Some(Ended::Released(report)) => {
                 state.last_run = Some(Evidence::of(report));
-                report.status.problem.map(native_problem)
+                // The owner keeps a Stop or removal failure in its status
+                // after a retry. Release is confirmed now, so that failure
+                // was resolved and is not a problem any more. A start or
+                // stream failure still explains why the run ended.
+                report
+                    .status
+                    .problem
+                    .filter(|problem| {
+                        !matches!(
+                            problem,
+                            NativeProblem::StopFailed | NativeProblem::RemoveFailed
+                        )
+                    })
+                    .map(native_problem)
             }
             // Stopped here before anything started. The refusal then only
             // reflects that Stop, whatever step noticed it.
