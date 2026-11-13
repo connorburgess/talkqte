@@ -32,7 +32,7 @@ import { Question } from './components/Question';
 import { ProcessingControl } from './components/ProcessingControl';
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { ContextNotes } from './components/ContextNotes';
-import { LiveSessionMock } from './components/LiveSessionMock';
+import { LayoutSwitch, LiveSessionMock } from './components/LiveSessionMock';
 import { SetupCard, type SetupTarget } from './components/SetupCard';
 import {
   PanelDivider,
@@ -102,6 +102,23 @@ function FloatingQuestion() {
   const paused = state?.status === 'paused';
   // The switch returns to the setting it left, so Quiet is not lost.
   const beforeFocused = useRef<'balanced' | 'quiet'>('balanced');
+  // A dismissal made here removes the focused control. Once the companion's
+  // other controls are enabled again, focus goes to the first of them, but
+  // only if it was dropped; never from another control or application.
+  const dismissed = useRef(false);
+  const cueId = state?.cue?.id;
+  useEffect(() => {
+    if (!dismissed.current || busy) return;
+    dismissed.current = false;
+    if (
+      !cueId &&
+      document.hasFocus() &&
+      document.activeElement === document.body
+    )
+      document
+        .querySelector<HTMLElement>('.companion-bar button:not(:disabled)')
+        ?.focus();
+  }, [busy, cueId]);
   return (
     <main className="floating-surface" aria-label="Meeting companion">
       <div className="companion-shell">
@@ -284,14 +301,15 @@ function FloatingQuestion() {
                     }),
                   )
                 }
-                onDismiss={() =>
+                onDismiss={() => {
+                  dismissed.current = true;
                   void run(() =>
                     bridge.command('respond_to_cue', {
                       id: state.cue!.id,
                       response: 'dismiss',
                     }),
-                  )
-                }
+                  );
+                }}
                 onKeep={() =>
                   void run(() =>
                     bridge.command('keep_line', { id: state.cue!.id }),
@@ -589,7 +607,7 @@ function Notebook() {
   useEffect(() => {
     if (focusError || suggestionError) setFocusExpanded(true);
   }, [focusError, suggestionError]);
-  const pendingFocus = useRef<SetupTarget | null>(null);
+  const pendingFocus = useRef<SetupTarget | 'appearance' | null>(null);
   const goToSetup = (target: SetupTarget) => {
     if (target === 'focus') {
       setFocusExpanded(true);
@@ -624,7 +642,11 @@ function Notebook() {
     if (!target) return;
     pendingFocus.current = null;
     const element = document.getElementById(
-      target === 'name' ? 'user-name' : 'live-transcription',
+      target === 'name'
+        ? 'user-name'
+        : target === 'appearance'
+          ? 'question-size'
+          : 'live-transcription',
     );
     element?.scrollIntoView({ block: 'center' });
     element?.focus();
@@ -724,13 +746,22 @@ function Notebook() {
       stop?.();
     };
   }, []);
+  const returnToExport = useRef(false);
   useEffect(() => {
     if (preview !== null) modal.current?.showModal();
     else if (modal.current?.open) {
       modal.current.close();
       exportButton.current?.focus();
+      // Saving closes the preview while Export is still disabled, so the
+      // return waits for it, unless focus has gone somewhere else meanwhile.
+      returnToExport.current = document.activeElement !== exportButton.current;
+    } else if (returnToExport.current && !busy) {
+      returnToExport.current = false;
+      const focused = document.activeElement;
+      if (focused === document.body || modal.current?.contains(focused))
+        exportButton.current?.focus();
     }
-  }, [preview]);
+  }, [preview, busy]);
 
   if (!state)
     return (
@@ -995,6 +1026,9 @@ function Notebook() {
               </>
             )}
           </div>
+          {view !== 'settings' && (
+            <LayoutSwitch view={view} live={state.live} onChange={setView} />
+          )}
           {view === 'notebook' && (listResizable || splitContent) && (
             <details
               className="layout-controls"
@@ -1138,7 +1172,9 @@ function Notebook() {
           </div>
         )}
 
-        {view === 'live-mock' && <LiveSessionMock />}
+        {view === 'live-mock' && (
+          <LiveSessionMock capturing={preparing || live || finishing} />
+        )}
         {view === 'notebook' && (
           <div className="notebook-body">
             <div className="meeting-header">
@@ -1357,6 +1393,22 @@ function Notebook() {
                   className="tabs"
                   role="tablist"
                   aria-label="Meeting content"
+                  onKeyDown={(e) => {
+                    const next =
+                      e.key === 'Home'
+                        ? 'notes'
+                        : e.key === 'End'
+                          ? 'transcript'
+                          : e.key === 'ArrowRight' || e.key === 'ArrowLeft'
+                            ? tab === 'notes'
+                              ? 'transcript'
+                              : 'notes'
+                            : null;
+                    if (!next) return;
+                    e.preventDefault();
+                    setTab(next);
+                    document.getElementById(`${next}-tab`)?.focus();
+                  }}
                 >
                   <button
                     role="tab"
@@ -1364,13 +1416,6 @@ function Notebook() {
                     aria-controls="notes-panel"
                     id="notes-tab"
                     tabIndex={tab === 'notes' ? 0 : -1}
-                    onKeyDown={(e) => {
-                      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-                        e.preventDefault();
-                        setTab('transcript');
-                        document.getElementById('transcript-tab')?.focus();
-                      }
-                    }}
                     onClick={() => setTab('notes')}
                   >
                     <FileText size={16} />
@@ -1383,13 +1428,6 @@ function Notebook() {
                     aria-controls="transcript-panel"
                     id="transcript-tab"
                     tabIndex={tab === 'transcript' ? 0 : -1}
-                    onKeyDown={(e) => {
-                      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-                        e.preventDefault();
-                        setTab('notes');
-                        document.getElementById('notes-tab')?.focus();
-                      }
-                    }}
                     onClick={() => setTab('transcript')}
                   >
                     <MessageCircle size={16} />
@@ -1535,7 +1573,10 @@ function Notebook() {
                 </p>
                 <button
                   className="text-button companion-settings"
-                  onClick={() => setView('settings')}
+                  onClick={() => {
+                    pendingFocus.current = 'appearance';
+                    setView('settings');
+                  }}
                 >
                   <Settings size={14} />
                   Question appearance & timing

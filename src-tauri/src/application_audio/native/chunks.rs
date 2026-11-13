@@ -93,17 +93,19 @@ impl Timed for NativeChunk {
 
     // Every path that stops or replaces a source cancels its control first,
     // so the chunk's own control answers for the source without the gate.
-    // Releasing the capture cancels it too: after a clean end of input, keep
-    // the capture until Worker::finish returns, or queued audio is withheld.
+    // Releasing the capture cancels it too. The source worker cancels on any
+    // end of input, so queued audio is withheld by decision, not flushed.
     fn current(&self, session: u64) -> bool {
         self.session == session && !self.control.is_cancelled()
     }
 }
 
 /// Assembles native blocks into at most three-second chunks on the worker
-/// that owns the NativeReader. Each push returns at most one chunk. A gap,
-/// the segment limit, or clean end of input can end a shorter chunk. Stop,
-/// cancellation and session replacement never flush pending audio.
+/// that owns the NativeReader. Each push returns at most one chunk. A gap or
+/// the segment limit can end a shorter chunk. Stop, cancellation and session
+/// replacement never flush pending audio. `finish` can release the last
+/// partial chunk at a clean end of input, but the source worker discards it
+/// by decision and never calls `finish`.
 pub struct NativeChunker {
     control: Control,
     session: u64,
@@ -113,7 +115,7 @@ pub struct NativeChunker {
 }
 
 impl NativeChunker {
-    pub fn new(control: Control, session: u64) -> Self {
+    pub(crate) fn new(control: Control, session: u64) -> Self {
         Self {
             control,
             session,

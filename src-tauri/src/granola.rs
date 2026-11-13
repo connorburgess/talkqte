@@ -13,6 +13,7 @@ use crate::context::{
     Capabilities, ContextItem, NoteSource, Provider, SourceError, MAX_EXCERPT_CHARS,
     MAX_TITLE_CHARS,
 };
+use crate::context_refresh::RefreshSource;
 use crate::notes_file::{NoteSummary, MAX_NOTES};
 use quick_xml::{events::Event, Reader, XmlVersion};
 use serde_json::{json, Value};
@@ -62,6 +63,8 @@ fn agent(https_only: bool) -> ureq::Agent {
         .timeout_recv_body(Some(Duration::from_secs(30)))
         .https_only(https_only)
         .http_status_as_error(false)
+        // Every request, sign-in included, names this app to Granola.
+        .user_agent(CLIENT_NAME)
         .build()
         .into()
 }
@@ -211,11 +214,23 @@ pub fn sign_in(
     open_url: &dyn Fn(&str) -> Result<(), String>,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Tokens, String> {
+    sign_in_at(RESOURCE, true, &granola_host, open_url, cancelled)
+}
+
+/// The sign-in against any resource; tests use a local fictional server
+/// and say which hosts they trust in place of granola.ai.
+fn sign_in_at(
+    resource: &str,
+    https_only: bool,
+    granola_host: &dyn Fn(&str) -> bool,
+    open_url: &dyn Fn(&str) -> Result<(), String>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Tokens, String> {
     if cancelled() {
         return Err("Sign-in cancelled.".into());
     }
-    let agent = agent(true);
-    let origin = RESOURCE
+    let agent = agent(https_only);
+    let origin = resource
         .strip_suffix("/mcp")
         .ok_or("The Granola endpoint is not as expected.")?;
     let resource_metadata: Value = get_json(
@@ -233,8 +248,12 @@ pub fn sign_in(
     }
     let server: Value = get_json(
         &agent,
-        &well_known(&authorization_server, "oauth-authorization-server")
-            .ok_or("Granola's sign-in server address is not as expected.")?,
+        &well_known(
+            &authorization_server,
+            "oauth-authorization-server",
+            https_only,
+        )
+        .ok_or("Granola's sign-in server address is not as expected.")?,
     )?;
     if server["issuer"]
         .as_str()
@@ -311,7 +330,7 @@ pub fn sign_in(
             ("redirect_uri", &redirect_uri),
             ("client_id", &client_id),
             ("code_verifier", &verifier),
-            ("resource", RESOURCE),
+            ("resource", resource),
         ]))
         .map_err(|_| "Granola's sign-in service could not be reached.")?;
     let token =
@@ -336,14 +355,18 @@ fn granola_host(url: &str) -> bool {
 
 /// The well-known document for an issuer: after the host and before any
 /// path the issuer carries, as RFC 8414 describes.
-fn well_known(issuer: &str, suffix: &str) -> Option<String> {
-    let rest = issuer.strip_prefix("https://")?;
+fn well_known(issuer: &str, suffix: &str, https_only: bool) -> Option<String> {
+    // Plain http is for a test's loopback server only.
+    let (scheme, rest) = issuer.split_once("://")?;
+    if scheme != "https" && (https_only || scheme != "http") {
+        return None;
+    }
     let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
     let path = path.trim_matches('/');
     Some(if path.is_empty() {
-        format!("https://{host}/.well-known/{suffix}")
+        format!("{scheme}://{host}/.well-known/{suffix}")
     } else {
-        format!("https://{host}/.well-known/{suffix}/{path}")
+        format!("{scheme}://{host}/.well-known/{suffix}/{path}")
     })
 }
 
@@ -1480,6 +1503,12 @@ fn note_from(value: &Value) -> Option<Note> {
     })
 }
 
+/// The provider update time behind a Granola revision, in milliseconds since
+/// 1970, or `None` for a copy imported without a usable `updated_at`.
+pub fn updated_at_ms(revision: u64) -> Option<u64> {
+    (revision > 1).then_some(revision)
+}
+
 fn preview(text: &str) -> String {
     let trimmed = text.trim();
     let short: String = trimmed.chars().take(PREVIEW_CHARS).collect();
@@ -1591,21 +1620,30 @@ impl NoteSource for Shared {
     }
 }
 
-impl NoteSource for Connection {
-    fn provider(&self) -> Provider {
-        Provider::Granola
+/// The explicit update check (`context_refresh.rs`) needs the provider's own
+/// identifier for the workspace a request is scoped to. Granola's MCP guide
+/// describes active-workspace scope, but the tools this client has observed
+/// name no workspace, so the check fails closed: the notebook does not offer
+/// it for a real connection and no note identifier is sent. Change this only
+/// after an account check establishes a provider-supported identity.
+impl RefreshSource for Shared {
+    fn binding_supported(&self) -> bool {
+        false
     }
 
-    /// Import only. Granola's page documents no live transcript stream and
-    /// no writeback through MCP, and this client asks for neither.
-    fn capabilities(&self) -> Capabilities {
-        Capabilities {
-            import_notes: self.tool("get_meetings").is_some(),
-            ..Capabilities::default()
-        }
+    fn workspace(&mut self) -> Result<Option<String>, SourceError> {
+        Ok(None)
     }
 
-    fn fetch(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError> {
+    fn fetch_available(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError> {
+        self.with_connection(|connection| connection.fetch_available(selection))
+    }
+}
+
+impl Connection {
+    /// The selected notes the server returned, without requiring all of
+    /// them. Notes it volunteers beyond the selection are dropped.
+    fn fetch_available(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError> {
         let tool = self
             .tool("get_meetings")
             .cloned()
@@ -1634,15 +1672,6 @@ impl NoteSource for Connection {
         } else {
             notes_in(&output)
         };
-        // Missing/inaccessible or size-omitted selections must not look like
-        // a successful partial import. Keep the chooser available for retry
-        // or a smaller selection; do not fetch more notes automatically.
-        if selection
-            .iter()
-            .any(|id| !notes.iter().any(|note| &note.id == id))
-        {
-            return Err(SourceError::Unavailable);
-        }
         Ok(notes
             .into_iter()
             .filter(|note| selection.iter().any(|wanted| wanted == &note.id))
@@ -1655,6 +1684,35 @@ impl NoteSource for Connection {
                 revision: note.revision,
             })
             .collect())
+    }
+}
+
+impl NoteSource for Connection {
+    fn provider(&self) -> Provider {
+        Provider::Granola
+    }
+
+    /// Import only. Granola's page documents no live transcript stream and
+    /// no writeback through MCP, and this client asks for neither.
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            import_notes: self.tool("get_meetings").is_some(),
+            ..Capabilities::default()
+        }
+    }
+
+    fn fetch(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError> {
+        let items = self.fetch_available(selection)?;
+        // Missing/inaccessible or size-omitted selections must not look like
+        // a successful partial import. Keep the chooser available for retry
+        // or a smaller selection; do not fetch more notes automatically.
+        if selection
+            .iter()
+            .any(|id| !items.iter().any(|item| &item.source_id == id))
+        {
+            return Err(SourceError::Unavailable);
+        }
+        Ok(items)
     }
 }
 
@@ -1714,18 +1772,25 @@ mod tests {
         assert!(!granola_host("https://evil.com@mcp-auth.granola.ai/"));
         assert!(!granola_host("https://notgranola.ai/"));
         assert_eq!(
-            well_known("https://mcp-auth.granola.ai", "oauth-authorization-server").unwrap(),
+            well_known(
+                "https://mcp-auth.granola.ai",
+                "oauth-authorization-server",
+                true
+            )
+            .unwrap(),
             "https://mcp-auth.granola.ai/.well-known/oauth-authorization-server"
         );
         assert_eq!(
             well_known(
                 "https://mcp-auth.granola.ai/tenant/a/",
-                "oauth-authorization-server"
+                "oauth-authorization-server",
+                true
             )
             .unwrap(),
             "https://mcp-auth.granola.ai/.well-known/oauth-authorization-server/tenant/a"
         );
-        assert!(well_known("http://mcp-auth.granola.ai", "x").is_none());
+        assert!(well_known("http://mcp-auth.granola.ai", "x", true).is_none());
+        assert!(well_known("ftp://127.0.0.1", "x", false).is_none());
     }
 
     #[test]
@@ -1785,6 +1850,132 @@ mod tests {
         assert!(wait_for_callback(&listener, "expected", &|| true)
             .unwrap_err()
             .contains("cancelled"));
+    }
+
+    /// The `User-Agent` values in a request head.
+    fn user_agents(head: &str) -> Vec<&str> {
+        head.lines()
+            .filter_map(|line| line.split_once(':'))
+            .filter(|(name, _)| name.eq_ignore_ascii_case("user-agent"))
+            .map(|(_, value)| value.trim())
+            .collect()
+    }
+
+    #[test]
+    fn every_sign_in_request_names_talkqte_as_its_user_agent() {
+        // A fictional sign-in service on a loopback port: resource and
+        // server metadata, client registration and the token exchange.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let seen = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+        let (log, base) = (seen.clone(), origin.clone());
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { break };
+                let mut buffer = vec![0u8; 16384];
+                let mut read = 0;
+                let (head, body) = loop {
+                    let n = stream.read(&mut buffer[read..]).unwrap_or(0);
+                    read += n;
+                    let text = String::from_utf8_lossy(&buffer[..read]).into_owned();
+                    if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                        let length: usize = head
+                            .lines()
+                            .find_map(|line| {
+                                line.to_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .map(|value| value.trim().parse().unwrap_or(0))
+                            })
+                            .unwrap_or(0);
+                        if body.len() >= length || n == 0 {
+                            break (head.to_string(), body.to_string());
+                        }
+                    } else if n == 0 {
+                        break (text, String::new());
+                    }
+                };
+                let path = head.split(' ').nth(1).unwrap_or("").to_string();
+                let reply = match path.as_str() {
+                    "/.well-known/oauth-protected-resource" => {
+                        json!({"authorization_servers": [base]})
+                    }
+                    "/.well-known/oauth-authorization-server" => json!({
+                        "issuer": base,
+                        "authorization_endpoint": format!("{base}/authorize"),
+                        "token_endpoint": format!("{base}/token"),
+                        "registration_endpoint": format!("{base}/register"),
+                    }),
+                    "/register" => json!({"client_id": "fictional-client"}),
+                    "/token" => json!({"access_token": "fictional-token"}),
+                    _ => json!({}),
+                }
+                .to_string();
+                log.lock().unwrap().push((head, body));
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                        reply.len()
+                    )
+                    .as_bytes(),
+                );
+            }
+        });
+        // The fictional browser returns to the loopback address at once.
+        let browser = |url: &str| {
+            let query = url.split_once('?').unwrap().1;
+            let value = |name: &str| {
+                query
+                    .split('&')
+                    .find_map(|pair| pair.strip_prefix(&format!("{name}=")))
+                    .map(percent_decode)
+                    .unwrap()
+            };
+            let (redirect, state) = (value("redirect_uri"), value("state"));
+            let address = redirect
+                .strip_prefix("http://")
+                .and_then(|rest| rest.strip_suffix("/callback"))
+                .unwrap()
+                .to_string();
+            std::thread::spawn(move || {
+                let mut stream = TcpStream::connect(address).unwrap();
+                stream
+                    .write_all(
+                        format!(
+                            "GET /callback?code=fictional-code&state={state} HTTP/1.1\r\nHost: x\r\n\r\n"
+                        )
+                        .as_bytes(),
+                    )
+                    .unwrap();
+                let mut page = String::new();
+                let _ = stream.read_to_string(&mut page);
+            });
+            Ok(())
+        };
+        let trusted = |url: &str| url.starts_with(&origin);
+        let tokens = sign_in_at(&format!("{origin}/mcp"), false, &trusted, &browser, &|| {
+            false
+        })
+        .unwrap();
+        assert_eq!(tokens.access_token, "fictional-token");
+        let seen = seen.lock().unwrap().clone();
+        let lines: Vec<&str> = seen
+            .iter()
+            .map(|(head, _)| head.lines().next().unwrap())
+            .collect();
+        assert_eq!(
+            lines,
+            [
+                "GET /.well-known/oauth-protected-resource HTTP/1.1",
+                "GET /.well-known/oauth-authorization-server HTTP/1.1",
+                "POST /register HTTP/1.1",
+                "POST /token HTTP/1.1",
+            ],
+            "discovery, registration and the token exchange, nothing else"
+        );
+        for (head, _) in &seen {
+            assert_eq!(user_agents(head), ["TalkQTE"], "{head}");
+        }
+        assert!(seen[3].1.contains("code=fictional-code"));
     }
 
     /// How the fictional server answers: normally (as JSON or an event
@@ -2008,6 +2199,10 @@ mod tests {
             assert!(seen.iter().all(|(head, _)| head
                 .to_lowercase()
                 .contains("authorization: bearer fictional-token")));
+            // Once, although both the agent and the request name it.
+            for (head, _) in &seen {
+                assert_eq!(user_agents(head), ["TalkQTE"], "{head}");
+            }
             assert!(
                 !seen[0].0.to_lowercase().contains("mcp-session-id"),
                 "none before the server issues one"
@@ -2298,6 +2493,44 @@ The default range is the last thirty days.
             seen.lock().unwrap().len(),
             4,
             "no automatic follow-up reads"
+        );
+    }
+
+    #[test]
+    fn an_update_check_fails_closed_without_asking_granola_for_any_note() {
+        use crate::context::ContextStore;
+        use crate::context_refresh::{CheckStatus, Refresh, CHECK_TIMEOUT};
+        let (endpoint, seen) = fictional_server(Answer::Json);
+        let mut shared = Shared::new(Connection::open_at(&endpoint, &tokens(), false).unwrap());
+        assert!(!shared.binding_supported());
+        let mut store = ContextStore::default();
+        let selection = ["m2".to_string()];
+        let fetched = shared.fetch(&selection).unwrap();
+        store.merge(Provider::Granola, &selection, fetched);
+        let before = seen.lock().unwrap().len();
+        let mut refresh = Refresh::default();
+        let ticket = refresh.begin(&store).unwrap();
+        let result = crate::context_refresh::run(&ticket, Box::new(shared.clone()), CHECK_TIMEOUT);
+        let report = refresh.apply(&ticket, result, &mut store, 0);
+        assert_eq!(report.status, CheckStatus::WorkspaceUnverified);
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            before,
+            "no request without a provider-supported workspace identity"
+        );
+        assert_eq!(store.items().len(), 1);
+
+        // The request a verified binding would allow returns what the server
+        // has for the selection instead of failing on an omitted note.
+        let available = shared
+            .fetch_available(&["m2".into(), "omitted-note".into()])
+            .unwrap();
+        assert_eq!(available.len(), 1);
+        assert_eq!(available[0].source_id, "m2");
+        let asked: Value = serde_json::from_str(&seen.lock().unwrap().last().unwrap().1).unwrap();
+        assert_eq!(
+            asked["params"]["arguments"]["meeting_ids"],
+            json!(["m2", "omitted-note"])
         );
     }
 

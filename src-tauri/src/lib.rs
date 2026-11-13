@@ -6,6 +6,7 @@ mod companion;
 mod companion_macos;
 pub mod context;
 mod context_import;
+pub mod context_refresh;
 pub mod cue_evaluator;
 pub mod engine;
 pub mod granola;
@@ -16,6 +17,8 @@ mod microphone;
 pub mod model;
 #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
 mod native_session_clock;
+#[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+mod native_source;
 pub mod notes_file;
 mod processing_commands;
 pub mod processing_reviews;
@@ -52,6 +55,8 @@ struct Runtime {
     context: context::ContextStore,
     /// A listed note source kept for selection, retry, or cancellation.
     pending_import: Option<context_import::PendingImport>,
+    /// The explicit Granola update check and what it last found.
+    refresh: context_refresh::Refresh,
     /// The Granola session for this app run, once the person has signed in.
     granola: Option<granola::Shared>,
     /// Set while a Granola sign-in waits for the browser; cleared to cancel.
@@ -73,6 +78,7 @@ impl Default for Runtime {
             processing_status: engine::ProcessingTracker::default(),
             context: context::ContextStore::default(),
             pending_import: None,
+            refresh: context_refresh::Refresh::default(),
             granola: None,
             granola_sign_in: None,
         }
@@ -855,6 +861,7 @@ fn remove_context_item(
     if !runtime.context.remove(provider, &source_id) {
         return Err("That note is no longer imported.".into());
     }
+    runtime.refresh.forget(provider, &source_id);
     publish_context(&app, &mut runtime);
     Ok(())
 }
@@ -870,6 +877,7 @@ fn remove_context_from(
     let removed = runtime.context.remove_all_from(context::Provider::File)
         + runtime.context.remove_all_from(context::Provider::Granola);
     runtime.pending_import = None;
+    runtime.refresh.forget_all();
     publish_context(&app, &mut runtime);
     Ok(removed)
 }
@@ -881,6 +889,9 @@ fn remove_context_from(
 struct GranolaStatus {
     connected: bool,
     tools: Vec<String>,
+    /// Whether this connection can verify its workspace for an update check.
+    update_check: bool,
+    freshness: Vec<context_refresh::NoteFreshness>,
 }
 
 fn granola_status_now(runtime: &Runtime) -> GranolaStatus {
@@ -891,6 +902,11 @@ fn granola_status_now(runtime: &Runtime) -> GranolaStatus {
             .as_ref()
             .map(granola::Shared::tool_names)
             .unwrap_or_default(),
+        update_check: runtime
+            .granola
+            .as_ref()
+            .is_some_and(context_refresh::RefreshSource::binding_supported),
+        freshness: runtime.refresh.freshness(&runtime.context),
     }
 }
 
@@ -1033,6 +1049,68 @@ async fn suggest_granola_focus(state: tauri::State<'_, AppState>) -> Result<Vec<
     result
 }
 
+/// Checks once, on request, whether the imported Granola notes are still the
+/// provider's latest revisions. See `context_refresh.rs` for the rules.
+#[tauri::command]
+async fn check_granola_updates(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<context_refresh::Report, String> {
+    let (ticket, shared) = {
+        let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+        let shared = runtime.granola.clone().ok_or("Connect Granola first.")?;
+        if !context_refresh::RefreshSource::binding_supported(&shared) {
+            return Err("This Granola connection cannot be checked for updates yet.".into());
+        }
+        let runtime = &mut *runtime;
+        let ticket = runtime
+            .refresh
+            .begin(&runtime.context)
+            .map_err(|error| match error {
+                context_refresh::BeginError::Running => "A check is already running.",
+                context_refresh::BeginError::Unsettled => {
+                    "The earlier check has not finished at Granola yet. Try again in a moment."
+                }
+                context_refresh::BeginError::NoNotes => "No Granola notes are selected.",
+            })?;
+        (ticket, shared)
+    };
+    let finished = tauri::async_runtime::spawn_blocking(move || {
+        let result =
+            context_refresh::run(&ticket, Box::new(shared), context_refresh::CHECK_TIMEOUT);
+        (ticket, result)
+    })
+    .await;
+    let Ok((ticket, result)) = finished else {
+        // Without a ticket to apply, end the check so another can start.
+        if let Ok(mut runtime) = state.0.lock() {
+            runtime.refresh.stop();
+        }
+        return Err("The check could not finish.".into());
+    };
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis() as u64);
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    let runtime = &mut *runtime;
+    let report = runtime
+        .refresh
+        .apply(&ticket, result, &mut runtime.context, now_ms);
+    if report.store_changed {
+        publish_context(&app, runtime);
+    }
+    Ok(report)
+}
+
+/// Stops a running update check; its result is discarded. A request already
+/// sent may still finish at the provider.
+#[tauri::command]
+fn stop_granola_update_check(state: tauri::State<AppState>) {
+    if let Ok(mut runtime) = state.0.lock() {
+        runtime.refresh.stop();
+    }
+}
+
 /// Forgets the Granola session. Imported notes stay until removed, as they
 /// would for a file; nothing is written back.
 #[tauri::command]
@@ -1041,6 +1119,7 @@ fn disconnect_granola(state: tauri::State<AppState>) -> Result<GranolaStatus, St
     if let Some(connection) = runtime.granola.take() {
         connection.disconnect();
     }
+    runtime.refresh.disconnect();
     if let Some(cancel) = &runtime.granola_sign_in {
         cancel.store(true, Ordering::Relaxed);
     }
@@ -1336,6 +1415,8 @@ pub fn run() {
             list_granola_notes,
             disconnect_granola,
             suggest_granola_focus,
+            check_granola_updates,
+            stop_granola_update_check,
             download_model,
             cancel_model_download,
             remove_model,

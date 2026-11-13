@@ -891,6 +891,22 @@ svg {
   color: var(--muted);
   white-space: pre-wrap;
 }
+.context-updates {
+  margin-top: 12px;
+}
+.context-updates p {
+  margin: 6px 0 0;
+}
+.context-updates .secondary-button {
+  min-height: 44px;
+}
+.context-updates [role='alert'] {
+  color: #843b2e;
+}
+.context-freshness {
+  display: block;
+  margin-top: 4px;
+}
 .context-dialog[open] {
   display: flex;
   flex-direction: column;

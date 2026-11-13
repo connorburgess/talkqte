@@ -90,11 +90,54 @@ export type Commands = {
   cancel_context_import: undefined;
   remove_context_item: { provider: ContextItem['provider']; sourceId: string };
   cancel_granola_sign_in: undefined;
+  stop_granola_update_check: undefined;
 };
 /** What the notebook may know about the Granola connection; never identity. */
 export interface GranolaStatus {
   connected: boolean;
   tools: string[];
+  /** Whether this connection can verify its workspace for an update check. */
+  updateCheck?: boolean;
+  freshness?: NoteFreshness[];
+}
+/** What the last explicit update check found for one imported Granola note. */
+export interface NoteFreshness {
+  sourceId: string;
+  /** The revision of the kept copy this finding is about. */
+  revision: number;
+  state: 'current' | 'updated' | 'notVerified';
+  reason:
+    | 'missing'
+    | 'unversioned'
+    | 'older'
+    | 'unreadable'
+    | 'unavailable'
+    | 'expired'
+    | 'revoked'
+    | 'rateLimited'
+    | 'unsupportedFormat'
+    | 'workspace'
+    | 'timedOut'
+    | null;
+  /** When a check last confirmed or updated the copy, by this device's clock. */
+  verifiedAtMs: number | null;
+  /** Granola's own update time for the kept copy, if it gave one. */
+  providerUpdatedAtMs: number | null;
+}
+export interface UpdateCheckReport {
+  status:
+    | 'checked'
+    | 'cancelled'
+    | 'timedOut'
+    | 'workspaceUnverified'
+    | 'workspaceChanged'
+    | 'unavailable'
+    | 'expired'
+    | 'revoked'
+    | 'rateLimited'
+    | 'unsupportedFormat';
+  retryAfterS: number | null;
+  notes: NoteFreshness[];
 }
 /** One prior note the user imported; never mistaken for the conversation. */
 export interface ContextItem {

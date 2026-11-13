@@ -10,6 +10,7 @@ import type {
   ModelStatus,
   PickedNotes,
   Snapshot,
+  UpdateCheckReport,
 } from './types';
 
 export const desktop = isTauri();
@@ -97,6 +98,12 @@ export async function listGranolaNotes() {
 export async function suggestGranolaFocus() {
   if (preview) return (await preview).suggestGranolaFocus();
   return invoke<string[]>('suggest_granola_focus');
+}
+
+/** Asks Granola once whether the imported notes changed; desktop only. */
+export async function checkGranolaUpdates() {
+  if (preview) return (await preview).checkGranolaUpdates();
+  return invoke<UpdateCheckReport>('check_granola_updates');
 }
 
 export async function disconnectGranola() {
