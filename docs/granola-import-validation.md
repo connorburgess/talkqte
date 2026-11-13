@@ -65,6 +65,40 @@ Acceptance: eight Chromium/WebKit import/removal checks, frontend build/formatti
 Remaining release checks: confirm one real selected-note import and removal in the native app, inspect an explicitly authorized account session's data flow without retaining content, and verify provider-side disconnect/retention expectations separately. Imported-context usefulness remains a separate human validation task.
 
 
+### What is established (13 November 2026)
+
+An audit compared each promise in [PRIVACY.md](../PRIVACY.md), the README and these notes with the code. It found two inaccurate statements, both since corrected: sign-in requests carried the HTTP library's user agent instead of `TalkQTE`, and the clip replay tool printed cue text that can repeat recognized speech. The lists below record what evidence each remaining promise has. All tests use fictional accounts, notes and credentials on loopback servers; none uses a real account, microphone or model.
+
+**Established by test**
+
+- **Companion window:** its capability grants no export, note editing, name, focus, import, Granola, model, processing or capture-start command. Its payload carries the cue, that cue's source line and display state, not the notebook, the rest of the transcript, the name, focus lines or an unrelated imported note.
+- **Export:** it holds notes and the demo transcript, never the name, focus lines or imported notes. A live session is refused while running and after Stop, and starting one drops an earlier demo preview.
+- **Interface:** the production content security policy allows connections only to the app's own IPC. In the browser preview, typed notes, focus and a name leave local storage, session storage, cookies, IndexedDB and the Cache API empty, every request goes to the page's own origin, and a reload shows nothing that was typed.
+- **Granola requests:** discovery, registration, the token exchange and every MCP request name `TalkQTE` as the user agent. The token travels only as a bearer header, never in an address or body, and is absent from `Debug` output.
+- **Disconnect during sign-in:** a sign-in waiting for the browser ends as cancelled without exchanging a code, and a connection that opens after Disconnect is dropped without another request.
+- **Connection status:** the notebook receives whether a connection is open, the server's tool names, whether an update check is offered, and the state of kept notes. A listing that names the signed-in account and another participant passes neither to the status nor to the chooser.
+- **Files and output:** one whole session (sign-in, listing, a selected note, a focus suggestion, a failed request, disconnect) runs in a child process whose home, app-data and temporary folders point at an empty folder. The folder stays empty and the process prints nothing. With `TALKQTE_GRANOLA_TRACE` set, the trace appears and contains no token, sign-in code, client ID, account, title or note text.
+- **Error messages:** provider failures, a refused sign-in, an unreadable or malformed notes file and a missing or damaged model each produce a fixed message with no path, token, account or file content, even when the failing reply or file contains them.
+- **Earlier checks:** disconnect and reconnect, trace masking, note removal, selection-only import, model checksum and partial-download cleanup, microphone stop and release in synthetic tests, and bounded audio buffers.
+
+**Upheld by code, without a test**
+
+- The microphone status payload has no samples, device identifier or precise level; the audio callback retains nothing.
+- The model download sends only the `TalkQTE` user agent and a range header. That code is built only with local transcription, and its one network test is run by hand.
+- Live audio and the live transcript are never written to disk: no file is opened on that path. No isolated-process check exists for it, because it needs the speech model.
+- whisper.cpp's own logging is routed away from stderr.
+- A notes file or export destination comes only from a native dialog; no command accepts a path from the interface.
+- No telemetry or analytics dependency is present.
+- Release is logical: dropped tokens and removed notes are not overwritten in memory.
+
+**Still needing a real account or device**
+
+- Which hosts a real Granola session contacts, how redirects behave, what the provider returns and retains, and what Disconnect leaves at the provider.
+- A built app after a real session and after quit: the contents of its data folder, webview storage, and operating-system logs or crash reports.
+- Microphone release, permission and device loss on real hardware, and whether the companion is visible to screen sharing.
+
+Limits of the isolated-session test: it covers the Granola adapter, not the native command layer or the webview, and it redirects folders through environment variables, so a write to an unrelated absolute path would go unnoticed. No such write exists in the adapter's source.
+
 ## Disconnect while notes are loading
 
 11 November 2026. The notebook previously disabled **Disconnect Granola** while a note listing was pending, even though the native connection already supported retirement without waiting for that request. A headless regression reproduced the disabled control before the fix.
