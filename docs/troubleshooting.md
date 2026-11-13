@@ -45,6 +45,8 @@ If a problem is not listed, the [feedback route](#reporting-a-problem) at the en
 
 ## Prior notes from a file
 
+**Add notes from a file** is inside the notebook's **Prior context** section, which starts closed; open it first.
+
 | You see                                                                                               | What it means                                      | What to do                                                                                                                 |
 | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | "That is not a TalkQTE notes file. It needs a "notes" list with an id, date, and text for each note." | The chosen file is not JSON in the expected shape. | Check the file: a `notes` list, each note with `id`, `date` (YYYY-MM-DD), and `text`; `title` and `revision` are optional. |
@@ -52,7 +54,7 @@ If a problem is not listed, the [feedback route](#reporting-a-problem) at the en
 | "The file has no notes."                                                                              | The `notes` list is empty.                         | Add notes to the file.                                                                                                     |
 | Some notes are "not listed"                                                                           | The file has repeated ids or more than 200 notes.  | Give each note a unique id; keep files under 200 notes.                                                                    |
 | A note is "skipped (no date or text)" after Import                                                    | The note lacks a real date or any text.            | Fix the note's `date` or `text` and import again.                                                                          |
-| "Choose a notes file first."                                                                          | Import was requested with no file read.            | Choose Add notes from a file.                                                                                              |
+| "Choose notes first."                                                                                 | Import was requested with nothing chosen to read.  | Open **Prior context**, then choose Add notes from a file or Choose Granola notes.                                         |
 
 ## Companion window
 
