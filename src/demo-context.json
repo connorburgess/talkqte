@@ -1,15 +1,20 @@
 {
-  "purpose": "Fictional, human-authored planning fixture; not connected to demo playback or live cues.",
+  "purpose": "Fictional, human-authored prior notes and cues for the browser preview's context demo (?demo=context). Nothing here is inferred or selected by a model, and live sessions never read this file.",
+  "lifecycle": {
+    "note": "Demo-only timing, stated here instead of borrowing the live rules (18 s on screen, 10 s pause), which would hide the third cue in a 63-second script. The Quiet setting's 30 s pause still applies.",
+    "visibleMs": 12000,
+    "quietMs": 5000
+  },
   "notes": [
     {
       "id": "garden-committee",
-      "title": "Garden committee",
+      "title": "Garden committee (fictional demo)",
       "date": "2025-10-28",
       "text": "Sam offered to draft the welcome guide and would like a co-writer. Gate signs need the council's approval, which usually takes about two weeks."
     },
     {
       "id": "visitor-schedule",
-      "title": "Visitor schedule",
+      "title": "Visitor schedule (fictional demo)",
       "date": "2025-11-03",
       "text": "Next new-visitor group: Saturday 22 November, 10 am. Three volunteers asked for printed copies to hand out."
     }
@@ -17,36 +22,26 @@
   "opportunities": [
     {
       "id": "draft-offer",
-      "segmentId": "s2",
-      "trigger": "Someone can take the first draft",
-      "notBeforeMs": 8000,
+      "phraseId": "s2-p2",
       "cue": "Sam offered to draft this on 28 Oct",
       "noteIds": ["garden-committee"],
-      "support": ["Sam offered to draft the welcome guide"],
-      "estimatedSpokenEndMs": 7680
+      "support": ["Sam offered to draft the welcome guide"]
     },
     {
       "id": "visitor-date",
-      "segmentId": "s4",
-      "trigger": "before the next group of visitors arrives",
-      "notBeforeMs": 38000,
+      "phraseId": "s4-p2",
       "cue": "Next visitor group: Sat 22 Nov",
       "noteIds": ["visitor-schedule"],
-      "support": ["Saturday 22 November, 10 am"],
-      "estimatedSpokenEndMs": 38000
+      "support": ["Saturday 22 November, 10 am"]
     },
     {
       "id": "sign-approval",
-      "segmentId": "s6",
-      "trigger": "put a small sign with a link by the gate",
-      "notBeforeMs": 56000,
+      "phraseId": "s6-p2",
       "cue": "A gate sign needs council approval, about two weeks",
       "noteIds": ["garden-committee"],
       "support": [
         "Gate signs need the council's approval, which usually takes about two weeks"
-      ],
-      "estimatedSpokenEndMs": 55760
+      ]
     }
-  ],
-  "timingNote": "Estimated from a fictional audio transcript; listen and verify exact trigger-word timing before playback integration."
+  ]
 }

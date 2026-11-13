@@ -28,6 +28,8 @@ With a prior note titled "Garden welcome guide" imported, the opening line shows
 
 The text-only script also reached a Decision cue ("How will we choose between those options?") at 1:12. In the shorter script, "We could either print the guide …" comes at 0:56, while the Friday quote is still showing and the 10-second pause after an answered question is still running, so the engine correctly holds it back. Restoring the Decision cue would need about 13 more seconds of conversation between those two lines. Decision cues remain covered by the engine's own scenario tests.
 
+The browser preview has a second run of this script with phrase-sized transcript timing and authored cues that cite fictional prior notes; see the [context demo record](context-demo.md).
+
 ## Playback in the desktop app
 
 The first version played the file through an HTML audio element. In the desktop app the owner heard it as very choppy. The likely cause is that the packaged app serves bundled files through Tauri's own protocol, which handles media seeking poorly, while the player kept seeking to follow the clock. The browser preview did not show this, because Vite's development server handles seeking normally.

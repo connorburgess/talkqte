@@ -1,15 +1,39 @@
 // Browser-only visual development adapter. This is not the desktop session engine.
 import demo from '../demo.json';
+import authoredContext from '../demo-context.json';
+import phrased from '../demo-phrases.json';
 import type {
   Commands,
   ContextItem,
+  CueSource,
   LiveStatus,
   MergeOutcome,
   ModelStatus,
   PickedNotes,
+  Segment,
   Snapshot,
   GranolaStatus,
 } from './types';
+
+/**
+ * `?demo=context` plays the authored run: the same fictional script arriving
+ * in phrase-sized pieces, with human-authored cues that cite bundled fictional
+ * prior notes. It replaces the phrase rules for that run only; nothing here is
+ * inferred, and live sessions never read these files.
+ */
+const authored = new URLSearchParams(location.search).get('demo') === 'context';
+const speakers = new Map(demo.segments.map((s) => [s.id, s.speaker]));
+/** Each phrase arrives a fixed delay after its last word is spoken. */
+const phrases: Segment[] = phrased.phrases.map((phrase) => ({
+  id: phrase.id,
+  atMs: phrase.endMs + phrased.deliveryDelayMs,
+  speaker: speakers.get(phrase.segmentId) ?? '',
+  text: phrase.text,
+}));
+const turnOf = new Map(phrased.phrases.map((p) => [p.id, p.segmentId]));
+const script: Segment[] = authored ? phrases : demo.segments;
+/** Demo-only note IDs live in their own namespace, apart from imports. */
+const demoNoteId = (id: string) => `demo:${id}`;
 
 const state: Snapshot = {
   revision: 0,
@@ -44,7 +68,79 @@ let deadline = 0;
 let last = performance.now();
 let timer: ReturnType<typeof setInterval> | undefined;
 let reviewedExport: string | null = null;
-const quietMs = () => (state.sensitivity === 'quiet' ? 30_000 : 10_000);
+// The authored run states its own shorter pause; the Quiet setting still wins.
+const quietMs = () =>
+  state.sensitivity === 'quiet'
+    ? 30_000
+    : authored
+      ? authoredContext.lifecycle.quietMs
+      : 10_000;
+/** The next authored opportunity to consider in this demo run. */
+let nextOpportunity = 0;
+/**
+ * Considers each authored opportunity once, when its triggering phrase has
+ * arrived, wherever that falls in a speaker's turn. One that cannot be shown
+ * then is let go: it never replaces a cue on screen, and it is not kept for
+ * after the pause.
+ */
+function raiseAuthored() {
+  const { visibleMs } = authoredContext.lifecycle;
+  while (nextOpportunity < authoredContext.opportunities.length) {
+    const opportunity = authoredContext.opportunities[nextOpportunity];
+    const phrase = state.transcript.find((p) => p.id === opportunity.phraseId);
+    if (!phrase) return;
+    nextOpportunity++;
+    const notes = opportunity.noteIds.map((id) =>
+      demoNotes.find((note) => note.sourceId === demoNoteId(id)),
+    );
+    if (
+      state.cue ||
+      phrase.atMs < cooldown ||
+      state.elapsedMs - phrase.atMs >= visibleMs ||
+      !notes.every((note) => note)
+    )
+      continue;
+    deadline = phrase.atMs + visibleMs;
+    const sources: CueSource[] = [
+      {
+        id: phrase.id,
+        revision: 1,
+        text: phrase.text,
+        provenance: {
+          kind: 'transcript',
+          atMs: phrase.atMs,
+          speaker: phrase.speaker,
+        },
+      },
+      ...notes.map((note, i) => ({
+        id: note!.sourceId,
+        revision: note!.revision,
+        text: opportunity.support[i],
+        provenance: {
+          kind: 'priorNote' as const,
+          provider: 'file' as const,
+          date: note!.sourceDate,
+          title: note!.title,
+        },
+      })),
+    ];
+    state.cue = {
+      id: `${generation}:${opportunity.id}`,
+      kind: 'Context',
+      question: opportunity.cue,
+      evidence: phrase.text,
+      sources,
+      sourceId: phrase.id,
+      remainingMs: deadline - state.elapsedMs,
+      totalMs: visibleMs,
+      held: false,
+      expanded: false,
+      resolvedBy: null,
+      note: null,
+      aboutFocus: false,
+    };
+  }
+}
 function emit() {
   state.revision++;
   for (const receive of listeners) receive(structuredClone(state));
@@ -64,9 +160,11 @@ function tick() {
       if (!quote) cooldown = deadline + quietMs();
     }
   }
-  for (const segment of demo.segments.slice(state.transcript.length)) {
+  for (const segment of script.slice(state.transcript.length)) {
     if (segment.atMs > state.elapsedMs) break;
     state.transcript.push(segment);
+    // The authored run raises only its authored cues, after this loop.
+    if (authored) continue;
     if (
       state.cue &&
       !state.cue.resolvedBy &&
@@ -162,6 +260,7 @@ function tick() {
       }
     }
   }
+  if (authored) raiseAuthored();
   if (state.elapsedMs >= state.durationMs) {
     state.status = 'ended';
     if (!state.cue?.held) state.cue = null;
@@ -191,6 +290,7 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
         throw new Error('End the current demo before replaying it.');
       generation++;
       cooldown = 0;
+      nextOpportunity = 0;
       shownNotes = [];
       state.elapsedMs = 0;
       state.transcript = [];
@@ -201,9 +301,10 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
       break;
     case 'remove_context_item': {
       const { provider, sourceId } = args as Commands['remove_context_item'];
-      contextItems = contextItems.filter(
-        (item) => !(item.provider === provider && item.sourceId === sourceId),
-      );
+      const kept = (item: ContextItem) =>
+        !(item.provider === provider && item.sourceId === sourceId);
+      contextItems = contextItems.filter(kept);
+      demoNotes = demoNotes.filter(kept);
       emitContext();
       break;
     }
@@ -340,6 +441,23 @@ const exampleNotes: ContextItem[] = [
   },
 ];
 let contextItems: ContextItem[] = [];
+/**
+ * The authored run's bundled fictional notes, already selected. They are kept
+ * apart from imported notes: imports never satisfy an authored cue, and these
+ * never raise an imported-note reminder. A removed note stays removed until
+ * the page reloads.
+ */
+let demoNotes: ContextItem[] = authored
+  ? authoredContext.notes.map((note) => ({
+      provider: 'file',
+      sourceId: demoNoteId(note.id),
+      title: note.title,
+      sourceDate: note.date,
+      excerpt: note.text,
+      revision: 1,
+    }))
+  : [];
+const selectedNotes = () => structuredClone([...demoNotes, ...contextItems]);
 // Notes already quoted as a reminder this demo run.
 let shownNotes: string[] = [];
 /** A demo-only subset of the engine's quoted-line rule, enough for the
@@ -430,35 +548,42 @@ function emitContext() {
     contextItems.some((item) => item.sourceId === id),
   );
   const cue = state.cue;
+  // A cue whose cited note was removed is withdrawn, even while held.
+  const citesRemovedDemoNote = cue?.sources?.some(
+    (source) =>
+      source.provenance.kind === 'priorNote' &&
+      !demoNotes.some((note) => note.sourceId === source.id),
+  );
   if (
-    cue?.note &&
-    !contextItems.some(
-      (item) => `${item.provider}:${item.sourceId}` === cue.sourceId,
-    )
+    citesRemovedDemoNote ||
+    (cue?.note &&
+      !contextItems.some(
+        (item) => `${item.provider}:${item.sourceId}` === cue.sourceId,
+      ))
   ) {
     state.cue = null;
     cooldown = state.elapsedMs + quietMs();
     emit();
   }
-  for (const receive of contextListeners)
-    receive(structuredClone(contextItems));
+  for (const receive of contextListeners) receive(selectedNotes());
 }
 export function connectContext(receive: (items: ContextItem[]) => void) {
   contextListeners.add(receive);
-  receive(structuredClone(contextItems));
+  receive(selectedNotes());
   return () => {
     contextListeners.delete(receive);
   };
 }
 export function removeAllContext(): number {
-  const removed = contextItems.length;
+  const removed = contextItems.length + demoNotes.length;
   contextItems = [];
+  demoNotes = [];
   shownNotes = [];
   emitContext();
   return removed;
 }
 export function contextItemsNow(): ContextItem[] {
-  return structuredClone(contextItems);
+  return selectedNotes();
 }
 // The browser preview has no account sign-in; Granola connects in the desktop app.
 export function granolaStatus(): GranolaStatus {
@@ -529,7 +654,16 @@ export function modelStatus(): ModelStatus {
   };
 }
 export function exportPreview() {
-  reviewedExport = `# ${state.title}\n\nFictional demo transcript; not derived from microphone audio.\n\n## Notes\n\n${state.notes}\n\n## Demo transcript\n\n${state.transcript.map((segment) => `**${segment.speaker}:** ${segment.text}`).join('\n\n')}\n`;
+  // Phrases of one turn are written out as the single line they came from.
+  const lines: Segment[] = [];
+  for (const segment of state.transcript) {
+    const turn = turnOf.get(segment.id);
+    const last = lines.at(-1);
+    if (authored && turn && last && turnOf.get(last.id) === turn)
+      last.text = `${last.text} ${segment.text}`;
+    else lines.push({ ...segment });
+  }
+  reviewedExport = `# ${state.title}\n\nFictional demo transcript; not derived from microphone audio.\n\n## Notes\n\n${state.notes}\n\n## Demo transcript\n\n${lines.map((segment) => `**${segment.speaker}:** ${segment.text}`).join('\n\n')}\n`;
   return reviewedExport;
 }
 export function exportMarkdown() {

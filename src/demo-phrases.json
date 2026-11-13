@@ -1,0 +1,210 @@
+{
+  "purpose": "Fictional demo transcript in phrase-sized pieces, timed to the bundled synthetic speech. Wording is authored; timings are rewritten by scripts/demo-phrases.mjs.",
+  "audio": "src/demo/welcome.mp3",
+  "deliveryDelayMs": 500,
+  "phrases": [
+    {
+      "id": "s1-p1",
+      "segmentId": "s1",
+      "text": "A welcome guide could make first visits easier.",
+      "startMs": 141,
+      "endMs": 2645,
+      "boundary": "turn",
+      "pauseMs": 1594
+    },
+    {
+      "id": "s2-p1",
+      "segmentId": "s2",
+      "text": "Agreed.",
+      "startMs": 4239,
+      "endMs": 4619,
+      "boundary": "pause",
+      "pauseMs": 630,
+      "estimateOffMs": 59
+    },
+    {
+      "id": "s2-p2",
+      "segmentId": "s2",
+      "text": "Someone can take the first draft",
+      "startMs": 5249,
+      "endMs": 6769,
+      "boundary": "pause",
+      "pauseMs": 141,
+      "estimateOffMs": 133
+    },
+    {
+      "id": "s2-p3",
+      "segmentId": "s2",
+      "text": "of the welcome guide.",
+      "startMs": 6910,
+      "endMs": 7688,
+      "boundary": "turn",
+      "pauseMs": 1169
+    },
+    {
+      "id": "s3-p1",
+      "segmentId": "s3",
+      "text": "It should cover where to find tools,",
+      "startMs": 8857,
+      "endMs": 10810,
+      "boundary": "pause",
+      "pauseMs": 270,
+      "estimateOffMs": 230
+    },
+    {
+      "id": "s3-p2",
+      "segmentId": "s3",
+      "text": "how to water the seedlings,",
+      "startMs": 11080,
+      "endMs": 12234,
+      "boundary": "pause",
+      "pauseMs": 224,
+      "estimateOffMs": 77
+    },
+    {
+      "id": "s3-p3",
+      "segmentId": "s3",
+      "text": "and who to ask for help.",
+      "startMs": 12458,
+      "endMs": 13659,
+      "boundary": "pause",
+      "pauseMs": 616,
+      "estimateOffMs": 209
+    },
+    {
+      "id": "s3-p4",
+      "segmentId": "s3",
+      "text": "I'd also include a small map,",
+      "startMs": 14275,
+      "endMs": 15779,
+      "boundary": "pause",
+      "pauseMs": 354,
+      "estimateOffMs": 406
+    },
+    {
+      "id": "s3-p5",
+      "segmentId": "s3",
+      "text": "because the shed is tucked behind the greenhouse.",
+      "startMs": 16133,
+      "endMs": 18436,
+      "boundary": "pause",
+      "pauseMs": 574,
+      "estimateOffMs": 273
+    },
+    {
+      "id": "s3-p6",
+      "segmentId": "s3",
+      "text": "A few photos would help people recognize the right tools.",
+      "startMs": 19010,
+      "endMs": 21713,
+      "boundary": "pause",
+      "pauseMs": 683,
+      "estimateOffMs": 184
+    },
+    {
+      "id": "s3-p7",
+      "segmentId": "s3",
+      "text": "We can leave the more detailed planting advice for another page,",
+      "startMs": 22396,
+      "endMs": 25187,
+      "boundary": "pause",
+      "pauseMs": 359,
+      "estimateOffMs": -532
+    },
+    {
+      "id": "s3-p8",
+      "segmentId": "s3",
+      "text": "so this one feels welcoming and easy to skim.",
+      "startMs": 25546,
+      "endMs": 27858,
+      "boundary": "turn",
+      "pauseMs": 5016
+    },
+    {
+      "id": "s4-p1",
+      "segmentId": "s4",
+      "text": "We should have it ready soon,",
+      "startMs": 32874,
+      "endMs": 34322,
+      "boundary": "pause",
+      "pauseMs": 635,
+      "estimateOffMs": 119
+    },
+    {
+      "id": "s4-p2",
+      "segmentId": "s4",
+      "text": "before the next group of visitors arrives.",
+      "startMs": 34957,
+      "endMs": 36860,
+      "boundary": "turn",
+      "pauseMs": 8656
+    },
+    {
+      "id": "s5-p1",
+      "segmentId": "s5",
+      "text": "A single page sounds right.",
+      "startMs": 45516,
+      "endMs": 47007,
+      "boundary": "pause",
+      "pauseMs": 567,
+      "estimateOffMs": 172
+    },
+    {
+      "id": "s5-p2",
+      "segmentId": "s5",
+      "text": "Let's have it ready by Friday",
+      "startMs": 47574,
+      "endMs": 48836,
+      "boundary": "pause",
+      "pauseMs": 126,
+      "estimateOffMs": 56
+    },
+    {
+      "id": "s5-p3",
+      "segmentId": "s5",
+      "text": "and try it with a few new visitors first.",
+      "startMs": 48962,
+      "endMs": 50824,
+      "boundary": "turn",
+      "pauseMs": 1230
+    },
+    {
+      "id": "s6-p1",
+      "segmentId": "s6",
+      "text": "We could either print the guide",
+      "startMs": 52054,
+      "endMs": 53423,
+      "boundary": "pause",
+      "pauseMs": 371,
+      "estimateOffMs": -494
+    },
+    {
+      "id": "s6-p2",
+      "segmentId": "s6",
+      "text": "or put a small sign with a link by the gate.",
+      "startMs": 53794,
+      "endMs": 55811,
+      "boundary": "turn",
+      "pauseMs": 790
+    },
+    {
+      "id": "s7-p1",
+      "segmentId": "s7",
+      "text": "Let's bring those options to the next garden meeting",
+      "startMs": 56601,
+      "endMs": 59153,
+      "boundary": "pause",
+      "pauseMs": 379,
+      "estimateOffMs": 109
+    },
+    {
+      "id": "s7-p2",
+      "segmentId": "s7",
+      "text": "and hear what everyone thinks.",
+      "startMs": 59532,
+      "endMs": 60843,
+      "boundary": "turn",
+      "pauseMs": 2157
+    }
+  ]
+}
