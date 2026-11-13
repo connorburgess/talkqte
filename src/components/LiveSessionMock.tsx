@@ -229,7 +229,11 @@ export function LiveSessionMock({
             </h2>
             <p className="mock-empty">{heard.note}</p>
             {heard.lines.length > 0 && (
-              <ol className="mock-lines" aria-label="Real transcript lines">
+              <ol
+                className="mock-lines"
+                role="list"
+                aria-label="Real transcript lines"
+              >
                 {heard.lines.map((line) => (
                   <li key={line.id}>
                     <span className="mock-speaker">{line.speaker}</span>{' '}
