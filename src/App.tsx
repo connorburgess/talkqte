@@ -32,6 +32,7 @@ import { Question } from './components/Question';
 import { ProcessingControl } from './components/ProcessingControl';
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { ContextNotes } from './components/ContextNotes';
+import { LiveSessionMock } from './components/LiveSessionMock';
 import { SetupCard, type SetupTarget } from './components/SetupCard';
 import {
   PanelDivider,
@@ -378,7 +379,9 @@ function Notebook() {
       }
     });
   };
-  const [view, setView] = useState<'notebook' | 'settings'>('notebook');
+  const [view, setView] = useState<'notebook' | 'settings' | 'live-mock'>(
+    'notebook',
+  );
   useEffect(() => {
     if (
       !preparing ||
@@ -859,6 +862,14 @@ function Notebook() {
             <BookOpen size={19} />
             Notebook
           </button>
+          <button
+            className={view === 'live-mock' ? 'nav-item selected' : 'nav-item'}
+            aria-current={view === 'live-mock' ? 'page' : undefined}
+            onClick={() => setView('live-mock')}
+          >
+            <Play size={19} />
+            Live layout preview
+          </button>
         </nav>
         {view === 'notebook' && (
           <div className="meeting-list-content">
@@ -970,7 +981,13 @@ function Notebook() {
         <header className="toolbar">
           <div className="breadcrumb">
             <BookOpen size={16} />
-            <span>{view === 'notebook' ? 'Notebook' : 'Settings'}</span>
+            <span>
+              {view === 'notebook'
+                ? 'Notebook'
+                : view === 'settings'
+                  ? 'Settings'
+                  : 'Live layout preview'}
+            </span>
             {view === 'notebook' && (
               <>
                 <ChevronRight size={14} />
@@ -1121,6 +1138,7 @@ function Notebook() {
           </div>
         )}
 
+        {view === 'live-mock' && <LiveSessionMock />}
         {view === 'notebook' && (
           <div className="notebook-body">
             <div className="meeting-header">
