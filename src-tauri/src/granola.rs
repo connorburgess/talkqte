@@ -538,9 +538,11 @@ impl Connection {
         if initialized.get("protocolVersion").is_none() {
             return Err(SourceError::Unavailable);
         }
+        trace_identity("initialize", || identity_in_json(&initialized));
         connection.notify("notifications/initialized")?;
         let listed = connection.call("tools/list", json!({}))?;
         trace("tools/list", &listed);
+        trace_identity("tools/list", || identity_in_tools(&listed));
         connection.tools = listed["tools"]
             .as_array()
             .map(|tools| tools.iter().filter_map(tool_from).collect())
@@ -583,6 +585,9 @@ impl Connection {
         trace("list_meetings output", &output);
         if let Value::String(text) = &output {
             trace_text("list_meetings text", text);
+            trace_identity("list_meetings", || identity_in_markup(text));
+        } else {
+            trace_identity("list_meetings", || identity_in_json(&output));
         }
         let (notes, remaining) = if let Value::String(text) = &output {
             tagged_listing(text)?
@@ -755,6 +760,166 @@ fn trace(label: &str, value: &Value) {
         return;
     }
     eprintln!("granola trace: {label}: {}", shape(value));
+}
+
+/// For the owner's account check (docs/granola-account-acceptance.md):
+/// whether any name the provider uses, in the session, its tools or their
+/// replies, looks like a workspace or account identity the update check
+/// could bind to. Only fixed vocabulary words, counts and tool positions
+/// are printed; never a name, a value or a tool's own name.
+fn trace_identity(label: &str, summary: impl FnOnce() -> String) {
+    if std::env::var_os("TALKQTE_GRANOLA_TRACE").is_none() {
+        return;
+    }
+    eprintln!("granola trace: identity: {label}: {}", summary());
+}
+
+/// Which kind of identity a provider's field, tag, attribute or tool name
+/// suggests, judged by its words (split at punctuation and camelCase).
+fn identity_kind(name: &str) -> Option<&'static str> {
+    let mut words: Vec<String> = Vec::new();
+    let mut word = String::new();
+    let mut previous_lower = false;
+    for c in name.chars() {
+        if !c.is_ascii_alphanumeric() {
+            words.push(std::mem::take(&mut word));
+            previous_lower = false;
+            continue;
+        }
+        if c.is_ascii_uppercase() && previous_lower {
+            words.push(std::mem::take(&mut word));
+        }
+        previous_lower = c.is_ascii_lowercase();
+        word.push(c.to_ascii_lowercase());
+    }
+    words.push(word);
+    // A plural names the same kind: `users`, `workspaces`.
+    let has = |vocabulary: &[&str]| {
+        words.iter().any(|word| {
+            vocabulary.contains(&word.as_str())
+                || word
+                    .strip_suffix('s')
+                    .is_some_and(|singular| vocabulary.contains(&singular))
+        })
+    };
+    if has(&[
+        "workspace",
+        "tenant",
+        "org",
+        "organization",
+        "organisation",
+        "team",
+    ]) {
+        Some("workspace")
+    } else if has(&["account", "user", "email", "owner", "member", "profile"]) {
+        Some("account")
+    } else {
+        None
+    }
+}
+
+/// Counts by kind, printed as `workspace=1 account=2`, or `none`.
+#[derive(Default)]
+struct IdentityCounts(std::collections::BTreeMap<&'static str, usize>);
+
+impl IdentityCounts {
+    fn note(&mut self, name: &str) {
+        if let Some(kind) = identity_kind(name) {
+            *self.0.entry(kind).or_default() += 1;
+        }
+    }
+
+    fn summary(&self) -> String {
+        if self.0.is_empty() {
+            return "none".into();
+        }
+        self.0
+            .iter()
+            .map(|(kind, count)| format!("{kind}={count}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+/// Every object key in a reply, within depth and size bounds.
+fn identity_in_json(value: &Value) -> String {
+    fn visit(value: &Value, depth: usize, remaining: &mut usize, counts: &mut IdentityCounts) {
+        if depth == 0 || *remaining == 0 {
+            return;
+        }
+        *remaining -= 1;
+        match value {
+            Value::Object(map) => {
+                for (key, value) in map {
+                    counts.note(key);
+                    visit(value, depth - 1, remaining, counts);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    visit(item, depth - 1, remaining, counts);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut counts = IdentityCounts::default();
+    visit(value, 12, &mut 5_000, &mut counts);
+    counts.summary()
+}
+
+/// Every tag and attribute name in a tagged reply; text and values unread.
+fn identity_in_markup(text: &str) -> String {
+    let mut reader = Reader::from_str(text);
+    let mut counts = IdentityCounts::default();
+    for _ in 0..5_000 {
+        match reader.read_event() {
+            Ok(Event::Start(tag) | Event::Empty(tag)) => {
+                counts.note(tag.name().as_ref());
+                for attribute in tag.attributes().flatten() {
+                    counts.note(attribute.key.as_ref());
+                }
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+    counts.summary()
+}
+
+/// Per tool, by position: whether its name, any of its input arguments, or
+/// any field its declared output schema names suggests an identity. A
+/// tool's own name is never printed.
+fn identity_in_tools(listed: &Value) -> String {
+    let tools = listed["tools"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+    let mut parts = vec![format!("{} tools", tools.len())];
+    for (index, tool) in tools.iter().take(50).enumerate() {
+        let mut name = IdentityCounts::default();
+        name.note(tool["name"].as_str().unwrap_or(""));
+        let mut input = IdentityCounts::default();
+        if let Some(properties) = tool["inputSchema"]["properties"].as_object() {
+            for key in properties.keys() {
+                input.note(key);
+            }
+        }
+        let output = match tool.get("outputSchema") {
+            Some(schema) => identity_in_json(schema),
+            None => "none".into(),
+        };
+        if !name.0.is_empty() {
+            parts.push(format!("tool {} name {}", index + 1, name.summary()));
+        }
+        if !input.0.is_empty() {
+            parts.push(format!("tool {} input {}", index + 1, input.summary()));
+        }
+        if output != "none" {
+            parts.push(format!("tool {} output {output}", index + 1));
+        }
+    }
+    if parts.len() == 1 {
+        parts.push("none".into());
+    }
+    parts.join("; ")
 }
 
 /// The layout of a text reply with content masked. Only known structural
@@ -1664,6 +1829,11 @@ impl Connection {
         )?;
         trace("get_meetings result", &result);
         let output = tool_output(&result);
+        if let Value::String(text) = &output {
+            trace_identity("get_meetings", || identity_in_markup(text));
+        } else {
+            trace_identity("get_meetings", || identity_in_json(&output));
+        }
         let notes = if let Value::String(text) = &output {
             trace_text("get_meetings text", text);
             tagged_meetings(text, true)
@@ -2024,6 +2194,80 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn identity_names_are_classified_by_their_words_only() {
+        for (name, kind) in [
+            ("workspace_id", Some("workspace")),
+            ("activeWorkspaceId", Some("workspace")),
+            ("team-name", Some("workspace")),
+            ("connected_user_email", Some("account")),
+            ("accountId", Some("account")),
+            ("meeting_id", None),
+            ("steamboat", None),
+            ("memberships_count", None),
+            ("users", Some("account")),
+            ("organizations", Some("workspace")),
+            ("get_account_info", Some("account")),
+            ("switch_workspace", Some("workspace")),
+            ("status", None),
+            ("Robin's compost budget", None),
+        ] {
+            assert_eq!(identity_kind(name), kind, "{name}");
+        }
+    }
+
+    #[test]
+    fn the_identity_summary_names_kinds_and_positions_never_names_or_values() {
+        let listed = json!({"tools": [
+            {"name": "list_meetings", "inputSchema": {"properties": {"time_range": {}}}},
+            {"name": "get_workspace_summary", "inputSchema": {"properties": {
+                "workspace_id": {"type": "string", "description": "Robin's garden club"},
+                "Robin's compost budget": {"type": "string"}
+            }}},
+            {"name": "whoami", "inputSchema": {"properties": {"user_email": {}}}},
+            {"name": "describe", "inputSchema": {"properties": {}},
+             "outputSchema": {"type": "object", "properties": {
+                 "active_workspace": {"type": "object", "properties": {"id": {}}},
+                 "Robin's plan": {}
+             }}}
+        ]});
+        let tools = identity_in_tools(&listed);
+        assert_eq!(
+            tools,
+            "4 tools; tool 2 name workspace=1; tool 2 input workspace=1; tool 3 input account=1; tool 4 output workspace=1"
+        );
+        let reply = json!({"meetings": [{"id": "m1", "owner_email": "robin@example.com",
+            "workspace": {"teamName": "Garden club"}}]});
+        assert_eq!(identity_in_json(&reply), "account=1 workspace=2");
+        assert_eq!(identity_in_markup(TAGGED_LISTING), "account=1");
+        assert_eq!(identity_in_json(&json!({"meetings": []})), "none");
+        assert_eq!(identity_in_tools(&json!({"tools": []})), "0 tools; none");
+        for printed in [
+            tools,
+            identity_in_json(&reply),
+            identity_in_markup(TAGGED_LISTING),
+        ] {
+            for private in [
+                "Robin",
+                "compost",
+                "garden",
+                "Garden",
+                "example.com",
+                "list_meetings",
+                "get_workspace_summary",
+                "whoami",
+                "workspace_id",
+                "user_email",
+                "connected_user_email",
+                "teamName",
+                "describe",
+                "active_workspace",
+            ] {
+                assert!(!printed.contains(private), "printed {private}: {printed}");
+            }
+        }
+    }
+
+    #[test]
     fn a_session_writes_no_file_and_prints_nothing_unless_the_trace_is_enabled() {
         for trace in [false, true] {
             let variables: &[(&str, &str)] = if trace {
@@ -2048,6 +2292,7 @@ pub(crate) mod tests {
                 "watering cans",
                 "launch plan",
                 "compost bins",
+                "connected_user_email",
             ] {
                 assert!(!printed.contains(private), "printed {private}: {printed}");
             }
@@ -2057,11 +2302,17 @@ pub(crate) mod tests {
                 "the trace follows TALKQTE_GRANOLA_TRACE: {printed}"
             );
             if trace {
+                // The identity summary answers the account check's question
+                // from the fictional listing's account attribute alone.
+                assert!(printed.contains("granola trace: identity: tools/list: 3 tools; none"));
+                assert!(printed.contains("granola trace: identity: list_meetings: account=1"));
                 for label in [
                     "tools/list",
                     "list_meetings result",
                     "get_meetings result",
                     "query_granola_meetings result",
+                    "identity: initialize",
+                    "identity: get_meetings",
                 ] {
                     assert!(
                         printed.contains(&format!("granola trace: {label}:")),

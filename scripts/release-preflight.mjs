@@ -123,6 +123,81 @@ export function configuredDevelopmentFeatures(manifest, config) {
   return DEVELOPMENT_FEATURES.filter((name) => enabled.has(name));
 }
 
+/** Frameworks only a development feature links, keyed by that feature. The
+ * crate that links ScreenCaptureKit is an optional dependency that only
+ * native-audio-spike turns on, so a release executable loading it was built
+ * with the feature. The notices check below keeps this true: it fails if that
+ * crate ever appears among the crates a release links. */
+export const DEVELOPMENT_FRAMEWORKS = {
+  'native-audio-spike': {
+    framework: 'ScreenCaptureKit',
+    crate: 'objc2-screen-capture-kit',
+  },
+};
+
+const DYLIB_COMMANDS = new Set([
+  0xc, // LC_LOAD_DYLIB
+  0x80000018, // LC_LOAD_WEAK_DYLIB
+  0x8000001f, // LC_REEXPORT_DYLIB
+  0x20, // LC_LAZY_LOAD_DYLIB
+  0x80000023, // LC_LOAD_UPWARD_DYLIB
+]);
+
+/** The libraries a Mach-O executable asks the loader for, from its load
+ * commands, across every architecture of a universal file. Throws for
+ * anything that is not a little-endian Mach-O. */
+export function linkedLibraries(buffer) {
+  const slices = [];
+  const fat = buffer.length >= 8 ? buffer.readUInt32BE(0) : 0;
+  if (fat === 0xcafebabe || fat === 0xcafebabf) {
+    const wide = fat === 0xcafebabf;
+    const count = buffer.readUInt32BE(4);
+    for (let index = 0; index < count; index++) {
+      const at = 8 + index * (wide ? 32 : 20);
+      if (at + (wide ? 32 : 20) > buffer.length)
+        throw new Error('universal header is truncated');
+      const offset = wide
+        ? Number(buffer.readBigUInt64BE(at + 8))
+        : buffer.readUInt32BE(at + 8);
+      const size = wide
+        ? Number(buffer.readBigUInt64BE(at + 16))
+        : buffer.readUInt32BE(at + 12);
+      if (offset + size > buffer.length)
+        throw new Error('universal slice lies outside the file');
+      slices.push(buffer.subarray(offset, offset + size));
+    }
+  } else slices.push(buffer);
+
+  const libraries = new Set();
+  for (const slice of slices) {
+    const magic = slice.length >= 28 ? slice.readUInt32LE(0) : 0;
+    if (magic !== 0xfeedfacf && magic !== 0xfeedface)
+      throw new Error('not a Mach-O executable');
+    const commands = slice.readUInt32LE(16);
+    let at = magic === 0xfeedfacf ? 32 : 28;
+    for (let index = 0; index < commands; index++) {
+      if (at + 8 > slice.length) throw new Error('load commands are truncated');
+      const command = slice.readUInt32LE(at);
+      const size = slice.readUInt32LE(at + 4);
+      if (size < 8 || at + size > slice.length)
+        throw new Error('a load command has an impossible size');
+      if (DYLIB_COMMANDS.has(command)) {
+        const name = at + slice.readUInt32LE(at + 8);
+        const end = slice.indexOf(0, name);
+        libraries.add(
+          slice.toString(
+            'utf8',
+            name,
+            end < 0 || end > at + size ? at + size : end,
+          ),
+        );
+      }
+      at += size;
+    }
+  }
+  return [...libraries].sort();
+}
+
 const ok = (check, message) => ({ level: 'ok', check, message });
 const fail = (check, message) => ({ level: 'fail', check, message });
 const note = (check, message) => ({ level: 'note', check, message });
@@ -435,6 +510,16 @@ export function checkSources(root = REPOSITORY) {
 
   const { noticesPath, notices } = sources;
   const stale = notices === undefined ? null : staleReason(notices, root);
+  for (const [feature, { framework, crate }] of Object.entries(
+    DEVELOPMENT_FRAMEWORKS,
+  ))
+    if (notices && new RegExp(`^${crate} `, 'm').test(notices))
+      findings.push(
+        fail(
+          'development features',
+          `${crate} is now linked into release builds, so ${framework} no longer shows that a bundle was built with ${feature}; update DEVELOPMENT_FRAMEWORKS in scripts/release-preflight.mjs`,
+        ),
+      );
   if (!noticesPath)
     findings.push(
       fail(
@@ -673,6 +758,42 @@ export function checkBundle(app, sources, options = {}) {
       findings.push(
         ok('build paths', 'no home-folder paths in the executable'),
       );
+
+    let libraries;
+    try {
+      libraries = linkedLibraries(readFileSync(executable));
+    } catch (error) {
+      findings.push(
+        (release ? fail : note)(
+          'development features in the app',
+          `not inspected: ${error.message}`,
+        ),
+      );
+    }
+    if (libraries) {
+      const built = Object.entries(DEVELOPMENT_FRAMEWORKS).filter(
+        ([, { framework }]) =>
+          libraries.some((path) => path.includes(`/${framework}.framework/`)),
+      );
+      findings.push(
+        built.length
+          ? fail(
+              'development features in the app',
+              built
+                .map(
+                  ([feature, { framework }]) =>
+                    `the executable loads ${framework}, which only ${feature} links; it was built with that development feature`,
+                )
+                .join('; '),
+            )
+          : ok(
+              'development features in the app',
+              `none of ${Object.values(DEVELOPMENT_FRAMEWORKS)
+                .map(({ framework }) => framework)
+                .join(', ')} among ${libraries.length} linked libraries`,
+            ),
+      );
+    }
 
     const archs = run('lipo', ['-archs', executable]);
     const build = run('vtool', ['-show-build', executable]);
