@@ -199,7 +199,12 @@ async function livePreview(page: Page) {
   const frame = preview.getByRole('group', { name: 'Session layout preview' });
   const row = (name: string) =>
     frame.locator('dt', { hasText: name }).locator('+ dd');
-  return { preview, source: row('Source'), capture: row('Capture') };
+  return {
+    preview,
+    source: row('Source'),
+    capture: row('Capture'),
+    application: row('Application audio'),
+  };
 }
 
 const microphoneStates: Record<Mic, Partial<MicrophoneSnapshot>> = {
@@ -231,8 +236,14 @@ async function realText(preview: Locator) {
 test('the live layout never says nothing is captured while a source may be', async ({
   page,
 }) => {
-  const { preview, source: sourceRow, capture } = await livePreview(page);
+  const {
+    preview,
+    source: sourceRow,
+    capture,
+    application,
+  } = await livePreview(page);
   await expect(capture).toHaveText('Real Off. Nothing is being captured.');
+  await expect(application).toHaveCount(0);
   for (const mic of microphones)
     for (const state of stuck) {
       await page.evaluate(
@@ -245,24 +256,34 @@ test('the live layout never says nothing is captured while a source may be', asy
         source: source(state),
       } satisfies Partial<ProcessingSnapshot>);
       const label = `${state} with microphone ${mic}`;
+      // The source has a row of its own, so the layout never shows capture
+      // state without it.
+      await expect(application, label).toHaveText(`Real ${sourceWords[state]}`);
       if (mic === 'off') {
         await expect(capture, label).toHaveText('Real The microphone is off.');
         await expect(sourceRow, label).toHaveText('Real No microphone open.');
       }
-      const text = await realText(preview);
-      expect(text, label).not.toMatch(
-        /\bnothing\b.*captur|captur\w*\s+nothing|\bnot\b.*captur/i,
-      );
+      // Sentence by sentence, as in the live layout's own checks: "not
+      // confirmed … stopped" followed by "may still be captured" is true.
+      const sentences = (await realText(preview))
+        .split(/(?<=[.!?…])\s+|\n+/)
+        .filter((sentence) => sentence && sentence !== 'Real');
+      expect(sentences.length, label).toBeGreaterThan(2);
+      for (const sentence of sentences)
+        expect(sentence, label).not.toMatch(
+          /\bnothing\b.*captur|captur\w*\s+nothing|\bnot\b.*captur/i,
+        );
     }
 });
 
 test('the live layout reads as before without the development fields', async ({
   page,
 }) => {
-  const { source: sourceRow, capture } = await livePreview(page);
+  const { source: sourceRow, capture, application } = await livePreview(page);
   await page.evaluate((value) => window.captureTest.send(value), {
     capture: 'off',
   } satisfies Partial<ProcessingSnapshot>);
   await expect(sourceRow).toHaveText('Real None open.');
   await expect(capture).toHaveText('Real Off. Nothing is being captured.');
+  await expect(application).toHaveCount(0);
 });

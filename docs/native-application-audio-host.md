@@ -120,8 +120,8 @@ a default build renders exactly as before.
 - **Live layout preview.** Its Real rows never say or imply that nothing is
   captured while the source may be capturing. With the microphone off they
   read "No microphone open." and "The microphone is off." instead.
-  `describeCapture` also returns the source's own line, ready for a row of
-  its own; the preview does not render that row yet.
+  The source has a Real row of its own, Application audio, in the same
+  wording as the panel, so the preview never shows capture state without it.
 
 ## Quitting
 

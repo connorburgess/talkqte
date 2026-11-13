@@ -204,6 +204,14 @@ export function LiveSessionMock({
                 )}
               </dd>
             </div>
+            {actual.application && (
+              <div>
+                <dt>Application audio</dt>
+                <dd>
+                  <span className="mock-tag">Real</span> {actual.application}
+                </dd>
+              </div>
+            )}
           </dl>
           <section aria-labelledby="real-transcript-title">
             <h2 id="real-transcript-title" className="mock-real-heading">
