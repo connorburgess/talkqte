@@ -301,6 +301,30 @@ test('importing every checked note again ends the check without calling it stopp
     await expect(note).toContainText(ORIGINAL);
 });
 
+test('a check whose notes were removed or imported again says exactly that', async ({
+  page,
+}) => {
+  await provider(page, { hold: true, changed: ['garden-0', 'garden-1'] });
+  await button(page, 'Check for updates').press('Enter');
+  await expect(button(page, 'Stop check')).toBeVisible();
+  // One note removed, the other imported again.
+  await notes(page).nth(0).getByRole('button').click();
+  await expect(notes(page)).toHaveCount(1);
+  await button(page, 'Choose Granola notes').click();
+  const chooser = page.getByRole('dialog', { name: /Choose notes/ });
+  await chooser.getByRole('checkbox').nth(1).check();
+  await chooser.getByRole('button', { name: 'Import 1 selected' }).click();
+  await expect(chooser).not.toBeVisible();
+  await page.evaluate(() => window.granolaTest.releaseCheck());
+  await expect(context(page).getByRole('status').last()).toHaveText(
+    'Check ended: the notes it was checking were removed or imported again, so there was nothing left to check.',
+  );
+  await expect(context(page)).not.toContainText('Check stopped');
+  await expect(context(page)).not.toContainText(
+    'these notes were imported again',
+  );
+});
+
 test('leaving the notebook stops a check, and returning shows the last results in a narrow window', async ({
   page,
 }, testInfo) => {

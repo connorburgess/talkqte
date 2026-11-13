@@ -71,40 +71,53 @@ export function Question({
         {cue.kind === 'Said' ? `“${cue.question}”` : cue.question}
       </h2>
       <p className="question-meta">
-        {cue.note
-          ? `Reminder from your notes · ${cue.note.sourceDate}`
-          : hasPriorNotes(cue.sources)
-            ? 'Suggestion with prior context'
-            : `${live ? 'Live question' : 'Demo question'} · ${cue.kind}${
-                cue.aboutFocus ? ' · about what matters' : ''
-              }`}
+        {cue.note ? (
+          <>
+            Reminder from your notes · {cue.note.sourceDate}
+            {/* Present for every note reminder, so a warning that appears
+                or changes in place is announced; empty when there is none.
+                Kept on the same line to leave the companion its room. */}
+            <span
+              className="question-warning"
+              aria-live={announce ? 'polite' : undefined}
+            >
+              {cue.note.unconfirmed && (
+                <>
+                  {' · '}not verified ·{' '}
+                  {cue.note.unconfirmed.lastConfirmedMs === null ? (
+                    'never confirmed'
+                  ) : (
+                    <>
+                      last confirmed{' '}
+                      <time
+                        dateTime={new Date(
+                          cue.note.unconfirmed.lastConfirmedMs,
+                        ).toISOString()}
+                      >
+                        {new Date(
+                          cue.note.unconfirmed.lastConfirmedMs,
+                        ).toLocaleString(undefined, {
+                          // A session-only time: the year adds nothing.
+                          day: 'numeric',
+                          month: 'short',
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        })}
+                      </time>
+                    </>
+                  )}
+                </>
+              )}
+            </span>
+          </>
+        ) : hasPriorNotes(cue.sources) ? (
+          'Suggestion with prior context'
+        ) : (
+          `${live ? 'Live question' : 'Demo question'} · ${cue.kind}${
+            cue.aboutFocus ? ' · about what matters' : ''
+          }`
+        )}
       </p>
-      {cue.note?.unconfirmed && (
-        <p
-          className="question-meta"
-          aria-live={announce ? 'polite' : undefined}
-        >
-          This copy could not be verified at the last check.{' '}
-          {cue.note.unconfirmed.lastConfirmedMs === null ? (
-            'No check on record has confirmed it.'
-          ) : (
-            <>
-              Last confirmed{' '}
-              <time
-                dateTime={new Date(
-                  cue.note.unconfirmed.lastConfirmedMs,
-                ).toISOString()}
-              >
-                {new Date(cue.note.unconfirmed.lastConfirmedMs).toLocaleString(
-                  undefined,
-                  { dateStyle: 'medium', timeStyle: 'short' },
-                )}
-              </time>
-              .
-            </>
-          )}
-        </p>
-      )}
       <button
         className="question-disclosure"
         aria-expanded={cue.expanded}
@@ -131,7 +144,11 @@ export function Question({
           <>
             <p>
               {cue.note
-                ? `From your imported note, ${cue.note.sourceDate} · not from this conversation`
+                ? cue.note.unconfirmed
+                  ? // The source line above already names the note and date;
+                    // this keeps a warned reminder inside the companion.
+                    'Not from this conversation.'
+                  : `From your imported note, ${cue.note.sourceDate} · not from this conversation`
                 : live
                   ? 'From the live transcript'
                   : 'From the fictional transcript'}

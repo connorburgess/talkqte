@@ -107,8 +107,14 @@ pub enum CheckStatus {
     /// Every note of the check was imported again while it was pending,
     /// so nothing was left to check.
     Reimported,
+    /// Every note of the check was removed while it was pending.
+    Removed,
+    /// While it was pending, some notes of the check were removed and the
+    /// rest imported again.
+    RemovedOrReimported,
     TimedOut,
-    /// The provider offered no workspace identity; no note request was sent.
+    /// The provider's workspace identity was missing, before the first note
+    /// request or after a later one; nothing from the check was applied.
     WorkspaceUnverified,
     WorkspaceChanged,
     Unavailable,
@@ -163,6 +169,9 @@ pub struct Ticket {
     /// The notebook's current selection for this check, which shrinks when
     /// a note is removed; shared so a removed note is not asked about.
     live: Live,
+    /// Notes the provider reported as withdrawn in batches answered before
+    /// the check failed or timed out.
+    received_withdrawn: Live,
     workspace: Option<String>,
     cancelled: Arc<AtomicBool>,
     settled: Arc<AtomicBool>,
@@ -178,6 +187,17 @@ struct Current {
     id: u64,
     selection: Live,
     cancelled: Arc<AtomicBool>,
+    /// Whether notes left the check because the person removed them or
+    /// imported them again, so an emptied check can say which.
+    removed: bool,
+    reimported: bool,
+}
+
+/// Why a note left a pending check.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Left {
+    Removed,
+    Reimported,
 }
 
 struct Entry {
@@ -198,8 +218,9 @@ pub struct Refresh {
     /// The latest request's completion flag, kept after Stop, a timeout and
     /// Disconnect so the one-request bound holds until it really ends.
     settled: Option<Arc<AtomicBool>>,
-    /// The check that ended because an import returned all of its notes.
-    reimported: Option<u64>,
+    /// A check that ended because its notes were removed or imported
+    /// again, and how to report it.
+    ended: Option<(u64, CheckStatus)>,
     /// The workspace the first successful check of this connection saw.
     workspace: Option<String>,
     notes: Vec<Entry>,
@@ -236,11 +257,14 @@ impl Refresh {
             id: self.next,
             selection: live.clone(),
             cancelled: cancelled.clone(),
+            removed: false,
+            reimported: false,
         });
         Ok(Ticket {
             id: self.next,
             selection,
             live,
+            received_withdrawn: Live::default(),
             workspace: self.workspace.clone(),
             cancelled,
             settled,
@@ -262,8 +286,13 @@ impl Refresh {
     pub fn disconnect(&mut self) {
         self.stop();
         self.workspace = None;
+        // What it confirmed is forgotten, including the time a copy that
+        // has since become unconfirmed was last confirmed.
         self.notes
             .retain(|entry| entry.state == Freshness::NotVerified);
+        for entry in &mut self.notes {
+            entry.verified_at_ms = None;
+        }
     }
 
     /// Merges an import the person asked for and ends the earlier finding
@@ -278,7 +307,6 @@ impl Refresh {
         fetched: Vec<ContextItem>,
     ) -> MergeOutcome {
         let mut total = MergeOutcome::default();
-        let pending = self.current.as_ref().map(|current| current.id);
         for item in fetched {
             let (id, revision) = (item.source_id.trim().to_string(), item.revision);
             let outcome = store.merge(provider, selection, vec![item]);
@@ -290,17 +318,13 @@ impl Refresh {
                             && kept.revision == revision
                     }));
             if returned {
-                self.forget(provider, &id);
+                self.leave(provider, &id, Left::Reimported);
             }
             total.added += outcome.added;
             total.updated += outcome.updated;
             total.unchanged += outcome.unchanged;
             total.over_limit += outcome.over_limit;
             total.rejected += outcome.rejected;
-        }
-        if self.current.is_none() {
-            // The import left a pending check with nothing to check.
-            self.reimported = pending.or(self.reimported);
         }
         total
     }
@@ -356,24 +380,55 @@ impl Refresh {
     /// A removed note leaves the selection at once, so a pending result
     /// cannot touch a later copy with the same identifier.
     pub fn forget(&mut self, provider: Provider, source_id: &str) {
+        self.leave(provider, source_id, Left::Removed);
+    }
+
+    fn leave(&mut self, provider: Provider, source_id: &str, why: Left) {
         if provider != Provider::Granola {
             return;
         }
         let source_id = source_id.trim();
         self.notes.retain(|entry| entry.source_id != source_id);
-        let emptied = self.current.as_ref().is_some_and(|current| {
+        let Some(current) = &mut self.current else {
+            return;
+        };
+        let emptied = {
             let mut selection = live_ids(&current.selection);
+            let before = selection.len();
             selection.retain(|id| id != source_id);
+            if selection.len() != before {
+                match why {
+                    Left::Removed => current.removed = true,
+                    Left::Reimported => current.reimported = true,
+                }
+            }
             selection.is_empty()
-        });
+        };
         if emptied {
-            self.stop();
+            self.end_emptied();
         }
+    }
+
+    /// Ends a check whose notes all left it, remembering how to report it.
+    fn end_emptied(&mut self) {
+        if let Some(current) = &self.current {
+            let status = match (current.removed, current.reimported) {
+                (true, true) => CheckStatus::RemovedOrReimported,
+                (false, true) => CheckStatus::Reimported,
+                _ => CheckStatus::Removed,
+            };
+            self.ended = Some((current.id, status));
+        }
+        self.stop();
     }
 
     pub fn forget_all(&mut self) {
         self.notes.clear();
-        self.stop();
+        if let Some(current) = &mut self.current {
+            current.removed = true;
+            live_ids(&current.selection).clear();
+        }
+        self.end_emptied();
     }
 
     /// Applies a finished check under the notebook lock. A result whose
@@ -392,10 +447,9 @@ impl Refresh {
             Some(current) if current.id == ticket.id => current,
             other => {
                 self.current = other;
-                let status = if self.reimported.take_if(|id| *id == ticket.id).is_some() {
-                    CheckStatus::Reimported
-                } else {
-                    CheckStatus::Cancelled
+                let status = match self.ended.take_if(|(id, _)| *id == ticket.id) {
+                    Some((_, status)) => status,
+                    None => CheckStatus::Cancelled,
                 };
                 return self.report(status, None, false, store);
             }
@@ -449,8 +503,26 @@ impl Refresh {
                         (CheckStatus::Unavailable, Unverified::Unavailable, None)
                     }
                 };
+                // A provider failure or timeout does not undo what earlier
+                // batches of this check reported as withdrawn. A workspace
+                // that changed or could not be verified applies nothing
+                // from the provider, withdrawals included.
+                let binding_failed = matches!(
+                    error,
+                    CheckError::WorkspaceUnverified | CheckError::WorkspaceChanged
+                );
+                let withdrawn = if binding_failed {
+                    vec![]
+                } else {
+                    live_ids(&ticket.received_withdrawn).clone()
+                };
                 for id in &selection {
                     if let Some(revision) = kept(store, id) {
+                        let reason = if withdrawn.contains(id) {
+                            Unverified::Withdrawn
+                        } else {
+                            reason
+                        };
                         self.record(id, revision, Freshness::NotVerified, Some(reason), None);
                     }
                 }
@@ -624,6 +696,7 @@ fn request(
     source: &mut dyn RefreshSource,
     selection: &[String],
     still_selected: &dyn Fn(&str) -> bool,
+    received_withdrawn: &dyn Fn(&[String]),
     expected: Option<&str>,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Fetched, CheckError> {
@@ -653,19 +726,23 @@ fn request(
         }
         items.extend(source.fetch_available(&batch).map_err(CheckError::Source)?);
         // Only what was asked about can be reported as withdrawn.
-        withdrawn.extend(
-            source
-                .withdrawn()
-                .into_iter()
-                .map(|id| id.trim().to_string())
-                .filter(|id| batch.contains(id)),
-        );
+        let reported: Vec<String> = source
+            .withdrawn()
+            .into_iter()
+            .map(|id| id.trim().to_string())
+            .filter(|id| batch.contains(id))
+            .collect();
         if cancelled() {
             return Err(CheckError::Cancelled);
         }
+        // A batch counts only once the workspace is confirmed again after
+        // it: a withdrawal from a batch whose binding failed, or could not
+        // be read, is never kept.
         if workspace_of(source)? != workspace {
             return Err(CheckError::WorkspaceChanged);
         }
+        received_withdrawn(&reported);
+        withdrawn.extend(reported);
     }
     Ok(Fetched {
         items,
@@ -686,6 +763,7 @@ pub fn run(
     let (sender, receiver) = mpsc::channel();
     let selection = ticket.selection.clone();
     let live = ticket.live.clone();
+    let received = ticket.received_withdrawn.clone();
     let expected = ticket.workspace.clone();
     let cancelled = ticket.cancelled.clone();
     let settle = Settle(ticket.settled.clone());
@@ -697,6 +775,12 @@ pub fn run(
                 source.as_mut(),
                 &selection,
                 &|id| live_ids(&live).iter().any(|kept| kept == id),
+                // Only what arrives before the check ends for the person.
+                &|ids| {
+                    if !cancelled.load(Ordering::Acquire) {
+                        live_ids(&received).extend_from_slice(ids);
+                    }
+                },
                 expected.as_deref(),
                 &|| cancelled.load(Ordering::Acquire),
             );
@@ -781,6 +865,8 @@ mod tests {
         replies: VecDeque<Result<Vec<ContextItem>, SourceError>>,
         asked: Arc<Mutex<Vec<Vec<String>>>>,
         gate: Option<Gate>,
+        /// Which note request (0 for the first) the gate holds.
+        hold_at: usize,
         /// Identifiers this provider reports as no longer available.
         withdrawn: Vec<String>,
     }
@@ -801,8 +887,12 @@ mod tests {
             &mut self,
             selection: &[String],
         ) -> Result<Vec<ContextItem>, SourceError> {
-            self.asked.lock().unwrap().push(selection.to_vec());
-            if let Some((started, release)) = self.gate.take() {
+            let call = {
+                let mut asked = self.asked.lock().unwrap();
+                asked.push(selection.to_vec());
+                asked.len() - 1
+            };
+            if let Some((started, release)) = self.gate.take_if(|_| call == self.hold_at) {
                 started.send(()).unwrap();
                 release.recv_timeout(LONG).unwrap();
             }
@@ -826,6 +916,7 @@ mod tests {
                 replies: replies.into(),
                 asked: asked.clone(),
                 gate: None,
+                hold_at: 0,
                 withdrawn: vec![],
             }),
             asked,
@@ -1259,7 +1350,7 @@ mod tests {
             vec![note("n2", EARLIER, "Imported again by choice.")],
         );
         let report = refresh.apply(&ticket, reply(), &mut store, NOW);
-        assert_eq!(report.status, CheckStatus::Cancelled);
+        assert_eq!(report.status, CheckStatus::Removed);
         assert_eq!(store.items()[0].excerpt, "Imported again by choice.");
 
         // Removing everything ends the check and its findings.
@@ -1268,7 +1359,7 @@ mod tests {
         store.remove_all_from(Provider::Granola);
         refresh.forget_all();
         let report = refresh.apply(&ticket, reply(), &mut store, NOW);
-        assert_eq!(report.status, CheckStatus::Cancelled);
+        assert_eq!(report.status, CheckStatus::Removed);
         assert!(store.items().is_empty() && report.notes.is_empty());
         refresh.settled = None;
         assert_eq!(refresh.begin(&store).err(), Some(BeginError::NoNotes));
@@ -1647,12 +1738,297 @@ mod tests {
         assert_eq!(report.status, CheckStatus::Reimported);
         assert_eq!(store.items()[0].revision, EARLIER);
 
+        // One removed and the other imported again, in either order: the
+        // report names both, not only the import.
+        for remove_first in [true, false] {
+            let mut store = store_of(&[("n1", EARLIER), ("n2", EARLIER)]);
+            refresh.settled = None;
+            let ticket = refresh.begin(&store).unwrap();
+            let again = store.items()[1..].to_vec();
+            if remove_first {
+                store.remove(Provider::Granola, "n1");
+                refresh.forget(Provider::Granola, "n1");
+                refresh.merge_import(&mut store, Provider::Granola, &ids, again);
+            } else {
+                refresh.merge_import(&mut store, Provider::Granola, &ids, again);
+                store.remove(Provider::Granola, "n1");
+                refresh.forget(Provider::Granola, "n1");
+            }
+            let report = refresh.apply(&ticket, late(), &mut store, NOW);
+            assert_eq!(report.status, CheckStatus::RemovedOrReimported);
+            assert_eq!(store.items()[0].revision, EARLIER);
+        }
+
         // Stop is still reported as a stop.
         refresh.settled = None;
         let ticket = refresh.begin(&store).unwrap();
         refresh.stop();
         let report = refresh.apply(&ticket, late(), &mut store, NOW);
         assert_eq!(report.status, CheckStatus::Cancelled);
+    }
+
+    fn store_of(notes: &[(&str, u64)]) -> ContextStore {
+        store(notes)
+    }
+
+    /// Twenty fictional notes, so a check needs two batches of ten.
+    fn twenty() -> (ContextStore, Vec<String>) {
+        let ids: Vec<String> = (0..20).map(|n| format!("n{n}")).collect();
+        let pairs: Vec<(&str, u64)> = ids.iter().map(|id| (id.as_str(), EARLIER)).collect();
+        (store(&pairs), ids)
+    }
+
+    #[test]
+    fn a_withdrawal_reported_before_a_later_batch_fails_is_kept() {
+        for second in [
+            Err(SourceError::Interrupted),
+            Err(SourceError::Expired),
+            Err(SourceError::RateLimited {
+                retry_after: Duration::from_secs(7),
+            }),
+        ] {
+            let (mut store, ids) = twenty();
+            let mut refresh = Refresh::default();
+            let (mut source, asked) = provider(&[Some("garden-club")], vec![Ok(vec![]), second]);
+            source.withdrawn = vec!["n1".into()];
+            let report = check(&mut refresh, &mut store, source, NOW);
+            assert_eq!(asked.lock().unwrap().len(), 2);
+            assert_ne!(report.status, CheckStatus::Checked);
+            assert_eq!(
+                state(&report, "n1"),
+                (Freshness::NotVerified, Some(Unverified::Withdrawn))
+            );
+            let eligible = refresh.eligible(&store);
+            assert_eq!(eligible.len(), 19);
+            assert!(!eligible.iter().any(|(item, _)| item.source_id == "n1"));
+            assert!(eligible.iter().all(|(_, warning)| warning.is_some()));
+            assert_eq!(store.items().len(), ids.len(), "nothing is deleted");
+        }
+    }
+
+    #[test]
+    fn a_withdrawal_reported_before_a_timeout_is_kept() {
+        let (mut store, _) = twenty();
+        let mut refresh = Refresh::default();
+        let (mut source, has_started, release) = held(vec![Ok(vec![]), Ok(vec![])]);
+        source.withdrawn = vec!["n1".into()];
+        source.hold_at = 1;
+        let ticket = refresh.begin(&store).unwrap();
+        let result = run(&ticket, source, Duration::from_millis(200));
+        assert_eq!(result, Err(CheckError::TimedOut));
+        has_started.recv_timeout(LONG).unwrap();
+        let report = refresh.apply(&ticket, result, &mut store, NOW);
+        release.send(()).unwrap();
+        assert_eq!(report.status, CheckStatus::TimedOut);
+        assert_eq!(
+            state(&report, "n1"),
+            (Freshness::NotVerified, Some(Unverified::Withdrawn))
+        );
+        assert_eq!(
+            state(&report, "n15"),
+            (Freshness::NotVerified, Some(Unverified::TimedOut))
+        );
+        assert!(!refresh
+            .eligible(&store)
+            .iter()
+            .any(|(item, _)| item.source_id == "n1"));
+    }
+
+    #[test]
+    fn a_failed_workspace_binding_applies_no_withdrawal() {
+        for later in [Some("allotment"), None] {
+            let (mut store, _) = twenty();
+            let mut refresh = Refresh::default();
+            // The binding holds for batch 1, then changes or disappears.
+            let (mut source, asked) =
+                provider(&[Some("garden-club"), later], vec![Ok(vec![]), Ok(vec![])]);
+            source.withdrawn = vec!["n1".into()];
+            let report = check(&mut refresh, &mut store, source, NOW);
+            assert_eq!(asked.lock().unwrap().len(), 1);
+            assert!(matches!(
+                report.status,
+                CheckStatus::WorkspaceChanged | CheckStatus::WorkspaceUnverified
+            ));
+            assert_eq!(
+                state(&report, "n1"),
+                (Freshness::NotVerified, Some(Unverified::Workspace))
+            );
+            // Still a reminder source, with the ordinary warning.
+            assert!(refresh
+                .eligible(&store)
+                .iter()
+                .any(|(item, warning)| item.source_id == "n1" && warning.is_some()));
+        }
+    }
+
+    #[test]
+    fn a_withdrawal_from_a_batch_whose_workspace_cannot_be_reread_is_not_kept() {
+        /// Answers the first workspace read, then fails every later one.
+        struct Unreadable(Box<Fictional>, usize);
+        impl RefreshSource for Unreadable {
+            fn binding_supported(&self) -> bool {
+                true
+            }
+            fn workspace(&mut self) -> Result<Option<String>, SourceError> {
+                self.1 += 1;
+                if self.1 == 1 {
+                    self.0.workspace()
+                } else {
+                    Err(SourceError::Interrupted)
+                }
+            }
+            fn fetch_available(
+                &mut self,
+                selection: &[String],
+            ) -> Result<Vec<ContextItem>, SourceError> {
+                self.0.fetch_available(selection)
+            }
+            fn withdrawn(&mut self) -> Vec<String> {
+                self.0.withdrawn()
+            }
+        }
+        let mut store = titled_store();
+        let mut refresh = Refresh::default();
+        let (mut source, _) = provider(&[Some("garden-club")], vec![Ok(vec![])]);
+        source.withdrawn = vec!["n1".into()];
+        let ticket = refresh.begin(&store).unwrap();
+        let result = run(&ticket, Box::new(Unreadable(source, 0)), LONG);
+        let report = refresh.apply(&ticket, result, &mut store, NOW);
+        assert_eq!(report.status, CheckStatus::Unavailable);
+        assert_eq!(
+            state(&report, "n1"),
+            (Freshness::NotVerified, Some(Unverified::Unavailable))
+        );
+        assert_eq!(refresh.eligible(&store).len(), 3);
+    }
+
+    #[test]
+    fn a_withdrawal_is_not_kept_when_the_check_times_out_during_the_workspace_read() {
+        /// Holds the workspace read that follows the first note request.
+        struct SlowRead(Box<Fictional>, usize, Option<Gate>);
+        impl RefreshSource for SlowRead {
+            fn binding_supported(&self) -> bool {
+                true
+            }
+            fn workspace(&mut self) -> Result<Option<String>, SourceError> {
+                self.1 += 1;
+                if self.1 == 2 {
+                    if let Some((started, release)) = self.2.take() {
+                        started.send(()).unwrap();
+                        release.recv_timeout(LONG).unwrap();
+                    }
+                }
+                self.0.workspace()
+            }
+            fn fetch_available(
+                &mut self,
+                selection: &[String],
+            ) -> Result<Vec<ContextItem>, SourceError> {
+                self.0.fetch_available(selection)
+            }
+            fn withdrawn(&mut self) -> Vec<String> {
+                self.0.withdrawn()
+            }
+        }
+        let mut store = titled_store();
+        let mut refresh = Refresh::default();
+        let (mut source, _) = provider(&[Some("garden-club")], vec![Ok(vec![])]);
+        source.withdrawn = vec!["n1".into()];
+        let (started, has_started) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let slow = SlowRead(source, 0, Some((started, released)));
+        let ticket = refresh.begin(&store).unwrap();
+        let result = run(&ticket, Box::new(slow), Duration::from_millis(200));
+        assert_eq!(result, Err(CheckError::TimedOut));
+        has_started.recv_timeout(LONG).unwrap();
+        let report = refresh.apply(&ticket, result, &mut store, NOW);
+        release.send(()).unwrap();
+        wait_until_settled(&refresh);
+        assert_eq!(
+            state(&report, "n1"),
+            (Freshness::NotVerified, Some(Unverified::TimedOut))
+        );
+        assert_eq!(refresh.eligible(&store).len(), 3);
+    }
+
+    #[test]
+    fn withdrawn_access_holds_back_only_the_notes_the_check_covered() {
+        let mut store = titled_store();
+        let mut refresh = Refresh::default();
+        let (source, has_started, release) = held(vec![Err(SourceError::Revoked)]);
+        let ticket = refresh.begin(&store).unwrap();
+        let result = std::thread::scope(|scope| {
+            let waiting = scope.spawn(|| run(&ticket, source, LONG));
+            has_started.recv_timeout(LONG).unwrap();
+            // While the check is pending: n2 is imported again and a new
+            // note n4 is imported for the first time.
+            let ids: Vec<String> = ["n2", "n4"].map(String::from).into();
+            let mut fresh = unchanged(&store, &["n2"]);
+            fresh.push(ContextItem {
+                title: "Tool shed inventory".into(),
+                ..note("n4", EARLIER, "Robin will label the watering cans.")
+            });
+            refresh.merge_import(&mut store, Provider::Granola, &ids, fresh);
+            release.send(()).unwrap();
+            waiting.join().unwrap()
+        });
+        let report = refresh.apply(&ticket, result, &mut store, NOW);
+        assert_eq!(report.status, CheckStatus::Revoked);
+        let eligible: Vec<String> = refresh
+            .eligible(&store)
+            .into_iter()
+            .map(|(item, warning)| {
+                assert!(warning.is_none(), "the import is the newer evidence");
+                item.source_id
+            })
+            .collect();
+        assert_eq!(eligible, ["n2", "n4"]);
+        assert_eq!(store.items().len(), 4);
+    }
+
+    #[test]
+    fn disconnecting_forgets_every_confirmation_time() {
+        let mut store = titled_store();
+        let mut refresh = Refresh::default();
+        let (source, _) = provider(
+            &[Some("garden-club")],
+            vec![Ok(unchanged(&store, &["n1", "n2", "n3"]))],
+        );
+        check(&mut refresh, &mut store, source, NOW);
+        // n2 becomes unconfirmed later and keeps the earlier time.
+        let (source, _) = provider(
+            &[Some("garden-club")],
+            vec![Ok(unchanged(&store, &["n1", "n3"]))],
+        );
+        let report = check(&mut refresh, &mut store, source, NOW + 60_000);
+        let n2 = report.notes.iter().find(|note| note.source_id == "n2");
+        assert_eq!(n2.unwrap().verified_at_ms, Some(NOW));
+
+        refresh.disconnect();
+        let kept = refresh.freshness(&store);
+        assert_eq!(kept.len(), 1, "only what could not be confirmed stays");
+        assert_eq!(
+            (kept[0].state, kept[0].reason, kept[0].verified_at_ms),
+            (Freshness::NotVerified, Some(Unverified::Missing), None)
+        );
+        // After reconnecting, a failed check gives every note the same
+        // history: none has a confirmation on record.
+        let (source, _) = provider(&[Some("allotment")], vec![Err(SourceError::Interrupted)]);
+        check(&mut refresh, &mut store, source, NOW + 120_000);
+        let warnings: Vec<_> = refresh
+            .eligible(&store)
+            .into_iter()
+            .map(|(_, warning)| warning)
+            .collect();
+        assert_eq!(
+            warnings,
+            vec![
+                Some(Unconfirmed {
+                    last_confirmed_ms: None
+                });
+                3
+            ]
+        );
     }
 
     fn say(engine: &mut crate::engine::Engine, id: &str, at_ms: u64, text: &str) {
