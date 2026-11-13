@@ -43,7 +43,7 @@ Comparable meeting tools process audio in the cloud. Granola's help center says 
 
 ## Licensing
 
-whisper.cpp and the Whisper model weights are MIT-licensed, and `whisper-rs` is released under the Unlicense. Builds that include local transcription ship the whisper.cpp license notice, and the model download screen links the model's license.
+whisper.cpp and the Whisper model weights are MIT-licensed, and `whisper-rs` is released under the Unlicense. Builds that include local transcription ship the whisper.cpp license notice: the macOS bundle carries it in its [third-party notices](release-path.md#third-party-notices). The model download screen names the model's license.
 
 ## What is implemented
 

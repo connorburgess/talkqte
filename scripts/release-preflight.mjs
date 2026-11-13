@@ -28,6 +28,7 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { NOTICES_IN_BUNDLE, staleReason } from './third-party-notices.mjs';
 
 const REPOSITORY = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MIB = 1024 * 1024;
@@ -205,8 +206,14 @@ function readSources(root) {
     'm',
   ).exec(read('src-tauri/Cargo.lock'))?.[1];
   const entitlementsPath = config.bundle?.macOS?.entitlements;
+  const noticesPath = config.bundle?.macOS?.files?.[NOTICES_IN_BUNDLE];
   return {
     config,
+    noticesPath,
+    notices:
+      noticesPath && existsSync(join(root, 'src-tauri', noticesPath))
+        ? read(join('src-tauri', noticesPath))
+        : undefined,
     versions: [
       ['package.json', json('package.json').version],
       ['package-lock.json', lock.version],
@@ -356,6 +363,34 @@ export function checkSources(root = REPOSITORY) {
       ),
     );
 
+  const { noticesPath, notices } = sources;
+  const stale = notices === undefined ? null : staleReason(notices, root);
+  if (!noticesPath)
+    findings.push(
+      fail(
+        'third-party notices',
+        `tauri.conf.json does not place ${NOTICES_IN_BUNDLE} in the bundle`,
+      ),
+    );
+  else if (notices === undefined)
+    findings.push(
+      fail(
+        'third-party notices',
+        `src-tauri/${noticesPath} is missing; run \`npm run notices\``,
+      ),
+    );
+  else if (stale)
+    findings.push(
+      fail(
+        'third-party notices',
+        `src-tauri/${noticesPath} is stale: ${stale}; run \`npm run notices\``,
+      ),
+    );
+  else
+    findings.push(
+      ok('third-party notices', 'generated from the current lockfiles'),
+    );
+
   const updater = config.plugins?.updater;
   if (!updater)
     findings.push(
@@ -497,6 +532,21 @@ export function checkBundle(app, sources, options = {}) {
           'usage descriptions in the app',
           Object.keys(bundled).join(', ') || 'none',
         ),
+  );
+
+  const bundledNotices = join(app, 'Contents', ...NOTICES_IN_BUNDLE.split('/'));
+  findings.push(
+    !existsSync(bundledNotices)
+      ? fail(
+          'third-party notices in the app',
+          `Contents/${NOTICES_IN_BUNDLE} is missing from the bundle`,
+        )
+      : readFileSync(bundledNotices, 'utf8') !== sources.notices
+        ? fail(
+            'third-party notices in the app',
+            `Contents/${NOTICES_IN_BUNDLE} differs from the repository's copy; rebuild after \`npm run notices\``,
+          )
+        : ok('third-party notices in the app', `Contents/${NOTICES_IN_BUNDLE}`),
   );
 
   const entries = walk(app);

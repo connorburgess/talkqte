@@ -81,6 +81,8 @@ jobs:
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --features native-audio-spike
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --features native-audio-spike -- -D warnings
+      - name: Third-party notices match the linked crates and bundled packages
+        run: npm run check:notices
       - run: npm run tauri -- build --debug --bundles app
       - name: Pre-flight the debug bundle (no signing, no release)
         run: node scripts/release-preflight.mjs src-tauri/target/debug/bundle/macos/TalkQTE.app
