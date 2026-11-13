@@ -36,6 +36,12 @@ struct Script {
     list_panics: AtomicBool,
     /// The worker has taken the run request but not begun it.
     run_waits: AtomicBool,
+    /// A session for the source alone waits before it begins.
+    session_waits: AtomicBool,
+    /// The microphone does not read off, as with an activity check.
+    microphone_open: AtomicBool,
+    /// No local recognizer could be loaded.
+    recognizer_missing: AtomicBool,
     runs: AtomicU64,
     lists: AtomicU64,
     begins: AtomicU64,
@@ -149,7 +155,23 @@ fn applications() -> Vec<Application> {
 
 impl Backend for Fake {
     fn begin_session(&mut self, control: &Control) -> Result<Box<dyn FnOnce()>, Failure> {
-        let session = self.runtime.lock().unwrap().begin_source_session(control)?;
+        while self.script.session_waits.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        // The app's own check, under the runtime lock as the app makes it.
+        let session = {
+            let mut runtime = self.runtime.lock().unwrap();
+            let microphone = if self.script.microphone_open.load(Ordering::SeqCst) {
+                crate::microphone::Status::Listening
+            } else {
+                crate::microphone::Status::Off
+            };
+            session_preflight(
+                Some(microphone),
+                !self.script.recognizer_missing.load(Ordering::SeqCst),
+            )?;
+            runtime.begin_source_session(control)?
+        };
         let runtime = self.runtime.clone();
         Ok(Box::new(move || {
             // A poisoned lock here would mean a test already failed.
@@ -226,6 +248,7 @@ impl Drop for Fixture {
         self.script.start_pending.store(false, Ordering::SeqCst);
         self.script.list_waits.store(false, Ordering::SeqCst);
         self.script.run_waits.store(false, Ordering::SeqCst);
+        self.script.session_waits.store(false, Ordering::SeqCst);
         // A host that locked itself up has already failed its test; do not
         // hang the teardown on it as well.
         if self.host.0.state.try_lock().is_ok() {
@@ -1099,7 +1122,9 @@ fn a_source_session_ends_when_cleanup_fails_or_the_worker_faults_but_capture_sta
     fixture.wait_phase(Phase::Listening);
     fixture.host.stop(&operation).unwrap();
     let failed = fixture.wait_phase(Phase::CleanupFailed);
-    assert!(failed.may_be_capturing && failed.source_session);
+    // Its source is stopped, so nothing calls this the source's own
+    // session any more; a later session may well have a microphone.
+    assert!(failed.may_be_capturing && !failed.source_session);
     fixture.runtime.lock().unwrap().sync();
     let (live, _, _, status) = fixture.session();
     assert!(!live, "the source's session ended");
@@ -1191,4 +1216,65 @@ fn a_source_session_is_refused_while_another_session_runs_and_leaves_it_alone() 
     );
     assert_eq!(runtime.engine.state.status, Status::Running);
     assert!(!runtime.is_source_session(session));
+}
+
+#[test]
+fn a_source_session_is_refused_with_the_microphone_open_or_no_recognizer_and_clears_nothing() {
+    use crate::engine::Status;
+    for (microphone_open, recognizer_missing, problem) in [
+        (true, false, Problem::SessionBusy),
+        (false, true, Problem::Unavailable),
+    ] {
+        let fixture = fixture(false);
+        // An earlier session that has ended, with what it heard.
+        let before = {
+            let mut runtime = fixture.runtime.lock().unwrap();
+            runtime.engine.end();
+            (runtime.engine.session(), runtime.engine.state.status)
+        };
+        fixture
+            .script
+            .microphone_open
+            .store(microphone_open, Ordering::SeqCst);
+        fixture
+            .script
+            .recognizer_missing
+            .store(recognizer_missing, Ordering::SeqCst);
+        fixture.start_session();
+        let off = fixture.wait("refusal", |view| view.problem.is_some());
+        assert_eq!((off.phase, off.problem), (Phase::Off, Some(problem)));
+        assert!(!off.source_session);
+        assert_eq!(fixture.script.runs.load(Ordering::SeqCst), 0);
+        let runtime = fixture.runtime.lock().unwrap();
+        assert!(runtime.live.is_none(), "no session was installed");
+        assert_eq!(
+            (runtime.engine.session(), runtime.engine.state.status),
+            before,
+            "the earlier session was left as it was"
+        );
+        assert_eq!(before.1, Status::Ended);
+    }
+}
+
+#[test]
+fn the_source_session_flag_holds_only_from_its_start_until_its_source_is_stopped() {
+    let fixture = fixture(false);
+    fixture.script.session_waits.store(true, Ordering::SeqCst);
+    let operation = fixture.start_session();
+    std::thread::sleep(Duration::from_millis(50));
+    // Approved, but the session has not begun.
+    let early = fixture.view();
+    assert_eq!(early.phase, Phase::Starting);
+    assert!(!early.source_session && !fixture.host.published().source_session);
+    fixture.script.session_waits.store(false, Ordering::SeqCst);
+    let listening = fixture.wait_phase(Phase::Listening);
+    assert!(listening.source_session && fixture.host.published().source_session);
+    // From Stop on, it no longer describes anything.
+    fixture.script.stop_hangs.store(true, Ordering::SeqCst);
+    fixture.host.stop(&operation).unwrap();
+    let stopping = fixture.view();
+    assert_eq!(stopping.phase, Phase::Stopping);
+    assert!(!stopping.source_session && !fixture.host.published().source_session);
+    fixture.script.stop_hangs.store(false, Ordering::SeqCst);
+    fixture.wait_phase(Phase::Off);
 }

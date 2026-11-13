@@ -81,6 +81,25 @@ export interface SourceCapture {
   /** The live session was started for this source alone; no microphone. */
   sourceSession: boolean;
 }
+/** The application a live session is running from alone, or null. Only
+ * while that session's source is starting or capturing, and while both the
+ * snapshot's and the microphone hook's own status read the microphone off:
+ * the wording this drives says the microphone is not used. */
+export function sourceOnlyApplication(
+  snapshot: ProcessingSnapshot | null | undefined,
+  microphoneStatus: string | undefined,
+) {
+  const source = snapshot?.source;
+  if (
+    !source?.sourceSession ||
+    (source.phase !== 'starting' && source.phase !== 'listening') ||
+    snapshot?.microphone !== 'off' ||
+    microphoneStatus !== 'off'
+  )
+    return null;
+  return source.application || 'the selected application';
+}
+
 /** One sentence for the source, or null when there is nothing to say. Never
  * says that nothing is captured while the source may be capturing. */
 export function describeSource(source: SourceCapture | null | undefined) {

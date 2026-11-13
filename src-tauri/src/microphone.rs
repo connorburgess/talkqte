@@ -482,7 +482,20 @@ pub async fn start_microphone(
     app: tauri::AppHandle,
     state: tauri::State<'_, Controller>,
 ) -> Result<(), String> {
-    start(app, state.inner().clone(), None, None)
+    let may_start = |app: &tauri::AppHandle| {
+        app.state::<crate::AppState>()
+            .0
+            .lock()
+            .is_ok_and(|runtime| runtime.microphone_may_start())
+    };
+    if !may_start(&app) {
+        return Err("Stop the live session before checking the microphone.".into());
+    }
+    // Checked again once the start is reserved, so a session that began in
+    // between still refuses it before any permission request.
+    let owner = app.clone();
+    let on_reserved: OnReserved = Box::new(move |_| may_start(&owner));
+    start(app, state.inner().clone(), None, Some(on_reserved))
         .await
         .map(|_| ())
 }

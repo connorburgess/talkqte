@@ -136,7 +136,7 @@ struct AppState(Mutex<Runtime>);
 // Emit while holding the state lock, preserving revision order across commands/ticks.
 fn publish(app: &tauri::AppHandle, runtime: &mut Runtime) {
     let _ = app.emit_to("main", "session:changed", &runtime.engine.state);
-    let cue_state = runtime.engine.cue_snapshot();
+    let cue_state = runtime.cue_snapshot();
     let _ = app.emit_to("cue", "cue:changed", &cue_state);
     publish_processing(app, runtime);
 }
@@ -248,7 +248,7 @@ fn snapshot(
 ) -> Result<serde_json::Value, String> {
     let runtime = state.0.lock().map_err(|_| "The demo is unavailable.")?;
     if window.label() == "cue" {
-        serde_json::to_value(runtime.engine.cue_snapshot())
+        serde_json::to_value(runtime.cue_snapshot())
     } else {
         serde_json::to_value(&runtime.engine.state)
     }

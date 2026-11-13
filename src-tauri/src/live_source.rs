@@ -166,6 +166,35 @@ impl Runtime {
         }
     }
 
+    /// The companion's snapshot: the engine's, plus whether the running
+    /// session is fed by an application alone, so it never reads a bare Off
+    /// for a session whose microphone was never used.
+    pub(crate) fn cue_snapshot(&self) -> crate::engine::CueSnapshot {
+        let mut snapshot = self.engine.cue_snapshot();
+        snapshot.source_session = self.source_session_running();
+        snapshot
+    }
+
+    /// A session for an application alone is running and its source has not
+    /// been stopped.
+    pub(crate) fn source_session_running(&self) -> bool {
+        self.source_session.as_ref().is_some_and(|own| {
+            !own.control.is_cancelled()
+                && self.live_session() == Some(own.session)
+                && self.engine.session() == own.session
+                && self.engine.state.status == Status::Running
+                && !self.engine.is_live_stopping()
+        })
+    }
+
+    /// Whether a standalone microphone check may start now. Not while any
+    /// live session runs: a session for an application alone says the
+    /// microphone is not used, and its Stop would not release a check that
+    /// started inside it.
+    pub(crate) fn microphone_may_start(&self) -> bool {
+        self.live.is_none()
+    }
+
     fn live_session(&self) -> Option<u64> {
         self.live.as_ref().map(|live| live.session)
     }
@@ -687,5 +716,65 @@ mod tests {
         assert!(!runtime.end_source_session(session));
         assert_eq!(runtime.engine.session(), next);
         assert_eq!(runtime.engine.state.status, Status::Running);
+    }
+
+    #[test]
+    fn the_notebook_stop_reaches_a_source_session_through_its_displayed_target() {
+        use crate::capture_control::StopPlan;
+        let mut runtime = Runtime::default();
+        let source = source("fictional-player");
+        let session = runtime.begin_source_session(&source.control).unwrap();
+        // The target the notebook shows: this session's operation and the
+        // microphone controller's current generation, which has none here.
+        let target = StopTarget {
+            operation: runtime.live_start.control().unwrap().0,
+            microphone: "0".into(),
+        };
+        let StopPlan { live, microphone } = runtime.prepare_capture_stop(&target).unwrap();
+        let live = live.expect("the session was taken for Stop");
+        assert_eq!(live.session, session);
+        assert!(live.microphone.is_none() && live.runner.is_none());
+        assert_eq!(
+            microphone, 0,
+            "only the displayed generation, none of its own"
+        );
+        assert!(source.control.is_cancelled(), "the source stops with it");
+        // finish_live then ends the engine session.
+        assert!(runtime.engine.finish_live_stop(session));
+        assert!(!runtime.source_session_running());
+    }
+
+    #[test]
+    fn the_companion_learns_of_a_source_session_only_while_it_runs() {
+        let mut runtime = Runtime::default();
+        let plain = serde_json::to_value(runtime.cue_snapshot()).unwrap();
+        assert!(plain.get("sourceSession").is_none());
+        let source = source("fictional-player");
+        runtime.begin_source_session(&source.control).unwrap();
+        runtime.attach_live_source(&source.control).unwrap();
+        let running = serde_json::to_value(runtime.cue_snapshot()).unwrap();
+        assert_eq!(running["sourceSession"], true);
+        assert!(
+            !runtime.microphone_may_start(),
+            "no microphone check inside it"
+        );
+        // Its source is stopped: the flag goes at once, before the session
+        // itself has ended.
+        source.gate.stop(&source.control).unwrap();
+        assert!(serde_json::to_value(runtime.cue_snapshot())
+            .unwrap()
+            .get("sourceSession")
+            .is_none());
+        runtime.sync();
+        assert!(runtime.live.is_none());
+        assert!(runtime.microphone_may_start());
+        // An ordinary live session never carries it, and also refuses a
+        // standalone microphone check.
+        let ordinary = live();
+        assert!(serde_json::to_value(ordinary.cue_snapshot())
+            .unwrap()
+            .get("sourceSession")
+            .is_none());
+        assert!(!ordinary.microphone_may_start());
     }
 }

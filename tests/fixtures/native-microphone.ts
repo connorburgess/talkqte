@@ -555,6 +555,7 @@ declare global {
       say: typeof say;
       setCue: (cue: Snapshot['cue']) => Promise<void>;
       setQuestionSize: (size: Snapshot['questionSize']) => Promise<void>;
+      setSourceSession: (sourceSession: boolean) => Promise<void>;
       rejectNextPause: () => void;
     };
     modelTest: {
@@ -637,6 +638,10 @@ window.liveTest = {
   say,
   setCue: (cue) => publish({ cue }),
   setQuestionSize: (questionSize) => publish({ questionSize }),
+  // Development builds only: the cue snapshot marks a session fed by an
+  // application alone.
+  setSourceSession: (sourceSession: boolean) =>
+    publish({ sourceSession } as Partial<Snapshot>),
   rejectNextPause: () => {
     rejectCuePause = true;
   },

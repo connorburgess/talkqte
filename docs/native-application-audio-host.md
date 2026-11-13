@@ -57,13 +57,22 @@ audio, with no microphone.
 - The worker begins the live session itself, through the same startup gate as
   Start live session, but loads no model for the session and opens no
   microphone. The source's worker loads its own recognizer, as before. It is
-  refused, with nothing started, while another live session, a live start or
-  the demo runs, and while the microphone is not off (an activity check, for
-  example, or a controller that cannot be read). The status then says
-  `sessionBusy`.
-- The status marks the session as the source's own only once the worker has
-  begun it, so nothing says the microphone is not used before that. The
-  notebook's wording also requires the microphone to read off.
+  refused, with nothing started and nothing cleared, while another live
+  session, a live start or the demo runs, and while the microphone is not off
+  (an activity check, for example, or a controller that cannot be read); the
+  status then says `sessionBusy`. It is also refused, as `unavailable`, when
+  the build has no local transcription or no installed model, so it never
+  clears the previous session only to end at once. A model that is present but
+  fails its checksum is still found only when the source's worker loads it.
+- The microphone check and the session cannot overlap in either order: the
+  session checks the microphone under the runtime lock, and a standalone
+  microphone check is refused while any live session runs, both before it
+  starts and again once its start is reserved, before any permission request.
+- The status marks the session as the source's own only from when the worker
+  has begun it until its source is stopped, and only while that source is
+  starting or capturing. The notebook's wording also requires both the
+  processing snapshot and the microphone's own status to read the microphone
+  off, so a microphone that has just started is never called unused.
 - The session's Stop stops its source, including a source that has not
   attached yet: the source's control is registered with the session when the
   session begins.
@@ -173,10 +182,10 @@ unconfirmed capture when the process exits has not been checked.
 
 ## Tests
 
-Twenty-one tests cover the host, and one projection test covers the snapshot
+Twenty-three tests cover the host, and one projection test covers the snapshot
 fields: no `microphone` or `source` without a source, both reported beside a
 combined `capture` with one, and an event when only the source changes.
-Eighteen run the host against the real source-worker ordering, with a
+Twenty run the host against the real source-worker ordering, with a
 fictional clock read, a memory-only clock feed, a scripted owner and a real
 `Mutex<Runtime>`. The scripted owner keeps a reported problem through a retry
 and release, as the real owner does. One test checks the decisions made before
@@ -196,6 +205,11 @@ the native request, and two are table checks:
   no problem and no native request.
 - It is refused, as `sessionBusy` and with nothing started, beside another
   live session, which is left running.
+- It is refused with the microphone open (`sessionBusy`) or with no
+  recognizer (`unavailable`), installing no session and leaving the previous
+  one as it was.
+- The source-session flag is absent before the session has begun and from
+  Stop on.
 
 - Listing is refused without the acknowledgement and the backend is never
   asked. Review is explicit, a replaced or cancelled review cannot start, and
@@ -259,7 +273,12 @@ stream as the reported outcome, a second complete operation after the first,
 exit while listing or reviewing, a fault in the worker outside its loop, and
 everything in the app wiring.
 
-Four runtime tests cover the session itself: it starts with no microphone
+Six runtime tests cover the session itself. Besides the four below, the
+notebook's own Stop, through its displayed target, takes the session, stops
+its source and has no microphone of its own to release; and the companion's
+flag is set only while the session runs and its source has not been stopped,
+while a standalone microphone check is refused during any live session. The
+four: it starts with no microphone
 and is refused beside another session, the demo or a stopped source; its Stop
 stops a source that has not attached; it ends when its attached source stops,
 while an ordinary session does not; and ending it twice, or after a
@@ -283,7 +302,13 @@ abandoned, it is not offered; the line says how cleanup is going.
 
 In a session for an application alone, the microphone panel says the
 application's audio is transcribed on this device and that the microphone is
-not used, and Stop live session ends the session. The live layout's Capture row
+not used, and Stop live session ends the session. The session strip, the cue
+pause hint and the Transcript tab credit the application instead of the
+microphone. The companion, which has no processing snapshot, reads a
+metadata-only flag on its cue snapshot: it shows "App audio · Local" (or "App
+audio still on" with cues paused) instead of a bare "Off", and its pause hint
+names application audio. The flag is absent from every other snapshot, and
+from all of them in a default build. The live layout's Capture row
 says the session runs from application audio, and its transcript note says
 lines come from the application.
 

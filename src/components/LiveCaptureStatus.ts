@@ -52,6 +52,7 @@ export function describeCapture(
         : described.source,
     capture:
       real.source.sourceSession &&
+      (real.source.phase === 'starting' || real.source.phase === 'listening') &&
       real.live &&
       !real.finishing &&
       real.microphone.state?.status === 'off'
@@ -202,16 +203,22 @@ export function describeTranscript(
       (lines.length ? source + count + ' ' : '') +
       'Stopping. Lines from audio already captured may still appear.';
   else if (lines.length) note = source + count;
-  else
+  else {
+    // Only for a session the application feeds alone, with the microphone off.
+    const alone =
+      application?.sourceSession && microphone.state?.status === 'off'
+        ? application.phase
+        : null;
     note =
-      application?.sourceSession && application.phase === 'listening'
+      alone === 'listening'
         ? 'No lines yet. Lines from the application appear a few seconds after they are heard.'
-        : application?.sourceSession && application.phase === 'starting'
+        : alone === 'starting'
           ? 'No lines yet. Application audio is starting.'
           : microphone.state?.status === 'listening'
             ? 'No lines yet. Lines from the microphone appear a few seconds after they are spoken.'
             : microphone.state?.status === 'starting'
               ? 'No lines yet. The microphone is not listening yet.'
               : 'No lines. The microphone is not listening.';
+  }
   return { note, lines };
 }

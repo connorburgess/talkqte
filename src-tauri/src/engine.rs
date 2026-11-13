@@ -481,6 +481,10 @@ pub struct CueSnapshot {
     pub question_size: QuestionSize,
     /// So the companion can offer the Focused switch and show its state.
     pub sensitivity: Sensitivity,
+    /// The running live session is fed by a selected application alone, with
+    /// no microphone. Development builds only; absent otherwise.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub source_session: bool,
 }
 
 pub struct Engine {
@@ -604,6 +608,7 @@ impl Engine {
             companion_position: self.state.companion_position,
             question_size: self.state.question_size,
             sensitivity: self.state.sensitivity,
+            source_session: false,
         }
     }
 

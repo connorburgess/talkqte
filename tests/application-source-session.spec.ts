@@ -295,3 +295,96 @@ test('the live layout follows the source session through starting and stopping',
     'Live session running from application audio',
   );
 });
+
+// The companion has no processing snapshot; the cue snapshot's flag tells it.
+
+test('the companion names application audio for a session with no microphone, never a bare Off', async ({
+  page,
+}) => {
+  await fixture(page, '/tests/fixtures/native-microphone.ts');
+  await page.goto('/?window=cue');
+  await page.evaluate(() => window.liveTest.start());
+  await page.evaluate((value) => window.microphoneTest.send(value), {
+    status: 'off' as const,
+    canStart: true,
+    message: null,
+    deviceName: null,
+  });
+  // A live session whose microphone stopped, as without a source: as before.
+  await expect(page.getByRole('status')).toHaveText('Off');
+  await page.evaluate(() => window.liveTest.setSourceSession(true));
+  await expect(page.getByRole('status')).toHaveText('App audio · Local');
+  const pause = page.getByRole('button', { name: 'Pause cues' });
+  await expect(pause).toHaveAttribute(
+    'title',
+    'Pause cues; application audio and transcript continue',
+  );
+  await pause.click();
+  await expect(page.getByRole('status')).toHaveText('App audio still on');
+  // The flag is gone once the source stops: no longer claimed.
+  await page.evaluate(() => window.liveTest.setSourceSession(false));
+  await expect(page.getByRole('status')).not.toHaveText(/App audio/);
+});
+
+test('the session strip and Transcript tab credit the application, not the microphone', async ({
+  page,
+}) => {
+  await notebook(page);
+  await sourceSession(page, 'listening');
+  await expect(page.locator('.notebook-body')).toContainText(
+    'Audio from Fictional player · transcribed on this device · not saved',
+  );
+  await expect(page.locator('.notebook-body')).not.toContainText(
+    'Your microphone · transcribed on this device',
+  );
+  await page.getByRole('tab', { name: /Transcript/ }).click();
+  await expect(
+    page.getByText('Audio from Fictional player · transcribed on this device', {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      'Lines from the application appear here a few seconds after they are heard.',
+    ),
+  ).toBeVisible();
+});
+
+test('a stale source-session flag beside a listening microphone credits the microphone', async ({
+  page,
+}) => {
+  const { microphone } = await notebook(page);
+  await sourceSession(page, 'listening');
+  // The microphone hook reports listening before the next processing
+  // snapshot, which still says the microphone is off.
+  await page.evaluate((value) => window.microphoneTest.send(value), {
+    status: 'listening' as const,
+    canStart: false,
+    message: null,
+    deviceName: 'Fictional USB microphone',
+  });
+  await expect(microphone).not.toContainText('the microphone is not used');
+  await expect(page.locator('.notebook-body')).toContainText(
+    'Your microphone · transcribed on this device · not saved',
+  );
+  // Nor while the source is stopping or failed, whatever the flag says.
+  await page.evaluate((value) => window.microphoneTest.send(value), {
+    status: 'off' as const,
+    canStart: true,
+    message: null,
+    deviceName: null,
+  });
+  for (const phase of ['stopping', 'cleanupFailed', 'abandoned'] as const) {
+    await page.evaluate((value) => window.captureTest.send(value), {
+      capture: 'stopping',
+      microphone: 'off',
+      source: source(phase, true),
+    } satisfies Partial<ProcessingSnapshot>);
+    await expect(microphone, phase).not.toContainText(
+      'the microphone is not used',
+    );
+    await expect(page.locator('.notebook-body'), phase).not.toContainText(
+      'Audio from Fictional player · transcribed',
+    );
+  }
+});

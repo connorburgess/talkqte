@@ -705,8 +705,14 @@ impl Host {
                 .as_ref()
                 .map(|active| active.id.clone())
                 .or(state.review.as_ref().map(|(id, _)| id.clone())),
+            // Only while that session's source is starting or capturing:
+            // once it is stopped the session has ended or is ending, and a
+            // later session may well have a microphone.
             source_session: state.active.as_ref().is_some_and(|active| {
-                active.session_only && active.session_started.load(Ordering::Acquire)
+                active.session_only
+                    && active.session_started.load(Ordering::Acquire)
+                    && !active.control.is_cancelled()
+                    && matches!(phase, Phase::Starting | Phase::Listening)
             }),
             choices: state
                 .listed
@@ -814,6 +820,23 @@ fn active_phase(abandoned: bool, stage: Option<Stage>, cancelled: bool) -> Phase
     }
 }
 
+/// Before a session for the source alone begins: a recognizer must be
+/// available, or the session would end as soon as it began after clearing the
+/// previous one; and the microphone must read off, since the session says it
+/// is not used. A microphone that cannot be read counts as not off.
+pub(crate) fn session_preflight(
+    microphone: Option<crate::microphone::Status>,
+    recognizer_available: bool,
+) -> Result<(), Failure> {
+    if !recognizer_available {
+        return Err(Failure::Unavailable);
+    }
+    if microphone != Some(crate::microphone::Status::Off) {
+        return Err(Failure::Busy);
+    }
+    Ok(())
+}
+
 fn native_problem(problem: NativeProblem) -> Problem {
     match problem {
         NativeProblem::StreamFailed => Problem::StreamFailed,
@@ -908,19 +931,23 @@ pub(crate) mod app {
 
     impl Backend for Native {
         fn begin_session(&mut self, control: &Control) -> Result<Box<dyn FnOnce()>, Failure> {
-            // A session for the application alone says the microphone is
-            // not used, so it starts only while the microphone is off. A
-            // controller that cannot be read now counts as not off.
-            let microphone = self
+            // The same check the recognizer load makes first. Whisper builds
+            // verify the model again when loading; that can still fail.
+            let recognizer_available = cfg!(feature = "local-whisper")
+                && crate::model_path(&self.app).is_some_and(|(path, _)| path.is_file());
+            let controller = self
                 .app
                 .state::<crate::microphone::Controller>()
-                .try_status();
-            if microphone != Some(crate::microphone::Status::Off) {
-                return Err(Failure::Busy);
-            }
+                .inner()
+                .clone();
             let access = AppAccess(self.app.clone());
             let session = access
-                .with(|runtime| runtime.begin_source_session(control))
+                .with(|runtime| {
+                    // Under the runtime lock, which a standalone microphone
+                    // start also consults, so the two cannot interleave.
+                    session_preflight(controller.try_status(), recognizer_available)?;
+                    runtime.begin_source_session(control)
+                })
                 .ok_or(Failure::Unavailable)??;
             Ok(Box::new(move || {
                 access.with(|runtime| runtime.end_source_session(session));
