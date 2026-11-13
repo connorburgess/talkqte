@@ -79,6 +79,16 @@ pub struct ContextItem {
     pub revision: u64,
 }
 
+/// Carried by a reminder that quotes a copy the last update check could not
+/// confirm as the provider's latest, so the reminder can say so.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Unconfirmed {
+    /// When a check last confirmed the copy, by the local clock; `None` if
+    /// no check has confirmed it since it was imported.
+    pub last_confirmed_ms: Option<u64>,
+}
+
 /// Why a fetch failed, as an adapter reports it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceError {

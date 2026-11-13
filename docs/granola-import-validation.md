@@ -171,3 +171,21 @@ PLAYWRIGHT_PORT=1432 npm test -- tests/granola-updates.spec.ts
 ```
 
 Unverified: whether Granola exposes a workspace identity, when an edited note becomes visible through `get_meetings`, what it returns for a note that was deleted, unshared or moved, real timeout and rate-limit behavior, native VoiceOver, and whether freshness labels help anyone during a conversation.
+
+## Reminders from copies a check could not confirm
+
+13 November 2026 (N2). The [reminder policy](selected-note-refresh-plan.md#reminders-from-copies-a-check-could-not-confirm) is implemented and checked with fictional providers only. The signed-in Granola connection cannot run a check, so the app's behavior on a real account is unchanged. No account, network, capture or model was used.
+
+Rust acceptance calls the store, the check and the cue engine directly with a scripted fictional source and a named clock. A line naming a note raises a reminder with no warning before any check and after a confirming one. After a check in which one note is not returned and another is reported as withdrawn, the first still reminds and carries the time it was last confirmed, the second raises no reminder, and both copies remain in the store. A later check that returns both restores plain reminders, which is the control for the withheld case. Offline, expired, rate-limited and unreadable-format checks keep a never-confirmed copy eligible with no confirmation time; older, undated and unreadable replies keep the earlier confirmation time. Withdrawn app access holds back every Granola copy while a file note with the same identifier still reminds. A later check that fails or omits the notes, and disconnecting, do not restore them. An import that returns an older or unreadable reply does not either; one that returns the note at the kept or a newer revision does. A reminder held open for reading stays, with the same words, when a check fails or omits its note: its warning appears, clears after a confirming check and returns with the confirmation time, each time in place; a withdrawal still withdraws it. A note that reminded, was withdrawn and was restored does not remind again at the same revision and does at a newer one. An import that returns every note of a pending check ends it as "imported again", a partial one lets the check continue for the rest, and Stop is still reported as a stop.
+
+A further set of tests runs the steps the app's commands take on the app's own runtime, without a window: an import reaches the engine; a check that changes no copy still adds the warning or holds a note back; a check that withdraws a displayed reminder reports that the windows must be told; importing a withheld note again lets it remind, and an older reply does not; a retired check changes nothing. Reverting any of the three calls (policy on publish, republish after a check, import merge) fails one of them.
+
+Browser acceptance renders fictional reminders in the notebook and the companion: the warning and its time are visible without opening **Why?**, "No check on record has confirmed it" appears when there is no time, and a reminder without the flag shows no warning. In the panel, a withdrawn note says it is kept but not used for reminders and never uses the word "deleted"; a not-returned note says a reminder from it will carry a warning; a later check that cannot reach the provider leaves the withdrawn note withheld; after disconnecting, confirmations disappear while both unconfirmed labels stay; importing the notes again clears them. The browser fixture restates the rules in TypeScript and does not run the engine, so it shows wording and layout, not eligibility.
+
+```sh
+cargo test --manifest-path src-tauri/Cargo.toml --locked --lib context_refresh
+cargo test --manifest-path src-tauri/Cargo.toml --locked --lib context_runtime
+PLAYWRIGHT_PORT=1432 npm test -- tests/granola-unverified-reminders.spec.ts tests/granola-updates.spec.ts
+```
+
+Unverified: whether Granola reports a withdrawn note at all, the commands' own locking and event emission, the native companion's size with the extra line, screen-reader announcement of the warning, evaluated cues that cite prior notes, and whether people find the warning useful.
