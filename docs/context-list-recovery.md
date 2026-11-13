@@ -20,10 +20,14 @@ Five scenarios pass in Chromium and WebKit, ten checks in total, against the act
 
 The removal tests check both the fixture's empty/reduced store and the displayed list. New imports in the ordering scenarios are emitted by the fixture; these tests do not establish account-level fetching. Keyboard activation works, and a late reply does not move focus from **Add notes from a file**. The 600 × 700 reduced-motion rendering has no horizontal overflow. The existing appearance, source/date labels, explicit controls and optional setup are preserved.
 
-| Before: removed notes reappear after the old reply | After: the empty list remains current |
-| --- | --- |
+| Before: removed notes reappear after the old reply                                   | After: the empty list remains current                                                                            |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
 | ![Fictional removed garden notes displayed again](assets/context-removal-before.png) | ![Prior-context empty state after removal, with Add notes from a file focused](assets/context-removal-after.png) |
 
 The desktop crops use a 1320 × 880 viewport; the [narrow crop](assets/context-removal-narrow.png) uses the same fictional data. Rendered states were inspected. Frontend compilation, formatting and 33 surrounding Chromium notebook/Granola checks passed; the source design scan reported no findings. These complement the rendered evidence; they do not validate native delivery ordering, VoiceOver, or behavior alongside another app.
 
 The owner subsequently confirmed basic native Granola import/removal on 11 November. Source/date accuracy and absence of unselected notes were not separately reported; account refresh and recovery are the next integration checks. The broader [privacy and recovery gates](granola-import-validation.md#privacy-boundary-checks) and native accessibility acceptance remain open. No account, capture, inference, or VM activity was used for this change.
+
+## Focus after removal
+
+Removing one or all notes from the keyboard moves focus to the stable **Prior context** disclosure before the removal control is disabled or removed. Fictional Chromium and WebKit checks cover both removal routes, removal after a Granola import, and delayed success or failure after the person moves focus elsewhere. A late reply does not pull focus back. Provider access, retained data and removal semantics are unchanged; native VoiceOver and real-account behavior remain separate checks.
