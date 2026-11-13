@@ -182,6 +182,21 @@ const FACTS = [
       ),
     source: () => ['CUE_MS', 'ASKED_MS'].map(engineSeconds),
   },
+  {
+    claim: 'docs/note-file-formats.md: lines searched for a Date: line',
+    doc: () =>
+      capture(
+        read('docs/note-file-formats.md'),
+        /among the note's first (\d+) non-blank lines/,
+        'the date-line search in docs/note-file-formats.md',
+      ),
+    source: () =>
+      capture(
+        read('src-tauri/src/notes_file.rs'),
+        /const DATE_LINE_SEARCH: usize = (\d+);/,
+        'DATE_LINE_SEARCH in notes_file.rs',
+      ),
+  },
 ];
 
 function checkFacts() {

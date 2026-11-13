@@ -1,0 +1,22 @@
+/* The date a person enters for a file note that has none of its own. */
+.context-choices .context-date {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 0;
+  padding: 0 8px 12px 38px;
+  cursor: default;
+}
+.context-choices .context-date input {
+  width: auto;
+  height: auto;
+  min-height: 44px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid #bfc7b6;
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+}

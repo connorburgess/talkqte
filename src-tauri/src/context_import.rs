@@ -1,6 +1,7 @@
 //! A chooser keeps its source for retry and invalidates in-flight work when
 //! closed, replaced, or disconnected. Network work never holds the app lock.
 use crate::context::{self, ContextItem, FetchError, NoteSource, Provider};
+use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -77,6 +78,33 @@ impl Attempt {
             !cancelled()
         })
     }
+
+    /// Fetches like `fetch`, then, if the source asks for dates, gives each
+    /// note without one the date the person entered for it. A date from the
+    /// source is never replaced, and an entry that is not a real YYYY-MM-DD
+    /// date fills nothing, so the store skips that note.
+    pub fn fetch_with_dates(
+        &mut self,
+        ids: &[String],
+        dates: &HashMap<String, String>,
+    ) -> Result<Vec<ContextItem>, FetchError> {
+        let mut items = self.fetch(ids)?;
+        if self.source.asks_for_dates() {
+            for item in items
+                .iter_mut()
+                .filter(|item| item.source_date.trim().is_empty())
+            {
+                if let Some(date) = dates
+                    .get(item.source_id.trim())
+                    .map(|date| date.trim())
+                    .filter(|date| context::valid_date(date))
+                {
+                    item.source_date = date.to_string();
+                }
+            }
+        }
+        Ok(items)
+    }
 }
 
 #[cfg(test)]
@@ -116,6 +144,56 @@ mod tests {
             .unwrap()
             .fetch(&["fictional-note".into()])
             .is_ok());
+    }
+
+    /// One fictional note without a date, from a source that may or may
+    /// not ask the person for dates.
+    struct Undated {
+        asks: bool,
+    }
+    impl NoteSource for Undated {
+        fn provider(&self) -> Provider {
+            Provider::File
+        }
+        fn capabilities(&self) -> Capabilities {
+            Capabilities {
+                import_notes: true,
+                ..Capabilities::default()
+            }
+        }
+        fn fetch(&mut self, _: &[String]) -> Result<Vec<ContextItem>, SourceError> {
+            Ok(vec![ContextItem {
+                provider: Provider::File,
+                source_id: "fictional-note".into(),
+                title: "Gate sign".into(),
+                source_date: String::new(),
+                excerpt: "A sign might cost less.".into(),
+                revision: 1,
+            }])
+        }
+        fn asks_for_dates(&self) -> bool {
+            self.asks
+        }
+    }
+
+    #[test]
+    fn only_a_source_that_asks_for_dates_takes_an_entered_one() {
+        let dates = HashMap::from([("fictional-note".to_string(), "2026-10-21".to_string())]);
+        let date_after = |asks: bool| {
+            PendingImport::new(Box::new(Undated { asks }))
+                .start()
+                .unwrap()
+                .fetch_with_dates(&["fictional-note".into()], &dates)
+                .unwrap()[0]
+                .source_date
+                .clone()
+        };
+        assert_eq!(date_after(true), "2026-10-21");
+        assert_eq!(
+            date_after(false),
+            "",
+            "a source that states dates gets none"
+        );
     }
 
     #[test]
