@@ -276,8 +276,10 @@ the reader publishes an operation-scoped atomic closure signal. The native owner
 checks it on every poll, cancels delivery and initiates Stop even if the selected
 application is silent. During pending startup it waits for completion before
 Stop, preserving the reservation; repeated polls cannot duplicate that request.
-No callback-state lock or native object crosses this closure signal. The host
-must retire the reader when its session ends. The worker below keeps polling,
+No callback-state lock or native object crosses this closure signal. A live
+session's Stop or replacement now cancels its attached source
+([below](#live-session-ownership-of-the-source--13-november-2026)); the host
+must still retire the reader. The worker below keeps polling,
 but app shutdown policy, live permission flow and recognition remain separate.
 
 ## Owner worker and host control
@@ -448,8 +450,8 @@ offset accuracy on real audio, and Stop latency on a device remain untested.
 
 ## Next acceptance and UI/UX checkpoint
 
-The next dependency is connecting a worker to explicit selection, session
-retirement and app shutdown.
+The next dependency is connecting a worker to explicit selection and app
+shutdown; session Stop and replacement now cancel an attached source.
 The worker mechanism is tested; the app exit/recovery policy is not implemented. Verify callback
 allocation/latency and actual buffer sizes, and prepare explicit consent/selection
 before requesting a bounded native run. Do not add
@@ -489,9 +491,10 @@ host-clock binding in three stages. No app command calls it yet:
    during the read or before acceptance rejects it. The same age limit includes
    time waiting to reacquire the runtime lock; reversed acceptance time is also
    rejected. Age exactly at the limit is accepted, without millisecond rounding.
-   The native owner's and delivered blocks' ongoing cancellation checks remain
-   necessary after this
-   acceptance; a clock measurement is not source permission.
+   Acceptance attaches the source to that live session (see the next
+   section). The native owner's and delivered blocks' ongoing cancellation
+   checks remain necessary after this acceptance; a clock measurement is not
+   source permission.
 
 Eight deterministic tests use injected instants and fictional host times. They
 cover fractional timing, delayed workers, exact tolerance boundaries, reversed
@@ -510,3 +513,87 @@ and integrate source selection, consent and shutdown/recovery. Drift-aware
 transcription offsets and separately authorized native filtering/release checks
 remain dependencies. Normal microphone, UI, retention and provider behavior is
 unchanged; the broader capture roadmap acceptance remains open.
+
+## Live session ownership of the source — 13 November 2026
+
+Before this change a live session's Stop did not reach an application-audio
+source. Stop keeps the engine's session number until cleanup finishes, so the
+reader's session check kept passing and the source's own control was never
+cancelled: blocks, chunks and recognized lines would have stayed acceptable
+until something else stopped the source.
+
+The runtime now holds one attached source at a time for the live session
+(`live_source.rs`, compiled in every build). Accepting a clock measurement
+attaches the source as its last step, so a rejected or expired measurement
+attaches nothing. One binding is accepted per source operation. A second
+acceptance, for the same source or another one, is refused with a distinct
+`Occupied` error and leaves the attached source running; it never replaces it.
+Once that source has stopped, a newly reviewed one can be attached.
+
+Retirement is one atomic store on the source's control, made under the runtime
+lock. It makes no native call and does not wait for a worker, an audio callback
+or the review gate; the surrounding runtime step briefly takes the existing
+startup-gate mutex, as it did before.
+
+- `stop_live_session`, scoped `stop_capture`, End during a live session,
+  microphone loss and a failed live start all pass through the same runtime
+  step, which now cancels the attached source.
+- Each runtime sync also retires a source whose session ended, was replaced, is
+  stopping or no longer matches its startup operation, in case a path changes
+  the session without that step. Syncs run on commands and on the 200 ms
+  background tick, so this fallback normally acts within about one tick; it is
+  not immediate and stops if that thread does.
+- A source that stops by itself is detached on the next sync or attach.
+- Dropping the attachment, including with the runtime, cancels the source. The
+  running app never drops its runtime, so this is not an app-exit policy.
+
+From that store on, the callback-side `push` refuses new audio, the reader
+discards what is queued, a partly assembled chunk is not flushed, and returned
+blocks and chunks fail `belongs_to`. A transcription worker holding native
+chunks skips queued ones and discards the undelivered lines of one in progress,
+counting each as stale. Lines delivered before Stop stay delivered. This differs
+from the microphone path, where Stop transcribes queued audio: for application
+audio, Stop discards undelivered audio. Whether a flush is wanted is undecided.
+
+A worker can pass its own source check just before Stop takes the runtime lock,
+and the engine still accepts lines while it drains the microphone. A transcript
+sink for application audio must therefore call `live_source_accepts` with the
+runtime lock held, immediately before committing each line; it refuses after
+Stop and refuses a source that was never attached. No such sink exists yet.
+
+Limits of this step:
+
+- Attachment is not enforced by the audio types. `ClockBinding::new`,
+  `Reader::bind_session` and `NativeChunker::new` can still be used without it,
+  and Stop does not reach a source wired that way. The sink check above is the
+  only place that refuses an unattached source.
+- Attaching requires an uncancelled control, not an approved one. A review that
+  is never approved can occupy the session until it is dropped or replaced; it
+  delivers nothing and Stop cancels it.
+- The review gate is not locked, so its snapshot keeps the earlier phase
+  (`Reviewing`, `Starting` or `Capturing`) until the source's owner observes
+  the cancellation on its next poll and begins Stop. The gate stays reserved
+  through that cleanup, so another review cannot overlap. A future UI must not
+  present that phase as continued listening after a live Stop.
+- Because one binding is accepted per operation, a later re-measurement, for
+  example after sleep, is refused. No policy for that exists yet.
+
+Six tests in the default build use a synthetic 16 kHz source with no device:
+three runtime-level Stop paths (the shared Stop step, scoped capture Stop and
+dropping the runtime) with one block returned, one queued and a later callback;
+a partly assembled chunk followed by a gap; a session that ends, is replaced or
+starts stopping without the Stop step; a sink thread that passed its own check
+and then waits behind Stop for the runtime lock; a refused second source; and
+refusal outside a running live session, with live cue pause keeping the source.
+Two native-feature tests run an accepted binding through the memory-only clock
+delivery path, `NativeChunker` and a transcription worker with a scripted
+recognizer: Stop arrives while the recognizer holds a chunk, and a rejected
+measurement or second acceptance attaches nothing. With the Stop step and the
+sync check disabled, five of these eight tests fail. The sink check, the
+refusals and the attach-once test pass either way, because they do not depend
+on cancellation.
+
+Not covered: a ScreenCaptureKit stream, real callbacks, Stop racing a callback
+on another thread beyond the handoff's own tests, native Stop latency or
+release, system sleep and wake, a lifetime bound on an accepted binding, app
+exit, and any UI. No command attaches a source, so app behavior is unchanged.

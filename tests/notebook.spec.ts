@@ -452,8 +452,10 @@ test('prior notes from a file are chosen, shown apart from the conversation, rem
   await expect(
     page.getByRole('status').filter({ hasText: 'already imported' }),
   ).toHaveCount(1);
-  // Remove all clears every imported note at once.
-  await panel.getByRole('button', { name: 'Remove all' }).click();
+  // Remove all clears every imported note at once. Focus only follows a
+  // removal made from the focused control, and a pointer click focuses a
+  // button on Linux but not in macOS WebKit, so activate it by keyboard.
+  await panel.getByRole('button', { name: 'Remove all' }).press('Enter');
   await expect(panel.getByRole('listitem')).toHaveCount(0);
   await expect(panel.getByRole('button', { name: 'Remove all' })).toHaveCount(
     0,
