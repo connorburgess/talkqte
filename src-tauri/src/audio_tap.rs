@@ -694,9 +694,10 @@ mod tests {
                     lines += 1;
                 }
                 if let Some(cue) = &engine.state.cue {
+                    // The kind only: a cue's words can repeat what was said.
                     eprintln!(
-                        "rate={rate} question raised after {lines} lines: {:?}",
-                        cue.question
+                        "rate={rate} cue raised after {lines} lines: kind={:?}",
+                        cue.kind
                     );
                     return;
                 }

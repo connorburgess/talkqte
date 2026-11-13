@@ -10,16 +10,18 @@ The product goal is timely context that helps someone stay grounded and respond 
 
 Every open item below carries a short ID: a section letter and a number, such as **V4**. Use the ID to refer to an item in pull requests and reviews. An item keeps its ID when it is checked off or reworded, a new item takes the next unused number in its section, and IDs are never reused. Items checked before 13 November 2026 have no ID. The letters are **P** production, integrations and distribution; **R** runnable prototype; **V** next product validation; **T** first technical milestone; **U** first usable version; **N** other note-taking apps; **D** desktop platforms; **M** phone.
 
-Items in progress, in the order explained under [Current focus](#current-focus):
+Items in progress. [Current focus](#current-focus) explains why the demo, the live interface and the first technical milestone come first:
 
-1. Fictional demo that shows the idea: **V1**, **V2**, **V3**.
-2. Live-session interface as a mock: **V4**.
-3. First technical milestone on macOS: **T2**, **T3**, **T4**, with the native checks **R1** and **R2**.
-4. Processing path for evaluated cues: **T1**.
-5. Comparison with and without cues: **V5**, **V6**, **V7**, **U8**.
-6. Signed installation and upgrade: **P1**.
+- **V1**, **V2**, **V3**: the fictional demo, waiting on the owner's review of the native preview.
+- **V4**: the live-session interface as a mock.
+- **T2**: native capture.
+- **N2**: Granola selected-note refresh.
+- **P1**: the release path.
+- **P3**: privacy boundaries.
+- **U1**–**U5**: cue rules.
+- **U7**: browser keyboard and reduced-motion coverage.
 
-Alongside these, where they do not delay 1–3: **N1** and **N2** for Granola, and **P3** for privacy boundaries. This list names what is being worked on; each item's own text records its state and acceptance.
+This list names what is being worked on; each item's own text records its state and acceptance.
 
 ## Current focus
 
@@ -63,7 +65,7 @@ This track runs alongside the feature milestones below. The goal includes a depe
 - [x] Establish a Granola capability and authentication decision, source-aware context contract, and fictional adapter fixtures; verify import, live input, and writeback separately. The contract and fictional failure tests exist. The owner's free plan points to MCP with the user's own sign-in (notes from the last 30 days). Granola's page confirms a custom client is permitted (OAuth 2.0 with dynamic client registration, Streamable HTTP) and names the tools, with transcripts paid-only ([readiness notes](docs/product-readiness.md#integration-readiness)); the adapter is built and tested against a fictional server (`src-tauri/src/granola.rs`); the notebook controls, sign-in, and listing have been checked. Tagged detail parsing now passes fictional headless tests; the notebook also keeps Disconnect available during slow listings or Focus suggestions and rejects retired results ([recovery checks](docs/granola-import-validation.md#disconnect-while-notes-are-loading)). The owner confirmed native note import/removal on 11 November ([import evidence](docs/granola-import-validation.md#owner-observed-native-import-and-removal--11-november-2026)); live transcript input and writeback are separately unsupported, and refresh/recovery/privacy acceptance remains open.
 - [x] Plan model delivery, integrity, interrupted downloads, offline use, and application/model compatibility. See the [model delivery plan](docs/model-delivery.md). The Settings download is built for `local-whisper` builds; the setup step, update path, and accuracy scoring remain.
 - [x] Keep live-session readiness current across speech model installation and removal. [Fictional response-ordering checks](docs/model-delivery.md#readiness-response-ordering--11-november-2026) cover delayed success, delayed failure and a pending check; clean-install and native model acceptance remain separate.
-- [ ] **P1** Prove a signed, notarized installation and a recoverable upgrade on a clean supported Mac; include data migration and update deferral during calls.
+- [ ] **P1** Prove a signed, notarized installation and a recoverable upgrade on a clean supported Mac; include data migration and update deferral during calls. The [release path](docs/release-path.md) records each step's state and a pre-flight of the configuration and the debug bundle. Signing, notarization, clean-Mac installation, upgrade and rollback have not been run and need the owner's Apple Developer account; update deferral is not implemented.
 - [ ] **P2** Test the path from the website to first useful use without development tools, unnecessary accounts, or unexplained permissions.
 - [ ] **P3** Verify privacy boundaries, retention/deletion, credential storage, and safe diagnostics for every enabled input or integration. The [Granola privacy checks](docs/granola-import-validation.md#privacy-boundary-checks) now cover disconnect/reconnect, diagnostic redaction, imported-note removal and export exclusion with fictional data; real-account data-flow and native acceptance remain.
 - [ ] **P4** Define pilot and wider-release acceptance criteria covering user value, accessibility, compatibility, and support readiness. [Proposed criteria](docs/pilot-acceptance.md) with pass/fail checks and current status, awaiting the owner's agreement.

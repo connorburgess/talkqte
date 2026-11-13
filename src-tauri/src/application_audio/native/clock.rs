@@ -469,6 +469,30 @@ pub(super) mod tests {
         (gate, control, capture, blocks)
     }
 
+    /// The same delivery path for a test that supplies its own reader and
+    /// clock binding, such as one accepted by the runtime. Source time 10 s
+    /// corresponds to host time 7 s; the first sample is 1 µs after that.
+    pub(crate) struct Feed {
+        delivery: Delivery,
+        base: CFRetained<CMTimebase>,
+    }
+
+    impl Feed {
+        pub(crate) fn new(reader: Reader, binding: ClockBinding, rate: f64) -> Self {
+            let origin = Arc::new(SourceOrigin::default());
+            origin.publish(time(10_000_001, 1_000_000));
+            Self {
+                delivery: Delivery::new(reader, origin, binding),
+                base: timebase(rate),
+            }
+        }
+
+        pub(crate) fn next(&mut self, session: u64) -> Result<Option<NativeBlock>, TimingError> {
+            let base = &self.base;
+            self.delivery.try_next(session, |o, f| convert(base, o, f))
+        }
+    }
+
     #[test]
     fn actual_timebase_rates_preserve_source_phase_session_fraction_and_gaps() {
         for (rate, start_ms, end_ms, gap_ms) in [
