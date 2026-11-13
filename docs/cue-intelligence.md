@@ -98,11 +98,68 @@ Cases that still differ, and why they were left alone:
 
 The [Claude lab record](claude-cue-lab.md#validation-record) covers three runs per case on 8–10 November: 10 of 11 expected actions matched in every pass (7 of eight), with no action changing between runs. No lab run was made for the 13 November changes. The sole lab disagreement is `missing-owner`, where staying quiet to avoid duplicating the speakers' own question is defensible; the expected label still needs human review and is unchanged here, so the rules' "show" counts as a match only while that label stands. All 33 request times span 2,969–5,768 ms including CLI startup. The 22 repeat requests averaged about 155 reported output tokens each; this is not a billing or allowance measure.
 
-These counts describe the two prototypes on eleven fictional cases, not an accuracy estimate for equivalent evaluators or real meetings. The 13 November rules were written with these cases in view, so the suite no longer tests them independently; a larger suite with cases written by someone else is needed to estimate how often the new phrases withdraw a question wrongly.
+These counts describe the two prototypes on eleven fictional cases, not an accuracy estimate for equivalent evaluators or real meetings. The 13 November rules were written with these cases in view, so the suite no longer tests them independently; a larger suite with cases written by someone else is needed to estimate how often the new phrases withdraw a question wrongly. The [held-out cases](#held-out-cases) below are a first step.
 
 The owner rule recognizes "someone can", "someone should", and "someone could". Volunteer verbs include "send", "sort", and "book", allowing `paraphrased-use` to resolve. The suite's questions beginning "Who's" are outside the open-question rule. The `context-reminder` case supplies no imported note, so it does not exercise the app's title-word reminder feature. Whatever the trigger, the owner question's wording is fixed ("Who will take the first draft?"), so on these fixtures it asks about a draft while the speakers discuss a checklist. Paraphrased triggers, corrections without a correction phrase, and topic shifts in other words remain gaps.
 
 Three judgments per case on fictional text establish only this limited repeatability. A larger suite, reviewed labels, and the planned comparison of useful participation and listening comprehension are still needed before choosing a live evaluator.
+
+### Held-out cases
+
+Recorded 13 November 2026. `scripts/fixtures/cue-rules-held-out.json` holds 23 new fictional conversations that the rules were not written against, each with an expected action and a one-line reason. **The labels were written by the rules lane, not by the owner, and await the owner's review.** They were written and committed before the rules were run on the cases, no label was changed afterwards, and no rule was changed with them. No lab or model run was made.
+
+`rules_on_the_held_out_fictional_cases` in `engine.rs` replays them offline: lines two seconds apart with one speaker label, the fixture's cue on screen where a case lists one (with the rule type the fixture names), and the session name where a case gives one.
+
+| Case                              | Group               | Expected | Rules    |
+| --------------------------------- | ------------------- | -------- | -------- |
+| deferral-next-month               | deferral            | withdraw | quiet    |
+| deferral-look-alike               | deferral            | quiet    | quiet    |
+| deferral-of-something-else        | deferral            | quiet    | withdraw |
+| correction-cancelled              | correction          | withdraw | withdraw |
+| correction-of-something-else      | correction          | quiet    | quiet    |
+| correction-without-a-phrase       | correction          | withdraw | quiet    |
+| answered-at-once                  | already answered    | quiet    | quiet    |
+| answered-in-the-same-line         | already answered    | quiet    | show     |
+| answered-in-other-words           | already answered    | resolved | quiet    |
+| asked-of-someone-else             | another addressee   | quiet    | quiet    |
+| handed-to-someone-else            | another addressee   | quiet    | quiet    |
+| asked-of-the-user                 | another addressee   | show     | show     |
+| asked-of-the-user-without-a-comma | another addressee   | show     | quiet    |
+| you-could-be-either               | uncertain addressee | quiet    | quiet    |
+| name-mentioned-not-addressed      | uncertain addressee | quiet    | quiet    |
+| repeat-in-other-words             | repeat              | quiet    | quiet    |
+| repeat-of-a-group-question        | repeat              | show     | show     |
+| topic-change-in-other-words       | topic change        | withdraw | quiet    |
+| topic-change-look-alike           | topic change        | quiet    | quiet    |
+| plain-idiom                       | plain               | quiet    | show     |
+| plain-goodbye                     | plain               | quiet    | show     |
+| plain-approval                    | plain               | quiet    | quiet    |
+| missing-owner-in-other-words      | plain               | show     | quiet    |
+| **Matches**                       |                     |          | **13 of 23** |
+
+The rules match 13 of 23. This is reported separately from the original eleven and should not be added to them. Read it with these limits:
+
+- Fourteen of the 23 cases are labeled quiet, so a companion that never did anything would match 14. On this set the rules score one below doing nothing. They get three of the nine cases that need an action (two shows and one withdrawal) and miss six; they act wrongly on four of the fourteen quiet cases (three unwanted questions and one wrong withdrawal).
+- Several quiet matches are quiet because no rule recognized anything in the line (`answered-at-once`, `handed-to-someone-else`, `you-could-be-either`), not because the rules weighed the evidence.
+- The same lane wrote the rules and these cases, knowing what the rules look for. The cases are held out from rule-writing, not independent of the rule-writer. Cases written by the owner or someone else would be a stronger check.
+- Twenty-three fictional conversations give no rate for real meetings.
+
+The ten misses, and whether a phrase rule could fix each without guessing meaning. None is implemented here.
+
+| Miss | What happened | A phrase rule could fix it? |
+| --- | --- | --- |
+| deferral-next-month | "We'll pick that up at the committee meeting next month. On to the raffle." is not recognized | Yes: "pick … up" as a putting-off verb with "at the … meeting" or "next month" as the occasion, or "On to …" as a topic opening |
+| deferral-of-something-else | "Let's leave the poster design for another meeting" withdraws a question about the welcome letter | Yes, by a word check: withdraw only when what is put off is "that", "it", or "this", or shares a distinctive word with the line the question came from |
+| answered-in-other-words | "Leave the compost with me, I'll get it ordered today" does not resolve the owner question | Yes: "leave … with me" and "I'll get it/that …" as volunteer phrases |
+| asked-of-the-user-without-a-comma | "What about you Robin, can you cover Saturday morning?" is not seen as asked of the user | Yes: the session name directly after "you" at the end of the opening clause |
+| topic-change-in-other-words | "Anyway, that's enough about the social. Treasurer's report next." is not a topic opening | Yes for "that's enough about …" as an opening; "… next." alone is too loose |
+| plain-idiom | "Someone can always tell when the bread is fresh" raises the owner question | Yes: do not count "someone can" before "always", "never", or a verb of noticing ("tell", "see", "hear") |
+| plain-goodbye | "We'll see you all soon" raises the vague-deadline question | Yes: do not count "soon" in "see you … soon", "talk soon", or "speak soon" |
+| missing-owner-in-other-words | "Nobody has picked up the banner printing yet" raises nothing | Only narrowly: "nobody has" or "no one has" with "picked up", "taken", or "claimed" and "yet". A wider form ("nobody has complained yet") would guess, and every new trigger adds interruptions |
+| answered-in-the-same-line | "Someone should water the seedlings…, and Priya has already said she'll do it" still raises the owner question | No: "has already said she'll do it" names the owner through "she", which the rules cannot tie to Priya without judging meaning |
+| correction-without-a-phrase | "Oh, hang on, the marquee went back to the hire company last week, so it's the hall" leaves the choice question up | No: knowing that one option is gone needs judgment of meaning |
+
+The owner has decided that `already-answered` in the original suite is not to be fixed by delaying every question, so no timing change is proposed for the answered cases here.
 
 ### Outcome labels
 
