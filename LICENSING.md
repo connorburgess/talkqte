@@ -25,7 +25,7 @@ For commercial terms, open a [licensing inquiry](https://github.com/connorburges
 
 ## Name and logo
 
-The software license does not grant rights to the TalkQTE name or logo. A modified version shared with others needs its own name and icon. See the [name and logo guide](TRADEMARKS.md) for what is fine without asking and what needs permission.
+The software license does not grant trademark rights in the TalkQTE name or logo. A modified version shared with others needs its own name and icon unless you have permission to use TalkQTE's. See the [name and logo guide](TRADEMARKS.md) for what is fine without asking and what needs permission.
 
 ## Previously published Apache-2.0 material
 
