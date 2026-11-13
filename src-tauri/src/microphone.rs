@@ -494,10 +494,25 @@ pub async fn start_microphone(
     // Checked again once the start is reserved, so a session that began in
     // between still refuses it before any permission request.
     let owner = app.clone();
-    let on_reserved: OnReserved = Box::new(move |_| may_start(&owner));
+    let refused = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let noted = refused.clone();
+    let on_reserved: OnReserved = Box::new(move |_| {
+        let allowed = may_start(&owner);
+        if !allowed {
+            noted.store(true, std::sync::atomic::Ordering::Release);
+        }
+        allowed
+    });
     start(app, state.inner().clone(), None, Some(on_reserved))
         .await
         .map(|_| ())
+        .map_err(|error| {
+            if refused.load(std::sync::atomic::Ordering::Acquire) {
+                "Stop the live session before checking the microphone.".into()
+            } else {
+                error
+            }
+        })
 }
 
 /// Called with the start's generation and the tap's chunker once capture has

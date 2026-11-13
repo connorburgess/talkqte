@@ -152,6 +152,17 @@ impl Runtime {
     /// without passing through Stop still retires its source, and a source
     /// that stopped by itself frees the session for an explicit new one.
     pub(crate) fn reconcile_live_source(&mut self) {
+        // A session for an application alone whose source was stopped before
+        // it attached has nothing left to wait for. End it now, as when an
+        // attached source stops, rather than when the worker's run returns.
+        let unattached_and_stopped = self
+            .source_session
+            .as_ref()
+            .filter(|own| own.control.is_cancelled() && self.live_source.is_none())
+            .map(|own| own.session);
+        if let Some(session) = unattached_and_stopped {
+            self.end_source_session(session);
+        }
         let Some(source) = &self.live_source else {
             return;
         };
@@ -776,5 +787,30 @@ mod tests {
             .get("sourceSession")
             .is_none());
         assert!(!ordinary.microphone_may_start());
+    }
+
+    #[test]
+    fn a_source_session_ends_on_sync_when_its_source_is_stopped_before_attaching() {
+        let mut runtime = Runtime::default();
+        let source = source("fictional-player");
+        let session = runtime.begin_source_session(&source.control).unwrap();
+        runtime.sync();
+        assert!(
+            runtime.source_session_running(),
+            "still loading, not stopped"
+        );
+        assert_eq!(runtime.engine.state.status, Status::Running);
+        // Stop application audio while the worker is still loading its
+        // recognizer: the source never attached.
+        source.gate.stop(&source.control).unwrap();
+        runtime.sync();
+        assert!(
+            runtime.live.is_none(),
+            "ended at once, not when the run returns"
+        );
+        assert_eq!(runtime.engine.state.status, Status::Ended);
+        assert!(!runtime.is_source_session(session));
+        // The worker's own end step later changes nothing.
+        assert!(!runtime.end_source_session(session));
     }
 }

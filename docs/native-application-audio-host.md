@@ -68,6 +68,7 @@ audio, with no microphone.
   session checks the microphone under the runtime lock, and a standalone
   microphone check is refused while any live session runs, both before it
   starts and again once its start is reserved, before any permission request.
+  Either refusal says "Stop the live session before checking the microphone."
 - The status marks the session as the source's own only from when the worker
   has begun it until its source is stopped, and only while that source is
   starting or capturing. The notebook's wording also requires both the
@@ -79,9 +80,11 @@ audio, with no microphone.
 - The session ends when its attached source stops for any reason, including
   the source's own Stop, a stream failure, a failed cleanup or an abandoned
   worker. Nothing could be delivered any more. A failed or abandoned cleanup
-  still reads as possibly capturing after the session has ended. If the source
-  never attaches, the worker ends the session when its run ends, also while
-  unwinding.
+  still reads as possibly capturing after the session has ended. A source
+  stopped before it attached, for example by its own Stop while its recognizer
+  loads, ends the session on the next sync too. If the source never attaches
+  and is not stopped, the worker ends the session when its run ends, also
+  while unwinding.
 - A session stopped before its source began ends Off with no problem.
 
 Starting a session for an application, like listing, is reached only through
@@ -303,8 +306,10 @@ abandoned, it is not offered; the line says how cleanup is going.
 In a session for an application alone, the microphone panel says the
 application's audio is transcribed on this device and that the microphone is
 not used, and Stop live session ends the session. The session strip, the cue
-pause hint and the Transcript tab credit the application instead of the
-microphone. The companion, which has no processing snapshot, reads a
+pause hint, the Transcript tab and the live layout's Real cue (its paused note
+and its Pause hint) credit the application instead of the microphone. The
+finishing line names application audio only while the source may still be
+capturing. The companion, which has no processing snapshot, reads a
 metadata-only flag on its cue snapshot: it shows "App audio · Local" (or "App
 audio still on" with cues paused) instead of a bare "Off", and its pause hint
 names application audio. The flag is absent from every other snapshot, and

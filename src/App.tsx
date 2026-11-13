@@ -1241,6 +1241,7 @@ function Notebook() {
               processingPhase: capture.state?.phase ?? null,
               preparing,
               finishing,
+              sourceSession: !!sourceApp,
             }}
             realCueControls={{
               busy,
@@ -1322,7 +1323,7 @@ function Notebook() {
                     {preparing
                       ? 'Local speech model · capture status shown above'
                       : finishing
-                        ? capture.state?.source &&
+                        ? capture.state?.source?.mayBeCapturing &&
                           microphone.state?.status === 'off'
                           ? 'Ending the live session. Application audio is shown under Cue processing.'
                           : 'Waiting for microphone release and remaining transcription.'

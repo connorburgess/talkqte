@@ -172,7 +172,9 @@ export function RealCue({
           title={
             input.cuesPaused
               ? 'Only new speech can raise a cue after resuming.'
-              : 'Clear the current cue; microphone and transcript continue.'
+              : input.sourceSession
+                ? 'Clear the current cue; application audio and transcript continue.'
+                : 'Clear the current cue; microphone and transcript continue.'
           }
           onClick={controls.toggleCues}
         >

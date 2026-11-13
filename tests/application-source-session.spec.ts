@@ -388,3 +388,64 @@ test('a stale source-session flag beside a listening microphone credits the micr
     );
   }
 });
+
+test('an ordinary session draining is not described as application audio', async ({
+  page,
+}) => {
+  await notebook(page);
+  await page.evaluate(() => window.liveTest.start());
+  await page.evaluate((value) => window.microphoneTest.send(value), {
+    status: 'off' as const,
+    canStart: true,
+    message: null,
+    deviceName: null,
+  });
+  // A development build always reports a source; here it is off.
+  await page.evaluate((value) => window.captureTest.send(value), {
+    phase: 'stopping',
+    capture: 'off',
+    microphone: 'off',
+    source: source('off', false),
+  } satisfies Partial<ProcessingSnapshot>);
+  const body = page.locator('.notebook-body');
+  await expect(body).toContainText(
+    'Waiting for microphone release and remaining transcription.',
+  );
+  await expect(body).not.toContainText('Application audio is shown');
+  // A source that may still be capturing is named while the session ends.
+  await page.evaluate((value) => window.captureTest.send(value), {
+    phase: 'stopping',
+    capture: 'stopping',
+    microphone: 'off',
+    source: source('stopping', true),
+  } satisfies Partial<ProcessingSnapshot>);
+  await expect(body).toContainText(
+    'Ending the live session. Application audio is shown under Cue processing.',
+  );
+});
+
+test('the live layout cue controls credit the application in a session with no microphone', async ({
+  page,
+}) => {
+  await notebook(page);
+  await sourceSession(page, 'listening');
+  await page
+    .getByRole('group', { name: 'Layout', exact: true })
+    .getByRole('button', { name: 'Layout preview', exact: true })
+    .press('Enter');
+  const preview = page.getByRole('region', {
+    name: 'Live session layout preview',
+  });
+  const pause = preview.locator('.mock-real-pause');
+  await expect(pause).toHaveAttribute(
+    'title',
+    'Clear the current cue; application audio and transcript continue.',
+  );
+  await pause.click();
+  await expect(preview).toContainText(
+    'Cues are paused; the application audio and transcript continue.',
+  );
+  await expect(preview).not.toContainText(
+    'the microphone and transcript continue',
+  );
+});
