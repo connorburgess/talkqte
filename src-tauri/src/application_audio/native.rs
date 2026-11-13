@@ -16,6 +16,8 @@ mod position;
 mod stream;
 mod task;
 pub use chunks::{NativeChunk, NativeChunker, MAX_SEGMENTS};
+#[cfg(test)]
+pub(crate) use clock::tests::Feed;
 pub use clock::{ClockBinding, NativeBlock, NativeReader};
 pub use stream::{NativeOwner, NativeTask, Selection};
 pub use task::{TaskControl, TaskSnapshot};

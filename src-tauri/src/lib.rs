@@ -11,6 +11,7 @@ pub mod engine;
 pub mod granola;
 pub mod live;
 mod live_control;
+mod live_source;
 mod microphone;
 pub mod model;
 #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
@@ -42,6 +43,9 @@ struct Runtime {
     /// delivering transcript lines takes the lock.
     live: Option<Live>,
     live_start: live_control::StartGate,
+    /// The approved application-audio source feeding the live session, if
+    /// any. Dropping it cancels that source's operation.
+    live_source: Option<live_source::LiveSource>,
     processing_reviews: processing_reviews::Reviews,
     processing_status: engine::ProcessingTracker,
     /// Prior notes the user imported this session, in memory only.
@@ -64,6 +68,7 @@ impl Default for Runtime {
             export: None,
             live: None,
             live_start: live_control::StartGate::default(),
+            live_source: None,
             processing_reviews: processing_reviews::Reviews::default(),
             processing_status: engine::ProcessingTracker::default(),
             context: context::ContextStore::default(),
@@ -77,6 +82,20 @@ impl Default for Runtime {
 impl Runtime {
     fn sync(&mut self) {
         self.sync_at(Instant::now());
+    }
+
+    /// The Markdown a person reviews before saving, kept so the save dialog
+    /// writes exactly that text. A live session is refused, and refusing it
+    /// drops any earlier preview.
+    fn prepare_export(&mut self) -> Result<String, String> {
+        // Live transcripts stay in memory only; this version never saves them.
+        if self.engine.state.live {
+            self.export = None;
+            return Err("Live sessions are not saved or exported.".into());
+        }
+        let markdown = self.engine.markdown();
+        self.export = Some(markdown.clone());
+        Ok(markdown)
     }
 
     fn sync_at(&mut self, now: Instant) {
@@ -96,6 +115,7 @@ impl Runtime {
                 .advance(u64::try_from(millis).unwrap_or(u64::MAX));
         }
         self.processing_reviews.reconcile(&self.engine);
+        self.reconcile_live_source();
     }
 }
 
@@ -382,18 +402,11 @@ fn set_overlay(
 
 #[tauri::command]
 fn export_preview(state: tauri::State<AppState>) -> Result<String, String> {
-    let mut runtime = state
+    state
         .0
         .lock()
-        .map_err(|_| "Could not prepare the export.")?;
-    // Live transcripts stay in memory only; this version never saves them.
-    if runtime.engine.state.live {
-        runtime.export = None;
-        return Err("Live sessions are not saved or exported.".into());
-    }
-    let markdown = runtime.engine.markdown();
-    runtime.export = Some(markdown.clone());
-    Ok(markdown)
+        .map_err(|_| "Could not prepare the export.")?
+        .prepare_export()
 }
 
 #[tauri::command]
@@ -1444,6 +1457,63 @@ mod carry_over_tests {
         assert!(next.state.revision > before);
         let again = carry_over(&next, Engine::default());
         assert!(again.state.revision > next.state.revision);
+    }
+}
+
+#[cfg(test)]
+mod export_tests {
+    use super::*;
+
+    #[test]
+    fn a_live_session_is_never_prepared_for_export_and_drops_an_earlier_preview() {
+        let mut runtime = Runtime::default();
+        runtime
+            .engine
+            .update_notes("A fictional notebook line.".into())
+            .unwrap();
+        let reviewed = runtime.prepare_export().unwrap();
+        assert!(reviewed.contains("A fictional notebook line."));
+        assert_eq!(runtime.export.as_deref(), Some(reviewed.as_str()));
+
+        // Starting a live session forgets the demo preview, so the save
+        // dialog has nothing to write while the microphone is in use.
+        let ticket = runtime.begin_live_start().unwrap();
+        let (ticket, ()) = ticket.load(|| Ok(())).unwrap(); // No model or device.
+        let session = runtime.install_live_start(&ticket).unwrap();
+        assert!(runtime.export.is_none());
+        runtime.engine.advance(1_000);
+        runtime
+            .engine
+            .ingest(
+                session,
+                engine::Segment {
+                    id: "l1".into(),
+                    at_ms: 1_000,
+                    speaker: "Speaker".into(),
+                    text: "The greenhouse keys are in the blue tin.".into(),
+                },
+            )
+            .unwrap();
+        // The notebook still shows the line; only saving it is refused.
+        assert_eq!(runtime.engine.state.transcript.len(), 1);
+        assert_eq!(
+            runtime.prepare_export().unwrap_err(),
+            "Live sessions are not saved or exported."
+        );
+        assert!(runtime.export.is_none());
+
+        // Stopping keeps the transcript on screen and still refuses to save it.
+        runtime.engine.end();
+        assert_eq!(runtime.engine.state.transcript.len(), 1);
+        assert!(runtime.prepare_export().is_err());
+        assert!(runtime.export.is_none());
+
+        // The demo that follows starts from its script: notes carry over, the
+        // live transcript does not, and export works again.
+        runtime.engine = carry_over(&runtime.engine, Engine::default());
+        let after = runtime.prepare_export().unwrap();
+        assert!(after.contains("A fictional notebook line."));
+        assert!(!after.contains("blue tin"));
     }
 }
 

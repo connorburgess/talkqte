@@ -18,8 +18,8 @@ Read from `main` at `b0971d0` and from one debug build made for this page.
 | Version               | `0.1.0`, stated separately in `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` and `src-tauri/tauri.conf.json`. The bundle takes its version from `tauri.conf.json`. Nothing kept them equal before the pre-flight.                                                                        |
 | Entitlements          | `src-tauri/Entitlements.plist` requests only `com.apple.security.device.audio-input`. They are embedded only when the bundle is signed.                                                                                                                                                                                       |
 | Hardened runtime      | Not set in the configuration. Tauri documents its default as on when a build is signed; that has not been observed on a signed TalkQTE build, and a build without a real signature has no runtime flag to inspect.                                                                                                            |
-| Permission text       | `src-tauri/Info.plist` supplies `NSMicrophoneUsageDescription`. Its wording describes microphone monitoring and does not mention live transcription; see [open decisions](#open-decisions-for-the-owner).                                                                                                                     |
-| Minimum macOS         | `13.0` in the configuration and in the built executable. The [proposed supported setup](budgets.md#proposed-first-supported-setup) is macOS 14 or later; see [open decisions](#open-decisions-for-the-owner).                                                                                                                 |
+| Permission text       | `src-tauri/Info.plist` supplies `NSMicrophoneUsageDescription`. It says the microphone is used only after you start it, to show whether there is input and, during a live session, to transcribe speech on the Mac, and that audio is not saved or sent. The prompt has not been displayed with this text.                    |
+| Minimum macOS         | `14.0` in the configuration, matching the [agreed first supported setup](budgets.md#proposed-first-supported-setup). The builds inspected on this page were made while it was `13.0`; no bundle built with `14.0` has been inspected here, and no macOS 14 system has run the app.                                            |
 | Bundle targets        | `app` only. No disk image is configured; one is produced by passing `--bundles app,dmg`.                                                                                                                                                                                                                                      |
 | Live transcription    | Compiled only with `--features local-whisper`. The default build, which CI makes, has no live session. A release intended for live use must pass that feature.                                                                                                                                                                |
 | Updater               | None. No updater plugin, endpoint or update-signing key exists. An update is a manual replacement of the app.                                                                                                                                                                                                                 |
@@ -36,8 +36,8 @@ Read from `main` at `b0971d0` and from one debug build made for this page.
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Files               | `Contents/Info.plist` (1,208 bytes), `Contents/MacOS/talkqte` (48,221,528 bytes), `Contents/Resources/icon.icns` (48,211 bytes). Nothing else.                                                       |
 | Size                | 48,270,947 bytes (46.0 MiB). This is a debug build; it is not a download size.                                                                                                                       |
-| `Info.plist`        | Identifier, version `0.1.0`, minimum macOS `13.0` and the microphone text all match the configuration.                                                                                               |
-| Executable          | arm64 only; `LC_BUILD_VERSION` minimum macOS 13.0.                                                                                                                                                   |
+| `Info.plist`        | Identifier, version `0.1.0`, minimum macOS (`13.0` at that commit) and the microphone text all matched the configuration.                                                                            |
+| Executable          | arm64 only; `LC_BUILD_VERSION` minimum macOS 13.0 at that commit.                                                                                                                                    |
 | Signature           | Ad-hoc and applied by the linker to the executable only: no sealed resources, no bound `Info.plist`, no team, no hardened runtime, no entitlements. `codesign --verify --deep --strict` fails on it. |
 | Build-machine paths | The executable contains paths under the building user's home folder (from compiler panic locations and debug information). See step 1.                                                               |
 | Frontend            | Embedded in the executable; no loose web files, source maps or model weights are in the bundle.                                                                                                      |
@@ -172,32 +172,32 @@ An older version that pins a different model would report the newer file as dama
 
 `npm run notices` (`scripts/third-party-notices.mjs`) writes `src-tauri/THIRD-PARTY-NOTICES.txt` from the dependencies a macOS release contains, and the bundle carries it at `Contents/Resources/THIRD-PARTY-NOTICES.txt`. It is regenerated for every release and whenever a lockfile changes. The app does not read or display it, and nothing is fetched at run time.
 
-- **Rust:** the crates linked into the executable for `aarch64-apple-darwin` with `local-whisper`, taken from `cargo metadata` with the locked versions. Build scripts, test-only crates and procedural macros are left out because they are not linked. A build without `local-whisper` links a subset. An Intel or universal build is not covered.
+- **Rust:** the crates linked into the executable for `aarch64-apple-darwin` with `local-whisper`: the set `cargo tree --edges normal,no-proc-macro` reports with the locked versions, with licence fields and package locations from `cargo metadata`. Build scripts, test-only crates, procedural macros and other platforms' crates are left out because they are not linked. A build without `local-whisper` links a subset. An Intel or universal build is not covered.
 - **JavaScript:** the packages whose modules Vite puts in the frontend bundle, found by a non-writing build.
 - **Texts:** each package's own licence and notice files, copied from the package and stored once when identical. `whisper-rs-sys` also contributes the vendored whisper.cpp licence.
 - **Freshness:** the file records the SHA-256 of `src-tauri/Cargo.lock` and `package-lock.json`. The pre-flight fails when either has changed since, and when a bundle's copy differs from the repository's. CI regenerates the file in the macOS job (`npm run check:notices`) and fails on any difference.
 
-Generated on 13 November 2026 it lists 221 Rust crates, the Rust standard library and 5 JavaScript packages (`@tauri-apps/api`, `lucide-react`, `react`, `react-dom`, `scheduler`). Declared licences:
+Generated on 13 November 2026 it lists 170 Rust crates, the Rust standard library and 5 JavaScript packages (`@tauri-apps/api`, `lucide-react`, `react`, `react-dom`, `scheduler`). Declared licences:
 
-- MIT, Apache-2.0, or a choice between them (some also offering Zlib or the Unlicense): 183 crates, the standard library and four JavaScript packages.
-- Unicode-3.0: the 15 ICU4X crates; `unicode-ident` is (MIT OR Apache-2.0) AND Unicode-3.0.
-- MPL-2.0: `cssparser`, `dtoa-short`, `option-ext`, `selectors`.
+- MIT, Apache-2.0, or a choice between them (some also offering Zlib or the Unlicense): 139 crates, the standard library and four JavaScript packages.
+- Unicode-3.0: the 15 ICU4X crates.
+- MPL-2.0: `option-ext`.
 - BSD-3-Clause, alone or with MIT: `alloc-no-stdlib`, `alloc-stdlib`, `subtle`, `brotli`, `brotli-decompressor`. BSD-2-Clause OR MIT OR Apache-2.0: `mach2`.
 - ISC: `rustls-webpki`, `untrusted`, `lucide-react`. Apache-2.0 AND ISC: `ring`. Apache-2.0 OR ISC OR MIT: `rustls`.
-- Zlib: `foldhash`, `zlib-rs`. 0BSD OR MIT OR Apache-2.0: `adler2`. CC0-1.0 OR MIT-0 OR Apache-2.0: `dunce`.
+- 0BSD OR MIT OR Apache-2.0: `adler2`. CC0-1.0 OR MIT-0 OR Apache-2.0: `dunce`.
 - CDLA-Permissive-2.0: `webpki-roots` (certificate data).
 - Unlicense: `whisper-rs`, `whisper-rs-sys`; the vendored whisper.cpp is MIT.
 
 No package declares a GPL, LGPL or AGPL licence. This is a list of what the packages declare, not a legal review; whether the MPL-2.0 and other terms are met by shipping this file is for the owner to confirm.
 
-Gaps: 19 crates (the `objc2` family, `block2`, `dispatch2`, `dasp_sample`, `alloc-stdlib`, `selectors`) ship no licence file in their package, and the standard library's notices are not copied; for these the file gives the declared licence and the source repository only. Windows and Linux bundles do not carry a notices file. The system web view and macOS frameworks are not listed.
+Gaps: 16 crates (`objc2` and its framework crates, `block2`, `dispatch2`, `dasp_sample`, `alloc-stdlib`) ship no licence file in their package, and the standard library's notices are not copied; for these the file gives the declared licence and the source repository only. Notices kept below a package's top level are included only where listed in the script (`ring`, `regex-syntax`, `whisper-rs-sys`); generation fails when a linked crate carries one that is neither listed nor deliberately ignored, but a notice under a file name the script does not recognise, or inside a source file, would be missed. Windows and Linux bundles do not carry a notices file. The system web view and macOS frameworks are not listed.
 
 ## Open decisions for the owner
 
 1. **Apple Developer Program membership** and where the Developer ID certificate and notary credentials are kept. Every **Owner** step waits on this.
-2. **Minimum macOS:** the bundle declares 13.0 while the proposed supported setup is 14 or later. Either raise `minimumSystemVersion` to match, or include macOS 13 in the clean-Mac test.
-3. **Microphone permission text:** it describes monitoring only. If the release includes live transcription, decide whether the prompt should say that speech is transcribed on the Mac. Any new wording must match [PRIVACY.md](../PRIVACY.md) and what is implemented.
-4. **Where the candidate is built:** settled for the Rust code by `npm run build:release`, which remaps build paths and fails if a home-folder path remains. Confirm it on the first build with `local-whisper`.
+2. **Minimum macOS:** settled as 14.0 in the configuration. Remaining: run the clean-Mac test on a macOS 14 system as well as a current one.
+3. **Microphone permission text:** settled; it now names input activity and on-device transcription during a live session. Remaining: see the prompt on first use in step 6.
+4. **Where the candidate is built:** addressed by `npm run build:release`, which remaps build paths and fails if a home-folder path remains. Still to be confirmed on the first build made from a checkout under the home folder and with `local-whisper`.
 5. **Disk image or zip** as the download, and whether the first candidates include `local-whisper`.
 
 ## Remaining steps, in order

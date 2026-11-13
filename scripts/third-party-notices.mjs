@@ -1,6 +1,6 @@
 // Writes src-tauri/THIRD-PARTY-NOTICES.txt from the dependencies a macOS
 // release actually contains: the Rust crates linked into the executable
-// (resolved by `cargo metadata` for the release target and features, without
+// (the set `cargo tree` reports for the release target and features, without
 // build-time, test-only and procedural-macro crates) and the JavaScript
 // packages Vite puts in the frontend bundle. Licence texts are copied from the
 // packages themselves; nothing is fetched except what cargo needs to resolve
@@ -27,10 +27,27 @@ export const NOTICES_IN_BUNDLE = 'Resources/THIRD-PARTY-NOTICES.txt';
 export const RUST_TARGET = 'aarch64-apple-darwin';
 export const RUST_FEATURES = ['local-whisper'];
 
-/** Notices kept beside vendored code rather than at a package's top level. */
-const VENDORED_NOTICES = { 'whisper-rs-sys': ['whisper.cpp/LICENSE'] };
+/** Notices kept below a package's top level, beside code it carries from
+ * elsewhere. Every such file in a linked crate must be listed here or in
+ * IGNORED_NOTICES, so a new one cannot be skipped without a decision. */
+const VENDORED_NOTICES = {
+  'regex-syntax': ['src/unicode_tables/LICENSE-UNICODE'],
+  ring: [
+    'src/polyfill/once_cell/LICENSE-APACHE',
+    'src/polyfill/once_cell/LICENSE-MIT',
+    'third_party/fiat/LICENSE',
+  ],
+  'whisper-rs-sys': ['whisper.cpp/LICENSE'],
+};
+
+/** Nested notices for code that is not compiled into the macOS app. */
+const IGNORED_NOTICES = {
+  // Linux desktop-portal backend; the macOS build uses the AppKit backend.
+  rfd: ['src/backend/xdg_desktop_portal/window_identifier/LICENSE'],
+};
 
 const NOTICE_FILE = /^(licen[sc]e|copying|notice|unlicense|copyright)/i;
+const SOURCE_FILE = /\.(rs|c|cc|cpp|h|hpp|m|py|js|ts|go|sh)$/i;
 const LOCKFILES = ['src-tauri/Cargo.lock', 'package-lock.json'];
 
 const sha256 = (data) => createHash('sha256').update(data).digest('hex');
@@ -61,26 +78,63 @@ export function staleReason(notices, root = REPOSITORY) {
     : 'a lockfile changed after it was generated';
 }
 
-/** Crates linked into the root package: reached through ordinary
- * dependencies only, never through or into a procedural macro. */
-export function linkedCrates(metadata) {
-  const packages = new Map(metadata.packages.map((pkg) => [pkg.id, pkg]));
-  const nodes = new Map(metadata.resolve.nodes.map((node) => [node.id, node]));
-  const linked = new Set();
-  const pending = [metadata.resolve.root];
-  while (pending.length) {
-    const id = pending.pop();
-    if (linked.has(id)) continue;
-    const pkg = packages.get(id);
-    if (pkg.targets.some((target) => target.kind.includes('proc-macro')))
-      continue;
-    linked.add(id);
-    for (const dependency of nodes.get(id).deps)
-      if (dependency.dep_kinds.some((kind) => kind.kind === null))
-        pending.push(dependency.pkg);
+/** The `name version` pairs `cargo tree` prints for the linked crates. The
+ * first line is the root package, which is the app itself and is dropped. */
+export function parseTree(output) {
+  const pairs = output
+    .split('\n')
+    .map((line) => /^(\S+) v(\S+)/.exec(line.trim()))
+    .filter(Boolean)
+    .map((match) => `${match[1]} ${match[2]}`);
+  return new Set(pairs.slice(1).filter((pair) => pair !== pairs[0]));
+}
+
+/** Packages from `cargo metadata` that `cargo tree` reports as linked.
+ * Metadata alone is not enough: its graph is unified across build scripts,
+ * procedural macros and other platforms, so it lists crates that never reach
+ * the executable. */
+export function linkedCrates(metadata, linked) {
+  const found = metadata.packages.filter((pkg) =>
+    linked.has(`${pkg.name} ${pkg.version}`),
+  );
+  const missing = [...linked].filter(
+    (pair) => !found.some((pkg) => `${pkg.name} ${pkg.version}` === pair),
+  );
+  if (missing.length)
+    throw new Error(
+      `cargo tree lists crates cargo metadata does not: ${missing.join(', ')}`,
+    );
+  return found.sort(byName);
+}
+
+/** Notice-named files below a package's top level, as relative paths. */
+export function nestedNotices(directory, prefix = '') {
+  const found = [];
+  for (const entry of readdirSync(join(directory, prefix), {
+    withFileTypes: true,
+  })) {
+    const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      if (entry.name !== '.git' && entry.name !== 'target')
+        found.push(...nestedNotices(directory, path));
+    } else if (
+      prefix &&
+      entry.isFile() &&
+      NOTICE_FILE.test(entry.name) &&
+      !SOURCE_FILE.test(entry.name)
+    )
+      found.push(path);
   }
-  linked.delete(metadata.resolve.root);
-  return [...linked].map((id) => packages.get(id)).sort(byName);
+  return found.sort();
+}
+
+/** Nested notices that are neither included nor deliberately ignored. */
+export function undecidedNotices(name, nested) {
+  const decided = new Set([
+    ...(VENDORED_NOTICES[name] ?? []),
+    ...(IGNORED_NOTICES[name] ?? []),
+  ]);
+  return nested.filter((path) => !decided.has(path));
 }
 
 /** The npm package a bundled module belongs to, or null for app code. */
@@ -114,8 +168,18 @@ function noticeFiles(directory, extra = []) {
   }));
 }
 
-function rustComponents(root, metadata) {
-  return linkedCrates(metadata).map((pkg) => ({
+function rustComponents(metadata, linked) {
+  const crates = linkedCrates(metadata, linked);
+  const undecided = crates.flatMap((pkg) =>
+    undecidedNotices(pkg.name, nestedNotices(dirname(pkg.manifest_path))).map(
+      (path) => `${pkg.name} ${pkg.version}: ${path}`,
+    ),
+  );
+  if (undecided.length)
+    throw new Error(
+      `linked crates carry notice files below their top level that are neither included nor ignored; add each to VENDORED_NOTICES or IGNORED_NOTICES in scripts/third-party-notices.mjs:\n  ${undecided.join('\n  ')}`,
+    );
+  return crates.map((pkg) => ({
     kind: 'Rust crate',
     name: pkg.name,
     version: pkg.version,
@@ -262,27 +326,44 @@ export function render(components, inputs) {
 }
 
 export async function generate(root = REPOSITORY) {
-  const metadata = JSON.parse(
+  const cargo = (...args) =>
     execFileSync(
       'cargo',
       [
-        'metadata',
-        '--format-version',
-        '1',
+        ...args,
         '--locked',
-        '--filter-platform',
-        RUST_TARGET,
         '--features',
         RUST_FEATURES.join(','),
         '--manifest-path',
         join(root, 'src-tauri', 'Cargo.toml'),
       ],
       { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 },
+    );
+  const metadata = JSON.parse(
+    cargo(
+      'metadata',
+      '--format-version',
+      '1',
+      '--filter-platform',
+      RUST_TARGET,
+    ),
+  );
+  const linked = parseTree(
+    cargo(
+      'tree',
+      '--target',
+      RUST_TARGET,
+      '--edges',
+      'normal,no-proc-macro',
+      '--prefix',
+      'none',
+      '--format',
+      '{p}',
     ),
   );
   return render(
     [
-      ...rustComponents(root, metadata),
+      ...rustComponents(metadata, linked),
       toolchainComponent(root),
       ...javascriptComponents(root, await bundledPackages(root)),
     ],
@@ -293,7 +374,13 @@ export async function generate(root = REPOSITORY) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const check = process.argv.includes('--check');
   const path = join(REPOSITORY, NOTICES_PATH);
-  const fresh = await generate();
+  let fresh;
+  try {
+    fresh = await generate();
+  } catch (error) {
+    console.error(`third-party notices: ${error.message}`);
+    process.exit(1);
+  }
   const current = existsSync(path) ? readFileSync(path, 'utf8') : null;
   if (check) {
     if (current === fresh) {

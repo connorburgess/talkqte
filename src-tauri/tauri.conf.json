@@ -48,7 +48,7 @@
     "category": "Productivity",
     "shortDescription": "Timely questions for better conversations",
     "macOS": {
-      "minimumSystemVersion": "13.0",
+      "minimumSystemVersion": "14.0",
       "entitlements": "Entitlements.plist",
       "files": {
         "Resources/THIRD-PARTY-NOTICES.txt": "THIRD-PARTY-NOTICES.txt"
