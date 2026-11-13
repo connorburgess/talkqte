@@ -79,6 +79,32 @@ export function Question({
                 cue.aboutFocus ? ' · about what matters' : ''
               }`}
       </p>
+      {cue.note?.unconfirmed && (
+        <p
+          className="question-meta"
+          aria-live={announce ? 'polite' : undefined}
+        >
+          This copy could not be verified at the last check.{' '}
+          {cue.note.unconfirmed.lastConfirmedMs === null ? (
+            'No check on record has confirmed it.'
+          ) : (
+            <>
+              Last confirmed{' '}
+              <time
+                dateTime={new Date(
+                  cue.note.unconfirmed.lastConfirmedMs,
+                ).toISOString()}
+              >
+                {new Date(cue.note.unconfirmed.lastConfirmedMs).toLocaleString(
+                  undefined,
+                  { dateStyle: 'medium', timeStyle: 'short' },
+                )}
+              </time>
+              .
+            </>
+          )}
+        </p>
+      )}
       <button
         className="question-disclosure"
         aria-expanded={cue.expanded}

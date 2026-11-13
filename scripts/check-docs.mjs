@@ -12,6 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMain } from './is-main.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const git = (...args) =>
@@ -216,7 +217,7 @@ function docsReminder(base, head) {
   return null;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const files = git('ls-files', '*.md').split('\n').filter(Boolean);
   const problems = [...checkLinks(files), ...checkFacts()];
   const { CONTRIBUTION_BASE: base, CONTRIBUTION_HEAD: head } = process.env;

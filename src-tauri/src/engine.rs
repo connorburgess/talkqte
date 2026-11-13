@@ -123,6 +123,9 @@ pub struct NoteRef {
     pub title: String,
     pub source_date: String,
     pub provider: String,
+    /// Set when the last update check could not confirm the quoted copy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unconfirmed: Option<crate::context::Unconfirmed>,
 }
 
 /// The cue kind for a reminder drawn from an imported note.
@@ -429,6 +432,7 @@ const NOTE_STOP_WORDS: &[&str] = &[
 struct NoteTerms {
     key: String,
     item: ContextItem,
+    unconfirmed: Option<crate::context::Unconfirmed>,
     terms: Vec<String>,
 }
 
@@ -513,6 +517,10 @@ pub struct Engine {
     notes: Vec<NoteTerms>,
     processing_context_digest: [u8; 32],
     shown_notes: Vec<String>,
+    /// The revision each shown note had when it reminded, and the keys of
+    /// kept notes currently held back from reminders.
+    reminded_revisions: Vec<(String, u64)>,
+    withheld_notes: Vec<String>,
     /// A cue type created since the last publish, with its previous time.
     unshown: Option<(String, Option<u64>)>,
 }
@@ -579,6 +587,8 @@ impl Engine {
             notes: vec![],
             processing_context_digest: evaluation::context_fingerprint(&[]),
             shown_notes: vec![],
+            reminded_revisions: vec![],
+            withheld_notes: vec![],
             unshown: None,
         }
     }
@@ -617,6 +627,7 @@ impl Engine {
         self.cues_after_ms = None;
         self.last_shown.clear();
         self.shown_notes.clear();
+        self.reminded_revisions.clear();
         self.focus_touched = vec![false; self.state.focus.len()];
         self.reminders_shown = 0;
         self.still_open_shown = false;
@@ -888,7 +899,15 @@ impl Engine {
         let correction = corrects(&segment.text);
         // A direct question is preserved while the user answers, so a topic
         // phrase does not clear it.
-        if topic_shift(&segment.text)
+        // Putting something off counts as a topic change only when it is
+        // the subject of the unread question on screen; otherwise it is an
+        // ordinary line and the question and repeat history stay.
+        let deferred = self
+            .state
+            .cue
+            .as_ref()
+            .is_some_and(|cue| deferred_subject(&segment.text, &cue.evidence));
+        if (topic_shift(&segment.text) || deferred)
             && !self
                 .state
                 .cue
@@ -1082,6 +1101,8 @@ impl Engine {
                 // user got to read it: a reminder is not re-raised later,
                 // and a session shows at most `MAX_REMINDERS` of them.
                 self.shown_notes.push(note.key.clone());
+                self.reminded_revisions
+                    .push((note.key.clone(), note.item.revision));
                 self.reminders_shown += 1;
                 self.unshown = None;
                 self.cue_deadline = segment.at_ms + CUE_MS;
@@ -1101,6 +1122,7 @@ impl Engine {
                         title: note.item.title,
                         source_date: note.item.source_date,
                         provider: note.item.provider.id().into(),
+                        unconfirmed: note.unconfirmed,
                     }),
                     about_focus: false,
                 });
@@ -1329,15 +1351,33 @@ impl Engine {
     /// its provider identity and revision, including across engine replacement.
     /// An unchanged import leaves a held cue and pending evaluation alone.
     pub fn set_notes(&mut self, notes: Vec<ContextItem>) {
+        self.set_prior_notes(notes.into_iter().map(|item| (item, None)).collect(), vec![]);
+    }
+
+    /// As `set_notes`, with the warning a reminder must carry for a copy
+    /// the last update check could not confirm, and the kept notes that are
+    /// held back from reminders. A displayed reminder keeps its words when
+    /// only the warning changes; the warning line itself is updated. A note
+    /// that is held back or removed withdraws its reminder as before.
+    pub fn set_prior_notes(
+        &mut self,
+        notes: Vec<(ContextItem, Option<crate::context::Unconfirmed>)>,
+        withheld: Vec<ContextItem>,
+    ) {
+        let withheld: Vec<String> = withheld
+            .iter()
+            .map(|item| format!("{}:{}", item.provider.id(), item.source_id))
+            .collect();
         let notes: Vec<_> = notes
             .into_iter()
-            .map(|item| NoteTerms {
+            .map(|(item, unconfirmed)| NoteTerms {
                 terms: note_terms(&item.title),
                 key: format!("{}:{}", item.provider.id(), item.source_id),
                 item,
+                unconfirmed,
             })
             .collect();
-        if self.notes == notes {
+        if self.notes == notes && self.withheld_notes == withheld {
             return;
         }
         self.invalidate_evaluation();
@@ -1347,16 +1387,36 @@ impl Engine {
         // than replacing words under the reader's eyes.
         let obsolete = self.state.cue.as_ref().is_some_and(|cue| {
             cue.note.is_some()
-                && !self
-                    .notes
-                    .iter()
-                    .any(|old| old.key == cue.source_id && notes.iter().any(|new| new == old))
+                && !self.notes.iter().any(|old| {
+                    old.key == cue.source_id
+                        && notes
+                            .iter()
+                            .any(|new| new.key == old.key && new.item == old.item)
+                })
         });
+        // A note that reminded, was held back and returns stays shown,
+        // unless it returns as a newer revision than the one that reminded.
+        for note in &notes {
+            if self.withheld_notes.contains(&note.key)
+                && self
+                    .reminded_revisions
+                    .iter()
+                    .any(|(key, revision)| *key == note.key && note.item.revision > *revision)
+            {
+                self.shown_notes.retain(|key| *key != note.key);
+                self.reminded_revisions.retain(|(key, _)| *key != note.key);
+            }
+        }
+        self.withheld_notes = withheld;
         self.notes = notes;
         self.processing_context_digest = evaluation::context_fingerprint(&self.notes);
         self.reconcile_processing_permission();
         let keys: Vec<&String> = self.notes.iter().map(|note| &note.key).collect();
-        self.shown_notes.retain(|key| keys.contains(&key));
+        let withheld = &self.withheld_notes;
+        self.shown_notes
+            .retain(|key| keys.contains(&key) || withheld.contains(key));
+        self.reminded_revisions
+            .retain(|(key, _)| keys.contains(&key) || withheld.contains(key));
         // Keep a refreshed note marked shown: no automatic replacement or
         // second reminder this session. Removal releases its copied evidence.
         if obsolete || self.reconcile_evaluated_sources() {
@@ -1365,6 +1425,22 @@ impl Engine {
             self.evaluated_cue = None;
             self.cooldown_until = self.state.elapsed_ms + self.cooldown();
             self.changed();
+        } else {
+            // Same note, different standing: keep the reminder, even held
+            // open, and bring its warning line up to date.
+            let warning = self.state.cue.as_ref().and_then(|cue| {
+                self.notes
+                    .iter()
+                    .find(|note| note.key == cue.source_id)
+                    .map(|note| note.unconfirmed)
+            });
+            let shown = self.state.cue.as_mut().and_then(|cue| cue.note.as_mut());
+            if let (Some(note), Some(warning)) = (shown, warning) {
+                if note.unconfirmed != warning {
+                    note.unconfirmed = warning;
+                    self.changed();
+                }
+            }
         }
     }
 
@@ -1380,6 +1456,8 @@ impl Engine {
         self.notes = previous.notes.clone();
         self.processing_context_digest = previous.processing_context_digest;
         self.shown_notes = previous.shown_notes.clone();
+        self.reminded_revisions = previous.reminded_revisions.clone();
+        self.withheld_notes = previous.withheld_notes.clone();
         self.reconcile_processing_permission();
     }
 
@@ -1561,16 +1639,18 @@ fn suggest(text: &str) -> Vec<(&'static str, String)> {
             .split_whitespace()
             .map(|word| word.trim_matches(|character: char| !character.is_alphanumeric()))
             .collect();
-        sentence_words.windows(2).any(|pair| {
+        sentence_words.windows(2).enumerate().any(|(index, pair)| {
             is_word(pair[0], "someone")
                 && ["can", "should", "could"]
                     .iter()
                     .any(|verb| is_word(pair[1], verb))
+                && !says_what_people_notice(&sentence_words[index + 1..])
         })
     }) {
         found.push(("Owner", "Who will take the first draft?".into()));
     }
-    if words.iter().any(|word| is_word(word, "soon")) {
+    if (0..words.len()).any(|index| is_word(words[index], "soon") && !farewell_soon(&words, index))
+    {
         found.push(("Timing", "What date should we aim for?".into()));
     }
     if words
@@ -1591,6 +1671,56 @@ fn suggest(text: &str) -> Vec<(&'static str, String)> {
         }
     }
     found
+}
+
+/// Whether the words from "can", "should", or "could" onwards, after
+/// "someone", make a general remark instead of leaving a task open: "someone
+/// can always tell when the bread is fresh", "someone should never have to
+/// ask", "someone could see it from the road". That is "always" or "never"
+/// next, or after "can" or "could" a verb of noticing. "Tell" counts only
+/// before a clause ("tell when", "tell that"), so "someone can tell the
+/// caterer" is still a task, and so is "someone could see to the booking".
+fn says_what_people_notice(words: &[&str]) -> bool {
+    let at = |index: usize| words.get(index).map(|word| word.to_lowercase());
+    let next = at(1).unwrap_or_default();
+    if matches!(next.as_str(), "always" | "never") {
+        return true;
+    }
+    if at(0).as_deref() == Some("should") {
+        return false;
+    }
+    let after = at(2).unwrap_or_default();
+    match next.as_str() {
+        "hear" | "notice" | "smell" | "feel" | "spot" => true,
+        "see" => after != "to",
+        "tell" => matches!(
+            after.as_str(),
+            "when" | "if" | "that" | "whether" | "by" | "from" | "how" | "what" | "why" | "where"
+        ),
+        _ => false,
+    }
+}
+
+/// Whether the "soon" at `index` belongs to a goodbye or a good wish, which
+/// sets no deadline: "see you all soon", "talk soon", "speak soon", "catch
+/// up soon", "get well soon". "See" must be followed by "you", "y'all", or
+/// "everyone" within the four words before "soon".
+fn farewell_soon(words: &[&str], index: usize) -> bool {
+    let before = |back: usize| {
+        index
+            .checked_sub(back)
+            .map(|at| words[at].to_lowercase().replace('’', "'"))
+            .unwrap_or_default()
+    };
+    if matches!(before(1).as_str(), "talk" | "speak" | "chat")
+        || (before(2) == "catch" && before(1) == "up")
+        || (before(2) == "get" && before(1) == "well")
+    {
+        return true;
+    }
+    (2..=4).any(|back| {
+        before(back) == "see" && matches!(before(back - 1).as_str(), "you" | "y'all" | "everyone")
+    })
 }
 
 /// The distinctive words of a note's title: alphabetic, at least
@@ -1988,9 +2118,10 @@ const HEDGES: [&str; 5] = ["maybe", "perhaps", "might", "probably", "possibly"];
 /// where it goes, which must end the sentence. "Let's leave the door open",
 /// "Let's table the proposal", and "Let's leave later" lack one of them and
 /// do not count; neither does a sentence with a second clause or one that
-/// keeps something open or sets time aside. It does not check what is being
-/// put off.
-fn defers(words: &[String]) -> bool {
+/// keeps something open or sets time aside. Returns the words for what is
+/// put off ("the cover choice", "that"); `deferred_subject` decides whether
+/// they are about the question on screen.
+fn defers(words: &[String]) -> Option<&[String]> {
     const OPENINGS: [&[&str]; 4] = [&["let's"], &["we'll"], &["we", "can"], &["we", "will"]];
     // Verbs that need an occasion after them to mean putting something off.
     const VERBS: [&[&str]; 6] = [
@@ -2027,13 +2158,10 @@ fn defers(words: &[String]) -> bool {
     let starts = |words: &[String], phrase: &[&str]| {
         words.len() >= phrase.len() && words.iter().zip(phrase).all(|(word, part)| word == part)
     };
-    let Some(rest) = OPENINGS
+    let rest = OPENINGS
         .iter()
         .find(|opening| starts(words, opening))
-        .map(|opening| &words[opening.len()..])
-    else {
-        return false;
-    };
+        .map(|opening| &words[opening.len()..])?;
     // Words that make the part between verb and occasion more than the
     // thing put off: a second clause ("… and leave the budget for later"),
     // keeping something open ("leave the vote open until next week"), or
@@ -2045,50 +2173,38 @@ fn defers(words: &[String]) -> bool {
     // The thing put off is one to four words, and the occasion ends the
     // sentence: "for later questions" is not an occasion.
     let put_off = |verbs: &[&[&str]], occasions: &[&[&str]]| {
-        verbs.iter().any(|verb| {
-            starts(rest, verb)
-                && occasions.iter().any(|occasion| {
-                    rest.len()
-                        .checked_sub(occasion.len())
-                        .filter(|at| (verb.len() + 1..=verb.len() + 4).contains(at))
-                        .is_some_and(|at| {
-                            starts(&rest[at..], occasion)
-                                && !rest[verb.len()..at]
-                                    .iter()
-                                    .any(|word| NOT_PUT_OFF.contains(&word.as_str()))
-                        })
-                })
+        verbs.iter().find_map(|verb| {
+            if !starts(rest, verb) {
+                return None;
+            }
+            occasions.iter().find_map(|occasion| {
+                let at = rest
+                    .len()
+                    .checked_sub(occasion.len())
+                    .filter(|at| (verb.len() + 1..=verb.len() + 4).contains(at))?;
+                let object = &rest[verb.len()..at];
+                (starts(&rest[at..], occasion)
+                    && !object
+                        .iter()
+                        .any(|word| NOT_PUT_OFF.contains(&word.as_str())))
+                .then_some(object)
+            })
         })
     };
     put_off(&VERBS, &OCCASIONS)
-        || put_off(&RETURNS, &OCCASIONS)
-        || put_off(&RETURNS, &RETURN_OCCASIONS)
+        .or_else(|| put_off(&RETURNS, &OCCASIONS))
+        .or_else(|| put_off(&RETURNS, &RETURN_OCCASIONS))
 }
 
-/// An explicit statement, at the start of a sentence, that the conversation
-/// is moving to another topic: "Moving on, ...", "OK, next item.", "Let's
-/// move on to ...", "On another note, ...". Putting the subject off to a
-/// later occasion counts too ("Let's leave that for another meeting"; see
-/// `defers`). Phrases inside a sentence ("Before we move on, ...", "The
-/// trucks are moving on Tuesday") do not count, nor do questions, negations,
-/// or hedges.
-fn topic_shift(text: &str) -> bool {
-    const OPENINGS: [&[&str]; 9] = [
-        &["moving", "on"],
-        &["let's", "move", "on"],
-        &["next", "item"],
-        &["next", "topic"],
-        &["on", "another", "note"],
-        &["on", "a", "different", "note"],
-        &["switching", "topics"],
-        &["changing", "topics"],
-        &["new", "topic"],
-    ];
+/// The statements of a line as lowercase words, without the short words
+/// people say first ("OK", "so", "anyway"). Sentences that end with or open
+/// like a question, or contain a negation or hedge, are left out.
+fn plain_statements(text: &str) -> Vec<Vec<String>> {
     // Short words people say before changing topic.
     const LEAD_INS: [&str; 7] = ["ok", "okay", "alright", "right", "so", "great", "anyway"];
     text.split_inclusive(['.', '?', '!', ';'])
         .filter(|sentence| !sentence.trim_end().ends_with('?'))
-        .any(|sentence| {
+        .filter_map(|sentence| {
             let words: Vec<String> = sentence
                 .split_whitespace()
                 .map(|word| {
@@ -2104,7 +2220,7 @@ fn topic_shift(text: &str) -> bool {
                 .iter()
                 .take_while(|word| LEAD_INS.contains(&word.as_str()))
                 .count();
-            let words = &words[start..];
+            let words = words[start..].to_vec();
             let excluded = words
                 .first()
                 .is_none_or(|first| QUESTION_OPENERS.contains(&first.as_str()))
@@ -2113,18 +2229,65 @@ fn topic_shift(text: &str) -> bool {
                         || word.ends_with("n't")
                         || HEDGES.contains(&word.as_str())
                 });
-            // Moving to the next slide or page continues the same topic.
-            let presentation = words.windows(2).any(|pair| {
-                pair[0] == "next" && matches!(pair[1].as_str(), "slide" | "page" | "screen")
-            });
-            !excluded
-                && !presentation
-                && (defers(words)
-                    || OPENINGS.iter().any(|opening| {
-                        words
-                            .starts_with(&opening.iter().map(|w| w.to_string()).collect::<Vec<_>>())
-                    }))
+            (!excluded).then_some(words)
         })
+        .collect()
+}
+
+/// Whether a line puts off the subject of a question raised from `source`:
+/// a sentence that `defers` something, where what is put off is "that",
+/// "it", or "this", or shares a distinctive word (five letters or more, not
+/// a common meeting word) with the source line. "Let's leave the poster
+/// design for another meeting" says nothing about a question raised from
+/// "Someone should write the welcome letter", so that question stays. This
+/// is a word match: a short or differently worded subject ("the rota",
+/// "the covers" for "cover") is missed, which leaves the question in place.
+fn deferred_subject(text: &str, source: &str) -> bool {
+    // Words about the conversation itself, which say nothing about a subject.
+    const GENERIC: [&str; 8] = [
+        "someone", "somebody", "anyone", "everyone", "question", "matter", "whole", "entire",
+    ];
+    let source_terms: Vec<String> = note_terms(source)
+        .into_iter()
+        .filter(|term| !GENERIC.contains(&term.as_str()))
+        .collect();
+    plain_statements(text).iter().any(|words| {
+        defers(words).is_some_and(|object| {
+            object.iter().any(|word| {
+                matches!(word.as_str(), "that" | "it" | "this") || source_terms.contains(word)
+            })
+        })
+    })
+}
+
+/// An explicit statement, at the start of a sentence, that the conversation
+/// is moving to another topic: "Moving on, ...", "OK, next item.", "Let's
+/// move on to ...", "On another note, ...". Phrases inside a sentence
+/// ("Before we move on, ...", "The trucks are moving on Tuesday") do not
+/// count, nor do questions, negations, or hedges. Putting the question's
+/// own subject off to a later occasion is handled by `deferred_subject`.
+fn topic_shift(text: &str) -> bool {
+    const OPENINGS: [&[&str]; 9] = [
+        &["moving", "on"],
+        &["let's", "move", "on"],
+        &["next", "item"],
+        &["next", "topic"],
+        &["on", "another", "note"],
+        &["on", "a", "different", "note"],
+        &["switching", "topics"],
+        &["changing", "topics"],
+        &["new", "topic"],
+    ];
+    plain_statements(text).iter().any(|words| {
+        // Moving to the next slide or page continues the same topic.
+        let presentation = words.windows(2).any(|pair| {
+            pair[0] == "next" && matches!(pair[1].as_str(), "slide" | "page" | "screen")
+        });
+        !presentation
+            && OPENINGS.iter().any(|opening| {
+                words.starts_with(&opening.iter().map(|w| w.to_string()).collect::<Vec<_>>())
+            })
+    })
 }
 
 /// How soon after a line a correction can take it back.
@@ -3018,12 +3181,14 @@ mod tests {
     #[test]
     fn putting_the_subject_off_to_a_later_occasion_withdraws_an_unread_question() {
         for change in [
-            "Let's leave the cover choice for another meeting. Now, the urgent security incident.",
+            // "That", "it", or "this" stands for what was just said.
             "OK, let's park that for next time.",
-            "We'll save the rota for the next meeting.",
-            "We can postpone the signage question until later.",
+            "We'll save this for the next meeting.",
+            "We can postpone it until later.",
             "Let’s come back to that later.",
+            // Or what is put off shares a word with the question's line.
             "So we'll revisit the draft next time.",
+            "Let's leave the Draft question for another meeting. Now, the budget.",
         ] {
             let mut e = play(&[
                 (1_000, "Someone can take the first draft."),
@@ -3035,6 +3200,49 @@ mod tests {
             assert!(e.state.cue.is_none(), "still shown after: {change}");
             assert!(e.state.notes.is_empty(), "nothing is kept: {change}");
         }
+    }
+
+    #[test]
+    fn putting_off_something_else_leaves_the_question_and_its_history() {
+        for line in [
+            // Another subject entirely.
+            "Let's leave the poster design for another meeting.",
+            "We'll save the rota for the next meeting.",
+            "We can postpone the signage question until later.",
+            // Words shared only with the fixed question, not the line.
+            "Let's leave the first item for later.",
+            // A different form of the word is missed, which keeps the question.
+            "Let's leave the drafts for later.",
+            // Words about the conversation are not a subject.
+            "Let's leave someone else's question for later.",
+        ] {
+            let mut e = play(&[(1_000, "Someone can take the first draft."), (4_000, line)]);
+            e.advance(4_000);
+            assert!(e.state.cue.is_some(), "withdrawn after: {line}");
+        }
+        // With no question on screen, putting something off is an ordinary
+        // line: a question dismissed a moment ago is not asked again.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (12_000, "Let's leave that for another meeting."),
+            (30_000, "Someone can take the first draft."),
+        ]);
+        e.advance(1_000);
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&id, Response::Dismiss).unwrap();
+        e.advance(29_000);
+        assert!(e.state.cue.is_none(), "repeated within two minutes");
+        // An explicit topic change still starts the history afresh.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (12_000, "Moving on to the newsletter."),
+            (30_000, "Someone can take the first draft."),
+        ]);
+        e.advance(1_000);
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&id, Response::Dismiss).unwrap();
+        e.advance(29_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Owner");
     }
 
     #[test]
@@ -3077,7 +3285,7 @@ mod tests {
 
     #[test]
     fn putting_something_off_follows_the_topic_change_lifecycle() {
-        let deferral = "Let's leave the cover choice for another meeting.";
+        let deferral = "Let's leave that for another meeting.";
         // A question being read stays in place.
         let mut e = play(&[
             (1_000, "Someone can take the first draft."),
@@ -3167,6 +3375,113 @@ mod tests {
             e.advance(4_000);
             assert!(e.state.cue.is_some(), "withdrawn after: {line}");
         }
+    }
+
+    #[test]
+    fn remarks_about_what_people_notice_and_goodbyes_raise_no_question() {
+        for line in [
+            "Someone can always tell when the bread is fresh. It was lovely last week.",
+            "Someone can never find the stapler in here.",
+            "Someone should never have to ask twice.",
+            "Someone could always tell he was joking.",
+            "Someone can tell when the paint is still wet.",
+            "Someone could hear it from the car park.",
+            "Someone can see the banner from the road.",
+            "Someone could smell the bonfire all afternoon.",
+            "Lovely. We'll see you all soon, thanks for coming.",
+            "See you soon!",
+            "See everyone soon.",
+            "See you both again soon.",
+            "Talk soon.",
+            "Speak soon, and thanks again.",
+            "Let’s catch up soon.",
+            "Get well soon, Maya.",
+        ] {
+            let e = play_statement(line);
+            assert!(e.state.cue.is_none(), "raised by: {line}");
+        }
+    }
+
+    #[test]
+    fn open_tasks_and_vague_deadlines_near_those_phrases_still_raise_a_question() {
+        for (line, kind) in [
+            ("Someone can take the first draft.", "Owner"),
+            ("Someone can tell the caterer about the change.", "Owner"),
+            ("Someone could see to the hall booking.", "Owner"),
+            ("Someone should hear back from the printer first.", "Owner"),
+            (
+                "Someone can always tell, but someone should fix it.",
+                "Owner",
+            ),
+            ("We need the draft soon.", "Timing"),
+            ("The printer wants the files soon.", "Timing"),
+            (
+                "See you soon, and the report needs to go out soon.",
+                "Timing",
+            ),
+            ("I'll see the printer and it should come soon.", "Timing"),
+            ("We should talk about it soon.", "Timing"),
+        ] {
+            let e = play_statement(line);
+            let cue = e
+                .state
+                .cue
+                .as_ref()
+                .unwrap_or_else(|| panic!("nothing raised by: {line}"));
+            assert_eq!(cue.kind, kind, "{line}");
+        }
+    }
+
+    #[test]
+    fn a_remark_or_goodbye_leaves_other_cue_decisions_alone() {
+        // A question on screen stays through a remark and a goodbye, and an
+        // answer still withdraws it.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (3_000, "Someone can always tell when it's rushed."),
+            (5_000, "Talk soon."),
+            (7_000, "I'll take it."),
+        ]);
+        e.advance(1_000);
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.advance(4_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().id, id);
+        e.advance(2_000);
+        assert!(e.state.cue.is_none());
+        // A topic change still withdraws, and the goodbye after it adds
+        // nothing; neither reaches the notes.
+        let mut e = play(&[
+            (1_000, "We need the draft soon."),
+            (4_000, "Moving on to the budget."),
+            (20_000, "See you all soon."),
+        ]);
+        e.advance(1_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Timing");
+        e.advance(19_000);
+        assert!(e.state.cue.is_none());
+        assert!(e.state.notes.is_empty());
+        // A question asked of the user is still shown; one put to someone
+        // else by name, or a repeat within two minutes, still is not.
+        let mut e = named_session();
+        e.ingest(e.session(), live("w1", 1_000, "Sam, will we see you soon?"))
+            .unwrap();
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
+        let mut e = named_session();
+        e.ingest(
+            e.session(),
+            live("w1", 1_000, "Alex, can someone take the draft soon?"),
+        )
+        .unwrap();
+        assert!(e.state.cue.is_none());
+        let mut e = play(&[
+            (1_000, "We need the draft soon."),
+            (25_000, "We really need it soon."),
+        ]);
+        e.advance(1_000);
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&id, Response::Dismiss).unwrap();
+        e.advance(24_000);
+        assert!(e.state.cue.is_none(), "repeated within two minutes");
     }
 
     #[test]
@@ -4055,6 +4370,129 @@ mod tests {
             .collect();
         assert_eq!(results, recorded);
         assert_eq!(matched, 9);
+    }
+
+    /// Runs the phrase rules on held-out fictional cases whose labels were
+    /// written and committed before the rules were run on them
+    /// (`scripts/fixtures/cue-rules-held-out.json`). The labels are the
+    /// rules lane's and await the owner's review. Each case starts from its
+    /// own cue where it lists one, with the rule type the fixture names, and
+    /// uses the session name where it gives one.
+    #[test]
+    fn rules_on_the_held_out_fictional_cases() {
+        let suite: serde_json::Value = serde_json::from_str(include_str!(
+            "../../scripts/fixtures/cue-rules-held-out.json"
+        ))
+        .unwrap();
+        let mut results = vec![];
+        let mut matched = 0;
+        let cases = suite["cases"].as_array().unwrap();
+        for case in cases {
+            let mut e = Engine::live();
+            e.start().unwrap();
+            if let Some(name) = case["userName"].as_str() {
+                e.set_user_name(Some(name.into())).unwrap();
+            }
+            let existing = &case["existingCue"];
+            let seed = (!existing.is_null()).then(|| {
+                (
+                    existing["ruleType"].as_str().unwrap(),
+                    existing["text"].as_str().unwrap(),
+                    existing["sourceIds"][0].as_str().unwrap(),
+                )
+            });
+            let mut seeded: Option<String> = None;
+            let mut action = "quiet";
+            for (index, event) in case["events"].as_array().unwrap().iter().enumerate() {
+                let at = 1_000 + index as u64 * 2_000;
+                e.advance(at - e.state.elapsed_ms);
+                let id = event["id"].as_str().unwrap();
+                let text = event["text"].as_str().unwrap();
+                let before = e.state.cue.clone();
+                e.ingest(e.session(), live(id, at, text)).unwrap();
+                if let (Some(cue), None) = (&before, &e.state.cue) {
+                    action = if resolves(&cue.kind, text) {
+                        "resolved"
+                    } else {
+                        "withdraw"
+                    };
+                }
+                if let Some((kind, question, source)) = seed.filter(|(_, _, source)| *source == id)
+                {
+                    let cue_id = format!("{}:{id}:fixture", e.generation);
+                    e.cue_deadline = at + CUE_MS;
+                    e.unshown = None;
+                    e.last_shown.retain(|(shown, _)| shown != kind);
+                    e.last_shown.push((kind.into(), at));
+                    e.state.cue = Some(Cue {
+                        sources: Vec::new(),
+                        id: cue_id.clone(),
+                        kind: kind.into(),
+                        question: question.into(),
+                        evidence: text.into(),
+                        source_id: source.into(),
+                        remaining_ms: CUE_MS,
+                        total_ms: CUE_MS,
+                        held: false,
+                        expanded: false,
+                        resolved_by: None,
+                        note: None,
+                        about_focus: false,
+                    });
+                    seeded = Some(cue_id);
+                }
+            }
+            match (&seeded, &e.state.cue) {
+                (Some(id), Some(cue)) if &cue.id != id => action = "second cue",
+                (None, Some(_)) => action = "show",
+                _ => {}
+            }
+            let expected = case["expected"]["action"].as_str().unwrap();
+            let id = case["id"].as_str().unwrap();
+            eprintln!("{id:36} rules={action:10} expected={expected}");
+            matched += usize::from(action == expected);
+            results.push((id.to_string(), action));
+            assert!(e.state.notes.is_empty(), "{id}");
+        }
+        // Recorded 13 November 2026 in docs/cue-intelligence.md. Update it
+        // deliberately when the rules change; never edit a label to match.
+        let recorded = [
+            ("deferral-next-month", "quiet"),
+            ("deferral-look-alike", "quiet"),
+            ("deferral-of-something-else", "quiet"),
+            ("correction-cancelled", "withdraw"),
+            ("correction-of-something-else", "quiet"),
+            ("correction-without-a-phrase", "quiet"),
+            ("answered-at-once", "quiet"),
+            ("answered-in-the-same-line", "show"),
+            ("answered-in-other-words", "quiet"),
+            ("asked-of-someone-else", "quiet"),
+            ("handed-to-someone-else", "quiet"),
+            ("asked-of-the-user", "show"),
+            ("asked-of-the-user-without-a-comma", "quiet"),
+            ("you-could-be-either", "quiet"),
+            ("name-mentioned-not-addressed", "quiet"),
+            ("repeat-in-other-words", "quiet"),
+            ("repeat-of-a-group-question", "show"),
+            ("topic-change-in-other-words", "quiet"),
+            ("topic-change-look-alike", "quiet"),
+            ("plain-idiom", "quiet"),
+            ("plain-goodbye", "quiet"),
+            ("plain-approval", "quiet"),
+            ("missing-owner-in-other-words", "quiet"),
+        ];
+        let recorded: Vec<(String, &str)> = recorded
+            .iter()
+            .map(|(id, action)| (id.to_string(), *action))
+            .collect();
+        assert_eq!(results, recorded);
+        assert_eq!((matched, cases.len()), (16, 23));
+        // Doing nothing at all would match every case labeled quiet.
+        let quiet = cases
+            .iter()
+            .filter(|case| case["expected"]["action"] == "quiet")
+            .count();
+        assert_eq!(quiet, 14);
     }
 
     #[test]

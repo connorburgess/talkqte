@@ -65,6 +65,43 @@ Acceptance: eight Chromium/WebKit import/removal checks, frontend build/formatti
 Remaining release checks: confirm one real selected-note import and removal in the native app, inspect an explicitly authorized account session's data flow without retaining content, and verify provider-side disconnect/retention expectations separately. Imported-context usefulness remains a separate human validation task.
 
 
+### What is established (13 November 2026)
+
+An audit compared each promise in [PRIVACY.md](../PRIVACY.md), the README and these notes with the code. It found two inaccurate statements, both since corrected: sign-in requests carried the HTTP library's user agent instead of `TalkQTE`, and the clip replay tool printed cue text that can repeat recognized speech. The lists below record what evidence each remaining promise has. All tests use fictional accounts, notes and credentials on loopback servers; none uses a real account, microphone or model.
+
+**Established by test**
+
+- **Companion window:** its capability grants no export, note editing, name, focus, import, Granola, model, processing or capture-start command. Its payload carries the cue, that cue's source line and display state, not the notebook, the rest of the transcript, the name, focus lines or an unrelated imported note.
+- **Export:** it holds notes and the demo transcript, never the name, focus lines or imported notes. A live session is refused while running and after Stop, and starting one drops an earlier demo preview.
+- **Interface:** the production content security policy allows connections only to the app's own IPC. In the browser preview, typed notes, focus and a name leave local storage, session storage, cookies, IndexedDB and the Cache API empty, every request goes to the page's own origin, and a reload shows nothing that was typed.
+- **Granola requests:** discovery, registration, the token exchange and every MCP request name `TalkQTE` as the user agent. The token travels only as a bearer header, never in an address or body, and is absent from `Debug` output.
+- **Disconnect during sign-in:** a sign-in waiting for the browser ends as cancelled without exchanging a code, and a connection that opens after Disconnect is dropped without another request.
+- **Connection status:** the notebook receives whether a connection is open, the server's tool names, whether an update check is offered, and the state of kept notes. A listing that names the signed-in account and another participant passes neither to the status nor to the chooser.
+- **Files and output:** one whole session (sign-in, listing, a selected note, a focus suggestion, a failed request, disconnect) runs in a child process whose home, app-data and temporary folders point at an empty folder. The folder stays empty and the process prints nothing. With `TALKQTE_GRANOLA_TRACE` set, the trace appears and contains no token, sign-in code, client ID, account, title or note text.
+- **Error messages:** provider failures, a refused sign-in, an unreadable or malformed notes file and a missing or damaged model each produce a fixed message with no path, token, account or file content, even when the failing reply or file contains them.
+- **Microphone status:** the snapshot both windows receive has six fields: a revision counter, a coarse status and activity, whether Start is available, a message and a display name. It holds no list of samples, no nested device description and no level.
+- **Model download:** against a fictional loopback file server, a request is a plain `GET` with no query or body, the `TalkQTE` user agent, a range header only when resuming, and no header beyond those any file request carries. The app's own fetcher refuses a plain-HTTP address before connecting.
+- **Live session:** two sessions with a scripted recognizer in place of the speech model (one stopped with a flush, one ended with audio queued) run in the same kind of isolated child process. The folder stays empty and neither the recognized line nor the question it raised is printed.
+- **Update check:** it is not offered for a Granola connection, and keeping a note leaves the status unchanged.
+- **Earlier checks:** disconnect and reconnect, trace masking, note removal, selection-only import, model checksum and partial-download cleanup, microphone stop and release in synthetic tests, and bounded audio buffers.
+
+**Upheld by code, without a test**
+
+- The audio callback retains no sample; the isolated live-session test starts after the capture callback, at the audio tap.
+- With the real speech model, recognition writes no file: the isolated test replaces the model with a scripted recognizer.
+- whisper.cpp's own logging is routed away from stderr.
+- A notes file or export destination comes only from a native dialog; no command accepts a path from the interface.
+- No telemetry or analytics dependency is present.
+- Release is logical: dropped tokens and removed notes are not overwritten in memory.
+
+**Still needing a real account or device**
+
+- Which hosts a real Granola session contacts, how redirects behave, what the provider returns and retains, and what Disconnect leaves at the provider.
+- A built app after a real session and after quit: the contents of its data folder, webview storage, and operating-system logs or crash reports.
+- Microphone release, permission and device loss on real hardware, and whether the companion is visible to screen sharing.
+
+Limits of the isolated tests: they cover the Granola adapter and the live session runner, not the native command layer, the capture callback, the speech model or the webview, and they redirect folders through environment variables, so a write to an unrelated absolute path would go unnoticed. No such write exists in either module's source.
+
 ## Disconnect while notes are loading
 
 11 November 2026. The notebook previously disabled **Disconnect Granola** while a note listing was pending, even though the native connection already supported retirement without waiting for that request. A headless regression reproduced the disabled control before the fix.
@@ -137,3 +174,21 @@ PLAYWRIGHT_PORT=1432 npm test -- tests/granola-updates.spec.ts
 ```
 
 Unverified: whether Granola exposes a workspace identity, when an edited note becomes visible through `get_meetings`, what it returns for a note that was deleted, unshared or moved, real timeout and rate-limit behavior, native VoiceOver, and whether freshness labels help anyone during a conversation.
+
+## Reminders from copies a check could not confirm
+
+13 November 2026 (N2). The [reminder policy](selected-note-refresh-plan.md#reminders-from-copies-a-check-could-not-confirm) is implemented and checked with fictional providers only. The signed-in Granola connection cannot run a check, so the app's behavior on a real account is unchanged. No account, network, capture or model was used.
+
+Rust acceptance calls the store, the check and the cue engine directly with a scripted fictional source and a named clock. A line naming a note raises a reminder with no warning before any check and after a confirming one. After a check in which one note is not returned and another is reported as withdrawn, the first still reminds and carries the time it was last confirmed, the second raises no reminder, and both copies remain in the store. A later check that returns both restores plain reminders, which is the control for the withheld case. Offline, expired, rate-limited and unreadable-format checks keep a never-confirmed copy eligible with no confirmation time; older, undated and unreadable replies keep the earlier confirmation time. Withdrawn app access holds back every Granola copy while a file note with the same identifier still reminds. A later check that fails or omits the notes, and disconnecting, do not restore them. An import that returns an older or unreadable reply does not either; one that returns the note at the kept or a newer revision does. A reminder held open for reading stays, with the same words, when a check fails or omits its note: its warning appears, clears after a confirming check and returns with the confirmation time, each time in place; a withdrawal still withdraws it. A note that reminded, was withdrawn and was restored does not remind again at the same revision and does at a newer one. An import that returns every note of a pending check ends it as "imported again", a partial one lets the check continue for the rest, and Stop is still reported as a stop.
+
+A further set of tests runs the steps the app's commands take on the app's own runtime, without a window: an import reaches the engine; a check that changes no copy still adds the warning or holds a note back; a check that withdraws a displayed reminder reports that the windows must be told; importing a withheld note again lets it remind, and an older reply does not; a retired check changes nothing. Reverting any of the three calls (policy on publish, republish after a check, import merge) fails one of them.
+
+Browser acceptance renders fictional reminders in the notebook and the companion: the warning and its time are visible without opening **Why?**, "No check on record has confirmed it" appears when there is no time, and a reminder without the flag shows no warning. In the panel, a withdrawn note says it is kept but not used for reminders and never uses the word "deleted"; a not-returned note says a reminder from it will carry a warning; a later check that cannot reach the provider leaves the withdrawn note withheld; after disconnecting, confirmations disappear while both unconfirmed labels stay; importing the notes again clears them. The browser fixture restates the rules in TypeScript and does not run the engine, so it shows wording and layout, not eligibility.
+
+```sh
+cargo test --manifest-path src-tauri/Cargo.toml --locked --lib context_refresh
+cargo test --manifest-path src-tauri/Cargo.toml --locked --lib context_runtime
+PLAYWRIGHT_PORT=1432 npm test -- tests/granola-unverified-reminders.spec.ts tests/granola-updates.spec.ts
+```
+
+Unverified: whether Granola reports a withdrawn note at all, the commands' own locking and event emission, the native companion's size with the extra line, screen-reader announcement of the warning, evaluated cues that cite prior notes, and whether people find the warning useful.

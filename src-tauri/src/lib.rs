@@ -7,6 +7,7 @@ mod companion_macos;
 pub mod context;
 mod context_import;
 pub mod context_refresh;
+mod context_runtime;
 pub mod cue_evaluator;
 pub mod engine;
 pub mod granola;
@@ -716,10 +717,13 @@ struct PickedNotes {
 
 fn publish_context(app: &tauri::AppHandle, runtime: &mut Runtime) {
     // The engine may quote an imported note as a context reminder.
-    let before = runtime.engine.state.revision;
-    runtime.engine.set_notes(runtime.context.items().to_vec());
-    runtime.processing_reviews.reconcile(&runtime.engine);
-    if runtime.engine.state.revision != before {
+    let cue_changed = runtime.sync_prior_notes();
+    emit_context(app, runtime, cue_changed);
+}
+
+/// Tells the windows about prior notes the engine has already been given.
+fn emit_context(app: &tauri::AppHandle, runtime: &mut Runtime, cue_changed: bool) {
+    if cue_changed {
         // A changed or removed note may be visible in either window, even held.
         publish(app, runtime);
     }
@@ -828,8 +832,8 @@ async fn import_context_notes(
         _ => "The selected notes could not be read. Nothing was imported. Try again, or cancel to choose other notes.",
     })?;
     runtime.pending_import = None;
-    let outcome = runtime.context.merge(provider, &ids, fetched);
-    publish_context(&app, &mut runtime);
+    let (outcome, cue_changed) = runtime.merge_imported_notes(provider, &ids, fetched);
+    emit_context(&app, &mut runtime, cue_changed);
     Ok(outcome)
 }
 
@@ -931,17 +935,11 @@ fn granola_error(error: &context::SourceError) -> String {
 /// is read until they list and choose notes; the tokens stay in memory.
 #[tauri::command]
 async fn connect_granola(state: tauri::State<'_, AppState>) -> Result<GranolaStatus, String> {
-    let cancel = Arc::new(AtomicBool::new(false));
-    {
-        let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-        if runtime.granola.is_some() {
-            return Err("Disconnect Granola before connecting again.".into());
-        }
-        if runtime.granola_sign_in.is_some() {
-            return Err("A Granola sign-in is already in progress.".into());
-        }
-        runtime.granola_sign_in = Some(cancel.clone());
-    }
+    let cancel = state
+        .0
+        .lock()
+        .map_err(|_| "The notebook is unavailable.")?
+        .begin_granola_sign_in()?;
     let waiting = cancel.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let tokens = granola::sign_in(
@@ -955,15 +953,64 @@ async fn connect_granola(state: tauri::State<'_, AppState>) -> Result<GranolaSta
     })
     .await
     .map_err(|_| "The sign-in could not finish.".to_string());
-    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-    runtime.granola_sign_in = None;
-    let connection = result??;
-    // A cancel that arrived after the browser returned still wins.
-    if cancel.load(Ordering::Relaxed) {
-        return Err("Sign-in cancelled.".into());
+    state
+        .0
+        .lock()
+        .map_err(|_| "The notebook is unavailable.")?
+        .finish_granola_sign_in(&cancel, result.and_then(|opened| opened))
+}
+
+impl Runtime {
+    /// Registers a sign-in and returns the flag that cancels it; one at a
+    /// time, and never beside an open connection.
+    fn begin_granola_sign_in(&mut self) -> Result<Arc<AtomicBool>, String> {
+        if self.granola.is_some() {
+            return Err("Disconnect Granola before connecting again.".into());
+        }
+        if self.granola_sign_in.is_some() {
+            return Err("A Granola sign-in is already in progress.".into());
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.granola_sign_in = Some(cancel.clone());
+        Ok(cancel)
     }
-    runtime.granola = Some(granola::Shared::new(connection));
-    Ok(granola_status_now(&runtime))
+
+    /// Ends the sign-in that `cancel` belongs to and keeps its connection,
+    /// unless it failed or was cancelled.
+    fn finish_granola_sign_in(
+        &mut self,
+        cancel: &AtomicBool,
+        result: Result<granola::Connection, String>,
+    ) -> Result<GranolaStatus, String> {
+        self.granola_sign_in = None;
+        let connection = result?;
+        // A cancel that arrived after the browser returned still wins.
+        if cancel.load(Ordering::Relaxed) {
+            return Err("Sign-in cancelled.".into());
+        }
+        self.granola = Some(granola::Shared::new(connection));
+        Ok(granola_status_now(self))
+    }
+
+    /// Forgets the Granola session and cancels a sign-in still waiting for
+    /// the browser. Imported notes stay.
+    fn disconnect_granola(&mut self) -> GranolaStatus {
+        if let Some(connection) = self.granola.take() {
+            connection.disconnect();
+        }
+        self.refresh.disconnect();
+        if let Some(cancel) = &self.granola_sign_in {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        if self
+            .pending_import
+            .as_ref()
+            .is_some_and(|source| source.provider() == context::Provider::Granola)
+        {
+            self.pending_import = None;
+        }
+        granola_status_now(self)
+    }
 }
 
 #[tauri::command]
@@ -1093,11 +1140,9 @@ async fn check_granola_updates(
         .map_or(0, |elapsed| elapsed.as_millis() as u64);
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
     let runtime = &mut *runtime;
-    let report = runtime
-        .refresh
-        .apply(&ticket, result, &mut runtime.context, now_ms);
-    if report.store_changed {
-        publish_context(&app, runtime);
+    let (report, cue_changed) = runtime.finish_update_check(&ticket, result, now_ms);
+    if let Some(cue_changed) = cue_changed {
+        emit_context(&app, runtime, cue_changed);
     }
     Ok(report)
 }
@@ -1115,22 +1160,11 @@ fn stop_granola_update_check(state: tauri::State<AppState>) {
 /// would for a file; nothing is written back.
 #[tauri::command]
 fn disconnect_granola(state: tauri::State<AppState>) -> Result<GranolaStatus, String> {
-    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-    if let Some(connection) = runtime.granola.take() {
-        connection.disconnect();
-    }
-    runtime.refresh.disconnect();
-    if let Some(cancel) = &runtime.granola_sign_in {
-        cancel.store(true, Ordering::Relaxed);
-    }
-    if runtime
-        .pending_import
-        .as_ref()
-        .is_some_and(|source| source.provider() == context::Provider::Granola)
-    {
-        runtime.pending_import = None;
-    }
-    Ok(granola_status_now(&runtime))
+    state
+        .0
+        .lock()
+        .map(|mut runtime| runtime.disconnect_granola())
+        .map_err(|_| "The notebook is unavailable.".into())
 }
 
 /// A live session's parts: the engine session it feeds, the microphone start
@@ -1519,6 +1553,12 @@ pub fn run() {
             }
         });
 }
+
+#[cfg(test)]
+mod granola_privacy_tests;
+
+#[cfg(test)]
+mod test_isolation;
 
 #[cfg(test)]
 mod carry_over_tests {

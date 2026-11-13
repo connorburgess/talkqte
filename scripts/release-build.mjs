@@ -13,6 +13,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMain } from './is-main.mjs';
 import { preflight } from './release-preflight.mjs';
 
 const REPOSITORY = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -40,11 +41,12 @@ export function pathRemaps({ home, cargoHome, repository, targetDir }) {
   return unique;
 }
 
-/** Whether a bundle was written by a build that began at `startedMs`. The
- * bundler rewrites Info.plist every time, even when cargo had nothing to
- * recompile, so the newer of it and the executable is compared. */
+/** Whether a bundle was written by a build that began at `startedMs`. Every
+ * run of `tauri build` rebuilds the frontend, recompiles the app crate and
+ * rewrites both Info.plist and the executable, even when no source changed
+ * (observed on two consecutive runs), so each of them must be new. */
 export function builtSince(startedMs, ...modifiedMs) {
-  return Math.max(...modifiedMs) >= startedMs;
+  return modifiedMs.length > 0 && Math.min(...modifiedMs) >= startedMs;
 }
 
 /** The environment for the build: existing flags are kept and extended. */
@@ -88,7 +90,7 @@ export function bundlePath({ targetDir, args, productName }) {
   );
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
   const run = (command, commandArgs, options = {}) => {
     const result = spawnSync(command, commandArgs, {
@@ -157,13 +159,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
   const { findings, passed } = preflight({ app, strictPaths: true });
+  const debug = args.includes('--debug') || args.includes('-d');
   const label = { ok: 'ok  ', fail: 'FAIL', note: 'note' };
   for (const { level, check, message } of findings)
     console.log(`${label[level]}  ${check}: ${message}`);
   console.log(
     passed
       ? `\nBuilt ${app}\nPre-flight passed. The bundle is not signed for distribution unless you supplied a Developer ID; see docs/release-path.md.`
-      : '\nThe build finished but its pre-flight failed.',
+      : `\nThe build finished but its pre-flight failed.${debug ? ' A debug build always fails the build-paths check: its debugging records point at object files in the build folder and the Rust toolchain, which path remapping does not change. Release builds do not carry them.' : ''}`,
   );
   process.exit(passed ? 0 : 1);
 }

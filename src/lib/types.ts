@@ -37,7 +37,13 @@ export interface Cue {
     sources?: CueSource[];
   } | null;
   /** Set for a context reminder: the imported note it quotes. */
-  note: { title: string; sourceDate: string; provider: string } | null;
+  note: {
+    title: string;
+    sourceDate: string;
+    provider: string;
+    /** Set when the last update check could not confirm the quoted copy. */
+    unconfirmed?: { lastConfirmedMs: number | null };
+  } | null;
   /** The line uses words from a focus line: shown sooner, kept longer. */
   aboutFocus: boolean;
 }
@@ -108,6 +114,7 @@ export interface NoteFreshness {
   state: 'current' | 'updated' | 'notVerified';
   reason:
     | 'missing'
+    | 'withdrawn'
     | 'unversioned'
     | 'older'
     | 'unreadable'
@@ -128,6 +135,7 @@ export interface UpdateCheckReport {
   status:
     | 'checked'
     | 'cancelled'
+    | 'reimported'
     | 'timedOut'
     | 'workspaceUnverified'
     | 'workspaceChanged'
