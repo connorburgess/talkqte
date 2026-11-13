@@ -33,6 +33,11 @@ jobs:
           CONTRIBUTION_BASE: ${{ github.event.pull_request.base.sha }}
           CONTRIBUTION_HEAD: ${{ github.event.pull_request.head.sha }}
         run: node scripts/check-contributions.mjs
+      - name: Check documentation links and source-backed facts
+        env:
+          CONTRIBUTION_BASE: ${{ github.event.pull_request.base.sha }}
+          CONTRIBUTION_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/check-docs.mjs
 
   frontend:
     name: Frontend and browser behavior
@@ -49,6 +54,7 @@ jobs:
       - run: npm ci
       - run: npm run test:contributions
       - run: npm run test:cue-lab
+      - run: npm run test:docs
       - run: npm run format:check
       - run: npm run build
       - run: npx playwright install --with-deps chromium webkit

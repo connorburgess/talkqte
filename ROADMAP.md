@@ -6,6 +6,27 @@ Each check-off includes a [capability and documentation review](docs/product-rea
 
 The product goal is timely context that helps someone stay grounded and respond during the conversation. Clarification questions are the first bounded cue type. Saving and note-taking are secondary use cases to validate, not required proof of value. Current public presentation should explain a clearly labeled fictional concept and invite people to follow development; recruitment and downloads remain later stages.
 
+## Current focus
+
+Reviewed against [PRODUCT.md](PRODUCT.md) on 12 November 2026. The review found three gaps between this plan and the product goal:
+
+- **The demo did not show the idea.** Its cards were phrase-rule questions and word-for-word quotes about what had just been said. The goal is timely context from sources the person chose, such as their prior notes. A context reminder appeared only after importing a note by hand.
+- **Recent work went into capture plumbing and safety boundaries.** Selected-application audio, native clocks and the evaluator boundary are each tested offline, but nothing yet joins them into the first technical milestone: both sides of a call, transcribed locally, producing one cue.
+- **No item covered the interface for a real meeting.** The notebook is a prototype surface built around the fictional demo.
+
+Work is ordered to close those gaps. Items further down this file remain valid, and this order decides what is picked next:
+
+1. **Make the fictional demo show the idea**: voices, a lighter cue card, cues grounded in fictional prior notes, and transcript timing that behaves like a live session ([Next product validation](#next-product-validation)).
+2. **Build the live-session interface as a mock first**, with a switch between the demo and the live layout, then connect its functions one at a time.
+3. **Finish the first technical milestone end to end** on macOS with a synthetic call ([First technical milestone](#first-technical-milestone)).
+4. **Choose the processing path for evaluated cues** and its permission flow.
+5. **Compare short fictional conversations with and without cues** with people, measuring participation and listening together.
+6. **Prove a signed installation and upgrade** on a clean Mac.
+
+Integration, platform and mobile tracks continue only where they do not delay items 1–3. Repeat this review at each milestone boundary and update this section in the same PR.
+
+**Keeping documents current.** `npm run check:docs` runs in CI on every pull request. It fails on a broken relative link or heading anchor in any Markdown file, and when a number a document quotes from the source (cue lifetimes, companion window sizes) no longer matches the source. It also posts a reminder when app source changes and no document does. It cannot judge whether prose is still true, so the review above still applies.
+
 ## Development milestones
 
 The direction is **proof of concept → live AI companion → connected workflows → broader platform availability**. macOS comes first, Windows is the next planned desktop platform, and iPhone/Android are future companion goals. Ubuntu/Linux is an exploratory track. Each platform must establish reliable conversation access and cue presentation.
@@ -78,6 +99,9 @@ The development Granola connection has passed account sign-in, listing, and requ
 ## Next product validation
 
 - [ ] Provide a clearly fictional, voiced practice conversation with natural-sounding synthetic speakers, synchronized text/cues, accessible playback controls and an optional pause to respond aloud without recording. Bundle generated audio so replay needs no provider call. Keep scripted continuation separate from speech recognition or adaptive replies; verify intelligibility, timing, pause/resume/replay/Stop and comprehension. See the [demo acceptance](docs/product-readiness.md#voiced-practice-demo).
+- [ ] Ground the demo's cues in fictional prior context. Start the demo with a small set of clearly fictional prior notes already selected, and show human-authored cues that cite both the spoken line and the note they draw on (for example, who offered to do a task last time). Remove the word-for-word quote card from the default run. These are authored cues that isolate the interaction from detection errors; they are not AI context selection, and live sessions keep their existing rules. Acceptance: every cue's sources are inspectable and labeled as prior notes or this conversation, the notes are visible and removable in the prior-context panel, and no real note store is read.
+- [ ] Time the demo like a live session. Show the transcript in phrase-sized pieces a short delay after the words are spoken, as local transcription delivers them, and raise a cue once its triggering phrase has arrived, including in the middle of a speaker's turn. Acceptance: text and cues follow the bundled audio within the documented live delay range, and a cue is never shown before the words that prompted it.
+- [ ] Build the live-session interface as a mock first, with a switch between the demo and the live layout. Design the interface a person would use beside a real meeting: source and capture state, the single cue, prior context, Stop. Label every control that is not yet connected, and connect functions one at a time behind it. The mock must never imply that audio is being captured or that cues are AI-generated. Acceptance: fictional states for idle, starting, listening, cue shown, paused, stopped and failed; keyboard and narrow-layout checks; visible Stop in every active state.
 - [ ] Simplify the notebook's temporary navigation and prior-context layout: one compact navigation area, contextual note management on demand, and room for the active conversation and cue. Preserve Settings, capture/Stop, source disclosure, selection/removal and disconnect; verify keyboard/focus and narrow layouts before replacing the current panels.
 
 Test the in-conversation interaction before investing in automatic detection. This can run independently of the native audio feasibility work below.
