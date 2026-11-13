@@ -16,6 +16,8 @@
     "test:cue-lab": "node --test scripts/cue-lab.test.mjs",
     "test:docs": "node --test scripts/check-docs.test.mjs",
     "check:docs": "node scripts/check-docs.mjs",
+    "test:release": "node --test scripts/release-preflight.test.mjs",
+    "check:release": "node scripts/release-preflight.mjs",
     "lab:claude": "node scripts/cue-lab.mjs",
     "check": "tsc -b && playwright test",
     "format": "prettier --write .",

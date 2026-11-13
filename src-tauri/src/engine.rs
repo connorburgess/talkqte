@@ -213,6 +213,9 @@ const COUNT_WORDS: &[&str] = &[
     "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "couple", "few",
 ];
 
+/// Words that may sit between a count and its unit: "two working days".
+const DAY_KINDS: &[&str] = &["full", "whole", "working", "business", "calendar"];
+
 /// Sentences of a line, split at a full stop, question mark, exclamation
 /// mark, or semicolon followed by a space or the end: "10.30" and "Mr."
 /// stay whole.
@@ -285,12 +288,19 @@ fn said_line(text: &str) -> Option<String> {
                             | "friday"
                     )
             });
-            let count_of_days = words.windows(2).any(|pair| {
-                (COUNT_WORDS.contains(&pair[0].as_str()) || is_number(&pair[0]))
-                    && matches!(
-                        pair[1].as_str(),
-                        "day" | "days" | "week" | "weeks" | "hours"
-                    )
+            // "two days", and "two working days" or "two full working days":
+            // up to two of a few words that say which days are counted.
+            let count_of_days = words.iter().enumerate().any(|(i, word)| {
+                (COUNT_WORDS.contains(&word.as_str()) || is_number(word)) && {
+                    let kinds = words[i + 1..]
+                        .iter()
+                        .take(2)
+                        .take_while(|w| DAY_KINDS.contains(&w.as_str()))
+                        .count();
+                    words.get(i + 1 + kinds).is_some_and(|unit| {
+                        matches!(unit.as_str(), "day" | "days" | "week" | "weeks" | "hours")
+                    })
+                }
             });
             let end_of = words.windows(3).any(|w| {
                 w[0] == "end"
@@ -1970,11 +1980,98 @@ const QUESTION_OPENERS: [&str; 20] = [
 /// Hedged statements do not count as answers.
 const HEDGES: [&str; 5] = ["maybe", "perhaps", "might", "probably", "possibly"];
 
+/// Whether a sentence, given as lowercase words, opens by putting its subject
+/// off to a later occasion: "Let's leave the cover choice for another
+/// meeting", "We'll park that until next week", "Let's come back to that
+/// later". It needs all three parts in order: an opening ("let's", "we'll",
+/// "we can", "we will"), a putting-off verb, something being put off, and
+/// where it goes, which must end the sentence. "Let's leave the door open",
+/// "Let's table the proposal", and "Let's leave later" lack one of them and
+/// do not count; neither does a sentence with a second clause or one that
+/// keeps something open or sets time aside. It does not check what is being
+/// put off.
+fn defers(words: &[String]) -> bool {
+    const OPENINGS: [&[&str]; 4] = [&["let's"], &["we'll"], &["we", "can"], &["we", "will"]];
+    // Verbs that need an occasion after them to mean putting something off.
+    const VERBS: [&[&str]; 6] = [
+        &["leave"],
+        &["park"],
+        &["save"],
+        &["table"],
+        &["defer"],
+        &["postpone"],
+    ];
+    // Verbs for returning to something, which may also end in a bare "later".
+    const RETURNS: [&[&str]; 2] = [&["revisit"], &["come", "back", "to"]];
+    const OCCASIONS: [&[&str]; 13] = [
+        &["for", "another", "meeting"],
+        &["for", "another", "time"],
+        &["for", "another", "day"],
+        &["for", "later"],
+        &["for", "next", "time"],
+        &["for", "next", "week"],
+        &["for", "the", "next", "meeting"],
+        &["until", "later"],
+        &["until", "next", "time"],
+        &["until", "next", "week"],
+        &["until", "the", "next", "meeting"],
+        &["in", "another", "meeting"],
+        &["at", "the", "next", "meeting"],
+    ];
+    const RETURN_OCCASIONS: [&[&str]; 4] = [
+        &["later"],
+        &["next", "time"],
+        &["next", "week"],
+        &["another", "time"],
+    ];
+    let starts = |words: &[String], phrase: &[&str]| {
+        words.len() >= phrase.len() && words.iter().zip(phrase).all(|(word, part)| word == part)
+    };
+    let Some(rest) = OPENINGS
+        .iter()
+        .find(|opening| starts(words, opening))
+        .map(|opening| &words[opening.len()..])
+    else {
+        return false;
+    };
+    // Words that make the part between verb and occasion more than the
+    // thing put off: a second clause ("… and leave the budget for later"),
+    // keeping something open ("leave the vote open until next week"), or
+    // setting time aside ("save some time for later").
+    const NOT_PUT_OFF: [&str; 16] = [
+        "and", "but", "or", "so", "because", "before", "after", "when", "if", "while", "open",
+        "time", "minutes", "room", "space", "who",
+    ];
+    // The thing put off is one to four words, and the occasion ends the
+    // sentence: "for later questions" is not an occasion.
+    let put_off = |verbs: &[&[&str]], occasions: &[&[&str]]| {
+        verbs.iter().any(|verb| {
+            starts(rest, verb)
+                && occasions.iter().any(|occasion| {
+                    rest.len()
+                        .checked_sub(occasion.len())
+                        .filter(|at| (verb.len() + 1..=verb.len() + 4).contains(at))
+                        .is_some_and(|at| {
+                            starts(&rest[at..], occasion)
+                                && !rest[verb.len()..at]
+                                    .iter()
+                                    .any(|word| NOT_PUT_OFF.contains(&word.as_str()))
+                        })
+                })
+        })
+    };
+    put_off(&VERBS, &OCCASIONS)
+        || put_off(&RETURNS, &OCCASIONS)
+        || put_off(&RETURNS, &RETURN_OCCASIONS)
+}
+
 /// An explicit statement, at the start of a sentence, that the conversation
 /// is moving to another topic: "Moving on, ...", "OK, next item.", "Let's
-/// move on to ...", "On another note, ...". Phrases inside a sentence
-/// ("Before we move on, ...", "The trucks are moving on Tuesday") do not
-/// count, nor do questions, negations, or hedges.
+/// move on to ...", "On another note, ...". Putting the subject off to a
+/// later occasion counts too ("Let's leave that for another meeting"; see
+/// `defers`). Phrases inside a sentence ("Before we move on, ...", "The
+/// trucks are moving on Tuesday") do not count, nor do questions, negations,
+/// or hedges.
 fn topic_shift(text: &str) -> bool {
     const OPENINGS: [&[&str]; 9] = [
         &["moving", "on"],
@@ -2022,9 +2119,11 @@ fn topic_shift(text: &str) -> bool {
             });
             !excluded
                 && !presentation
-                && OPENINGS.iter().any(|opening| {
-                    words.starts_with(&opening.iter().map(|w| w.to_string()).collect::<Vec<_>>())
-                })
+                && (defers(words)
+                    || OPENINGS.iter().any(|opening| {
+                        words
+                            .starts_with(&opening.iter().map(|w| w.to_string()).collect::<Vec<_>>())
+                    }))
         })
 }
 
@@ -2917,6 +3016,130 @@ mod tests {
     }
 
     #[test]
+    fn putting_the_subject_off_to_a_later_occasion_withdraws_an_unread_question() {
+        for change in [
+            "Let's leave the cover choice for another meeting. Now, the urgent security incident.",
+            "OK, let's park that for next time.",
+            "We'll save the rota for the next meeting.",
+            "We can postpone the signage question until later.",
+            "Let’s come back to that later.",
+            "So we'll revisit the draft next time.",
+        ] {
+            let mut e = play(&[
+                (1_000, "Someone can take the first draft."),
+                (4_000, change),
+            ]);
+            e.advance(1_000);
+            assert!(e.state.cue.is_some());
+            e.advance(3_000);
+            assert!(e.state.cue.is_none(), "still shown after: {change}");
+            assert!(e.state.notes.is_empty(), "nothing is kept: {change}");
+        }
+    }
+
+    #[test]
+    fn lines_that_only_resemble_putting_something_off_leave_the_question() {
+        for line in [
+            // No later occasion, nothing put off, or no opening.
+            "Let's leave the door open.",
+            "Let's table the proposal.",
+            "Let's leave later.",
+            "Let's come back to the first draft.",
+            "Let's park the van at the gate.",
+            // A second clause, keeping something open, or setting time aside.
+            "Let's come back to the first draft and leave the budget for later.",
+            "Let's leave the survey open for another day.",
+            "Let's leave the vote open until next week.",
+            "Let's leave ten minutes for later questions.",
+            "Let's save some time for later.",
+            "Let's revisit who takes the draft before next week.",
+            "Let's leave the long list of every single cover option for another meeting.",
+            "The cover choice was left for another meeting last year.",
+            "Before we leave that for later, someone needs to own the draft.",
+            // Questions, with or without a question mark.
+            "Should we leave that for another meeting?",
+            "Can we park that until next week.",
+            "Let's leave that for another meeting?",
+            // Negations and hedges.
+            "Let's not leave that for another meeting.",
+            "We can't leave the draft for later.",
+            "Maybe we'll park that until next week.",
+            "We'll probably revisit that later.",
+            // Put to someone by name: the opening is not recognized, so the
+            // question stays rather than guessing.
+            "Alex, let's leave that for another meeting.",
+        ] {
+            let mut e = play(&[(1_000, "Someone can take the first draft."), (4_000, line)]);
+            e.advance(4_000);
+            assert!(e.state.cue.is_some(), "withdrawn after: {line}");
+        }
+    }
+
+    #[test]
+    fn putting_something_off_follows_the_topic_change_lifecycle() {
+        let deferral = "Let's leave the cover choice for another meeting.";
+        // A question being read stays in place.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (4_000, deferral),
+        ]);
+        e.advance(1_000);
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.inspect_cue(&id, true).unwrap();
+        e.advance(3_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().id, id);
+        // So does a question asked of the user by name.
+        let mut e = play(&[
+            (1_000, "Robin, can you take the first draft?"),
+            (4_000, deferral),
+        ]);
+        e.set_user_name(Some("Robin".into())).unwrap();
+        e.advance(4_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
+        // A pause follows the withdrawal, so the next line raises nothing.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (4_000, deferral),
+            (6_000, "We could use either the hall or the shed."),
+        ]);
+        e.advance(6_000);
+        assert!(e.state.cue.is_none());
+        // On the new topic the same type of question may be asked again,
+        // and a repeat of it within two minutes is still skipped.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (4_000, deferral),
+            (20_000, "Someone can take the newsletter."),
+            (50_000, "Someone can take the newsletter."),
+        ]);
+        e.advance(20_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Owner");
+        e.advance(30_000);
+        assert!(e.state.cue.is_none(), "repeated within two minutes");
+        // A deferral that names when is itself a spoken date: the stale
+        // question goes and the line is quoted word for word.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (4_000, "OK, let's park that until next week."),
+        ]);
+        e.advance(4_000);
+        let cue = e.state.cue.as_ref().unwrap();
+        assert_eq!(cue.kind, SAID);
+        assert_eq!(cue.question, "OK, let's park that until next week.");
+        // An answer is still an answer: it resolves rather than withdraws.
+        let mut e = play(&[
+            (1_000, "We could use either a blue or green cover."),
+            (4_000, "Let's go with the blue cover."),
+        ]);
+        e.advance(1_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, "Decision");
+        assert!(resolves("Decision", "Let's go with the blue cover."));
+        assert!(!topic_shift("Let's go with the blue cover."));
+        e.advance(3_000);
+        assert!(e.state.cue.is_none());
+    }
+
+    #[test]
     fn questions_negations_and_ordinary_lines_are_not_topic_changes() {
         for line in [
             // Questions, with or without a question mark.
@@ -3479,6 +3702,9 @@ mod tests {
             "Legal needs it back by March 3rd.",
             "I'll share the slides Friday.",
             "I'll send it today at 10.30.",
+            "Legal needs two full working days after the draft is ready.",
+            "The printer takes three business days.",
+            "We need 5 working days before the fair.",
         ] {
             let e = play_statement(line);
             let cue = e
@@ -3501,6 +3727,11 @@ mod tests {
             "Share the weekend photos when you can.",
             "We may ship it in two days.",
             "Send it by Friday. Scratch that, Monday.",
+            "Does legal need two full working days?",
+            "Legal might need three business days.",
+            "Does legal need two working days",
+            "We had two full working groups ready.",
+            "It takes two full lovely sunny days.",
         ] {
             let e = play_statement(line);
             assert!(
@@ -3686,9 +3917,15 @@ mod tests {
             ("already-answered", "resolved"),
             ("visible-cue-resolved", "no cue raised"),
             ("asked-but-unanswered", "quiet"),
-            ("topic-moved-on", "quiet"),
+            // 13 November 2026: "Let's leave … for another meeting" now
+            // counts as a topic change.
+            ("topic-moved-on", "withdraw"),
             ("uncertain-speaker", "no cue raised"),
-            ("context-reminder", "quiet"),
+            // 13 November 2026: a count such as "two full working days" is
+            // now a time, so the first line is quoted as a Said cue. The
+            // action matches the label; the rules still do not connect that
+            // line to the later "Can we commit to Friday?".
+            ("context-reminder", "show"),
             ("transcript-instruction", "quiet"),
             // Labels added 9 November 2026; run once each in the Claude lab
             // the same day (all three matched).
@@ -3701,6 +3938,123 @@ mod tests {
             .map(|(id, action)| (id.to_string(), *action))
             .collect();
         assert_eq!(results, baseline);
+        let matched = suite
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(&results)
+            .filter(|(case, (_, action))| case["expected"]["action"] == *action)
+            .count();
+        assert_eq!(matched, 7, "of 11; 5 before 13 November 2026");
+    }
+
+    /// The same suite from each fixture's own starting state, as the cue lab
+    /// sees it: where a case lists a visible cue, that cue is put in place
+    /// after its source line instead of waiting for the rules to raise one.
+    /// This measures suppression and resolution separately from detection.
+    /// The cue's rule type is chosen here from the fixture's wording, which
+    /// the rules themselves never do.
+    #[test]
+    fn rules_from_each_fixtures_own_starting_cue() {
+        let suite: serde_json::Value =
+            serde_json::from_str(include_str!("../../scripts/fixtures/cue-lab.json")).unwrap();
+        let mut results = vec![];
+        let mut matched = 0;
+        for case in suite.as_array().unwrap() {
+            let mut e = Engine::live();
+            e.start().unwrap();
+            let existing = &case["existingCue"];
+            let seed = (!existing.is_null()).then(|| {
+                let text = existing["text"].as_str().unwrap();
+                let kind = if text.starts_with("Who will") {
+                    "Owner"
+                } else if text.starts_with("How will we choose") {
+                    "Decision"
+                } else if text.starts_with("What new date") {
+                    "Timing"
+                } else {
+                    panic!("no rule type for: {text}")
+                };
+                (kind, text, existing["sourceIds"][0].as_str().unwrap())
+            });
+            let mut seeded: Option<String> = None;
+            let mut action = "quiet";
+            for (index, event) in case["events"].as_array().unwrap().iter().enumerate() {
+                let at = 1_000 + index as u64 * 2_000;
+                e.advance(at - e.state.elapsed_ms);
+                let id = event["id"].as_str().unwrap();
+                let text = event["text"].as_str().unwrap();
+                let before = e.state.cue.clone();
+                e.ingest(e.session(), live(id, at, text)).unwrap();
+                if let (Some(cue), None) = (&before, &e.state.cue) {
+                    action = if resolves(&cue.kind, text) {
+                        "resolved"
+                    } else {
+                        "withdraw"
+                    };
+                }
+                if let Some((kind, question, source)) = seed.filter(|(_, _, source)| *source == id)
+                {
+                    let cue_id = format!("{}:{id}:fixture", e.generation);
+                    e.cue_deadline = at + CUE_MS;
+                    e.unshown = None;
+                    e.last_shown.retain(|(shown, _)| shown != kind);
+                    e.last_shown.push((kind.into(), at));
+                    e.state.cue = Some(Cue {
+                        sources: Vec::new(),
+                        id: cue_id.clone(),
+                        kind: kind.into(),
+                        question: question.into(),
+                        evidence: text.into(),
+                        source_id: source.into(),
+                        remaining_ms: CUE_MS,
+                        total_ms: CUE_MS,
+                        held: false,
+                        expanded: false,
+                        resolved_by: None,
+                        note: None,
+                        about_focus: false,
+                    });
+                    seeded = Some(cue_id);
+                }
+            }
+            match (&seeded, &e.state.cue) {
+                // The visible cue is still the one the case started with.
+                (Some(id), Some(cue)) => assert_eq!(&cue.id, id, "a second cue replaced it"),
+                (None, Some(_)) => action = "show",
+                _ => {}
+            }
+            let expected = case["expected"]["action"].as_str().unwrap();
+            let id = case["id"].as_str().unwrap();
+            eprintln!("{id:24} rules={action:10} expected={expected}");
+            matched += usize::from(action == expected);
+            results.push((id.to_string(), action));
+            // Nothing from an unused cue reaches the notes.
+            assert!(e.state.notes.is_empty(), "{id}");
+            if let Some((_, question, _)) = seed {
+                assert!(!e.markdown().contains(question), "{id}");
+            }
+        }
+        // Recorded 13 November 2026 in docs/cue-intelligence.md.
+        let recorded = [
+            ("missing-owner", "show"),
+            ("already-answered", "resolved"),
+            ("visible-cue-resolved", "resolved"),
+            ("asked-but-unanswered", "quiet"),
+            ("topic-moved-on", "withdraw"),
+            ("uncertain-speaker", "quiet"),
+            ("context-reminder", "show"),
+            ("transcript-instruction", "quiet"),
+            ("context-corrected", "quiet"),
+            ("paraphrased-use", "resolved"),
+            ("repeated-trigger", "quiet"),
+        ];
+        let recorded: Vec<(String, &str)> = recorded
+            .iter()
+            .map(|(id, action)| (id.to_string(), *action))
+            .collect();
+        assert_eq!(results, recorded);
+        assert_eq!(matched, 9);
     }
 
     #[test]
@@ -3983,6 +4337,47 @@ mod tests {
             e.ingest(e.session(), live("w1", 1_000, line)).unwrap();
             assert!(e.state.cue.is_none(), "{line}");
         }
+    }
+
+    #[test]
+    fn a_count_of_working_days_follows_the_addressee_and_repeat_rules() {
+        // Put to someone else by name, or to an uncertain addressee as a
+        // question: nothing is quoted.
+        for line in [
+            "Alex, does legal need two full working days?",
+            "Does legal need two full working days, Alex?",
+            "Does anyone know if legal needs two full working days",
+        ] {
+            let mut e = named_session();
+            e.ingest(e.session(), live("w1", 1_000, line)).unwrap();
+            assert!(
+                e.state.cue.as_ref().is_none_or(|cue| cue.kind != SAID),
+                "{line}"
+            );
+        }
+        // Asked of the user, the question itself is shown, not a quote.
+        let mut e = named_session();
+        let asked = "Sam, does legal need two full working days?";
+        e.ingest(e.session(), live("w1", 1_000, asked)).unwrap();
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
+        // Said once, then dismissed: the same words are not quoted again
+        // within two minutes, and nothing was kept in the notes.
+        let line = "Legal needs two full working days after the draft is ready.";
+        let mut e = play(&[(1_000, line), (25_000, line)]);
+        e.advance(1_000);
+        let first = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&first, Response::Dismiss).unwrap();
+        e.advance(24_000);
+        assert!(e.state.cue.is_none(), "repeated within two minutes");
+        assert!(e.state.notes.is_empty());
+        // After a topic change the pause applies as after any withdrawal.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (4_000, "Moving on to the budget."),
+            (6_000, line),
+        ]);
+        e.advance(6_000);
+        assert!(e.state.cue.is_none());
     }
 
     #[test]

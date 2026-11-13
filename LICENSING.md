@@ -21,7 +21,13 @@ An integration that connects a permitted TalkQTE installation to another applica
 
 The distinction is how the software is used or distributed, not whether its user earns money. Charging for a client-facing product powered by TalkQTE is different from using the app yourself during a paid meeting. If a case does not clearly fit the license, request terms before shipping it.
 
+For a platform that uses TalkQTE as one part of something larger, including a hosted or managed service where no copy is handed over, a working test is whether TalkQTE is the thing being sold or a tool supporting something else being sold. A product, service, or module whose commercial value comes entirely or substantially from TalkQTE's functionality is outside "your own internal business purposes" and needs a commercial agreement, whether or not customers ever see TalkQTE. This follows [n8n's published explanation](https://github.com/n8n-io/n8n-docs/blob/53637d1c42bb95f19c4656637170e4158ba036e2/docs/n8n-community-license/license-faq.md) of the same license text for its own software; it is guidance, not a ruling on any particular case.
+
 For commercial terms, open a [licensing inquiry](https://github.com/connorburgess/talkqte/issues/new?title=Commercial%20licensing%20inquiry) requesting a private contact. Keep confidential business details out of public issues. A commercial agreement is separate from buying the project; an inquiry does not grant permission.
+
+## Name and logo
+
+The software license does not grant trademark rights in the TalkQTE name or logo. A modified version shared with others needs its own name and icon unless you have permission to use TalkQTE's. See the [name and logo guide](TRADEMARKS.md) for what is fine without asking and what needs permission.
 
 ## Previously published Apache-2.0 material
 
