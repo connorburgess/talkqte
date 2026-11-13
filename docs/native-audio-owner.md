@@ -6,6 +6,11 @@ has no Tauri command, selection UI, enumeration or transcription
 connection. A bounded sample handler is connected only inside this experiment. No native capture was run for this change. The app still provides
 only its existing microphone paths.
 
+> Update, 13 November 2026: a [development-only host](native-application-audio-host.md)
+> now reaches this path through one command behind the same feature. Sentences
+> below that say no command, selection or enumeration exists describe the code
+> when each section was written. A default build is unchanged.
+
 This advances the [source-only experiment](system-audio-plan.md): dependable
 Stop and exact-source ownership must precede listening to another application.
 It does not establish source isolation, release latency or useful meeting cues.
@@ -451,8 +456,9 @@ offset accuracy on real audio, and Stop latency on a device remain untested.
 ## Next acceptance and UI/UX checkpoint
 
 The source worker and sink below connect selection, the owner and the
-transcript in code that nothing calls. The next dependency is the host around
-them: a disclosed selection flow, a visible stopping state and app shutdown.
+transcript. The [development-only host](native-application-audio-host.md) now
+calls them behind the same feature, with explicit selection and a status that
+keeps failed, unanswered and abandoned cleanup visible. It has not been run.
 The worker mechanism is tested; the app exit/recovery policy is not implemented. Verify callback
 allocation/latency and actual buffer sizes, and prepare explicit consent/selection
 before requesting a bounded native run. Do not add

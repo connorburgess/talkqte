@@ -1,4 +1,6 @@
 pub mod application_audio;
+#[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+mod application_audio_host;
 pub mod audio_tap;
 mod capture_control;
 mod companion;
@@ -157,6 +159,8 @@ fn publish_processing(app: &tauri::AppHandle, runtime: &mut Runtime) -> engine::
     let controller = app.state::<microphone::Controller>();
     let (generation, microphone) = controller.control_snapshot();
     let capture = capture_state(microphone);
+    #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+    let capture = application_audio_host::with_source(app, capture);
     let (operation, mut startup) = runtime
         .live_start
         .control()
@@ -1376,6 +1380,8 @@ pub fn run() {
         .manage(microphone::Controller::default())
         .manage(ModelDownload::default())
         .invoke_handler(tauri::generate_handler![
+            #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+            application_audio_host::app::application_audio,
             capture_control::stop_capture,
             processing_commands::review_processing_scope,
             processing_commands::approve_processing_scope,
@@ -1429,6 +1435,8 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             companion_macos::hide_controls(app)?;
+            #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+            application_audio_host::install(app.handle())?;
             // A download interrupted by quitting never counts as installed.
             if let Some(dir) = models_dir(app.handle()) {
                 model::clean_partials(&dir);
@@ -1516,6 +1524,8 @@ pub fn run() {
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
             ) {
                 microphone::stop_on_exit(app);
+                #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+                application_audio_host::exit(app);
             }
         });
 }

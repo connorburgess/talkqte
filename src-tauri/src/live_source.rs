@@ -2,8 +2,8 @@
 //! Stopping or replacing that session cancels the source's operation under the
 //! runtime lock with one atomic store: no native call and no wait on a worker,
 //! callback or the review gate. The source's owner observes the cancellation
-//! and cleans up on its own worker. Nothing here starts capture, and no app
-//! command attaches a source. Attachment is not enforced by the audio types:
+//! and cleans up on its own worker. Nothing here starts capture; only the
+//! development host attaches a source. Attachment is not enforced by the audio types:
 //! a caller that binds a reader to a session without attaching is not covered.
 
 use crate::{

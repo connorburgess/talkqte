@@ -2,10 +2,9 @@
 //! the worker that owns the native selection: measure and accept the clock
 //! (which attaches the source to the live session), begin the approved
 //! selection, then move blocks to chunks, a transcription worker and the
-//! runtime's source sink until native cleanup is released. No command, picker,
-//! enumeration or permission request calls this; nothing here was run against
+//! runtime's source sink until native cleanup is released. Called only by the
+//! development host in `application_audio_host`; nothing here was run against
 //! a device.
-#![allow(dead_code)]
 
 use crate::{
     application_audio::{
@@ -67,6 +66,7 @@ pub(crate) enum Refused {
 
 /// Metadata only; no audio or text.
 #[derive(Debug)]
+#[allow(dead_code)] // Kept as acceptance evidence; the host reads only status.
 pub(crate) struct Report {
     pub status: Status,
     pub worker: Stats,
@@ -223,18 +223,36 @@ pub(crate) unsafe fn run<A: Access, T: Transcriber>(
     transcriber: T,
     monitor: Monitor,
 ) -> Result<Report, Refused> {
+    run_with(
+        runtime,
+        start,
+        |snapshot| snapshot.measure(limits.max_width, limits.max_age),
+        // SAFETY: the caller's obligations are those of this call.
+        |start, binding| unsafe { NativeOwner::begin(start, selection, binding) },
+        transcriber,
+        monitor,
+    )
+}
+
+/// `run` with its two native steps supplied: the host-clock read and the
+/// start of the source. Tests pass a fictional clock and a scripted owner, so
+/// the same ordering runs without a stream.
+pub(crate) fn run_with<A: Access, T: Transcriber, S: Source>(
+    runtime: A,
+    start: Start,
+    measure: impl FnOnce(Snapshot) -> Result<Measurement, TimingError>,
+    begin: impl FnOnce(Start, ClockBinding) -> Result<S, Failure>,
+    transcriber: T,
+    monitor: Monitor,
+) -> Result<Report, Refused> {
     let control = start.control();
-    let accepted = prepare(&runtime, &control, |snapshot| {
-        snapshot.measure(limits.max_width, limits.max_age)
-    })
-    .map_err(Refused::Clock)?;
+    let accepted = prepare(&runtime, &control, measure).map_err(Refused::Clock)?;
     // Before any native request: if this thread cannot be started, nothing
     // has been asked of the OS yet.
     let worker = start_worker(runtime.clone(), accepted.session, &control, transcriber);
     // A refused start drops its lease, which cancels the operation; the next
     // runtime sync then detaches it.
-    let source = unsafe { NativeOwner::begin(start, selection, accepted.binding) }
-        .map_err(Refused::Start)?;
+    let source = begin(start, accepted.binding).map_err(Refused::Start)?;
     Ok(pump(
         runtime,
         accepted.session,

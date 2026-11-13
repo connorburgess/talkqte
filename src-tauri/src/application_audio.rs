@@ -1,7 +1,8 @@
 //! Development-only ownership for selected-application audio. The default build
 //! has no OS API, enumeration, permission request or app command. The handoff
 //! submodule accepts synthetic buffers without activating any capture.
-//! The optional native-audio-spike owner is unconnected to app commands.
+//! With the optional native-audio-spike feature, one development command
+//! reaches the native owner through `application_audio_host`.
 //! Native selection, sample handling and release still require acceptance.
 
 pub mod chunks;
