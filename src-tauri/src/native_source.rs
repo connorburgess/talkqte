@@ -66,7 +66,6 @@ pub(crate) enum Refused {
 
 /// Metadata only; no audio or text.
 #[derive(Debug)]
-#[allow(dead_code)] // Kept as acceptance evidence; the host reads only status.
 pub(crate) struct Report {
     pub status: Status,
     pub worker: Stats,

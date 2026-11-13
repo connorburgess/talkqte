@@ -132,7 +132,47 @@ struct View {
     operation: Option<String>,
     choices: Vec<Choice>,
     problem: Option<Problem>,
+    /// What the last released operation did, for acceptance records.
+    last_run: Option<Evidence>,
     scope_notice: &'static str,
+}
+
+/// Counts and one duration from a released operation. No audio or text.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Evidence {
+    /// Chunks the recognizer processed.
+    recognized_chunks: u64,
+    accepted_lines: u64,
+    /// Lines the sink or the engine refused, for example as out of order.
+    refused_lines: u64,
+    /// Lines whose time fell outside their audio.
+    out_of_range_lines: u64,
+    /// Chunks withheld because the source had stopped.
+    stale_chunks: u64,
+    /// Chunks the transcription queue had no room for.
+    refused_chunks: u64,
+    recognizer_failures: u64,
+    /// The transcription worker did not stop in time; counts are incomplete.
+    worker_detached: bool,
+    /// Width of the accepted host-clock read.
+    clock_read_micros: u64,
+}
+
+impl Evidence {
+    fn of(report: &Report) -> Self {
+        Self {
+            recognized_chunks: report.worker.chunks,
+            accepted_lines: report.worker.accepted,
+            refused_lines: report.worker.rejected,
+            out_of_range_lines: report.worker.out_of_range,
+            stale_chunks: report.worker.stale,
+            refused_chunks: report.refused_chunks,
+            recognizer_failures: report.worker.failures,
+            worker_detached: report.worker.detached,
+            clock_read_micros: u64::try_from(report.bracket_width.as_micros()).unwrap_or(u64::MAX),
+        }
+    }
 }
 
 /// Metadata for the main window. No audio, transcript or native identifier.
@@ -172,7 +212,7 @@ pub(crate) enum Action {
 }
 
 enum Ended {
-    Released(Option<NativeProblem>),
+    Released(Report),
     Refused(Refused),
     /// The worker unwound, or the request was never run.
     Unwound,
@@ -271,6 +311,8 @@ struct State {
     review: Option<(String, Review)>,
     active: Option<Active>,
     problem: Option<Problem>,
+    /// Counts from the last operation that reached release.
+    last_run: Option<Evidence>,
     exiting: bool,
 }
 
@@ -303,6 +345,7 @@ impl Host {
                 review: None,
                 active: None,
                 problem: None,
+                last_run: None,
                 exiting: false,
             }),
         }))
@@ -363,7 +406,13 @@ impl Host {
                 while let Ok(command) = commands.recv() {
                     match command {
                         Command::List(mut listed) => {
-                            let result = backend.list(&listed.cancelled);
+                            // Cancelled or quit while this waited: the OS is
+                            // not asked at all, so no prompt can follow.
+                            let result = if listed.cancelled.load(Ordering::Acquire) {
+                                Err(Failure::Cancelled)
+                            } else {
+                                backend.list(&listed.cancelled)
+                            };
                             listed.answer(result);
                         }
                         Command::Run {
@@ -372,7 +421,7 @@ impl Host {
                             monitor,
                             finish,
                         } => match backend.run(&source, start, monitor) {
-                            Ok(report) => finish.set(Ended::Released(report.status.problem)),
+                            Ok(report) => finish.set(Ended::Released(report)),
                             Err(refused) => finish.set(Ended::Refused(refused)),
                         },
                     }
@@ -471,6 +520,7 @@ impl Host {
         // The retained selections are consumed by this start.
         state.listed.clear();
         state.problem = None;
+        state.last_run = None;
         state.active = Some(Active {
             id,
             application,
@@ -522,7 +572,10 @@ impl Host {
             return;
         };
         let problem = match &*active.ended.lock().unwrap_or_else(|e| e.into_inner()) {
-            Some(Ended::Released(problem)) => problem.map(native_problem),
+            Some(Ended::Released(report)) => {
+                state.last_run = Some(Evidence::of(report));
+                report.status.problem.map(native_problem)
+            }
             // Stopped here before anything started. The refusal then only
             // reflects that Stop, whatever step noticed it.
             Some(Ended::Refused(_)) if active.stop_requested => None,
@@ -600,6 +653,7 @@ impl Host {
                 })
                 .collect(),
             problem,
+            last_run: state.last_run.clone(),
             scope_notice: SCOPE_NOTICE,
         }
     }
@@ -709,16 +763,18 @@ fn new_id() -> Result<String, Error> {
 }
 
 /// The capture state the rest of the app shows, with this source included:
-/// never Off or Unknown while the selected application may be captured.
+/// never Off or Unknown while the selected application may be captured. A
+/// starting microphone stays Starting whatever the source is doing, because
+/// the notebook disables its Stop control while capture reads Stopping, and a
+/// stuck source must not take Stop away from a microphone that is starting.
 pub(crate) fn overall_capture(microphone: CaptureState, source: Phase) -> CaptureState {
     if !source.may_be_capturing() {
         return microphone;
     }
     match (microphone, source) {
         (CaptureState::Running, _) | (_, Phase::Listening) => CaptureState::Running,
-        (CaptureState::Off | CaptureState::Unknown | CaptureState::Starting, Phase::Starting) => {
-            CaptureState::Starting
-        }
+        (CaptureState::Starting, _)
+        | (CaptureState::Off | CaptureState::Unknown, Phase::Starting) => CaptureState::Starting,
         _ => CaptureState::Stopping,
     }
 }
@@ -786,43 +842,69 @@ pub(crate) mod app {
         }
 
         fn run(&mut self, source: &str, start: Start, monitor: Monitor) -> Result<Report, Refused> {
-            // Stopped while this request waited: load nothing, ask nothing.
-            if start.control().is_cancelled() {
-                return Err(Refused::Start(Failure::Cancelled));
-            }
-            let chosen = self
+            let access = AppAccess(self.app.clone());
+            let listed: Vec<&str> = self
                 .selections
                 .iter()
-                .position(|selection| selection.application().selection_id() == source)
-                .ok_or(Refused::Start(Failure::SourceUnavailable))?;
+                .map(|selection| selection.application().selection_id())
+                .collect();
+            let ready = before_native_start(&access, &start.control(), source, &listed, || {
+                recognizer(&self.app)
+            });
+            // Whatever the answer, the listed selections are spent.
+            let (chosen, transcriber) = match ready {
+                Ok(ready) => ready,
+                Err(refused) => {
+                    self.selections.clear();
+                    return Err(refused);
+                }
+            };
             let selection = self.selections.swap_remove(chosen);
             self.selections.clear();
-            // The approval was given during one live session. Loading the
-            // recognizer can take seconds; a session that ended or was
-            // replaced meanwhile must not receive this source.
-            let access = AppAccess(self.app.clone());
-            let session = |access: &AppAccess| {
-                access
-                    .with(|runtime| {
-                        runtime
-                            .live_source_operation()
-                            .map(|_| runtime.engine.session())
-                    })
-                    .flatten()
-                    .ok_or(Refused::Clock(TimingError::SessionChanged))
-            };
-            let approved_in = session(&access)?;
-            let transcriber =
-                recognizer(&self.app).map_err(|_| Refused::Start(Failure::Unavailable))?;
-            if session(&access)? != approved_in {
-                return Err(Refused::Clock(TimingError::SessionChanged));
-            }
             // SAFETY: the person reviewed and approved this exact selection
             // through the gate, and this is the worker that constructed it.
             // The remaining obligations of NativeOwner::begin are unverified
             // device gates; see docs/native-audio-owner.md.
             unsafe { native_source::run(access, start, selection, LIMITS, transcriber, monitor) }
         }
+    }
+
+    /// Everything decided before the native request, in order: a start that
+    /// was stopped while it waited loads nothing; the source must be one of
+    /// the listed selections; a live session must be running; the recognizer
+    /// is loaded; and the live session must still be the same one, because
+    /// the approval was given during it and loading can take seconds.
+    /// Returns the position of the selection and the loaded recognizer.
+    pub(in crate::application_audio_host) fn before_native_start<A: Access, T>(
+        access: &A,
+        control: &Control,
+        source: &str,
+        listed: &[&str],
+        load: impl FnOnce() -> Result<T, String>,
+    ) -> Result<(usize, T), Refused> {
+        if control.is_cancelled() {
+            return Err(Refused::Start(Failure::Cancelled));
+        }
+        let chosen = listed
+            .iter()
+            .position(|id| *id == source)
+            .ok_or(Refused::Start(Failure::SourceUnavailable))?;
+        let session = || {
+            access
+                .with(|runtime| {
+                    runtime
+                        .live_source_operation()
+                        .map(|_| runtime.engine.session())
+                })
+                .flatten()
+                .ok_or(Refused::Clock(TimingError::SessionChanged))
+        };
+        let approved_in = session()?;
+        let loaded = load().map_err(|_| Refused::Start(Failure::Unavailable))?;
+        if session()? != approved_in {
+            return Err(Refused::Clock(TimingError::SessionChanged));
+        }
+        Ok((chosen, loaded))
     }
 
     /// A second local recognizer for this source, loaded before any native

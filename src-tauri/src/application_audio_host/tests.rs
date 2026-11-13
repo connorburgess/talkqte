@@ -22,14 +22,16 @@ const WAIT: Duration = Duration::from_secs(5);
 struct Script {
     /// The start completion has not arrived.
     start_pending: AtomicBool,
-    /// Stop reports failure until one retry.
-    stop_fails: AtomicBool,
+    /// How many more Stop requests the OS will report as failed.
+    stop_failures: AtomicU64,
     /// The Stop completion never arrives.
     stop_hangs: AtomicBool,
     /// The worker's loop faults on its next pass.
     panics: AtomicBool,
     /// Listing waits, as it would behind an OS prompt.
     list_waits: AtomicBool,
+    /// Listing does not notice a cancellation while it waits.
+    list_deaf: AtomicBool,
     list_denied: AtomicBool,
     list_panics: AtomicBool,
     /// The worker has taken the run request but not begun it.
@@ -82,7 +84,17 @@ impl Source for Scripted {
             }
             Stage::Running if cancelled => Stage::Stopping,
             Stage::Stopping if self.script.stop_hangs.load(Ordering::SeqCst) => Stage::Stopping,
-            Stage::Stopping if self.script.stop_fails.load(Ordering::SeqCst) => Stage::StopFailed,
+            Stage::Stopping
+                if self
+                    .script
+                    .stop_failures
+                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                        left.checked_sub(1)
+                    })
+                    .is_ok() =>
+            {
+                Stage::StopFailed
+            }
             Stage::Stopping => Stage::Draining,
             Stage::Draining => {
                 self.capture = None;
@@ -101,7 +113,6 @@ impl Source for Scripted {
         if self.stage != Stage::StopFailed {
             return false;
         }
-        self.script.stop_fails.store(false, Ordering::SeqCst);
         self.stage = Stage::Stopping;
         true
     }
@@ -135,7 +146,7 @@ impl Backend for Fake {
     fn list(&mut self, cancelled: &AtomicBool) -> Result<Vec<Application>, Failure> {
         self.script.lists.fetch_add(1, Ordering::SeqCst);
         while self.script.list_waits.load(Ordering::SeqCst) {
-            if cancelled.load(Ordering::Acquire) {
+            if cancelled.load(Ordering::Acquire) && !self.script.list_deaf.load(Ordering::SeqCst) {
                 return Err(Failure::Cancelled);
             }
             std::thread::sleep(Duration::from_millis(2));
@@ -363,6 +374,10 @@ fn stop_reads_stopping_until_cleanup_is_confirmed_whoever_asked() {
         let off = fixture.wait_phase(Phase::Off);
         assert!(!off.may_be_capturing && off.problem.is_none());
         assert_eq!(off.operation, None);
+        // The released run's counts are kept; this one heard nothing.
+        let json = serde_json::to_value(&off).unwrap();
+        assert_eq!(json["lastRun"]["acceptedLines"], 0);
+        assert_eq!(json["lastRun"]["workerDetached"], false);
         assert_eq!(shown(&off), CaptureState::Off);
         assert_eq!(
             fixture.host.0.gate.snapshot().unwrap().phase,
@@ -376,7 +391,7 @@ fn stop_reads_stopping_until_cleanup_is_confirmed_whoever_asked() {
 #[test]
 fn a_failed_stop_reads_cleanup_failed_until_one_explicit_retry_releases_it() {
     let fixture = fixture(true);
-    fixture.script.stop_fails.store(true, Ordering::SeqCst);
+    fixture.script.stop_failures.store(1, Ordering::SeqCst);
     let operation = fixture.listening();
     assert_eq!(fixture.host.retry_cleanup(&operation), Ok(false));
     fixture.host.stop(&operation).unwrap();
@@ -415,6 +430,166 @@ fn a_failed_stop_reads_cleanup_failed_until_one_explicit_retry_releases_it() {
 }
 
 #[test]
+fn a_retry_that_fails_again_can_be_retried_and_one_that_hangs_cannot() {
+    let retried = |fixture: &Fixture, count: u64| {
+        let deadline = Instant::now() + WAIT;
+        while fixture.script.retries.load(Ordering::SeqCst) < count {
+            assert!(Instant::now() < deadline, "retry {count} was not performed");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    };
+
+    // The OS reports failure twice. Each reported failure allows one retry.
+    let fixture = fixture(true);
+    fixture.script.stop_failures.store(2, Ordering::SeqCst);
+    let operation = fixture.listening();
+    fixture.host.stop(&operation).unwrap();
+    fixture.wait_phase(Phase::CleanupFailed);
+    assert_eq!(fixture.host.retry_cleanup(&operation), Ok(true));
+    retried(&fixture, 1);
+    // The second failure has to be reported before a second retry is taken;
+    // how long that takes is the worker's business, so wait for the answer.
+    let deadline = Instant::now() + WAIT;
+    while fixture.host.retry_cleanup(&operation) != Ok(true) {
+        assert_ne!(fixture.view().phase, Phase::Off, "it failed twice");
+        assert!(
+            Instant::now() < deadline,
+            "the second failure was never offered"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    retried(&fixture, 2);
+    fixture.wait_phase(Phase::Off);
+    assert_eq!(fixture.script.retries.load(Ordering::SeqCst), 2);
+
+    // The OS reports failure once, and the retried Stop is never answered.
+    let fixture = self::fixture(true);
+    fixture.script.stop_failures.store(1, Ordering::SeqCst);
+    let operation = fixture.listening();
+    fixture.host.stop(&operation).unwrap();
+    fixture.wait_phase(Phase::CleanupFailed);
+    fixture.script.stop_hangs.store(true, Ordering::SeqCst);
+    assert_eq!(fixture.host.retry_cleanup(&operation), Ok(true));
+    retried(&fixture, 1);
+    // From the performed retry on there is no reported failure to retry,
+    // however long the Stop stays unanswered.
+    let stopping = fixture.wait_phase(Phase::Stopping);
+    assert!(stopping.may_be_capturing && !stopping.can_retry);
+    for _ in 0..50 {
+        assert_eq!(fixture.host.retry_cleanup(&operation), Ok(false));
+        assert_eq!(fixture.view().phase, Phase::Stopping);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(fixture.script.retries.load(Ordering::SeqCst), 1);
+    fixture.script.stop_hangs.store(false, Ordering::SeqCst);
+    fixture.wait_phase(Phase::Off);
+}
+
+#[test]
+fn a_listing_cancelled_before_the_worker_takes_it_never_asks_the_os() {
+    for quit in [false, true] {
+        let fixture = fixture(true);
+        // The worker is held inside one listing that cannot be interrupted.
+        fixture.script.list_waits.store(true, Ordering::SeqCst);
+        fixture.script.list_deaf.store(true, Ordering::SeqCst);
+        fixture.host.list(true).unwrap();
+        let deadline = Instant::now() + WAIT;
+        while fixture.script.lists.load(Ordering::SeqCst) == 0 {
+            assert!(Instant::now() < deadline, "the worker never listed");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        fixture.host.cancel_list().unwrap();
+        // A second request waits behind it and is cancelled, or the app
+        // quits, before the worker can take it.
+        fixture.host.list(true).unwrap();
+        if quit {
+            fixture.host.exit();
+        } else {
+            fixture.host.cancel_list().unwrap();
+        }
+        assert_eq!(fixture.view().phase, Phase::Off);
+        fixture.script.list_waits.store(false, Ordering::SeqCst);
+        // Proof the worker is past both requests: it answers a third.
+        if !quit {
+            fixture.host.list(true).unwrap();
+            fixture.wait("choices", |view| !view.choices.is_empty());
+        } else {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert_eq!(
+            fixture.script.lists.load(Ordering::SeqCst),
+            if quit { 1 } else { 2 },
+            "the cancelled request was never put to the OS (quit {quit})"
+        );
+    }
+}
+
+#[test]
+fn before_the_native_request_a_start_is_checked_for_stop_selection_and_session() {
+    use app::before_native_start;
+    let listed = ["fictional-0", "fictional-1"];
+    let live = || {
+        let mut runtime = Runtime::default();
+        let ticket = runtime.begin_live_start().unwrap();
+        runtime.install_live_start(&ticket).unwrap();
+        Arc::new(Mutex::new(runtime))
+    };
+    let control = || {
+        let gate = Gate::default();
+        let review = gate
+            .review(Application::new("fictional-0".into(), "Fictional player".into()).unwrap())
+            .unwrap();
+        (gate, review.control(), review)
+    };
+    let never = || -> Result<(), String> { panic!("the recognizer must not be loaded") };
+
+    // Stopped while the request waited.
+    let (runtime, (gate, stopped, _review)) = (live(), control());
+    gate.stop(&stopped).unwrap();
+    assert_eq!(
+        before_native_start(&runtime, &stopped, "fictional-0", &listed, never),
+        Err(Refused::Start(Failure::Cancelled))
+    );
+    // Not one of the listed selections.
+    let (_gate, current, _review) = control();
+    assert_eq!(
+        before_native_start(&runtime, &current, "fictional-9", &listed, never),
+        Err(Refused::Start(Failure::SourceUnavailable))
+    );
+    // No live session to feed.
+    let idle = Arc::new(Mutex::new(Runtime::default()));
+    assert_eq!(
+        before_native_start(&idle, &current, "fictional-1", &listed, never),
+        Err(Refused::Clock(TimingError::SessionChanged))
+    );
+    // The recognizer cannot be loaded.
+    assert_eq!(
+        before_native_start(&runtime, &current, "fictional-1", &listed, || {
+            Err::<(), _>("no model".to_string())
+        }),
+        Err(Refused::Start(Failure::Unavailable))
+    );
+    // The session is replaced while the recognizer loads.
+    let replaced = runtime.clone();
+    assert_eq!(
+        before_native_start(&runtime, &current, "fictional-1", &listed, move || {
+            let mut runtime = replaced.lock().unwrap();
+            drop(runtime.take_live_for_stop());
+            runtime.engine.end();
+            let ticket = runtime.begin_live_start().unwrap();
+            runtime.install_live_start(&ticket).unwrap();
+            Ok(())
+        }),
+        Err(Refused::Clock(TimingError::SessionChanged))
+    );
+    // Otherwise: the chosen selection and the loaded recognizer.
+    assert_eq!(
+        before_native_start(&runtime, &current, "fictional-1", &listed, || Ok(7)),
+        Ok((1, 7))
+    );
+}
+
+#[test]
 fn a_completion_that_never_arrives_reads_stopping_then_stalled_and_never_off() {
     let fixture = fixture(true);
     fixture.script.stop_hangs.store(true, Ordering::SeqCst);
@@ -426,7 +601,7 @@ fn a_completion_that_never_arrives_reads_stopping_then_stalled_and_never_off() {
     std::thread::sleep(Duration::from_millis(100));
     for (later, stalled) in [
         (Duration::ZERO, false),
-        (STALLED_AFTER + Duration::from_millis(200), true),
+        (STALLED_AFTER * 2, true),
         (Duration::from_secs(3_600), true),
     ] {
         let view = fixture.host.snapshot_at(asked + later).view;
@@ -618,9 +793,21 @@ fn a_worker_that_cannot_be_reached_or_faults_while_listing_never_leaves_the_host
         (failed.phase, failed.problem),
         (Phase::Off, Some(Problem::ListFailed))
     );
-    // Its thread is gone. Nothing was started, and nothing can be.
-    let host = fixture.host.clone();
-    assert_eq!(within(move || host.list(true)), Err(Error::Unavailable));
+    // Its thread is going or gone. Nothing was started, and soon nothing can
+    // be: a request that still gets in is answered as failed, not left
+    // listing.
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let host = fixture.host.clone();
+        match within(move || host.list(true)) {
+            Err(Error::Unavailable) => break,
+            Ok(()) | Err(Error::Busy) => {
+                fixture.wait("the dropped request", |view| view.phase == Phase::Off);
+            }
+            other => panic!("unexpected answer {other:?}"),
+        }
+        assert!(Instant::now() < deadline, "the dead worker kept accepting");
+    }
     let host = fixture.host.clone();
     assert_eq!(within(move || host.snapshot().view.phase), Phase::Off);
 }
@@ -677,6 +864,14 @@ fn the_shared_capture_state_is_never_off_while_the_source_may_be_capturing() {
             } else {
                 assert_eq!(shown, microphone, "{phase:?} adds nothing");
             }
+        }
+    }
+    // A starting microphone is never shown as stopping: the notebook would
+    // disable its Stop control for a start it could otherwise cancel.
+    for phase in phases {
+        assert_ne!(overall_capture(Starting, phase), Stopping, "{phase:?}");
+        if phase != Phase::Listening {
+            assert_eq!(overall_capture(Starting, phase), Starting, "{phase:?}");
         }
     }
     assert_eq!(overall_capture(Off, Phase::Listening), Running);

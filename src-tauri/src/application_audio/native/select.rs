@@ -58,6 +58,10 @@ pub unsafe fn shareable_applications(cancelled: &AtomicBool) -> Result<Vec<Selec
     if !objc2::available!(macos = 14.0) {
         return Err(Failure::Unavailable);
     }
+    // Cancelled before anything was asked: ask nothing, so no prompt follows.
+    if cancelled.load(Ordering::Acquire) {
+        return Err(Failure::Cancelled);
+    }
     let (answer, answered) = sync_channel::<Result<Handoff, Failure>>(1);
     let completion = RcBlock::new(
         move |content: *mut SCShareableContent, error: *mut NSError| {

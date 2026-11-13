@@ -132,7 +132,7 @@ Native filtering, clock origin/drift, deadlines and actual source release remain
 unimplemented or unverified. The optional [native owner](native-audio-owner.md)
 now has a dedicated-worker loop and a sendable control handle. Native objects stay
 on their constructing thread through cleanup; host-handle loss requests Stop,
-and abandonment remains distinct from release. No app command enables this path. Its worker-side `chunks` submodule accepts only
+and abandonment remains distinct from release. In a default build no app command enables this path; a `native-audio-spike` development build has [one unvalidated command](native-application-audio-host.md) that does. Its worker-side `chunks` submodule accepts only
 16 kHz mono, cuts continuous audio at three seconds and partial audio at every
 gap or clean EOF, and discards pending samples on cancellation/session changes.
 Returned chunks retain source/session guards, and the microphone path is unchanged.
@@ -145,9 +145,11 @@ nothing ever attaches a source, so this changes no app behavior.
 `src-tauri/src/native_source.rs` is the development-only host loop that would
 attach one: it is compiled only on macOS with the `native-audio-spike` feature,
 and moves native blocks through the chunker and a transcription worker to that
-source sink. No command, picker, enumeration or permission request calls it, and
-it has not been run against a device, so nothing in the app starts application
-audio. See [ownership, sink and tests](native-audio-owner.md#live-session-ownership-of-the-source--13-november-2026).
+source sink. In a default build no command, picker, enumeration or permission
+request calls it, so nothing in the app starts application audio. A
+`native-audio-spike` development build adds a
+[host with one command](native-application-audio-host.md) that can list
+applications and start one; it has not been run against a device. See [ownership, sink and tests](native-audio-owner.md#live-session-ownership-of-the-source--13-november-2026).
 
 1. Capture both sides of a synthetic call with headphones, with clear microphone/system permissions.
 2. Stop and pause promptly; test device disconnect and permission denial.

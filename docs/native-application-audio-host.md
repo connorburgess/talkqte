@@ -28,7 +28,8 @@ The command takes one action at a time and returns the current status.
    asks ScreenCaptureKit for shareable content once. **macOS can show its
    Screen Recording prompt at this step**, before any application has been
    chosen; the system picker the plan mentions is not used. `cancelList` stops
-   waiting; a late answer is released unused.
+   waiting; a late answer is released unused. A listing that is cancelled, or
+   overtaken by quitting, before the worker takes it is never put to the OS.
 2. `review`, naming one listed application. Nothing is requested of the OS. A
    later review replaces this one, and the earlier approval is worthless.
 3. `start`, naming that review. Only the application under review can start.
@@ -66,8 +67,14 @@ unbroken spell of `stopping`, counted from the first status read that saw it,
 has lasted five seconds. That number is host wording policy, not a measured
 release time, and nothing is forced, retried or reported Off when it passes. `canRetry` is true only in `cleanupFailed`. The status also carries the
 application name, an opaque operation identifier, the listed choices, a
-problem label and the scope notice. It carries no audio, transcript or native
-identifier.
+problem label and the scope notice. After a released operation it also carries
+that run's counts: chunks recognized, lines accepted and refused, lines timed
+outside their audio, chunks withheld or refused, recognizer failures, whether
+the transcription worker had to be detached, and the width of the accepted
+clock read. It carries no audio, transcript or native identifier.
+
+The event is published by a 200 ms refresh, so `application-audio:changed`
+can trail the state by up to that long. The command's own reply is current.
 
 A failed cleanup is retried only on request, one request at a time, and a
 second request needs a newly reported failure. An unanswered Stop is not a
@@ -77,7 +84,10 @@ nothing in the process can still stop that stream.
 
 The processing status's capture state is combined with this phase: it never
 reads Off or Unknown while `mayBeCapturing` is true. With the microphone off, a
-failed, unanswered or abandoned cleanup reads `stopping` there. That path runs
+failed, unanswered or abandoned cleanup reads `stopping` there. A microphone
+that is starting keeps reading `starting` whatever the source is doing: the
+notebook disables its Stop control while capture reads `stopping`, and a stuck
+source must not take Stop away from a starting microphone. That path runs
 with the runtime lock held, so it reads the phase from an atomic the host
 writes under its own lock, at approval and on every status read. It can lag a
 release by one refresh, never a start, and the host lock is never taken under
@@ -90,6 +100,14 @@ for the microphone, and nothing in the notebook shows this host's own status.
 The interface is outside this change; do not judge a device run by the
 notebook until it shows the application-audio status.
 
+One control is still affected. The notebook offers **Cancel start** only while
+capture reads Off. If an earlier application source is stuck in `stopping`,
+`cleanupFailed` or `abandoned` and the microphone has not begun starting, the
+shared state reads `stopping`, so a new live session's model loading shows a
+disabled Stop instead of Cancel start until the microphone itself starts. The
+fix is for the source to have its own field in the processing snapshot instead
+of sharing the microphone's; that is the next step, with the interface.
+
 ## Quitting
 
 On an exit request the host refuses new work and requests Stop, without
@@ -98,9 +116,10 @@ unconfirmed capture when the process exits has not been checked.
 
 ## Tests
 
-Twelve tests run the host against the real source-worker ordering, with a
-fictional clock read, a memory-only clock feed, a scripted owner and a real
-`Mutex<Runtime>`:
+Fifteen tests cover the host. Twelve run it against the real source-worker
+ordering, with a fictional clock read, a memory-only clock feed, a scripted
+owner and a real `Mutex<Runtime>`; one checks the decisions made before the
+native request; two are table checks:
 
 - Listing is refused without the acknowledgement and the backend is never
   asked. Review is explicit, a replaced or cancelled review cannot start, and
@@ -110,6 +129,16 @@ fictional clock read, a memory-only clock feed, a scripted owner and a real
 - A failed Stop reads `cleanupFailed` across further polls with no automatic
   retry and no new selection. One retry is accepted, a second is refused, and
   the retry releases it.
+- When the retried Stop fails again, that newly reported failure allows one
+  more retry. When the retried Stop is never answered, no further retry is
+  accepted, however long it stays unanswered.
+- A listing cancelled, or overtaken by an exit request, while the worker is
+  still busy is answered as cancelled and the backend is not asked again.
+- Before the native request, in order: a stopped start loads no recognizer; a
+  source that is not one of the listed selections is refused; no live session
+  is refused; a recognizer that cannot load is refused; and a live session
+  replaced while the recognizer loads is refused. This runs the same function
+  the app uses, with a shared runtime in place of the app's.
 - A Stop completion that never arrives reads `stopping`, then `stalled`, an
   hour later still not Off, with no retry offered, also after an exit request.
 - A worker that faults reads `abandoned`, refuses retry and new work, and has
@@ -135,8 +164,9 @@ Mutation checks, each restored afterwards and each failing at least one test:
 reading a failed cleanup as stopping, treating an unwound worker as finished,
 reading a cancelled start as starting, ignoring the source in the shared
 capture state, blaming the session for a start the person stopped, not marking
-the phase at approval, and keeping a listing request alive under the host
-lock. The host tests passed 30 consecutive runs.
+the phase at approval, keeping a listing request alive under the host lock,
+showing a starting microphone as stopping, and putting a cancelled listing to
+the OS. The host tests passed 30 consecutive runs.
 
 The scripted owner stands in for ScreenCaptureKit's completions and is a
 second, simpler copy of the owner's stage logic, not the real owner with a fake
@@ -152,9 +182,13 @@ everything in the app wiring.
 ## Not run, and the gates that stay open
 
 The app wiring was compiled with the feature and never executed: the command,
-its permission added at startup, the status event, the exit hook, the real
-enumeration and the second recognizer. Treat each as unverified until a
-development build is run on a device.
+its permission added at startup, the status event, the exit hook and the real
+enumeration. The second recognizer's loading code exists only when
+`local-whisper` is enabled as well, which is the one configuration that can
+actually start a source. That pair was compiled and linted locally for this
+change; CI compiles `native-audio-spike` alone, where a start is refused for
+lack of local transcription. Treat all of it as unverified until a development
+build is run on a device.
 
 Against the [selected-application acceptance gates](system-audio-plan.md):
 
@@ -182,9 +216,14 @@ Against the [selected-application acceptance gates](system-audio-plan.md):
   application quitting, device change, and sleep and wake are not.
 - **Audio contract: open.** Clock drift, real buffer sizes, callback
   allocation and the delivered channel and sample-rate layout are unmeasured.
-  A microphone and an application feeding one session would lose lines that
-  arrive out of order, and microphone pickup of the same speech could add
-  duplicate lines; neither is handled.
+  The engine refuses any line timed before the last line it accepted, whoever
+  sent it. With a microphone and an application in one session, a line from
+  either can therefore be dropped because the other's later line arrived
+  first: **attaching a source can drop microphone lines**. Microphone pickup
+  of the same speech could also add duplicate lines. Neither is handled, so
+  transcript quality must not be judged through this host. The refused-line
+  count in the run's record shows how many of the source's lines were lost
+  this way, not the microphone's.
 - **Performance: open.** A second recognizer is loaded for the source; its
   memory and CPU cost against the budgets is unmeasured.
 
