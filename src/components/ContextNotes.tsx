@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { FileText, Link2, X } from 'lucide-react';
 import * as bridge from '../lib/bridge';
 import type { ContextItem, GranolaStatus, PickedNotes } from '../lib/types';
+import {
+  GranolaNoteFreshness,
+  GranolaUpdateCheck,
+  useGranolaUpdateCheck,
+} from './GranolaUpdateCheck';
 
 /**
  * Prior notes the user imported from a file for this session. They are shown
@@ -28,11 +33,15 @@ export function ContextNotes({
     tools: [],
   });
   const granolaRevision = useRef(0);
+  const updates = useGranolaUpdateCheck();
   const setGranola = (status: GranolaStatus) => {
     granolaRevision.current++;
     setGranolaState(status);
+    updates.connectionChanged(status);
     onGranola?.(status);
   };
+  // A finding belongs to the copy that was checked, not to a later one.
+  useEffect(() => updates.keepOnly(items), [items]);
   const [signingIn, setSigningIn] = useState(false);
   const [listing, setListing] = useState(false);
   useEffect(() => {
@@ -318,6 +327,12 @@ export function ContextNotes({
             Loading recent notes… You can disconnect while you wait.
           </p>
         )}
+        {granola.connected && granola.updateCheck && (
+          <GranolaUpdateCheck
+            updates={updates}
+            count={items.filter((item) => item.provider === 'granola').length}
+          />
+        )}
         {items.length > 0 ? (
           <ul className="context-list">
             {items.map((item) => (
@@ -330,6 +345,13 @@ export function ContextNotes({
                       ? 'From Granola'
                       : 'From a file'}
                   </span>
+                  {item.provider === 'granola' && (
+                    <GranolaNoteFreshness
+                      freshness={updates.freshness.find(
+                        (note) => note.sourceId === item.sourceId,
+                      )}
+                    />
+                  )}
                   <p>{item.excerpt}</p>
                 </div>
                 <button
@@ -391,8 +413,8 @@ export function ContextNotes({
           </button>
         </div>
         <p id="context-pick-description">
-          Only the notes you tick are kept, for this session. They appear beside
-          your notebook as prior context and never feed a question on their own.
+          Only the notes you tick are kept, for this session. They are listed
+          under Prior context and never feed a question on their own.
         </p>
         {pickedFrom === 'granola' && picked && picked.notes.length > 0 && (
           <p className="small">

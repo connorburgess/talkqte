@@ -13,6 +13,7 @@ use crate::context::{
     Capabilities, ContextItem, NoteSource, Provider, SourceError, MAX_EXCERPT_CHARS,
     MAX_TITLE_CHARS,
 };
+use crate::context_refresh::RefreshSource;
 use crate::notes_file::{NoteSummary, MAX_NOTES};
 use quick_xml::{events::Event, Reader, XmlVersion};
 use serde_json::{json, Value};
@@ -1480,6 +1481,12 @@ fn note_from(value: &Value) -> Option<Note> {
     })
 }
 
+/// The provider update time behind a Granola revision, in milliseconds since
+/// 1970, or `None` for a copy imported without a usable `updated_at`.
+pub fn updated_at_ms(revision: u64) -> Option<u64> {
+    (revision > 1).then_some(revision)
+}
+
 fn preview(text: &str) -> String {
     let trimmed = text.trim();
     let short: String = trimmed.chars().take(PREVIEW_CHARS).collect();
@@ -1591,21 +1598,30 @@ impl NoteSource for Shared {
     }
 }
 
-impl NoteSource for Connection {
-    fn provider(&self) -> Provider {
-        Provider::Granola
+/// The explicit update check (`context_refresh.rs`) needs the provider's own
+/// identifier for the workspace a request is scoped to. Granola's MCP guide
+/// describes active-workspace scope, but the tools this client has observed
+/// name no workspace, so the check fails closed: the notebook does not offer
+/// it for a real connection and no note identifier is sent. Change this only
+/// after an account check establishes a provider-supported identity.
+impl RefreshSource for Shared {
+    fn binding_supported(&self) -> bool {
+        false
     }
 
-    /// Import only. Granola's page documents no live transcript stream and
-    /// no writeback through MCP, and this client asks for neither.
-    fn capabilities(&self) -> Capabilities {
-        Capabilities {
-            import_notes: self.tool("get_meetings").is_some(),
-            ..Capabilities::default()
-        }
+    fn workspace(&mut self) -> Result<Option<String>, SourceError> {
+        Ok(None)
     }
 
-    fn fetch(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError> {
+    fn fetch_available(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError> {
+        self.with_connection(|connection| connection.fetch_available(selection))
+    }
+}
+
+impl Connection {
+    /// The selected notes the server returned, without requiring all of
+    /// them. Notes it volunteers beyond the selection are dropped.
+    fn fetch_available(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError> {
         let tool = self
             .tool("get_meetings")
             .cloned()
@@ -1634,15 +1650,6 @@ impl NoteSource for Connection {
         } else {
             notes_in(&output)
         };
-        // Missing/inaccessible or size-omitted selections must not look like
-        // a successful partial import. Keep the chooser available for retry
-        // or a smaller selection; do not fetch more notes automatically.
-        if selection
-            .iter()
-            .any(|id| !notes.iter().any(|note| &note.id == id))
-        {
-            return Err(SourceError::Unavailable);
-        }
         Ok(notes
             .into_iter()
             .filter(|note| selection.iter().any(|wanted| wanted == &note.id))
@@ -1655,6 +1662,35 @@ impl NoteSource for Connection {
                 revision: note.revision,
             })
             .collect())
+    }
+}
+
+impl NoteSource for Connection {
+    fn provider(&self) -> Provider {
+        Provider::Granola
+    }
+
+    /// Import only. Granola's page documents no live transcript stream and
+    /// no writeback through MCP, and this client asks for neither.
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            import_notes: self.tool("get_meetings").is_some(),
+            ..Capabilities::default()
+        }
+    }
+
+    fn fetch(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError> {
+        let items = self.fetch_available(selection)?;
+        // Missing/inaccessible or size-omitted selections must not look like
+        // a successful partial import. Keep the chooser available for retry
+        // or a smaller selection; do not fetch more notes automatically.
+        if selection
+            .iter()
+            .any(|id| !items.iter().any(|item| &item.source_id == id))
+        {
+            return Err(SourceError::Unavailable);
+        }
+        Ok(items)
     }
 }
 
@@ -2298,6 +2334,44 @@ The default range is the last thirty days.
             seen.lock().unwrap().len(),
             4,
             "no automatic follow-up reads"
+        );
+    }
+
+    #[test]
+    fn an_update_check_fails_closed_without_asking_granola_for_any_note() {
+        use crate::context::ContextStore;
+        use crate::context_refresh::{CheckStatus, Refresh, CHECK_TIMEOUT};
+        let (endpoint, seen) = fictional_server(Answer::Json);
+        let mut shared = Shared::new(Connection::open_at(&endpoint, &tokens(), false).unwrap());
+        assert!(!shared.binding_supported());
+        let mut store = ContextStore::default();
+        let selection = ["m2".to_string()];
+        let fetched = shared.fetch(&selection).unwrap();
+        store.merge(Provider::Granola, &selection, fetched);
+        let before = seen.lock().unwrap().len();
+        let mut refresh = Refresh::default();
+        let ticket = refresh.begin(&store).unwrap();
+        let result = crate::context_refresh::run(&ticket, Box::new(shared.clone()), CHECK_TIMEOUT);
+        let report = refresh.apply(&ticket, result, &mut store, 0);
+        assert_eq!(report.status, CheckStatus::WorkspaceUnverified);
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            before,
+            "no request without a provider-supported workspace identity"
+        );
+        assert_eq!(store.items().len(), 1);
+
+        // The request a verified binding would allow returns what the server
+        // has for the selection instead of failing on an omitted note.
+        let available = shared
+            .fetch_available(&["m2".into(), "omitted-note".into()])
+            .unwrap();
+        assert_eq!(available.len(), 1);
+        assert_eq!(available[0].source_id, "m2");
+        let asked: Value = serde_json::from_str(&seen.lock().unwrap().last().unwrap().1).unwrap();
+        assert_eq!(
+            asked["params"]["arguments"]["meeting_ids"],
+            json!(["m2", "omitted-note"])
         );
     }
 

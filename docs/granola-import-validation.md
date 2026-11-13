@@ -113,3 +113,27 @@ The UI/UX task is to keep connection state, available actions and keyboard focus
 | ![Fictional prior-context panel incorrectly asking to connect again](assets/granola-status-before.png) | ![Fictional prior-context panel retaining note selection and keyboard-focused Disconnect](assets/granola-status-after.png) |
 
 These desktop crops use a 1320 × 880 browser viewport; the [narrow rendering](assets/granola-status-narrow.png) uses the same fictional IPC. All 12 new checks passed in Chromium and WebKit, plus 32 surrounding Granola/notebook checks in Chromium. The frontend build, formatting and source design scan passed; the scan reported no findings and the rendered crops were inspected. Existing local WebKit pointer-entry tests timed out before the test body; the same timeout was reproduced with unchanged app source from `60355d3`, so the surrounding local WebKit suite is not counted as passing. This is a reproduced browser boundary defect, not an observed real-account failure. Real selected-note import, native VoiceOver and cross-app behavior remain separate acceptance gates.
+
+## Explicit update check against a simulated provider
+
+13 November 2026. The notebook can ask once, on request, whether the selected Granola notes changed ([scope and rules](selected-note-refresh-plan.md#first-slice-one-explicit-check-simulated-provider-only)). This is simulated-provider evidence only. The signed-in Granola connection does not show the control, sends no new request, and its permissions text is unchanged, because no provider-supported workspace identity has been verified. No account, network, capture or model was used.
+
+The UI/UX task is to learn whether selected prior notes are still current without losing control of what is read, and to leave a slow or failed check at any time. The existing paper and evergreen presentation is kept. One button starts the check and becomes **Stop check**; a sentence beside it states how many notes are asked about and that only their identifiers are sent. Progress and a completed or stopped check appear in a status region that is present before its text changes; a check that could not finish appears as an alert. Each checked note carries its own line. Whether a screen reader announces these has not been checked.
+
+Rust acceptance uses a scripted fictional source with a named clock and held replies: a changed note replaces its copy and an unchanged one is confirmed; omitted, older, unversioned and unreadable replies keep the copy unverified and keep the time of the last successful check; a missing or changed workspace identity applies nothing, and a missing one sends no note request; offline, expired, withdrawn, rate-limited and unreadable-format replies are distinct and not retried; a local timeout refuses a second request until the first ends and drops its late reply; Stop and Disconnect return at once and discard a late success; a note removed, or removed and imported again, during the wait is neither restored nor updated; twenty notes go out as two sequential requests of ten, and a check that timed out during the first sends no second; a finding does not carry over to a copy imported later at another revision. A further test runs the actual Granola connection against the loopback fictional server and confirms the check ends before any note request.
+
+Browser acceptance replaces native IPC with the simulated provider in `tests/fixtures/native-granola.ts`, which restates those rules in TypeScript; it shows what the notebook renders, not that Rust and the interface agree over the real command transport. Fifteen checks cover a connection that reports no update check and so shows no control, the changed and no-longer-returned notes, each failure state with a repeated check, timeout, Stop, Disconnect and reconnect, removal during a check, a note removed and imported again after a check, and leaving and returning to the notebook at 600 × 700 without horizontal overflow. The older, no-update-time and unreadable per-note messages are covered in Rust but not rendered in a browser test, and no test drives the native command itself.
+
+![Fictional prior-context panel after an update check: one note updated, one not returned and kept](assets/granola-update-check-narrow.png)
+
+The capture uses fictional garden notes at a 600 × 700 browser viewport with the simulated provider.
+
+Repeat the checks without an account or a GUI:
+
+```sh
+cargo test --manifest-path src-tauri/Cargo.toml --locked --lib context_refresh
+cargo test --manifest-path src-tauri/Cargo.toml --locked --lib granola::tests::an_update_check
+PLAYWRIGHT_PORT=1432 npm test -- tests/granola-updates.spec.ts
+```
+
+Unverified: whether Granola exposes a workspace identity, when an edited note becomes visible through `get_meetings`, what it returns for a note that was deleted, unshared or moved, real timeout and rate-limit behavior, native VoiceOver, and whether freshness labels help anyone during a conversation.
