@@ -111,9 +111,13 @@ export async function disconnectGranola() {
   return invoke<GranolaStatus>('disconnect_granola');
 }
 
-export async function importContextNotes(ids: string[]) {
-  if (preview) return (await preview).importContextNotes(ids);
-  return invoke<MergeOutcome>('import_context_notes', { ids });
+/** Imports the chosen notes; `dates` fills file notes that have no date. */
+export async function importContextNotes(
+  ids: string[],
+  dates?: Record<string, string>,
+) {
+  if (preview) return (await preview).importContextNotes(ids, dates);
+  return invoke<MergeOutcome>('import_context_notes', { ids, dates });
 }
 
 /** Removes every imported note; returns how many were removed. */

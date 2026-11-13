@@ -109,6 +109,12 @@ pub trait NoteSource {
     fn provider(&self) -> Provider;
     fn capabilities(&self) -> Capabilities;
     fn fetch(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError>;
+    /// Whether the chooser asks the person for the date of a note that has
+    /// none. Only a Markdown or plain-text file does; other sources state
+    /// their dates, and a note without one is skipped.
+    fn asks_for_dates(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -266,7 +272,7 @@ fn invisible(character: char) -> bool {
 }
 
 /// A real calendar date in YYYY-MM-DD form.
-fn valid_date(date: &str) -> bool {
+pub(crate) fn valid_date(date: &str) -> bool {
     let parts: Vec<&str> = date.split('-').collect();
     let [year, month, day] = parts.as_slice() else {
         return false;
