@@ -723,3 +723,48 @@ test('a bundle without the current notices fails', (t) => {
     /^third-party notices in the app: .*differs from the repository's copy/,
   );
 });
+
+test('a development feature switched on by the configuration fails', (t) => {
+  const byDefault = fixture(t);
+  write(
+    byDefault.root,
+    'src-tauri/Cargo.toml',
+    [
+      '[package]',
+      'name = "orchard"',
+      'version = "1.4.2"',
+      '',
+      '[features]',
+      '# Fictional: the default turns on a feature that turns on the spike.',
+      'default = ["capture"]',
+      'capture = ["native-audio-spike", "dep:fictional-capture"]',
+      'native-audio-spike = [',
+      '  "dep:fictional-spike",',
+      ']',
+      '',
+      '[dependencies]',
+      '',
+    ].join('\n'),
+  );
+  assert.deepEqual(failures(preflight({ root: byDefault.root })), [
+    "development features: native-audio-spike is switched on by the crate's default features or tauri.conf.json build.features; a release must not include it",
+  ]);
+
+  const byTauri = fixture(t, {
+    config: (config) => {
+      config.build = { features: ['native-audio-spike'] };
+    },
+  });
+  assert.match(
+    failures(preflight({ root: byTauri.root }))[0],
+    /^development features: native-audio-spike is switched on/,
+  );
+
+  const declaredOnly = fixture(t);
+  write(
+    declaredOnly.root,
+    'src-tauri/Cargo.toml',
+    '[package]\nname = "orchard"\nversion = "1.4.2"\n\n[features]\nnative-audio-spike = ["dep:fictional-spike"]\nlocal-whisper = ["dep:fictional-whisper"]\n',
+  );
+  assert.deepEqual(failures(preflight({ root: declaredOnly.root })), []);
+});
