@@ -33,6 +33,8 @@ pub(crate) struct Measurement {
 /// The host must retain it with its acceptance evidence. This correspondence
 /// does not authorize capture or replace ongoing source/session guards.
 pub(crate) struct MeasuredBinding {
+    /// The live session the source is now attached to.
+    pub session: u64,
     pub binding: ClockBinding,
     pub bracket_width: Duration,
 }
@@ -116,6 +118,7 @@ impl Runtime {
                 Refused::Occupied => TimingError::Occupied,
             })?;
         Ok(MeasuredBinding {
+            session: snapshot.session,
             binding: measurement.binding,
             bracket_width: measurement.width,
         })
@@ -192,7 +195,7 @@ impl Snapshot {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::application_audio::{
         chunks::ChunkError,
@@ -443,7 +446,10 @@ mod tests {
 
     /// Host time 7 s is where the memory-only test timebase places source
     /// time 10 s, so an accepted binding maps the fictional feed's samples.
-    fn accepted(runtime: &mut Runtime, control: &Control) -> Result<MeasuredBinding, TimingError> {
+    pub(crate) fn accepted(
+        runtime: &mut Runtime,
+        control: &Control,
+    ) -> Result<MeasuredBinding, TimingError> {
         let at = runtime.last_tick;
         let snapshot = runtime.native_clock_snapshot_at(control, at)?;
         let measurement = snapshot.measure_with(

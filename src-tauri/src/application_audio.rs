@@ -110,7 +110,6 @@ impl Control {
 
     /// Identity of the reviewed operation, not of its application or name.
     #[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
-    #[cfg_attr(not(test), allow(dead_code))] // Its only caller has no caller yet.
     pub(crate) fn same_operation(&self, other: &Control) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
@@ -280,6 +279,11 @@ pub struct Start {
 }
 
 impl Start {
+    /// The approved operation's identity, for scoped Stop and source checks.
+    pub fn control(&self) -> Control {
+        self.lease.control.clone()
+    }
+
     /// Run on a worker, never the UI thread or audio callback. The adapter
     /// receives only the reviewed selection and cancellation token. It must
     /// clean up before returning Err, and release its stream in a non-panicking

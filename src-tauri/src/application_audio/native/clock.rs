@@ -63,8 +63,12 @@ pub struct ClockBinding {
 impl ClockBinding {
     /// host_origin must describe the host clock, not the stream clock. The host
     /// must pair it with session_time for this session before invoking begin.
-    /// Rust Instant alone does not establish that correspondence.
-    pub fn new(
+    /// Rust Instant alone does not establish that correspondence. Outside
+    /// tests only the runtime's clock measurement constructs one, and it
+    /// leaves the runtime only through acceptance, which attaches a source.
+    /// The binding names a session, not that source: the caller must begin
+    /// the same operation it accepted, and the transcript sink checks it.
+    pub(crate) fn new(
         session: u64,
         host_origin: CMTime,
         session_time: Duration,

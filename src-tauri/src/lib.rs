@@ -17,6 +17,8 @@ mod microphone;
 pub mod model;
 #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
 mod native_session_clock;
+#[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+mod native_source;
 pub mod notes_file;
 mod processing_commands;
 pub mod processing_reviews;
