@@ -6,7 +6,10 @@
       "id": "deferral-next-month",
       "category": "deferral",
       "events": [
-        { "id": "e1", "text": "Someone could book the hall for the bake sale." },
+        {
+          "id": "e1",
+          "text": "Someone could book the hall for the bake sale."
+        },
         {
           "id": "e2",
           "text": "We'll pick that up at the committee meeting next month. On to the raffle."
@@ -380,7 +383,10 @@
           "id": "e1",
           "text": "The new shed arrived and it looks great."
         },
-        { "id": "e2", "text": "Lovely. We'll see you all soon, thanks for coming." }
+        {
+          "id": "e2",
+          "text": "Lovely. We'll see you all soon, thanks for coming."
+        }
       ],
       "existingCue": null,
       "expected": {
@@ -396,7 +402,10 @@
           "id": "e1",
           "text": "Thanks everyone, the minutes from last time are approved."
         },
-        { "id": "e2", "text": "Great, and the accounts were signed off in March." }
+        {
+          "id": "e2",
+          "text": "Great, and the accounts were signed off in March."
+        }
       ],
       "existingCue": null,
       "expected": {

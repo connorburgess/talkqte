@@ -4057,6 +4057,129 @@ mod tests {
         assert_eq!(matched, 9);
     }
 
+    /// Runs the phrase rules on held-out fictional cases whose labels were
+    /// written and committed before the rules were run on them
+    /// (`scripts/fixtures/cue-rules-held-out.json`). The labels are the
+    /// rules lane's and await the owner's review. Each case starts from its
+    /// own cue where it lists one, with the rule type the fixture names, and
+    /// uses the session name where it gives one.
+    #[test]
+    fn rules_on_the_held_out_fictional_cases() {
+        let suite: serde_json::Value = serde_json::from_str(include_str!(
+            "../../scripts/fixtures/cue-rules-held-out.json"
+        ))
+        .unwrap();
+        let mut results = vec![];
+        let mut matched = 0;
+        let cases = suite["cases"].as_array().unwrap();
+        for case in cases {
+            let mut e = Engine::live();
+            e.start().unwrap();
+            if let Some(name) = case["userName"].as_str() {
+                e.set_user_name(Some(name.into())).unwrap();
+            }
+            let existing = &case["existingCue"];
+            let seed = (!existing.is_null()).then(|| {
+                (
+                    existing["ruleType"].as_str().unwrap(),
+                    existing["text"].as_str().unwrap(),
+                    existing["sourceIds"][0].as_str().unwrap(),
+                )
+            });
+            let mut seeded: Option<String> = None;
+            let mut action = "quiet";
+            for (index, event) in case["events"].as_array().unwrap().iter().enumerate() {
+                let at = 1_000 + index as u64 * 2_000;
+                e.advance(at - e.state.elapsed_ms);
+                let id = event["id"].as_str().unwrap();
+                let text = event["text"].as_str().unwrap();
+                let before = e.state.cue.clone();
+                e.ingest(e.session(), live(id, at, text)).unwrap();
+                if let (Some(cue), None) = (&before, &e.state.cue) {
+                    action = if resolves(&cue.kind, text) {
+                        "resolved"
+                    } else {
+                        "withdraw"
+                    };
+                }
+                if let Some((kind, question, source)) = seed.filter(|(_, _, source)| *source == id)
+                {
+                    let cue_id = format!("{}:{id}:fixture", e.generation);
+                    e.cue_deadline = at + CUE_MS;
+                    e.unshown = None;
+                    e.last_shown.retain(|(shown, _)| shown != kind);
+                    e.last_shown.push((kind.into(), at));
+                    e.state.cue = Some(Cue {
+                        sources: Vec::new(),
+                        id: cue_id.clone(),
+                        kind: kind.into(),
+                        question: question.into(),
+                        evidence: text.into(),
+                        source_id: source.into(),
+                        remaining_ms: CUE_MS,
+                        total_ms: CUE_MS,
+                        held: false,
+                        expanded: false,
+                        resolved_by: None,
+                        note: None,
+                        about_focus: false,
+                    });
+                    seeded = Some(cue_id);
+                }
+            }
+            match (&seeded, &e.state.cue) {
+                (Some(id), Some(cue)) if &cue.id != id => action = "second cue",
+                (None, Some(_)) => action = "show",
+                _ => {}
+            }
+            let expected = case["expected"]["action"].as_str().unwrap();
+            let id = case["id"].as_str().unwrap();
+            eprintln!("{id:36} rules={action:10} expected={expected}");
+            matched += usize::from(action == expected);
+            results.push((id.to_string(), action));
+            assert!(e.state.notes.is_empty(), "{id}");
+        }
+        // Recorded 13 November 2026 in docs/cue-intelligence.md. Update it
+        // deliberately when the rules change; never edit a label to match.
+        let recorded = [
+            ("deferral-next-month", "quiet"),
+            ("deferral-look-alike", "quiet"),
+            ("deferral-of-something-else", "withdraw"),
+            ("correction-cancelled", "withdraw"),
+            ("correction-of-something-else", "quiet"),
+            ("correction-without-a-phrase", "quiet"),
+            ("answered-at-once", "quiet"),
+            ("answered-in-the-same-line", "show"),
+            ("answered-in-other-words", "quiet"),
+            ("asked-of-someone-else", "quiet"),
+            ("handed-to-someone-else", "quiet"),
+            ("asked-of-the-user", "show"),
+            ("asked-of-the-user-without-a-comma", "quiet"),
+            ("you-could-be-either", "quiet"),
+            ("name-mentioned-not-addressed", "quiet"),
+            ("repeat-in-other-words", "quiet"),
+            ("repeat-of-a-group-question", "show"),
+            ("topic-change-in-other-words", "quiet"),
+            ("topic-change-look-alike", "quiet"),
+            ("plain-idiom", "show"),
+            ("plain-goodbye", "show"),
+            ("plain-approval", "quiet"),
+            ("missing-owner-in-other-words", "quiet"),
+        ];
+        let recorded: Vec<(String, &str)> = recorded
+            .iter()
+            .map(|(id, action)| (id.to_string(), *action))
+            .collect();
+        assert_eq!(results, recorded);
+        assert_eq!((matched, cases.len()), (13, 23));
+        // Doing nothing at all would match every case labeled quiet.
+        let quiet = cases
+            .iter()
+            .filter(|case| case["expected"]["action"] == "quiet")
+            .count();
+        assert_eq!(quiet, 14);
+    }
+
     #[test]
     fn a_question_answered_while_catching_up_is_never_shown() {
         let mut e = play(&[
