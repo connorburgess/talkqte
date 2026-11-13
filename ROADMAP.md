@@ -123,7 +123,7 @@ The development Granola connection has passed account sign-in, listing, and requ
 
 Test the in-conversation interaction before investing in automatic detection. This can run independently of the native audio feasibility work below.
 
-- [ ] **V5** Compare no assistance with stable, human-selected questions in matched fictional conversations; counterbalance order.
+- [ ] **V5** Compare no assistance with stable, human-selected questions in matched fictional conversations; counterbalance order. A [proposed protocol](docs/comparison-study.md) covering V5–V7 (matched fictional conversations, cue schedules, counterbalancing, scoring, consent) was written on 14 November 2026 and awaits the owner; nothing has been run.
 - [ ] **V6** Compare source-backed context reminders in a separate human-cued condition; check orientation and appropriate responses while the topic is still active.
 - [ ] **V7** Measure useful participation and listening comprehension together, with useful clarification specific to the question condition; include unsupported, already-answered, and late cues. Do not use saves or speaking speed as the success measure.
 - [ ] **V8** Check whether the **Why?** hold is discoverable or needs a separate Hold action.
