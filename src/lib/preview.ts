@@ -9,6 +9,7 @@ import type {
   PickedNotes,
   Snapshot,
   GranolaStatus,
+  UpdateCheckReport,
 } from './types';
 
 const state: Snapshot = {
@@ -296,6 +297,7 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
       break;
     }
     case 'cancel_granola_sign_in':
+    case 'stop_granola_update_check':
       break;
     case 'set_sensitivity':
       state.sensitivity = (args as Commands['set_sensitivity']).value;
@@ -476,6 +478,9 @@ export function suggestGranolaFocus(): string[] {
   throw new Error(
     'Granola connects in the desktop app, with your own sign-in.',
   );
+}
+export function checkGranolaUpdates(): UpdateCheckReport {
+  throw new Error('Connect Granola first.');
 }
 export function disconnectGranola(): GranolaStatus {
   return { connected: false, tools: [] };

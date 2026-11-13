@@ -48,6 +48,8 @@
     "allow-list-granola-notes",
     "allow-disconnect-granola",
     "allow-suggest-granola-focus",
+    "allow-check-granola-updates",
+    "allow-stop-granola-update-check",
     "allow-download-model",
     "allow-cancel-model-download",
     "allow-remove-model",

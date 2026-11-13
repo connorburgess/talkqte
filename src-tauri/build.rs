@@ -43,6 +43,8 @@ fn main() {
             "list_granola_notes",
             "disconnect_granola",
             "suggest_granola_focus",
+            "check_granola_updates",
+            "stop_granola_update_check",
             "download_model",
             "cancel_model_download",
             "remove_model",
