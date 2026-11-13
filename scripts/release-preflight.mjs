@@ -14,6 +14,8 @@
 // --expect signed requires a Developer ID signature with the hardened runtime.
 // --expect notarized also requires a stapled ticket and Gatekeeper's verdict.
 // --max-size-mib N overrides the size tripwire; --root DIR reads another tree.
+// --strict-paths fails on build-machine home folders in the executable, as
+// --expect signed and notarized always do.
 //
 // A pass is evidence about one artifact on the Mac that ran the check. It is
 // not a clean-machine installation test; see docs/release-path.md.
@@ -28,6 +30,7 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { NOTICES_IN_BUNDLE, staleReason } from './third-party-notices.mjs';
 
 const REPOSITORY = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MIB = 1024 * 1024;
@@ -205,8 +208,14 @@ function readSources(root) {
     'm',
   ).exec(read('src-tauri/Cargo.lock'))?.[1];
   const entitlementsPath = config.bundle?.macOS?.entitlements;
+  const noticesPath = config.bundle?.macOS?.files?.[NOTICES_IN_BUNDLE];
   return {
     config,
+    noticesPath,
+    notices:
+      noticesPath && existsSync(join(root, 'src-tauri', noticesPath))
+        ? read(join('src-tauri', noticesPath))
+        : undefined,
     versions: [
       ['package.json', json('package.json').version],
       ['package-lock.json', lock.version],
@@ -356,6 +365,34 @@ export function checkSources(root = REPOSITORY) {
       ),
     );
 
+  const { noticesPath, notices } = sources;
+  const stale = notices === undefined ? null : staleReason(notices, root);
+  if (!noticesPath)
+    findings.push(
+      fail(
+        'third-party notices',
+        `tauri.conf.json does not place ${NOTICES_IN_BUNDLE} in the bundle`,
+      ),
+    );
+  else if (notices === undefined)
+    findings.push(
+      fail(
+        'third-party notices',
+        `src-tauri/${noticesPath} is missing; run \`npm run notices\``,
+      ),
+    );
+  else if (stale)
+    findings.push(
+      fail(
+        'third-party notices',
+        `src-tauri/${noticesPath} is stale: ${stale}; run \`npm run notices\``,
+      ),
+    );
+  else
+    findings.push(
+      ok('third-party notices', 'generated from the current lockfiles'),
+    );
+
   const updater = config.plugins?.updater;
   if (!updater)
     findings.push(
@@ -499,6 +536,21 @@ export function checkBundle(app, sources, options = {}) {
         ),
   );
 
+  const bundledNotices = join(app, 'Contents', ...NOTICES_IN_BUNDLE.split('/'));
+  findings.push(
+    !existsSync(bundledNotices)
+      ? fail(
+          'third-party notices in the app',
+          `Contents/${NOTICES_IN_BUNDLE} is missing from the bundle`,
+        )
+      : readFileSync(bundledNotices, 'utf8') !== sources.notices
+        ? fail(
+            'third-party notices in the app',
+            `Contents/${NOTICES_IN_BUNDLE} differs from the repository's copy; rebuild after \`npm run notices\``,
+          )
+        : ok('third-party notices in the app', `Contents/${NOTICES_IN_BUNDLE}`),
+  );
+
   const entries = walk(app);
   const realApp = realpathSync(app);
   const unwanted = [];
@@ -537,13 +589,16 @@ export function checkBundle(app, sources, options = {}) {
 
   if (executableStat?.isFile()) {
     const paths = new Set(
-      readFileSync(executable, 'latin1').match(/\/Users\/[^/\0\s"']+\//g) ?? [],
+      (
+        readFileSync(executable, 'latin1').match(/\/Users\/[^/\0\s"']+\//g) ??
+        []
+      ).filter((path) => path !== '/Users/Shared/'),
     );
     if (paths.size)
       findings.push(
-        note(
+        (release || options.strictPaths ? fail : note)(
           'build paths',
-          `the executable embeds paths under ${paths.size} home folder(s) of the build machine; build a release where that folder name may be published, or remap it`,
+          `the executable embeds paths under ${paths.size} home folder(s) of the build machine; build with \`npm run build:release\`, which remaps them`,
         ),
       );
     else
@@ -763,7 +818,8 @@ export function parseArguments(argv) {
       options.maxSizeMib = Number(value());
       if (!(options.maxSizeMib > 0))
         throw new Error('--max-size-mib takes a positive number');
-    } else if (argument === '--root') options.root = resolve(value());
+    } else if (argument === '--strict-paths') options.strictPaths = true;
+    else if (argument === '--root') options.root = resolve(value());
     else if (argument.startsWith('-'))
       throw new Error(`unknown option ${argument}`);
     else if (options.app) throw new Error('give one .app path');
@@ -785,7 +841,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   } catch (error) {
     console.error(`release-preflight: ${error.message}`);
     console.error(
-      'usage: node scripts/release-preflight.mjs [--expect bundle|signed|notarized] [--max-size-mib N] [--root DIR] [path/to/App.app]',
+      'usage: node scripts/release-preflight.mjs [--expect bundle|signed|notarized] [--max-size-mib N] [--strict-paths] [--root DIR] [path/to/App.app]',
     );
     process.exit(2);
   }

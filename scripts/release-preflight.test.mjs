@@ -18,6 +18,7 @@ import {
   parseSignature,
   preflight,
 } from './release-preflight.mjs';
+import { inputsLine } from './third-party-notices.mjs';
 
 // Everything here is a fictional project and bundle written to a temporary
 // folder; no real app, signature or Apple service is involved.
@@ -55,6 +56,7 @@ function fixture(t, change = {}) {
       macOS: {
         minimumSystemVersion: '13.0',
         entitlements: 'Entitlements.plist',
+        files: { 'Resources/THIRD-PARTY-NOTICES.txt': 'NOTICES.txt' },
       },
     },
   };
@@ -100,6 +102,11 @@ function fixture(t, change = {}) {
   write(app, 'Contents/MacOS/orchard', change.executable ?? 'fictional code');
   chmodSync(join(app, 'Contents/MacOS/orchard'), 0o755);
   write(app, 'Contents/Resources/icon.icns', 'icon');
+  // Written last, so its digests cover the lockfiles above.
+  const notices = `Fictional notices\n${inputsLine(root)}\n`;
+  if (change.notices !== null)
+    write(root, 'src-tauri/NOTICES.txt', change.notices ?? notices);
+  write(app, 'Contents/Resources/THIRD-PARTY-NOTICES.txt', notices);
   change.bundle?.(app);
   return { root, app };
 }
@@ -297,10 +304,10 @@ test('a bundle over the size tripwire fails and says which limit applied', (t) =
   );
 });
 
-test('build-machine home folders in the executable are counted, not printed', (t) => {
+test('build-machine home folders are counted, not printed, and fail a release', (t) => {
   const { root, app } = fixture(t, {
     executable:
-      'panic at /Users/fictional-builder/.cargo/registry/src/lib.rs\0',
+      'panic at /Users/fictional-builder/.cargo/registry/src/lib.rs\0/Users/Shared/data\0',
   });
   const result = preflight({ root, app, run: tools() });
   const paths = result.findings.find(
@@ -309,6 +316,22 @@ test('build-machine home folders in the executable are counted, not printed', (t
   assert.equal(paths.level, 'note');
   assert.match(paths.message, /1 home folder/);
   assert.doesNotMatch(paths.message, /fictional-builder/);
+
+  for (const options of [{ strictPaths: true }, { expect: 'signed' }])
+    assert.deepEqual(
+      failures(preflight({ root, app, run: tools(), ...options })),
+      [
+        'build paths: the executable embeds paths under 1 home folder(s) of the build machine; build with `npm run build:release`, which remaps them',
+      ],
+    );
+
+  const remapped = fixture(t, {
+    executable: 'panic at /build/cargo/registry/src/lib.rs\0',
+  });
+  assert.deepEqual(
+    failures(preflight({ ...remapped, run: tools(), strictPaths: true })),
+    [],
+  );
 });
 
 test('an executable needing a newer macOS than the bundle declares fails', (t) => {
@@ -603,6 +626,11 @@ test('manifests with arrays before the version and Windows line endings are read
     'src-tauri/Cargo.lock',
     '[[package]]\r\nname = "orchard"\r\nversion = "1.4.2"\r\n',
   );
+  write(
+    root,
+    'src-tauri/NOTICES.txt',
+    `Fictional notices\n${inputsLine(root)}\n`,
+  );
   assert.deepEqual(failures(preflight({ root })), []);
 });
 
@@ -638,4 +666,60 @@ test('configuration this check cannot read fails by name instead of passing', (t
   assert.deepEqual(failures(preflight({ root: blank.root })), [
     'usage descriptions: empty in src-tauri/Info.plist: NSMicrophoneUsageDescription',
   ]);
+});
+
+test('third-party notices must exist and match the lockfiles they record', (t) => {
+  const missing = fixture(t, { notices: null });
+  assert.deepEqual(failures(preflight({ root: missing.root })), [
+    'third-party notices: src-tauri/NOTICES.txt is missing; run `npm run notices`',
+  ]);
+
+  const stale = fixture(t);
+  write(
+    stale.root,
+    'package-lock.json',
+    JSON.stringify({
+      version: '1.4.2',
+      packages: { '': { version: '1.4.2' }, 'node_modules/new': {} },
+    }),
+  );
+  assert.deepEqual(failures(preflight({ root: stale.root })), [
+    'third-party notices: src-tauri/NOTICES.txt is stale: a lockfile changed after it was generated; run `npm run notices`',
+  ]);
+
+  const unmarked = fixture(t, { notices: 'Hand-written notices\n' });
+  assert.match(
+    failures(preflight({ root: unmarked.root }))[0],
+    /^third-party notices: .*records no lockfile digests/,
+  );
+
+  const unbundled = fixture(t, {
+    config: (config) => delete config.bundle.macOS.files,
+  });
+  assert.match(
+    failures(preflight({ root: unbundled.root }))[0],
+    /^third-party notices: tauri\.conf\.json does not place Resources\/THIRD-PARTY-NOTICES\.txt in the bundle/,
+  );
+});
+
+test('a bundle without the current notices fails', (t) => {
+  const absent = fixture(t, {
+    bundle: (app) =>
+      rmSync(join(app, 'Contents/Resources/THIRD-PARTY-NOTICES.txt')),
+  });
+  assert.deepEqual(failures(preflight({ ...absent, run: tools() })), [
+    'third-party notices in the app: Contents/Resources/THIRD-PARTY-NOTICES.txt is missing from the bundle',
+  ]);
+  const old = fixture(t, {
+    bundle: (app) =>
+      write(
+        app,
+        'Contents/Resources/THIRD-PARTY-NOTICES.txt',
+        'From an earlier build\n',
+      ),
+  });
+  assert.match(
+    failures(preflight({ ...old, run: tools() }))[0],
+    /^third-party notices in the app: .*differs from the repository's copy/,
+  );
 });
