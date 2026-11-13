@@ -33,7 +33,9 @@ async function startLive(page: Page) {
     .getByRole('button', { name: 'Start live session', exact: true })
     .press('Enter');
   await expect(
-    page.getByRole('button', { name: 'Stop live session', exact: true }),
+    page
+      .getByRole('region', { name: 'Microphone', exact: true })
+      .getByRole('button', { name: 'Stop live session', exact: true }),
   ).toBeEnabled();
 }
 
@@ -108,7 +110,7 @@ test('each real control sends its existing command once, and focus stays on a co
   await expect(
     page.getByRole('region', { name: 'Live session layout preview' }),
   ).toContainText(
-    'Hide sources, Dismiss and Pause cues in the Real Cue section act on the real live session',
+    'Stop live session, Hide sources, Dismiss and Pause cues act on the real live session',
   );
   await button('Hide sources').press('Enter');
   await expect(button('Why?')).toBeFocused();
@@ -197,10 +199,10 @@ test('real and simulated controls look different and are named apart', async ({
   // While real controls are shown, the text no longer calls the layout
   // read-only or every control simulated.
   await expect(preview).toContainText(
-    'Source, Capture, Transcript, Cue and Prior context show the app’s real state. Why?, Dismiss and Pause cues in the Real Cue section act on the real live session; everything else is a fictional example.',
+    'Source, Capture, Transcript, Cue and Prior context show the app’s real state. Stop live session, Why?, Dismiss and Pause cues act on the real live session; everything else is a fictional example.',
   );
   await expect(preview.locator('.mock-banner')).toContainText(
-    'Source, Capture, Transcript, Cue and Prior context are real · Why?, Dismiss and Pause cues act on the real session; every control marked (simulated) only changes the example',
+    'Source, Capture, Transcript, Cue and Prior context are real · Stop live session, Why?, Dismiss and Pause cues act on the real live session; every control marked (simulated) only changes the example · the preview starts no capture, connects to no meeting, and generates no cues of its own',
   );
   await expect(preview).not.toContainText('every control here is simulated');
   await expect(preview).not.toContainText('real state, read-only');
@@ -305,6 +307,7 @@ test('no real control appears without a real live session', async ({
   ).toBeVisible();
   await page.evaluate(() => window.captureTest.holdDrain());
   await page
+    .getByRole('region', { name: 'Microphone', exact: true })
     .getByRole('button', { name: 'Stop live session', exact: true })
     .press('Enter');
   await expect(

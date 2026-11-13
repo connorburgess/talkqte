@@ -28,7 +28,9 @@ async function startLive(page: Page) {
     .getByRole('button', { name: 'Start live session', exact: true })
     .press('Enter');
   await expect(
-    page.getByRole('button', { name: 'Stop live session', exact: true }),
+    page
+      .getByRole('region', { name: 'Microphone', exact: true })
+      .getByRole('button', { name: 'Stop live session', exact: true }),
   ).toBeEnabled();
 }
 
@@ -416,6 +418,7 @@ test('paused cues and an ended session show no real cue', async ({ page }) => {
     ruleCue('Timing', 'What date should we aim for?', 'We can do it soon.'),
   );
   await page
+    .getByRole('region', { name: 'Microphone', exact: true })
     .getByRole('button', { name: 'Stop live session', exact: true })
     .click();
   await page

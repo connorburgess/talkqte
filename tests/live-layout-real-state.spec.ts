@@ -251,7 +251,7 @@ test('a live session shows preparing, listening and stopping, and only the real 
   );
   await expectNoClaimThatNothingIsCaptured(preview);
   await expect(preview).toContainText(
-    'A real live session is being prepared. Its Stop and other controls are above; nothing in this preview starts or stops it.',
+    'A real live session is being prepared. You can stop it here or with its controls above; nothing in this preview starts it.',
   );
   await page.evaluate(() => window.captureTest.releaseStart());
   await signal(page, { deviceName: 'Fictional USB microphone' });
@@ -267,10 +267,9 @@ test('a live session shows preparing, listening and stopping, and only the real 
   await expect(frame).toContainText('Simulated stop.');
   await expectNoClaimThatNothingIsCaptured(preview);
   await expect(capture).toContainText('Listening. A live session');
-  const realStop = page.getByRole('button', {
-    name: 'Stop live session',
-    exact: true,
-  });
+  const realStop = page
+    .getByRole('region', { name: 'Microphone', exact: true })
+    .getByRole('button', { name: 'Stop live session', exact: true });
   await expect(realStop).toBeEnabled();
 
   // The native side reports stopping before the microphone is released.

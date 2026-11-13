@@ -1243,6 +1243,17 @@ function Notebook() {
               finishing,
               sourceSession: !!sourceApp,
             }}
+            realStop={{
+              preparing,
+              cancelling,
+              live,
+              finishing,
+              busy: capture.busy,
+              snapshot: capture.state ?? null,
+              stop: () => void capture.stop(),
+              failed: !!capture.error,
+              refresh: capture.refresh,
+            }}
             realCueControls={{
               busy,
               inspect: inspectCue,
