@@ -1,5 +1,5 @@
-//! Development-only ScreenCaptureKit ownership. No app command, enumeration,
-//! permission request or processing path enables this module.
+//! Development-only ScreenCaptureKit ownership. Only this feature's
+//! `application_audio_host` command reaches it; a default build has neither.
 //! Native filtering, callback safety and actual release still need device tests.
 
 use super::{Application, Control, Failure, Lease, Phase, Start};
@@ -13,12 +13,14 @@ mod clock;
 mod output;
 pub mod pcm;
 mod position;
+mod select;
 mod stream;
 mod task;
 pub use chunks::{NativeChunk, NativeChunker, MAX_SEGMENTS};
 #[cfg(test)]
 pub(crate) use clock::tests::Feed;
 pub use clock::{ClockBinding, NativeBlock, NativeReader};
+pub use select::shareable_applications;
 pub use stream::{NativeOwner, NativeTask, Selection};
 pub use task::{TaskControl, TaskSnapshot};
 
