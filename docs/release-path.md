@@ -90,7 +90,7 @@ CI runs the script's tests in the frontend job and the default (`--expect bundle
 | 4   | Staple and verify the artifact | Scriptable now, then Owner | `--expect notarized` is written and tested with fictional output; it needs the notarized artifact.                                                                                                               |
 | 5   | Install on a clean Mac         | Owner                      | Needs a Mac that has never held developer tools or TalkQTE. Procedure below.                                                                                                                                     |
 | 6   | First launch and permissions   | Owner                      | The microphone text is in the bundle (checked). The prompt, refusal and recovery on a clean Mac have not been observed.                                                                                          |
-| 7   | Upgrade with data migration    | Owner                      | Only the speech model persists and no stored format needs converting today. Needs two signed candidates. Procedure below.                                                                                        |
+| 7   | Upgrade with data migration    | Owner                      | Only the speech model persists and no stored format needs converting today. Needs two signed candidates. Procedure below; the [data snapshot](#data-snapshot) script gives the before-and-after comparison.      |
 | 8   | Update deferral during a call  | Not implemented            | No updater exists, so nothing can interrupt a call automatically. Deferral must be designed with the updater; see [update deferral](#update-deferral-during-a-call).                                             |
 | 9   | Rollback                       | Owner                      | Reinstalling the previous candidate is the only route. It is expected to be safe while nothing with a stored format persists; it has not been tried.                                                             |
 | 10  | Uninstall                      | Owner                      | Moving the app to the Trash is expected to leave the folders listed above, including the model; this has not been tried. No in-app removal of everything exists; **Remove model** in Settings deletes the model. |
@@ -151,9 +151,10 @@ Record the Mac model, macOS version, candidate SHA-256, and each result.
 
 Needs a second signed candidate with a higher version (all five version files changed together; the pre-flight enforces this).
 
-1. On the clean Mac with the first candidate and the model installed: `shasum -a 256 ~/Library/Application\ Support/com.talkqte.desktop/models/ggml-tiny.en.bin`.
-2. Quit TalkQTE. Replace it in Applications with the second candidate.
-3. Open it. Pass: no new Gatekeeper warning; the microphone permission is still granted without a new prompt; the model shows as installed with the same SHA-256; a live session starts.
+1. On the clean Mac with the first candidate and the model installed, quit TalkQTE and record what it keeps on disk: `node release-data-snapshot.mjs record --identifier com.talkqte.desktop --out before.json` (see [data snapshot](#data-snapshot)).
+2. Replace the app in Applications with the second candidate.
+3. Open it. Pass: no new Gatekeeper warning; the microphone permission is still granted without a new prompt; the model shows as installed; a live session starts.
+4. Quit it, record again with `--out after-upgrade.json`, and run `node release-data-snapshot.mjs compare before.json after-upgrade.json`. Pass: exit 0 and "Kept: nothing in the data folder was removed or changed", which covers the model's size and SHA-256. Keep the output with the evidence.
 
 The microphone grant is tied to the bundle identifier and signing identity. It is expected to survive between two builds signed by the same team and to be lost between an ad-hoc build and a signed one; both are expectations to observe, not results.
 
@@ -175,9 +176,21 @@ The pre-flight already fails an updater configured without an https endpoint and
 ### 9. Rollback
 
 1. From the upgraded state in step 7, quit and replace the app with the first candidate.
-2. Pass: it opens, the model is still installed with the same SHA-256, and a live session starts.
+2. Pass: it opens, the model is still installed, and a live session starts.
+3. Quit it, record with `--out after-rollback.json`, and compare `before.json` with `after-rollback.json`. Pass: exit 0, as in step 7.
 
 An older version that pins a different model would report the newer file as damaged and offer a fresh download; no such pair of versions exists yet. Once anything with a stored format persists, rollback must be tested against data written by the newer version.
+
+### Data snapshot
+
+`scripts/release-data-snapshot.mjs` records the names, sizes and SHA-256 digests of the files TalkQTE and macOS keep for it, and compares two records. It reads only, sends nothing, and stores paths relative to the home folder so a record does not name the account. A record does list the data folder's file names, so keep it outside the checkout.
+
+- **Locations:** `~/Library/Application Support/com.talkqte.desktop` must be kept; any file there that is removed, changed or unreadable makes `compare` exit 1. The preferences file, caches, web-view storage, HTTP storage and saved window state are reported but may change at any launch. Added files are reported, not failed.
+- **Migrations:** when a release is meant to change stored data, `compare --allow-changes` reports the differences without failing; what changed still has to be checked against that release's migration test.
+- **On the clean Mac:** the script is one file with no dependencies beyond Node.js, and `--identifier` lets it run without a checkout. A clean Mac has no Node.js, so either install Node.js there only after steps 5–6 are recorded, or run the script from another Mac against the test Mac's home folder with `--home` (for example a virtual machine's shared folder). It notes the installed app's version from `/Applications/TalkQTE.app`, or from `--app`.
+- **Uninstall (step 10):** record before moving the app to the Trash and again afterwards; the comparison lists exactly what remains.
+
+Checked with fictional home folders in its tests, and once read-only on the development Mac, where it found the model in the data folder and files in three of the other five locations and two consecutive records compared as kept. It has not been used across a real upgrade, because no two signed candidates exist.
 
 ## Third-party notices
 
@@ -216,5 +229,5 @@ Gaps: 16 crates (`objc2` and its framework crates, `block2`, `dispatch2`, `dasp_
 1. Make decisions 1–5. For every candidate, regenerate the third-party notices (`npm run notices`) and commit any change before building.
 2. Build, sign, notarize and staple candidate A (steps 1–4); run the pre-flight with `--expect notarized` and keep its output.
 3. Install candidate A on a clean Mac and run steps 5–6.
-4. Raise the version, build candidate B the same way, and run steps 7 and 9 on the same Mac.
+4. Raise the version, build candidate B the same way, and run steps 7 and 9 on the same Mac, keeping the data snapshot comparisons.
 5. Record the evidence here, measure the signed bundle and disk image for the [operating estimates](operating-estimates.md#follow-up), and only then review the roadmap item. Update deferral stays open until an updater is designed.
