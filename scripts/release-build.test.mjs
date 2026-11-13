@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import {
   buildEnvironment,
   builtSince,
   bundlePath,
   pathRemaps,
+  requestedDevelopmentFeatures,
 } from './release-build.mjs';
 
 // Fictional folders; nothing is built here.
@@ -89,4 +95,86 @@ test("a bundle counts as this build's only when all of it is new", () => {
     false,
   );
   assert.equal(builtSince(started), false);
+});
+
+test('every way of asking for the development feature is refused', () => {
+  const refused = (args, env = {}, files = {}) =>
+    requestedDevelopmentFeatures(args, env, (path) => files[path]);
+  const feature = 'native-audio-spike';
+  for (const args of [
+    ['--features', feature],
+    ['--features', 'local-whisper', feature],
+    ['--features', `local-whisper,${feature}`],
+    [`--features=${feature}`],
+    ['-f', feature],
+    ['--bundles', 'app', '--', '--features', feature],
+    ['--', '-F', feature],
+    ['--config', `{"build":{"features":["${feature}"]}}`],
+    [`-c={"build":{"features":["${feature}"]}}`],
+  ])
+    assert.deepEqual(
+      refused(args).length > 0,
+      true,
+      `${JSON.stringify(args)} is refused`,
+    );
+  assert.deepEqual(refused(['--', '--all-features']), [
+    '--all-features turns on every feature',
+  ]);
+  assert.deepEqual(
+    refused(
+      ['--config', 'orchard.json'],
+      {},
+      {
+        'orchard.json': `{"build":{"features":["${feature}"]}}`,
+      },
+    ),
+    [`the --config file orchard.json names ${feature}`],
+  );
+  assert.deepEqual(
+    refused([], { TAURI_CONFIG: `{"build":{"features":["${feature}"]}}` }),
+    [`TAURI_CONFIG names ${feature}`],
+  );
+  assert.deepEqual(refused([], { RUSTFLAGS: `--cfg feature="${feature}"` }), [
+    `RUSTFLAGS names ${feature}`,
+  ]);
+});
+
+test('ordinary release arguments, and look-alike names, are not refused', () => {
+  const refused = (args, env = {}) =>
+    requestedDevelopmentFeatures(args, env, () => undefined);
+  assert.deepEqual(
+    refused(['--bundles', 'app,dmg', '--features', 'local-whisper']),
+    [],
+  );
+  assert.deepEqual(refused(['--features', 'native-audio-spike-free']), []);
+  assert.deepEqual(refused(['--config', 'missing.json']), []);
+  assert.deepEqual(refused([], { RUSTFLAGS: '-C target-cpu=native' }), []);
+});
+
+test('the build script refuses before building anything', (t) => {
+  const empty = mkdtempSync(join(tmpdir(), 'no-tools-'));
+  t.after(() => rmSync(empty, { recursive: true, force: true }));
+  const script = join(
+    dirname(fileURLToPath(import.meta.url)),
+    'release-build.mjs',
+  );
+  const env = { ...process.env, PATH: empty };
+  delete env.TAURI_CONFIG;
+  // With nothing on PATH, reaching cargo or npm would fail with exit 1.
+  const result = spawnSync(
+    process.execPath,
+    [
+      script,
+      '--bundles',
+      'app',
+      '--features',
+      'local-whisper,native-audio-spike',
+    ],
+    { encoding: 'utf8', env },
+  );
+  assert.equal(result.status, 2, result.stdout + result.stderr);
+  assert.match(
+    result.stderr,
+    /refusing to build a release with a development feature \(native-audio-spike\):\n {2}argument 4 names native-audio-spike/,
+  );
 });

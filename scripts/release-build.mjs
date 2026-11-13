@@ -14,7 +14,11 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMain } from './is-main.mjs';
-import { preflight } from './release-preflight.mjs';
+import {
+  DEVELOPMENT_FEATURES,
+  configuredDevelopmentFeatures,
+  preflight,
+} from './release-preflight.mjs';
 
 const REPOSITORY = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -47,6 +51,47 @@ export function pathRemaps({ home, cargoHome, repository, targetDir }) {
  * (observed on two consecutive runs), so each of them must be new. */
 export function builtSince(startedMs, ...modifiedMs) {
   return modifiedMs.length > 0 && Math.min(...modifiedMs) >= startedMs;
+}
+
+const names = (feature) =>
+  new RegExp(`(^|[^A-Za-z0-9_-])${feature}($|[^A-Za-z0-9_-])`);
+
+/** Why these build arguments and environment would compile a development
+ * feature in, as a list of reasons; empty when they would not. Anything that
+ * names the feature counts, wherever it appears: `--features`/`-f` lists,
+ * cargo arguments after `--`, an inline `--config` or one in a file, Tauri's
+ * TAURI_CONFIG and the Rust flags. `--all-features` turns on every feature. */
+export function requestedDevelopmentFeatures(
+  args,
+  env = {},
+  readText = (path) =>
+    existsSync(path) ? readFileSync(path, 'utf8') : undefined,
+) {
+  const reasons = [];
+  const scan = (text, where) => {
+    for (const feature of DEVELOPMENT_FEATURES)
+      if (text && names(feature).test(text))
+        reasons.push(`${where} names ${feature}`);
+  };
+  for (const [index, argument] of args.entries()) {
+    if (argument === '--all-features')
+      reasons.push('--all-features turns on every feature');
+    scan(argument, `argument ${index + 1}`);
+    const config =
+      argument === '--config' || argument === '-c'
+        ? args[index + 1]
+        : /^(?:--config|-c)=(.*)$/s.exec(argument)?.[1];
+    if (config && !config.trimStart().startsWith('{'))
+      scan(readText(config), `the --config file ${config}`);
+  }
+  if (env.TAURI_CONFIG) {
+    scan(env.TAURI_CONFIG, 'TAURI_CONFIG');
+    if (!env.TAURI_CONFIG.trimStart().startsWith('{'))
+      scan(readText(env.TAURI_CONFIG), 'the TAURI_CONFIG file');
+  }
+  for (const flags of ['RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS'])
+    scan(env[flags], flags);
+  return reasons;
 }
 
 /** The environment for the build: existing flags are kept and extended. */
@@ -100,6 +145,24 @@ if (isMain(import.meta.url)) {
     });
     if (result.status !== 0) process.exit(result.status ?? 1);
   };
+
+  // Refuse before anything is built: a development feature in a release
+  // candidate is never wanted, and a finished bundle cannot show it yet.
+  const reasons = [
+    ...requestedDevelopmentFeatures(args, process.env),
+    ...configuredDevelopmentFeatures(
+      readFileSync(join(REPOSITORY, 'src-tauri', 'Cargo.toml'), 'utf8'),
+      JSON.parse(
+        readFileSync(join(REPOSITORY, 'src-tauri', 'tauri.conf.json'), 'utf8'),
+      ),
+    ).map((feature) => `the configuration switches on ${feature}`),
+  ];
+  if (reasons.length) {
+    console.error(
+      `release-build: refusing to build a release with a development feature (${DEVELOPMENT_FEATURES.join(', ')}):\n  ${reasons.join('\n  ')}\nBuild it with the ordinary \`npm run tauri -- build --debug\` for development instead.`,
+    );
+    process.exit(2);
+  }
 
   run(process.execPath, ['scripts/third-party-notices.mjs', '--check']);
 
