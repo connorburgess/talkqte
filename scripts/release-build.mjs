@@ -8,8 +8,8 @@
 //   npm run build:release -- --bundles app,dmg --features local-whisper
 //
 // Arguments are passed to `tauri build` unchanged.
-import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,10 +26,25 @@ export function pathRemaps({ home, cargoHome, repository, targetDir }) {
     [repository, '/build/talkqte'],
     [targetDir, '/build/target'],
   ];
-  return remaps.filter(
+  const unique = remaps.filter(
     ([from], index) =>
       from && remaps.findIndex(([other]) => other === from) === index,
   );
+  // Compiler flag variables are split on whitespace, so such a folder would
+  // turn into several broken flags and fail far from its cause.
+  const spaced = unique.filter(([from]) => /\s/.test(from));
+  if (spaced.length)
+    throw new Error(
+      `cannot remap a folder whose path contains a space: ${spaced.map(([, to]) => to.replace('/build/', '')).join(', ')} folder. Build from a checkout, home and Cargo folder without spaces.`,
+    );
+  return unique;
+}
+
+/** Whether a bundle was written by a build that began at `startedMs`. The
+ * bundler rewrites Info.plist every time, even when cargo had nothing to
+ * recompile, so the newer of it and the executable is compared. */
+export function builtSince(startedMs, ...modifiedMs) {
+  return Math.max(...modifiedMs) >= startedMs;
 }
 
 /** The environment for the build: existing flags are kept and extended. */
@@ -86,17 +101,36 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
   run(process.execPath, ['scripts/third-party-notices.mjs', '--check']);
 
-  const targetDir = resolve(
-    REPOSITORY,
-    process.env.CARGO_TARGET_DIR ?? join('src-tauri', 'target'),
-  );
+  // Ask cargo, which honours CARGO_TARGET_DIR and its own configuration.
+  const targetDir = JSON.parse(
+    execFileSync(
+      'cargo',
+      [
+        'metadata',
+        '--no-deps',
+        '--format-version',
+        '1',
+        '--manifest-path',
+        join(REPOSITORY, 'src-tauri', 'Cargo.toml'),
+      ],
+      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+    ),
+  ).target_directory;
   const cargoHome = process.env.CARGO_HOME ?? join(homedir(), '.cargo');
-  const remaps = pathRemaps({
-    home: homedir(),
-    cargoHome,
-    repository: resolve(REPOSITORY),
-    targetDir,
-  });
+  let remaps;
+  try {
+    remaps = pathRemaps({
+      home: homedir(),
+      cargoHome,
+      repository: resolve(REPOSITORY),
+      targetDir,
+    });
+  } catch (error) {
+    console.error(`release-build: ${error.message}`);
+    process.exit(2);
+  }
+  // File times have coarser resolution than the clock on some volumes.
+  const started = Date.now() - 2000;
   run('npm', ['run', 'tauri', '--', 'build', ...args], {
     env: buildEnvironment(process.env, remaps),
   });
@@ -105,6 +139,23 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     readFileSync(join(REPOSITORY, 'src-tauri', 'tauri.conf.json'), 'utf8'),
   );
   const app = bundlePath({ targetDir, args, productName });
+  const produced = [
+    join(app, 'Contents', 'Info.plist'),
+    ...(existsSync(join(app, 'Contents', 'MacOS'))
+      ? readdirSync(join(app, 'Contents', 'MacOS')).map((name) =>
+          join(app, 'Contents', 'MacOS', name),
+        )
+      : []),
+  ].filter((path) => existsSync(path));
+  if (
+    !produced.length ||
+    !builtSince(started, ...produced.map((path) => statSync(path).mtimeMs))
+  ) {
+    console.error(
+      `release-build: ${app} was not written by this build (missing, or older than the build's start). Check the bundle arguments; nothing was pre-flighted.`,
+    );
+    process.exit(1);
+  }
   const { findings, passed } = preflight({ app, strictPaths: true });
   const label = { ok: 'ok  ', fail: 'FAIL', note: 'note' };
   for (const { level, check, message } of findings)

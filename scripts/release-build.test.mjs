@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildEnvironment, bundlePath, pathRemaps } from './release-build.mjs';
+import {
+  buildEnvironment,
+  builtSince,
+  bundlePath,
+  pathRemaps,
+} from './release-build.mjs';
 
 // Fictional folders; nothing is built here.
 const folders = {
@@ -61,5 +66,25 @@ test('the bundle is looked for where the given build arguments put it', () => {
   assert.equal(
     bundlePath({ ...base, args: ['--target=aarch64-apple-darwin', '-d'] }),
     '/t/aarch64-apple-darwin/debug/bundle/macos/Orchard.app',
+  );
+});
+
+test('a folder with a space stops the build with its role, not its path', () => {
+  assert.throws(
+    () => pathRemaps({ ...folders, home: '/Users/fictional builder' }),
+    (error) =>
+      /cannot remap a folder whose path contains a space: home folder/.test(
+        error.message,
+      ) && !error.message.includes('fictional builder'),
+  );
+});
+
+test('a bundle older than the build is not accepted as its result', () => {
+  const started = 1_000_000;
+  assert.equal(builtSince(started, started - 60_000, started - 5), false);
+  // Cargo had nothing to recompile, but the bundler rewrote Info.plist.
+  assert.equal(
+    builtSince(started, started + 4_000, started - 86_400_000),
+    true,
   );
 });
