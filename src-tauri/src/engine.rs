@@ -2113,27 +2113,41 @@ const HEDGES: [&str; 5] = ["maybe", "perhaps", "might", "probably", "possibly"];
 /// Whether a sentence, given as lowercase words, opens by putting its subject
 /// off to a later occasion: "Let's leave the cover choice for another
 /// meeting", "We'll park that until next week", "Let's come back to that
-/// later". It needs all three parts in order: an opening ("let's", "we'll",
-/// "we can", "we will"), a putting-off verb, something being put off, and
-/// where it goes, which must end the sentence. "Let's leave the door open",
-/// "Let's table the proposal", and "Let's leave later" lack one of them and
-/// do not count; neither does a sentence with a second clause or one that
-/// keeps something open or sets time aside. Returns the words for what is
+/// later", "Let's push it to next month", "We'll pick that up at the
+/// committee meeting next month". It needs all of these in order: an
+/// opening ("let's", "we'll", "we can", "we will"), a putting-off verb,
+/// one to four words for what is put off, and where it goes, which must end
+/// the sentence. "Let's leave the door open", "Let's table the proposal",
+/// and "Let's leave later" lack one of them and do not count; neither does
+/// one that keeps something open or sets time aside. A clause joined by
+/// "and" that starts with another such verb ("…, and come back to it in
+/// September") is read with the same opening. Returns the words for what is
 /// put off ("the cover choice", "that"); `deferred_subject` decides whether
 /// they are about the question on screen.
-fn defers(words: &[String]) -> Option<&[String]> {
+fn defers(words: &[String]) -> Option<Vec<String>> {
     const OPENINGS: [&[&str]; 4] = [&["let's"], &["we'll"], &["we", "can"], &["we", "will"]];
-    // Verbs that need an occasion after them to mean putting something off.
-    const VERBS: [&[&str]; 6] = [
-        &["leave"],
-        &["park"],
-        &["save"],
-        &["table"],
-        &["defer"],
-        &["postpone"],
+    // Verbs that need an occasion after them to mean putting something off,
+    // with an optional word that follows what is put off ("pick that up").
+    const VERBS: [(&[&str], Option<&str>); 12] = [
+        (&["leave"], None),
+        (&["park"], None),
+        (&["save"], None),
+        (&["table"], None),
+        (&["defer"], None),
+        (&["postpone"], None),
+        (&["push"], None),
+        (&["move"], None),
+        (&["hold", "off", "on"], None),
+        (&["put", "off"], None),
+        (&["put"], Some("off")),
+        (&["pick", "up"], None),
     ];
+    // "Pick that up" also means collecting something, so it counts only
+    // with an occasion that names a meeting, a time, or "later".
+    const PICK: (&[&str], Option<&str>) = (&["pick"], Some("up"));
     // Verbs for returning to something, which may also end in a bare "later".
-    const RETURNS: [&[&str]; 2] = [&["revisit"], &["come", "back", "to"]];
+    const RETURNS: [(&[&str], Option<&str>); 2] =
+        [(&["revisit"], None), (&["come", "back", "to"], None)];
     const OCCASIONS: [&[&str]; 13] = [
         &["for", "another", "meeting"],
         &["for", "another", "time"],
@@ -2149,19 +2163,40 @@ fn defers(words: &[String]) -> Option<&[String]> {
         &["in", "another", "meeting"],
         &["at", "the", "next", "meeting"],
     ];
-    const RETURN_OCCASIONS: [&[&str]; 4] = [
-        &["later"],
+    // A short phrase after one of these, ending in one of the words below,
+    // is an occasion as well: "at the committee meeting next month", "to
+    // next week", "in September".
+    const OCCASION_STARTS: [&str; 6] = ["at", "for", "in", "until", "till", "to"];
+    const OCCASION_ENDS: [&str; 18] = [
+        "meeting",
+        "later",
+        "week",
+        "month",
+        "time",
+        "year",
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+    ];
+    // Waiting for something to happen first: "until we've seen the
+    // weather", "until after the fair".
+    const CONDITIONS: [&str; 6] = ["we", "we've", "we're", "we'll", "after", "they've"];
+    // Without a word in front: "Let's park that next month".
+    const BARE: [&[&str]; 4] = [
         &["next", "time"],
         &["next", "week"],
+        &["next", "month"],
         &["another", "time"],
     ];
-    let starts = |words: &[String], phrase: &[&str]| {
-        words.len() >= phrase.len() && words.iter().zip(phrase).all(|(word, part)| word == part)
-    };
-    let rest = OPENINGS
-        .iter()
-        .find(|opening| starts(words, opening))
-        .map(|opening| &words[opening.len()..])?;
     // Words that make the part between verb and occasion more than the
     // thing put off: a second clause ("… and leave the budget for later"),
     // keeping something open ("leave the vote open until next week"), or
@@ -2170,30 +2205,118 @@ fn defers(words: &[String]) -> Option<&[String]> {
         "and", "but", "or", "so", "because", "before", "after", "when", "if", "while", "open",
         "time", "minutes", "room", "space", "who",
     ];
-    // The thing put off is one to four words, and the occasion ends the
-    // sentence: "for later questions" is not an occasion.
-    let put_off = |verbs: &[&[&str]], occasions: &[&[&str]]| {
-        verbs.iter().find_map(|verb| {
-            if !starts(rest, verb) {
+    let starts = |words: &[String], phrase: &[&str]| {
+        words.len() >= phrase.len() && words.iter().zip(phrase).all(|(word, part)| word == part)
+    };
+    let is_occasion = |tail: &[String], returning: bool| {
+        OCCASIONS.iter().any(|occasion| tail == *occasion)
+            || BARE.iter().any(|occasion| tail == *occasion)
+            || (returning && tail == ["later"])
+            || (tail.len() >= 2
+                && tail.len() <= 6
+                && OCCASION_STARTS.contains(&tail[0].as_str())
+                && OCCASION_ENDS.contains(&tail[tail.len() - 1].as_str()))
+            || (tail.len() >= 3
+                && matches!(tail[0].as_str(), "until" | "till")
+                && CONDITIONS.contains(&tail[1].as_str()))
+    };
+    let opening = OPENINGS.iter().find(|opening| starts(words, opening))?;
+    let after_opening = &words[opening.len()..];
+    // The clause after the opening, and any later clause joined by "and"
+    // that opens with a putting-off verb of its own.
+    let opens_with_verb = |clause: &[String]| {
+        VERBS
+            .iter()
+            .chain(RETURNS.iter())
+            .chain(std::iter::once(&PICK))
+            .any(|(verb, _)| starts(clause, verb))
+    };
+    let mut clauses: Vec<&[String]> = vec![];
+    let mut from = 0;
+    for (index, word) in after_opening.iter().enumerate() {
+        if word == "and" && opens_with_verb(&after_opening[index + 1..]) {
+            clauses.push(&after_opening[from..index]);
+            from = index + 1;
+        }
+    }
+    clauses.push(&after_opening[from..]);
+    let put_off = |clause: &[String],
+                   verbs: &[(&[&str], Option<&str>)],
+                   returning: bool,
+                   needs_meeting: bool| {
+        verbs.iter().find_map(|(verb, particle)| {
+            if !starts(clause, verb) {
                 return None;
             }
-            occasions.iter().find_map(|occasion| {
-                let at = rest
-                    .len()
-                    .checked_sub(occasion.len())
-                    .filter(|at| (verb.len() + 1..=verb.len() + 4).contains(at))?;
-                let object = &rest[verb.len()..at];
-                (starts(&rest[at..], occasion)
+            (verb.len() + 1..=verb.len() + 4).find_map(|end| {
+                let object = clause.get(verb.len()..end)?;
+                let tail_start = match particle {
+                    Some(particle) => (clause.get(end)? == particle).then_some(end + 1)?,
+                    None => end,
+                };
+                let tail = &clause[tail_start..];
+                (is_occasion(tail, returning)
+                    && (!needs_meeting
+                        || tail
+                            .iter()
+                            .any(|word| matches!(word.as_str(), "meeting" | "time" | "later")))
                     && !object
                         .iter()
                         .any(|word| NOT_PUT_OFF.contains(&word.as_str())))
-                .then_some(object)
+                .then(|| object.to_vec())
             })
         })
     };
-    put_off(&VERBS, &OCCASIONS)
-        .or_else(|| put_off(&RETURNS, &OCCASIONS))
-        .or_else(|| put_off(&RETURNS, &RETURN_OCCASIONS))
+    clauses.iter().find_map(|clause| {
+        put_off(clause, &VERBS, false, false)
+            .or_else(|| put_off(clause, &RETURNS, true, false))
+            .or_else(|| put_off(clause, &[PICK], false, true))
+    })
+}
+
+/// Whether a sentence declines to discuss what was just said: "Let's not
+/// get into that tonight", "Let's not go into it now". Only "that", "it",
+/// or "this", optionally followed by a word for now, so "Let's not get into
+/// the budget" and "Let's not get into trouble" do not count. A negation
+/// rules out every other deferral; this phrase is the one exception.
+fn declines_to_discuss(text: &str) -> bool {
+    const LEAD_INS: [&str; 7] = ["ok", "okay", "alright", "right", "so", "well", "anyway"];
+    const NOW: [&[&str]; 7] = [
+        &[],
+        &["now"],
+        &["right", "now"],
+        &["today"],
+        &["tonight"],
+        &["here"],
+        &["yet"],
+    ];
+    text.split_inclusive(['.', '?', '!', ';'])
+        .filter(|sentence| !sentence.trim_end().ends_with('?'))
+        .any(|sentence| {
+            let words: Vec<String> = sentence
+                .split_whitespace()
+                .map(|word| {
+                    word.replace(['’', '‘'], "'")
+                        .trim_matches(|character: char| {
+                            !character.is_alphanumeric() && character != '\''
+                        })
+                        .to_lowercase()
+                })
+                .filter(|word| !word.is_empty())
+                .collect();
+            let start = words
+                .iter()
+                .take_while(|word| LEAD_INS.contains(&word.as_str()))
+                .count();
+            let words = &words[start..];
+            words.len() >= 5
+                && words[0] == "let's"
+                && words[1] == "not"
+                && matches!(words[2].as_str(), "get" | "go")
+                && words[3] == "into"
+                && matches!(words[4].as_str(), "that" | "it" | "this")
+                && NOW.iter().any(|now| words[5..] == **now)
+        })
 }
 
 /// The statements of a line as lowercase words, without the short words
@@ -2251,13 +2374,14 @@ fn deferred_subject(text: &str, source: &str) -> bool {
         .into_iter()
         .filter(|term| !GENERIC.contains(&term.as_str()))
         .collect();
-    plain_statements(text).iter().any(|words| {
-        defers(words).is_some_and(|object| {
-            object.iter().any(|word| {
-                matches!(word.as_str(), "that" | "it" | "this") || source_terms.contains(word)
+    declines_to_discuss(text)
+        || plain_statements(text).iter().any(|words| {
+            defers(words).is_some_and(|object| {
+                object.iter().any(|word| {
+                    matches!(word.as_str(), "that" | "it" | "this") || source_terms.contains(word)
+                })
             })
         })
-    })
 }
 
 /// An explicit statement, at the start of a sentence, that the conversation
@@ -3340,6 +3464,114 @@ mod tests {
             assert!(e.state.cue.is_none(), "still shown after: {change}");
             assert!(e.state.notes.is_empty(), "nothing is kept: {change}");
         }
+    }
+
+    #[test]
+    fn deferrals_in_other_words_withdraw_an_unread_question() {
+        for change in [
+            "We'll pick that up at the committee meeting next month. On to the raffle.",
+            "Let's park that until we've seen what the weather does, and come back to it in September.",
+            "Let's not get into that tonight. It's on the agenda for March.",
+            "OK, let's not go into it now.",
+            "Let's push it to next week.",
+            "We'll move that to the next meeting.",
+            "Let's hold off on the draft until after the fair.",
+            "Let's put that off till next month.",
+            "We can put off the draft until the new year meeting.",
+            "Let's park that next month.",
+        ] {
+            let mut e = play(&[
+                (1_000, "Someone can take the first draft."),
+                (4_000, change),
+            ]);
+            e.advance(1_000);
+            assert!(e.state.cue.is_some());
+            e.advance(3_000);
+            assert!(
+                e.state.cue.as_ref().is_none_or(|cue| cue.kind == SAID),
+                "still asked after: {change}"
+            );
+            assert!(e.state.notes.is_empty(), "nothing is kept: {change}");
+        }
+    }
+
+    #[test]
+    fn wordings_that_only_resemble_a_deferral_leave_the_question() {
+        for line in [
+            // Collecting something, not putting it off.
+            "We'll pick it up at the shop next week.",
+            "Let's pick up the chairs at nine.",
+            // Moving or pushing a thing, not a time.
+            "Let's move the chairs to the back room.",
+            "Let's push the tables to the wall.",
+            // Not discussing something other than what was just said.
+            "Let's not get into the budget tonight.",
+            "Let's not get into trouble with the council.",
+            "We won't get into that tonight.",
+            // Questions, hedges, and other negations.
+            "Should we push it to next week?",
+            "Can we pick that up at the next meeting.",
+            "Maybe we'll push it to next week.",
+            "Let's not push it to next week.",
+            // Another subject, put off in the new wording.
+            "Let's push the poster design to next month.",
+            // Waiting on a condition but keeping something open.
+            "Let's leave the vote open until we've heard from everyone.",
+            // Put to someone by name: the opening is not recognized.
+            "Alex, let's push it to next week.",
+        ] {
+            let mut e = play(&[(1_000, "Someone can take the first draft."), (4_000, line)]);
+            e.advance(4_000);
+            assert_eq!(
+                e.state.cue.as_ref().map(|cue| cue.kind.as_str()),
+                Some("Owner"),
+                "withdrawn after: {line}"
+            );
+        }
+        // A question being read, or one asked of the user, stays.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (4_000, "Let's not get into that tonight."),
+        ]);
+        e.advance(1_000);
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.inspect_cue(&id, true).unwrap();
+        e.advance(3_000);
+        assert_eq!(e.state.cue.as_ref().unwrap().id, id);
+        let mut e = named_session();
+        e.ingest(
+            e.session(),
+            live("w1", 1_000, "Sam, can you take the first draft?"),
+        )
+        .unwrap();
+        e.ingest(
+            e.session(),
+            live("w2", 3_000, "Let's push it to next week."),
+        )
+        .unwrap();
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
+        // An answer in the same breath still resolves rather than defers.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (4_000, "I'll take it, and let's push the rest to next week."),
+        ]);
+        e.advance(1_000);
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.inspect_cue(&id, true).unwrap();
+        e.advance(3_000);
+        assert!(e.state.cue.as_ref().unwrap().resolved_by.is_some());
+        // With no question on screen, a deferral changes nothing: a question
+        // dismissed a moment ago is not asked again.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft."),
+            (12_000, "Let's not get into that tonight."),
+            (30_000, "Someone can take the first draft."),
+        ]);
+        e.advance(1_000);
+        let id = e.state.cue.as_ref().unwrap().id.clone();
+        e.respond(&id, Response::Dismiss).unwrap();
+        e.advance(29_000);
+        assert!(e.state.cue.is_none(), "repeated within two minutes");
     }
 
     #[test]
@@ -4618,7 +4850,7 @@ mod tests {
         // Recorded 13 November 2026 in docs/cue-intelligence.md. Update it
         // deliberately when the rules change; never edit a label to match.
         let recorded = [
-            ("deferral-next-month", "quiet"),
+            ("deferral-next-month", "withdraw"),
             ("deferral-look-alike", "quiet"),
             ("deferral-of-something-else", "quiet"),
             ("correction-cancelled", "withdraw"),
@@ -4647,7 +4879,7 @@ mod tests {
             .map(|(id, action)| (id.to_string(), *action))
             .collect();
         assert_eq!(results, recorded);
-        assert_eq!((matched, cases.len()), (17, 23));
+        assert_eq!((matched, cases.len()), (18, 23));
         // Doing nothing at all would match every case labeled quiet.
         let quiet = cases
             .iter()
@@ -4697,8 +4929,8 @@ mod tests {
             ("bouncy-castle-to-parking", "withdraw"),
             ("carpet-tiles-same-subject", "quiet"),
             ("skip-or-trailer-settled", "resolved"),
-            ("work-party-parked", "quiet"),
-            ("shed-colour-not-tonight", "quiet"),
+            ("work-party-parked", "withdraw"),
+            ("shed-colour-not-tonight", "withdraw"),
             ("floor-not-moving", "quiet"),
             ("minibus-already-booked", "quiet"),
             ("tomato-glut", "quiet"),
@@ -4715,7 +4947,7 @@ mod tests {
             .map(|(id, action)| (id.to_string(), *action))
             .collect();
         assert_eq!(results, recorded);
-        assert_eq!((matched, cases.len()), (23, 34));
+        assert_eq!((matched, cases.len()), (25, 34));
         // Doing nothing at all would match every case labeled quiet.
         let quiet = cases
             .iter()
