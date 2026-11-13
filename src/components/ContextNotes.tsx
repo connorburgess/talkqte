@@ -66,13 +66,27 @@ export function ContextNotes({
     chosen.length === Math.min(picked.notes.length, selectionLimit) &&
     chosen.length > 0;
   const addButton = useRef<HTMLButtonElement>(null);
+  const summary = useRef<HTMLElement>(null);
   const returnFocus = useRef(false);
+  const returnAddAfterRemove = useRef(false);
+  const focusBeforeRemoval = (button: HTMLButtonElement) => {
+    // Removal disables the buttons and may unmount them. Move focus only
+    // when it is on the activated control, before the asynchronous request.
+    const wasFocused = document.activeElement === button;
+    if (wasFocused) summary.current?.focus();
+    return wasFocused;
+  };
   useEffect(() => {
     if (picked) dialog.current?.showModal();
     else if (dialog.current?.open) dialog.current.close();
   }, [picked]);
   // Return to the control that opened this chooser after it is enabled again.
   useEffect(() => {
+    if (!working && returnAddAfterRemove.current) {
+      returnAddAfterRemove.current = false;
+      if (document.activeElement === summary.current)
+        addButton.current?.focus();
+    }
     if (!picked && !working && returnFocus.current) {
       returnFocus.current = false;
       (pickedFrom === 'granola' ? granolaButton : addButton).current?.focus();
@@ -184,6 +198,10 @@ export function ContextNotes({
     <section className="context-panel" aria-label="Prior context">
       <details className="context-disclosure">
         <summary
+          ref={summary}
+          onBlur={() => {
+            returnAddAfterRemove.current = false;
+          }}
           aria-disabled={working || undefined}
           onClick={(event) => {
             // Keep cancellation and disconnect reachable while a request is pending.
@@ -211,18 +229,19 @@ export function ContextNotes({
               <button
                 className="text-button"
                 disabled={busy || working}
-                onClick={() =>
+                onClick={(event) => {
+                  returnAddAfterRemove.current = focusBeforeRemoval(
+                    event.currentTarget,
+                  );
                   void run(async () => {
-                    // This button unmounts with the list; focus moves to Add.
-                    returnFocus.current = true;
                     const removed = await bridge.removeAllContext();
                     onNotice(
                       removed === 1
                         ? '1 imported note removed.'
                         : `${removed} imported notes removed.`,
                     );
-                  })
-                }
+                  });
+                }}
               >
                 Remove all
               </button>
@@ -318,14 +337,15 @@ export function ContextNotes({
                   aria-label={`Remove ${item.title} (${item.sourceDate})`}
                   title="Remove"
                   disabled={busy || working}
-                  onClick={() =>
+                  onClick={(event) => {
+                    focusBeforeRemoval(event.currentTarget);
                     void run(() =>
                       bridge.command('remove_context_item', {
                         provider: item.provider,
                         sourceId: item.sourceId,
                       }),
-                    )
-                  }
+                    );
+                  }}
                 >
                   <X size={15} />
                 </button>

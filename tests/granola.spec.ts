@@ -249,3 +249,23 @@ test('a failed disconnect stays connected and offers an explicit retry', async (
     page.getByRole('button', { name: 'Connect Granola', exact: true }),
   ).toBeFocused();
 });
+
+test('removing all after a Granola import returns focus to prior context', async ({
+  page,
+}) => {
+  const chooser = page.getByRole('dialog', { name: /Choose notes/ });
+  await chooser.getByRole('checkbox').first().check();
+  await chooser
+    .getByRole('button', { name: 'Import 1 selected' })
+    .press('Enter');
+  await expect(chooser).not.toBeVisible();
+  await page
+    .getByRole('button', { name: 'Remove all', exact: true })
+    .press('Enter');
+  await expect(
+    page.getByRole('region', { name: 'Prior context' }),
+  ).toContainText('No prior notes selected.');
+  await expect(
+    page.getByRole('button', { name: 'Add notes from a file' }),
+  ).toBeFocused();
+});
