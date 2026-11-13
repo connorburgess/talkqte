@@ -135,6 +135,7 @@ export interface UpdateCheckReport {
   status:
     | 'checked'
     | 'cancelled'
+    | 'reimported'
     | 'timedOut'
     | 'workspaceUnverified'
     | 'workspaceChanged'

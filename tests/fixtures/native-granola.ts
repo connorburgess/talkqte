@@ -47,7 +47,12 @@ const selections: string[][] = [];
 // A simulated provider for the explicit update check. It stands in for the
 // Rust rules in context_refresh.rs, which have their own tests; no real
 // Granola connection offers this check yet.
-type Failure = Exclude<UpdateCheckReport['status'], 'checked' | 'cancelled'>;
+type Failure = Exclude<
+  UpdateCheckReport['status'],
+  'checked' | 'cancelled' | 'reimported'
+>;
+/** The check that ended because an import returned all of its notes. */
+let reimported = 0;
 interface Provider {
   changed?: string[];
   missing?: string[];
@@ -148,7 +153,8 @@ async function checkUpdates(): Promise<UpdateCheckReport> {
     if (how === 'timeout') plan.fail = 'timedOut';
     else unsettled = false;
   }
-  if (check?.id !== id) return report('cancelled');
+  if (check?.id !== id)
+    return report(reimported === id ? 'reimported' : 'cancelled');
   const kept = check.selection.filter((sourceId) =>
     items.some((item) => isGranola(item) && item.sourceId === sourceId),
   );
@@ -340,7 +346,9 @@ export async function command(name: string, args: unknown) {
         );
       pending = false;
       // An import is a fresh read: earlier findings about these notes end.
+      const pendingCheck = check?.id;
       for (const id of ids) forget(id);
+      if (pendingCheck && !check) reimported = pendingCheck;
       await emit('context:changed', items);
       return {
         added: items.length,

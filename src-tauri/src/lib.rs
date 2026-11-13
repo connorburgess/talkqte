@@ -7,6 +7,7 @@ mod companion_macos;
 pub mod context;
 mod context_import;
 pub mod context_refresh;
+mod context_runtime;
 pub mod cue_evaluator;
 pub mod engine;
 pub mod granola;
@@ -716,13 +717,13 @@ struct PickedNotes {
 
 fn publish_context(app: &tauri::AppHandle, runtime: &mut Runtime) {
     // The engine may quote an imported note as a context reminder.
-    let before = runtime.engine.state.revision;
-    // A copy the last update check could not confirm carries a warning; one
-    // the provider reported as withdrawn is left out (context_refresh.rs).
-    let eligible = runtime.refresh.eligible(&runtime.context);
-    runtime.engine.set_prior_notes(eligible);
-    runtime.processing_reviews.reconcile(&runtime.engine);
-    if runtime.engine.state.revision != before {
+    let cue_changed = runtime.sync_prior_notes();
+    emit_context(app, runtime, cue_changed);
+}
+
+/// Tells the windows about prior notes the engine has already been given.
+fn emit_context(app: &tauri::AppHandle, runtime: &mut Runtime, cue_changed: bool) {
+    if cue_changed {
         // A changed or removed note may be visible in either window, even held.
         publish(app, runtime);
     }
@@ -831,12 +832,8 @@ async fn import_context_notes(
         _ => "The selected notes could not be read. Nothing was imported. Try again, or cancel to choose other notes.",
     })?;
     runtime.pending_import = None;
-    let runtime = &mut *runtime;
-    // Also ends earlier update-check findings about the notes it returns.
-    let outcome = runtime
-        .refresh
-        .merge_import(&mut runtime.context, provider, &ids, fetched);
-    publish_context(&app, runtime);
+    let (outcome, cue_changed) = runtime.merge_imported_notes(provider, &ids, fetched);
+    emit_context(&app, &mut runtime, cue_changed);
     Ok(outcome)
 }
 
@@ -1100,13 +1097,9 @@ async fn check_granola_updates(
         .map_or(0, |elapsed| elapsed.as_millis() as u64);
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
     let runtime = &mut *runtime;
-    let report = runtime
-        .refresh
-        .apply(&ticket, result, &mut runtime.context, now_ms);
-    if report.status != context_refresh::CheckStatus::Cancelled {
-        // Also when no copy changed: the result decides which notes may
-        // remind and with what warning.
-        publish_context(&app, runtime);
+    let (report, cue_changed) = runtime.finish_update_check(&ticket, result, now_ms);
+    if let Some(cue_changed) = cue_changed {
+        emit_context(&app, runtime, cue_changed);
     }
     Ok(report)
 }

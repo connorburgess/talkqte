@@ -104,6 +104,9 @@ pub enum CheckStatus {
     Checked,
     /// Stopped, disconnected, or replaced; nothing was applied.
     Cancelled,
+    /// Every note of the check was imported again while it was pending,
+    /// so nothing was left to check.
+    Reimported,
     TimedOut,
     /// The provider offered no workspace identity; no note request was sent.
     WorkspaceUnverified,
@@ -195,6 +198,8 @@ pub struct Refresh {
     /// The latest request's completion flag, kept after Stop, a timeout and
     /// Disconnect so the one-request bound holds until it really ends.
     settled: Option<Arc<AtomicBool>>,
+    /// The check that ended because an import returned all of its notes.
+    reimported: Option<u64>,
     /// The workspace the first successful check of this connection saw.
     workspace: Option<String>,
     notes: Vec<Entry>,
@@ -273,6 +278,7 @@ impl Refresh {
         fetched: Vec<ContextItem>,
     ) -> MergeOutcome {
         let mut total = MergeOutcome::default();
+        let pending = self.current.as_ref().map(|current| current.id);
         for item in fetched {
             let (id, revision) = (item.source_id.trim().to_string(), item.revision);
             let outcome = store.merge(provider, selection, vec![item]);
@@ -292,7 +298,23 @@ impl Refresh {
             total.over_limit += outcome.over_limit;
             total.rejected += outcome.rejected;
         }
+        if self.current.is_none() {
+            // The import left a pending check with nothing to check.
+            self.reimported = pending.or(self.reimported);
+        }
         total
+    }
+
+    /// Kept notes that are held back from reminders, so the engine can
+    /// remember that one of them already reminded in this session.
+    pub fn withheld(&self, store: &ContextStore) -> Vec<ContextItem> {
+        let eligible = self.eligible(store);
+        store
+            .items()
+            .iter()
+            .filter(|item| !eligible.iter().any(|(kept, _)| kept == *item))
+            .cloned()
+            .collect()
     }
 
     /// The notes a reminder may quote, with the warning it must carry.
@@ -370,7 +392,12 @@ impl Refresh {
             Some(current) if current.id == ticket.id => current,
             other => {
                 self.current = other;
-                return self.report(CheckStatus::Cancelled, None, false, store);
+                let status = if self.reimported.take_if(|id| *id == ticket.id).is_some() {
+                    CheckStatus::Reimported
+                } else {
+                    CheckStatus::Cancelled
+                };
+                return self.report(status, None, false, store);
             }
         };
         let kept = |store: &ContextStore, id: &str| {
@@ -1391,7 +1418,7 @@ mod tests {
         let mut engine = crate::engine::Engine::live();
         engine.start().unwrap();
         engine.advance(10_000);
-        engine.set_prior_notes(refresh.eligible(store));
+        engine.set_prior_notes(refresh.eligible(store), refresh.withheld(store));
         engine
             .ingest(
                 engine.session(),
@@ -1592,40 +1619,175 @@ mod tests {
     }
 
     #[test]
-    fn a_held_reminder_is_cleared_when_its_copy_stops_being_confirmed() {
-        for withdrawn in [false, true] {
+    fn a_check_whose_notes_were_all_imported_again_says_so_instead_of_stopped() {
+        let mut store = store(&[("n1", EARLIER), ("n2", EARLIER)]);
+        let mut refresh = Refresh::default();
+        let ids: Vec<String> = vec!["n1".into(), "n2".into()];
+        let late = || {
+            Ok(Fetched {
+                items: vec![note("n1", LATER, "A late fictional reply.")],
+                withdrawn: vec![],
+                workspace: "garden-club".into(),
+            })
+        };
+        // Only one of the two is imported again: the check goes on.
+        let ticket = refresh.begin(&store).unwrap();
+        let again = store.items()[..1].to_vec();
+        refresh.merge_import(&mut store, Provider::Granola, &ids, again);
+        let report = refresh.apply(&ticket, late(), &mut store, NOW);
+        assert_eq!(report.status, CheckStatus::Checked);
+        assert_eq!(store.items()[0].revision, EARLIER, "n1 left the check");
+
+        // Both are imported again: nothing is left to check.
+        refresh.settled = None;
+        let ticket = refresh.begin(&store).unwrap();
+        let again = store.items().to_vec();
+        refresh.merge_import(&mut store, Provider::Granola, &ids, again);
+        let report = refresh.apply(&ticket, late(), &mut store, NOW);
+        assert_eq!(report.status, CheckStatus::Reimported);
+        assert_eq!(store.items()[0].revision, EARLIER);
+
+        // Stop is still reported as a stop.
+        refresh.settled = None;
+        let ticket = refresh.begin(&store).unwrap();
+        refresh.stop();
+        let report = refresh.apply(&ticket, late(), &mut store, NOW);
+        assert_eq!(report.status, CheckStatus::Cancelled);
+    }
+
+    fn say(engine: &mut crate::engine::Engine, id: &str, at_ms: u64, text: &str) {
+        engine
+            .ingest(
+                engine.session(),
+                crate::engine::Segment {
+                    id: id.into(),
+                    at_ms,
+                    speaker: "Speaker 1".into(),
+                    text: text.into(),
+                },
+            )
+            .unwrap();
+    }
+
+    fn sync(engine: &mut crate::engine::Engine, refresh: &Refresh, store: &ContextStore) {
+        engine.set_prior_notes(refresh.eligible(store), refresh.withheld(store));
+    }
+
+    #[test]
+    fn a_failed_check_keeps_a_held_reminder_and_updates_its_warning_in_place() {
+        let mut store = titled_store();
+        let mut refresh = Refresh::default();
+        let mut engine = crate::engine::Engine::live();
+        engine.start().unwrap();
+        engine.advance(10_000);
+        sync(&mut engine, &refresh, &store);
+        say(&mut engine, "w1", 9_000, GUIDE);
+        let id = engine.state.cue.as_ref().unwrap().id.clone();
+        engine.inspect_cue(&id, true).unwrap();
+        let warning = |engine: &crate::engine::Engine| {
+            let cue = engine.state.cue.as_ref().expect("the reminder stays");
+            assert!(cue.held && cue.expanded && cue.id == id);
+            assert_eq!(cue.question, "Garden welcome guide");
+            cue.note.as_ref().unwrap().unconfirmed
+        };
+        assert_eq!(warning(&engine), None);
+
+        // Offline: the reminder stays open and gains the warning.
+        let (source, _) = provider(&[Some("garden-club")], vec![Err(SourceError::Interrupted)]);
+        check(&mut refresh, &mut store, source, NOW);
+        let before = engine.state.revision;
+        sync(&mut engine, &refresh, &store);
+        assert_eq!(
+            warning(&engine),
+            Some(Unconfirmed {
+                last_confirmed_ms: None
+            })
+        );
+        assert!(engine.state.revision > before, "both windows are told");
+
+        // A confirming check removes the warning, again in place; a later
+        // omission brings it back with the confirmation time.
+        let (source, _) = provider(
+            &[Some("garden-club")],
+            vec![Ok(unchanged(&store, &["n1", "n2", "n3"]))],
+        );
+        check(&mut refresh, &mut store, source, NOW);
+        sync(&mut engine, &refresh, &store);
+        assert_eq!(warning(&engine), None);
+        let (source, _) = provider(
+            &[Some("garden-club")],
+            vec![Ok(unchanged(&store, &["n2", "n3"]))],
+        );
+        check(&mut refresh, &mut store, source, NOW + 60_000);
+        sync(&mut engine, &refresh, &store);
+        assert_eq!(
+            warning(&engine),
+            Some(Unconfirmed {
+                last_confirmed_ms: Some(NOW)
+            })
+        );
+
+        // A withdrawal still withdraws the reminder, held or not.
+        let (mut source, _) = provider(
+            &[Some("garden-club")],
+            vec![Ok(unchanged(&store, &["n2", "n3"]))],
+        );
+        source.withdrawn = vec!["n1".into()];
+        check(&mut refresh, &mut store, source, NOW + 120_000);
+        sync(&mut engine, &refresh, &store);
+        assert!(engine.state.cue.is_none());
+    }
+
+    #[test]
+    fn a_restored_note_reminds_again_only_as_a_newer_revision() {
+        for newer in [false, true] {
             let mut store = titled_store();
             let mut refresh = Refresh::default();
             let mut engine = crate::engine::Engine::live();
             engine.start().unwrap();
             engine.advance(10_000);
-            engine.set_prior_notes(refresh.eligible(&store));
-            engine
-                .ingest(
-                    engine.session(),
-                    crate::engine::Segment {
-                        id: "w1".into(),
-                        at_ms: 9_000,
-                        speaker: "Speaker 1".into(),
-                        text: GUIDE.into(),
-                    },
-                )
-                .unwrap();
+            sync(&mut engine, &refresh, &store);
+            say(&mut engine, "w1", 9_000, GUIDE);
             let id = engine.state.cue.as_ref().unwrap().id.clone();
-            engine.inspect_cue(&id, true).unwrap();
-            assert!(engine.state.cue.as_ref().unwrap().held);
+            engine
+                .respond(&id, crate::engine::Response::Dismiss)
+                .unwrap();
 
+            // Withdrawn, then returned by a later check.
             let (mut source, _) = provider(
                 &[Some("garden-club")],
                 vec![Ok(unchanged(&store, &["n2", "n3"]))],
             );
-            if withdrawn {
-                source.withdrawn = vec!["n1".into()];
-            }
+            source.withdrawn = vec!["n1".into()];
             check(&mut refresh, &mut store, source, NOW);
-            engine.set_prior_notes(refresh.eligible(&store));
-            // Cleared, not relabeled under the reader's eyes.
-            assert!(engine.state.cue.is_none());
+            sync(&mut engine, &refresh, &store);
+            let mut returned = unchanged(&store, &["n1", "n2", "n3"]);
+            if newer {
+                returned[0].revision = LATER;
+                returned[0].excerpt = "Robin moved the open day to Sunday.".into();
+            }
+            let (source, _) = provider(&[Some("garden-club")], vec![Ok(returned)]);
+            check(&mut refresh, &mut store, source, NOW + 60_000);
+            sync(&mut engine, &refresh, &store);
+            assert_eq!(refresh.eligible(&store).len(), 3);
+
+            engine.advance(120_000);
+            say(&mut engine, "w2", 129_000, GUIDE);
+            let reminded = engine.state.cue.as_ref().and_then(|cue| cue.note.as_ref());
+            assert_eq!(
+                reminded.is_some(),
+                newer,
+                "only a newer revision than the one that reminded may remind again"
+            );
+            if newer {
+                assert!(engine
+                    .state
+                    .cue
+                    .as_ref()
+                    .unwrap()
+                    .evidence
+                    .contains("Sunday"));
+            }
         }
     }
 

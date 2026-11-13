@@ -77,7 +77,8 @@ export function useGranolaUpdateCheck() {
         const report = await bridge.checkGranolaUpdates();
         // Stop can arrive just after the result was applied; say what
         // happened instead of claiming nothing changed.
-        const applied = report.status !== 'cancelled';
+        const applied =
+          report.status !== 'cancelled' && report.status !== 'reimported';
         if (
           current !== run.current &&
           !(applied && current === stopped.current)
@@ -125,6 +126,8 @@ function summary(outcome: Outcome, freshness: NoteFreshness[]) {
     }
     case 'cancelled':
       return 'Check stopped. Nothing was changed. A request already sent may still finish at Granola; its answer is discarded.';
+    case 'reimported':
+      return 'Check ended: these notes were imported again, so there was nothing left to check.';
     case 'timedOut':
       return 'Granola did not answer in time. Your copies were kept and are not verified. The earlier request must finish before you can check again.';
     case 'workspaceUnverified':
@@ -158,7 +161,7 @@ export function GranolaUpdateCheck({
   const { checking, outcome, freshness } = updates;
   if (count === 0) return null;
   const quiet =
-    !outcome || outcome.status === 'checked' || outcome.status === 'cancelled';
+    !outcome || ['checked', 'cancelled', 'reimported'].includes(outcome.status);
   return (
     <div className="context-updates">
       <button

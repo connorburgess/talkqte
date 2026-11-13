@@ -517,6 +517,10 @@ pub struct Engine {
     notes: Vec<NoteTerms>,
     processing_context_digest: [u8; 32],
     shown_notes: Vec<String>,
+    /// The revision each shown note had when it reminded, and the keys of
+    /// kept notes currently held back from reminders.
+    reminded_revisions: Vec<(String, u64)>,
+    withheld_notes: Vec<String>,
     /// A cue type created since the last publish, with its previous time.
     unshown: Option<(String, Option<u64>)>,
 }
@@ -583,6 +587,8 @@ impl Engine {
             notes: vec![],
             processing_context_digest: evaluation::context_fingerprint(&[]),
             shown_notes: vec![],
+            reminded_revisions: vec![],
+            withheld_notes: vec![],
             unshown: None,
         }
     }
@@ -621,6 +627,7 @@ impl Engine {
         self.cues_after_ms = None;
         self.last_shown.clear();
         self.shown_notes.clear();
+        self.reminded_revisions.clear();
         self.focus_touched = vec![false; self.state.focus.len()];
         self.reminders_shown = 0;
         self.still_open_shown = false;
@@ -1086,6 +1093,8 @@ impl Engine {
                 // user got to read it: a reminder is not re-raised later,
                 // and a session shows at most `MAX_REMINDERS` of them.
                 self.shown_notes.push(note.key.clone());
+                self.reminded_revisions
+                    .push((note.key.clone(), note.item.revision));
                 self.reminders_shown += 1;
                 self.unshown = None;
                 self.cue_deadline = segment.at_ms + CUE_MS;
@@ -1334,17 +1343,23 @@ impl Engine {
     /// its provider identity and revision, including across engine replacement.
     /// An unchanged import leaves a held cue and pending evaluation alone.
     pub fn set_notes(&mut self, notes: Vec<ContextItem>) {
-        self.set_prior_notes(notes.into_iter().map(|item| (item, None)).collect());
+        self.set_prior_notes(notes.into_iter().map(|item| (item, None)).collect(), vec![]);
     }
 
     /// As `set_notes`, with the warning a reminder must carry for a copy
-    /// the last update check could not confirm. A change to that warning
-    /// counts as a change to the note, so a displayed reminder is cleared
-    /// instead of keeping or gaining words under the reader's eyes.
+    /// the last update check could not confirm, and the kept notes that are
+    /// held back from reminders. A displayed reminder keeps its words when
+    /// only the warning changes; the warning line itself is updated. A note
+    /// that is held back or removed withdraws its reminder as before.
     pub fn set_prior_notes(
         &mut self,
         notes: Vec<(ContextItem, Option<crate::context::Unconfirmed>)>,
+        withheld: Vec<ContextItem>,
     ) {
+        let withheld: Vec<String> = withheld
+            .iter()
+            .map(|item| format!("{}:{}", item.provider.id(), item.source_id))
+            .collect();
         let notes: Vec<_> = notes
             .into_iter()
             .map(|(item, unconfirmed)| NoteTerms {
@@ -1354,7 +1369,7 @@ impl Engine {
                 unconfirmed,
             })
             .collect();
-        if self.notes == notes {
+        if self.notes == notes && self.withheld_notes == withheld {
             return;
         }
         self.invalidate_evaluation();
@@ -1364,16 +1379,36 @@ impl Engine {
         // than replacing words under the reader's eyes.
         let obsolete = self.state.cue.as_ref().is_some_and(|cue| {
             cue.note.is_some()
-                && !self
-                    .notes
-                    .iter()
-                    .any(|old| old.key == cue.source_id && notes.iter().any(|new| new == old))
+                && !self.notes.iter().any(|old| {
+                    old.key == cue.source_id
+                        && notes
+                            .iter()
+                            .any(|new| new.key == old.key && new.item == old.item)
+                })
         });
+        // A note that reminded, was held back and returns stays shown,
+        // unless it returns as a newer revision than the one that reminded.
+        for note in &notes {
+            if self.withheld_notes.contains(&note.key)
+                && self
+                    .reminded_revisions
+                    .iter()
+                    .any(|(key, revision)| *key == note.key && note.item.revision > *revision)
+            {
+                self.shown_notes.retain(|key| *key != note.key);
+                self.reminded_revisions.retain(|(key, _)| *key != note.key);
+            }
+        }
+        self.withheld_notes = withheld;
         self.notes = notes;
         self.processing_context_digest = evaluation::context_fingerprint(&self.notes);
         self.reconcile_processing_permission();
         let keys: Vec<&String> = self.notes.iter().map(|note| &note.key).collect();
-        self.shown_notes.retain(|key| keys.contains(&key));
+        let withheld = &self.withheld_notes;
+        self.shown_notes
+            .retain(|key| keys.contains(&key) || withheld.contains(key));
+        self.reminded_revisions
+            .retain(|(key, _)| keys.contains(&key) || withheld.contains(key));
         // Keep a refreshed note marked shown: no automatic replacement or
         // second reminder this session. Removal releases its copied evidence.
         if obsolete || self.reconcile_evaluated_sources() {
@@ -1382,6 +1417,22 @@ impl Engine {
             self.evaluated_cue = None;
             self.cooldown_until = self.state.elapsed_ms + self.cooldown();
             self.changed();
+        } else {
+            // Same note, different standing: keep the reminder, even held
+            // open, and bring its warning line up to date.
+            let warning = self.state.cue.as_ref().and_then(|cue| {
+                self.notes
+                    .iter()
+                    .find(|note| note.key == cue.source_id)
+                    .map(|note| note.unconfirmed)
+            });
+            let shown = self.state.cue.as_mut().and_then(|cue| cue.note.as_mut());
+            if let (Some(note), Some(warning)) = (shown, warning) {
+                if note.unconfirmed != warning {
+                    note.unconfirmed = warning;
+                    self.changed();
+                }
+            }
         }
     }
 
@@ -1397,6 +1448,8 @@ impl Engine {
         self.notes = previous.notes.clone();
         self.processing_context_digest = previous.processing_context_digest;
         self.shown_notes = previous.shown_notes.clone();
+        self.reminded_revisions = previous.reminded_revisions.clone();
+        self.withheld_notes = previous.withheld_notes.clone();
         self.reconcile_processing_permission();
     }
 

@@ -100,6 +100,30 @@ for (const [name, url] of [
   });
 }
 
+test('a reminder held open keeps its words when only its warning changes', async ({
+  page,
+}) => {
+  await nativePage(page, '/');
+  const held = { ...reminder, held: true, expanded: true };
+  const question = await show(page, held);
+  await expect(question).toContainText('Kept here until you dismiss it.');
+  await expect(question).toContainText('Robin will label the watering cans');
+  await expect(question).not.toContainText('could not be verified');
+  // The same reminder after a check that could not reach the provider.
+  await page.evaluate((value) => window.liveTest.setCue(value), {
+    ...held,
+    note: { ...held.note!, unconfirmed: { lastConfirmedMs: CHECKED_AT_MS } },
+  });
+  await expect(question).toContainText(
+    'This copy could not be verified at the last check. Last confirmed',
+  );
+  await expect(question).toContainText('Kept here until you dismiss it.');
+  await expect(question).toContainText('Robin will label the watering cans');
+  await expect(
+    question.getByRole('button', { name: 'Hide context' }),
+  ).toHaveAttribute('aria-expanded', 'true');
+});
+
 test('the panel separates a copy kept out of reminders from one that reminds with a warning', async ({
   page,
 }) => {
