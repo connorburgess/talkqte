@@ -1556,6 +1556,9 @@ pub fn run() {
 mod granola_privacy_tests;
 
 #[cfg(test)]
+mod test_isolation;
+
+#[cfg(test)]
 mod carry_over_tests {
     use super::*;
 

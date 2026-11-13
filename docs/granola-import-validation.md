@@ -79,13 +79,16 @@ An audit compared each promise in [PRIVACY.md](../PRIVACY.md), the README and th
 - **Connection status:** the notebook receives whether a connection is open, the server's tool names, whether an update check is offered, and the state of kept notes. A listing that names the signed-in account and another participant passes neither to the status nor to the chooser.
 - **Files and output:** one whole session (sign-in, listing, a selected note, a focus suggestion, a failed request, disconnect) runs in a child process whose home, app-data and temporary folders point at an empty folder. The folder stays empty and the process prints nothing. With `TALKQTE_GRANOLA_TRACE` set, the trace appears and contains no token, sign-in code, client ID, account, title or note text.
 - **Error messages:** provider failures, a refused sign-in, an unreadable or malformed notes file and a missing or damaged model each produce a fixed message with no path, token, account or file content, even when the failing reply or file contains them.
+- **Microphone status:** the snapshot both windows receive has six fields: a revision counter, a coarse status and activity, whether Start is available, a message and a display name. It holds no list of samples, no nested device description and no level.
+- **Model download:** against a fictional loopback file server, a request is a plain `GET` with no query or body, the `TalkQTE` user agent, a range header only when resuming, and no header beyond those any file request carries. The app's own fetcher refuses a plain-HTTP address before connecting.
+- **Live session:** two sessions with a scripted recognizer in place of the speech model (one stopped with a flush, one ended with audio queued) run in the same kind of isolated child process. The folder stays empty and neither the recognized line nor the question it raised is printed.
+- **Update check:** it is not offered for a Granola connection, and keeping a note leaves the status unchanged.
 - **Earlier checks:** disconnect and reconnect, trace masking, note removal, selection-only import, model checksum and partial-download cleanup, microphone stop and release in synthetic tests, and bounded audio buffers.
 
 **Upheld by code, without a test**
 
-- The microphone status payload has no samples, device identifier or precise level; the audio callback retains nothing.
-- The model download sends only the `TalkQTE` user agent and a range header. That code is built only with local transcription, and its one network test is run by hand.
-- Live audio and the live transcript are never written to disk: no file is opened on that path. No isolated-process check exists for it, because it needs the speech model.
+- The audio callback retains no sample; the isolated live-session test starts after the capture callback, at the audio tap.
+- With the real speech model, recognition writes no file: the isolated test replaces the model with a scripted recognizer.
 - whisper.cpp's own logging is routed away from stderr.
 - A notes file or export destination comes only from a native dialog; no command accepts a path from the interface.
 - No telemetry or analytics dependency is present.
@@ -97,7 +100,7 @@ An audit compared each promise in [PRIVACY.md](../PRIVACY.md), the README and th
 - A built app after a real session and after quit: the contents of its data folder, webview storage, and operating-system logs or crash reports.
 - Microphone release, permission and device loss on real hardware, and whether the companion is visible to screen sharing.
 
-Limits of the isolated-session test: it covers the Granola adapter, not the native command layer or the webview, and it redirects folders through environment variables, so a write to an unrelated absolute path would go unnoticed. No such write exists in the adapter's source.
+Limits of the isolated tests: they cover the Granola adapter and the live session runner, not the native command layer, the capture callback, the speech model or the webview, and they redirect folders through environment variables, so a write to an unrelated absolute path would go unnoticed. No such write exists in either module's source.
 
 ## Disconnect while notes are loading
 

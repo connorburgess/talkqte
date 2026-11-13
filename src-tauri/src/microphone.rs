@@ -950,6 +950,37 @@ mod tests {
     }
 
     #[test]
+    fn the_status_the_windows_receive_has_no_samples_device_identifier_or_level() {
+        let (controller, meter, _, now) = running();
+        meter.observe([0.5; 32].into_iter());
+        let update = controller.poll(now).expect("activity is reported");
+        let sent = serde_json::to_value(&update.snapshot).unwrap();
+        let fields = sent.as_object().unwrap();
+        let mut names: Vec<&str> = fields.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            [
+                "activity",
+                "canStart",
+                "deviceName",
+                "message",
+                "revision",
+                "status"
+            ]
+        );
+        // A coarse state and a display name: no list of samples, no nested
+        // device description, and no number but the revision counter.
+        assert_eq!(sent["status"], "listening");
+        assert_eq!(sent["activity"], "active");
+        assert_eq!(sent["deviceName"], "Garden USB microphone");
+        for (name, value) in fields {
+            assert!(!value.is_array() && !value.is_object(), "{name}");
+            assert_eq!(value.is_number(), name == "revision", "{name}");
+        }
+    }
+
+    #[test]
     fn stop_releases_capture_and_late_callbacks_cannot_reactivate_it() {
         let (controller, meter, drops, now) = running();
         assert_eq!(
