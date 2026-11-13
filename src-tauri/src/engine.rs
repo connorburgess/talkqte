@@ -4372,21 +4372,15 @@ mod tests {
         assert_eq!(matched, 9);
     }
 
-    /// Runs the phrase rules on held-out fictional cases whose labels were
-    /// written and committed before the rules were run on them
-    /// (`scripts/fixtures/cue-rules-held-out.json`). The labels are the
-    /// rules lane's and await the owner's review. Each case starts from its
-    /// own cue where it lists one, with the rule type the fixture names, and
-    /// uses the session name where it gives one.
-    #[test]
-    fn rules_on_the_held_out_fictional_cases() {
-        let suite: serde_json::Value = serde_json::from_str(include_str!(
-            "../../scripts/fixtures/cue-rules-held-out.json"
-        ))
-        .unwrap();
+    /// Replays fixture cases in the held-out format through a live engine
+    /// and returns each case's action: lines two seconds apart with one
+    /// speaker label, the fixture's cue on screen after its source line
+    /// where a case lists one (with the rule type the fixture names), and
+    /// the session name where a case gives one. A cue that disappears counts
+    /// as resolved when the line that removed it reads as an answer, and as
+    /// withdrawn otherwise. Nothing from any case may reach the notes.
+    fn replay_fixture_cases(cases: &[serde_json::Value]) -> Vec<(String, &'static str)> {
         let mut results = vec![];
-        let mut matched = 0;
-        let cases = suite["cases"].as_array().unwrap();
         for case in cases {
             let mut e = Engine::live();
             e.start().unwrap();
@@ -4449,11 +4443,38 @@ mod tests {
             }
             let expected = case["expected"]["action"].as_str().unwrap();
             let id = case["id"].as_str().unwrap();
-            eprintln!("{id:36} rules={action:10} expected={expected}");
-            matched += usize::from(action == expected);
+            let kind = e.state.cue.as_ref().map_or("", |cue| cue.kind.as_str());
+            eprintln!("{id:36} rules={action:10} expected={expected:9} {kind}");
             results.push((id.to_string(), action));
             assert!(e.state.notes.is_empty(), "{id}");
         }
+        results
+    }
+
+    /// How many replayed actions match the fixture's labels.
+    fn matched_labels(cases: &[serde_json::Value], results: &[(String, &str)]) -> usize {
+        cases
+            .iter()
+            .zip(results)
+            .filter(|(case, (_, action))| case["expected"]["action"] == *action)
+            .count()
+    }
+
+    /// Runs the phrase rules on held-out fictional cases whose labels were
+    /// written and committed before the rules were run on them
+    /// (`scripts/fixtures/cue-rules-held-out.json`). The labels are the
+    /// rules lane's and await the owner's review. Each case starts from its
+    /// own cue where it lists one, with the rule type the fixture names, and
+    /// uses the session name where it gives one.
+    #[test]
+    fn rules_on_the_held_out_fictional_cases() {
+        let suite: serde_json::Value = serde_json::from_str(include_str!(
+            "../../scripts/fixtures/cue-rules-held-out.json"
+        ))
+        .unwrap();
+        let cases = suite["cases"].as_array().unwrap();
+        let results = replay_fixture_cases(cases);
+        let matched = matched_labels(cases, &results);
         // Recorded 13 November 2026 in docs/cue-intelligence.md. Update it
         // deliberately when the rules change; never edit a label to match.
         let recorded = [
@@ -4493,6 +4514,74 @@ mod tests {
             .filter(|case| case["expected"]["action"] == "quiet")
             .count();
         assert_eq!(quiet, 14);
+    }
+
+    /// Runs the phrase rules on independent fictional cases
+    /// (`scripts/fixtures/cue-rules-independent.json`), written by a lane
+    /// that had not read the engine's rules, without running them. That
+    /// author had read the browser preview's stand-in (`src/lib/preview.ts`)
+    /// and the opening held-out cases; the fixture records this. The labels
+    /// await the owner's review. Replayed exactly as the held-out cases.
+    #[test]
+    fn rules_on_the_independent_fictional_cases() {
+        let suite: serde_json::Value = serde_json::from_str(include_str!(
+            "../../scripts/fixtures/cue-rules-independent.json"
+        ))
+        .unwrap();
+        let cases = suite["cases"].as_array().unwrap();
+        let results = replay_fixture_cases(cases);
+        let matched = matched_labels(cases, &results);
+        // Recorded 14 November 2026 in docs/cue-intelligence.md, before any
+        // rule was changed for these cases. Update it deliberately when the
+        // rules change; never edit a label to match.
+        let recorded = [
+            ("storeroom-chairs", "show"),
+            ("server-cupboard", "quiet"),
+            ("tombola-owner-lost", "quiet"),
+            ("gate-shift-taken", "quiet"),
+            ("compost-bins-later", "quiet"),
+            ("permit-form-sometime", "show"),
+            ("floor-plan-when-free", "quiet"),
+            ("stall-list-thursday", "quiet"),
+            ("seed-order-twentieth", "quiet"),
+            ("cake-stall-tables", "show"),
+            ("lift-name-at-end", "show"),
+            ("posters-praise", "quiet"),
+            ("as-maren-said", "quiet"),
+            ("urn-for-idris", "quiet"),
+            ("desks-via-hana", "quiet"),
+            ("anyone-seen-gazebo", "show"),
+            ("you-grab-the-float", "quiet"),
+            ("caretaker-keys-again", "quiet"),
+            ("risk-form-again", "quiet"),
+            ("bouncy-castle-to-parking", "withdraw"),
+            ("carpet-tiles-same-subject", "quiet"),
+            ("skip-or-trailer-settled", "resolved"),
+            ("work-party-parked", "quiet"),
+            ("shed-colour-not-tonight", "quiet"),
+            ("floor-not-moving", "quiet"),
+            ("minibus-already-booked", "quiet"),
+            ("tomato-glut", "quiet"),
+            ("lead-and-urn-covered", "quiet"),
+            ("thanks-and-tea", "quiet"),
+            ("rhetorical-cake-stall", "quiet"),
+            ("t-shirts-arrived", "quiet"),
+            ("hall-already-swept", "quiet"),
+            ("skip-date-on-sheet", "quiet"),
+            ("new-office-windows", "quiet"),
+        ];
+        let recorded: Vec<(String, &str)> = recorded
+            .iter()
+            .map(|(id, action)| (id.to_string(), *action))
+            .collect();
+        assert_eq!(results, recorded);
+        assert_eq!((matched, cases.len()), (22, 34));
+        // Doing nothing at all would match every case labeled quiet.
+        let quiet = cases
+            .iter()
+            .filter(|case| case["expected"]["action"] == "quiet")
+            .count();
+        assert_eq!(quiet, 17);
     }
 
     #[test]
