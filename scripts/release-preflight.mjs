@@ -30,6 +30,7 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMain } from './is-main.mjs';
 import { NOTICES_IN_BUNDLE, staleReason } from './third-party-notices.mjs';
 
 const REPOSITORY = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -834,7 +835,7 @@ export function parseArguments(argv) {
   return options;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   let options;
   try {
     options = parseArguments(process.argv.slice(2));
