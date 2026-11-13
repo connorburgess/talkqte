@@ -30,6 +30,8 @@ If a problem is not listed, the [feedback route](#reporting-a-problem) at the en
 | Lines appear several seconds late                                     | Speech is transcribed in chunks of up to 3 seconds, ending early at a pause, and then recognized.            | Expected in this version; the measured delay on one Mac is in [local transcription](local-transcription.md#pause-based-chunks).                 |
 | Lines are wrong or missing                                            | The `tiny.en` model is small and English-only, and recognition in real rooms has not been checked.           | Expected limitation. Record what was said and what appeared, with the setup, when reporting it.                                                 |
 
+The **Live layout preview** in navigation is a fictional example, not a live session. It does not open the microphone, transcribe, or generate cues, and **Stop preview** changes only the example. To stop a real session, use Stop live session beside microphone status.
+
 ## Speech model download
 
 | You see                                                                                               | What it means                                                                                                      | What to do                                                                                                                                          |
@@ -45,6 +47,8 @@ If a problem is not listed, the [feedback route](#reporting-a-problem) at the en
 
 ## Prior notes from a file
 
+**Add notes from a file** is inside the notebook's **Prior context** section, which starts closed; open it first.
+
 | You see                                                                                               | What it means                                      | What to do                                                                                                                 |
 | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | "That is not a TalkQTE notes file. It needs a "notes" list with an id, date, and text for each note." | The chosen file is not JSON in the expected shape. | Check the file: a `notes` list, each note with `id`, `date` (YYYY-MM-DD), and `text`; `title` and `revision` are optional. |
@@ -52,7 +56,7 @@ If a problem is not listed, the [feedback route](#reporting-a-problem) at the en
 | "The file has no notes."                                                                              | The `notes` list is empty.                         | Add notes to the file.                                                                                                     |
 | Some notes are "not listed"                                                                           | The file has repeated ids or more than 200 notes.  | Give each note a unique id; keep files under 200 notes.                                                                    |
 | A note is "skipped (no date or text)" after Import                                                    | The note lacks a real date or any text.            | Fix the note's `date` or `text` and import again.                                                                          |
-| "Choose a notes file first."                                                                          | Import was requested with no file read.            | Choose Add notes from a file.                                                                                              |
+| "Choose notes first."                                                                                 | Import was requested with nothing chosen to read.  | Open **Prior context**, then choose Add notes from a file or Choose Granola notes.                                         |
 
 ## Companion window
 
