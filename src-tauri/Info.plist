@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Show microphone activity when you choose to start monitoring. Audio is not saved or sent anywhere.</string>
+    <string>TalkQTE uses the microphone only after you start it: to show whether there is input and, during a live session, to transcribe speech on this Mac. Audio is not saved or sent anywhere.</string>
 </dict>
 </plist>
