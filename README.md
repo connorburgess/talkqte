@@ -39,7 +39,7 @@ The microphone indicator measures signal activity only. It does not transcribe, 
 
 **Microphone input:** after an explicit start, the notebook and Settings show the opened input name when available. Expand **Change microphone** for the stop → choose macOS input → restart steps. This is a device label and guidance, not an in-app device picker or automatic switching. [Fictional checks and remaining native acceptance](docs/microphone-input.md).
 
-**Quieter notebook:** one sidebar holds Notebook, the meeting list and Settings; narrow windows use a compact header. The editor and cue area come before optional meeting focus. Expand **This meeting** to edit Focus, or **Set up a live session** below the meeting list for the first-run checklist. Import, export, microphone status and Stop remain reachable. See the [layout and interaction checks](docs/notebook-simplification.md).
+**Quieter notebook:** one sidebar holds Notebook, the live layout preview, the meeting list and Settings; narrow windows use a compact header. The editor and cue area come before optional meeting focus. Expand **This meeting** to edit Focus, or **Set up a live session** below the meeting list for the first-run checklist. Import, export, microphone status and Stop remain reachable. See the [layout and interaction checks](docs/notebook-simplification.md).
 
 **Live layout preview:** choose **Live layout preview** in navigation to inspect fictional session states. The preview does not capture audio, connect to a meeting, or generate cues; the start, pause, resume, retry and **Stop preview** controls only change the example. Actual microphone and live-session controls remain separate. This is a layout experiment, not a working live integration.
 
