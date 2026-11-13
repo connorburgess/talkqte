@@ -5,8 +5,12 @@ import {
   type RealCapture,
 } from './LiveCaptureStatus';
 import { clockTime, type ContextItem } from '../lib/types';
-import type { RealCueInput } from './LiveCueStatus';
-import { RealCue } from './RealCue';
+import {
+  listNames,
+  realControlNames,
+  type RealCueInput,
+} from './LiveCueStatus';
+import { RealCue, type RealCueControls } from './RealCue';
 import { RealContext } from './RealContext';
 import './live-mock.css';
 
@@ -100,12 +104,15 @@ export function LayoutSwitch({
 export function LiveSessionMock({
   real,
   realCue,
+  realCueControls,
   realContext,
 }: {
   /** The notebook's own microphone and live-session state, shown read-only. */
   real: RealCapture;
   /** The notebook's own cue for a live session, shown read-only. */
   realCue: RealCueInput;
+  /** The notebook's own handlers for the real cue and cue pause. */
+  realCueControls: RealCueControls;
   /** The prior notes selected in the notebook, shown read-only. */
   realContext: ContextItem[];
 }) {
@@ -149,20 +156,25 @@ export function LiveSessionMock({
   const notes = fictionalNotes.filter(({ id }) => noteIds.includes(id));
   const cueAvailable = noteIds.includes(citedNote.id);
   const cueShown = state === 'cue' || (state === 'paused' && cueKept);
+  const realParts = actual.application
+    ? 'Source, Capture, Application audio, Transcript, Cue and Prior context'
+    : 'Source, Capture, Transcript, Cue and Prior context';
+  // While a live session offers real controls, the text must not call the
+  // layout read-only or every control simulated.
+  const realControls = listNames(realControlNames(realCue));
 
   return (
     <section className="live-mock" aria-labelledby="mock-title">
       <h1 id="mock-title">Live session layout preview</h1>
       <p>
-        {actual.application
-          ? 'Source, Capture, Application audio, Transcript, Cue and Prior context show the app’s real state, read-only.'
-          : 'Source, Capture, Transcript, Cue and Prior context show the app’s real state, read-only.'}{' '}
-        Everything else is a fictional example.
+        {realControls
+          ? `${realParts} show the app’s real state. ${realControls} in the Real Cue section act on the real live session; everything else is a fictional example.`
+          : `${realParts} show the app’s real state, read-only. Everything else is a fictional example.`}
       </p>
       {actual.underway && (
         <p className="mock-real-session">
-          {actual.underway} Its controls are above; nothing in this preview
-          starts or stops it.
+          {actual.underway} Its Stop and other controls are above; nothing in
+          this preview starts or stops it.
         </p>
       )}
       <label className="mock-state-picker">
@@ -194,12 +206,11 @@ export function LiveSessionMock({
         ref={frame}
       >
         <p className="mock-banner">
-          {actual.application
-            ? 'Source, Capture, Application audio, Transcript, Cue and Prior context are real'
-            : 'Source, Capture, Transcript, Cue and Prior context are real'}{' '}
-          and read-only · every control here is simulated and only changes the
-          example · the preview starts and stops no capture, connects to no
-          meeting, and generates no cues of its own
+          {realControls
+            ? `${realParts} are real · ${realControls} act on the real session; every control marked (simulated) only changes the example`
+            : `${realParts} are real and read-only · every control here is simulated and only changes the example`}{' '}
+          · the preview starts and stops no capture, connects to no meeting, and
+          generates no cues of its own
         </p>
         <div className="mock-real">
           <dl className="mock-facts">
@@ -247,7 +258,7 @@ export function LiveSessionMock({
               </ol>
             )}
           </section>
-          <RealCue input={realCue} />
+          <RealCue input={realCue} controls={realCueControls} />
           <RealContext items={realContext} />
         </div>
         <div className="mock-session-header">

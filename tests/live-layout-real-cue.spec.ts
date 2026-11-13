@@ -63,11 +63,13 @@ const ruleCue = (kind: string, question: string, evidence: string): Cue => ({
   remainingMs: 18_000,
   totalMs: 18_000,
   held: false,
-  expanded: false,
+  // Opened, as after Why?, so the wording checks can read the sources.
+  expanded: true,
   resolvedBy: null,
   note: null,
   aboutFocus: false,
 });
+const openedSuggestion: Cue = { ...mixedCue, expanded: true };
 
 /** Sends a session snapshot through the mocked event channel. */
 async function sendSession(page: Page, value: Partial<Snapshot>) {
@@ -128,13 +130,13 @@ test('on the desktop, the demo’s cue is never shown as real', async ({
   await expect(real).not.toContainText('Who will take the first draft?');
 });
 
-test('a live cue appears read-only with its phrase rule and source, apart from the example cue', async ({
+test('a live cue appears with its phrase rule and where its source is from; Why? adds the quote', async ({
   page,
 }) => {
   await native(page);
   await startLive(page);
   const { preview, picker, real, example } = await openPreview(page);
-  await expect(real).toHaveText('Real CueNone.');
+  await expect(real).toHaveText('Real CueNone.Pause cues');
   await page.evaluate(() =>
     window.liveTest.say(
       'Someone can take the fictional draft.',
@@ -145,15 +147,17 @@ test('a live cue appears read-only with its phrase rule and source, apart from t
   await expect(real).toContainText(
     'Phrase rule: the line said “someone can”, “someone should” or “someone could”.',
   );
-  await expect(real.getByRole('list', { name: 'Real cue sources' })).toHaveText(
-    'From the live transcript: “Someone can take the fictional draft.”',
-  );
-  await expect(real).toContainText(
-    'Why? and Dismiss for this cue are in the notebook, and in the companion when it is shown; the layout only shows it.',
-  );
-  // Read-only: the real cue offers no control, and says nothing of AI.
-  await expect(real.getByRole('button')).toHaveCount(0);
-  await expect(real).not.toContainText(/\bAI\b|model|understand/i);
+  // As on the notebook card, where the source is from always shows; the
+  // quoted words appear under Why?.
+  const sources = real.getByRole('list', { name: 'Real cue sources' });
+  await expect(sources).toHaveText('From the live transcript');
+  // Its controls are the real ones, without a simulated label.
+  await expect(real.getByRole('button')).toHaveText([
+    'Why?',
+    'Dismiss',
+    'Pause cues',
+  ]);
+  await expect(real).not.toContainText(/\bAI\b|model|understand|simulated/i);
   // The example cue is separate, under its own heading.
   await picker.selectOption('cue');
   await expect(example).toContainText(
@@ -186,7 +190,7 @@ test('a live cue appears read-only with its phrase rule and source, apart from t
     .getByRole('group', { name: 'Layout', exact: true })
     .getByRole('button', { name: 'Layout preview', exact: true })
     .click();
-  await expect(real).toHaveText('Real CueNone.');
+  await expect(real).toHaveText('Real CueNone.Pause cues');
 });
 
 test('every rule kind names its origin in plain words', async ({ page }) => {
@@ -241,7 +245,7 @@ test('every rule kind names its origin in plain words', async ({ page }) => {
     'Phrase rule: the line named a time together with a commitment word, such as “ready by Friday”, so it is quoted word for word.',
   );
   await expect(real).toContainText(
-    'Why?, Dismiss and Keep this line for this cue are in the notebook, and in the companion when it is shown; the layout only shows it.',
+    'Keep this line is in the notebook, and in the companion when it is shown.',
   );
   // A line that also matched a focus line says so.
   await setCue(page, {
@@ -278,9 +282,7 @@ test('a note reminder names the note title match and the note, not this conversa
   await expect(real.getByRole('list', { name: 'Real cue sources' })).toHaveText(
     'Prior note, not from this conversation · Garden gate rota · 2026-11-03: “Robin keeps the fictional gate key.”',
   );
-  await expect(real).toContainText(
-    'Kept until you dismiss it in the notebook, and in the companion when it is shown.',
-  );
+  await expect(real).toContainText('Kept until you dismiss it.');
   // An unconfirmed copy carries the same warning as the notebook card.
   await setCue(page, {
     ...ruleCue(
@@ -298,6 +300,25 @@ test('a note reminder names the note title match and the note, not this conversa
   await expect(real.getByRole('list', { name: 'Real cue sources' })).toHaveText(
     'Prior note, not from this conversation · Garden gate rota · 2026-11-03 · not verified · never confirmed: “Robin keeps the fictional gate key.”',
   );
+  // The warning shows before Why? too, as on the notebook card; only the
+  // quoted words wait for Why?.
+  await setCue(page, {
+    ...ruleCue(
+      'Context',
+      'Garden gate rota',
+      'Robin keeps the fictional gate key.',
+    ),
+    expanded: false,
+    note: {
+      title: 'Garden gate rota',
+      sourceDate: '2026-11-03',
+      provider: 'granola',
+      unconfirmed: { lastConfirmedMs: null },
+    },
+  });
+  await expect(real.getByRole('list', { name: 'Real cue sources' })).toHaveText(
+    'Prior note, not from this conversation · Garden gate rota · 2026-11-03 · not verified · never confirmed',
+  );
   await setCue(page, {
     ...ruleCue(
       'Owner',
@@ -308,14 +329,14 @@ test('a note reminder names the note title match and the note, not this conversa
     resolvedBy: { sourceId: 'line-2', evidence: 'Robin will take it.' },
   });
   await expect(real).toContainText(
-    'Answered later in the conversation, in the line below. Kept until you dismiss it in the notebook, and in the companion when it is shown.',
+    'Answered later in the conversation. Kept until you dismiss it.',
   );
   await expect(
     real.getByRole('list', { name: 'Real cue resolution' }),
   ).toHaveText('From the live transcript: “Robin will take it.”');
   // A resolution from prior notes lists those notes.
   await setCue(page, {
-    ...mixedCue,
+    ...openedSuggestion,
     held: true,
     resolvedBy: {
       sourceId: 'prior:file:print',
@@ -324,7 +345,7 @@ test('a note reminder names the note title match and the note, not this conversa
     },
   });
   await expect(real).toContainText(
-    'Marked resolved from the sources below. Kept until you dismiss it in the notebook, and in the companion when it is shown.',
+    'Marked resolved from these sources. Kept until you dismiss it.',
   );
   await expect(
     real.getByRole('list', { name: 'Real cue resolution' }),
@@ -343,7 +364,7 @@ for (const hosted of [false, true]) {
     await native(page, hosted ? '?live&processor&hosted' : '?live&processor');
     await startLive(page);
     const { real } = await openPreview(page);
-    await setCue(page, mixedCue);
+    await setCue(page, openedSuggestion);
     await expect(real).toContainText('Will the draft be ready Tuesday?');
     await expect(real).toContainText(
       `Proposed by Garden evaluator · Fictional model, the cue processing approved for this session, ${
@@ -383,7 +404,7 @@ test('paused cues and an ended session show no real cue', async ({ page }) => {
     .click();
   const { real } = await openPreview(page);
   await expect(real).toHaveText(
-    'Real CueNone. Cues are paused; the microphone and transcript continue.',
+    'Real CueNone. Cues are paused; the microphone and transcript continue.Resume cues',
   );
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();
   await page

@@ -814,6 +814,18 @@ function Notebook() {
       notesEditor.current?.focus();
     });
   };
+  // Shared by the notebook card and the live layout, so both send the same
+  // commands the same way.
+  const inspectCue = (expanded: boolean) => {
+    if (!state.cue) return;
+    void run(() =>
+      bridge.command('inspect_cue', { id: state.cue!.id, expanded }),
+    );
+  };
+  const toggleLiveCues = () =>
+    void run(() =>
+      bridge.command('set_live_cues_paused', { paused: !state.cuesPaused }),
+    );
   const dismiss = () => {
     if (!state.cue) return;
     const actionFocus = document.activeElement;
@@ -1226,6 +1238,15 @@ function Notebook() {
               cuesPaused: state.cuesPaused,
               cue: state.cue,
               processor: capture.state?.processor ?? null,
+              processingPhase: capture.state?.phase ?? null,
+              preparing,
+              finishing,
+            }}
+            realCueControls={{
+              busy,
+              inspect: inspectCue,
+              dismiss,
+              toggleCues: toggleLiveCues,
             }}
           />
         )}
@@ -1339,13 +1360,7 @@ function Notebook() {
                               ? 'Clear the current cue; application audio and transcript continue.'
                               : 'Clear the current cue; microphone and transcript continue.'
                         }
-                        onClick={() =>
-                          void run(() =>
-                            bridge.command('set_live_cues_paused', {
-                              paused: !state.cuesPaused,
-                            }),
-                          )
-                        }
+                        onClick={toggleLiveCues}
                       >
                         {state.cuesPaused ? (
                           <Play size={15} />
@@ -1598,14 +1613,7 @@ function Notebook() {
                     busy={busy}
                     onDismiss={dismiss}
                     onKeep={keepLine}
-                    onInspect={(expanded) =>
-                      void run(() =>
-                        bridge.command('inspect_cue', {
-                          id: state.cue!.id,
-                          expanded,
-                        }),
-                      )
-                    }
+                    onInspect={inspectCue}
                   />
                 ) : (
                   <div className="question-idle">
