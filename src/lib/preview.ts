@@ -341,6 +341,47 @@ const exampleNotes: ContextItem[] = [
     revision: 1,
   },
 ];
+// Fictional Markdown and plain-text files as the desktop app reads them:
+// one note each, titled by a first-line heading or the file name, with a
+// date only when the file states one (see notes_file.rs).
+const noteFiles: Record<string, { fileName: string; notes: ContextItem[] }> = {
+  markdown: {
+    fileName: 'Welcome guide printing.md',
+    notes: [
+      {
+        provider: 'file',
+        sourceId: 'file-welcome-printing',
+        title: 'Welcome guide printing',
+        sourceDate: '',
+        excerpt:
+          '## Overview\nThe fictional print shop needs two days for a one-page guide.\n\n## Action items\n- Alex asks about a sign by the gate.',
+        revision: 1,
+      },
+    ],
+  },
+  text: {
+    fileName: 'Tool shed rota.txt',
+    notes: [
+      {
+        provider: 'file',
+        sourceId: 'file-tool-shed-rota',
+        title: 'Tool shed rota',
+        sourceDate: '2026-11-04',
+        excerpt:
+          'Date: 2026-11-04\nRobin has the fictional shed key on Tuesdays.',
+        revision: 1,
+      },
+    ],
+  },
+};
+// The same messages the desktop app gives for these files.
+const refusedFiles: Record<string, string> = {
+  'too-large': 'That file is larger than 1 MB. Choose a smaller notes file.',
+  unsupported:
+    'TalkQTE reads notes from a Markdown (.md) or plain-text (.txt) file, or a TalkQTE JSON notes file. Export or save the notes in one of those formats.',
+};
+// The notes of the file last picked, as the desktop app keeps them.
+let pickedNotes: ContextItem[] = exampleNotes;
 let contextItems: ContextItem[] = [];
 // Notes already quoted as a reminder this demo run.
 let shownNotes: string[] = [];
@@ -486,14 +527,30 @@ export function disconnectGranola(): GranolaStatus {
   return { connected: false, tools: [] };
 }
 export function pickContextFile(): PickedNotes {
-  // `?notes=empty` previews a file with nothing to choose.
-  if (new URLSearchParams(location.search).get('notes') === 'empty') {
-    return { fileName: 'empty-notes.json', skipped: 0, notes: [] };
+  // `?notes=empty` previews a file with nothing to choose; `markdown` and
+  // `text` preview one-note files, and `too-large` and `unsupported` files
+  // the app refuses.
+  const kind = new URLSearchParams(location.search).get('notes') ?? '';
+  if (kind === 'empty') {
+    pickedNotes = [];
+    return {
+      fileName: 'empty-notes.json',
+      skipped: 0,
+      notes: [],
+      asksForDates: false,
+    };
   }
-  return {
+  if (refusedFiles[kind]) throw new Error(refusedFiles[kind]);
+  const file = noteFiles[kind] ?? {
     fileName: 'garden-notes.json',
+    notes: exampleNotes,
+  };
+  pickedNotes = file.notes;
+  return {
+    fileName: file.fileName,
     skipped: 0,
-    notes: exampleNotes.map((note) => ({
+    asksForDates: !!noteFiles[kind],
+    notes: file.notes.map((note) => ({
       sourceId: note.sourceId,
       title: note.title,
       sourceDate: note.sourceDate,
@@ -501,7 +558,10 @@ export function pickContextFile(): PickedNotes {
     })),
   };
 }
-export function importContextNotes(ids: string[]): MergeOutcome {
+export function importContextNotes(
+  ids: string[],
+  dates: Record<string, string> = {},
+): MergeOutcome {
   const outcome: MergeOutcome = {
     added: 0,
     updated: 0,
@@ -509,9 +569,16 @@ export function importContextNotes(ids: string[]): MergeOutcome {
     overLimit: 0,
     rejected: 0,
   };
-  for (const note of exampleNotes) {
-    if (!ids.includes(note.sourceId)) continue;
-    if (contextItems.some((item) => item.sourceId === note.sourceId))
+  for (const picked of pickedNotes) {
+    if (!ids.includes(picked.sourceId)) continue;
+    // An entered date fills only a Markdown or text note without one.
+    const asks = pickedNotes !== exampleNotes;
+    const note = {
+      ...picked,
+      sourceDate: picked.sourceDate || (asks && dates[picked.sourceId]) || '',
+    };
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(note.sourceDate)) outcome.rejected++;
+    else if (contextItems.some((item) => item.sourceId === note.sourceId))
       outcome.unchanged++;
     else {
       contextItems.push(structuredClone(note));
