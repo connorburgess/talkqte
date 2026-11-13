@@ -72,7 +72,10 @@ test('every state names its source and capture state, and every control says it 
 }) => {
   const { mock, picker, frame } = await openMock(page);
   await expect(mock).toContainText(
-    'the preview starts and stops nothing, connects to no meeting, and generates no AI cues',
+    'Source and Capture show the app’s real state, read-only. Everything else is a fictional example.',
+  );
+  await expect(mock).toContainText(
+    'the preview starts and stops no capture, connects to no meeting, and generates no AI cues',
   );
   const capture: Record<string, string> = {
     idle: 'Example not started',
