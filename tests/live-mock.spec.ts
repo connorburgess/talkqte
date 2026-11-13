@@ -323,6 +323,9 @@ for (const width of [480, 320]) {
       const stop = simulated(frame, 'Stop');
       await expect(stop).toBeVisible();
       if (width === 480) {
+        // Measured from the top of the page: focus moving to a control lower
+        // down in an earlier state may have scrolled it.
+        await page.evaluate(() => scrollTo(0, 0));
         const bounds = (await stop.boundingBox())!;
         expect(bounds.x).toBeGreaterThanOrEqual(0);
         expect(bounds.y).toBeGreaterThanOrEqual(0);
