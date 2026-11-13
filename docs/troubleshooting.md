@@ -30,8 +30,6 @@ If a problem is not listed, the [feedback route](#reporting-a-problem) at the en
 | Lines appear several seconds late                                     | Speech is transcribed in chunks of up to 3 seconds, ending early at a pause, and then recognized.            | Expected in this version; the measured delay on one Mac is in [local transcription](local-transcription.md#pause-based-chunks).                 |
 | Lines are wrong or missing                                            | The `tiny.en` model is small and English-only, and recognition in real rooms has not been checked.           | Expected limitation. Record what was said and what appeared, with the setup, when reporting it.                                                 |
 
-The **Live layout preview** in navigation is a fictional example, not a live session. It does not open the microphone, transcribe, or generate cues, and **Stop preview** changes only the example. To stop a real session, use Stop live session beside microphone status.
-
 ## Speech model download
 
 | You see                                                                                               | What it means                                                                                                      | What to do                                                                                                                                          |
