@@ -79,12 +79,14 @@ test('a folder with a space stops the build with its role, not its path', () => 
   );
 });
 
-test('a bundle older than the build is not accepted as its result', () => {
+test("a bundle counts as this build's only when all of it is new", () => {
   const started = 1_000_000;
+  assert.equal(builtSince(started, started + 4_000, started + 5_000), true);
   assert.equal(builtSince(started, started - 60_000, started - 5), false);
-  // Cargo had nothing to recompile, but the bundler rewrote Info.plist.
+  // A fresh Info.plist around an executable left from an earlier build.
   assert.equal(
     builtSince(started, started + 4_000, started - 86_400_000),
-    true,
+    false,
   );
+  assert.equal(builtSince(started), false);
 });

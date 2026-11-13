@@ -288,6 +288,48 @@ fn an_export_holds_notes_and_the_demo_transcript_but_no_name_focus_or_imported_n
     }
 }
 
+#[test]
+fn file_and_model_errors_name_no_path_and_quote_no_file_content() {
+    use talkqte_lib::{model, notes_file::FileSource};
+    let folder = std::env::temp_dir().join(format!("talkqte-allotment-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let notes = folder.join("committee-notes.json");
+    let model_file = folder.join("ggml-tiny.en.bin");
+    let mut messages = vec![
+        FileSource::read(&notes).unwrap_err(),
+        model::verify(&model_file, &model::TINY_EN).unwrap_err(),
+    ];
+    for content in [
+        "Priya keeps the padlock code for the bins.",
+        r#"{"notes": [{"id": "n1", "text": "Priya keeps the padlock code for the bins."}]}"#,
+        r#"{"notes": []}"#,
+    ] {
+        std::fs::write(&notes, content).unwrap();
+        messages.push(FileSource::read(&notes).unwrap_err());
+    }
+    std::fs::write(&model_file, "Priya keeps the padlock code for the bins.").unwrap();
+    messages.push(model::verify(&model_file, &model::TINY_EN).unwrap_err());
+    messages.push(model::Failure::Storage(folder.display().to_string()).message());
+    let _ = std::fs::remove_dir_all(&folder);
+
+    assert_eq!(messages.len(), 7);
+    for message in &messages {
+        assert!(message.ends_with('.') && message.chars().count() <= 120);
+        for private in [
+            "allotment",
+            "committee",
+            "ggml",
+            "Priya",
+            "padlock",
+            "n1",
+            "/",
+            "\\",
+        ] {
+            assert!(!message.contains(private), "{message}");
+        }
+    }
+}
+
 /// The requests a fictional server saw: each one's head and body.
 type Seen = Arc<Mutex<Vec<(String, String)>>>;
 

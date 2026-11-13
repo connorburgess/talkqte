@@ -24,7 +24,7 @@ AI is intended to select relevant context, decide whether a cue would help, and 
 
 ## Where it stands today
 
-**Early development.** The app runs from source on macOS, but it does not yet understand a live meeting or generate AI cues. A developer build can transcribe your own microphone on the device and apply the same phrase-based questions; it does not hear the other side of a call. There is no supported public release.
+**Early development.** The app runs from source on macOS, but it does not yet understand a live meeting or generate AI cues. A developer build can transcribe your own microphone on the device and apply the same phrase-based questions; it does not hear the other side of a call. There is no supported public release; the [macOS release path](docs/release-path.md) lists what is configured and what remains.
 
 | Working prototype                                                                                                          | Still to build and validate                                                             |
 | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
@@ -41,7 +41,7 @@ The microphone indicator measures signal activity only. It does not transcribe, 
 
 **Quieter notebook:** one sidebar holds Notebook, the live layout preview, the meeting list and Settings; narrow windows use a compact header. The editor and cue area come before optional meeting focus. Expand **This meeting** to edit Focus, or **Set up a live session** below the meeting list for the first-run checklist. Import, export, microphone status and Stop remain reachable. See the [layout and interaction checks](docs/notebook-simplification.md).
 
-**Live layout preview:** use the **Demo / Layout preview** switch in the toolbar (or the same entry in navigation) to see the layout planned for use beside a real meeting, with fictional content: source and capture state, one example cue with its sources, prior context, and Stop. Nothing in it is connected. It does not capture audio, connect to a meeting, or generate cues, and every control inside the frame is labeled **(simulated)** and only changes the example. Actual microphone and live-session controls remain separate. This is a layout experiment, not a working live integration.
+**Live layout preview:** use the **Demo / Layout preview** switch in the toolbar (or the same entry in navigation) to see the layout planned for use beside a real meeting, with fictional content: source and capture state, one example cue with its sources, prior context, and Stop. Nothing in it is connected. It does not capture audio, connect to a meeting, or generate cues, and every control inside the frame is labeled **(simulated)** and only changes the example. Actual microphone and live-session controls remain separate: while a real live session runs, the switch reads **Session / Layout preview** and the preview says so, pointing to that session's status and Stop above it. This is a layout experiment, not a working live integration.
 
 **Adjustable panels:** drag the notebook divider or the divider between Notes/Transcript and the question. Focus a divider for arrow-key resizing, or use **Panel sizes** in the toolbar for sliders and reset. Narrow windows stack the panels; sizes last for the app session. See the [interaction checks and native limitations](docs/panel-sizing.md).
 
@@ -66,7 +66,7 @@ These are development milestones, not announced release dates or current capabil
 
 The stack is Rust, Tauri 2, React, and TypeScript. Local Whisper transcription is available only in a `local-whisper` developer build, with model setup in Settings or a developer-supplied model path. The AI cue runtime is still being evaluated, and a lab model is not automatically the production choice.
 
-On macOS, install Node.js 22, Rust 1.97.1, and Xcode Command Line Tools. See [Tauri's prerequisites](https://v2.tauri.app/start/prerequisites/).
+On macOS, install Node.js 22, Rust 1.97.1, and Xcode Command Line Tools. The app bundle requires macOS 14.0 or later; only macOS 26.4 has been tested. See [Tauri's prerequisites](https://v2.tauri.app/start/prerequisites/).
 
 ```sh
 npm ci
