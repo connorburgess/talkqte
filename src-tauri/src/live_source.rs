@@ -85,12 +85,29 @@ impl Runtime {
         self.live_source = None;
     }
 
-    /// For a transcript sink, with the runtime lock held, immediately before
-    /// it commits a line from this source. A worker's own source check can
-    /// pass just before Stop takes this lock; this one cannot, and it also
-    /// refuses a source that was never attached.
+    /// The transcript sink for application audio: the one place a recognized
+    /// line from a source enters the engine. Call with the runtime lock held.
+    /// A line is refused unless that exact source is attached to this running
+    /// session, so audio that reached a worker some other way adds nothing.
     #[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
-    #[cfg_attr(not(test), allow(dead_code))] // No application-audio sink exists yet.
+    pub(crate) fn ingest_source_line(
+        &mut self,
+        session: u64,
+        control: &Control,
+        segment: crate::engine::Segment,
+    ) -> Result<(), String> {
+        self.sync();
+        if !self.live_source_accepts(session, control) {
+            return Err("That audio source is not attached to this live session.".into());
+        }
+        self.engine.ingest(session, segment)
+    }
+
+    /// With the runtime lock held, immediately before a line from this source
+    /// is committed. A worker's own source check can pass just before Stop
+    /// takes this lock; this one cannot, and it also refuses a source that
+    /// was never attached.
+    #[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
     pub(crate) fn live_source_accepts(&self, session: u64, control: &Control) -> bool {
         self.live_source.as_ref().is_some_and(|source| {
             source.session == session
@@ -341,6 +358,47 @@ mod tests {
         assert_eq!(stopping.engine.session(), session, "Stop keeps the number");
         drop(stopping);
         assert!(!worker.join().unwrap(), "the late line is refused");
+    }
+
+    #[test]
+    fn the_source_sink_takes_lines_only_from_the_attached_source_of_a_running_session() {
+        let line = |id: &str, at_ms| crate::engine::Segment {
+            id: id.into(),
+            at_ms,
+            speaker: "Speaker 1".into(),
+            text: "A fictional line.".into(),
+        };
+        let mut runtime = live();
+        let session = runtime.engine.session();
+        let source = source("fictional-player");
+        // Same application and a valid session number, but never attached.
+        let stranger = self::source("fictional-player");
+        runtime.attach_live_source(&source.control).unwrap();
+        runtime
+            .ingest_source_line(session, &source.control, line("a1", 0))
+            .unwrap();
+        assert!(runtime
+            .ingest_source_line(session, &stranger.control, line("b1", 0))
+            .is_err());
+        assert!(runtime
+            .ingest_source_line(session + 1, &source.control, line("a2", 0))
+            .is_err());
+        // Stop keeps the engine running for the microphone's queued audio;
+        // this source's lines are refused all the same.
+        runtime.take_live_for_stop().unwrap();
+        assert_eq!(runtime.engine.state.status, Status::Running);
+        assert!(runtime
+            .ingest_source_line(session, &source.control, line("a3", 0))
+            .is_err());
+        runtime.engine.ingest(session, line("m1", 0)).unwrap();
+        let ids: Vec<_> = runtime
+            .engine
+            .state
+            .transcript
+            .iter()
+            .map(|line| line.id.as_str())
+            .collect();
+        assert_eq!(ids, ["a1", "m1"]);
     }
 
     #[test]

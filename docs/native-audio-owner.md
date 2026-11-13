@@ -450,8 +450,9 @@ offset accuracy on real audio, and Stop latency on a device remain untested.
 
 ## Next acceptance and UI/UX checkpoint
 
-The next dependency is connecting a worker to explicit selection and app
-shutdown; session Stop and replacement now cancel an attached source.
+The source worker and sink below connect selection, the owner and the
+transcript in code that nothing calls. The next dependency is the host around
+them: a disclosed selection flow, a visible stopping state and app shutdown.
 The worker mechanism is tested; the app exit/recovery policy is not implemented. Verify callback
 allocation/latency and actual buffer sizes, and prepare explicit consent/selection
 before requesting a bounded native run. Do not add
@@ -553,20 +554,22 @@ blocks and chunks fail `belongs_to`. A transcription worker holding native
 chunks skips queued ones and discards the undelivered lines of one in progress,
 counting each as stale. Lines delivered before Stop stay delivered. This differs
 from the microphone path, where Stop transcribes queued audio: for application
-audio, Stop discards undelivered audio. Whether a flush is wanted is undecided.
+audio, Stop discards undelivered audio. The reason is recorded
+[below](#stop-discards-undelivered-application-audio).
 
 A worker can pass its own source check just before Stop takes the runtime lock,
 and the engine still accepts lines while it drains the microphone. A transcript
 sink for application audio must therefore call `live_source_accepts` with the
 runtime lock held, immediately before committing each line; it refuses after
-Stop and refuses a source that was never attached. No such sink exists yet.
+Stop and refuses a source that was never attached. The sink in the next section
+does this.
 
 Limits of this step:
 
-- Attachment is not enforced by the audio types. `ClockBinding::new`,
-  `Reader::bind_session` and `NativeChunker::new` can still be used without it,
-  and Stop does not reach a source wired that way. The sink check above is the
-  only place that refuses an unattached source.
+- When this step merged, attachment was not enforced by the audio types. The
+  next section narrows that: the binding and native chunker constructors are
+  now crate-private and the sink refuses an unattached source. The synthetic
+  `Reader::bind_session` path is still public and has no sink.
 - Attaching requires an uncancelled control, not an approved one. A review that
   is never approved can occupy the session until it is dropped or replaced; it
   delivers nothing and Stop cancels it.
@@ -597,3 +600,146 @@ Not covered: a ScreenCaptureKit stream, real callbacks, Stop racing a callback
 on another thread beyond the handoff's own tests, native Stop latency or
 release, system sleep and wake, a lifetime bound on an accepted binding, app
 exit, and any UI. No command attaches a source, so app behavior is unchanged.
+
+## Source worker and transcript sink — 13 November 2026
+
+`native_source.rs` (macOS, `native-audio-spike` only) is the host loop for one
+selected application. Nothing calls it: there is no command, picker,
+enumeration or permission request, and it has not been run against a device.
+
+`run` takes the approved `Start`, the `Selection` built on the calling worker
+thread and explicit clock limits. In order, it:
+
+1. snapshots the session under the runtime lock, reads the host clock without
+   it, and accepts the measurement under the lock again. Acceptance attaches
+   the source. Any refusal ends here, before a native request is sent;
+2. begins the native owner for exactly that selection with the accepted
+   binding. The owner still refuses a selection that differs from the review;
+3. loops on that worker until the owner reports `Released`: poll native
+   completions first on every pass, then move available blocks into
+   `NativeChunker` and submit full chunks to a transcription worker.
+
+The host passes in a sendable `Monitor`. The loop records the owner's stage in
+it on every pass, so a failed Stop or output removal is visible while the loop
+is still running. `Monitor::retry_cleanup` accepts one explicit retry of such
+an observed failure; a request made before a failure is refused, not saved.
+Nothing retries by itself. The monitor holds no native object and its lock is
+never held across a native call or together with the runtime lock.
+
+If the runtime is unavailable when a line arrives (its lock is poisoned), the
+sink cancels the source. Nothing could be delivered or stopped through that
+runtime, so the worker stops listening and continues native cleanup.
+
+Recognized lines enter the engine through `Runtime::ingest_source_line` and
+nowhere else. With the runtime lock held it syncs, checks that this exact
+source is attached to this running session, and only then calls the engine. A
+line from a source that is not attached is refused even when its session number
+is right and its audio was recognized. The sink check sits behind the worker's
+own source check, so it also closes the window where Stop arrives between that
+check and the commit.
+
+Attachment is now the only way for native audio to reach a session:
+
+- `ClockBinding::new` is crate-private. Outside tests only the clock
+  measurement calls it, and the binding leaves the runtime only through
+  acceptance, which attaches a source. `NativeOwner::begin` needs a binding.
+- `NativeChunker::new` is crate-private; outside tests only the source worker
+  calls it.
+- The sink refuses everything else. This is the enforcement that does not
+  depend on how the audio was produced.
+
+This holds inside the crate by convention plus the sink, not by the type
+system. A binding names a session, not a source, so crate code could accept
+the clock for one operation and begin another; `run` uses one operation for
+both, and the sink compares the operation itself, so the other one's lines are
+refused. Crate code could also hand native chunks to a worker with a different
+sink. The synthetic `Reader::bind_session` path remains public for tests and
+has no route to the engine.
+
+### Stop discards undelivered application audio
+
+Decision: when the live session stops, is replaced, or the source ends for any
+reason, audio from the selected application that has not yet produced a
+delivered line is discarded. This covers audio in the callback queue, a partly
+assembled chunk, chunks waiting for the recognizer and the chunk being
+recognized. Lines already in the transcript stay. A clean end of input is
+treated the same way; the worker cancels the operation when reading ends.
+
+Reasons:
+
+- Stop is the person's instruction to stop listening to another application.
+  A flush would keep recognizing that application's audio after Stop and add
+  lines the person did not expect. With the current limits that is up to about
+  22 seconds of audio when the recognizer is behind: a 32-block callback queue
+  (about 4 s), a partial chunk (under 3 s), four queued three-second chunks
+  and the one in progress.
+- One cancellation is the only authority that closes the callback, the queue,
+  returned work and the sink together. A flush needs a second state in which
+  the source is stopped but still allowed to deliver, which reopens the gap the
+  attachment closed.
+- The cost is bounded by the same limits: at most about 22 seconds of speech
+  are missing from the end of the transcript, and normally a few seconds when
+  the recognizer keeps up. Cues are meant to be timely, not a complete record.
+
+The microphone path keeps its existing behavior and transcribes its queued
+audio on Stop. The two differ on purpose; this has not been tried with people.
+
+### Tests
+
+Six native-feature tests run the worker loop with the memory-only clock feed,
+a scripted owner (running until cancelled, then two polls of stopping, then
+released) and a scripted recognizer. A seventh covers preparation alone.
+
+- An attached source puts its first line in the engine at the clock's time.
+  While the recognizer holds the second chunk the session is stopped, or in a
+  second case ended without the Stop step. No second line arrives, the loop
+  ends at `Released` and the review gate returns to idle. In the second case
+  the engine itself refuses the late line; what the case adds is that the
+  sink's sync retires the still-running source, which is what ends the loop.
+  The queued audio contains two real gaps, which end chunks instead of joining
+  audio.
+- A source whose binding was built directly, with the same numbers an accepted
+  one would hold, is read, chunked and recognized, and its line is refused at
+  the sink. The transcript stays empty and the live session is undisturbed.
+- A scripted Stop failure stays visible in the monitor across further polls
+  with no automatic retry and the gate still reserved; one explicit retry then
+  releases. A retry requested before the failure is refused.
+- A valid block from a different operation is refused by the chunker, and the
+  worker cancels its own source without recognizing its queued audio.
+- A clean end of input ends the loop with the source cancelled and the
+  trailing audio unrecognized. Here the reader's own retirement cancels it.
+- An unavailable runtime cancels the source.
+- Preparation with a real host-clock read attaches one source, refuses a second
+  as `Occupied` without stopping the first, and refuses after Stop without
+  reading the clock.
+
+One default-build test drives the sink directly: an attached source's line is
+accepted, a line from an unattached source of the same application is refused,
+and after Stop the source's line is refused while a microphone line for the
+same session is still accepted.
+
+Mutation checks, each restored afterwards: without the sink's attachment check
+the default-build sink test and the unattached-source test fail; without the
+worker's cancel at the end of reading the foreign-block test fails; without
+the unavailable-runtime cancel or without performing the retry, their tests
+fail. The threaded tests are bounded by a five-second watchdog so a regression
+fails instead of hanging.
+
+Not covered:
+
+- `run` itself, because beginning the owner constructs a real stream. The
+  scripted owner starts already running and stands in for native completion
+  order, which has its own tests above; the starting stage and a start failure
+  are not exercised through this loop.
+- Real callbacks, Stop latency, and a native completion that never arrives.
+  The loop then keeps the worker and gate reserved by design, with no UI.
+- A full transcription queue. The loop reads as fast as audio arrives, so a
+  slow recognizer drops the newest chunks; they are counted, not retried.
+- A transcription worker that does not stop within its two-second wait after
+  release; its counts are then incomplete.
+- Publishing state after a line. The test access is a plain shared runtime; the
+  app's access must publish under the lock as the microphone sink does.
+- App exit, sleep and wake.
+- A microphone and an application feeding one session at once. The engine
+  refuses a line timed before the last accepted one, so two sources would lose
+  lines until ordering is designed.

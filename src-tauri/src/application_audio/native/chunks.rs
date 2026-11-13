@@ -93,8 +93,8 @@ impl Timed for NativeChunk {
 
     // Every path that stops or replaces a source cancels its control first,
     // so the chunk's own control answers for the source without the gate.
-    // Releasing the capture cancels it too: after a clean end of input, keep
-    // the capture until Worker::finish returns, or queued audio is withheld.
+    // Releasing the capture cancels it too. The source worker cancels on any
+    // end of input, so queued audio is withheld by decision, not flushed.
     fn current(&self, session: u64) -> bool {
         self.session == session && !self.control.is_cancelled()
     }
@@ -113,7 +113,7 @@ pub struct NativeChunker {
 }
 
 impl NativeChunker {
-    pub fn new(control: Control, session: u64) -> Self {
+    pub(crate) fn new(control: Control, session: u64) -> Self {
         Self {
             control,
             session,
