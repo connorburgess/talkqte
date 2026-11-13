@@ -730,6 +730,8 @@ struct PickedNotes {
     notes: Vec<notes_file::NoteSummary>,
     /// Notes in the file that are not listed: beyond the limit or repeated.
     skipped: usize,
+    /// Whether a note without a date asks for one: a Markdown or text file.
+    asks_for_dates: bool,
 }
 
 fn publish_context(app: &tauri::AppHandle, runtime: &mut Runtime) {
@@ -760,7 +762,7 @@ async fn pick_context_file(
         picker
             .dialog()
             .file()
-            .add_filter("TalkQTE notes", &["json"])
+            .add_filter("Notes", &notes_file::EXTENSIONS)
             .blocking_pick_file()
             .map(|file| {
                 file.into_path()
@@ -781,6 +783,7 @@ async fn pick_context_file(
         .map_err(|_| "The file could not be read.")??;
     let notes = source.summaries();
     let skipped = source.skipped;
+    let asks_for_dates = context::NoteSource::asks_for_dates(&source);
     // A new pick replaces any file still waiting for a selection.
     state
         .0
@@ -791,6 +794,7 @@ async fn pick_context_file(
         file_name,
         notes,
         skipped,
+        asks_for_dates,
     }))
 }
 
@@ -800,6 +804,8 @@ async fn import_context_notes(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     ids: Vec<String>,
+    // Dates entered for Markdown or plain-text notes that have none.
+    dates: Option<std::collections::HashMap<String, String>>,
 ) -> Result<context::MergeOutcome, String> {
     // The fetch may go to a provider, so it runs off the main thread and
     // outside the lock, with real pauses between retries.
@@ -819,8 +825,9 @@ async fn import_context_notes(
         )
     };
     let selection = ids.clone();
+    let dates = dates.unwrap_or_default();
     let (attempt, fetched) = tauri::async_runtime::spawn_blocking(move || {
-        let fetched = attempt.fetch(&selection);
+        let fetched = attempt.fetch_with_dates(&selection, &dates);
         (attempt, fetched)
     })
     .await
@@ -1076,6 +1083,7 @@ async fn list_granola_notes(state: tauri::State<'_, AppState>) -> Result<PickedN
         file_name: "Granola · the last 30 days".into(),
         notes,
         skipped,
+        asks_for_dates: false,
     })
 }
 

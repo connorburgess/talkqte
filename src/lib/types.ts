@@ -161,6 +161,7 @@ export interface ContextItem {
 export interface NoteSummary {
   sourceId: string;
   title: string;
+  /** Empty when a Markdown or plain-text file gives no date. */
   sourceDate: string;
   preview: string;
 }
@@ -169,6 +170,8 @@ export interface PickedNotes {
   notes: NoteSummary[];
   /** Notes in the file not listed: beyond the limit of 200, or repeated. */
   skipped: number;
+  /** A Markdown or plain-text file: a note without a date asks for one. */
+  asksForDates?: boolean;
 }
 export interface MergeOutcome {
   added: number;
