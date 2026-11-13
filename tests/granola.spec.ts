@@ -12,12 +12,13 @@ test.beforeEach(async ({ page }) => {
     });
   });
   await page.goto('/?granola');
+  await page.locator('.context-disclosure > summary').press('Enter');
   await page
     .getByRole('button', { name: 'Connect Granola', exact: true })
-    .click();
+    .press('Enter');
   await page
     .getByRole('button', { name: 'Choose Granola notes', exact: true })
-    .click();
+    .press('Enter');
 });
 
 test('a failed selected-note import stays visible and can retry without listing again', async ({
@@ -116,15 +117,25 @@ test('disconnect stays reachable while listing and ignores a late chooser', asyn
   browserName,
 }, testInfo) => {
   const chooser = page.getByRole('dialog', { name: /Choose notes/ });
-  await chooser.getByRole('checkbox').first().check();
-  await chooser.getByRole('button', { name: 'Import 1 selected' }).click();
+  await chooser.getByRole('checkbox').first().press('Space');
+  await chooser
+    .getByRole('button', { name: 'Import 1 selected' })
+    .press('Enter');
   const context = page.getByRole('region', { name: 'Prior context' });
   await expect(context.getByRole('listitem')).toHaveCount(1);
   await page.evaluate(() => window.granolaTest.holdListing());
-  await page.getByRole('button', { name: 'Choose Granola notes' }).click();
+  await page
+    .getByRole('button', { name: 'Choose Granola notes' })
+    .press('Enter');
   await expect(
     page.getByRole('button', { name: 'Loading Granola notes…' }),
   ).toBeDisabled();
+  await expect(context.locator('summary')).toHaveAttribute(
+    'aria-disabled',
+    'true',
+  );
+  await context.locator('summary').press('Enter');
+  await expect(context.locator('details')).toHaveAttribute('open', '');
   await context.screenshot({
     path: testInfo.outputPath('granola-loading.png'),
   });

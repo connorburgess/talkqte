@@ -27,6 +27,7 @@ for (const all of [false, true]) {
     page,
   }, testInfo) => {
     await page.goto('/?context-ordering&hold-context');
+    await page.locator('.context-disclosure > summary').press('Enter');
     await expect
       .poll(() => page.evaluate(() => window.contextTest.pending()))
       .toBeGreaterThan(0);
@@ -68,6 +69,7 @@ test('a delayed empty startup list cannot hide newly imported notes', async ({
   page,
 }) => {
   await page.goto('/?context-ordering&hold-context&empty-context');
+  await page.locator('.context-disclosure > summary').press('Enter');
   await expect
     .poll(() => page.evaluate(() => window.contextTest.pending()))
     .toBeGreaterThan(0);
@@ -83,6 +85,7 @@ test('a failed startup read after an event does not detach later removal updates
   page,
 }) => {
   await page.goto('/?context-ordering&hold-context');
+  await page.locator('.context-disclosure > summary').press('Enter');
   await expect
     .poll(() => page.evaluate(() => window.contextTest.pending()))
     .toBeGreaterThan(0);
@@ -101,6 +104,7 @@ test('the initial list still supplies notes when no event has arrived', async ({
   page,
 }) => {
   await page.goto('/?context-ordering&hold-context');
+  await page.locator('.context-disclosure > summary').press('Enter');
   await expect
     .poll(() => page.evaluate(() => window.contextTest.pending()))
     .toBeGreaterThan(0);

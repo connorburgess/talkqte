@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 test.beforeEach(async ({ page }) => {
   await page.clock.install();
   await page.goto('/');
+  await page.locator('.context-disclosure > summary').press('Enter');
   await expect(
     page.getByRole('button', { name: 'Try demo', exact: true }),
   ).toBeVisible();
@@ -33,6 +34,7 @@ test('focus is optional and the setup card can finish without it', async ({
 test('the setup card sends Choose notes to the prior-context panel without changing view', async ({
   page,
 }) => {
+  await page.locator('.context-disclosure > summary').press('Enter');
   await page.locator('.setup-disclosure > summary').press('Enter');
   const card = page.getByRole('region', { name: 'Before your first meeting' });
   await card.getByRole('button', { name: 'Choose notes' }).click();
@@ -388,6 +390,7 @@ test('a chooser with nothing to choose says so instead of showing a blank list',
   page,
 }) => {
   await page.goto('/?notes=empty');
+  await page.locator('.context-disclosure > summary').press('Enter');
   const panel = page.getByRole('region', { name: 'Prior context' });
   await panel.getByRole('button', { name: 'Add notes from a file' }).click();
   const dialog = page.getByRole('dialog', { name: /Choose notes/ });

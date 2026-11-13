@@ -12,6 +12,12 @@ async function pendingStatus(page: Page) {
 }
 async function connected(page: Page) {
   if (
+    !(await page
+      .locator('.context-disclosure')
+      .evaluate((el) => (el as HTMLDetailsElement).open))
+  )
+    await page.locator('.context-disclosure > summary').press('Enter');
+  if (
     await page
       .locator('.focus-disclosure')
       .evaluate((el) => !(el as HTMLDetailsElement).open)
@@ -45,6 +51,7 @@ for (const fail of [false, true]) {
     page,
   }, testInfo) => {
     await page.goto('/?granola&hold-granola-status');
+    await page.locator('.context-disclosure > summary').press('Enter');
     await pendingStatus(page);
     await button(page, 'Connect Granola').press('Enter');
     await connected(page);
@@ -78,6 +85,7 @@ for (const fail of [false, true]) {
     page,
   }) => {
     await page.goto('/?granola');
+    await page.locator('.context-disclosure > summary').press('Enter');
     await button(page, 'Connect Granola').press('Enter');
     await connected(page);
     await button(page, 'Settings').press('Enter');
@@ -117,6 +125,7 @@ test('a current connection snapshot restores controls on returning to the notebo
   page,
 }) => {
   await page.goto('/?granola');
+  await page.locator('.context-disclosure > summary').press('Enter');
   await button(page, 'Connect Granola').press('Enter');
   await connected(page);
   await button(page, 'Settings').press('Enter');
@@ -136,6 +145,7 @@ test('an initial status failure leaves explicit connection available', async ({
   page,
 }) => {
   await page.goto('/?granola&hold-granola-status');
+  await page.locator('.context-disclosure > summary').press('Enter');
   await pendingStatus(page);
   await page.evaluate(() => window.granolaTest.releaseStatuses(true));
   await expect(button(page, 'Connect Granola')).toBeEnabled();

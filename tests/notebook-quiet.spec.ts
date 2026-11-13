@@ -114,6 +114,7 @@ for (const width of [320, 600]) {
     await focus.fill('Garden welcome guide');
     await page.locator('.focus-disclosure > summary').press('Enter');
     await expect(focus).toBeHidden();
+    await page.locator('.context-disclosure > summary').press('Enter');
     await page
       .getByRole('button', { name: 'Add notes from a file' })
       .press('Enter');
