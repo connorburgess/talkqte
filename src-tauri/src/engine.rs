@@ -1985,9 +1985,11 @@ const HEDGES: [&str; 5] = ["maybe", "perhaps", "might", "probably", "possibly"];
 /// meeting", "We'll park that until next week", "Let's come back to that
 /// later". It needs all three parts in order: an opening ("let's", "we'll",
 /// "we can", "we will"), a putting-off verb, something being put off, and
-/// where it goes. "Let's leave the door open", "Let's table the proposal",
-/// and "Let's leave later" lack one of them and do not count. It does not
-/// check what is being put off.
+/// where it goes, which must end the sentence. "Let's leave the door open",
+/// "Let's table the proposal", and "Let's leave later" lack one of them and
+/// do not count; neither does a sentence with a second clause or one that
+/// keeps something open or sets time aside. It does not check what is being
+/// put off.
 fn defers(words: &[String]) -> bool {
     const OPENINGS: [&[&str]; 4] = [&["let's"], &["we'll"], &["we", "can"], &["we", "will"]];
     // Verbs that need an occasion after them to mean putting something off.
@@ -2032,14 +2034,29 @@ fn defers(words: &[String]) -> bool {
     else {
         return false;
     };
-    // At least one word, the thing put off, sits between verb and occasion.
+    // Words that make the part between verb and occasion more than the
+    // thing put off: a second clause ("… and leave the budget for later"),
+    // keeping something open ("leave the vote open until next week"), or
+    // setting time aside ("save some time for later").
+    const NOT_PUT_OFF: [&str; 16] = [
+        "and", "but", "or", "so", "because", "before", "after", "when", "if", "while", "open",
+        "time", "minutes", "room", "space", "who",
+    ];
+    // The thing put off is one to four words, and the occasion ends the
+    // sentence: "for later questions" is not an occasion.
     let put_off = |verbs: &[&[&str]], occasions: &[&[&str]]| {
         verbs.iter().any(|verb| {
             starts(rest, verb)
-                && (verb.len() + 1..rest.len()).any(|at| {
-                    occasions
-                        .iter()
-                        .any(|occasion| starts(&rest[at..], occasion))
+                && occasions.iter().any(|occasion| {
+                    rest.len()
+                        .checked_sub(occasion.len())
+                        .filter(|at| (verb.len() + 1..=verb.len() + 4).contains(at))
+                        .is_some_and(|at| {
+                            starts(&rest[at..], occasion)
+                                && !rest[verb.len()..at]
+                                    .iter()
+                                    .any(|word| NOT_PUT_OFF.contains(&word.as_str()))
+                        })
                 })
         })
     };
@@ -3029,6 +3046,14 @@ mod tests {
             "Let's leave later.",
             "Let's come back to the first draft.",
             "Let's park the van at the gate.",
+            // A second clause, keeping something open, or setting time aside.
+            "Let's come back to the first draft and leave the budget for later.",
+            "Let's leave the survey open for another day.",
+            "Let's leave the vote open until next week.",
+            "Let's leave ten minutes for later questions.",
+            "Let's save some time for later.",
+            "Let's revisit who takes the draft before next week.",
+            "Let's leave the long list of every single cover option for another meeting.",
             "The cover choice was left for another meeting last year.",
             "Before we leave that for later, someone needs to own the draft.",
             // Questions, with or without a question mark.
@@ -3970,7 +3995,7 @@ mod tests {
                 }
                 if let Some((kind, question, source)) = seed.filter(|(_, _, source)| *source == id)
                 {
-                    let cue_id = format!("{}:{id}", e.generation);
+                    let cue_id = format!("{}:{id}:fixture", e.generation);
                     e.cue_deadline = at + CUE_MS;
                     e.unshown = None;
                     e.last_shown.retain(|(shown, _)| shown != kind);
@@ -4006,7 +4031,9 @@ mod tests {
             results.push((id.to_string(), action));
             // Nothing from an unused cue reaches the notes.
             assert!(e.state.notes.is_empty(), "{id}");
-            assert!(!e.markdown().contains("Who will"), "{id}");
+            if let Some((_, question, _)) = seed {
+                assert!(!e.markdown().contains(question), "{id}");
+            }
         }
         // Recorded 13 November 2026 in docs/cue-intelligence.md.
         let recorded = [
