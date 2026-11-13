@@ -259,12 +259,13 @@ test('removing all after a Granola import returns focus to prior context', async
     .getByRole('button', { name: 'Import 1 selected' })
     .press('Enter');
   await expect(chooser).not.toBeVisible();
-  const summary = page.locator('.context-disclosure > summary');
   await page
     .getByRole('button', { name: 'Remove all', exact: true })
     .press('Enter');
   await expect(
     page.getByRole('region', { name: 'Prior context' }),
   ).toContainText('No prior notes selected.');
-  await expect(summary).toBeFocused();
+  await expect(
+    page.getByRole('button', { name: 'Add notes from a file' }),
+  ).toBeFocused();
 });

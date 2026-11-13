@@ -131,7 +131,9 @@ for (const all of [false, true]) {
     );
     await remove.press('Enter');
     await expect(panel(page)).not.toContainText(firstTitle);
-    await expect(summary).toBeFocused();
+    await expect(
+      all ? button(page, 'Add notes from a file') : summary,
+    ).toBeFocused();
     if (all)
       await expect(panel(page)).toContainText('No prior notes selected.');
     else await expect(panel(page)).toContainText(secondTitle);
@@ -167,3 +169,23 @@ for (const failure of [false, true]) {
     await expect(notebook).toBeFocused();
   });
 }
+
+test('returning to the disclosure during removal does not restore old focus intent', async ({
+  page,
+}) => {
+  await page.goto('/?context-ordering&hold-context&hold-removal');
+  const summary = page.locator('.context-disclosure > summary');
+  await summary.press('Enter');
+  await page.evaluate(() => window.contextTest.publish());
+  await expect(panel(page)).toContainText(firstTitle);
+  await button(page, 'Remove all').press('Enter');
+  await expect(summary).toBeFocused();
+  await expect
+    .poll(() => page.evaluate(() => window.contextTest.pendingRemovals()))
+    .toBe(1);
+  await button(page, 'Notebook').focus();
+  await summary.focus();
+  await page.evaluate(() => window.contextTest.releaseRemoval());
+  await expect(panel(page)).toContainText('No prior notes selected.');
+  await expect(summary).toBeFocused();
+});
