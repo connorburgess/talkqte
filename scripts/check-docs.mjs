@@ -28,42 +28,68 @@ export function slug(heading) {
 
 /** Heading text as rendered: inline links, emphasis and code marks removed. */
 function headingText(raw) {
+  const code = [];
   return raw
+    .replace(/`+([^`]+)`+/g, (_, text) => `\u0000${code.push(text) - 1}\u0000`)
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[*_`]/g, '')
+    .replace(/(\*\*|__)(.*?)\1/g, '$2')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/(?<![\p{L}\p{N}])_([^_]+)_(?![\p{L}\p{N}])/gu, '$1')
+    .replace(/\u0000(\d+)\u0000/g, (_, index) => code[Number(index)])
     .trim();
+}
+
+// A closing fence must use the opening character and be at least as long.
+function* proseLines(markdown) {
+  let fence = null;
+  for (const [index, line] of markdown.split('\n').entries()) {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (
+        marker &&
+        marker[1][0] === fence[0] &&
+        marker[1].length >= fence.length &&
+        !marker[2].trim()
+      )
+        fence = null;
+      continue;
+    }
+    if (marker) {
+      fence = marker[1];
+      continue;
+    }
+    yield { line: index + 1, text: line };
+  }
 }
 
 /** Anchors a Markdown file exposes, with GitHub's -1, -2 suffixes for repeats. */
 export function anchors(markdown) {
-  const seen = new Map();
   const result = new Set();
-  let fenced = false;
-  for (const line of markdown.split('\n')) {
-    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
-    if (fenced) continue;
-    const match = /^#{1,6}\s+(.*?)\s*#*\s*$/.exec(line);
+  for (const { text } of proseLines(markdown)) {
+    const match = /^#{1,6}\s+(.*?)\s*#*\s*$/.exec(text);
     if (!match) continue;
     const base = slug(headingText(match[1]));
-    const count = seen.get(base) ?? 0;
-    seen.set(base, count + 1);
-    result.add(count ? `${base}-${count}` : base);
+    let anchor = base;
+    let count = 0;
+    while (result.has(anchor)) anchor = `${base}-${++count}`;
+    result.add(anchor);
   }
   return result;
 }
 
-/** Relative link targets in a Markdown file, outside code. */
+/** Inline relative links and reference definitions outside fenced code. */
 export function links(markdown) {
   const found = [];
-  let fenced = false;
-  for (const [index, line] of markdown.split('\n').entries()) {
-    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
-    if (fenced) continue;
-    const text = line.replace(/`[^`]*`/g, '');
-    for (const match of text.matchAll(/\]\(\s*<?([^)\s>]+)>?[^)]*\)/g)) {
-      const target = match[1];
+  for (const { line, text: raw } of proseLines(markdown)) {
+    const text = raw.replace(/`[^`]*`/g, '');
+    const targets = [...text.matchAll(/\]\(\s*<?([^)\s>]+)>?[^)]*\)/g)].map(
+      (match) => match[1],
+    );
+    const reference = /^ {0,3}\[[^\]]+\]:\s*<?([^\s>]+)>?/.exec(text);
+    if (reference) targets.push(reference[1]);
+    for (const target of targets) {
       if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(target)) continue;
-      found.push({ line: index + 1, target });
+      found.push({ line, target });
     }
   }
   return found;

@@ -25,3 +25,35 @@ test('only relative links outside code are checked', () => {
     { line: 5, target: '#here' },
   ]);
 });
+
+test('code and literal underscores survive heading formatting', () => {
+  assert.deepEqual(
+    [
+      ...anchors(
+        '## `native_audio`\n## __Bold__ and _emphasis_\n## native_audio',
+      ),
+    ],
+    ['native_audio', 'bold-and-emphasis', 'native_audio-1'],
+  );
+});
+
+test('reference definitions are checked, including unused relative definitions', () => {
+  assert.deepEqual(
+    links('[guide][ref]\n[ref]: docs/missing.md\n[web]: https://example.com'),
+    [{ line: 2, target: 'docs/missing.md' }],
+  );
+});
+
+test('nested shorter and mismatched fences remain code', () => {
+  const markdown =
+    '````markdown\n```\n[x](missing.md)\n# hidden\n~~~\n```\n````\n# Visible\n[x](real.md)';
+  assert.deepEqual([...anchors(markdown)], ['visible']);
+  assert.deepEqual(links(markdown), [{ line: 9, target: 'real.md' }]);
+});
+
+test('heading suffixes avoid collisions with explicit numbered headings', () => {
+  assert.deepEqual(
+    [...anchors('# Same\n# Same-1\n# Same')],
+    ['same', 'same-1', 'same-2'],
+  );
+});
