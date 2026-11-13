@@ -43,6 +43,8 @@ export const commands = [
   'context_items',
   'import_context_notes',
   'cancel_context_import',
+  'remove_context_item',
+  'remove_context_from',
 ];
 const status = () => ({
   connected,
@@ -77,6 +79,20 @@ export async function command(name: string, args: unknown) {
       return status();
     case 'context_items':
       return items;
+    case 'remove_context_item': {
+      const { provider, sourceId } = args as ContextItem;
+      items = items.filter(
+        (item) => item.provider !== provider || item.sourceId !== sourceId,
+      );
+      await emit('context:changed', items);
+      return;
+    }
+    case 'remove_context_from': {
+      const removed = items.length;
+      items = [];
+      await emit('context:changed', items);
+      return removed;
+    }
     case 'suggest_granola_focus':
       // Deliberately allow a retired success to cross IPC. The UI must reject
       // it too; native connection retirement has its own Rust tests.
