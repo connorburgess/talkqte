@@ -821,6 +821,16 @@ test('a development feature switched on by the configuration fails', (t) => {
     /^development features: timing-log is switched on/,
   );
 
+  const modelBackend = fixture(t, {
+    config: (config) => {
+      config.build = { features: ['local-whisper', 'claude-cli'] };
+    },
+  });
+  assert.match(
+    failures(preflight({ root: modelBackend.root }))[0],
+    /^development features: claude-cli is switched on/,
+  );
+
   const declaredOnly = fixture(t);
   write(
     declaredOnly.root,
