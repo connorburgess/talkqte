@@ -1547,3 +1547,104 @@ mod by_setting {
         assert_eq!(g.script.lists.load(Ordering::SeqCst), 0, "nothing is asked");
     }
 }
+
+#[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+mod owned_lab_stop {
+    use super::*;
+    use std::sync::mpsc::TryRecvError;
+
+    #[test]
+    fn never_started_stop_closes_all_future_admission_without_loading_backend() {
+        let fixture = fixture(false);
+        fixture
+            .host
+            .close_for_lab_stop()
+            .unwrap()
+            .recv_timeout(WAIT)
+            .unwrap();
+        assert!(fixture.host.lab_stop_released());
+        assert_eq!(fixture.host.list(true), Err(Error::Busy));
+        assert_eq!(fixture.host.review("fictional"), Err(Error::Busy));
+        assert_eq!(fixture.host.start_session("fictional"), Err(Error::Busy));
+        fixture
+            .host
+            .close_for_lab_stop()
+            .unwrap()
+            .recv_timeout(WAIT)
+            .unwrap();
+        assert!(fixture.host.lab_stop_released());
+        assert_eq!(fixture.script.lists.load(Ordering::SeqCst), 0);
+        assert_eq!(fixture.script.begins.load(Ordering::SeqCst), 0);
+        assert_eq!(fixture.script.captures.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn cancelled_listing_must_finish_before_its_fence_can_confirm_settlement() {
+        let fixture = fixture(false);
+        fixture.script.list_waits.store(true, Ordering::SeqCst);
+        fixture.script.list_deaf.store(true, Ordering::SeqCst);
+        fixture.host.list(true).unwrap();
+        fixture.wait("listing entered", |_| {
+            fixture.script.lists.load(Ordering::SeqCst) == 1
+        });
+        let fence = fixture.host.close_for_lab_stop().unwrap();
+        assert_eq!(fence.try_recv(), Err(TryRecvError::Empty));
+        assert_eq!(fixture.host.list(true), Err(Error::Busy));
+        fixture.script.list_waits.store(false, Ordering::SeqCst);
+        fence.recv_timeout(WAIT).unwrap();
+        assert!(fixture.host.lab_stop_released());
+        assert!(
+            fixture.view().choices.is_empty(),
+            "late listing cannot reopen admission"
+        );
+        assert_eq!(fixture.script.captures.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn queued_session_start_cannot_acquire_after_stop_or_its_release_fence() {
+        let fixture = fixture(false);
+        fixture.script.session_waits.store(true, Ordering::SeqCst);
+        fixture.start_session();
+        let fence = fixture.host.close_for_lab_stop().unwrap();
+        assert_eq!(fence.try_recv(), Err(TryRecvError::Empty));
+        assert!(!fixture.host.lab_stop_released());
+        fixture.script.session_waits.store(false, Ordering::SeqCst);
+        fence.recv_timeout(WAIT).unwrap();
+        assert!(fixture.host.lab_stop_released());
+        assert_eq!(fixture.script.captures.load(Ordering::SeqCst), 0);
+        assert!(!fixture.runtime.lock().unwrap().source_session_running());
+        assert_eq!(fixture.host.list(true), Err(Error::Busy));
+    }
+
+    #[test]
+    fn running_stop_and_repeated_stop_wait_for_actual_native_release() {
+        let fixture = fixture(true);
+        fixture.listening();
+        fixture.script.stop_hangs.store(true, Ordering::SeqCst);
+        let first = fixture.host.close_for_lab_stop().unwrap();
+        let second = fixture.host.close_for_lab_stop().unwrap();
+        assert!(!fixture.host.lab_stop_released());
+        assert_eq!(first.try_recv(), Err(TryRecvError::Empty));
+        assert_eq!(second.try_recv(), Err(TryRecvError::Empty));
+        fixture.script.stop_hangs.store(false, Ordering::SeqCst);
+        first.recv_timeout(WAIT).unwrap();
+        second.recv_timeout(WAIT).unwrap();
+        assert!(fixture.host.lab_stop_released());
+        assert_eq!(fixture.view().phase, Phase::Off);
+        assert_eq!(fixture.script.runs.load(Ordering::SeqCst), 1);
+        assert_eq!(fixture.host.list(true), Err(Error::Busy));
+    }
+
+    #[test]
+    fn an_abandoned_worker_never_produces_a_release_fence() {
+        let fixture = fixture(true);
+        fixture.listening();
+        fixture.script.panics.store(true, Ordering::SeqCst);
+        fixture.wait_phase(Phase::Abandoned);
+        let fence = fixture.host.close_for_lab_stop();
+        if let Ok(fence) = fence {
+            assert!(fence.recv_timeout(WAIT).is_err());
+        }
+        assert!(!fixture.host.lab_stop_released());
+    }
+}
