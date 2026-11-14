@@ -39,6 +39,8 @@ export const STAGE_HTML = () => readFileSync(STAGE, 'utf8');
 const ENTRY = '/tests/fixtures/native-microphone.ts';
 const VIEWPORT = { width: 1920, height: 1080 };
 const WORD_MS = 360;
+// File names come from a results file, which could have been edited by hand.
+const safe = (text) => String(text).replace(/[^A-Za-z0-9_-]+/g, '-');
 
 /** What the stage needs to play one replay from a simulation results file. */
 export function stageData(results, replay, { origin, speed = 1 }) {
@@ -82,7 +84,7 @@ export function stageData(results, replay, { origin, speed = 1 }) {
         ? 'decision times measured on isolated requests, replayed here'
         : kind === 'rules'
           ? 'recorded rule outcomes, no decision time'
-          : 'decision times made up by the fake evaluator',
+          : 'decision times made up, not measured',
     lines,
     timeline: replay.timeline,
     // A little past the last line reaching the app, or the last cue change
@@ -161,6 +163,7 @@ export async function recordReplay({
   log = createRunLog(null),
 }) {
   const data = stageData(results, replay, { origin: baseURL, speed });
+  name = safe(name);
   const rawDirectory = mkdtempSync(join(tmpdir(), 'talkqte-lab-take-'));
   const frames = join(directory, `${name}-frames`);
   mkdirSync(frames, { recursive: true });
@@ -353,7 +356,7 @@ export async function main(args, { print = console.log } = {}) {
   const discarded = [];
   try {
     for (const replay of replays) {
-      const name = `${replay.id}-${results.evaluator.id}-${stamp()}`;
+      const name = safe(`${replay.id}-${results.evaluator.id}-${stamp()}`);
       try {
         const manifest = await recordReplay({
           browser,

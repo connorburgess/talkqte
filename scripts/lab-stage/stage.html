@@ -497,6 +497,35 @@
           ].sort((a, b) => a.atMs - b.atMs);
           const transcript = [];
           let cue = null;
+          let newestText = null;
+          // Keeps the newest transcript line in view in the notebook. The
+          // line is found by its words, and its list or the page is scrolled.
+          const follow = () => {
+            if (!newestText) return;
+            const view = $('notebook').contentWindow;
+            const walker = view.document.createTreeWalker(
+              view.document.body,
+              NodeFilter.SHOW_TEXT,
+            );
+            let found = null;
+            while (walker.nextNode())
+              if (walker.currentNode.nodeValue.includes(newestText))
+                found = walker.currentNode.parentElement;
+            let scrolled = false;
+            for (let box = found; box && !scrolled; box = box.parentElement) {
+              const style = view.getComputedStyle(box);
+              if (
+                /auto|scroll/.test(style.overflowY) &&
+                box.scrollHeight > box.clientHeight
+              ) {
+                box.scrollTop = box.scrollHeight;
+                scrolled = true;
+              }
+            }
+            // Otherwise the page itself scrolls.
+            if (!scrolled) found?.scrollIntoView({ block: 'end' });
+            newestText = null;
+          };
           const publish = async () => {
             const state = {
               elapsedMs: Math.round(now),
@@ -507,6 +536,8 @@
               },
             };
             for (const frame of frames()) await frame.liveTest.publish(state);
+            // After the notebook has drawn the new line.
+            setTimeout(follow, 120);
           };
           const apply = (event) => {
             if (event.kind === 'speak') {
@@ -536,6 +567,7 @@
                 speaker: 'Speaker',
                 text: line.text,
               });
+              newestText = line.text;
             } else if (event.kind === 'evaluation-start') {
               note(`Evaluator asked after line ${event.lineId.slice(1)}`);
             } else if (event.kind === 'decision') {

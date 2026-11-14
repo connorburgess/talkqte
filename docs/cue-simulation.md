@@ -211,7 +211,7 @@ What is on screen:
 - **A label across the top** for the whole recording: "Simulated", "Fictional", the conversation, where the cue decisions came from, and what the decision times are (measured, recorded with none, or made up).
 - **A lab overlay** under the notebook, marked as not part of TalkQTE, listing each time the evaluator was asked and what it decided, including decisions that were dropped.
 
-The notebook's own wording describes the app as it is today (phrase rules, no model connected). In a recording the cue decisions come from the results file, as the label says.
+The notebook's own wording describes the app as it is today (phrase rules, no model connected). In a recording the cue decisions come from the results file, as the label says. The notebook is kept scrolled to the newest transcript line, so its own copy of the cue can move out of view; the companion always shows it.
 
 The recorder finds each cue by its words, not by how the card is built, so it works with the current card and with a redesigned one: it waits for the cue's text to appear in the companion, checks it in the notebook, takes a still, and waits for it to go when the results clear it.
 
@@ -222,7 +222,7 @@ What is saved, in the output directory:
 - a manifest (`.json`) with the source of the decisions, the settings, and for each cue when the results expected it and when it was actually seen;
 - an event log (`.log.jsonl`).
 
-A take in which an expected cue never appeared, or playback failed, is deleted rather than kept. Recordings are private working files: the output directory must be outside the checkout, and videos or stills of the app never go in the repository, the README, the website or anything promotional.
+A take in which an expected cue never appeared, or playback failed, is deleted rather than kept. File names are built from the conversation and evaluator names with anything but letters, digits, hyphens and underscores replaced. Recordings are private working files: the output directory must be outside the checkout, and videos or stills of the app never go in the repository, the README, the website or anything promotional.
 
 A recording shows timing and appearance on invented conversations. Playback runs on the browser's clock, so a cue is drawn a little after the time in the results; the manifest records both. It is not a recording of the desktop app, a real call, or anyone's use of TalkQTE.
 
