@@ -201,6 +201,17 @@ for (const replacement of ['sources', 'session']) {
   });
 }
 
+test('shows when lines are being sent and stops showing it after the reply', async ({
+  page,
+}) => {
+  await open(page);
+  await enable(page);
+  await send(page, { sending: true });
+  await expect(page.getByText(/Sending recent lines to /)).toBeVisible();
+  await send(page, { sending: false, lastDecision: 'quiet' });
+  await expect(page.getByText(/Sending recent lines to /)).toHaveCount(0);
+});
+
 test('Pause and Disable preserve capture; Stop waits for capture confirmation', async ({
   page,
 }) => {
@@ -288,8 +299,12 @@ test('changed note revisions close a review; mismatched returned scope is reject
 
 for (const issue of [
   'authentication',
+  'credentials',
   'allowance',
   'rateLimit',
+  'unreachable',
+  'timedOut',
+  'invalidReply',
   'worker',
   'inputLimit',
 ] as const) {

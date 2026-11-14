@@ -31,8 +31,12 @@ export type ProcessingIssue =
   | 'scopeChanged'
   | 'inputLimit'
   | 'authentication'
+  | 'credentials'
   | 'allowance'
   | 'rateLimit'
+  | 'unreachable'
+  | 'timedOut'
+  | 'invalidReply'
   | 'worker'
   | null;
 export interface StopTarget {
@@ -54,6 +58,8 @@ export interface ProcessingSnapshot {
   approved: ProcessingScope | null;
   issue: ProcessingIssue;
   lastDecision: 'quiet' | 'cue' | null;
+  /** Conversation lines are being sent to the processor right now. */
+  sending?: boolean;
   /** Development builds only: the microphone alone, beside a combined capture. */
   microphone?: ProcessingSnapshot['capture'];
   /** Development builds only: the selected-application source. */

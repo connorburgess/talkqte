@@ -1,6 +1,6 @@
 # Model-decided cues: design
 
-Status: design note, 14 November 2026. Nothing in it is enabled yet. The owner has decided that the real app's cues come from a model, and that the phrase rules in `src-tauri/src/engine.rs` will be removed, because they do not decide what a conversation needs.
+Status: design note, 14 November 2026. Updated the same day: the development backend is implemented behind the `claude-cli` Cargo feature and tested against a fake `claude` executable. No model has been called from the app. The first real call needs the owner's go-ahead. The owner has decided that the real app's cues come from a model, and that the phrase rules in `src-tauri/src/engine.rs` will be removed, because they do not decide what a conversation needs.
 
 A build without a model connection shows no cues and says so. This note says how the model is reached from the app, what leaves the device, and what happens when it fails.
 
@@ -52,7 +52,7 @@ It has the same shape as the lab's app-style request (`buildPrompt` in `scripts/
 - **`events`:** the newest six fresh transcript lines, plus any older lines the cue on screen cites. Every line carries the one label "Speaker", as live transcripts do today.
 - **`existingCue`:** the cue on screen, or `null`.
 - **`userName`:** the listener's session name, only when Settings has one.
-- **`earlierCues`:** up to four cues this session has shown, oldest first, each with how it ended (`resolved`, `withdrawn` or `expired`). The field is present only when there is something to list. A cue decided but never shown is not listed.
+- **`earlierCues`:** up to four cues this session has shown, oldest first, each with how it ended (`resolved`, `withdrawn` or `expired`). A cue the person dismissed is listed as `expired`. The field is present only when there is something to list. A cue decided but never shown is not listed.
 
 The system prompt is the lab's compact prompt, with its glance rule, the sentence that says whose name `userName` is, and the sentence about earlier cues. The prompt text, the CLI arguments and the inherited-credential list will move into one shared file, read both by the lab scripts and by the Rust build (`include_str!`). The lab and the app then cannot drift apart, and a test on each side checks that the copy it uses is that file. Its location is chosen when the lab scripts are changed to read it.
 
@@ -106,7 +106,17 @@ A valid decision is applied only if the request it answers still matches the cur
 
 Each request has a deadline of eight seconds by default. The development setting can change it within the worker's existing ten-second ceiling. A cue that would arrive more than 18 seconds after its newest cited line is refused, as it is now.
 
-There is no retry, no fallback to another model, no fallback to phrase rules and no queue. Any failure stops sending for the rest of the session, and the reason is shown in plain words in the notebook and in the companion's status line. Capture and the transcript carry on. Sending starts again only when the person turns the connection back on.
+There is no retry, no fallback to another model, no fallback to phrase rules and no queue. Capture and the transcript carry on whatever happens.
+
+**Slow replies (the owner's rule, 14 November 2026).**
+
+- **One reply over the deadline is skipped.** No cue is shown that time, the late result is dropped when it arrives, and the next new line is sent as usual.
+- **Two timeouts in a row stop cues for the session**, with the plain reason.
+- **A reply in time resets the count.**
+
+The count is `TIMEOUTS_TO_STOP` in `src-tauri/src/engine/evaluation.rs`, so changing it is a one-line edit.
+
+**Every other failure stops sending at once** for the rest of the session: usage limit, sign-in, inherited credentials, an unusable reply, and a CLI error. The reason is shown in plain words in the notebook. Sending starts again only when the person reviews and turns the connection back on.
 
 | What happened                                                                   | What the person sees                                                                                               | Sent?                    |
 | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------ |
@@ -115,11 +125,12 @@ There is no retry, no fallback to another model, no fallback to phrase rules and
 | An API key, provider switch, gateway or proxy setting is inherited              | "Cues are off: an API key or provider setting is present, and this connection uses only your Claude subscription." | Nothing                  |
 | A usage or rate limit was reached                                               | "Cues stopped: your Claude usage limit was reached."                                                               | No more                  |
 | No connection, or the CLI reported an error                                     | "Cues stopped: the model could not be reached."                                                                    | No more                  |
-| The deadline passed                                                             | "Cues stopped: the model took longer than 8 seconds."                                                              | No more                  |
+| The deadline passed once                                                        | Nothing; that request is skipped                                                                                   | The next line, as usual  |
+| The deadline passed twice in a row                                              | "Cues stopped: the model took too long to reply twice in a row."                                                   | No more                  |
 | The reply was unreadable, malformed, from another model, or cited unknown lines | "Cues stopped: the model's reply could not be used."                                                               | No more                  |
 | The request would be too large                                                  | "Cues stopped: the conversation lines were too long to send."                                                      | Nothing for that request |
 
-A single slow reply ending the session's cues is strict. This keeps the existing evaluator's rule that a concrete failure needs fresh approval. Whether a timeout should instead skip one request is a decision to revisit with measured latency, not a default to loosen now.
+The wording above is what the notebook shows; the companion shows that cues are off. A usage limit and a rate limit share one message, because the CLI's wording does not reliably tell them apart.
 
 ## What leaves the device, and when
 
@@ -145,19 +156,19 @@ A single slow reply ending the session's cues is strict. This keeps the existing
 - **Build.** A Cargo feature, `claude-cli`, used in development builds only.
 - **Arguments.** It starts `claude` with the lab's isolated arguments: print mode, no tools, no MCP, no slash commands, no session persistence, hooks off, `switchModelsOnFlag: false`, only the requested model available, and JSON output.
 - **Environment.** It passes an allowlisted environment, and refuses to start if any inherited credential name from the lab's list is present.
-- **Model and effort.** Chosen in the development settings from the lab's options: Opus 5.5 or Haiku 5.5, at low or medium effort. The default is the lab's, Opus 5.5 at medium.
-- **Checks.** Version and subscription sign-in are checked when the connection is turned on, not on every request.
+- **Model and effort.** Chosen from the lab's options with the development settings `TALKQTE_CUE_MODEL` (`opus-5.5` or `haiku-5.5`) and `TALKQTE_CUE_EFFORT` (`low` or `medium`), read when a live session starts. The default is the lab's, Opus 5.5 at medium. An unknown name leaves the session with no model connection rather than reaching another model.
+- **Checks.** Version and subscription sign-in are checked once per session, on the first request, before that request is sent. Inherited credentials are checked before every request.
 - **Limits.** Standard output is capped at 128 KiB. The child process is ended on cancellation or deadline, so a slow call cannot hold the worker.
 - **No retries.** There is no `--fallback-model` and no API path.
 
-**The decision log** is development-only and shares one file and one format with the real-app timing log (`src-tauri/src/timing_log.rs`, in review in #273). It is behind the `timing-log` feature and an explicit file path, and nothing is sent anywhere. The backend records four events beside the timing log's own:
+**The decision log** is development-only and shares one file and one format with the real-app timing log (`src-tauri/src/timing_log.rs`). It is behind the `timing-log` feature and an explicit file path, and nothing is sent anywhere. The backend records four events beside the timing log's own:
 
 - `evaluator`: the connection turned on or off, with model, effort and backend;
 - `evaluation_requested`: session, request number, the last line covered, the number of lines sent, and whether a cue was on screen;
 - `evaluation_result`: one of `show`, `quiet`, `resolved`, `withdraw`, `failed`, `stale` or `cancelled`, with latency and a fixed failure code;
-- `cue_decision` with `decider: "model"` and the request number, recorded where the engine accepts the cue.
+- `cue_decision` with `decider: "model"`, the request number and the cue's words, recorded where the engine accepts the cue. Phrase-rule cues carry `decider: "phrase_rule"`.
 
-These events carry IDs and counts, not prompt or reply text. A reviewer joins them to the timing log's lines and cue text. Tools such as the dialogue simulation's listener can read the real app's cues from those same events, or from the existing cue snapshot, with no new interface.
+`evaluation_result` failure codes are `timeout`, `invalid_reply`, `rate_limited`, `input_limit`, `sign_in`, `credentials` and `unavailable`. These events carry ids, counts and fixed codes, never the prompt or the raw reply. A reviewer joins them to the timing log's lines and cue text. Tools such as the dialogue simulation's listener can read the real app's cues from those same events, or from the existing cue snapshot, with no new interface.
 
 ## Acceptance for the later changes
 

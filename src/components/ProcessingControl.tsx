@@ -27,9 +27,17 @@ const issues = {
   inputLimit:
     'This context is too large to process. Choose fewer prior notes in a new review.',
   authentication:
-    'The processor needs sign-in. Resolve that in its own app, then explicitly review processing again.',
+    'Cues are off: Claude Code is not installed, needs updating, or is not signed in to a Claude subscription. Fix that in Claude Code, then review processing again.',
+  credentials:
+    'Cues are off: an API key or provider setting is present, and this connection uses only your Claude subscription. Nothing was sent.',
+  unreachable:
+    'Cues stopped: the model could not be reached. Nothing more will be sent until you review processing again.',
+  timedOut:
+    'Cues stopped: the model took too long to reply twice in a row. Nothing more will be sent until you review processing again.',
+  invalidReply:
+    "Cues stopped: the model's reply could not be used. Nothing more will be sent until you review processing again.",
   allowance:
-    'The processor allowance is unavailable. Processing has stopped; no alternate service will be used.',
+    'Cues stopped: your Claude usage or rate limit was reached. Nothing more will be sent, and no other service will be used.',
   rateLimit:
     'The processor is rate limited. Processing has stopped; it will not retry automatically.',
   worker:
@@ -437,6 +445,12 @@ export function ProcessingControl({
       {snapshot?.issue && (
         <p className="processing-message" role="status">
           {issues[snapshot.issue]}
+        </p>
+      )}
+      {active && snapshot?.sending && (
+        <p className="processing-muted" role="status">
+          Sending recent lines to{' '}
+          {snapshot.processor?.destination ?? 'the processor'}…
         </p>
       )}
       {active && snapshot?.lastDecision === 'quiet' && (

@@ -6,6 +6,8 @@ import {
   BookOpen,
   ChevronRight,
   CircleHelp,
+  Cloud,
+  CloudUpload,
   EyeOff,
   FileText,
   MessageCircle,
@@ -187,6 +189,31 @@ function FloatingQuestion() {
                               : 'Quiet input'
                         }
                       />
+                    )}
+                  </span>
+                )}
+                {/* Conversation lines may leave the device while this
+                    shows; the arrow means a request is on its way. */}
+                {state?.model && (
+                  <span
+                    className={`companion-capture is-on`}
+                    title={
+                      state.model === 'sending'
+                        ? 'Sending recent lines to Claude'
+                        : 'Model cues on: recent lines go to Claude'
+                    }
+                    role="img"
+                    aria-label={
+                      state.model === 'sending'
+                        ? 'Sending recent lines to Claude'
+                        : 'Model cues on: recent lines go to Claude'
+                    }
+                    data-tauri-drag-region
+                  >
+                    {state.model === 'sending' ? (
+                      <CloudUpload size={16} aria-hidden="true" />
+                    ) : (
+                      <Cloud size={16} aria-hidden="true" />
                     )}
                   </span>
                 )}

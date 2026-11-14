@@ -61,6 +61,9 @@ export interface CueSnapshot {
   companionPosition: 'bottomRight' | 'topCenter' | 'topLeft' | 'topRight';
   questionSize: 'standard' | 'large';
   sensitivity: 'balanced' | 'quiet' | 'focused';
+  /** Present while a model connection may send conversation lines off the
+   * device: `sending` while a request is on its way. */
+  model?: 'on' | 'sending';
   /** Development builds only: the running session is fed by a selected
    * application alone, with no microphone. */
   sourceSession?: boolean;
