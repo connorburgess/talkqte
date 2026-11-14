@@ -41,6 +41,8 @@ const QUEUE: usize = 1024;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
+    /// Owned development process Stop handshake. Receipt is not release.
+    DevStop { run_id: String, step: &'static str },
     /// A session started or ended, with its clock at that moment. Anchors
     /// session time to wall time.
     Session {
@@ -175,6 +177,21 @@ pub enum Event {
         application: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
+    },
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    DevSourceObservation {
+        version: u8,
+        step: &'static str,
+        application: &'static str,
+        run_id: String,
+        host_operation: String,
+        live_operation: String,
+        session: String,
     },
     /// Lines lost since the last line written, because the queue was full
     /// or a write failed.
@@ -438,6 +455,7 @@ pub fn features() -> Vec<&'static str> {
         ("native-audio-spike", cfg!(feature = "native-audio-spike")),
         ("timing-log", cfg!(feature = "timing-log")),
         ("claude-cli", cfg!(feature = "claude-cli")),
+        ("lab-evaluator", cfg!(feature = "lab-evaluator")),
     ]
     .into_iter()
     .filter_map(|(name, on)| on.then_some(name))
