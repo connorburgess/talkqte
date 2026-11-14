@@ -52,6 +52,7 @@ npm run lab:batch -- --set held-out --run --out <directory outside the repositor
 What the runner enforces:
 
 - **A named model.** `--model opus-5.5` (the default) or `--model haiku-5.5`; nothing else is accepted, so a mistyped name cannot reach another model. The run requests exactly that model with no fallback, and a reply reported as coming from any other model is rejected and ends the run. The model is recorded in the results (`evaluator.model`), in the names of the results and log files, and in a recording's label. A log from one model cannot be used to resume a run of another.
+- **A named effort and reply.** `--effort medium` (the default) or `low`, and `--reply full` (the default) or `compact`. The compact reply is the three fields the app acts on (`action`, `cue`, `sourceIds`) with no reason or observed-use label, asked for by a shorter system prompt that says not to explain; it is checked as strictly as the full one. Both choices are recorded in the results and are part of the run's name, so runs under different settings are never taken for one another and one cannot resume another.
 - **A call cap.** `--max-calls` is required, from 1 to 100. An evaluator counts as hosted unless its adapter says explicitly that it is not, so a new adapter cannot skip the acknowledgement or the cap by omission. A run that would need more requests than the cap is refused before anything starts, and the loop stops at the cap regardless.
 - **No API key, ever.** If the shell carries an API key, auth token, base-URL override or provider switch (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_…` and similar), the run is refused before any process starts and the message names the variables, never their values. The single-case command refuses the same way, and so does a shell with `HTTPS_PROXY`, `HTTP_PROXY` or `ALL_PROXY` set. The existing checks still apply after that: the child process gets an allowlisted environment, and an API-key, routed or unknown sign-in is rejected before any model request.
 - **One version check and one sign-in check, which send no case text, then one request per case, one at a time.** No retry, no alternate model, no fallback.
@@ -157,6 +158,34 @@ What it does, following the app's [evaluator bridge](cue-evaluator.md#transcript
 - **The listener's name is sent** (`--no-listener-name`) as `userName` where the conversation has a listener, the way the app's session name works, with the one sentence in the system prompt that says whose name it is. Lines keep the single "Speaker" label.
 
 What these do to a model's decisions is not known; no model was run. Offline they change only what the harness can show: with a 4-second decision, the labels evaluator cues 25 of 30 moments in time instead of 24, and five fewer requests are made.
+
+**Decisions that newer speech overtook.** In the two-model run of 14 November 2026, 17 of each model's 38 decisions were dropped because a new line arrived first. `--keep-overtaken-cues` (off by default) keeps one kind of overtaken decision: a cue, when nothing is on screen and every line it cites is still among the newest six. `npm run lab:sim -- --replay <results .json>` looks back at a recorded run under each policy with no new request, giving the recorded decisions back in the same order with the same times:
+
+| Policy | Opus 5.5: in time, late, missed | cues, unexpected | Haiku 5.5: in time, late, missed | cues, unexpected |
+| --- | --- | --- | --- | --- |
+| Dropped, as it ran | 1, 2, 5 | 5, 2 | 4, 0, 4 | 8, 4 |
+| Cue kept while its lines are in view | 3, 1, 4 | 8, 4 | 3, 1, 4 | 11, 7 |
+| The same, unless an answer or topic change arrived | 3, 1, 4 | 8, 4 | 3, 0, 5 | 10, 7 |
+| Everything applied | 3, 1, 4 | 8, 4 | 3, 1, 4 | 11, 7 |
+
+Of 8 labelled moments; no cue under any policy was on screen within 5 seconds. Keeping overtaken cues brought Opus's median from 21.5 to 10.0 seconds and two more moments in time, and it also doubled the cues the labels did not expect; for Haiku it added three unexpected cues and helped nothing. The third row uses the labels to know when an answer or topic change arrived, which is the best any detector could do, and it barely differs. This replay has a hard limit: once a kept cue is on screen, the later recorded decisions were made without knowing about it (5 for Opus, 7 for Haiku), so what the evaluator would then have said is not known, they are treated as quiet, and the cue stays until it expires. So it cannot show whether a kept cue would have been withdrawn in time. On this evidence it is not a clear gain, and it is left off.
+
+**Where the output goes.** `npm run lab:review -- --tokens <results .json>,<results .json>` works out, from a run's own counters, how much of what the model wrote was the reply the lab reads, and fits a straight line of request time against output length. For the same run:
+
+| | Opus 5.5 | Haiku 5.5 |
+| --- | --- | --- |
+| Output tokens a request, median | 274 | 627 |
+| In the reply the lab reads | about 75 | about 72 |
+| Of that, explanation | about 60 | about 57 |
+| Written but not in the reply | about 199 | about 555 |
+| Request time, median | 5.4 s | 5.1 s |
+| Fixed part of a request | 3.2 s | 0.9 s |
+| Time per 100 output tokens | 0.8 s | 0.7 s |
+| Estimate without the explanation | 5.0 s | 5.0 s |
+| Estimate without the unseen working | 3.8 s | 1.4 s |
+| Estimate with the three-field reply only | 3.3 s | 1.0 s |
+
+Most of each request's output is working the reply never shows, far more for Haiku than Opus; the explanation is most of the visible reply but little of the time. The estimates say a lower effort matters much more than a shorter reply, and that Haiku has far more to gain than Opus, whose requests have about three seconds that do not depend on length. Reply sizes are estimated at four characters to a token, and the line is fitted to one run's 38 requests: it suggests what to try, and only a run measures it.
 
 **What the budget allows.** `npm run lab:sim -- --budget` works out, offline, how many of the 30 labelled moments an evaluator that agreed with every label would cue, and how many of those cues would be on screen within 5 seconds of the line being said, for each pair of transcription delay and decision time:
 
@@ -314,7 +343,7 @@ A recording shows timing and appearance on invented conversations. Playback runs
 
 `npm run test:cue-lab` runs the offline tests for the single-case lab, the batch runner and the simulation. For the batch runner they cover: the dry run starting nothing; every refusal above happening before any process; one sign-in check and one request per case; stopping at the first limit, error, wrong model or malformed reply without retry; the call cap; labels never reaching the evaluator; the first set's prompt being unchanged; the rules record matching the engine's tests; results being refused inside the checkout; and the fake evaluator being repeatable. CI runs them with no model, credentials or network.
 
-For the simulation they cover: a cue appearing one decision after its line and being scored against its moment; an overtaken decision being dropped with one catch-up; never two requests at once; the minimum gap and the dry-run bound; expiry after 18 seconds; the six-line window and what an app-style request contains; each count in the table above on a small scripted conversation; the labels evaluator acting only where a label says to and losing moments as its delay grows; the model a run asks for, records and accepts a reply from; two runs set side by side; an acknowledgement neither starting an evaluation nor overtaking one, while a real new turn and an answer to a question still do; the earlier cues each request lists and their limit; the listener's name sent with one speaker label kept; the budget table's arithmetic; a stopped run resuming without repeating its decisions, with the cap counting new requests only and nothing reused under another prompt; a failed request sorted into a kind without keeping the CLI's words; the glance prompt and the count of cues over it; stopping at the cap and at the first failure with the log intact; every refusal happening before any process; repeatability; and the shape of the conversation fixture.
+For the simulation they cover: a cue appearing one decision after its line and being scored against its moment; an overtaken decision being dropped with one catch-up; never two requests at once; the minimum gap and the dry-run bound; expiry after 18 seconds; the six-line window and what an app-style request contains; each count in the table above on a small scripted conversation; the labels evaluator acting only where a label says to and losing moments as its delay grows; the model a run asks for, records and accepts a reply from; the compact reply and the effort asked for, checked and recorded; an overtaken cue kept only while its lines are in view; a recorded run replayed identically and looked at under each policy without asking anything; where a run's output went; two runs set side by side; an acknowledgement neither starting an evaluation nor overtaking one, while a real new turn and an answer to a question still do; the earlier cues each request lists and their limit; the listener's name sent with one speaker label kept; the budget table's arithmetic; a stopped run resuming without repeating its decisions, with the cap counting new requests only and nothing reused under another prompt; a failed request sorted into a kind without keeping the CLI's words; the glance prompt and the count of cues over it; stopping at the cap and at the first failure with the log intact; every refusal happening before any process; repeatability; and the shape of the conversation fixture.
 
 `scripts/cue-sim-review.test.mjs` (part of `npm run test:cue-lab`) reviews small scripted takes and checks each verdict and observation: a complete take with readable cues, a stopped run, a long cue, a cue cleared too soon, a decision thrown away by an acknowledgement, a late cue, and a status that claims a microphone.
 
