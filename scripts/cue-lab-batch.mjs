@@ -11,7 +11,7 @@
 // explicit invocation with a call cap, and stops at the first failure.
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { modelFor } from './cue-lab.mjs';
+import { modelFor, replyOptions } from './cue-lab.mjs';
 import { EVALUATORS, createEvaluator, isHosted } from './cue-evaluators.mjs';
 import {
   createRunLog,
@@ -227,7 +227,16 @@ export async function runBatch({
   return results;
 }
 
-function describePlan(set, cases, evaluator, plan, selection, model, print) {
+function describePlan(
+  set,
+  cases,
+  evaluator,
+  plan,
+  selection,
+  model,
+  extra,
+  print,
+) {
   print('Dry run. No process was started and nothing was sent.');
   print(
     `Set: ${set.name} (${set.file}), ${cases.length} of ${set.cases.length} cases.`,
@@ -255,7 +264,7 @@ function describePlan(set, cases, evaluator, plan, selection, model, print) {
     print(
       `[${index + 1}] ${request.caseId}\n    ${request.input ?? '(nothing: the recorded outcome for this case is read)'}`,
     );
-  const chosen = `--set ${set.name}${selection ? ` --cases ${selection}` : ''}${model ? ` --model ${model}` : ''}`;
+  const chosen = `--set ${set.name}${selection ? ` --cases ${selection}` : ''}${model ? ` --model ${model}` : ''}${extra}`;
   if (!isHosted(evaluator))
     print(
       `\nTo run it:\n  npm run lab:batch -- ${chosen} --evaluator ${evaluator.id} --run --out <directory outside the repository>`,
@@ -315,6 +324,8 @@ export async function main(
       '--max-calls',
       '--prompt',
       '--model',
+      '--effort',
+      '--reply',
     ],
     switches: ['--run', '--included-usage-confirmed'],
   });
@@ -338,6 +349,7 @@ export async function main(
       rules,
       glance: prompt === 'glance',
       model: modelFor(flags['--model']),
+      ...replyOptions(flags),
     },
     evaluators,
   );
@@ -349,6 +361,10 @@ export async function main(
       planBatch(cases, evaluator),
       flags['--cases'],
       flags['--model'],
+      ['--effort', '--reply']
+        .filter((flag) => flags[flag] !== undefined)
+        .map((flag) => ` ${flag} ${flags[flag]}`)
+        .join(''),
       print,
     );
     return null;

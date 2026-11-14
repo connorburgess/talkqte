@@ -15,7 +15,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { GLANCE_WORDS, modelFor } from './cue-lab.mjs';
+import { GLANCE_WORDS, modelFor, replyOptions } from './cue-lab.mjs';
 import {
   CUE_BUDGET_MS,
   MAX_CALLS_CEILING,
@@ -52,7 +52,10 @@ export const DEFAULTS = {
   // 'app': one speaker label for every line, as a live transcript has.
   // 'named': speaker names as well, to see what they add.
   input: 'app',
-  // false: a decision overtaken by newer speech is dropped, as in the app.
+  // What happens to a decision that newer speech overtook.
+  // false: it is dropped, as in the app. true: it is applied anyway.
+  // 'in-window': a cue is still shown if nothing is on screen and every
+  // line it cites is still among the newest lines; anything else is dropped.
   applyStale: false,
   // true: a bare acknowledgement ("Mm.", "Yeah.") neither starts an
   // evaluation nor overtakes one in flight. The app does not do this yet.
@@ -304,6 +307,148 @@ export function resumingEvaluator(evaluator, reusable) {
   };
 }
 
+/** The decisions of a run that was already made, given back in the same
+ * order with the same times, so the run can be looked at again under
+ * another policy without asking anything. A decision is matched by the
+ * newest line of its request. Where the new policy leaves the screen in a
+ * state the recorded decision was not made for (a cue it was not told
+ * about), what the evaluator would have said is not known: it is counted,
+ * and treated as quiet. */
+export function recordedEvaluator(results) {
+  const recorded = new Map();
+  for (const replay of results.conversations)
+    for (const event of replay.timeline)
+      if (event.type === 'decision')
+        recorded.set(`${replay.id}/${event.lineId}`, event);
+  const counts = { unknown: 0, unrecorded: 0 };
+  const quiet = (elapsedMs, latency) => ({
+    decision: {
+      action: 'quiet',
+      cue: null,
+      sourceIds: null,
+      reason: null,
+      observedUse: null,
+    },
+    elapsedMs,
+    latency,
+  });
+  return {
+    id: 'recorded',
+    label: `Recorded decisions of ${results.evaluator.label}`,
+    kind: 'fake',
+    hosted: false,
+    counts,
+    async open() {
+      return { model: results.evaluator.model ?? null };
+    },
+    request: () => ({ systemPrompt: null, input: null }),
+    async decide(testCase) {
+      const event = recorded.get(`${testCase.id}/${testCase.events.at(-1).id}`);
+      if (!event) {
+        counts.unrecorded++;
+        return quiet(0, 'none');
+      }
+      const lifecycle = ['resolved', 'withdraw'].includes(event.action);
+      if (
+        (event.action === 'show' && testCase.existingCue) ||
+        (lifecycle && !testCase.existingCue)
+      ) {
+        counts.unknown++;
+        return quiet(event.latencyMs, event.latency);
+      }
+      return {
+        decision: {
+          action: event.action,
+          cue: event.cue,
+          sourceIds: event.sourceIds,
+          reason: event.reason,
+          observedUse: event.observedUse,
+        },
+        elapsedMs: event.latencyMs,
+        latency: event.latency,
+      };
+    },
+    async close() {},
+  };
+}
+
+/** Looks back at a recorded run under each policy for overtaken decisions,
+ * with no new request: dropped (as it ran), a cue kept while its lines are
+ * still in view, the same but not when a line labelled as ending the
+ * moment arrived meanwhile (the best any detector of answers and topic
+ * changes could do), and everything applied. */
+export async function stalePolicies(results) {
+  const bundled = await loadConversations();
+  const conversations = results.conversations.map((replay) =>
+    bundled.find((c) => c.id === replay.id),
+  );
+  if (conversations.some((c) => !c))
+    throw new Error(
+      'That run includes a conversation that is not among the bundled ones.',
+    );
+  // A line that ends some labelled moment: an answer or a topic change.
+  const ending = (conversation) => {
+    const ends = new Set(
+      conversation.lines.flatMap((line) => [
+        ...(line.until ? [line.until] : []),
+        ...(['resolved', 'withdraw'].includes(line.expect) ? [line.id] : []),
+      ]),
+    );
+    return (since) => since.some((line) => ends.has(line.id));
+  };
+  const rows = [];
+  for (const [name, applyStale, guarded] of [
+    ['Dropped, as it ran', false, false],
+    ['Cue kept while its lines are in view', 'in-window', false],
+    ['The same, unless an answer or topic change arrived', 'in-window', true],
+    ['Everything applied', true, false],
+  ]) {
+    const evaluator = recordedEvaluator(results);
+    const scores = [];
+    for (const conversation of conversations) {
+      const replay = await simulate(conversation, evaluator, {
+        ...results.settings,
+        applyStale,
+        staleGuard: guarded ? ending(conversation) : undefined,
+      });
+      scores.push(score(conversation, replay));
+    }
+    const totals = total(scores);
+    const after = scores.flatMap((s) => s.afterSaidMs);
+    rows.push({
+      policy: name,
+      moments: totals.opportunities.labelled,
+      inTime: totals.opportunities.inTime,
+      late: totals.opportunities.late,
+      missed: totals.opportunities.missed,
+      withinBudget: after.filter((ms) => ms <= CUE_BUDGET_MS).length,
+      medianMs: after.length ? totals.triggerToCue.medianMs : null,
+      cuesShown: totals.cuesShown,
+      unexpected: totals.unexpectedShows,
+      duplicates: totals.duplicates,
+      // Decisions the recorded run cannot answer for under this policy.
+      unknown: evaluator.counts.unknown,
+    });
+  }
+  return rows;
+}
+
+function describePolicies(results, rows, print) {
+  print(
+    `${results.evaluator.label}: the recorded decisions under each policy for a decision that newer speech overtook. Nothing was asked again.\n`,
+  );
+  print(
+    'policy                                               in time  late  missed  within 5 s  median   cues  unexpected  repeats  not known',
+  );
+  for (const row of rows)
+    print(
+      `${row.policy.padEnd(52)} ${String(row.inTime).padStart(4)}    ${String(row.late).padStart(3)}   ${String(row.missed).padStart(4)}    ${String(row.withinBudget).padStart(6)}     ${(row.medianMs === null ? 'none' : `${(row.medianMs / 1000).toFixed(1)} s`).padStart(6)}  ${String(row.cuesShown).padStart(4)}  ${String(row.unexpected).padStart(9)}  ${String(row.duplicates).padStart(7)}  ${String(row.unknown).padStart(8)}`,
+    );
+  print(
+    `\nOf ${rows[0].moments} labelled moments. "Not known" counts later decisions that were made without the cue this policy would have left on screen: what the evaluator would have said then cannot be recovered from the log, so they are treated as quiet and such a cue simply stays until it expires.`,
+  );
+}
+
 /** Replays one conversation. Returns its timeline and its lines with the
  * time each reached the evaluator. Throws whatever the evaluator throws. */
 export async function simulate(
@@ -314,6 +459,9 @@ export async function simulate(
     transcriptDelayMs = DEFAULTS.transcriptDelayMs,
     input = DEFAULTS.input,
     applyStale = DEFAULTS.applyStale,
+    // For looking back at a recorded run: given the lines that arrived
+    // while a decision was in flight, true keeps it dropped.
+    staleGuard,
     ignoreBackchannels = DEFAULTS.ignoreBackchannels,
     cueHistory = DEFAULTS.cueHistory,
     listenerName = DEFAULTS.listenerName,
@@ -429,8 +577,19 @@ export async function simulate(
     const { decision } = result;
     const sourceIds = decision.sourceIds ?? [lineId];
     let outcome = 'applied';
-    if (superseded && !applyStale) outcome = 'superseded';
-    else if ((cue?.cueId ?? null) !== cueId) outcome = 'cue-changed';
+    // An overtaken decision is kept only if the policy says so.
+    const window = new Set(heard.slice(-CONTEXT_LINES).map((line) => line.id));
+    const since = heard.filter((line) => line.arrivesAtMs > startedAtMs);
+    const kept =
+      applyStale === true ||
+      (applyStale === 'in-window' &&
+        decision.action === 'show' &&
+        !cue &&
+        sourceIds.every((id) => window.has(id)) &&
+        !staleGuard?.(since));
+    if (superseded && !kept) outcome = 'superseded';
+    else if ((cue?.cueId ?? null) !== cueId && !(superseded && kept && !cue))
+      outcome = 'cue-changed';
     else if (decision.action === 'show') {
       const newest = Math.max(
         ...sourceIds.map((id) => byId.get(id).arrivesAtMs),
@@ -1083,13 +1242,17 @@ export async function main(
       '--latency-ms',
       '--input',
       '--prompt',
+      '--replay',
       '--model',
+      '--effort',
+      '--reply',
       '--resume',
     ],
     switches: [
       '--run',
       '--included-usage-confirmed',
       '--apply-stale',
+      '--keep-overtaken-cues',
       '--overtake-backchannels',
       '--no-cue-history',
       '--no-listener-name',
@@ -1097,6 +1260,15 @@ export async function main(
       '--coverage',
     ],
   });
+  if (flags['--replay']) {
+    const recorded = JSON.parse(readFileSync(flags['--replay'], 'utf8'));
+    if (recorded.schema !== 'talkqte-cue-sim/1')
+      throw new Error(
+        '--replay takes a results file written by this simulation.',
+      );
+    describePolicies(recorded, await stalePolicies(recorded), print);
+    return null;
+  }
   if (flags['--budget']) {
     describeBudget(await budgetTable(), print);
     return null;
@@ -1117,7 +1289,11 @@ export async function main(
       DEFAULTS.transcriptDelayMs,
     ),
     input: flags['--input'] ?? DEFAULTS.input,
-    applyStale: Boolean(flags['--apply-stale']),
+    applyStale: flags['--apply-stale']
+      ? true
+      : flags['--keep-overtaken-cues']
+        ? 'in-window'
+        : false,
     ignoreBackchannels: !flags['--overtake-backchannels'],
     cueHistory: !flags['--no-cue-history'],
     listenerName: !flags['--no-listener-name'],
@@ -1169,6 +1345,7 @@ export async function main(
       latencyMs,
       glance: prompt === 'glance',
       model: modelFor(flags['--model']),
+      ...replyOptions(flags),
     },
     evaluators,
   );
@@ -1200,11 +1377,12 @@ export async function main(
       .map((flag) => `${flag} ${flags[flag]}`),
     ...[
       '--apply-stale',
+      '--keep-overtaken-cues',
       '--overtake-backchannels',
       '--no-cue-history',
       '--no-listener-name',
     ].filter((flag) => flags[flag]),
-    ...['--prompt', '--model', '--resume']
+    ...['--prompt', '--model', '--effort', '--reply', '--resume']
       .filter((flag) => flags[flag] !== undefined)
       .map((flag) => `${flag} ${flags[flag]}`),
   ].join(' ');
