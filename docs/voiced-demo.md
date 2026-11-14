@@ -1,6 +1,6 @@
 # Voiced practice demo
 
-**Retired on 14 November 2026.** The demo described here was removed from the app at the owner's decision, together with **Try demo**, its controls and the bundled speech. Fictional demonstrations now come from the lab's simulations and recordings ([batches and simulations](cue-simulation.md)). This page is kept as a record of what was built, how the audio was produced and which checks ran; its present-tense descriptions are of the app before that date. The notebook, companion and browser preview no longer offer it.
+**Retired on 14 November 2026.** The demo described here was removed from the app at the owner's decision, together with **Try demo**, its controls and the bundled speech. Fictional demonstrations now come from the lab's simulations and recordings ([batches and simulations](cue-simulation.md)). This page is kept as a record of what was built, how the audio was produced and which checks ran; its present-tense descriptions are of the app before that date. The app no longer contains it: the fictional script survives only as a fixture for the engine's own tests.
 
 The fictional community-garden demo ("A better welcome") now plays with two synthetic voices, Robin and Alex. This record covers what the voiced demo does, how its audio was produced, and which acceptance checks from [product readiness](product-readiness.md#voiced-practice-demo) have run.
 
