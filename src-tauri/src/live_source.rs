@@ -128,8 +128,7 @@ impl Runtime {
         if !self.live_source_accepts(session, control) {
             return Err(LineRefused::NotAttached);
         }
-        self.engine
-            .ingest(session, segment)
+        self.ingest_timed(session, segment)
             .map_err(LineRefused::Engine)
     }
 

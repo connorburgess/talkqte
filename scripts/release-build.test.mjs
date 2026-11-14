@@ -97,46 +97,48 @@ test("a bundle counts as this build's only when all of it is new", () => {
   assert.equal(builtSince(started), false);
 });
 
-test('every way of asking for the development feature is refused', () => {
-  const refused = (args, env = {}, files = {}) =>
-    requestedDevelopmentFeatures(args, env, (path) => files[path]);
-  const feature = 'native-audio-spike';
-  for (const args of [
-    ['--features', feature],
-    ['--features', 'local-whisper', feature],
-    ['--features', `local-whisper,${feature}`],
-    [`--features=${feature}`],
-    ['-f', feature],
-    ['--bundles', 'app', '--', '--features', feature],
-    ['--', '-F', feature],
-    ['--config', `{"build":{"features":["${feature}"]}}`],
-    [`-c={"build":{"features":["${feature}"]}}`],
-  ])
+test('every way of asking for a development feature is refused', () => {
+  // timing-log can write transcript text to disk; neither belongs in a release.
+  for (const feature of ['native-audio-spike', 'timing-log']) {
+    const refused = (args, env = {}, files = {}) =>
+      requestedDevelopmentFeatures(args, env, (path) => files[path]);
+    for (const args of [
+      ['--features', feature],
+      ['--features', 'local-whisper', feature],
+      ['--features', `local-whisper,${feature}`],
+      [`--features=${feature}`],
+      ['-f', feature],
+      ['--bundles', 'app', '--', '--features', feature],
+      ['--', '-F', feature],
+      ['--config', `{"build":{"features":["${feature}"]}}`],
+      [`-c={"build":{"features":["${feature}"]}}`],
+    ])
+      assert.deepEqual(
+        refused(args).length > 0,
+        true,
+        `${JSON.stringify(args)} is refused`,
+      );
+    assert.deepEqual(refused(['--', '--all-features']), [
+      '--all-features turns on every feature',
+    ]);
     assert.deepEqual(
-      refused(args).length > 0,
-      true,
-      `${JSON.stringify(args)} is refused`,
+      refused(
+        ['--config', 'orchard.json'],
+        {},
+        {
+          'orchard.json': `{"build":{"features":["${feature}"]}}`,
+        },
+      ),
+      [`the --config file orchard.json names ${feature}`],
     );
-  assert.deepEqual(refused(['--', '--all-features']), [
-    '--all-features turns on every feature',
-  ]);
-  assert.deepEqual(
-    refused(
-      ['--config', 'orchard.json'],
-      {},
-      {
-        'orchard.json': `{"build":{"features":["${feature}"]}}`,
-      },
-    ),
-    [`the --config file orchard.json names ${feature}`],
-  );
-  assert.deepEqual(
-    refused([], { TAURI_CONFIG: `{"build":{"features":["${feature}"]}}` }),
-    [`TAURI_CONFIG names ${feature}`],
-  );
-  assert.deepEqual(refused([], { RUSTFLAGS: `--cfg feature="${feature}"` }), [
-    `RUSTFLAGS names ${feature}`,
-  ]);
+    assert.deepEqual(
+      refused([], { TAURI_CONFIG: `{"build":{"features":["${feature}"]}}` }),
+      [`TAURI_CONFIG names ${feature}`],
+    );
+    assert.deepEqual(refused([], { RUSTFLAGS: `--cfg feature="${feature}"` }), [
+      `RUSTFLAGS names ${feature}`,
+    ]);
+  }
 });
 
 test('ordinary release arguments, and look-alike names, are not refused', () => {
@@ -147,6 +149,7 @@ test('ordinary release arguments, and look-alike names, are not refused', () => 
     [],
   );
   assert.deepEqual(refused(['--features', 'native-audio-spike-free']), []);
+  assert.deepEqual(refused(['--features', 'timing-logger']), []);
   assert.deepEqual(refused(['--config', 'missing.json']), []);
   assert.deepEqual(refused([], { RUSTFLAGS: '-C target-cpu=native' }), []);
 });
@@ -175,6 +178,6 @@ test('the build script refuses before building anything', (t) => {
   assert.equal(result.status, 2, result.stdout + result.stderr);
   assert.match(
     result.stderr,
-    /refusing to build a release with a development feature \(native-audio-spike\):\n {2}argument 4 names native-audio-spike/,
+    /refusing to build a release with a development feature \(native-audio-spike, timing-log\):\n {2}argument 4 names native-audio-spike/,
   );
 });

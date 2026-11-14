@@ -25,6 +25,7 @@ mod native_source;
 pub mod notes_file;
 mod processing_commands;
 pub mod processing_reviews;
+pub mod timing_log;
 pub mod transcription;
 
 use engine::{CompanionPosition, Engine, QuestionSize, Response, Sensitivity};
@@ -144,6 +145,7 @@ fn publish(app: &tauri::AppHandle, runtime: &mut Runtime) {
     let _ = app.emit_to("main", "session:changed", &runtime.engine.state);
     let cue_state = runtime.cue_snapshot();
     let _ = app.emit_to("cue", "cue:changed", &cue_state);
+    timing_log::observe_published(&runtime.engine);
     publish_processing(app, runtime);
 }
 
@@ -1258,7 +1260,7 @@ async fn start_live_session(
                 let state = sink_app.state::<AppState>();
                 let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
                 runtime.sync();
-                let result = runtime.engine.ingest(session, segment);
+                let result = runtime.ingest_timed(session, segment);
                 publish(&sink_app, &mut runtime);
                 result
             };

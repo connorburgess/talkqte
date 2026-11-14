@@ -70,6 +70,12 @@ impl LiveSession {
             .spawn(move || {
                 while !flag.load(Ordering::Acquire) {
                     for chunk in chunker.drain(session_start_ms) {
+                        crate::timing_log::record_audio(
+                            "microphone",
+                            session,
+                            chunk.start_ms,
+                            &chunk.samples,
+                        );
                         if worker.submit(chunk).is_err() {
                             count.fetch_add(1, Ordering::Relaxed);
                         }
