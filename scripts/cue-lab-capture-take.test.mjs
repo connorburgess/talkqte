@@ -26,6 +26,9 @@ function fixture({
   wrongSource = false,
   observe,
   guardSink,
+  playerFails = false,
+  signal,
+  takeMs,
 } = {}) {
   const trace = [],
     counts = {
@@ -129,6 +132,7 @@ function fixture({
       counts.play++;
       trace.push('play');
       entered();
+      if (playerFails) throw Error('fictional player failure');
       if (lateAtStart) delta = 7000;
       onStarted({
         sha256: media.sha256,
@@ -197,6 +201,8 @@ function fixture({
     recorder,
     media,
     nativeReleaseMs: 20,
+    signal,
+    ...(takeMs === undefined ? {} : { takeMs }),
     processEvents,
     onGuard: (receipt) => {
       guardReceipts.push(receipt);
@@ -418,4 +424,100 @@ test('capture stand-in writes bounded core events and numeric guard receipts thr
   assert.equal(manifest.guards[1].actualAnchorMs, f.take.guard.actualAnchorMs);
   assert.equal(manifest.runtime.node, process.version);
   assert.equal(manifest.clocks[0].anchor, undefined);
+});
+
+for (const mode of [
+  'sourceFails',
+  'playerFails',
+  'lateBeforeStart',
+  'wrongSource',
+  'observer',
+  'guard',
+])
+  test(`runtime ${mode} remains failure evidence after successful cleanup`, async () => {
+    const events = [];
+    const f = fixture({
+      ...(['observer', 'guard'].includes(mode) ? {} : { [mode]: true }),
+      observe(event) {
+        if (mode === 'observer' && event.stage === 'source.listening')
+          throw Error('fictional observer failure');
+        events.push(event);
+      },
+      guardSink() {
+        if (mode === 'guard') throw Error('fictional guard failure');
+      },
+    });
+    try {
+      await assert.rejects(f.take.done, (e) => e.category === 'protocol');
+      await assert.rejects(f.take.stop(), (e) => e.category === 'protocol');
+      assert.equal(events.at(-1).stage, 'run.ended');
+      assert.equal(events.at(-1).outcome, 'failure');
+      assert.equal(f.take.phase, 'failed');
+      assert.equal(f.counts.nativeStop, 1);
+      assert.equal(f.counts.recordStop, 1);
+      assert.equal(f.counts.playerStop, 1);
+      assert.ok(events.every((e) => !e.payload));
+    } finally {
+      mock.restoreAll();
+    }
+  });
+for (const mode of ['stop', 'SIGINT', 'SIGTERM', 'external'])
+  test(`explicit ${mode} remains cancelled evidence despite subsequent aborted work`, async () => {
+    const events = [],
+      external = new AbortController();
+    const f = fixture({
+      holdPlayback: true,
+      signal: external.signal,
+      observe: (e) => events.push(e),
+    });
+    await f.playEntered;
+    if (mode === 'stop') void f.take.stop().catch(() => {});
+    else if (mode === 'external') external.abort();
+    else f.processEvents.emit(mode);
+    await assert.rejects(f.take.done, (e) => e.category === 'cancelled');
+    assert.equal(events.at(-1).outcome, 'cancelled');
+    assert.equal(f.take.phase, 'stopped');
+    assert.equal(f.counts.nativeStop, 1);
+    assert.equal(f.counts.recordStop, 1);
+  });
+test('deadline is failure evidence rather than cancellation', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const events = [];
+  const f = fixture({
+    holdPlayback: true,
+    takeMs: 10,
+    observe: (e) => events.push(e),
+  });
+  await f.playEntered;
+  t.mock.timers.tick(10);
+  await assert.rejects(f.take.done, (e) => e.category === 'deadline');
+  assert.equal(events.at(-1).outcome, 'failure');
+  assert.equal(f.take.phase, 'failed');
+});
+test('adapter terminal notification remains failure after later user Stop', async () => {
+  const events = [];
+  const f = fixture({ holdPlayback: true, observe: (e) => events.push(e) });
+  await f.playEntered;
+  f.failSource();
+  await Promise.resolve();
+  void f.take.stop().catch(() => {});
+  await assert.rejects(f.take.done, (e) => e.category === 'protocol');
+  assert.equal(events.at(-1).outcome, 'failure');
+  assert.equal(f.counts.nativeStop, 1);
+});
+test('cleanup failure remains independent and dominates cancelled outcome', async () => {
+  const events = [];
+  const f = fixture({
+    holdPlayback: true,
+    syncRecorderStop: true,
+    observe: (e) => events.push(e),
+  });
+  await f.playEntered;
+  void f.take.stop().catch(() => {});
+  await assert.rejects(f.take.done, (e) => e.category === 'cleanup');
+  assert.equal(events.at(-1).outcome, 'failure');
+  assert.equal(f.take.phase, 'failed-cleanup');
+  assert.equal(f.counts.nativeStop, 1);
+  assert.equal(f.counts.playerStop, 1);
+  assert.equal(f.counts.recordStop, 1);
 });

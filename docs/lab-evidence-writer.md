@@ -21,7 +21,12 @@ meeting information.
 Register an unanchored monotonic clock named `node`. Pass `observe` to the capture
 driver as a bounded synchronous function that requires `writer.emit(event)` to
 return true. Pass `onGuard` to `writer.recordGuard`. Observer failure stops the
-take; independent cleanup still runs. A size/event failure emits one terminal gap,
+take; independent cleanup still runs. The first terminal cause is latched: runtime,
+source, protocol, deadline, observer and guard errors remain failure even when
+cleanup succeeds. Explicit user Stop, SIGINT/SIGTERM and external abort remain
+cancelled; later abort-induced work rejection cannot overwrite that cause. Cleanup
+failure is independent and always reports failure. No raw error text is retained.
+A size/event failure emits one terminal gap,
 notifies `onFailure` once, refuses later events and remains failed in the manifest.
 Connect that notification to the run's root abort. Do not ignore a false return.
 
