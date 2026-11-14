@@ -63,7 +63,7 @@ The existing request bounds stay:
 - at most 32 KiB in all;
 - an oversized request fails before anything is sent, with no truncation and no partial batch.
 
-Prior notes are not sent in the first version. The approved-note path in the evaluator stays, but the connection does not offer it until a separate review.
+Prior notes are not sent in the first version. The approved-note path in the evaluator stays, and the review screen still lists notes. A request holding an approved note fails before anything is sent and stops cues, showing the processor as unavailable, so approve conversation only. Offering notes needs a separate review.
 
 **When a request is made.** A request is made on a new transcript line, at least two seconds after the previous request, as in the simulation. Only one request is ever in flight. A line that arrives while one is in flight cancels it, and one catch-up request follows with the latest lines, using the existing coalesced scheduling. No backlog is kept and nothing is replayed.
 
@@ -104,7 +104,7 @@ A valid decision is applied only if the request it answers still matches the cur
 
 ## Timeouts and failure
 
-Each request has a deadline of eight seconds by default. The development setting can change it within the worker's existing ten-second ceiling. A cue that would arrive more than 18 seconds after its newest cited line is refused, as it is now.
+Each request has a deadline of eight seconds (`DEADLINE` in `src-tauri/src/claude_cli.rs`), within the worker's existing ten-second ceiling. The first request of a session also runs the version and sign-in checks inside that deadline, so a slow cold start can time out once. A cue that would arrive more than 18 seconds after its newest cited line is refused, as it is now.
 
 There is no retry, no fallback to another model, no fallback to phrase rules and no queue. Capture and the transcript carry on whatever happens.
 
@@ -112,7 +112,7 @@ There is no retry, no fallback to another model, no fallback to phrase rules and
 
 - **One reply over the deadline is skipped.** No cue is shown that time, the late result is dropped when it arrives, and the next new line is sent as usual.
 - **Two timeouts in a row stop cues for the session**, with the plain reason.
-- **A reply in time resets the count.**
+- **A reply in time resets the count**, and so does turning the connection back on. A request overtaken by newer speech neither counts nor resets it, so a timeout, overtaken requests, and a second timeout count as two in a row. Because newer speech overtakes a request, a timeout happens only when the conversation is quiet for the whole deadline.
 
 The count is `TIMEOUTS_TO_STOP` in `src-tauri/src/engine/evaluation.rs`, so changing it is a one-line edit.
 
@@ -158,7 +158,7 @@ The wording above is what the notebook shows; the companion shows that cues are 
 - **Environment.** It passes an allowlisted environment, and refuses to start if any inherited credential name from the lab's list is present.
 - **Model and effort.** Chosen from the lab's options with the development settings `TALKQTE_CUE_MODEL` (`opus-5.5` or `haiku-5.5`) and `TALKQTE_CUE_EFFORT` (`low` or `medium`), read when a live session starts. The default is the lab's, Opus 5.5 at medium. An unknown name leaves the session with no model connection rather than reaching another model.
 - **Checks.** Version and subscription sign-in are checked once per session, on the first request, before that request is sent. Inherited credentials are checked before every request.
-- **Limits.** Standard output is capped at 128 KiB. The child process is ended on cancellation or deadline, so a slow call cannot hold the worker.
+- **Limits.** Standard output is capped at 128 KiB. Each call runs in a fresh empty folder, removed afterwards, and in its own process group. Cancellation or the deadline ends the whole group, and a helper left holding the output cannot hold the worker. Quitting the app does not end a call already in flight, which may finish on its own.
 - **No retries.** There is no `--fallback-model` and no API path.
 
 **The decision log** is development-only and shares one file and one format with the real-app timing log (`src-tauri/src/timing_log.rs`). It is behind the `timing-log` feature and an explicit file path, and nothing is sent anywhere. The backend records four events beside the timing log's own:

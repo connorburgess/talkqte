@@ -67,7 +67,12 @@ fn connected_engine() -> Option<crate::engine::Engine> {
     .ok()?
     .with_effort(choice.effort.clone());
     let worker = crate::cue_evaluator::Worker::start(
-        ClaudeCli::new(None, choice, std::env::vars()),
+        ClaudeCli::new(
+            None,
+            choice,
+            std::env::vars_os()
+                .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?))),
+        ),
         DEADLINE,
     )
     .ok()?;
@@ -256,6 +261,12 @@ fn fill_model(value: &mut serde_json::Value, model: &str) {
 /// hold account details.
 pub fn classify(text: &str) -> Failure {
     let words = text.to_lowercase();
+    // Status codes count only as whole words, as in the lab's patterns.
+    let code = |code: &str| {
+        regex::Regex::new(&format!(r"\b{code}\b"))
+            .expect("a status-code pattern compiles")
+            .is_match(&words)
+    };
     let any = |list: &[&str]| list.iter().any(|w| words.contains(w));
     if any(&[
         "usage limit",
@@ -264,11 +275,11 @@ pub fn classify(text: &str) -> Failure {
         "hit your limit",
         "quota",
         "too many requests",
-        "429",
         "out of usage",
         "out of extra usage",
         "credit balance",
-    ]) {
+    ]) || code("429")
+    {
         Failure::UsageLimit
     } else if any(&[
         "not logged in",
@@ -280,14 +291,34 @@ pub fn classify(text: &str) -> Failure {
         "invalid api key",
         "credential",
         "oauth",
-        "401",
-        "403",
         "forbidden",
-    ]) {
+    ]) || code("401")
+        || code("403")
+    {
         Failure::SignIn
     } else {
         Failure::Unreachable
     }
+}
+
+/// A new empty folder, removed when dropped.
+struct TempDir(PathBuf);
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn tempdir() -> Result<TempDir, Failure> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let path = std::env::temp_dir().join(format!(
+        "talkqte-cue-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir(&path).map_err(|_| Failure::Unreachable)?;
+    Ok(TempDir(path))
 }
 
 /// What one finished child process returned.
@@ -334,72 +365,94 @@ impl ClaudeCli {
 
     fn run(&self, args: &[String], input: &str, cancel: &Cancellation) -> Result<Output, Failure> {
         let limit = contract().cli.max_output_bytes;
-        let workdir = std::env::temp_dir();
-        let mut child = Command::new(&self.command)
+        // A fresh, empty folder for each call, as the lab uses, so no stray
+        // CLAUDE.md or settings in a shared folder can reach the CLI.
+        let workdir = tempdir()?;
+        let mut command = Command::new(&self.command);
+        command
             .args(args)
             .env_clear()
             .envs(self.child_environment())
-            .current_dir(workdir)
+            .current_dir(&workdir.0)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| {
-                if error.kind() == std::io::ErrorKind::NotFound {
-                    Failure::SignIn
-                } else {
-                    Failure::Unreachable
+            .stderr(Stdio::piped());
+        // Its own process group, so ending a call also ends any helper it
+        // started (a version-manager shim, for example).
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(&mut command, 0);
+        let mut child = command.spawn().map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                Failure::SignIn
+            } else {
+                Failure::Unreachable
+            }
+        })?;
+        let end = |child: &mut std::process::Child| {
+            #[cfg(unix)]
+            if let Ok(pid) = i32::try_from(child.id()) {
+                // SAFETY: signals only the process group this call created.
+                unsafe {
+                    libc::kill(-pid, libc::SIGKILL);
                 }
-            })?;
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+        };
         let mut stdin = child.stdin.take().expect("stdin piped");
         let input = input.to_string();
         // A child that exits early closes its stdin; that is reported below.
-        let writer = thread::spawn(move || {
+        thread::spawn(move || {
             let _ = stdin.write_all(input.as_bytes());
         });
         let read = |mut pipe: Box<dyn Read + Send>| {
+            let (done, result) = std::sync::mpsc::channel();
             thread::spawn(move || {
                 let mut out = Vec::new();
                 let mut chunk = [0u8; 8192];
-                loop {
+                let complete = loop {
                     match pipe.read(&mut chunk) {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => {
-                            if out.len() + n > limit {
-                                return None;
-                            }
-                            out.extend_from_slice(&chunk[..n]);
-                        }
+                        Ok(0) | Err(_) => break true,
+                        Ok(n) if out.len() + n > limit => break false,
+                        Ok(n) => out.extend_from_slice(&chunk[..n]),
                     }
-                }
-                Some(out)
-            })
+                };
+                let _ = done.send(complete.then_some(out));
+            });
+            result
         };
         let stdout = read(Box::new(child.stdout.take().expect("stdout piped")));
         let stderr = read(Box::new(child.stderr.take().expect("stderr piped")));
         let status = loop {
             if cancel.is_cancelled() {
                 // End a slow or cancelled call so it cannot hold the worker.
-                let _ = child.kill();
-                let _ = child.wait();
+                end(&mut child);
                 return Err(Failure::Cancelled);
             }
             match child.try_wait() {
                 Ok(Some(status)) => break status,
                 Ok(None) => thread::sleep(Duration::from_millis(20)),
                 Err(_) => {
-                    let _ = child.kill();
+                    end(&mut child);
                     return Err(Failure::Unreachable);
                 }
             }
         };
-        let _ = writer.join();
-        let stdout = stdout
-            .join()
-            .ok()
-            .flatten()
-            .ok_or(Failure::InvalidDecision)?;
-        let stderr = stderr.join().ok().flatten().unwrap_or_default();
+        // A helper left holding a pipe must not hold the worker: wait for
+        // the output only while the call is still current.
+        let mut collect = |pipe: std::sync::mpsc::Receiver<Option<Vec<u8>>>| loop {
+            match pipe.recv_timeout(Duration::from_millis(20)) {
+                Ok(out) => return Ok(out),
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return Ok(None),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) if cancel.is_cancelled() => {
+                    end(&mut child);
+                    return Err(Failure::Cancelled);
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            }
+        };
+        let stdout = collect(stdout)?.ok_or(Failure::InvalidDecision)?;
+        let stderr = collect(stderr)?.unwrap_or_default();
         Ok(Output {
             success: status.success(),
             stdout: String::from_utf8_lossy(&stdout).into_owned(),
@@ -421,11 +474,13 @@ impl ClaudeCli {
             return Err(Failure::Credentials);
         }
         let version = self.run(&contract.cli.version_args, "", cancel)?;
+        // The version is the first word, as the lab reads it.
         let found: Vec<u64> = version
             .stdout
-            .split(|c: char| !c.is_ascii_digit() && c != '.')
-            .find(|part| part.matches('.').count() == 2)
-            .map(|part| part.split('.').filter_map(|n| n.parse().ok()).collect())
+            .split_whitespace()
+            .next()
+            .filter(|word| word.matches('.').count() == 2)
+            .map(|word| word.split('.').filter_map(|n| n.parse().ok()).collect())
             .unwrap_or_default();
         if !version.success || found.len() != 3 || found[..] < contract.min_cli_version[..] {
             return Err(Failure::SignIn);
@@ -475,11 +530,12 @@ impl Evaluator for ClaudeCli {
         }
         let args = evaluate_args(&self.choice, &system_prompt(request));
         let output = self.run(&args, &input, cancel)?;
-        let wrapper: serde_json::Value = match serde_json::from_str(&output.stdout) {
-            Ok(value) => value,
-            Err(_) if !output.success => return Err(classify(&output.stderr)),
-            Err(_) => return Err(Failure::InvalidDecision),
-        };
+        // Any non-zero exit fails, as in the lab, sorted by the CLI's wording.
+        if !output.success {
+            return Err(classify(&format!("{}\n{}", output.stdout, output.stderr)));
+        }
+        let wrapper: serde_json::Value =
+            serde_json::from_str(&output.stdout).map_err(|_| Failure::InvalidDecision)?;
         let text = |key: &str| wrapper.get(key).and_then(|v| v.as_str()).unwrap_or("");
         if text("type") != "result"
             || text("subtype") != "success"
@@ -714,6 +770,25 @@ mod tests {
         assert_eq!(
             evaluate(backend(missing, &[]), &request()),
             Err(Failure::SignIn)
+        );
+    }
+
+    #[test]
+    fn status_codes_count_only_as_whole_words_and_a_failed_exit_is_refused() {
+        assert_eq!(classify("request id 40130 failed"), Failure::Unreachable);
+        assert_eq!(classify("HTTP 429 Too Many"), Failure::UsageLimit);
+        assert_eq!(classify("error 401"), Failure::SignIn);
+        // Valid JSON on standard output does not rescue a non-zero exit.
+        let dir = temp();
+        let reply = r#"{"action":"quiet","cue":null,"sourceIds":["transcript:a"]}"#;
+        let path = fake(
+            &dir,
+            SUBSCRIBED,
+            &format!("{}; exit 1", wrapper("claude-opus-5-5", reply)),
+        );
+        assert_eq!(
+            evaluate(backend(path, &[]), &request()),
+            Err(Failure::Unreachable)
         );
     }
 

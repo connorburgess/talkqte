@@ -462,7 +462,6 @@ impl Engine {
             outcome,
             latency_ms: u64::try_from(submitted.sent.elapsed().as_millis()).unwrap_or(u64::MAX),
             failure,
-            cue: None,
             elapsed_ms: self.state.elapsed_ms,
         });
     }
@@ -1773,6 +1772,36 @@ mod tests {
             .prompt_input()
             .unwrap()
             .contains(r#""earlierCues":[{"text":"Who will book the hall?","state":"withdrawn"}"#));
+    }
+
+    #[test]
+    fn turning_the_connection_back_on_starts_afresh() {
+        let mut h = Harness::with_budget(Duration::from_millis(20));
+        h.line("Someone should send Dana the lease.");
+        h.request();
+        h.reply(
+            "show",
+            Some("Who will send Dana the lease?"),
+            &["transcript:line-1"],
+        );
+        assert!(h.engine.state.cue.is_some());
+        // One timeout, then the person turns processing off and on again.
+        h.line("Anyway.");
+        h.request();
+        std::thread::sleep(Duration::from_millis(30));
+        h.engine.advance(1);
+        h.replies.send("{}".into()).unwrap();
+        drain_without_another_request(&mut h);
+        h.engine.revoke_processing();
+        h.approve_notes();
+        // The cue shown before approval is not sent, and the count restarts:
+        // one timeout after re-approval is skipped, not a stop.
+        h.line("A new topic begins.");
+        let request = h.request();
+        assert!(request.earlier_cues().is_empty());
+        std::thread::sleep(Duration::from_millis(30));
+        h.engine.advance(1);
+        assert!(h.engine.has_processing_permission());
     }
 
     #[test]

@@ -74,15 +74,16 @@ pub enum Event {
         accepted: bool,
     },
     /// The engine first holds a cue. `question` and `source_id` are written
-    /// only for a phrase cue raised by a transcript line, where `source_id`
-    /// is that line. A cue that quotes a note, lists focus lines, concerns
-    /// the focus or comes from an evaluator has `source` `note`, `focus` or
-    /// `evaluated` and no question, so neither note titles nor focus lines
-    /// reach the log.
+    /// for a phrase cue raised by a transcript line, where `source_id` is
+    /// that line, and for a model cue. A cue that quotes a note, lists focus
+    /// lines or concerns the focus has `source` `note` or `focus` and no
+    /// question, so neither note titles nor focus lines reach the log.
     ///
     /// `decider` is `phrase_rule` or `model`. A model cue is recorded where
-    /// the engine accepts the evaluator's reply, with its `request` and its
-    /// words: the model saw only lines the log already has.
+    /// the engine accepts the evaluator's reply, with its `request` and the
+    /// words the companion shows. Those can repeat the session name or an
+    /// earlier cue, both of which the model was sent; never a prior note,
+    /// which this path does not send.
     CueDecision {
         session: u64,
         cue: String,
@@ -126,8 +127,6 @@ pub enum Event {
         latency_ms: u64,
         #[serde(skip_serializing_if = "Option::is_none")]
         failure: Option<&'static str>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        cue: Option<String>,
         elapsed_ms: u64,
     },
     /// A cue is in the snapshot sent to the companion window. The log cannot
@@ -609,7 +608,6 @@ mod tests {
                 outcome: "failed",
                 latency_ms: 8_000,
                 failure: Some("timeout"),
-                cue: None,
                 elapsed_ms: 8_200,
             },
         ]

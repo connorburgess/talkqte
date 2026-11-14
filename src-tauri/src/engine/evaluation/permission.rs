@@ -288,6 +288,13 @@ impl Engine {
             },
             notes,
         });
+        // A new grant starts afresh: no run of timeouts, and no earlier cues
+        // drawn from speech the new grant may not cover.
+        if let Some(state) = &mut self.evaluation {
+            state.timeouts_in_row = 0;
+            state.shown = None;
+            state.earlier.clear();
+        }
         self.record_connection("on");
         if review.conversation == ConversationScope::RecentAndNewSpeech {
             self.submit_evaluation();
