@@ -79,7 +79,8 @@ final class Writer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Senda
   var frameReported = false
 
   func reportReady() {
-    guard strictWindows && streamsStarted && frames > 0 && !frameReported else { return }
+    guard strictWindows && streamsStarted && frames > 0 && !frameReported && problem == nil
+      && writer.status == .writing else { return }
     frameReported = true
     // Accepted by the writer, not yet a durable completed movie.
     emit(["event": "frame_accepted", "wallMs": wallMs(), "frames": frames])

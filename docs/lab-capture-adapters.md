@@ -59,7 +59,8 @@ permissive CLI path is preserved. Strict `matched` echoes exact apps/PIDs/window
 IDs and `rule:"exact pid/window"`; the adapter compares them to approved selection.
 Strict readiness is `frame_accepted`, emitted only after at least one successful
 video append **and both capture streams have started and ordinary Stop handlers
-are installed**. This is a frame accepted
+are installed**, with no already-known stream problem and the writer still
+writing. This is a frame accepted
 by the writer, not necessarily a durable persisted movie before finalization.
 Legacy `started` is not accepted as strict readiness.
 
@@ -68,15 +69,19 @@ owned helper's stdout incrementally with fatal UTF-8 and duplicate-key rejection
 16 KiB frame and 256 KiB combined stdout/stderr bounds. Unexpected/malformed/
 wrong-identity messages fail closed; raw helper error text is never forwarded.
 Startup defaults to five seconds. The fixed helper duration is at most 180 seconds.
-Stop sends ordinary SIGTERM once to that exact owned child and awaits stream
+Stop sends ordinary SIGTERM once to that exact detached owned process group and awaits stream
 closure plus `stopped` with positive frame/audio counts, completed writer status,
 empty problem, a nonempty regular output file and exit zero. Output is then `0600`.
 No sound, failed writer, partial message, process exit or signal receipt alone
 counts as a successful recording.
 
-Finalization defaults to six seconds. On expiry only the owned helper process
-group is killed, then ownership remains until close; forced termination is always
-failed/unconfirmed recording cleanup. This is not the native app's SIGUSR2 seam
+Finalization defaults to six seconds. On expiry the owned helper process group
+is killed independently of the parent's exit state. An additional 100 ms bounds
+missing close/pipe settlement, destroys owned pipes and reports failed cleanup;
+it does not claim the missing close occurred. Even a valid parent close must
+confirm group absence. Unexpected surviving descendants are killed and remain
+failed cleanup even if then absent. Forced/unconfirmed termination never becomes
+successful recording cleanup. This is not the native app's SIGUSR2 seam
 and cannot establish native source release. Early setup cancellation before the
 helper installs ordinary Stop handlers is also failed/unconfirmed. Stop before
 any helper spawn is a proven never-started recorder; a pending selector cannot

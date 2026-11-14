@@ -98,6 +98,9 @@ function recorder({
     stopping = null,
     startTimer,
     stopTimer,
+    hardTimer,
+    groupTimer,
+    endSettled = false,
     resolveStart,
     rejectStart,
     resolveEnd,
@@ -136,6 +139,48 @@ function recorder({
     notify();
   };
   const decoder = new TextDecoder('utf-8', { fatal: true });
+  const group = (name) => {
+    if (!integer(pid) || child?.pid !== pid || child?.spawnfile !== binary) {
+      invalid = true;
+      return true;
+    }
+    try {
+      process.kill(-pid, name);
+      return true;
+    } catch (error) {
+      if (error.code === 'ESRCH') return false;
+      invalid = true;
+      return true;
+    }
+  };
+  const finishEnd = (success) => {
+    if (endSettled) return;
+    endSettled = true;
+    for (const timer of [startTimer, stopTimer, hardTimer, groupTimer])
+      clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+    if (success && !invalid) resolveEnd();
+    else {
+      invalid = true;
+      rejectStart(gateFailure('protocol'));
+      rejectEnd(gateFailure('cleanup'));
+      notify();
+    }
+  };
+  const retireAfterClose = () => {
+    if (endSettled) return;
+    if (!group(0)) return finishEnd(completed);
+    // A surviving group after parent/pipe close is unexpected. Retire it but
+    // never report its forced cleanup as a successful recording.
+    invalid = true;
+    group('SIGKILL');
+    const until = performance.now() + 100;
+    const verify = () => {
+      if (!group(0) || performance.now() >= until) return finishEnd(false);
+      groupTimer = setTimeout(verify, 10);
+    };
+    verify();
+  };
   function frame(value) {
     requireThat(value && typeof value === 'object' && !Array.isArray(value));
     if (value.event === 'matched') {
@@ -172,6 +217,7 @@ function recorder({
     } else throw gateFailure('protocol');
   }
   function chunk(data, stdout) {
+    if (endSettled) return;
     try {
       bytes += data.length;
       requireThat(bytes <= 256 * 1024);
@@ -196,24 +242,27 @@ function recorder({
         return { stopped: true };
       }
       if (!closed) {
-        try {
-          requireThat(child.pid === pid && child.spawnfile === binary);
-          if (!child.kill('SIGTERM')) throw gateFailure('cleanup');
-        } catch {
-          invalid = true;
+        if (!integer(pid) || child.pid !== pid || child.spawnfile !== binary) {
+          finishEnd(false);
+          return await ended;
         }
+        if (child.exitCode !== null || child.signalCode !== null)
+          invalid = true;
+        // The owned group can outlive its parent; parent state never gates this.
+        group('SIGTERM');
         stopTimer = setTimeout(() => {
           invalid = true;
-          // Owned helper group only; forced exit NEVER proves capture finalization.
-          try {
-            if (
-              !closed &&
-              child.pid === pid &&
-              child.exitCode === null &&
-              child.signalCode === null
-            )
-              process.kill(-pid, 'SIGKILL');
-          } catch {}
+          group('SIGKILL');
+          // Bound missing close/pipe settlement independently of parent exit.
+          hardTimer = setTimeout(() => {
+            group('SIGKILL');
+            for (const pipe of [child.stdout, child.stderr]) {
+              try {
+                pipe.destroy?.();
+              } catch {}
+            }
+            finishEnd(false);
+          }, 100);
         }, stopMs);
       }
       await ended;
@@ -296,10 +345,10 @@ function recorder({
         child.stderr.on('data', (data) => chunk(data, false));
         child.once('error', fail);
         child.once('close', (code, termination) => {
+          if (endSettled) return;
           closed = true;
           clearTimeout(startTimer);
           clearTimeout(stopTimer);
-          signal?.removeEventListener('abort', abort);
           let artifact = false;
           try {
             const s = lstatSync(output);
@@ -318,15 +367,9 @@ function recorder({
             code === 0 &&
             !termination &&
             artifact;
-          if (!completed) {
-            invalid = true;
-            rejectStart(gateFailure('protocol'));
-            rejectEnd(gateFailure('cleanup'));
-            notify();
-          } else {
-            resolveEnd();
-            if (!stopping) notify();
-          }
+          if (!completed) invalid = true;
+          retireAfterClose();
+          if (completed && !invalid && !stopping) notify();
         });
         abort = () => {
           void stop().catch(() => {});

@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
-import { test as nodeTest } from 'node:test';
-import { mkdtempSync, chmodSync, rmSync, readFileSync } from 'node:fs';
+import { test as nodeTest, mock } from 'node:test';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { EventEmitter } from 'node:events';
+import {
+  mkdtempSync,
+  chmodSync,
+  rmSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -128,8 +137,9 @@ test('strict Swift source gates exact identities before streams and readiness af
   );
   assert.match(
     source,
-    /guard strictWindows && streamsStarted && frames > 0 && !frameReported/,
+    /guard strictWindows && streamsStarted && frames > 0 && !frameReported && problem == nil/,
   );
+  assert.match(source, /&& writer.status == \.writing else/);
   assert.match(
     source,
     /video\.append\(buffer\) \{\s*frames \+= 1\s*reportReady\(\)/,
@@ -143,4 +153,131 @@ test('strict Swift source gates exact identities before streams and readiness af
       source.indexOf('writer.streamsStarted = true'),
   );
   assert.match(source, /if !strictWindows \{ emit\(\["event": "started"/);
+});
+
+function mockedRecorder() {
+  const groupSignals = [];
+  let present = true;
+  const child = Object.assign(new EventEmitter(), {
+    pid: 56789,
+    exitCode: null,
+    signalCode: null,
+    stdout: Object.assign(new EventEmitter(), { destroy() {} }),
+    stderr: Object.assign(new EventEmitter(), { destroy() {} }),
+  });
+  mock.method(childProcess, 'spawn', (binary) => {
+    child.spawnfile = binary;
+    queueMicrotask(() => {
+      emit({
+        event: 'matched',
+        emulator: { app: 'QuickTime Player', pid: 44002, windowId: 1 },
+        companion: {
+          app: 'TalkQTE',
+          pid: 44001,
+          windowId: 2,
+          rule: 'exact pid/window',
+        },
+      });
+      emit({ event: 'frame_accepted', frames: 1, wallMs: 1 });
+    });
+    return child;
+  });
+  mock.method(process, 'kill', (pid, signal) => {
+    assert.equal(pid, -56789);
+    groupSignals.push(signal);
+    if (signal === 0 && !present)
+      throw Object.assign(Error('absent'), { code: 'ESRCH' });
+    if (signal === 'SIGKILL') present = false;
+    return true;
+  });
+  syncBuiltinESMExports();
+  const f = fixture('normal', { stopMs: 20 });
+  function emit(value) {
+    child.stdout.emit('data', Buffer.from(JSON.stringify(value) + '\n'));
+  }
+  return {
+    ...f,
+    child,
+    groupSignals,
+    finish(groupPresent = true) {
+      present = groupPresent;
+      writeFileSync(f.recorder.output, 'fictional mock artifact', {
+        mode: 0o600,
+      });
+      emit({
+        event: 'stopped',
+        frames: 1,
+        audioBuffers: 1,
+        status: 'completed',
+        problem: '',
+      });
+      child.exitCode = 0;
+      child.emit('close', 0, null);
+    },
+    close() {
+      mock.restoreAll();
+      syncBuiltinESMExports();
+      f.close();
+    },
+  };
+}
+const bounded = (promise) =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(Error('recorder settlement timed out')),
+      500,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+for (const mode of ['parent-exited-pipes-held', 'termination-without-close'])
+  test(`owned group is retired and missing close is bounded: ${mode}`, async () => {
+    const f = mockedRecorder();
+    try {
+      await f.recorder.start({ runId: 'owned-run' });
+      if (mode === 'parent-exited-pipes-held') f.child.exitCode = 0;
+      await assert.rejects(
+        bounded(f.recorder.stop()),
+        (error) => error.category === 'cleanup',
+      );
+      assert.ok(f.groupSignals.includes('SIGTERM'));
+      assert.ok(f.groupSignals.includes('SIGKILL'));
+    } finally {
+      f.close();
+    }
+  });
+test('valid parent close with surviving group retires descendants and remains failed cleanup', async () => {
+  const f = mockedRecorder();
+  try {
+    await f.recorder.start({ runId: 'owned-run' });
+    f.finish(true);
+    await assert.rejects(
+      bounded(f.recorder.stop()),
+      (error) => error.category === 'cleanup',
+    );
+    assert.ok(f.groupSignals.includes(0));
+    assert.ok(f.groupSignals.includes('SIGKILL'));
+  } finally {
+    f.close();
+  }
+});
+test('successful completed parent close also confirms owned group absence', async () => {
+  const f = mockedRecorder();
+  try {
+    await f.recorder.start({ runId: 'owned-run' });
+    f.finish(false);
+    assert.deepEqual(await bounded(f.recorder.stop()), { stopped: true });
+    assert.ok(f.groupSignals.includes(0));
+    assert.equal(f.groupSignals.includes('SIGKILL'), false);
+  } finally {
+    f.close();
+  }
 });
