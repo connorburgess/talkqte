@@ -102,33 +102,81 @@ export function subscriptionEnvironment(source) {
   return { ...env, ...CONTRACT.childEnvironment.set };
 }
 
+// Each kind of failure and the fixed labels of the phrases that sort a
+// failure into it, in the order the kinds are tried. A failure keeps the
+// labels that matched, never the words they matched in.
+const SIGNALS = [
+  [
+    'usage-limit',
+    [
+      ['usage limit', /usage limit/],
+      ['rate limit', /rate limit/],
+      ['limit reached', /limit reached/],
+      ['hit your limit', /hit your limit/],
+      ['quota', /quota/],
+      ['too many requests', /too many requests/],
+      ['429', /\b429\b/],
+      ['out of usage', /out of (?:extra )?usage/],
+      ['credit balance', /credit balance/],
+    ],
+  ],
+  [
+    'auth',
+    [
+      ['not logged in', /not logged in/],
+      ['please log in', /please log in/],
+      ['/login', /\/login/],
+      ['unauthorized', /unauthori[sz]ed/],
+      ['authenticat', /authenticat/],
+      ['invalid api key', /invalid api key/],
+      ['credential', /credential/],
+      ['oauth', /oauth/],
+      ['401', /\b401\b/],
+      ['403', /\b403\b/],
+      ['forbidden', /forbidden/],
+    ],
+  ],
+  [
+    'transient',
+    [
+      ['overloaded', /overloaded/],
+      ['timed out', /timed out/],
+      ['timeout', /timeout/],
+      ['network', /network/],
+      ['econn', /econn/],
+      ['enotfound', /enotfound/],
+      ['socket', /socket/],
+      ['temporar', /temporar/],
+      ['unavailable', /unavailable/],
+      ['connection', /connection/],
+      ['5xx', /\b5\d\d\b/],
+    ],
+  ],
+];
+
+/** The kind of a failed request and every fixed label that matched in the
+ * CLI's own output, across all kinds. The output itself is not kept. */
+export function failureSignals({ code, killed = false, text = '' }) {
+  if (code === 'ENOENT') return { category: 'not-installed', signals: [] };
+  if (killed || code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER')
+    return { category: 'time-or-output-limit', signals: [] };
+  const words = text.toLowerCase();
+  const signals = [];
+  let category = null;
+  for (const [kind, phrases] of SIGNALS)
+    for (const [label, pattern] of phrases)
+      if (pattern.test(words)) {
+        signals.push(label);
+        category ??= kind;
+      }
+  return { category: category ?? 'other', signals };
+}
+
 /** Sorts a failed request into a kind, from the exit and the wording of
  * the CLI's own output. Only the kind is kept: the text is never stored,
  * logged or shown, because it can hold account details. */
-export function classifyFailure({ code, killed = false, text = '' }) {
-  if (code === 'ENOENT') return 'not-installed';
-  if (killed || code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER')
-    return 'time-or-output-limit';
-  const words = text.toLowerCase();
-  if (
-    /usage limit|rate limit|limit reached|hit your limit|quota|too many requests|\b429\b|out of (?:extra )?usage|credit balance/.test(
-      words,
-    )
-  )
-    return 'usage-limit';
-  if (
-    /not logged in|please log in|\/login|unauthori[sz]ed|authenticat|invalid api key|credential|oauth|\b401\b|\b403\b|forbidden/.test(
-      words,
-    )
-  )
-    return 'auth';
-  if (
-    /overloaded|timed out|timeout|network|econn|enotfound|socket|temporar|unavailable|connection|\b5\d\d\b/.test(
-      words,
-    )
-  )
-    return 'transient';
-  return 'other';
+export function classifyFailure(details) {
+  return failureSignals(details).category;
 }
 
 const KINDS = {
@@ -142,12 +190,13 @@ const KINDS = {
 
 /** An error that carries the kind of failure and the exit code, never the
  * CLI's words. */
-function failure(message, category, exitCode = null) {
+function failure(message, category, exitCode = null, signals = []) {
   return Object.assign(
     new Error(
       `${message} Kind of failure: ${KINDS[category]}${exitCode === null ? '' : ` (exit code ${exitCode})`}.`,
     ),
-    { category, exitCode },
+    // signals: fixed labels of what matched, never the CLI's words.
+    { category, exitCode, signals },
   );
 }
 
@@ -171,7 +220,7 @@ export function execute(
         if (error) {
           // Never echo raw provider stderr, auth output, or account details:
           // the output is read here once, to sort the failure, and dropped.
-          const category = classifyFailure({
+          const { category, signals } = failureSignals({
             code: error.code,
             killed: error.killed,
             text: `${stdout}\n${stderr}`,
@@ -187,6 +236,7 @@ export function execute(
               message,
               category,
               Number.isInteger(error.code) ? error.code : null,
+              signals,
             ),
           );
         } else resolve(stdout);
@@ -429,11 +479,14 @@ async function isolatedRequest(
     result.subtype !== 'success' ||
     result.is_error !== false
   ) {
+    const { category, signals } = failureSignals({
+      text: `${result.subtype ?? ''}\n${typeof result.result === 'string' ? result.result : ''}`,
+    });
     throw failure(
       `Claude did not complete ${task}; the lab did not retry or request a fallback.`,
-      classifyFailure({
-        text: `${result.subtype ?? ''}\n${typeof result.result === 'string' ? result.result : ''}`,
-      }),
+      category,
+      null,
+      signals,
     );
   }
   const models = Object.keys(result.modelUsage ?? {});
