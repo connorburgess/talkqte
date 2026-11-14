@@ -259,6 +259,11 @@ export function createLabPlaybackSession({
         }
       }
       try {
+        source.close?.();
+      } catch {
+        cleanupFailed = true;
+      }
+      try {
         launcher.close();
       } catch {
         cleanupFailed = true;

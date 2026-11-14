@@ -338,7 +338,15 @@ test('runtime session cross-check discards unrelated simulated ends and rejects 
       }) + '\n',
     );
     reader.poll();
-    assert.deepEqual(events, [{ event: 'session', state: 'started' }]);
+    assert.deepEqual(events, [
+      {
+        event: 'session',
+        state: 'started',
+        session: 1,
+        commit: record.commit,
+        features: record.features,
+      },
+    ]);
     appendFileSync(
       path,
       JSON.stringify({

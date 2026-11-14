@@ -291,17 +291,42 @@ function launcher({
     child = null,
     reader = null,
     released = false,
-    step = null;
+    step = null,
+    closed = false;
+  let activeRunId = null;
+  const subscribers = new Set();
   const close = () => {
+    if (closed) return;
+    closed = true;
     reader?.close();
+    for (const listener of subscribers)
+      listener({ event: 'observation_closed' });
+    subscribers.clear();
   };
   return Object.freeze({
     executable: build.executable,
     directory,
     timingPath,
+    subscribe(listener) {
+      requireThat(
+        !closed && typeof listener === 'function' && subscribers.size < 8,
+      );
+      subscribers.add(listener);
+      return () => subscribers.delete(listener);
+    },
+    get identity() {
+      return child
+        ? Object.freeze({
+            pid: child.pid,
+            executable: build.executable,
+            runId: activeRunId,
+          })
+        : null;
+    },
     launch({ executable, environment: runEnv, onTiming, metadata }) {
       requireThat(
         !used &&
+          !closed &&
           executable === build.executable &&
           typeof onTiming === 'function',
       );
@@ -361,6 +386,8 @@ function launcher({
               if (step === 'released') released = true;
             }
             onTiming(event);
+            for (const listener of subscribers)
+              listener(Object.freeze(structuredClone(event)));
             if (released) close();
           },
         });
@@ -390,11 +417,14 @@ function launcher({
           stdio: ['ignore', 'ignore', 'ignore'],
           shell: false,
         });
+        activeRunId = runEnv.TALKQTE_DEV_LAB_RUN_ID;
         // Drain already-written final evidence before the owner's exit listener.
         child.once('exit', () => reader.finish());
         child.once('error', () => {
           close();
           onTiming({ event: 'dropped', count: 1 });
+          for (const listener of subscribers)
+            listener({ event: 'dropped', count: 1 });
         });
         return child;
       } catch {
@@ -463,6 +493,7 @@ export function prepareLabFixtureLauncher({
       'stall-partial',
       'duplicate-fields',
       'frame-oversize',
+      'listening',
     ].includes(fixtureCase),
   );
   const before = digest(process.execPath),
@@ -470,6 +501,9 @@ export function prepareLabFixtureLauncher({
   return launcher({
     build: {
       executable: process.execPath,
+      ...(fixtureCase === 'listening'
+        ? { manifest: { commit: 'b'.repeat(40), features: FEATURES } }
+        : {}),
       check() {
         requireThat(
           digest(process.execPath).sha256 === before.sha256 &&

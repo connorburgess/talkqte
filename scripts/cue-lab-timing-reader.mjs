@@ -130,7 +130,14 @@ export function watchLabTiming({
         if (session !== null) throw gateFailure('protocol');
         session = value.session;
       } else if (session !== value.session) throw gateFailure('protocol');
-      onEvent({ event: 'session', state: value.state });
+      onEvent({
+        event: 'session',
+        state: value.state,
+        session: value.session,
+        ...(expectedCommit
+          ? { commit: value.commit, features: [...value.features] }
+          : {}),
+      });
     } else if (value.event === 'source_problem' || value.event === 'dropped')
       throw gateFailure('protocol');
     else if (value.event === 'dev_source') {
@@ -142,12 +149,19 @@ export function watchLabTiming({
       )
         throw gateFailure('protocol');
       if (value.step === 'refused') throw gateFailure('protocol');
+      onEvent({
+        event: 'dev_source',
+        step: value.step,
+        application: value.application,
+      });
     } else if (
       value.event === 'source_ended' &&
       (value.problem ||
         (expectedApplication && value.application !== expectedApplication))
     )
       throw gateFailure('protocol');
+    else if (value.event === 'source_ended')
+      onEvent({ event: 'source_ended', application: value.application });
     // Transcript/model payloads are discarded, never forwarded or logged.
   };
   const poll = () => {

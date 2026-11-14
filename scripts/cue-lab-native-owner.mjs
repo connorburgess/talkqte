@@ -103,8 +103,13 @@ export function createLabNativeOwner({
       (event?.event === 'dev_source' && event.step === 'refused')
     )
       fail();
-    else if (event?.event === 'session' && event.state === 'ended')
+    else if (
+      (event?.event === 'session' && event.state === 'ended') ||
+      event?.event === 'source_ended'
+    )
       emit('session-ended');
+    else if (event?.event === 'dev_source' && event.step === 'stopping')
+      emit('stop-requested');
     // Transcript/cue text and receipt clocks never enter the lifecycle.
   };
   return Object.freeze({
