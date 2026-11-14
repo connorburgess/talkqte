@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { X } from 'lucide-react';
+import { Check, X } from 'lucide-react';
 import {
   clockTime,
   type Cue,
@@ -55,10 +55,13 @@ function useEdgeFades(card: RefObject<HTMLElement | null>) {
     const element = card.current;
     if (!element) return;
     element.addEventListener('scroll', measure, { passive: true });
+    // An answer opening in place changes what fits once it has opened.
+    element.addEventListener('animationend', measure);
     const resized = new ResizeObserver(measure);
     resized.observe(element);
     return () => {
       element.removeEventListener('scroll', measure);
+      element.removeEventListener('animationend', measure);
       resized.disconnect();
     };
   }, []);
@@ -266,6 +269,9 @@ export function Question({
   const card = useRef<HTMLElement>(null);
   // A cue first seen already held was read earlier: its words do not replay.
   const [settled] = useState(cue.held);
+  // An answer that arrives while the cue is showing opens in place; one that
+  // was already there when the cue was first shown is simply there.
+  const [answered] = useState(!!cue.resolvedBy);
   // The words scroll inside the card; Dismiss and the card's edges do not.
   const scroller = useRef<HTMLDivElement>(null);
   const fades = useEdgeFades(scroller);
@@ -351,22 +357,25 @@ export function Question({
           <span className="cue-hold">{cue.held ? 'Held' : 'Hold'}</span>
         </button>
         {cue.resolvedBy && (
-          <div className="cue-source">
-            <span className="cue-source-label">
-              {hasPriorNotes(cue.resolvedBy.sources)
-                ? 'Marked resolved from these sources'
-                : 'Answered later in the conversation'}
-            </span>{' '}
-            {cue.resolvedBy.sources?.length ? (
-              <Sources
-                sources={cue.resolvedBy.sources}
-                label="Resolution sources"
-              />
-            ) : (
-              <blockquote className="cue-quote">
-                “<Words text={cue.resolvedBy.evidence} spoken />”
-              </blockquote>
-            )}
+          <div className={`cue-answer${answered ? '' : ' is-arriving'}`}>
+            <div className="cue-source">
+              <span className="cue-source-label">
+                <Check className="cue-tick" size={14} aria-hidden="true" />
+                {hasPriorNotes(cue.resolvedBy.sources)
+                  ? 'Marked resolved from these sources'
+                  : 'Answered later in the conversation'}
+              </span>{' '}
+              {cue.resolvedBy.sources?.length ? (
+                <Sources
+                  sources={cue.resolvedBy.sources}
+                  label="Resolution sources"
+                />
+              ) : (
+                <blockquote className="cue-quote">
+                  “<Words text={cue.resolvedBy.evidence} spoken />”
+                </blockquote>
+              )}
+            </div>
           </div>
         )}
         <div className="cue-source">

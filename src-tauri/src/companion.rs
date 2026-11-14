@@ -15,24 +15,16 @@ use tauri::{Manager, PhysicalPosition, PhysicalSize};
 pub enum Mode {
     Hidden,
     Compact,
+    /// A cue is showing. The window is one size for it, held or answered.
     Question,
-    Details,
-    /// Context plus the later line that answered the question.
-    AnsweredDetails,
 }
 
 impl Mode {
     pub fn for_snapshot(state: &CueSnapshot, microphone: MicrophoneStatus) -> Self {
         if !state.overlay_enabled {
             Self::Hidden
-        } else if let Some(cue) = &state.cue {
-            if cue.expanded && cue.resolved_by.is_some() {
-                Self::AnsweredDetails
-            } else if cue.expanded {
-                Self::Details
-            } else {
-                Self::Question
-            }
+        } else if state.cue.is_some() {
+            Self::Question
         } else if microphone == MicrophoneStatus::Off
             && matches!(state.status, Status::Ready | Status::Ended)
         {
@@ -40,13 +32,6 @@ impl Mode {
         } else {
             Self::Compact
         }
-    }
-}
-
-impl Mode {
-    /// The window is at a cue's size.
-    fn shows_cue(self) -> bool {
-        matches!(self, Self::Question | Self::Details | Self::AnsweredDetails)
     }
 }
 
@@ -112,7 +97,7 @@ fn frame_at(
         1.0
     };
     let margin = (20.0 * scale).round() as u32;
-    let question = matches!(mode, Mode::Question | Mode::Details | Mode::AnsweredDetails);
+    let question = mode == Mode::Question;
     let logical_width = if question {
         question_width(f64::from(area.0) / scale)
     } else {
@@ -122,8 +107,6 @@ fn frame_at(
         ((logical_width * scale).round() as u32).min(area.0.saturating_sub(2 * margin).max(1));
     let logical_height = match mode {
         Mode::Question => 340.0,
-        Mode::Details => 460.0,
-        Mode::AnsweredDetails => 560.0,
         _ => 76.0,
     } + if question && text_size == QuestionSize::Large {
         // Large text wraps more in the narrow window, and WebKit sets the
@@ -207,7 +190,9 @@ impl Placement {
     /// when motion is reduced, when there was no cue, when another cue has
     /// arrived, or when the companion is being hidden altogether.
     fn leave_wait(&mut self, mode: Mode, now: Instant, reduce_motion: bool) -> Option<Duration> {
-        let was_cue = self.applied.is_some_and(|(applied, _)| applied.shows_cue());
+        let was_cue = self
+            .applied
+            .is_some_and(|(applied, _)| applied == Mode::Question);
         if reduce_motion || !was_cue || mode != Mode::Compact {
             self.leaving = None;
             return None;
@@ -390,13 +375,6 @@ mod tests {
         let mut placement = showing(Mode::Question);
         assert_eq!(placement.leave_wait(Mode::Compact, at(0), true), None);
 
-        // A held or answered cue's window waits the same way.
-        for mode in [Mode::Details, Mode::AnsweredDetails] {
-            assert!(showing(mode)
-                .leave_wait(Mode::Compact, at(0), false)
-                .is_some());
-        }
-
         // Hiding the companion, or having had no cue, waits for nothing.
         assert_eq!(
             showing(Mode::Question).leave_wait(Mode::Hidden, at(0), false),
@@ -486,7 +464,7 @@ mod tests {
         assert_eq!(width((1024, 768), 1.0, Mode::Question), 360);
         assert_eq!(width((2880, 1800), 2.0, Mode::Question), 840);
         assert_eq!(width((2560, 1440), 1.0, Mode::Question), 480);
-        assert_eq!(width((5120, 2880), 2.0, Mode::Details), 960);
+        assert_eq!(width((5120, 2880), 2.0, Mode::Question), 960);
         // Exactly at a boundary is the middle size; a fractional scale rounds.
         assert_eq!(width((1100, 700), 1.0, Mode::Question), 420);
         assert_eq!(width((2400, 1350), 1.0, Mode::Question), 420);
@@ -516,8 +494,8 @@ mod tests {
             let preset = at(Mode::Question, None);
             (preset.x, preset.y)
         });
-        // Growing for context near the bottom edge moves it up, not off.
-        let grown = at(Mode::Details, Some((300, 700)));
+        // A cue arriving near the bottom edge moves it up, not off.
+        let grown = at(Mode::Question, Some((300, 700)));
         assert_eq!(grown.y + grown.height as i32, 1000);
         assert_eq!(grown.x, 300);
         // A position past the right edge, or above the top, is pulled in.
@@ -572,42 +550,36 @@ mod tests {
     }
 
     #[test]
-    fn an_answered_question_being_read_gets_room_for_the_answer() {
+    fn a_held_or_answered_question_keeps_the_window_at_one_size() {
         let mut engine = Engine::default();
         engine.start().unwrap();
         engine.advance(37_000);
         let id = engine.state.cue.as_ref().unwrap().id.clone();
-        engine.inspect_cue(&id, true).unwrap();
+        let mode =
+            |engine: &Engine| Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off);
+        assert_eq!(mode(&engine), Mode::Question);
+        // Held, with or without the old request for its context opened.
+        for expanded in [false, true] {
+            engine.inspect_cue(&id, expanded).unwrap();
+            assert_eq!(mode(&engine), Mode::Question);
+        }
         engine.advance(14_000); // The demo agrees on Friday at 51 s.
-        let mode = Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off);
-        assert_eq!(mode, Mode::AnsweredDetails);
-        let at = |mode, size| {
+        assert!(engine.state.cue.as_ref().unwrap().resolved_by.is_some());
+        assert_eq!(mode(&engine), Mode::Question);
+        let height = |size| {
             frame(
                 (0, 0),
                 (1600, 1000),
                 1.0,
-                mode,
+                Mode::Question,
                 CompanionPosition::BottomRight,
                 size,
             )
+            .height
         };
-        // One question's height, 120 px more for its context, 100 px more
-        // for an answer; large text adds 80 px to each.
-        assert_eq!(at(Mode::Question, QuestionSize::Standard).height, 340);
-        assert_eq!(at(Mode::Details, QuestionSize::Standard).height, 460);
-        assert_eq!(at(Mode::AnsweredDetails, QuestionSize::Large).height, 640);
-        for size in [QuestionSize::Standard, QuestionSize::Large] {
-            assert!(at(Mode::AnsweredDetails, size).height > at(Mode::Details, size).height);
-            assert_eq!(
-                at(Mode::AnsweredDetails, size).width,
-                at(Mode::Details, size).width
-            );
-        }
-        engine.inspect_cue(&id, false).unwrap();
-        assert_eq!(
-            Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
-            Mode::Question
-        );
+        // One height for a cue; large text adds 80 px.
+        assert_eq!(height(QuestionSize::Standard), 340);
+        assert_eq!(height(QuestionSize::Large), 420);
     }
 
     #[test]
@@ -704,7 +676,7 @@ mod tests {
     }
 
     #[test]
-    fn top_placements_keep_their_anchor_when_context_opens() {
+    fn top_placements_keep_their_anchor_when_the_text_is_larger() {
         for position in [
             CompanionPosition::TopLeft,
             CompanionPosition::TopCenter,
@@ -718,18 +690,18 @@ mod tests {
                 position,
                 QuestionSize::Standard,
             );
-            let details = frame(
+            let large = frame(
                 (-1600, -900),
                 (1600, 860),
                 1.0,
-                Mode::Details,
+                Mode::Question,
                 position,
                 QuestionSize::Large,
             );
             assert_eq!(question.y, -880);
-            assert_eq!(details.y, question.y);
-            assert_eq!(details.x, question.x);
-            assert!(details.height > question.height);
+            assert_eq!(large.y, question.y);
+            assert_eq!(large.x, question.x);
+            assert!(large.height > question.height);
             if position == CompanionPosition::TopCenter {
                 assert_eq!(question.x + question.width as i32 / 2, -800);
             }
@@ -737,7 +709,7 @@ mod tests {
     }
 
     #[test]
-    fn every_placement_clamps_large_context_to_small_or_scaled_work_areas() {
+    fn every_placement_clamps_a_large_text_cue_to_small_or_scaled_work_areas() {
         for position in [
             CompanionPosition::BottomRight,
             CompanionPosition::TopCenter,
@@ -750,7 +722,7 @@ mod tests {
                         (-500, 40),
                         area,
                         scale,
-                        Mode::Details,
+                        Mode::Question,
                         position,
                         QuestionSize::Large,
                     );
@@ -763,17 +735,12 @@ mod tests {
     }
 
     #[test]
-    fn reading_mode_stays_visible_after_playback_finishes() {
+    fn a_held_cue_stays_visible_after_playback_finishes() {
         let mut engine = Engine::default();
         engine.start().unwrap();
         engine.advance(8_000);
-        engine.inspect_cue("1:s2", true).unwrap();
-        engine.advance(200_000);
-        assert_eq!(
-            Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
-            Mode::Details
-        );
         engine.inspect_cue("1:s2", false).unwrap();
+        engine.advance(200_000);
         assert_eq!(
             Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
             Mode::Question
