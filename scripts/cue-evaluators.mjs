@@ -186,14 +186,103 @@ export function rulesEvaluator(outcomes) {
   };
 }
 
+/** How long an unread cue stays, as the engine's CUE_MS. */
+export const CUE_LIFETIME_MS = 18_000;
+
+/** The labels themselves as an evaluator, after a fixed delay: it shows a
+ * cue at each labelled moment and clears it at the labelled line, and is
+ * otherwise quiet. It sees only what a request holds, so a moment that has
+ * left the six-line window is not shown. No model is involved. It answers
+ * one question: if an evaluator agreed with every label and took this
+ * long, which cues would still be on time? */
+export function labelsEvaluator(conversations, { latencyMs = 4_000 } = {}) {
+  const byId = new Map(conversations.map((c) => [c.id, c]));
+  return {
+    id: 'labels',
+    label: `The labels, after a fixed ${latencyMs} ms (no model)`,
+    kind: 'fake',
+    hosted: false,
+    async open() {
+      return { model: null };
+    },
+    request: (testCase) => ({
+      systemPrompt: null,
+      input: buildPrompt(testCase),
+    }),
+    async decide(testCase) {
+      const { lines } = byId.get(testCase.id);
+      const at = new Map(lines.map((item, i) => [item.id, i]));
+      const inRequest = new Set(testCase.events.map((event) => event.id));
+      const newest = lines[at.get(testCase.events.at(-1).id)];
+      const heard = lines.slice(0, at.get(newest.id) + 1);
+      const decision = {
+        action: 'quiet',
+        cue: null,
+        sourceIds: [newest.id],
+        reason: 'The labels expect no change here.',
+        observedUse: 'not_observed',
+      };
+      const cue = testCase.existingCue;
+      if (cue) {
+        // The moment this cue is for; a fixture's own cue has none.
+        const moment = lines.find(
+          (item) => item.expect === 'show' && item.about === cue.text,
+        );
+        const ending = heard.findLast(
+          (item) =>
+            ['resolved', 'withdraw'].includes(item.expect) &&
+            item.of === (moment?.id ?? 'seed') &&
+            inRequest.has(item.id),
+        );
+        if (ending) {
+          decision.action = ending.expect;
+          decision.sourceIds = [...new Set([...cue.sourceIds, ending.id])];
+          decision.reason = 'A line labelled as ending this cue was heard.';
+        }
+      } else {
+        const moment = heard.findLast(
+          (item) =>
+            item.expect === 'show' &&
+            inRequest.has(item.id) &&
+            !(item.until && at.get(item.until) <= at.get(newest.id)) &&
+            !heard.some((other) => other.of === item.id) &&
+            newest.atMs - item.atMs < CUE_LIFETIME_MS,
+        );
+        if (moment) {
+          decision.action = 'show';
+          decision.cue = moment.about ?? 'A cue for the labelled moment.';
+          decision.sourceIds = [moment.id];
+          decision.reason = 'A labelled moment is open.';
+        }
+      }
+      return { decision, elapsedMs: latencyMs, latency: 'simulated' };
+    },
+    async close() {},
+  };
+}
+
 /** Every evaluator the lab can use, by the name given to --evaluator. Each
  * takes what the runner knows: the environment, the recorded rule outcomes
- * for the chosen set, and an optional made-up delay. Adding a provider
+ * for the chosen set, the conversations being replayed, and an optional
+ * made-up delay. Adding a provider
  * means adding one entry here. */
 export const EVALUATORS = {
   claude: ({ environment }) => claudeEvaluator({ environment }),
   fake: ({ latencyMs }) => fakeEvaluator({ latencyMs }),
-  rules: ({ rules }) => rulesEvaluator(rules),
+  rules: ({ rules }) => {
+    if (!rules)
+      throw new Error(
+        'The phrase rules have no recorded outcomes for the timed conversations: they run in Rust and have not been replayed on these. Use --set with one of the three case sets, or another evaluator.',
+      );
+    return rulesEvaluator(rules);
+  },
+  labels: ({ conversations, latencyMs }) => {
+    if (!conversations)
+      throw new Error(
+        'The labels evaluator replays labelled lines; use it with the simulation (npm run lab:sim).',
+      );
+    return labelsEvaluator(conversations, { latencyMs });
+  },
 };
 
 export function createEvaluator(name, context, evaluators = EVALUATORS) {
