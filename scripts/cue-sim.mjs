@@ -129,6 +129,74 @@ export function finalOutcomeEvaluator(rules) {
   };
 }
 
+/** The labels themselves as an evaluator, after a fixed delay: it shows a
+ * cue at each labelled moment and clears it at the labelled line, and is
+ * otherwise quiet. It sees only what a request holds, so a moment that has
+ * left the six-line window is not shown. No model is involved. It answers
+ * one question: if an evaluator agreed with every label and took this
+ * long, which cues would still be on time? */
+export function labelsEvaluator(conversations, { latencyMs = 4_000 } = {}) {
+  const byId = new Map(conversations.map((c) => [c.id, c]));
+  return {
+    id: 'labels',
+    label: `The labels, after a fixed ${latencyMs} ms (no model)`,
+    kind: 'fake',
+    hosted: false,
+    async open() {
+      return { model: null };
+    },
+    async decide(testCase) {
+      const { lines } = byId.get(testCase.id);
+      const at = new Map(lines.map((item, i) => [item.id, i]));
+      const inRequest = new Set(testCase.events.map((event) => event.id));
+      const newest = lines[at.get(testCase.events.at(-1).id)];
+      const heard = lines.slice(0, at.get(newest.id) + 1);
+      const decision = {
+        action: 'quiet',
+        cue: null,
+        sourceIds: [newest.id],
+        reason: 'The labels expect no change here.',
+        observedUse: 'not_observed',
+      };
+      const cue = testCase.existingCue;
+      if (cue) {
+        // The moment this cue is for; a fixture's own cue has none.
+        const moment = lines.find(
+          (item) => item.expect === 'show' && item.about === cue.text,
+        );
+        const ending = heard.findLast(
+          (item) =>
+            ['resolved', 'withdraw'].includes(item.expect) &&
+            item.of === (moment?.id ?? 'seed') &&
+            inRequest.has(item.id),
+        );
+        if (ending) {
+          decision.action = ending.expect;
+          decision.sourceIds = [...new Set([...cue.sourceIds, ending.id])];
+          decision.reason = 'A line labelled as ending this cue was heard.';
+        }
+      } else {
+        const moment = heard.findLast(
+          (item) =>
+            item.expect === 'show' &&
+            inRequest.has(item.id) &&
+            !(item.until && at.get(item.until) <= at.get(newest.id)) &&
+            !heard.some((other) => other.of === item.id) &&
+            newest.atMs - item.atMs < CUE_LIFETIME_MS,
+        );
+        if (moment) {
+          decision.action = 'show';
+          decision.cue = moment.about ?? 'A cue for the labelled moment.';
+          decision.sourceIds = [moment.id];
+          decision.reason = 'A labelled moment is open.';
+        }
+      }
+      return { decision, elapsedMs: latencyMs, latency: 'simulated' };
+    },
+    async close() {},
+  };
+}
+
 /** Replays one conversation. Returns its timeline and its lines with the
  * time each reached the evaluator. Throws whatever the evaluator throws. */
 export async function simulate(
@@ -412,22 +480,43 @@ export function score(conversation, { lines, timeline }) {
     );
   }).length;
 
-  // A cue for a labelled moment may arrive a line or two later. Showing it
-  // on a quiet line while that moment is still open is not a broken quiet.
-  const catchingUp = (item, decision) =>
-    decision.action === 'show' &&
-    opportunities.some(
-      (o) =>
-        index.get(o.lineId) < index.get(item.id) &&
-        (!o.until || index.get(item.id) < index.get(o.until)) &&
-        item.arrivesAtMs < o.closesAtMs &&
-        (!o.cueId ||
-          shown.find((e) => e.cueId === o.cueId).triggerLineId === item.id),
+  // A decision can come a line or two after the line it is about. On a
+  // quiet line, showing the cue for a moment that is still open, or clearing
+  // a cue after the line labelled as ending it, is catching up, not a
+  // broken quiet.
+  const starts = new Map(
+    events('evaluation-start').map((event) => [event.lineId, event]),
+  );
+  const catchingUp = (item, decision) => {
+    const here = index.get(item.id);
+    if (decision.action === 'show')
+      return opportunities.some(
+        (o) =>
+          index.get(o.lineId) < here &&
+          (o.until
+            ? here < index.get(o.until)
+            : item.arrivesAtMs < o.closesAtMs),
+      );
+    const cueId = starts.get(item.id)?.existingCueId;
+    const moment =
+      cueId === seeded?.cueId
+        ? 'seed'
+        : opportunities.find((o) => o.cueId === cueId)?.lineId;
+    return lines.some(
+      (other) =>
+        other.expect === decision.action &&
+        other.of === moment &&
+        index.get(other.id) < here,
     );
+  };
   const quietLines = lines.filter((item) => item.expect === 'quiet');
   const quietDecisions = quietLines
     .map((item) => [item, decisions.find((d) => d.lineId === item.id)])
-    .filter(([item, decision]) => decision && !catchingUp(item, decision))
+    .filter(
+      ([item, decision]) =>
+        decision &&
+        (decision.action === 'quiet' || !catchingUp(item, decision)),
+    )
     .map(([, decision]) => decision);
   const count = (list, test) => list.filter(test).length;
   return {
@@ -771,7 +860,7 @@ export async function main(
     environment = process.env,
     evaluators = {
       claude: () => claudeEvaluator({ environment }),
-      fake: () => fakeEvaluator(),
+      fake: (latencyMs) => fakeEvaluator({ latencyMs }),
     },
     now = () => new Date(),
   } = {},
@@ -785,6 +874,7 @@ export async function main(
       '--max-calls',
       '--min-gap-ms',
       '--transcript-delay-ms',
+      '--latency-ms',
       '--input',
     ],
     switches: [
@@ -843,12 +933,22 @@ export async function main(
         'The phrase rules have no recorded outcomes for the timed conversations: they run in Rust and have not been replayed on these. Use --set with one of the three case sets, or another evaluator.',
       );
   }
+  const latencyMs =
+    flags['--latency-ms'] === undefined
+      ? undefined
+      : wholeNumber('--latency-ms', flags['--latency-ms']);
+  if (latencyMs !== undefined && !['labels', 'fake'].includes(name))
+    throw new Error(
+      '--latency-ms sets the made-up delay of the labels or fake evaluator only.',
+    );
+  if (!evaluator && name === 'labels')
+    evaluator = labelsEvaluator(conversations, { latencyMs });
   if (!evaluator) {
     if (!Object.hasOwn(evaluators, name))
       throw new Error(
-        `Unknown evaluator. Choose one of: ${[...Object.keys(evaluators), 'rules'].join(', ')}.`,
+        `Unknown evaluator. Choose one of: ${[...Object.keys(evaluators), 'labels', 'rules'].join(', ')}.`,
       );
-    evaluator = evaluators[name]();
+    evaluator = evaluators[name](latencyMs);
   }
   const most = [];
   for (const conversation of conversations)

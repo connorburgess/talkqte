@@ -18,6 +18,7 @@ import {
   conversationFromCase,
   coverage,
   finalOutcomeEvaluator,
+  labelsEvaluator,
   loadConversations,
   main,
   maxEvaluations,
@@ -661,4 +662,65 @@ test('a hosted simulation checks the sign-in once and asks one request at a time
       .filter((e) => e.type === 'decision')
       .every((e) => e.latency === 'measured'),
   );
+});
+
+test('replaying the labels at a fixed delay shows which labelled moments a slower evaluator loses', async () => {
+  const conversations = await loadConversations();
+  const at = async (latencyMs, options = {}) =>
+    (
+      await runSimulation({
+        source: 'conversations',
+        conversations,
+        evaluator: labelsEvaluator(conversations, { latencyMs }),
+        options,
+      })
+    ).totals;
+  const instant = await at(0, { transcriptDelayMs: 0 });
+  const typical = await at(4_000);
+  const slow = await at(8_000);
+  for (const totals of [instant, typical, slow]) {
+    // It only ever acts where a label says to.
+    assert.equal(totals.unexpectedShows, 0);
+    assert.equal(totals.flips, 0);
+    assert.equal(totals.duplicates, 0);
+    assert.equal(totals.quiet.kept, totals.quiet.evaluated);
+    assert.equal(totals.opportunities.labelled, 30);
+  }
+  // With no delay at all, the only misses are moments that open while an
+  // earlier cue still holds the single slot.
+  assert.ok(instant.opportunities.inTime >= 27);
+  assert.equal(instant.opportunities.late, 0);
+  assert.ok(typical.opportunities.inTime < instant.opportunities.inTime);
+  assert.ok(slow.opportunities.inTime < typical.opportunities.inTime);
+  assert.ok(typical.triggerToCue.medianMs >= 3_000 + 4_000);
+  assert.ok(slow.evaluations.overtaken > typical.evaluations.overtaken);
+});
+
+test('the labels evaluator cannot cue a moment that has left the six-line window', async () => {
+  const lines = [
+    line('l1', 0, 'Someone needs to book the room.', {
+      expect: 'show',
+      about: 'The room has no one booking it.',
+    }),
+    ...Array.from({ length: 7 }, (_, i) =>
+      line(`l${i + 2}`, 1_000 + i * 1_000, 'Mm.', { expect: 'quiet' }),
+    ),
+  ];
+  const conversation = talk(lines);
+  // The first request is still in flight when the next six lines arrive.
+  const replay = await simulate(
+    conversation,
+    labelsEvaluator([conversation], { latencyMs: 6_500 }),
+    noDelay,
+  );
+  const decisions = replay.timeline.filter((e) => e.type === 'decision');
+  assert.deepEqual(
+    decisions.map((d) => [d.lineId, d.action, d.outcome]),
+    [
+      ['l1', 'show', 'superseded'],
+      ['l7', 'quiet', 'superseded'],
+      ['l8', 'quiet', 'applied'],
+    ],
+  );
+  assert.equal(score(conversation, replay).opportunities.missed, 1);
 });

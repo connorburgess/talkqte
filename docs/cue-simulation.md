@@ -13,6 +13,7 @@ Everything that decides about a cue sits behind one adapter in `scripts/cue-eval
 | `claude` | Claude Code with Opus 5.5 through the subscription sign-in, with the isolation described in the [lab page](claude-cue-lab.md#isolation-and-output) | Yes: the fictional case text goes to Anthropic. Hosted inference |
 | `fake` | A deterministic keyword stand-in with a made-up delay. It proves the harness. It is not the app's rules and not a model | No |
 | `rules` | The phrase rules' recorded final outcome for each case, read from `scripts/fixtures/cue-rules-recorded.json` | No |
+| `labels` | Simulation only: the labels themselves, acted on after a fixed delay (`--latency-ms`). It shows a cue at each labelled moment and clears it at the labelled line | No |
 
 The phrase rules run in Rust. The lab does not run them: it reads the outcomes that the engine's replay tests assert, and an offline test fails if that record and the arrays in `engine.rs` ever differ. The record holds one final action per case, with no cited sources, wording or delay. Its `cue-lab` entry is the "from the fixture's cue" measurement in the [rules baseline](cue-intelligence.md#rules-baseline-on-the-shared-suite); the other two are the scores after the rule changes written against those sets.
 
@@ -162,6 +163,33 @@ With `--set`, each case of a set is replayed as a two-second conversation from t
 | Quiet kept | Of the evaluated lines labelled quiet, those where the decision was quiet. A cue that arrives a line late for a moment still open is not counted against quiet |
 | Endings: as labelled, otherwise, lingered | When a line answers or removes the basis of a cue on screen: cleared with the labelled action, cleared with the other one, or left until it expired, with how long it stayed |
 
+### What replaying the labels shows
+
+The `labels` evaluator answers one question without any model: if an evaluator agreed with every label and took a fixed time to decide, which cues would still be on time? It sees only what a request holds, so it cannot cue a moment that has left the six-line window.
+
+```sh
+npm run lab:sim -- --evaluator labels --latency-ms 4000 --run --out <directory outside the repository>
+```
+
+Run offline on 14 November 2026 over all 13 conversations (30 labelled moments), with a line reaching the evaluator 3 seconds after it is said:
+
+| Decision time | Cue in time | Late | Missed | Line said to cue on screen, median | Over the 5-second budget |
+| --- | --- | --- | --- | --- | --- |
+| 0 s | 28 | 0 | 2 | 3.0 s | 2 of 28 |
+| 2 s | 28 | 0 | 2 | 5.0 s | 6 of 28 |
+| 4 s | 24 | 4 | 2 | 7.0 s | 28 of 28 |
+| 6 s | 16 | 8 | 6 | 9.7 s | 24 of 24 |
+
+With no transcription delay and a 4-second decision, 28 are in time and 9 of 28 are over the budget.
+
+What this does and does not say:
+
+- It is arithmetic on invented conversations and on the lane's own labels, with two assumed delays. It is not a measurement of any model or of the app.
+- It is a ceiling, not a forecast: a real evaluator will disagree with some labels, and its decision time varies.
+- The two moments missed even at 0 s open while an earlier cue still holds the single slot.
+- At 4 seconds, about the middle of the [recorded request times](claude-cue-lab.md#validation-record), every cue is over the 5-second budget because the transcription delay alone uses 3 of the 5 seconds, and the moments lost first are the short ones: a question put to someone by name, which the conversation answers within seconds.
+- "In time" here means before the line that ends the moment has been said, or within the 18 seconds a cue may live. It does not mean the cue would have helped.
+
 ### What an offline run shows
 
 Run offline on 14 November 2026 with the fake evaluator and default settings, all 13 conversations: 168 evaluations, 41 of them overtaken and dropped, and the two cues it showed appeared a median 6.8 seconds after their line was said. Those figures say nothing about cues: the fake matches keywords and its delay is made up. They show that the harness counts, drops, places and scores as described. One thing in them is real arithmetic, though: a 3-second transcription delay plus any decision slower than 2 seconds is over the 5-second budget before the companion draws anything.
@@ -181,4 +209,4 @@ Run offline on 14 November 2026 with the fake evaluator and default settings, al
 
 `npm run test:cue-lab` runs the offline tests for the single-case lab, the batch runner and the simulation. For the batch runner they cover: the dry run starting nothing; every refusal above happening before any process; one sign-in check and one request per case; stopping at the first limit, error, wrong model or malformed reply without retry; the call cap; labels never reaching the evaluator; the first set's prompt being unchanged; the rules record matching the engine's tests; results being refused inside the checkout; and the fake evaluator being repeatable. CI runs them with no model, credentials or network.
 
-For the simulation they cover: a cue appearing one decision after its line and being scored against its moment; an overtaken decision being dropped with one catch-up; never two requests at once; the minimum gap and the dry-run bound; expiry after 18 seconds; the six-line window and what an app-style request contains; each count in the table above on a small scripted conversation; stopping at the cap and at the first failure with the log intact; every refusal happening before any process; repeatability; and the shape of the conversation fixture.
+For the simulation they cover: a cue appearing one decision after its line and being scored against its moment; an overtaken decision being dropped with one catch-up; never two requests at once; the minimum gap and the dry-run bound; expiry after 18 seconds; the six-line window and what an app-style request contains; each count in the table above on a small scripted conversation; the labels evaluator acting only where a label says to and losing moments as its delay grows; stopping at the cap and at the first failure with the log intact; every refusal happening before any process; repeatability; and the shape of the conversation fixture.
