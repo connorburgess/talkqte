@@ -79,15 +79,55 @@ pub enum Event {
     /// the focus or comes from an evaluator has `source` `note`, `focus` or
     /// `evaluated` and no question, so neither note titles nor focus lines
     /// reach the log.
+    ///
+    /// `decider` is `phrase_rule` or `model`. A model cue is recorded where
+    /// the engine accepts the evaluator's reply, with its `request` and its
+    /// words: the model saw only lines the log already has.
     CueDecision {
         session: u64,
         cue: String,
         kind: String,
         source: &'static str,
+        decider: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        request: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         question: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         source_id: Option<String>,
+        elapsed_ms: u64,
+    },
+    /// The model connection was turned on or off.
+    Evaluator {
+        session: u64,
+        state: &'static str,
+        backend: String,
+        model: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        effort: Option<String>,
+        elapsed_ms: u64,
+    },
+    /// A request was sent to the evaluator. Ids and counts only.
+    EvaluationRequested {
+        session: u64,
+        request: u64,
+        /// The newest transcript line the request covers, as `segment.id`.
+        through_segment: String,
+        lines: usize,
+        has_cue: bool,
+        elapsed_ms: u64,
+    },
+    /// What came back: `show`, `quiet`, `resolved`, `withdraw`, `failed`,
+    /// `stale` or `cancelled`, with a fixed failure code when it failed.
+    EvaluationResult {
+        session: u64,
+        request: u64,
+        outcome: &'static str,
+        latency_ms: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        failure: Option<&'static str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cue: Option<String>,
         elapsed_ms: u64,
     },
     /// A cue is in the snapshot sent to the companion window. The log cannot
@@ -356,6 +396,7 @@ pub fn features() -> Vec<&'static str> {
         ("local-whisper", cfg!(feature = "local-whisper")),
         ("native-audio-spike", cfg!(feature = "native-audio-spike")),
         ("timing-log", cfg!(feature = "timing-log")),
+        ("claude-cli", cfg!(feature = "claude-cli")),
     ]
     .into_iter()
     .filter_map(|(name, on)| on.then_some(name))
@@ -383,6 +424,8 @@ pub fn decision(session: u64, cue: &Cue, elapsed_ms: u64) -> Event {
         cue: cue.id.clone(),
         kind: cue.kind.clone(),
         source,
+        decider: "phrase_rule",
+        request: None,
         question: line.then(|| cue.question.clone()),
         source_id: line.then(|| cue.source_id.clone()),
         elapsed_ms,
@@ -407,7 +450,9 @@ pub fn ingest_events(
         text: segment.text.clone(),
         accepted,
     }];
-    if let Some(cue) = after.filter(|cue| Some(cue.id.as_str()) != before) {
+    // A model cue is recorded by the engine where it accepts the reply.
+    if let Some(cue) = after.filter(|cue| Some(cue.id.as_str()) != before && cue.sources.is_empty())
+    {
         events.push(decision(session, cue, elapsed_ms));
     }
     events
@@ -538,6 +583,50 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_events_carry_ids_and_codes_but_no_prompt_or_reply() {
+        let lines: Vec<serde_json::Value> = [
+            Event::Evaluator {
+                session: 3,
+                state: "on",
+                backend: "claude-cli".into(),
+                model: "claude-opus-5-5".into(),
+                effort: Some("medium".into()),
+                elapsed_ms: 100,
+            },
+            Event::EvaluationRequested {
+                session: 3,
+                request: 1,
+                through_segment: "w4".into(),
+                lines: 4,
+                has_cue: false,
+                elapsed_ms: 200,
+            },
+            Event::EvaluationResult {
+                session: 3,
+                request: 1,
+                outcome: "failed",
+                latency_ms: 8_000,
+                failure: Some("timeout"),
+                cue: None,
+                elapsed_ms: 8_200,
+            },
+        ]
+        .iter()
+        .map(|event| serde_json::from_str(&line(event, 1, 2)).unwrap())
+        .collect();
+        assert_eq!(lines[0]["event"], "evaluator");
+        assert_eq!(lines[1]["event"], "evaluation_requested");
+        assert_eq!(lines[1]["through_segment"], "w4");
+        assert_eq!(lines[2]["event"], "evaluation_result");
+        assert_eq!(lines[2]["failure"], "timeout");
+        for value in &lines {
+            assert_eq!(value["wall_ms"], 1);
+            assert_eq!(value["mono_ms"], 2);
+            assert!(value.get("text").is_none() && value.get("prompt").is_none());
+        }
+    }
     use serde_json::Value;
 
     #[test]

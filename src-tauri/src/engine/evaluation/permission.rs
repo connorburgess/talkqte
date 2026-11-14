@@ -42,6 +42,8 @@ pub struct ProcessorConfiguration {
     pub(super) location: ProcessingLocation,
     policy_revision: String,
     pub(super) disclosure: ProcessorDisclosure,
+    /// The effort asked of the model, for the development timing log.
+    effort: Option<String>,
 }
 
 impl ProcessorConfiguration {
@@ -68,7 +70,15 @@ impl ProcessorConfiguration {
             location,
             policy_revision,
             disclosure,
+            effort: None,
         })
+    }
+
+    /// Names the effort a model backend asks for, so the development log
+    /// can say which settings a run used.
+    pub fn with_effort(mut self, effort: String) -> Self {
+        self.effort = Some(effort);
+        self
     }
 }
 
@@ -278,10 +288,31 @@ impl Engine {
             },
             notes,
         });
+        self.record_connection("on");
         if review.conversation == ConversationScope::RecentAndNewSpeech {
             self.submit_evaluation();
         }
         Ok(())
+    }
+
+    /// The development timing log's record of the connection turning on or
+    /// off. Names the backend and its settings, never an account or path.
+    fn record_connection(&self, state: &'static str) {
+        if !crate::timing_log::enabled() {
+            return;
+        }
+        let Some(evaluation) = &self.evaluation else {
+            return;
+        };
+        let processor = &evaluation.permission.processor;
+        crate::timing_log::record(crate::timing_log::Event::Evaluator {
+            session: self.generation,
+            state,
+            backend: processor.id.clone(),
+            model: processor.model.clone(),
+            effort: processor.effort.clone(),
+            elapsed_ms: self.state.elapsed_ms,
+        });
     }
 
     /// Disable evaluated processing, release grant/cue copies and cancel work.
@@ -290,8 +321,15 @@ impl Engine {
         if self.evaluation.is_none() {
             return;
         }
+        let was_on = self
+            .evaluation
+            .as_ref()
+            .is_some_and(|state| state.permission.grant.is_some());
         self.invalidate_evaluation();
         self.evaluation.as_mut().unwrap().permission.revoke();
+        if was_on {
+            self.record_connection("off");
+        }
         self.set_evaluation_status(EvaluationStatus::Idle);
         self.evaluated_cue = None;
         self.state.cue = None;

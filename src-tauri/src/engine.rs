@@ -487,6 +487,20 @@ pub struct CueSnapshot {
     /// no microphone. Development builds only; absent otherwise.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub source_session: bool,
+    /// Whether conversation lines may leave the device for a model, and
+    /// whether a request is being sent. Absent without a model connection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<ModelLink>,
+}
+
+/// The companion's indicator for a model connection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelLink {
+    /// The connection is on; lines are sent after new speech.
+    On,
+    /// A request is on its way now.
+    Sending,
 }
 
 pub struct Engine {
@@ -621,6 +635,13 @@ impl Engine {
             question_size: self.state.question_size,
             sensitivity: self.state.sensitivity,
             source_session: false,
+            model: self.has_processing_permission().then(|| {
+                if self.evaluation_status() == Some(EvaluationStatus::Pending) {
+                    ModelLink::Sending
+                } else {
+                    ModelLink::On
+                }
+            }),
         }
     }
 

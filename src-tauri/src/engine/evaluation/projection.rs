@@ -48,6 +48,12 @@ pub enum Issue {
     ScopeChanged,
     InputLimit,
     Worker,
+    Authentication,
+    Credentials,
+    Allowance,
+    Unreachable,
+    TimedOut,
+    InvalidReply,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -147,6 +153,8 @@ pub struct ProcessingSnapshot {
     pub approved: Option<Scope>,
     pub issue: Option<Issue>,
     pub last_decision: Option<LastDecision>,
+    /// Conversation lines are being sent to the processor right now.
+    pub sending: bool,
     /// The microphone alone, when a selected-application source also exists.
     /// `capture` then combines the two and never understates either.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -366,6 +374,22 @@ impl Engine {
             Some(EvaluationStatus::Unavailable(EvaluationIssue::InputLimit)) => {
                 Some(Issue::InputLimit)
             }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::SignIn)) => {
+                Some(Issue::Authentication)
+            }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::Credentials)) => {
+                Some(Issue::Credentials)
+            }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::UsageLimit)) => {
+                Some(Issue::Allowance)
+            }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::Unreachable)) => {
+                Some(Issue::Unreachable)
+            }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::TimedOut)) => Some(Issue::TimedOut),
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::InvalidReply)) => {
+                Some(Issue::InvalidReply)
+            }
             Some(EvaluationStatus::Unavailable(_)) => Some(Issue::Worker),
             _ => None,
         };
@@ -426,7 +450,10 @@ impl Engine {
         } else {
             None
         };
+        let sending =
+            phase == Phase::Active && self.evaluation_status() == Some(EvaluationStatus::Pending);
         ProcessingSnapshot {
+            sending,
             revision: 0,
             session: self.session().to_string(),
             scope_revision,
@@ -465,8 +492,7 @@ mod tests {
                 return Err(Failure::EvaluatorUnavailable);
             }
             Ok(
-                serde_json::json!({"action":"quiet","cue":null,"reason":"Fictional decision",
-                "sourceIds":[request.sources()[0].id],"observedUse":"not_observed"})
+                serde_json::json!({"action":"quiet","cue":null,"sourceIds":[request.sources()[0].id]})
                 .to_string(),
             )
         }

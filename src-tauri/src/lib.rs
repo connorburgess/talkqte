@@ -3,6 +3,7 @@ pub mod application_audio;
 mod application_audio_host;
 pub mod audio_tap;
 mod capture_control;
+pub mod claude_cli;
 mod companion;
 #[cfg(target_os = "macos")]
 mod companion_macos;

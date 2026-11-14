@@ -43,7 +43,16 @@ pub enum EvaluationIssue {
     InvalidReply,
     TimedOut,
     WorkerUnavailable,
+    SignIn,
+    Credentials,
+    UsageLimit,
+    Unreachable,
 }
+
+/// The owner's rule for slow replies: one reply over the deadline is skipped
+/// (no cue that time, its late result dropped); this many in a row stop cues
+/// for the session. Every other failure stops at once.
+pub const TIMEOUTS_TO_STOP: u8 = 2;
 
 pub(super) struct State {
     worker: Worker,
@@ -53,11 +62,22 @@ pub(super) struct State {
     permission: Permission,
     status: EvaluationStatus,
     outcome_at_ms: Option<u64>,
+    timeouts_in_row: u8,
+    min_gap_ms: u64,
+    last_dispatch_ms: Option<u64>,
+    requests_sent: u64,
+    // The evaluated cue on screen: its id, words, and whether a held cue was
+    // marked answered. Recorded as an earlier cue when it leaves.
+    shown: Option<(String, String, bool)>,
+    earlier: Vec<crate::cue_evaluator::EarlierCue>,
 }
 
 struct Pending {
     request: Request,
     permission_generation: u64,
+    // For the development timing log: the request number and when it left.
+    number: u64,
+    sent: std::time::Instant,
 }
 
 impl Engine {
@@ -73,8 +93,51 @@ impl Engine {
             permission: Permission::new(processor),
             status: EvaluationStatus::Idle,
             outcome_at_ms: None,
+            timeouts_in_row: 0,
+            min_gap_ms: 0,
+            last_dispatch_ms: None,
+            requests_sent: 0,
+            shown: None,
+            earlier: Vec::new(),
         });
         engine
+    }
+
+    /// At least this long between two requests on the session clock. Newer
+    /// speech waits, coalesced, until the gap has passed.
+    pub fn with_min_gap_ms(mut self, gap: u64) -> Self {
+        if let Some(state) = &mut self.evaluation {
+            state.min_gap_ms = gap;
+        }
+        self
+    }
+
+    /// Records the evaluated cue that has left the screen, with how it ended.
+    fn note_ended_cue(&mut self, end: Option<crate::cue_evaluator::CueEnd>) {
+        use crate::cue_evaluator::{CueEnd, EarlierCue, MAX_EARLIER_CUES};
+        let on_screen = self.state.cue.as_ref().map(|cue| cue.id.clone());
+        let Some(state) = &mut self.evaluation else {
+            return;
+        };
+        let Some((id, text, resolved)) = state.shown.clone() else {
+            return;
+        };
+        if end.is_none() && on_screen.as_deref() == Some(id.as_str()) {
+            return;
+        }
+        let state_end = end.unwrap_or(if resolved {
+            CueEnd::Resolved
+        } else {
+            CueEnd::Expired
+        });
+        state.shown = None;
+        state.earlier.push(EarlierCue {
+            text,
+            state: state_end,
+        });
+        if state.earlier.len() > MAX_EARLIER_CUES {
+            state.earlier.remove(0);
+        }
     }
 
     /// None means this engine has no evaluator. Permission and capture state
@@ -94,6 +157,14 @@ impl Engine {
     }
 
     fn fail_evaluation(&mut self, failure: Failure) {
+        if failure == Failure::Expired {
+            let state = self.evaluation.as_mut().expect("evaluation failed");
+            state.timeouts_in_row = state.timeouts_in_row.saturating_add(1);
+            if state.timeouts_in_row < TIMEOUTS_TO_STOP {
+                // Skipped: no cue this time, and nothing else changes.
+                return;
+            }
+        }
         let issue = match failure {
             Failure::InvalidInput => EvaluationIssue::InputLimit,
             Failure::InvalidDecision => EvaluationIssue::InvalidReply,
@@ -101,6 +172,10 @@ impl Engine {
             Failure::EvaluatorUnavailable | Failure::WorkerUnavailable => {
                 EvaluationIssue::WorkerUnavailable
             }
+            Failure::SignIn => EvaluationIssue::SignIn,
+            Failure::Credentials => EvaluationIssue::Credentials,
+            Failure::UsageLimit => EvaluationIssue::UsageLimit,
+            Failure::Unreachable => EvaluationIssue::Unreachable,
             // Superseded work and controls are not provider outages.
             Failure::Busy | Failure::Cancelled | Failure::Stale => return,
         };
@@ -204,7 +279,9 @@ impl Engine {
         }) {
             return Ok(None);
         }
-        Request::new(self.generation, self.evaluation_revision, sources, existing).map(Some)
+        Request::new(self.generation, self.evaluation_revision, sources, existing)?
+            .with_listener(self.state.user_name.clone(), state.earlier.clone())
+            .map(Some)
     }
 
     /// Only newly accepted eligible speech requests work. Multiple notifications
@@ -223,6 +300,7 @@ impl Engine {
     /// Clock ticks poll results and dispatch a waiting speech notification, never
     /// retry a completed/failed input or create work without new eligible speech.
     pub(super) fn poll_evaluation(&mut self) {
+        self.note_ended_cue(None);
         self.reconcile_processing_permission();
         if self.evaluation.as_ref().is_some_and(|state| {
             state
@@ -242,11 +320,14 @@ impl Engine {
     }
 
     fn dispatch_latest_speech(&mut self) {
-        if self
-            .evaluation
-            .as_ref()
-            .is_none_or(|state| !state.latest_speech_waiting || state.worker.is_busy())
-        {
+        let now = self.state.elapsed_ms;
+        if self.evaluation.as_ref().is_none_or(|state| {
+            !state.latest_speech_waiting
+                || state.worker.is_busy()
+                || state
+                    .last_dispatch_ms
+                    .is_some_and(|at| now.saturating_sub(at) < state.min_gap_ms)
+        }) {
             return;
         }
         // Build only when the worker can accept work, from current sources and
@@ -263,9 +344,39 @@ impl Engine {
         if let Some(request) = request {
             match state.worker.submit(request.clone()) {
                 Ok(()) => {
+                    state.last_dispatch_ms = Some(now);
+                    state.requests_sent += 1;
+                    let number = state.requests_sent;
+                    if crate::timing_log::enabled() {
+                        let lines = request
+                            .sources()
+                            .iter()
+                            .filter(|source| source_time(source).is_some())
+                            .collect::<Vec<_>>();
+                        crate::timing_log::record(crate::timing_log::Event::EvaluationRequested {
+                            session: self.generation,
+                            request: number,
+                            through_segment: lines
+                                .iter()
+                                .max_by_key(|source| source_time(source))
+                                .map(|source| {
+                                    source
+                                        .id
+                                        .strip_prefix("transcript:")
+                                        .unwrap_or(&source.id)
+                                        .to_string()
+                                })
+                                .unwrap_or_default(),
+                            lines: lines.len(),
+                            has_cue: request.existing_cue().is_some(),
+                            elapsed_ms: now,
+                        });
+                    }
                     state.pending = Some(Pending {
                         request,
                         permission_generation: state.permission.generation,
+                        number,
+                        sent: std::time::Instant::now(),
                     });
                     self.set_evaluation_status(EvaluationStatus::Pending);
                 }
@@ -297,17 +408,70 @@ impl Engine {
         };
         let submitted = state.pending.take().expect("pending checked");
         self.set_evaluation_status(EvaluationStatus::Idle);
+        let applies = permission_current && current.as_ref() == Some(&submitted.request);
+        self.record_result(&submitted, &result, applies);
         if let Some(current) = current {
-            if permission_current && current == submitted.request {
+            if applies {
                 match result {
-                    Ok(decision) => self.apply_evaluation(&current, decision),
+                    Ok(decision) => self.apply_evaluation(&current, decision, submitted.number),
                     Err(error) => self.fail_evaluation(error),
                 }
             }
         }
     }
 
-    fn apply_evaluation(&mut self, request: &Request, decision: Decision) {
+    /// The development timing log's record of a reply. Ids and codes only.
+    fn record_result(
+        &self,
+        submitted: &Pending,
+        result: &Result<Decision, Failure>,
+        applies: bool,
+    ) {
+        if !crate::timing_log::enabled() {
+            return;
+        }
+        let (outcome, failure) = match result {
+            _ if !applies => ("stale", None),
+            Ok(decision) => (
+                match decision.action {
+                    Action::Show => "show",
+                    Action::Quiet => "quiet",
+                    Action::Resolved => "resolved",
+                    Action::Withdraw => "withdraw",
+                },
+                None,
+            ),
+            Err(Failure::Cancelled | Failure::Busy) => ("cancelled", None),
+            Err(Failure::Stale) => ("stale", None),
+            Err(failure) => (
+                "failed",
+                Some(match failure {
+                    Failure::Expired => "timeout",
+                    Failure::InvalidDecision => "invalid_reply",
+                    Failure::UsageLimit => "rate_limited",
+                    Failure::InvalidInput => "input_limit",
+                    Failure::SignIn => "sign_in",
+                    Failure::Credentials => "credentials",
+                    _ => "unavailable",
+                }),
+            ),
+        };
+        crate::timing_log::record(crate::timing_log::Event::EvaluationResult {
+            session: self.generation,
+            request: submitted.number,
+            outcome,
+            latency_ms: u64::try_from(submitted.sent.elapsed().as_millis()).unwrap_or(u64::MAX),
+            failure,
+            cue: None,
+            elapsed_ms: self.state.elapsed_ms,
+        });
+    }
+
+    fn apply_evaluation(&mut self, request: &Request, decision: Decision, number: u64) {
+        // A reply in time ends any run of timeouts.
+        if let Some(state) = &mut self.evaluation {
+            state.timeouts_in_row = 0;
+        }
         // Only worker-validated results reach here. Resolve references again
         // from this immutable request; provider reason/use labels never become
         // notes, scores, or a claim that the user used or benefited from a cue.
@@ -376,7 +540,25 @@ impl Engine {
                     note: None,
                     about_focus,
                 });
-                self.evaluated_cue = Some((id, cited));
+                if crate::timing_log::enabled() {
+                    crate::timing_log::record(crate::timing_log::Event::CueDecision {
+                        session: self.generation,
+                        cue: id.clone(),
+                        kind: "Suggestion".into(),
+                        source: "evaluated",
+                        decider: "model",
+                        request: Some(number),
+                        question: self.state.cue.as_ref().map(|cue| cue.question.clone()),
+                        source_id: Some(first.id.clone()),
+                        elapsed_ms: now,
+                    });
+                }
+                self.evaluated_cue = Some((id.clone(), cited));
+                self.note_ended_cue(None);
+                if let Some(state) = &mut self.evaluation {
+                    state.shown =
+                        Some((id, self.state.cue.as_ref().unwrap().question.clone(), false));
+                }
                 self.last_shown
                     .retain(|(_, at)| now.saturating_sub(*at) < REPEAT_MS);
                 // Even a caller producing distinct suggestions cannot grow
@@ -402,6 +584,9 @@ impl Engine {
                         evidence: evidence(&cited),
                         sources: cited.clone(),
                     });
+                    if let Some(shown) = self.evaluation.as_mut().and_then(|s| s.shown.as_mut()) {
+                        shown.2 = true;
+                    }
                     if let Some((_, originals)) = &mut self.evaluated_cue {
                         for source in cited {
                             if !originals.iter().any(|old| old.id == source.id) {
@@ -414,6 +599,11 @@ impl Engine {
                     // suggestion. Clear it; never relabel withdrawal as answer.
                     self.state.cue = None;
                     self.evaluated_cue = None;
+                    self.note_ended_cue(Some(if decision.action == Action::Resolved {
+                        crate::cue_evaluator::CueEnd::Resolved
+                    } else {
+                        crate::cue_evaluator::CueEnd::Withdrawn
+                    }));
                     self.cooldown_until = self.state.elapsed_ms.saturating_add(self.cooldown());
                 }
             }
@@ -641,12 +831,11 @@ mod tests {
                 .recv_timeout(Duration::from_secs(2))
                 .expect("fictional request")
         }
-        fn reply(&mut self, action: &str, cue: Option<&str>, ids: &[&str], observed: &str) {
+        fn reply(&mut self, action: &str, cue: Option<&str>, ids: &[&str]) {
             self.replies
                 .send(
                     serde_json::json!({
                         "action": action, "cue": cue, "sourceIds": ids,
-                        "reason": "Fictional decision reason", "observedUse": observed,
                     })
                     .to_string(),
                 )
@@ -671,7 +860,6 @@ mod tests {
                 "show",
                 Some("Who owns the checklist?"),
                 &["transcript:line-1"],
-                "not_observed",
             );
             self.engine.state.cue.as_ref().unwrap().id.clone()
         }
@@ -718,7 +906,7 @@ mod tests {
         let request = h.request();
         assert_eq!(request.sources().len(), 1);
         assert_eq!(request.sources()[0].id, "transcript:line-2");
-        h.reply("quiet", None, &["transcript:line-2"], "not_observed");
+        h.reply("quiet", None, &["transcript:line-2"]);
         h.engine.revoke_processing();
         h.line("Someone should send the checklist soon.");
         drain_without_another_request(&mut h);
@@ -747,7 +935,7 @@ mod tests {
         let request = h.request();
         assert_eq!(request.sources().len(), 2);
         assert_eq!(request.sources()[1], note_source(&approved));
-        h.reply("quiet", None, &["transcript:line-1"], "not_observed");
+        h.reply("quiet", None, &["transcript:line-1"]);
         // Replacing an unapproved note and adding a note cannot widen approval.
         h.engine
             .set_notes(vec![approved, selected(Provider::File, "new")]);
@@ -759,7 +947,7 @@ mod tests {
             .sources()
             .iter()
             .any(|s| s.id.starts_with("prior:file:")));
-        h.reply("quiet", None, &["transcript:line-2"], "not_observed");
+        h.reply("quiet", None, &["transcript:line-2"]);
     }
 
     #[test]
@@ -900,7 +1088,7 @@ mod tests {
         );
         h.line("Who should review the garden guide?");
         assert_eq!(h.request().sources().len(), 1);
-        h.reply("quiet", None, &["transcript:line-1"], "not_observed");
+        h.reply("quiet", None, &["transcript:line-1"]);
     }
 
     #[test]
@@ -919,7 +1107,6 @@ mod tests {
             "show",
             Some("Who owns the checklist?"),
             &["transcript:line-1"],
-            "not_observed",
         );
         drain_without_another_request(&mut h);
         assert!(h.engine.state.cue.is_none());
@@ -931,7 +1118,6 @@ mod tests {
             "show",
             Some("Who owns the new handoff?"),
             &["transcript:line-3"],
-            "not_observed",
         );
         let id = h.engine.state.cue.as_ref().unwrap().id.clone();
         h.engine.inspect_cue(&id).unwrap();
@@ -987,7 +1173,7 @@ mod tests {
             .sources()
             .iter()
             .all(|source| source_time(source).is_some()));
-        h.reply("quiet", None, &["transcript:line-7"], "not_observed");
+        h.reply("quiet", None, &["transcript:line-7"]);
     }
 
     fn selected(provider: crate::context::Provider, id: &str) -> ContextItem {
@@ -1033,7 +1219,6 @@ mod tests {
                 "transcript:line-1",
                 "prior:file:line-1",
             ],
-            "not_observed",
         );
         let payload = serde_json::to_value(h.engine.cue_snapshot()).unwrap();
         let sources = payload["cue"]["sources"].as_array().unwrap();
@@ -1063,12 +1248,7 @@ mod tests {
         );
         h.line("The checklist handoff is still unclear.");
         h.request();
-        h.reply(
-            "show",
-            Some("Who owns the checklist?"),
-            &["prior:file:one"],
-            "not_observed",
-        );
+        h.reply("show", Some("Who owns the checklist?"), &["prior:file:one"]);
         assert!(
             h.engine.state.cue.is_none(),
             "uncited fresh speech is insufficient"
@@ -1079,14 +1259,13 @@ mod tests {
             "show",
             Some("Who owns the checklist?"),
             &["transcript:line-2", "prior:file:one"],
-            "not_observed",
         );
         let id = h.engine.state.cue.as_ref().unwrap().id.clone();
         h.engine.inspect_cue(&id).unwrap();
         for action in ["resolved", "withdraw"] {
             h.line("The review is still being discussed.");
             h.request();
-            h.reply(action, None, &["prior:file:one"], "not_observed");
+            h.reply(action, None, &["prior:file:one"]);
             let cue = h.engine.state.cue.as_ref().unwrap();
             assert_eq!(cue.id, id);
             assert!(cue.resolved_by.is_none());
@@ -1094,12 +1273,7 @@ mod tests {
         h.engine.advance(CUE_MS);
         h.line("New discussion without a matching reference.");
         h.request();
-        h.reply(
-            "resolved",
-            None,
-            &["transcript:line-2", "prior:file:one"],
-            "not_observed",
-        );
+        h.reply("resolved", None, &["transcript:line-2", "prior:file:one"]);
         assert!(
             h.engine.state.cue.as_ref().unwrap().resolved_by.is_none(),
             "old held speech is not a fresh anchor"
@@ -1119,7 +1293,6 @@ mod tests {
             "show",
             Some("Who owns the checklist?"),
             &["transcript:line-1", "prior:file:one"],
-            "not_observed",
         );
         assert!(
             h.engine.state.cue.is_none(),
@@ -1144,7 +1317,6 @@ mod tests {
                 "show",
                 Some("When should review start?"),
                 &["transcript:line-1", "prior:granola:one"],
-                "not_observed",
             );
             h.engine.advance(1_000);
             assert!(h.engine.state.cue.is_none());
@@ -1171,12 +1343,7 @@ mod tests {
                 if !resolution_source {
                     ids.push("prior:granola:one");
                 }
-                h.reply(
-                    "show",
-                    Some("When should review start?"),
-                    &ids,
-                    "not_observed",
-                );
+                h.reply("show", Some("When should review start?"), &ids);
                 let id = h.engine.state.cue.as_ref().unwrap().id.clone();
                 h.engine.inspect_cue(&id).unwrap();
                 if resolution_source {
@@ -1186,7 +1353,6 @@ mod tests {
                         "resolved",
                         None,
                         &["transcript:line-2", "prior:granola:one"],
-                        "possible",
                     );
                     let cue = h.engine.state.cue.as_ref().unwrap();
                     assert_eq!(cue.id, id);
@@ -1275,7 +1441,7 @@ mod tests {
         h.approve_notes();
         h.line("The review schedule is unclear.");
         assert_eq!(h.request().sources().len(), 2);
-        h.reply("quiet", None, &["transcript:line-1"], "not_observed");
+        h.reply("quiet", None, &["transcript:line-1"]);
     }
 
     #[test]
@@ -1300,14 +1466,11 @@ mod tests {
         h.line("The checklist handoff is still unclear.");
         let request = h.request();
         let json = serde_json::to_string(&request).unwrap();
-        for excluded in [
-            "private manual",
-            "Selected prior",
-            "Review checklist",
-            "Robin",
-        ] {
+        for excluded in ["private manual", "Selected prior", "Review checklist"] {
             assert!(!json.contains(excluded));
         }
+        // The listener's session name is sent on purpose, as the lab does.
+        assert_eq!(request.user_name(), Some("Robin"));
         h.engine.advance(2_000);
         h.engine.set_question_size(QuestionSize::Large);
         // A repeated/older import leaves the selected store unchanged. Its
@@ -1317,7 +1480,6 @@ mod tests {
             "show",
             Some("Who owns the checklist?"),
             &["transcript:line-1"],
-            "not_observed",
         );
         let cue = h.engine.state.cue.as_ref().unwrap();
         assert!(cue.remaining_ms < CUE_MS - 1_999);
@@ -1341,12 +1503,7 @@ mod tests {
         h.request();
         // Hold can be selected while the result is in flight; apply reads it now.
         h.engine.inspect_cue(&id).unwrap();
-        h.reply(
-            "quiet",
-            None,
-            &["transcript:line-1", "transcript:line-2"],
-            "possible",
-        );
+        h.reply("quiet", None, &["transcript:line-1", "transcript:line-2"]);
         assert!(h.engine.state.cue.as_ref().unwrap().resolved_by.is_none());
         assert_eq!(
             h.engine.evaluation_status(),
@@ -1358,7 +1515,6 @@ mod tests {
             "resolved",
             None,
             &["transcript:line-2", "transcript:line-3"],
-            "possible",
         );
         let cue = h.engine.state.cue.as_ref().unwrap();
         assert_eq!(
@@ -1386,7 +1542,6 @@ mod tests {
             "show",
             Some("Who owns the checklist?"),
             &["transcript:line-1"],
-            "not_observed",
         );
         assert!(h.engine.state.cue.is_none());
         h.line("Someone should send the checklist soon.");
@@ -1403,7 +1558,6 @@ mod tests {
             "show",
             Some("Who owns the release?"),
             &["transcript:line-3"],
-            "not_observed",
         );
         assert!(h.engine.state.cue.is_some());
     }
@@ -1415,7 +1569,7 @@ mod tests {
         h.line("The handoff might be settled.");
         h.request();
         h.engine.respond(&id, Response::Dismiss).unwrap();
-        h.reply("resolved", None, &["transcript:line-2"], "unknown");
+        h.reply("resolved", None, &["transcript:line-2"]);
         assert!(h.engine.state.cue.is_none());
         assert!(h.engine.evaluated_cue.is_none());
         h.line("A different handoff is unclear.");
@@ -1424,7 +1578,6 @@ mod tests {
             "show",
             Some("Who owns the release?"),
             &["transcript:line-3"],
-            "not_observed",
         );
         assert!(h.engine.state.cue.is_none(), "cooldown must win");
         h.engine.advance(10_000);
@@ -1434,7 +1587,6 @@ mod tests {
             "show",
             Some("Who owns the checklist?"),
             &["transcript:line-4"],
-            "not_observed",
         );
         assert!(h.engine.state.cue.is_none(), "repeat must stay quiet");
         h.line("The release handoff remains unclear.");
@@ -1443,7 +1595,6 @@ mod tests {
             "show",
             Some("Who owns the release?"),
             &["transcript:line-5"],
-            "not_observed",
         );
         assert!(h.engine.state.cue.is_some());
     }
@@ -1476,8 +1627,7 @@ mod tests {
             .send(
                 serde_json::json!({
                     "action": "show", "cue": "An obsolete suggestion",
-                    "sourceIds": ["transcript:line-1"],
-                    "reason": "Fictional stale reply", "observedUse": "not_observed"
+                    "sourceIds": ["transcript:line-1"]
                 })
                 .to_string(),
             )
@@ -1494,7 +1644,6 @@ mod tests {
             "show",
             Some("Who will take the garden checklist?"),
             &["transcript:line-25"],
-            "not_observed",
         );
         assert_eq!(
             h.engine.state.cue.as_ref().unwrap().sources[0].id,
@@ -1574,7 +1723,7 @@ mod tests {
                 "stale" => h.engine.advance(CUE_MS),
                 _ => unreachable!(),
             }
-            h.reply("resolved", None, &["transcript:line-2"], "possible");
+            h.reply("resolved", None, &["transcript:line-2"]);
             drain_without_another_request(&mut h);
             assert!(
                 h.engine
@@ -1588,56 +1737,146 @@ mod tests {
     }
 
     #[test]
-    fn failure_and_timeout_require_new_approval_even_after_new_speech() {
-        for timeout in [false, true] {
-            let mut h = Harness::with_budget(if timeout {
-                Duration::from_millis(20)
-            } else {
-                Duration::from_secs(5)
-            });
-            h.line("The garden checklist needs an owner.");
-            h.request();
-            h.line("Who will take the garden checklist?");
-            h.replies.send("{}".into()).unwrap(); // Cancelled first attempt.
-            let latest = next_scheduled_request(&mut h);
-            assert_eq!(latest.sources().last().unwrap().id, "transcript:line-2");
-            let stale_review = h
-                .engine
-                .review_processing(ConversationScope::NewSpeechOnly, &[])
-                .unwrap();
-            if timeout {
-                std::thread::sleep(Duration::from_millis(30));
-                h.engine.advance(1); // Deadline expires while adapter remains occupied.
-            }
-            h.replies.send("{}".into()).unwrap(); // Malformed output must stay quiet.
-            drain_without_another_request(&mut h);
-            assert!(h.engine.state.cue.is_none());
-            let unavailable = Some(EvaluationStatus::Unavailable(if timeout {
-                EvaluationIssue::TimedOut
-            } else {
-                EvaluationIssue::InvalidReply
-            }));
-            assert_eq!(h.engine.evaluation_status(), unavailable);
-            assert!(!h.engine.has_processing_permission());
-            assert_eq!(
-                h.engine.approve_processing(stale_review),
-                Err(ProcessingError::StaleReview)
-            );
-            h.line("A new fictional topic begins.");
-            h.engine.set_live_cues_paused(true).unwrap();
-            h.engine.set_live_cues_paused(false).unwrap();
-            drain_without_another_request(&mut h);
-            assert_eq!(h.engine.evaluation_status(), unavailable);
-            assert_eq!(h.engine.state.transcript.len(), 3);
-            h.approve_notes();
-            assert_eq!(h.engine.evaluation_status(), Some(EvaluationStatus::Idle));
-            h.line("Fresh approval permits only new speech.");
-            assert_eq!(
-                h.request().sources().last().unwrap().id,
-                "transcript:line-4"
-            );
-            h.reply("quiet", None, &["transcript:line-4"], "not_observed");
-        }
+    fn requests_list_earlier_cues_and_how_each_ended() {
+        use crate::cue_evaluator::CueEnd;
+        let mut h = Harness::new();
+        h.line("Someone should book the hall.");
+        assert!(h.request().earlier_cues().is_empty());
+        h.reply(
+            "show",
+            Some("Who will book the hall?"),
+            &["transcript:line-1"],
+        );
+        h.line("Actually the hall is already booked.");
+        let request = h.request();
+        assert!(request.existing_cue().is_some());
+        h.reply("withdraw", None, &["transcript:line-2"]);
+        h.engine.advance(20_000);
+        h.line("We still need someone for the raffle.");
+        let request = h.request();
+        assert_eq!(request.earlier_cues().len(), 1);
+        assert_eq!(request.earlier_cues()[0].text, "Who will book the hall?");
+        assert_eq!(request.earlier_cues()[0].state, CueEnd::Withdrawn);
+        h.reply(
+            "show",
+            Some("Who will run the raffle?"),
+            &["transcript:line-3"],
+        );
+        // A cue left to expire is listed as expired.
+        h.engine.advance(20_000);
+        h.line("The raffle prizes arrived.");
+        let request = h.request();
+        assert_eq!(request.earlier_cues().len(), 2);
+        assert_eq!(request.earlier_cues()[1].state, CueEnd::Expired);
+        // The prompt the model reads carries them, as the lab sends them.
+        assert!(request
+            .prompt_input()
+            .unwrap()
+            .contains(r#""earlierCues":[{"text":"Who will book the hall?","state":"withdrawn"}"#));
+    }
+
+    #[test]
+    fn newer_speech_waits_for_the_minimum_gap_between_requests() {
+        let mut h = Harness::new();
+        h.engine = std::mem::replace(&mut h.engine, Engine::live()).with_min_gap_ms(2_000);
+        h.line("Someone should book the hall.");
+        h.request();
+        h.reply("quiet", None, &["transcript:line-1"]);
+        h.line("The hall is free on Saturday.");
+        // Too soon: nothing is sent, and the line waits.
+        h.engine.advance(500);
+        assert!(h.requests.try_recv().is_err());
+        h.engine.advance(1_600);
+        let request = h.request();
+        assert_eq!(request.sources().last().unwrap().id, "transcript:line-2");
+    }
+
+    #[test]
+    fn a_single_timeout_is_skipped_and_two_in_a_row_stop_cues() {
+        let mut h = Harness::with_budget(Duration::from_millis(20));
+        let time_out = |h: &mut Harness| {
+            std::thread::sleep(Duration::from_millis(30));
+            h.engine.advance(1);
+        };
+        h.line("The garden checklist needs an owner.");
+        h.request();
+        time_out(&mut h);
+        // Skipped: permission and status survive, and no cue appears.
+        assert!(h.engine.has_processing_permission());
+        assert_eq!(h.engine.evaluation_status(), Some(EvaluationStatus::Idle));
+        // The late reply is dropped when it finally arrives.
+        h.replies
+            .send(
+                serde_json::json!({"action": "show", "cue": "Who owns the checklist?",
+                    "sourceIds": ["transcript:line-1"]})
+                .to_string(),
+            )
+            .unwrap();
+        drain_without_another_request(&mut h);
+        assert!(h.engine.state.cue.is_none());
+        // A reply in time resets the run of timeouts.
+        h.line("Maya might take it.");
+        h.request();
+        h.reply("quiet", None, &["transcript:line-2"]);
+        h.line("Or perhaps Sam.");
+        h.request();
+        time_out(&mut h);
+        assert!(h.engine.has_processing_permission());
+        h.replies.send("{}".into()).unwrap();
+        drain_without_another_request(&mut h);
+        // Two in a row stop cues for the session, with the plain reason.
+        h.line("Nobody has said yes yet.");
+        h.request();
+        time_out(&mut h);
+        assert_eq!(
+            h.engine.evaluation_status(),
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::TimedOut))
+        );
+        assert!(!h.engine.has_processing_permission());
+        h.replies.send("{}".into()).unwrap();
+        drain_without_another_request(&mut h);
+        h.line("Still nobody.");
+        drain_without_another_request(&mut h);
+        assert!(h.engine.state.cue.is_none());
+    }
+
+    #[test]
+    fn an_unusable_reply_requires_new_approval_even_after_new_speech() {
+        let mut h = Harness::new();
+        h.line("The garden checklist needs an owner.");
+        h.request();
+        h.line("Who will take the garden checklist?");
+        h.replies.send("{}".into()).unwrap(); // Cancelled first attempt.
+        let latest = next_scheduled_request(&mut h);
+        assert_eq!(latest.sources().last().unwrap().id, "transcript:line-2");
+        let stale_review = h
+            .engine
+            .review_processing(ConversationScope::NewSpeechOnly, &[])
+            .unwrap();
+        h.replies.send("{}".into()).unwrap(); // Malformed output must stay quiet.
+        drain_without_another_request(&mut h);
+        assert!(h.engine.state.cue.is_none());
+        let unavailable = Some(EvaluationStatus::Unavailable(EvaluationIssue::InvalidReply));
+        assert_eq!(h.engine.evaluation_status(), unavailable);
+        assert!(!h.engine.has_processing_permission());
+        assert_eq!(
+            h.engine.approve_processing(stale_review),
+            Err(ProcessingError::StaleReview)
+        );
+        h.line("A new fictional topic begins.");
+        h.engine.set_live_cues_paused(true).unwrap();
+        h.engine.set_live_cues_paused(false).unwrap();
+        drain_without_another_request(&mut h);
+        assert_eq!(h.engine.evaluation_status(), unavailable);
+        assert_eq!(h.engine.state.transcript.len(), 3);
+        h.approve_notes();
+        assert_eq!(h.engine.evaluation_status(), Some(EvaluationStatus::Idle));
+        h.line("Fresh approval permits only new speech.");
+        assert_eq!(
+            h.request().sources().last().unwrap().id,
+            "transcript:line-4"
+        );
+        h.reply("quiet", None, &["transcript:line-4"]);
     }
 
     #[test]
@@ -1655,8 +1894,7 @@ mod tests {
         h.replies
             .send(
                 serde_json::json!({
-                    "action": "quiet", "cue": null, "sourceIds": ["transcript:line-1"],
-                    "reason": "Fictional supported decision", "observedUse": "not_observed"
+                    "action": "quiet", "cue": null, "sourceIds": ["transcript:line-1"]
                 })
                 .to_string(),
             )
@@ -1685,7 +1923,7 @@ mod tests {
             let mut h = Harness::new();
             h.line("Maya owns the checklist.");
             h.request();
-            h.reply("quiet", None, &["transcript:line-1"], "not_observed");
+            h.reply("quiet", None, &["transcript:line-1"]);
             let revision = h.engine.state.revision;
             match change {
                 "speech" => h.line("The next topic is the garden schedule."),
@@ -1781,8 +2019,7 @@ mod tests {
                     .send(
                         serde_json::json!({
                             "action": "show", "cue": "Who owns the garden checklist?",
-                            "sourceIds": [old_id], "reason": "Fictional delayed reply",
-                            "observedUse": "not_observed"
+                            "sourceIds": [old_id]
                         })
                         .to_string(),
                     )
@@ -1804,7 +2041,6 @@ mod tests {
                 "show",
                 Some("Who will take the garden checklist?"),
                 &[&latest_id],
-                "not_observed",
             );
             assert_eq!(
                 h.engine.state.cue.as_ref().unwrap().sources[0].id,
@@ -1828,7 +2064,6 @@ mod tests {
             "show",
             Some("Who owns the checklist?"),
             &["transcript:line-1"],
-            "not_observed",
         );
         assert!(h.engine.state.cue.is_none());
         assert!(h.engine.state.transcript.is_empty());
@@ -1841,7 +2076,7 @@ mod tests {
             .unwrap();
         h.engine.approve_processing(review).unwrap();
         assert_ne!(old, h.request());
-        h.reply("quiet", None, &["transcript:line-2"], "not_observed");
+        h.reply("quiet", None, &["transcript:line-2"]);
     }
 
     #[test]
@@ -1856,7 +2091,7 @@ mod tests {
         }
         assert!(h.engine.state.cue.is_none());
         assert!(h.engine.evaluated_cue.is_none());
-        h.reply("resolved", None, &["transcript:line-2"], "not_observed");
+        h.reply("resolved", None, &["transcript:line-2"]);
         let latest = next_scheduled_request(&mut h);
         assert!(latest.existing_cue().is_none());
         assert_eq!(latest.sources().len(), RECENT_LINES);
@@ -1866,7 +2101,7 @@ mod tests {
             .any(|source| source.id == "transcript:line-2"));
         assert!(h.engine.state.cue.is_none());
         let last_id = latest.sources().last().unwrap().id.clone();
-        h.reply("quiet", None, &[&last_id], "not_observed");
+        h.reply("quiet", None, &[&last_id]);
         h.engine.advance(1_000);
         assert!(
             h.requests.try_recv().is_err(),
@@ -1881,7 +2116,7 @@ mod tests {
         h.engine.inspect_cue(&id).unwrap();
         h.line("That checklist is no longer part of this release.");
         h.request();
-        h.reply("withdraw", None, &["transcript:line-2"], "unknown");
+        h.reply("withdraw", None, &["transcript:line-2"]);
         assert_eq!(
             h.engine.evaluation_status(),
             Some(EvaluationStatus::Decided(EvaluationOutcome::Withdrawn))
@@ -1929,12 +2164,7 @@ mod tests {
             } else {
                 "transcript:line-1"
             };
-            h.reply(
-                "show",
-                Some("Who owns the checklist?"),
-                &[id],
-                "not_observed",
-            );
+            h.reply("show", Some("Who owns the checklist?"), &[id]);
             assert!(h.engine.state.cue.is_none(), "{change}");
             assert_eq!(
                 h.engine.evaluation_status(),
