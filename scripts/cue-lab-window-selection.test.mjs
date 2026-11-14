@@ -101,3 +101,52 @@ for (const fixtureCase of [
     },
   );
 }
+
+// Failure may close the parent synchronously while descendants remain alive.
+// Do not let close cancel the owned group's only bounded KILL path.
+test('failed parent close retains cleanup ownership until descendant retirement', async () => {
+  const { default: childProcess } = await import('node:child_process');
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { EventEmitter } = await import('node:events');
+  const { PassThrough } = await import('node:stream');
+  const { mock } = await import('node:test');
+  const child = new EventEmitter();
+  Object.assign(child, {
+    pid: 77771,
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+  });
+  const signals = [];
+  let alive = true;
+  mock.method(childProcess, 'spawn', () => {
+    queueMicrotask(() => child.stdout.write('malformed\n'));
+    return child;
+  });
+  mock.method(process, 'kill', (pid, signal) => {
+    assert.equal(pid, -77771);
+    signals.push(signal);
+    if (!alive) throw Object.assign(new Error('absent'), { code: 'ESRCH' });
+    if (signal === 'SIGTERM') child.emit('close', 0, null);
+    if (signal === 'SIGKILL') alive = false;
+    return true;
+  });
+  syncBuiltinESMExports();
+  try {
+    const select = createLabOwnedWindowSelectorFixture({
+      ...options,
+      native: { identity: options.nativeIdentity },
+      deadlineMs: 1000,
+    });
+    await assert.rejects(
+      select({ runId: 'fictional-run' }),
+      (e) => e.category === 'cleanup',
+    );
+    assert.equal(alive, false);
+    assert.ok(signals.includes(0));
+    assert.equal(signals.filter((s) => s === 'SIGTERM').length, 1);
+    assert.equal(signals.filter((s) => s === 'SIGKILL').length, 1);
+  } finally {
+    mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+});

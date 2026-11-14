@@ -87,16 +87,18 @@ export function createLabCaptureTake({
     root.abort();
     (async () => {
       const results = await Promise.allSettled([
-        owner.stop(),
-        player.stop(),
-        work?.catch(() => {}),
+        Promise.resolve().then(() => owner.stop()),
+        Promise.resolve().then(() => player.stop()),
+        Promise.resolve().then(() => work?.catch(() => {})),
       ]);
       let failed =
         results[0].status !== 'fulfilled' ||
         results[0].value?.released !== true ||
         results[1].status !== 'fulfilled' ||
         results[1].value?.stopped !== true;
-      const recorded = await Promise.allSettled([recorder.stop()]);
+      const recorded = await Promise.allSettled([
+        Promise.resolve().then(() => recorder.stop()),
+      ]);
       failed ||=
         recorded[0].status !== 'fulfilled' ||
         recorded[0].value?.stopped !== true;

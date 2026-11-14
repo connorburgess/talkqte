@@ -20,6 +20,8 @@ function fixture({
   sourceFails = false,
   holdPlayback = false,
   playerDeadline = 1000,
+  syncPlayerStop = false,
+  syncRecorderStop = false,
 } = {}) {
   const trace = [],
     counts = {
@@ -134,8 +136,10 @@ function fixture({
       await Promise.resolve();
       return { completed: !signal.aborted, sha256: media.sha256 };
     },
-    async stop() {
+    stop() {
       counts.playerStop++;
+      if (syncPlayerStop)
+        throw Error('fictional synchronous player Stop failure');
       trace.push('player-stop');
       playerHandler?.();
       return { stopped: true };
@@ -159,8 +163,10 @@ function fixture({
       if (lateBeforeStart) delta = 6000;
       return { started: true };
     },
-    async stop() {
+    stop() {
       counts.recordStop++;
+      if (syncRecorderStop)
+        throw Error('fictional synchronous recorder Stop failure');
       trace.push('recorder-final');
       recorderHandler?.();
       return { stopped: true };
@@ -268,3 +274,19 @@ test('capture-only process Stop aborts active playback and removes signal handle
 test('capture-only refuses a player start deadline longer than the reserved guard budget', () => {
   assert.throws(() => fixture({ playerDeadline: 2000 }));
 });
+
+for (const mode of ['syncPlayerStop', 'syncRecorderStop'])
+  test(`capture cleanup isolates ${mode} and still closes independent resources once`, async () => {
+    const f = fixture({ [mode]: true });
+    await assert.rejects(f.take.done, (e) => e.category === 'cleanup');
+    await assert.rejects(f.take.stop(), (e) => e.category === 'cleanup');
+    assert.equal(f.counts.nativeStop, 1);
+    assert.equal(f.counts.playerStop, 1);
+    assert.equal(f.counts.recordStop, 1);
+    assert.equal(f.trace.filter((x) => x === 'source-close').length, 1);
+    assert.equal(f.trace.filter((x) => x === 'launcher-close').length, 1);
+    assert.equal(f.processEvents.listenerCount('SIGINT'), 0);
+    assert.equal(f.processEvents.listenerCount('SIGTERM'), 0);
+    assert.equal(f.take.phase, 'failed-cleanup');
+    if (mode === 'syncRecorderStop') assert.equal(f.counts.playerClose, 0);
+  });

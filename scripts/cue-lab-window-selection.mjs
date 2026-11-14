@@ -191,9 +191,8 @@ function ownedWindowSelector({
       const fail = () => {
         if (failed || settled) return;
         failed = true;
-        try {
-          group('SIGTERM');
-        } catch {}
+        // Arm cleanup before TERM: a synchronous parent close must not cancel
+        // retirement while an owned descendant still holds the process group.
         hardTimer = setTimeout(() => {
           try {
             group('SIGKILL');
@@ -202,6 +201,9 @@ function ownedWindowSelector({
           child.stderr.destroy();
           finish(null, 'cleanup');
         }, 100);
+        try {
+          group('SIGTERM');
+        } catch {}
       };
       child.once('error', fail);
       if (!integer(child.pid)) return finish(null, 'cleanup');
@@ -230,7 +232,14 @@ function ownedWindowSelector({
       });
       child.once('close', (code, terminated) => {
         if (settled) return;
-        if (failed) return finish(null, 'cleanup');
+        if (failed) {
+          try {
+            if (!group(0)) finish(null, 'cleanup');
+          } catch {}
+          // Parent exit/closed pipes do not retire surviving descendants.
+          // Keep the bounded KILL path armed until group absence is proven.
+          return;
+        }
         try {
           required(
             code === 0 &&
