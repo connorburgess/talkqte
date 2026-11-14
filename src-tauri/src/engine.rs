@@ -495,6 +495,10 @@ pub struct CueSnapshot {
     /// notebook's processing issue.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_issue: Option<evaluation::Issue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_provider: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub model_lab: bool,
 }
 
 /// The companion's indicator for a model connection.
@@ -655,6 +659,8 @@ impl Engine {
                 _ => None,
             },
             model_issue: self.processing_issue(),
+            model_provider: self.model_provider(),
+            model_lab: self.is_lab_evaluator(),
         }
     }
 
@@ -892,7 +898,7 @@ impl Engine {
     }
 
     fn consume(&mut self, segment: Segment, now: u64) {
-        self.invalidate_evaluation();
+        self.speech_changed();
         self.state.transcript.push(segment.clone());
         // Keep memory bounded in a long session; the oldest lines go first.
         if self.state.transcript.len() > MAX_TRANSCRIPT_SEGMENTS {
@@ -6001,3 +6007,9 @@ mod tests {
         );
     }
 }
+
+// Compile the actual inert lab facade before native activates its root module.
+// No non-test runtime selection is introduced here.
+#[cfg(all(test, unix))]
+#[path = "lab_evaluator.rs"]
+mod lab_evaluator_offline;

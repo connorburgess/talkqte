@@ -23,6 +23,10 @@ const visuallyHidden = {
 } as const;
 
 export const issueText = {
+  labStopped:
+    'Cues stopped: this strict development lab run ended. Start a new lab run and session to continue; Resume does not restart it.',
+  labUnavailable:
+    'Cues are off: the development lab provider, model, effort or local broker settings are unavailable. Correct the launch settings before starting a new run.',
   devSettings:
     'Cues are off: TALKQTE_DEV_MODEL_CONNECTION must be on or absent, and TALKQTE_DEV_MODEL_CALLS must be a whole number from 1 to 100. Correct the launch settings and relaunch.',
   callLimit:
@@ -50,6 +54,33 @@ export const issueText = {
   worker:
     'Cues stopped: the model connection stopped working. Nothing more will be sent until you turn it on again.',
 };
+export function processingIssueText(
+  issue: keyof typeof issueText,
+  provider = 'Claude',
+  lab = false,
+): string {
+  if (!lab) return issueText[issue];
+  if (
+    issue === 'labStopped' ||
+    issue === 'labUnavailable' ||
+    issue === 'callLimit' ||
+    issue === 'devSettings'
+  )
+    return issueText[issue];
+  const reason =
+    issue === 'timedOut'
+      ? 'the model exceeded its deadline'
+      : issue === 'authentication'
+        ? `${provider} subscription sign-in or CLI setup is unavailable`
+        : issue === 'credentials'
+          ? 'the subscription authentication policy was not met'
+          : issue === 'allowance' || issue === 'rateLimit'
+            ? `${provider} usage or rate limit was reached`
+            : issue === 'invalidReply'
+              ? 'the model reply failed validation'
+              : 'the development model connection failed';
+  return `Cues stopped: ${reason}. Nothing more will be sent in this strict lab run. Start a new lab run and session to continue.`;
+}
 function NoteLabel({ note }: { note: ProcessingNote }) {
   return (
     <>
@@ -455,7 +486,18 @@ export function ProcessingControl({
       )}
       {snapshot?.issue && (
         <p className="processing-message" role="status">
-          {issueText[snapshot.issue]}
+          {processingIssueText(
+            snapshot.issue,
+            snapshot.processor?.name,
+            snapshot.processor?.id === 'lab-subscription',
+          )}
+        </p>
+      )}
+      {snapshot?.processor?.id === 'lab-subscription' && (
+        <p className="processing-muted">
+          Fictional development lab. Pause, Dismiss, Off and Stop end this
+          strict run; Resume does not restart it. The lab shares a CLI-dispatch
+          budget across roles; underlying provider request count is unobserved.
         </p>
       )}
       {snapshot?.phase === 'off' && snapshot.processor && !snapshot.issue && (
@@ -467,7 +509,9 @@ export function ProcessingControl({
         <p className="processing-muted" role="status">
           {snapshot.processor?.name.startsWith('Claude')
             ? 'Sending recent lines to Claude…'
-            : 'Sending recent lines to the model…'}
+            : snapshot.processor?.name === 'Codex'
+              ? 'Sending recent lines to Codex…'
+              : 'Sending recent lines to the model…'}
         </p>
       )}
       {active && snapshot?.lastDecision === 'quiet' && (

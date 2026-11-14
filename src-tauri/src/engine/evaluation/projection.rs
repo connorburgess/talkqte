@@ -57,6 +57,8 @@ pub enum Issue {
     Misconfigured,
     DevSettings,
     CallLimit,
+    LabStopped,
+    LabUnavailable,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -383,6 +385,12 @@ impl Engine {
     /// The plain reason processing stopped, if it did.
     pub(crate) fn processing_issue(&self) -> Option<Issue> {
         match self.evaluation_status() {
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::LabStopped)) => {
+                Some(Issue::LabStopped)
+            }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::LabUnavailable)) => {
+                Some(Issue::LabUnavailable)
+            }
             Some(EvaluationStatus::Unavailable(EvaluationIssue::ScopeChanged)) => {
                 Some(Issue::ScopeChanged)
             }
