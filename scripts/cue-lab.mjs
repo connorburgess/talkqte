@@ -36,11 +36,16 @@ A cue is read at a glance while someone is listening: at most ${GLANCE_WORDS} wo
 
 /** `glance` adds the length rule. Without it the prompt is exactly the one
  * the recorded trials used. */
+// Added only when a request lists earlier cues.
+const HISTORY_NOTE = `
+earlierCues lists cues already shown in this conversation and how each ended: resolved, withdrawn or expired. Do not show a cue that repeats or rewords one of them unless later events give a new reason for it.`;
+
 export function systemPromptFor(testCase, { glance = false } = {}) {
   return (
     SYSTEM_PROMPT +
     (glance ? GLANCE_RULE : '') +
-    (testCase.userName ? NAME_NOTE : '')
+    (testCase.userName ? NAME_NOTE : '') +
+    (testCase.earlierCues?.length ? HISTORY_NOTE : '')
   );
 }
 
@@ -230,6 +235,15 @@ export function buildPrompt(testCase) {
     })),
     existingCue: cue && { text: cue.text, sourceIds: cue.sourceIds },
     ...(testCase.userName ? { userName: testCase.userName } : {}),
+    // What this session has already shown, as words and how each ended.
+    ...(testCase.earlierCues?.length
+      ? {
+          earlierCues: testCase.earlierCues.map(({ text, state }) => ({
+            text,
+            state,
+          })),
+        }
+      : {}),
   });
 }
 
