@@ -1,0 +1,465 @@
+/* The cue card: what it is, where it came from and how long it stays, in
+   one glance and one height. Shared by the notebook and the companion. */
+.question.cue-card {
+  --cue-surface: #e7eedf;
+  --cue-ink: #1f3027;
+  --cue-soft: #3f4e3c;
+  --cue-lead: #4a5d49;
+  --cue-rule: #cbd6bf;
+  --cue-fill: #2f5a48;
+  --cue-accent: #9a452f;
+  --cue-radius: var(--radius-panel);
+  --cue-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  background: var(--cue-surface);
+  color: var(--cue-ink);
+  padding: 0;
+  border-radius: var(--cue-radius);
+  transform-origin: left center;
+  /* It comes in from the left, then opens to its full width. The words are
+     in place from the first frame; nothing waits on the motion to be read. */
+  animation:
+    cue-arrive 200ms var(--cue-ease) both,
+    cue-widen 520ms 70ms var(--cue-ease) both;
+}
+.cue-card .cue-scroll {
+  padding: 16px 18px 14px;
+}
+@keyframes cue-arrive {
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes cue-widen {
+  from {
+    clip-path: inset(0 58% 0 0 round var(--cue-radius));
+  }
+  to {
+    clip-path: inset(0 0 0 0 round var(--cue-radius));
+  }
+}
+@keyframes cue-settle {
+  from {
+    transform: translateX(-12px);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes cue-draw {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes cue-follow {
+  from {
+    transform: translateX(-8px);
+  }
+  to {
+    transform: none;
+  }
+}
+/* Words are there, light, from the first frame, and darken in reading
+   order: the purpose and the cue first, then the quoted line. */
+@keyframes cue-word {
+  from {
+    opacity: 0.26;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes cue-leave {
+  from {
+    clip-path: inset(0 0 0 0 round var(--cue-radius));
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-12px);
+    clip-path: inset(0 34% 0 0 round var(--cue-radius));
+  }
+}
+.cue-card .cue-line {
+  animation: cue-settle 520ms 70ms var(--cue-ease) both;
+}
+.cue-card .cue-track {
+  transform-origin: left center;
+  animation: cue-draw 640ms 180ms var(--cue-ease) both;
+}
+.cue-card .cue-source,
+.cue-card .keep-line {
+  animation: cue-follow 420ms 120ms var(--cue-ease) both;
+}
+.cue-card .cue-word {
+  animation: cue-word 320ms ease-out both;
+  animation-delay: calc(50ms + var(--i) * 24ms);
+}
+.cue-card .cue-quote .cue-word {
+  animation-duration: 360ms;
+  animation-delay: calc(300ms + var(--i) * 22ms);
+}
+/* Spoken words wait, still readable, and darken at about the pace they
+   were said. */
+@keyframes cue-spoken {
+  from {
+    opacity: var(--cue-unsaid);
+  }
+  to {
+    opacity: 1;
+  }
+}
+.cue-card .cue-word.cue-spoken {
+  --cue-unsaid: 0.5;
+  animation: cue-spoken 260ms ease-out both;
+  animation-delay: var(--at);
+}
+/* Small text keeps more of its strength while it waits. */
+.cue-card .cue-quote .cue-word.cue-spoken {
+  --cue-unsaid: 0.68;
+}
+.question.cue-card.is-leaving {
+  animation: cue-leave 190ms cubic-bezier(0.7, 0, 0.84, 0) both;
+  pointer-events: none;
+}
+.cue-card.is-leaving *,
+.cue-card.is-settled .cue-word {
+  animation: none;
+}
+
+/* The purpose is the first words of the sentence; the cue completes it. */
+.cue-card .cue-line {
+  font-size: 22px;
+  line-height: 1.22;
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+/* Only the lines beside the corner Dismiss make room for it. */
+.cue-card .cue-line::before {
+  content: '';
+  float: right;
+  width: 30px;
+  height: 32px;
+}
+.cue-card .cue-lead {
+  font-weight: 500;
+  color: var(--cue-lead);
+}
+.cue-card.cue-asked .cue-lead {
+  font-weight: 650;
+  color: var(--cue-accent);
+}
+.question.cue-card .cue-line h2 {
+  display: inline;
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: inherit;
+}
+.question-large.cue-card .cue-line {
+  font-size: 28px;
+}
+/* A long cue steps down in size so it is never cut off by the card. */
+.cue-card.cue-long .cue-line {
+  font-size: 19px;
+}
+.cue-card.cue-longer .cue-line {
+  font-size: 17px;
+  letter-spacing: -0.01em;
+}
+.question-large.cue-card.cue-long .cue-line {
+  font-size: 24px;
+}
+.question-large.cue-card.cue-longer .cue-line {
+  font-size: 21px;
+}
+
+/* The time left is the rule between the cue and its source. It is also
+   the Hold control: one 44px target, drawn as a line. */
+.cue-card .cue-time {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  /* The target is taller than the gap it is drawn in. */
+  margin-block: -6px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--cue-lead);
+  text-align: left;
+}
+.cue-card .cue-time[aria-disabled='true'] {
+  cursor: default;
+}
+.cue-card .cue-track {
+  position: relative;
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--cue-rule);
+  transition: height 140ms ease-out;
+}
+.cue-card .cue-time:hover:not([aria-disabled='true']) .cue-track {
+  height: 5px;
+}
+.cue-card .cue-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--cue-fill);
+  transform-origin: left center;
+  transform: scaleX(var(--left));
+  transition:
+    transform 260ms linear,
+    background-color 300ms ease-out;
+}
+/* The moving end of the line: a small bead, so a glance finds it. */
+.cue-card .cue-bead {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--left) * 100%);
+  width: 7px;
+  height: 7px;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background: var(--cue-fill);
+  box-shadow: 0 0 0 4px rgb(47 90 72 / 0.14);
+  transition:
+    left 260ms linear,
+    opacity 240ms ease-out;
+}
+/* Held: the line runs back to full and rests, and the bead goes with it. */
+.cue-card.is-held .cue-fill {
+  background: #7d967e;
+  transition:
+    transform 560ms var(--cue-ease),
+    background-color 300ms ease-out;
+}
+.cue-card.is-held .cue-bead {
+  opacity: 0;
+  transition:
+    left 560ms var(--cue-ease),
+    opacity 240ms ease-out 380ms;
+}
+.cue-card .cue-stays {
+  flex: 1;
+  font-size: 13px;
+}
+/* The word sits over the end of the line: shown when held, and when the
+   pointer or the keyboard is on the card. */
+.cue-card .cue-hold {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  translate: 0 -50%;
+  padding-left: 10px;
+  background: var(--cue-surface);
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--cue-ink);
+  opacity: 0;
+  transition: opacity 160ms ease-out;
+}
+.cue-card:hover .cue-hold,
+.cue-card .cue-time:focus-visible .cue-hold,
+.cue-card.is-held .cue-hold {
+  opacity: 1;
+}
+.cue-card.is-held .cue-hold {
+  color: var(--cue-lead);
+}
+.cue-card .cue-time:hover:not([aria-disabled='true']) .cue-fill {
+  background: #244a3a;
+}
+
+/* Where it came from: always in view, never behind a click. */
+.cue-card .cue-source {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--cue-soft);
+  overflow-wrap: anywhere;
+}
+.cue-card .cue-source + .cue-source {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--cue-rule);
+}
+.cue-card .cue-source-label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--cue-lead);
+  font-variant-numeric: tabular-nums;
+}
+.cue-card .cue-quote {
+  margin: 1px 0 0;
+  color: var(--cue-ink);
+}
+.cue-card .cue-sources {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cue-card .cue-sources .cue-quote {
+  white-space: pre-wrap;
+}
+.cue-card .cue-sources li + li,
+.cue-card .cue-source p + .cue-sources,
+.cue-card .cue-sources + p {
+  margin-top: 6px;
+}
+.cue-card .question-warning {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--cue-accent);
+}
+.question-large.cue-card .cue-source {
+  font-size: 16px;
+}
+.question-large.cue-card .cue-source-label,
+.question-large.cue-card .question-warning {
+  font-size: 14px;
+}
+.cue-card .keep-line {
+  min-height: 44px;
+  color: var(--cue-ink);
+}
+.cue-card .dismiss-question {
+  top: 2px;
+  right: 2px;
+  color: var(--cue-lead);
+}
+.cue-card .dismiss-question:hover:not(:disabled) {
+  color: var(--cue-ink);
+  background: #d6dfca;
+}
+.cue-card .dismiss-question {
+  transition:
+    background-color 160ms ease-out,
+    scale 120ms ease-out;
+}
+.cue-card .dismiss-question svg {
+  transition: rotate 260ms var(--cue-ease);
+}
+.cue-card .dismiss-question:hover:not(:disabled) svg {
+  rotate: 90deg;
+}
+.cue-card .dismiss-question:active:not(:disabled) {
+  scale: 0.94;
+}
+.question.cue-card button:focus-visible,
+.floating-surface .question.cue-card button:focus-visible {
+  outline: 3px solid var(--forest);
+  outline-offset: 2px;
+}
+/* These two rings are drawn inside their targets: the line overlaps the
+   text beside it, and the corner would be cut off by the card's edge. */
+.question.cue-card button.cue-time:focus-visible,
+.floating-surface .question.cue-card button.cue-time:focus-visible,
+.question.cue-card button.dismiss-question:focus-visible,
+.floating-surface .question.cue-card button.dismiss-question:focus-visible {
+  outline-offset: -3px;
+}
+
+/* In the companion the card fills the window under the bar, at one height
+   for every state. Its words scroll inside it when they do not fit; its
+   edges and Dismiss stay where they are. */
+.floating-surface .question.cue-card {
+  --cue-radius: 20px;
+  display: flex;
+  flex-direction: column;
+  margin: 0 6px 6px;
+  border-top: 0;
+  border-radius: var(--cue-radius);
+  padding: 0;
+  overflow: hidden;
+  background: var(--cue-surface);
+}
+.floating-surface .cue-card .cue-scroll {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden auto;
+  padding: 10px 18px;
+}
+.floating-surface .cue-card .cue-line::before {
+  height: 38px;
+}
+/* A short cue sits in the middle of the card, with equal room above and
+   below; a long one starts at the top and scrolls. */
+.floating-surface .cue-card .cue-scroll::before,
+.floating-surface .cue-card .cue-scroll::after {
+  content: '';
+  flex: 1 0 0;
+}
+.floating-surface .cue-card .cue-scroll > * {
+  flex: none;
+}
+.floating-surface .cue-card .keep-line {
+  align-self: flex-start;
+}
+/* More to read beyond an edge: the words fade into the card there, so no
+   line is ever shown cut in half, and the rest is reached by scrolling. */
+.floating-surface .cue-card::before,
+.floating-surface .cue-card::after {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  left: 0;
+  right: 0;
+  height: 48px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms ease-out;
+}
+.floating-surface .cue-card::before {
+  top: 0;
+  background: linear-gradient(var(--cue-surface) 22%, transparent);
+}
+.floating-surface .cue-card::after {
+  bottom: 0;
+  background: linear-gradient(transparent, var(--cue-surface) 78%);
+}
+.floating-surface .cue-card.fades-start::before,
+.floating-surface .cue-card.fades-end::after {
+  opacity: 1;
+}
+.floating-surface .cue-card .dismiss-question {
+  z-index: 2;
+}
+/* The 360px window of a small display: a step down in size keeps a cue of
+   ordinary length inside the card with every platform's fonts. */
+@media (max-width: 380px) {
+  .floating-surface .cue-card .cue-line {
+    font-size: 20px;
+  }
+  .floating-surface .cue-card.cue-long .cue-line {
+    font-size: 18px;
+  }
+  .floating-surface .cue-card.cue-longer .cue-line {
+    font-size: 16px;
+  }
+  .floating-surface .question-large.cue-card .cue-line {
+    font-size: 25px;
+  }
+  .floating-surface .question-large.cue-card.cue-long .cue-line {
+    font-size: 22px;
+  }
+  .floating-surface .question-large.cue-card.cue-longer .cue-line {
+    font-size: 19px;
+  }
+  .floating-surface .question-large.cue-card .cue-source {
+    font-size: 15px;
+  }
+}

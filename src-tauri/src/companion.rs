@@ -43,6 +43,13 @@ impl Mode {
     }
 }
 
+impl Mode {
+    /// The window is at a cue's size.
+    fn shows_cue(self) -> bool {
+        matches!(self, Self::Question | Self::Details | Self::AnsweredDetails)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Frame {
     x: i32,
@@ -177,15 +184,45 @@ pub struct Placement {
     /// SETTLE_MS without the expected position they count again, so a move
     /// the system refused cannot swallow later drags.
     expected: Option<((i32, i32), Instant)>,
+    /// When a cue was first seen gone while the window was still at its
+    /// size, until the window returns to the bar.
+    leaving: Option<Instant>,
 }
 
 /// How long the app's own move may take to land.
 const SETTLE_MS: u64 = 1_000;
 
+/// How long the window keeps a cue's size after the cue goes, so the card's
+/// leaving animation (190 ms in `cue-card.css`) finishes inside it.
+const LEAVE_MS: u64 = 220;
+// The wait covers the animation, and stays too short to read as a pause.
+const _: () = assert!(LEAVE_MS >= 190 && LEAVE_MS <= 300);
+
 #[derive(Default)]
 pub struct WindowState(Mutex<Placement>);
 
 impl Placement {
+    /// A cue has gone and the bar is about to replace it. Returns how much
+    /// longer the window should keep the cue's size, or None to resize now:
+    /// when motion is reduced, when there was no cue, when another cue has
+    /// arrived, or when the companion is being hidden altogether.
+    fn leave_wait(&mut self, mode: Mode, now: Instant, reduce_motion: bool) -> Option<Duration> {
+        let was_cue = self.applied.is_some_and(|(applied, _)| applied.shows_cue());
+        if reduce_motion || !was_cue || mode != Mode::Compact {
+            self.leaving = None;
+            return None;
+        }
+        let waited = now.duration_since(*self.leaving.get_or_insert(now));
+        let wait = Duration::from_millis(LEAVE_MS).checked_sub(waited);
+        match wait {
+            Some(left) if !left.is_zero() => Some(left),
+            _ => {
+                self.leaving = None;
+                None
+            }
+        }
+    }
+
     /// Records a Moved event. Returns true when it was a drag by the person.
     fn note_move(&mut self, position: (i32, i32), now: Instant) -> bool {
         if let Some((expected, since)) = self.expected {
@@ -228,6 +265,24 @@ pub fn reset_drag(app: &tauri::AppHandle) {
     }
 }
 
+/// Whether the system asks for reduced motion. Only macOS is asked; other
+/// platforms resize at once, as they did before the leaving animation.
+#[cfg(target_os = "macos")]
+fn reduce_motion() -> bool {
+    use objc2::{class, msg_send, runtime::AnyObject};
+    // SAFETY: `refresh` calls this on the main thread. NSWorkspace's shared
+    // instance lives for the whole process, and the property is a plain BOOL.
+    unsafe {
+        let workspace: *mut AnyObject = msg_send![class!(NSWorkspace), sharedWorkspace];
+        !workspace.is_null() && msg_send![workspace, accessibilityDisplayShouldReduceMotion]
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn reduce_motion() -> bool {
+    true
+}
+
 pub fn refresh(app: &tauri::AppHandle) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
@@ -247,6 +302,18 @@ pub fn refresh(app: &tauri::AppHandle) {
         let Ok(mut placement) = state.0.lock() else {
             return;
         };
+        // Let a leaving cue fold away before the window shrinks to the bar.
+        let already_waiting = placement.leaving.is_some();
+        if let Some(wait) = placement.leave_wait(mode, Instant::now(), reduce_motion()) {
+            if !already_waiting {
+                let later = handle.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(wait);
+                    refresh(&later);
+                });
+            }
+            return;
+        }
         let layout = if mode == Mode::Hidden {
             None
         } else {
@@ -293,6 +360,67 @@ pub fn refresh(app: &tauri::AppHandle) {
 mod tests {
     use super::*;
     use crate::engine::{Engine, Response};
+
+    #[test]
+    fn a_cue_that_goes_keeps_the_window_until_its_fold_has_played() {
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        let showing = |mode| Placement {
+            applied: Some((mode, None)),
+            ..Placement::default()
+        };
+
+        // The cue goes and the bar is next: wait out the leaving animation.
+        let mut placement = showing(Mode::Question);
+        assert_eq!(
+            placement.leave_wait(Mode::Compact, at(0), false),
+            Some(Duration::from_millis(LEAVE_MS))
+        );
+        assert_eq!(
+            placement.leave_wait(Mode::Compact, at(100), false),
+            Some(Duration::from_millis(LEAVE_MS - 100))
+        );
+        assert_eq!(
+            placement.leave_wait(Mode::Compact, at(LEAVE_MS), false),
+            None
+        );
+        assert!(placement.leaving.is_none());
+
+        // Reduced motion plays no fold, so the window returns at once.
+        let mut placement = showing(Mode::Question);
+        assert_eq!(placement.leave_wait(Mode::Compact, at(0), true), None);
+
+        // A held or answered cue's window waits the same way.
+        for mode in [Mode::Details, Mode::AnsweredDetails] {
+            assert!(showing(mode)
+                .leave_wait(Mode::Compact, at(0), false)
+                .is_some());
+        }
+
+        // Hiding the companion, or having had no cue, waits for nothing.
+        assert_eq!(
+            showing(Mode::Question).leave_wait(Mode::Hidden, at(0), false),
+            None
+        );
+        assert_eq!(
+            showing(Mode::Compact).leave_wait(Mode::Compact, at(0), false),
+            None
+        );
+        assert_eq!(
+            Placement::default().leave_wait(Mode::Compact, at(0), false),
+            None
+        );
+
+        // Another cue arriving during the wait cancels it; the next one to
+        // go starts a full wait of its own.
+        let mut placement = showing(Mode::Question);
+        assert!(placement.leave_wait(Mode::Compact, at(0), false).is_some());
+        assert_eq!(placement.leave_wait(Mode::Question, at(50), false), None);
+        assert_eq!(
+            placement.leave_wait(Mode::Compact, at(150), false),
+            Some(Duration::from_millis(LEAVE_MS))
+        );
+    }
 
     #[test]
     fn companion_follows_session_and_question_lifecycle() {
@@ -422,6 +550,7 @@ mod tests {
             applied: Some((Mode::Question, Some(frame))),
             dragged: None,
             expected: Some(((1160, 640), start)),
+            leaving: None,
         };
         // A resize moves the corner first; then the move lands. Neither is a drag.
         assert!(!placement.note_move((1160, 904), start));

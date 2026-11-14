@@ -161,12 +161,12 @@ test('the companion shows a question and its source without animation under redu
       (element) => element.getAnimations({ subtree: true }).length,
     ),
   ).toBe(0);
-  await question
-    .getByRole('button', { name: 'Why?', exact: true })
-    .press('Enter');
   await expect(question.locator('blockquote')).toBeVisible();
+  await question
+    .getByRole('button', { name: 'Hold', exact: true })
+    .press('Enter');
   await expect(
-    question.getByRole('button', { name: 'Hide context' }),
+    question.getByRole('button', { name: 'Held', exact: true }),
   ).toBeFocused();
   expect(
     await question.evaluate(

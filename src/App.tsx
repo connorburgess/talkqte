@@ -27,7 +27,7 @@ import {
 } from './lib/types';
 
 const megabytes = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
-import { Question } from './components/Question';
+import { CueCard } from './components/Question';
 import { ProcessingControl } from './components/ProcessingControl';
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { ContextNotes } from './components/ContextNotes';
@@ -294,9 +294,8 @@ function FloatingQuestion() {
                 <span>Hide</span>
               </button>
             </header>
-            {state?.cue && (
-              <Question
-                key={state.cue.id}
+            {state && (
+              <CueCard
                 cue={state.cue}
                 size={state.questionSize}
                 live={state.live}
@@ -1523,41 +1522,39 @@ function Notebook() {
                   <h2>A timely question</h2>
                   <CircleHelp size={16} aria-hidden="true" />
                 </div>
-                {state.cue ? (
-                  <Question
-                    key={state.cue.id}
-                    cue={state.cue}
-                    size={state.questionSize}
-                    live={state.live}
-                    busy={busy}
-                    onDismiss={dismiss}
-                    onKeep={keepLine}
-                    onInspect={inspectCue}
-                  />
-                ) : (
-                  <div className="question-idle">
-                    <h3>
-                      {state.cuesPaused
-                        ? 'Cues are paused.'
-                        : state.status === 'ready'
-                          ? 'Room for a good question.'
-                          : state.status === 'ended'
-                            ? 'Take the useful bits with you.'
-                            : 'A little room to think.'}
-                    </h3>
-                    <p>
-                      {state.cuesPaused
-                        ? 'Resume cues when you want suggestions again. Speech from the pause will not become a new cue.'
-                        : state.status === 'ready'
-                          ? 'When something could use a little clarity, a question will appear here.'
-                          : state.status === 'ended'
-                            ? state.live
-                              ? 'Your notes stay here until you close the app.'
-                              : 'Your notes are still here. Export them before closing the app.'
-                            : 'Questions pass quietly. You can keep listening without responding.'}
-                    </p>
-                  </div>
-                )}
+                <CueCard
+                  cue={state.cue}
+                  size={state.questionSize}
+                  live={state.live}
+                  busy={busy}
+                  onDismiss={dismiss}
+                  onKeep={keepLine}
+                  onInspect={inspectCue}
+                  empty={
+                    <div className="question-idle">
+                      <h3>
+                        {state.cuesPaused
+                          ? 'Cues are paused.'
+                          : state.status === 'ready'
+                            ? 'Room for a good question.'
+                            : state.status === 'ended'
+                              ? 'Take the useful bits with you.'
+                              : 'A little room to think.'}
+                      </h3>
+                      <p>
+                        {state.cuesPaused
+                          ? 'Resume cues when you want suggestions again. Speech from the pause will not become a new cue.'
+                          : state.status === 'ready'
+                            ? 'When something could use a little clarity, a question will appear here.'
+                            : state.status === 'ended'
+                              ? state.live
+                                ? 'Your notes stay here until you close the app.'
+                                : 'Your notes are still here. Export them before closing the app.'
+                              : 'Questions pass quietly. You can keep listening without responding.'}
+                      </p>
+                    </div>
+                  }
+                />
                 <p className="companion-footnote">
                   {state.live && capture.state?.processor
                     ? capture.state.approved
@@ -1839,8 +1836,8 @@ function Notebook() {
               <div>
                 <h2>Glance view</h2>
                 <p>
-                  One complete question, with context tucked away. Open “Why?”
-                  to see the source and keep the question until you dismiss it.
+                  One complete cue with where it came from. A line shows how
+                  long it stays; Hold keeps it until you dismiss it.
                 </p>
                 <p
                   className={`appearance-example question-${state.questionSize}`}
