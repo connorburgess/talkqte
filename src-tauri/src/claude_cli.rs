@@ -140,23 +140,56 @@ fn install_signal_cleanup() {
     #[cfg(unix)]
     {
         static ONCE: std::sync::Once = std::sync::Once::new();
-        extern "C" fn on_signal(signal: libc::c_int) {
-            end_all();
-            // SAFETY: restore the default action and re-raise, so the app
-            // exits as it would have; both calls are async-signal-safe.
-            unsafe {
-                libc::signal(signal, libc::SIG_DFL);
-                libc::raise(signal);
-            }
+        ONCE.call_once(|| install_handlers(&[libc::SIGINT, libc::SIGTERM, libc::SIGHUP]));
+    }
+}
+
+// The disposition each signal had before the handler, by signal number, so
+// the handler can hand the signal back to it.
+#[cfg(unix)]
+static PREVIOUS: [std::sync::atomic::AtomicUsize; 64] =
+    [const { std::sync::atomic::AtomicUsize::new(0) }; 64];
+
+/// Installs the cleanup handler for each signal, except one the app was
+/// started with ignored (SIGHUP under `nohup`, for example), which stays
+/// ignored. The handler ends the calls in flight, puts back what the signal
+/// did before, and raises it again, so the app behaves as it would have.
+#[cfg(unix)]
+fn install_handlers(signals: &[libc::c_int]) {
+    extern "C" fn on_signal(signal: libc::c_int) {
+        end_all();
+        let previous = usize::try_from(signal)
+            .ok()
+            .and_then(|index| PREVIOUS.get(index))
+            .map_or(libc::SIG_DFL, |slot| {
+                slot.load(std::sync::atomic::Ordering::Acquire) as libc::sighandler_t
+            });
+        // SAFETY: restoring a disposition and raising are async-signal-safe.
+        unsafe {
+            libc::signal(signal, previous);
+            libc::raise(signal);
         }
-        ONCE.call_once(|| {
-            for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
-                // SAFETY: the handler only uses atomics and kill/signal/raise.
-                unsafe {
-                    libc::signal(signal, on_signal as *const () as libc::sighandler_t);
-                }
+    }
+    for &signal in signals {
+        let Some(slot) = usize::try_from(signal).ok().and_then(|i| PREVIOUS.get(i)) else {
+            continue;
+        };
+        // SAFETY: reads the current disposition without changing it.
+        let current = unsafe {
+            let mut action: libc::sigaction = std::mem::zeroed();
+            if libc::sigaction(signal, std::ptr::null(), &mut action) != 0 {
+                continue;
             }
-        });
+            action.sa_sigaction
+        };
+        if current == libc::SIG_IGN {
+            continue;
+        }
+        slot.store(current, std::sync::atomic::Ordering::Release);
+        // SAFETY: the handler only uses atomics and kill/signal/raise.
+        unsafe {
+            libc::signal(signal, on_signal as *const () as libc::sighandler_t);
+        }
     }
 }
 
@@ -390,16 +423,34 @@ impl Drop for TempDir {
     }
 }
 
+/// A fresh folder under the temp directory with an unpredictable name and
+/// owner-only permissions, as `mkdtemp` makes. A name that already exists,
+/// such as one left by an earlier run, is skipped for a new one.
 fn tempdir() -> Result<TempDir, Failure> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let path = std::env::temp_dir().join(format!(
-        "talkqte-cue-{}-{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::create_dir(&path).map_err(|_| Failure::Unreachable)?;
-    Ok(TempDir(path))
+    tempdir_named(|| {
+        let mut bytes = [0u8; 12];
+        getrandom::fill(&mut bytes).ok()?;
+        Some(format!(
+            "talkqte-cue-{}",
+            bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        ))
+    })
+}
+
+fn tempdir_named(mut name: impl FnMut() -> Option<String>) -> Result<TempDir, Failure> {
+    let parent = std::env::temp_dir();
+    for _ in 0..16 {
+        let path = parent.join(name().ok_or(Failure::Unreachable)?);
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        match builder.create(&path) {
+            Ok(()) => return Ok(TempDir(path)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => return Err(Failure::Unreachable),
+        }
+    }
+    Err(Failure::Unreachable)
 }
 
 /// What one finished child process returned.
@@ -1020,6 +1071,66 @@ mod tests {
             );
             thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    #[test]
+    fn a_signal_the_app_ignores_stays_ignored_and_others_get_cleanup() {
+        // SIGUSR1 and SIGUSR2 stand in for SIGHUP and SIGTERM, so the test
+        // process's own handling of the real signals is left alone.
+        let query = |signal| unsafe {
+            let mut action: libc::sigaction = std::mem::zeroed();
+            libc::sigaction(signal, std::ptr::null(), &mut action);
+            action.sa_sigaction
+        };
+        unsafe {
+            libc::signal(libc::SIGUSR1, libc::SIG_IGN);
+            libc::signal(libc::SIGUSR2, libc::SIG_DFL);
+        }
+        install_handlers(&[libc::SIGUSR1, libc::SIGUSR2]);
+        assert_eq!(
+            query(libc::SIGUSR1),
+            libc::SIG_IGN,
+            "an ignored signal stays ignored"
+        );
+        assert_ne!(
+            query(libc::SIGUSR2),
+            libc::SIG_DFL,
+            "the cleanup handler is installed"
+        );
+        // What the handler will put back is the signal's earlier disposition.
+        assert_eq!(
+            PREVIOUS[libc::SIGUSR2 as usize].load(std::sync::atomic::Ordering::Acquire),
+            libc::SIG_DFL
+        );
+        unsafe {
+            libc::signal(libc::SIGUSR1, libc::SIG_DFL);
+            libc::signal(libc::SIGUSR2, libc::SIG_DFL);
+        }
+    }
+
+    #[test]
+    fn each_call_gets_a_private_folder_and_a_leftover_name_is_skipped() {
+        use std::os::unix::fs::PermissionsExt;
+        let first = tempdir().unwrap();
+        let second = tempdir().unwrap();
+        assert_ne!(first.0, second.0);
+        let mode = std::fs::metadata(&first.0).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+        // A name left by an earlier run is passed over for a new one.
+        let leftover = std::env::temp_dir().join("talkqte-cue-leftover-from-earlier");
+        let _ = std::fs::create_dir(&leftover);
+        let mut names = [
+            "talkqte-cue-leftover-from-earlier",
+            "talkqte-cue-fresh-name-test",
+        ]
+        .into_iter();
+        let fresh = tempdir_named(|| names.next().map(str::to_string)).unwrap();
+        assert!(fresh.0.ends_with("talkqte-cue-fresh-name-test"));
+        // Each folder is removed once its call is done.
+        let path = fresh.0.clone();
+        drop(fresh);
+        assert!(!path.exists());
+        let _ = std::fs::remove_dir(&leftover);
     }
 
     #[test]
