@@ -36,8 +36,16 @@ function fixture({
   body,
   bodyFails = false,
   bodyCleanupFails = false,
+  missingDisplayLabel = false,
   initialSignal,
 } = {}) {
+  const selectedMedia = body
+    ? {
+        ...media,
+        purpose: 'neutral-calibration',
+        displayLabel: 'Fictional neutral calibration',
+      }
+    : media;
   const trace = [],
     events = new EventEmitter(),
     child = new EventEmitter();
@@ -171,6 +179,9 @@ function fixture({
         sha256: media.sha256,
         monotonicMs: performance.now(),
         uncertaintyMs: ackUncertainty,
+        ...(body && !missingDisplayLabel
+          ? { displayLabel: selectedMedia.displayLabel }
+          : {}),
       };
       if (!missingAck) onStarted(ack);
       if (duplicateAck) onStarted(ack);
@@ -237,7 +248,7 @@ function fixture({
   const options = {
     launcher,
     stopAfterS: 110,
-    media,
+    media: selectedMedia,
     player,
     recorder,
     source: {
@@ -431,6 +442,47 @@ test('prepared take refuses an adaptive body and a nonfictional media identity',
   assert.throws(() =>
     createPreparedTake({ media: { ...media, fictional: false } }),
   );
+});
+
+test('body bootstrap rejects narrative or unlabelled media before subscribing or constructing a run', () => {
+  let subscriptions = 0;
+  const subscribe = () => {
+    subscriptions++;
+    return () => {};
+  };
+  const body = Object.assign(async () => {}, { close: async () => {} });
+  const options = {
+    launcher: { executable: '/fictional/app', launch() {}, close() {} },
+    source: { waitListening() {} },
+    player: { prepare() {}, play() {}, stop() {}, subscribe },
+    recorder: { start() {}, stop() {}, subscribe },
+    stopAfterS: 110,
+    body,
+  };
+  for (const edit of [
+    { purpose: 'narrative', displayLabel: 'Narrative' },
+    { purpose: 'neutral-calibration' },
+    { purpose: 'neutral-calibration', displayLabel: '   ' },
+    { purpose: 'neutral-calibration', displayLabel: 'x'.repeat(121) },
+    { purpose: 'neutral-calibration', displayLabel: 'hidden\nlabel' },
+  ])
+    assert.throws(() =>
+      createLabPlaybackSession({ ...options, media: { ...media, ...edit } }),
+    );
+  assert.equal(subscriptions, 0);
+});
+
+test('body never starts without actual player acknowledgement of the displayed bootstrap label', async () => {
+  let bodies = 0;
+  const f = fixture({
+    body: async () => {
+      bodies++;
+    },
+    missingDisplayLabel: true,
+  });
+  await assert.rejects(f.take.done);
+  assert.equal(bodies, 0);
+  assert.equal(f.counts.playerStop, 1);
 });
 
 for (const event of [

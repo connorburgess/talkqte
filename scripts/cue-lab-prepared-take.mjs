@@ -56,6 +56,14 @@ export function createLabPlaybackSession({
       (body === undefined ||
         (typeof body === 'function' && typeof body.close === 'function')),
   );
+  if (body)
+    required(
+      media.purpose === 'neutral-calibration' &&
+        typeof media.displayLabel === 'string' &&
+        media.displayLabel.trim().length > 0 &&
+        media.displayLabel.length <= 120 &&
+        !/[\u0000-\u001f\u007f]/.test(media.displayLabel),
+    );
   const identity = Object.freeze({ ...media });
   const root = new AbortController();
   let phase = 'starting',
@@ -169,7 +177,8 @@ export function createLabPlaybackSession({
             required(
               !startObserved &&
                 !root.signal.aborted &&
-                anchor?.sha256 === identity.sha256,
+                anchor?.sha256 === identity.sha256 &&
+                (!body || anchor.displayLabel === identity.displayLabel),
             );
             startObserved = true;
             run.acknowledgePlaybackStart({

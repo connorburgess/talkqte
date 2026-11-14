@@ -95,7 +95,14 @@ the body, provider and native settle. It must use the same player, provider and
 gate; it does not own a second lifecycle. `createPreparedTake` refuses a body.
 
 An adaptive session must supply separately preregistered, labelled neutral voiced
-calibration media. It cannot silently seed scenario narrative into an empty stream
+calibration media. When a body is supplied, media must declare
+`purpose:"neutral-calibration"` and a nonempty `displayLabel` of at most 120
+characters without control characters. Narrative/unlabelled bootstrap is refused
+before constructing a run. At actual playback start, the player must have rendered
+that label and report the exact `displayLabel` in its `onStarted` observation;
+configured label text alone is not evidence that it was displayed. These checks
+do not judge semantic neutrality: approved content and hash preregistration remain
+required. The prepared path is unchanged. It cannot silently seed scenario narrative into an empty stream
 transcript. Actual incremental voice/player clocks and stream scheduling belong
 to that separate driver; this helper fabricates no clock or transcript history.
 
