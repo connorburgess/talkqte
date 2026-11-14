@@ -1,0 +1,62 @@
+{
+  "durationMs": 63000,
+  "model": "gpt-4o-mini-tts",
+  "segments": [
+    {
+      "id": "s1",
+      "speaker": "Robin",
+      "voice": "marin",
+      "startMs": 88,
+      "endMs": 3400,
+      "text": "A welcome guide could make first visits easier."
+    },
+    {
+      "id": "s2",
+      "speaker": "Alex",
+      "voice": "cedar",
+      "startMs": 4184,
+      "endMs": 8000,
+      "text": "Agreed. Someone can take the first draft of the welcome guide."
+    },
+    {
+      "id": "s3",
+      "speaker": "Robin",
+      "voice": "marin",
+      "startMs": 8800,
+      "endMs": 28000,
+      "text": "It should cover where to find tools, how to water the seedlings, and who to ask for help. I'd also include a small map, because the shed is tucked behind the greenhouse. A few photos would help people recognize the right tools. We can leave the more detailed planting advice for another page, so this one feels welcoming and easy to skim."
+    },
+    {
+      "id": "s4",
+      "speaker": "Alex",
+      "voice": "cedar",
+      "startMs": 32800,
+      "endMs": 37000,
+      "text": "We should have it ready soon, before the next group of visitors arrives."
+    },
+    {
+      "id": "s5",
+      "speaker": "Robin",
+      "voice": "marin",
+      "startMs": 45240,
+      "endMs": 51000,
+      "text": "A single page sounds right. Let's have it ready by Friday and try it with a few new visitors first."
+    },
+    {
+      "id": "s6",
+      "speaker": "Alex",
+      "voice": "cedar",
+      "startMs": 51992,
+      "endMs": 56000,
+      "text": "We could either print the guide or put a small sign with a link by the gate."
+    },
+    {
+      "id": "s7",
+      "speaker": "Robin",
+      "voice": "marin",
+      "startMs": 56536,
+      "endMs": 61000,
+      "text": "Let's bring those options to the next garden meeting and hear what everyone thinks."
+    }
+  ]
+}

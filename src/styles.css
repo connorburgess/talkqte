@@ -1560,3 +1560,10 @@ svg {
   height: 19px;
   flex-shrink: 0;
 }
+
+.demo-practice-hint {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 10px 0 22px;
+  max-width: 75ch;
+}

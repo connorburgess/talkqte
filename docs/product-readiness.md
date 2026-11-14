@@ -165,6 +165,8 @@ Offer a deliberate pause to practise responding aloud without capturing or evalu
 
 Acceptance: check all spoken lines against the fictional script, audible quality and speaker distinction, no overlapping or clipped turns, cue/text/audio alignment, immediate pause/End and correct replay, keyboard access and audio failure recovery. Compare useful participation and listening comprehension separately from technical playback checks. Record generation/model provenance and asset rights without account details or credentials. Review the concrete script and a bounded generation budget before a provider run; no unattended generation, billing change or API fallback. No user-outcome evidence is established by this demo.
 
+The [voiced demo record](voiced-demo.md) covers the bundled script, generation provenance and the checks run so far: line-by-line speech recovery, timing, controls and failure recovery. Audible quality, native playback, VoiceOver and comprehension remain open, so the roadmap item stays open.
+
 ## Distribution and first use
 
 Plan both how people find TalkQTE and how they receive a maintained application.

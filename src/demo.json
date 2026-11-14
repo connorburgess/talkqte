@@ -1,25 +1,25 @@
 {
   "title": "A better welcome",
   "description": "Planning a friendly first visit to a fictional community garden.",
-  "durationMs": 104000,
+  "durationMs": 63000,
   "segments": [
     {
       "id": "s1",
-      "atMs": 1000,
+      "atMs": 3400,
       "speaker": "Robin",
-      "text": "Let's make a first visit to the garden feel a little easier. A short welcome guide could help."
+      "text": "A welcome guide could make first visits easier."
     },
     {
       "id": "s2",
-      "atMs": 5000,
+      "atMs": 8000,
       "speaker": "Alex",
       "text": "Agreed. Someone can take the first draft of the welcome guide."
     },
     {
       "id": "s3",
-      "atMs": 18000,
+      "atMs": 28000,
       "speaker": "Robin",
-      "text": "It should cover where to find tools, how to water the seedlings, and who to ask for help."
+      "text": "It should cover where to find tools, how to water the seedlings, and who to ask for help. I'd also include a small map, because the shed is tucked behind the greenhouse. A few photos would help people recognize the right tools. We can leave the more detailed planting advice for another page, so this one feels welcoming and easy to skim."
     },
     {
       "id": "s4",
@@ -35,13 +35,13 @@
     },
     {
       "id": "s6",
-      "atMs": 69000,
+      "atMs": 56000,
       "speaker": "Alex",
       "text": "We could either print the guide or put a small sign with a link by the gate."
     },
     {
       "id": "s7",
-      "atMs": 85000,
+      "atMs": 61000,
       "speaker": "Robin",
       "text": "Let's bring those options to the next garden meeting and hear what everyone thinks."
     }

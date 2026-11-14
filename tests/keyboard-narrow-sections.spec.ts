@@ -33,7 +33,9 @@ test('a question is explained, dismissed and its quoted line kept from the keybo
   await page
     .getByRole('button', { name: 'Try demo', exact: true })
     .press('Enter');
-  await page.clock.runFor(5_200);
+  // Try demo opens the transcript; return to Notes, where focus is checked.
+  await page.getByRole('tab', { name: 'Notes', exact: true }).press('Enter');
+  await page.clock.runFor(8_200);
   const question = page.getByRole('region', { name: 'Suggested question' });
   const notes = page.getByRole('textbox', { name: 'Meeting notes' });
   await expect(

@@ -39,7 +39,7 @@ for (const surface of ['notebook', 'companion'] as const) {
         ? page.getByRole('button', { name: 'Pause demo', exact: true })
         : page.getByRole('textbox', { name: 'Meeting notes' });
     await focusTarget.focus();
-    await page.clock.runFor(5_200);
+    await page.clock.runFor(8_200);
     const question = page.getByRole('region', { name: 'Suggested question' });
     await expect(question.getByRole('heading')).toHaveText(
       'Who will take the first draft?',
@@ -90,7 +90,7 @@ test('reduced motion shows the complete question and source without animation', 
   await page.clock.install();
   await page.goto('/');
   await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(5_200);
+  await page.clock.runFor(8_200);
   const question = page.getByRole('region', { name: 'Suggested question' });
   await expect(question.getByRole('heading')).toBeVisible();
   expect(

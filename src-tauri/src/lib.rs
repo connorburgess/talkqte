@@ -1737,11 +1737,11 @@ mod session_clock_tests {
         );
         assert_eq!(
             runtime.engine.state.cue.as_ref().unwrap().remaining_ms,
-            8_000
+            11_000
         );
         runtime.sync_at(origin + Duration::from_millis(15_000));
         assert_eq!(runtime.engine.state.elapsed_ms, 15_000);
-        runtime.sync_at(origin + Duration::from_millis(23_000));
+        runtime.sync_at(origin + Duration::from_millis(26_000));
         assert!(runtime.engine.state.cue.is_none());
     }
 

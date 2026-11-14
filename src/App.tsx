@@ -41,6 +41,7 @@ import {
 } from './components/PanelDivider';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
 import { useCaptureControl } from './lib/useCaptureControl';
+import { useDemoVoices } from './lib/useDemoVoices';
 import {
   microphoneNotCapturing,
   sourceOnlyApplication,
@@ -363,6 +364,7 @@ function Notebook() {
   const resizeNotes = (value: number) =>
     setNotesRatio(value / (gridWidth - 28));
   const { state, error, setError, busy, run } = useSession<Snapshot>();
+  const voices = useDemoVoices(state);
   const microphone = useMicrophone();
   const capture = useCaptureControl();
   // A session fed by a selected application alone, with the microphone off
@@ -979,7 +981,7 @@ function Notebook() {
                 ) : (
                   <>
                     <span className="meeting-meta">
-                      Robin & Alex <span>1m 44s</span>
+                      Robin & Alex <span>{clockTime(state.durationMs)}</span>
                     </span>
                   </>
                 )}
@@ -1346,11 +1348,20 @@ function Notebook() {
                             : sourceApp
                               ? `Audio from ${sourceApp} · transcribed on this device · not saved`
                               : 'Your microphone · transcribed on this device · not saved'
-                          : 'Scripted conversation · separate from microphone'}
+                          : 'Fictional conversation · synthetic voices'}
                   </span>
                 </div>
               </div>
               <div className="session-actions">
+                {!state.live && !preparing && !finishing && (
+                  <button
+                    className="text-button"
+                    onClick={voices.toggle}
+                    aria-pressed={voices.muted}
+                  >
+                    {voices.muted ? 'Enable voices' : 'Mute voices'}
+                  </button>
+                )}
                 {!preparing && (
                   <span className="session-clock">
                     {clockTime(state.elapsedMs)}
@@ -1452,10 +1463,17 @@ function Notebook() {
                       className="primary-button"
                       disabled={busy}
                       onClick={() =>
-                        void run(() => {
+                        void run(async () => {
                           setNotice('');
+                          voices.start();
                           demoStarted.current = true;
-                          return bridge.command('start_demo');
+                          try {
+                            await bridge.command('start_demo');
+                          } catch (error) {
+                            voices.pause();
+                            throw error;
+                          }
+                          setTab('transcript');
                         })
                       }
                     >
@@ -1469,6 +1487,18 @@ function Notebook() {
               </div>
             </section>
 
+            {!state.live && !preparing && !finishing && (
+              <p className="demo-practice-hint">
+                {voices.unavailable && (
+                  <span role="status">
+                    Voices could not play. The transcript and cues still
+                    work.{' '}
+                  </span>
+                )}
+                Pause to try a response aloud, or keep listening. This demo does
+                not listen to your response or change its script.
+              </p>
+            )}
             <div
               className={`notebook-grid${splitContent ? ' is-split' : ''}`}
               ref={measureGrid}
