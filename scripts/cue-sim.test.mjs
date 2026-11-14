@@ -6,8 +6,9 @@ import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { MODEL } from './cue-lab.mjs';
+import { MODEL, buildPrompt } from './cue-lab.mjs';
 import {
+  EVALUATORS,
   claudeEvaluator,
   fakeEvaluator,
   rulesEvaluator,
@@ -64,6 +65,10 @@ function scripted(script) {
     async open() {
       return { model: null };
     },
+    request: (testCase) => ({
+      systemPrompt: null,
+      input: buildPrompt(testCase),
+    }),
     async decide(testCase) {
       seen.push(testCase);
       const [action, elapsedMs = 1_000, cue = null] =
@@ -451,6 +456,7 @@ test('a hosted simulation is refused before any process without confirmation, a 
         print: () => {},
         environment: { HOME: '/fictional-home' },
         evaluators: {
+          ...EVALUATORS,
           claude: () =>
             claudeEvaluator({
               environment: { HOME: '/fictional-home' },
@@ -486,6 +492,19 @@ test('the dry run starts nothing and says how many requests could leave the devi
   assert.match(text, /paper-reading-group: 11 lines over 69 s, at most 11/);
   assert.match(text, /off this device to Anthropic/);
   assert.match(text, /--max-calls 11 --included-usage-confirmed/);
+  // Every line is listed as a request would carry it: one speaker label,
+  // no speaker names, no labels.
+  const [conversation] = (await loadConversations()).filter(
+    (c) => c.id === 'paper-reading-group',
+  );
+  for (const item of conversation.lines) {
+    assert.ok(text.includes(`  ${item.id}  Speaker: ${item.text}`), item.id);
+    if (item.about) assert.ok(!text.includes(item.about), item.id);
+  }
+  assert.ok(!text.includes('Sofia'));
+  assert.match(text, /A cue the evaluator wrote .* is therefore sent back/);
+  assert.equal(text.match(/System prompt:/g).length, 1);
+  assert.ok(!text.includes('userName is'));
 });
 
 test('a run is repeatable and writes results and a full event log outside the repository', async () => {
@@ -601,6 +620,9 @@ test('the timed conversations cover software, AI and hiring work and are mostly 
       } else if (item.expect === 'resolved' || item.expect === 'withdraw') {
         const of = c.lines[order.get(item.of)];
         assert.equal(of?.expect, 'show', `${where} ends a labelled moment`);
+        // The moment must say where it closes, or it would stay open.
+        assert.ok(of.until, `${where}: ${item.of} names the line that ends it`);
+        assert.ok(order.get(of.until) <= i, where);
         assert.ok(order.get(item.of) < i, where);
       } else if (item.expect === null) {
         assert.ok(item.note?.length > 10, `${where} says why it is unlabelled`);
@@ -723,4 +745,167 @@ test('the labels evaluator cannot cue a moment that has left the six-line window
     ],
   );
   assert.equal(score(conversation, replay).opportunities.missed, 1);
+});
+
+test('the dry run prints the prompts and command a run would really use', async () => {
+  const dry = async (args) => {
+    const lines = [];
+    await main(args, {
+      print: (text) => lines.push(text),
+      environment: {},
+      evaluators: {
+        ...EVALUATORS,
+        claude: () => claudeEvaluator({ environment: {} }),
+      },
+    });
+    return lines.join('\n');
+  };
+  // Named input: speaker names and the listener's name are sent, and the
+  // settings are carried into the suggested command.
+  const named = await dry([
+    '--conversations',
+    'recruiter-intake',
+    '--input',
+    'named',
+    '--min-gap-ms',
+    '3000',
+    '--transcript-delay-ms',
+    '1000',
+    '--apply-stale',
+  ]);
+  assert.match(named, /userName "Kai"/);
+  assert.match(named, /  l1 {2}Paula: Thanks for making time/);
+  assert.match(named, /userName is the listener's own name/);
+  assert.match(
+    named,
+    /--conversations recruiter-intake --input named --min-gap-ms 3000 --transcript-delay-ms 1000 --apply-stale --run .* --max-calls \d+ --included-usage-confirmed/,
+  );
+  // A set: each case's own cue is listed, and cases without a session
+  // name get the plain prompt, so both prompts are printed.
+  const set = await dry(['--set', 'held-out', '--input', 'named']);
+  assert.match(set, /cue on screen from e1: Who will book the hall\?/);
+  assert.equal(set.match(/System prompt:/g).length, 2);
+  // More than one invocation allows: no command that would be refused.
+  const all = await dry([]);
+  assert.match(all, /could need 168 requests, more than the 100/);
+  assert.ok(!all.includes('--included-usage-confirmed'));
+});
+
+test('an adapter that does not say it is on-device cannot simulate without a confirmation and a cap', async () => {
+  const [conversation] = await loadConversations();
+  let opened = 0;
+  const { hosted: _omitted, ...undeclared } = {
+    ...fakeEvaluator({ latencyMs: 100 }),
+    id: 'undeclared',
+    open: async () => {
+      opened++;
+      return { model: 'fictional' };
+    },
+  };
+  await assert.rejects(
+    main(
+      [
+        '--conversations',
+        conversation.id,
+        '--evaluator',
+        'undeclared',
+        '--run',
+      ],
+      {
+        print: () => {},
+        environment: {},
+        evaluators: { undeclared: () => undeclared },
+      },
+    ),
+    /--included-usage-confirmed/,
+  );
+  for (const maxCalls of [undefined, Infinity, 0, 101])
+    await assert.rejects(
+      runSimulation({
+        source: 'conversations',
+        conversations: [conversation],
+        evaluator: undeclared,
+        maxCalls,
+      }),
+      /needs a call cap/,
+    );
+  assert.equal(opened, 0);
+});
+
+test('a cue shown after its moment closed is late, not missed, and a labelled withdrawal is not a flip', async () => {
+  // The answer is said two seconds after the question, but with a
+  // three-second transcription delay the evaluator has not heard it yet.
+  const late = talk([
+    line('l1', 0, 'Robin, can you book the room?', {
+      expect: 'show',
+      until: 'l2',
+    }),
+    line('l2', 2_000, 'Yes, I will.', { expect: 'resolved', of: 'l1' }),
+  ]);
+  const replay = await simulate(
+    late,
+    scripted({ l1: ['show', 500, 'Maya asked you to book the room.'] }),
+    { transcriptDelayMs: 3_000, minGapMs: 0 },
+  );
+  const scored = score(late, replay);
+  assert.deepEqual(
+    [
+      scored.opportunities.late,
+      scored.opportunities.missed,
+      scored.unexpectedShows,
+    ],
+    [1, 0, 0],
+  );
+
+  // The line labelled withdraw and a quiet line arrive while one request
+  // is in flight; the catch-up withdraws with the quiet line as newest.
+  const moved = talk([
+    line('l1', 0, 'Someone needs to book the room.', {
+      expect: 'show',
+      until: 'l3',
+    }),
+    line('l2', 5_000, 'Mm.', { expect: 'quiet' }),
+    line('l3', 5_500, 'Moving on to the budget.', {
+      expect: 'withdraw',
+      of: 'l1',
+    }),
+    line('l4', 6_000, 'Right.', { expect: 'quiet' }),
+  ]);
+  const metrics = score(
+    moved,
+    await simulate(
+      moved,
+      scripted({
+        l1: ['show', 500, 'Who will book the room?'],
+        l2: ['quiet', 2_000],
+        l4: ['withdraw', 500],
+      }),
+      noDelay,
+    ),
+  );
+  assert.equal(metrics.flips, 0);
+  assert.equal(metrics.endings.asLabelled, 1);
+  assert.equal(metrics.quiet.kept, metrics.quiet.evaluated);
+});
+
+test("a case whose cue is given never asks about that cue's own line", async () => {
+  const set = await loadSet('cue-lab');
+  for (const item of set.cases.filter((c) => c.existingCue)) {
+    const conversation = conversationFromCase(item, 'cue-lab');
+    const bound = await maxEvaluations(conversation, {});
+    // An evaluator that would show at once still cannot exceed the bound.
+    const eager = scripted(
+      Object.fromEntries(conversation.lines.map((l) => [l.id, ['quiet', 0]])),
+    );
+    const replay = await simulate(conversation, eager, {});
+    assert.equal(eager.seen.length, bound, item.id);
+    assert.ok(
+      !replay.timeline.some(
+        (e) =>
+          e.type === 'evaluation-start' &&
+          e.lineId === item.existingCue.sourceIds.at(-1),
+      ),
+      item.id,
+    );
+  }
 });

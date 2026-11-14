@@ -7,16 +7,22 @@
 //   hosted             true when case text leaves the device
 //   destination        where it goes, in plain words (hosted only)
 //   open()             one-time checks; returns facts for the results file
+//   request(testCase)  { systemPrompt, input }: exactly what deciding this
+//                      case reads or sends; null where there is nothing.
+//                      The dry run prints it and the log records it.
 //   decide(testCase)   { decision, elapsedMs, latency, usage?, provider? }
 //   close()
+//
+// `hosted` must be exactly false for an evaluator to run without the usage
+// acknowledgement and a call cap: anything else is treated as hosted.
 //
 // `latency` says what elapsedMs is: 'measured' wall time of a real request,
 // 'simulated' for the fake, or 'none' for recorded rule outcomes.
 import {
   MODEL,
   buildPrompt,
-  inheritedCredentialNames,
   openLab,
+  requestFor,
   validateDecision,
 } from './cue-lab.mjs';
 
@@ -31,13 +37,8 @@ export function claudeEvaluator({ environment = process.env, run } = {}) {
     destination:
       'Anthropic, through the Claude Code subscription sign-in on this device',
     async open() {
-      // Refuse rather than quietly drop them: an inherited key or gateway
-      // means this shell is set up for something other than the subscription.
-      const names = inheritedCredentialNames(environment);
-      if (names.length)
-        throw new Error(
-          `This shell carries API or provider settings (${names.join(', ')}). No process was started. Run the lab from a shell without them; it uses the subscription sign-in only.`,
-        );
+      // openLab refuses, before any process, when the shell carries an API
+      // key, token, gateway or provider switch.
       lab = await openLab(run ? { environment, run } : { environment });
       return {
         model: MODEL,
@@ -45,6 +46,7 @@ export function claudeEvaluator({ environment = process.env, run } = {}) {
         authentication: lab.access.authentication,
       };
     },
+    request: requestFor,
     async decide(testCase) {
       const report = await lab.evaluate(testCase);
       return {
@@ -92,6 +94,11 @@ export function fakeEvaluator({ latencyMs } = {}) {
     async open() {
       return { model: null };
     },
+    // It reads the same input a model would be sent, and no system prompt.
+    request: (testCase) => ({
+      systemPrompt: null,
+      input: buildPrompt(testCase),
+    }),
     async decide(testCase) {
       const input = buildPrompt(testCase);
       const newest = testCase.events.at(-1);
@@ -157,8 +164,10 @@ export function rulesEvaluator(outcomes) {
     async open() {
       return { model: null };
     },
+    // Nothing is read but the recorded outcome for the case.
+    request: () => ({ systemPrompt: null, input: null }),
     async decide(testCase) {
-      const action = outcomes[testCase.id];
+      const action = outcomes?.[testCase.id];
       if (!action)
         throw new Error(`No recorded rule outcome for ${testCase.id}.`);
       return {
@@ -176,3 +185,114 @@ export function rulesEvaluator(outcomes) {
     async close() {},
   };
 }
+
+/** How long an unread cue stays, as the engine's CUE_MS. */
+export const CUE_LIFETIME_MS = 18_000;
+
+/** The labels themselves as an evaluator, after a fixed delay: it shows a
+ * cue at each labelled moment and clears it at the labelled line, and is
+ * otherwise quiet. It sees only what a request holds, so a moment that has
+ * left the six-line window is not shown. No model is involved. It answers
+ * one question: if an evaluator agreed with every label and took this
+ * long, which cues would still be on time? */
+export function labelsEvaluator(conversations, { latencyMs = 4_000 } = {}) {
+  const byId = new Map(conversations.map((c) => [c.id, c]));
+  return {
+    id: 'labels',
+    label: `The labels, after a fixed ${latencyMs} ms (no model)`,
+    kind: 'fake',
+    hosted: false,
+    async open() {
+      return { model: null };
+    },
+    request: (testCase) => ({
+      systemPrompt: null,
+      input: buildPrompt(testCase),
+    }),
+    async decide(testCase) {
+      const { lines } = byId.get(testCase.id);
+      const at = new Map(lines.map((item, i) => [item.id, i]));
+      const inRequest = new Set(testCase.events.map((event) => event.id));
+      const newest = lines[at.get(testCase.events.at(-1).id)];
+      const heard = lines.slice(0, at.get(newest.id) + 1);
+      const decision = {
+        action: 'quiet',
+        cue: null,
+        sourceIds: [newest.id],
+        reason: 'The labels expect no change here.',
+        observedUse: 'not_observed',
+      };
+      const cue = testCase.existingCue;
+      if (cue) {
+        // The moment this cue is for; a fixture's own cue has none.
+        const moment = lines.find(
+          (item) => item.expect === 'show' && item.about === cue.text,
+        );
+        const ending = heard.findLast(
+          (item) =>
+            ['resolved', 'withdraw'].includes(item.expect) &&
+            item.of === (moment?.id ?? 'seed') &&
+            inRequest.has(item.id),
+        );
+        if (ending) {
+          decision.action = ending.expect;
+          decision.sourceIds = [...new Set([...cue.sourceIds, ending.id])];
+          decision.reason = 'A line labelled as ending this cue was heard.';
+        }
+      } else {
+        const moment = heard.findLast(
+          (item) =>
+            item.expect === 'show' &&
+            inRequest.has(item.id) &&
+            !(item.until && at.get(item.until) <= at.get(newest.id)) &&
+            !heard.some((other) => other.of === item.id) &&
+            newest.atMs - item.atMs < CUE_LIFETIME_MS,
+        );
+        if (moment) {
+          decision.action = 'show';
+          decision.cue = moment.about ?? 'A cue for the labelled moment.';
+          decision.sourceIds = [moment.id];
+          decision.reason = 'A labelled moment is open.';
+        }
+      }
+      return { decision, elapsedMs: latencyMs, latency: 'simulated' };
+    },
+    async close() {},
+  };
+}
+
+/** Every evaluator the lab can use, by the name given to --evaluator. Each
+ * takes what the runner knows: the environment, the recorded rule outcomes
+ * for the chosen set, the conversations being replayed, and an optional
+ * made-up delay. Adding a provider
+ * means adding one entry here. */
+export const EVALUATORS = {
+  claude: ({ environment }) => claudeEvaluator({ environment }),
+  fake: ({ latencyMs }) => fakeEvaluator({ latencyMs }),
+  rules: ({ rules }) => {
+    if (!rules)
+      throw new Error(
+        'The phrase rules have no recorded outcomes for the timed conversations: they run in Rust and have not been replayed on these. Use --set with one of the three case sets, or another evaluator.',
+      );
+    return rulesEvaluator(rules);
+  },
+  labels: ({ conversations, latencyMs }) => {
+    if (!conversations)
+      throw new Error(
+        'The labels evaluator replays labelled lines; use it with the simulation (npm run lab:sim).',
+      );
+    return labelsEvaluator(conversations, { latencyMs });
+  },
+};
+
+export function createEvaluator(name, context, evaluators = EVALUATORS) {
+  if (!Object.hasOwn(evaluators, name))
+    throw new Error(
+      `Unknown evaluator. Choose one of: ${Object.keys(evaluators).join(', ')}.`,
+    );
+  return evaluators[name](context);
+}
+
+/** Whether an evaluator must be treated as sending text off the device.
+ * Only an explicit false says it does not. */
+export const isHosted = (evaluator) => evaluator.hosted !== false;

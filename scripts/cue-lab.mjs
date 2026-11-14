@@ -33,13 +33,14 @@ export function systemPromptFor(testCase) {
 }
 
 /** Names, never values, of inherited settings that could route a request
- * to an API key, another provider or a gateway instead of the subscription. */
+ * to an API key, another provider, a gateway, a proxy or another sign-in
+ * instead of the subscription. */
 export function inheritedCredentialNames(source) {
   return Object.keys(source)
     .filter(
       (key) =>
         source[key] &&
-        /^(?:ANTHROPIC_(?:API_KEY|AUTH_TOKEN|CUSTOM_HEADERS|[A-Z_]*BASE_URL|[A-Z_]*API_KEY)|CLAUDE_CODE_(?:OAUTH_TOKEN|USE_[A-Z0-9_]+|API_KEY_HELPER[A-Z_]*)|AWS_BEARER_TOKEN_BEDROCK)$/.test(
+        /^(?:ANTHROPIC_(?:API_KEY|AUTH_TOKEN|CUSTOM_HEADERS|UNIX_SOCKET|[A-Z_]*BASE_URL|[A-Z_]*API_KEY|(?:BEDROCK|VERTEX|FOUNDRY)_[A-Z_]+)|CLAUDE_CODE_(?:OAUTH_[A-Z_]+|USE_[A-Z0-9_]+|API_KEY_[A-Z_]+|SKIP_[A-Z_]*AUTH)|CLAUDE_CONFIG_DIR|CLOUD_ML_REGION|AWS_BEARER_TOKEN_BEDROCK|(?:HTTPS?|ALL)_PROXY)$/i.test(
           key,
         ),
     )
@@ -135,12 +136,26 @@ export function assertSubscription(status) {
   }
 }
 
+/** Exactly what one request carries. The dry run prints this and the run
+ * sends it, so the two cannot differ. */
+export function requestFor(testCase) {
+  return {
+    systemPrompt: systemPromptFor(testCase),
+    input: buildPrompt(testCase),
+  };
+}
+
 export function buildPrompt(testCase) {
   // Keep the expected labels, case IDs, categories and the rules' own cue
   // type out of the model's input.
   const cue = testCase.existingCue ?? null;
   return JSON.stringify({
-    events: testCase.events,
+    // Only these fields of a line, whatever else a fixture may add later.
+    events: testCase.events.map((event) => ({
+      id: event.id,
+      ...(event.speaker === undefined ? {} : { speaker: event.speaker }),
+      text: event.text,
+    })),
     existingCue: cue && { text: cue.text, sourceIds: cue.sourceIds },
     ...(testCase.userName ? { userName: testCase.userName } : {}),
   });
@@ -219,6 +234,7 @@ function providerCounters(result) {
 }
 
 async function evaluate(testCase, access, options, run) {
+  const request = requestFor(testCase);
   const args = [
     ...BASE_ARGS,
     '--print',
@@ -250,12 +266,12 @@ async function evaluate(testCase, access, options, run) {
     '--output-format',
     'json',
     '--system-prompt',
-    systemPromptFor(testCase),
+    request.systemPrompt,
   ];
   const start = performance.now();
   const raw = await run('claude', args, {
     ...options,
-    input: buildPrompt(testCase),
+    input: request.input,
   });
   const elapsedMs = Math.round(performance.now() - start);
   const result = parseObject(
@@ -323,6 +339,13 @@ export async function openLab({
   environment = process.env,
   run = execute,
 } = {}) {
+  // Refuse rather than quietly drop them: an inherited key, token or gateway
+  // means this shell is set up for something other than the subscription.
+  const names = inheritedCredentialNames(environment);
+  if (names.length)
+    throw new Error(
+      `This shell carries API, provider or proxy settings (${names.join(', ')}). No process was started. Run the lab from a shell without them; it uses the subscription sign-in only.`,
+    );
   const cwd = await mkdtemp(join(tmpdir(), 'talkqte-cue-lab-'));
   const options = { cwd, env: subscriptionEnvironment(environment) };
   const close = () => rm(cwd, { recursive: true, force: true });

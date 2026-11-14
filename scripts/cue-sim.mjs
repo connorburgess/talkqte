@@ -14,12 +14,18 @@
 import { writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { buildPrompt, systemPromptFor } from './cue-lab.mjs';
-import { CUE_BUDGET_MS, callCap } from './cue-lab-batch.mjs';
 import {
-  claudeEvaluator,
-  fakeEvaluator,
-  rulesEvaluator,
+  CUE_BUDGET_MS,
+  MAX_CALLS_CEILING,
+  callCap,
+  requireCap,
+} from './cue-lab-batch.mjs';
+import {
+  CUE_LIFETIME_MS,
+  EVALUATORS,
+  createEvaluator,
+  isHosted,
+  labelsEvaluator,
 } from './cue-evaluators.mjs';
 import {
   createRunLog,
@@ -31,8 +37,7 @@ import {
 import { SETS, loadRulesOutcomes, loadSet } from './cue-lab-sets.mjs';
 import { isMain } from './is-main.mjs';
 
-/** How long an unread cue stays, as the engine's CUE_MS. */
-export const CUE_LIFETIME_MS = 18_000;
+export { CUE_LIFETIME_MS, labelsEvaluator };
 /** The evaluator sees this many recent lines, as the engine's bridge does. */
 export const CONTEXT_LINES = 6;
 export const DEFAULTS = {
@@ -129,72 +134,38 @@ export function finalOutcomeEvaluator(rules) {
   };
 }
 
-/** The labels themselves as an evaluator, after a fixed delay: it shows a
- * cue at each labelled moment and clears it at the labelled line, and is
- * otherwise quiet. It sees only what a request holds, so a moment that has
- * left the six-line window is not shown. No model is involved. It answers
- * one question: if an evaluator agreed with every label and took this
- * long, which cues would still be on time? */
-export function labelsEvaluator(conversations, { latencyMs = 4_000 } = {}) {
-  const byId = new Map(conversations.map((c) => [c.id, c]));
+/** What the evaluator is given for one decision: the lines in view, the
+ * cue on screen, and (in named input only) the listener's name. */
+function testCaseFor(conversation, lines, cue, input, finalLine = false) {
   return {
-    id: 'labels',
-    label: `The labels, after a fixed ${latencyMs} ms (no model)`,
-    kind: 'fake',
-    hosted: false,
-    async open() {
-      return { model: null };
-    },
-    async decide(testCase) {
-      const { lines } = byId.get(testCase.id);
-      const at = new Map(lines.map((item, i) => [item.id, i]));
-      const inRequest = new Set(testCase.events.map((event) => event.id));
-      const newest = lines[at.get(testCase.events.at(-1).id)];
-      const heard = lines.slice(0, at.get(newest.id) + 1);
-      const decision = {
-        action: 'quiet',
-        cue: null,
-        sourceIds: [newest.id],
-        reason: 'The labels expect no change here.',
-        observedUse: 'not_observed',
-      };
-      const cue = testCase.existingCue;
-      if (cue) {
-        // The moment this cue is for; a fixture's own cue has none.
-        const moment = lines.find(
-          (item) => item.expect === 'show' && item.about === cue.text,
-        );
-        const ending = heard.findLast(
-          (item) =>
-            ['resolved', 'withdraw'].includes(item.expect) &&
-            item.of === (moment?.id ?? 'seed') &&
-            inRequest.has(item.id),
-        );
-        if (ending) {
-          decision.action = ending.expect;
-          decision.sourceIds = [...new Set([...cue.sourceIds, ending.id])];
-          decision.reason = 'A line labelled as ending this cue was heard.';
-        }
-      } else {
-        const moment = heard.findLast(
-          (item) =>
-            item.expect === 'show' &&
-            inRequest.has(item.id) &&
-            !(item.until && at.get(item.until) <= at.get(newest.id)) &&
-            !heard.some((other) => other.of === item.id) &&
-            newest.atMs - item.atMs < CUE_LIFETIME_MS,
-        );
-        if (moment) {
-          decision.action = 'show';
-          decision.cue = moment.about ?? 'A cue for the labelled moment.';
-          decision.sourceIds = [moment.id];
-          decision.reason = 'A labelled moment is open.';
-        }
-      }
-      return { decision, elapsedMs: latencyMs, latency: 'simulated' };
-    },
-    async close() {},
+    id: conversation.id,
+    finalLine,
+    events: lines.map((line) => ({
+      id: line.id,
+      speaker: input === 'named' ? line.speaker : 'Speaker',
+      text: line.text,
+    })),
+    existingCue: cue && { text: cue.text, sourceIds: cue.sourceIds },
+    ...(input === 'named' && conversation.listener
+      ? { userName: conversation.listener }
+      : {}),
   };
+}
+
+/** The system prompts a run over these conversations would use, exactly
+ * as the evaluator gives them for each one. */
+function systemPrompts(conversations, evaluator, input) {
+  return [
+    ...new Set(
+      conversations
+        .map(
+          (c) =>
+            evaluator.request(testCaseFor(c, c.lines.slice(0, 1), null, input))
+              .systemPrompt,
+        )
+        .filter(Boolean),
+    ),
+  ];
 }
 
 /** Replays one conversation. Returns its timeline and its lines with the
@@ -227,6 +198,7 @@ export async function simulate(
   let next = 0;
   let cue = null;
   let cueCount = 0;
+  let seeded = false;
   let pending = null;
   let waiting = false;
   let wakeAt = null;
@@ -271,26 +243,21 @@ export async function simulate(
     const cited = (cue?.sourceIds ?? [])
       .map((id) => byId.get(id))
       .filter((line) => !recent.includes(line));
-    const testCase = {
-      id: conversation.id,
-      finalLine: newest === lines.at(-1),
-      events: [...cited, ...recent].map((line) => ({
-        id: line.id,
-        speaker: input === 'named' ? line.speaker : 'Speaker',
-        text: line.text,
-      })),
-      existingCue: cue && { text: cue.text, sourceIds: cue.sourceIds },
-      ...(input === 'named' && conversation.listener
-        ? { userName: conversation.listener }
-        : {}),
-    };
+    const testCase = testCaseFor(
+      conversation,
+      [...cited, ...recent],
+      cue,
+      input,
+      newest === lines.at(-1),
+    );
     calls.count++;
     lastStart = atMs;
     emit('evaluation-start', atMs, {
       lineId: newest.id,
       call: calls.count,
       existingCueId: cue?.cueId ?? null,
-      input: buildPrompt(testCase),
+      // The adapter's own account of what this request carries.
+      input: evaluator.request(testCase).input,
     });
     const result = await evaluator.decide(testCase);
     pending = {
@@ -355,9 +322,10 @@ export async function simulate(
       heard.push(line);
       emit('line', atMs, { lineId: line.id, spokenAtMs: line.atMs });
       const seed = conversation.seedCue;
-      if (seed && !cueCount && seed.sourceIds.at(-1) === line.id) {
+      if (seed && !seeded && seed.sourceIds.at(-1) === line.id) {
         // The fixture's cue is given, not decided: no evaluation here.
-        show(atMs, seed.text, seed.sourceIds, line.id, 'fixture');
+        seeded = true;
+        if (!cue) show(atMs, seed.text, seed.sourceIds, line.id, 'fixture');
       } else if (capped) {
         emit('evaluation-skipped', atMs, { lineId: line.id, why: 'call-cap' });
       } else if (pending) {
@@ -425,8 +393,12 @@ export function score(conversation, { lines, timeline }) {
     const open = opportunities.findLast(
       (o) =>
         index.get(o.lineId) <= at &&
-        (!o.until || at < index.get(o.until)) &&
-        trigger.arrivesAtMs < o.closesAtMs,
+        // A moment with an ending line is open until that line is the
+        // newest heard; whether the cue then came in time is judged below
+        // by the clock. One without is open while a cue could still live.
+        (o.until
+          ? at < index.get(o.until)
+          : trigger.arrivesAtMs < o.closesAtMs),
     );
     const repeat = texts.has(normal(event.text));
     texts.add(normal(event.text));
@@ -469,14 +441,17 @@ export function score(conversation, { lines, timeline }) {
       };
     });
 
-  // A flip: the evaluator showed a cue and then took it back, at a line
-  // that is not labelled as a reason to withdraw it.
+  // A flip: the evaluator showed a cue and then took it back, with no line
+  // heard by then that is labelled as a reason to withdraw that cue.
   const flips = shown.filter((event) => {
     const end = cleared.get(event.cueId);
-    return (
-      event.origin === 'evaluator' &&
-      end?.why === 'withdraw' &&
-      line(end.lineId).expect !== 'withdraw'
+    if (event.origin !== 'evaluator' || end?.why !== 'withdraw') return false;
+    const moment = opportunities.find((o) => o.cueId === event.cueId)?.lineId;
+    return !lines.some(
+      (other) =>
+        other.expect === 'withdraw' &&
+        other.of === moment &&
+        index.get(other.id) <= index.get(end.lineId),
     );
   }).length;
 
@@ -614,6 +589,7 @@ export function total(scores) {
 /** The most evaluations a replay can start: every decision instant. */
 export async function maxEvaluations(conversation, options) {
   const instant = {
+    request: () => ({ systemPrompt: null, input: null }),
     async decide() {
       return {
         decision: {
@@ -647,6 +623,8 @@ export async function runSimulation({
   log = createRunLog(null),
   now = () => new Date(),
 }) {
+  requireCap(evaluator, maxCalls);
+  const hosted = isHosted(evaluator);
   const settings = { ...DEFAULTS, ...options };
   const calls = { count: 0 };
   const replays = [];
@@ -657,20 +635,12 @@ export async function runSimulation({
     source,
     evaluator: evaluator.id,
     evaluatorLabel: evaluator.label,
-    hosted: evaluator.hosted,
+    hosted,
     destination: evaluator.destination ?? null,
     conversationIds: conversations.map(({ id }) => id),
     settings,
     maxCalls: maxCalls ?? null,
-    systemPrompts: [
-      ...new Set(
-        conversations.map((c) =>
-          systemPromptFor({
-            userName: settings.input === 'named' ? c.listener : null,
-          }),
-        ),
-      ),
-    ],
+    systemPrompts: systemPrompts(conversations, evaluator, settings.input),
     node: process.version,
     platform: `${process.platform}-${process.arch}`,
   });
@@ -723,7 +693,7 @@ export async function runSimulation({
       id: evaluator.id,
       label: evaluator.label,
       kind: evaluator.kind,
-      hosted: evaluator.hosted,
+      hosted,
       ...facts,
     },
     settings,
@@ -858,10 +828,7 @@ export async function main(
   {
     print = console.log,
     environment = process.env,
-    evaluators = {
-      claude: () => claudeEvaluator({ environment }),
-      fake: (latencyMs) => fakeEvaluator({ latencyMs }),
-    },
+    evaluators = EVALUATORS,
     now = () => new Date(),
   } = {},
 ) {
@@ -909,17 +876,14 @@ export async function main(
   const name = flags['--evaluator'] ?? 'claude';
   let source;
   let conversations;
-  let evaluator;
+  let rules = null;
   if (flags['--set']) {
     const set = await loadSet(flags['--set']);
     source = `set:${set.name}`;
     conversations = set.cases.map((item) =>
       conversationFromCase(item, set.name),
     );
-    if (name === 'rules')
-      evaluator = finalOutcomeEvaluator(
-        rulesEvaluator(await loadRulesOutcomes(set.name)),
-      );
+    rules = await loadRulesOutcomes(set.name);
   } else {
     source = 'conversations';
     const all = await loadConversations();
@@ -928,10 +892,6 @@ export async function main(
     if (unknown.length)
       throw new Error(`Unknown fictional conversation: ${unknown.join(', ')}.`);
     conversations = ids ? all.filter((c) => ids.includes(c.id)) : all;
-    if (name === 'rules')
-      throw new Error(
-        'The phrase rules have no recorded outcomes for the timed conversations: they run in Rust and have not been replayed on these. Use --set with one of the three case sets, or another evaluator.',
-      );
   }
   const latencyMs =
     flags['--latency-ms'] === undefined
@@ -941,19 +901,29 @@ export async function main(
     throw new Error(
       '--latency-ms sets the made-up delay of the labels or fake evaluator only.',
     );
-  if (!evaluator && name === 'labels')
-    evaluator = labelsEvaluator(conversations, { latencyMs });
-  if (!evaluator) {
-    if (!Object.hasOwn(evaluators, name))
-      throw new Error(
-        `Unknown evaluator. Choose one of: ${[...Object.keys(evaluators), 'labels', 'rules'].join(', ')}.`,
-      );
-    evaluator = evaluators[name](latencyMs);
-  }
+  let evaluator = createEvaluator(
+    name,
+    { environment, rules, conversations, latencyMs },
+    evaluators,
+  );
+  // The rules' record is one outcome per case, given at its last line.
+  if (evaluator.kind === 'rules') evaluator = finalOutcomeEvaluator(evaluator);
+  const hosted = isHosted(evaluator);
   const most = [];
   for (const conversation of conversations)
     most.push(await maxEvaluations(conversation, options));
   const mostTotal = most.reduce((a, b) => a + b, 0);
+
+  // The same selection and settings, for the command a dry run suggests.
+  const chosen = [
+    flags['--set']
+      ? `--set ${flags['--set']}`
+      : `--conversations ${conversations.map((c) => c.id).join(',')}`,
+    ...['--input', '--min-gap-ms', '--transcript-delay-ms']
+      .filter((flag) => flags[flag] !== undefined)
+      .map((flag) => `${flag} ${flags[flag]}`),
+    ...(flags['--apply-stale'] ? ['--apply-stale'] : []),
+  ].join(' ');
 
   if (!flags['--run']) {
     print('Dry run. No process was started and nothing was sent.');
@@ -961,31 +931,56 @@ export async function main(
     print(
       `Settings: evaluate on a new line, at least ${options.minGapMs} ms apart; a line reaches the evaluator ${options.transcriptDelayMs} ms after it is said; input "${options.input}"; each request holds the newest ${CONTEXT_LINES} lines and the cue on screen.`,
     );
-    for (const [i, conversation] of conversations.entries())
+    print(
+      hosted
+        ? `\nA run sends the lines below, a few at a time as they are "heard", off this device to ${evaluator.destination}. That is hosted inference and uses the subscription's shared allowance. No API key is used or accepted. Before the first request it makes 2 CLI checks (version and sign-in) that send no conversation text.`
+        : '\nA run evaluates on this device. No model, account or network is used. These are the lines an evaluator would be given:',
+    );
+    print(
+      'Every line as a request would carry it (ID, speaker label, text). Labels and conversation IDs are not sent.',
+    );
+    for (const [i, conversation] of conversations.entries()) {
       print(
-        `  ${conversation.id}: ${conversation.lines.length} lines over ${Math.round(conversation.lines.at(-1).atMs / 1000)} s, at most ${most[i]} evaluations`,
+        `\n${conversation.id}: ${conversation.lines.length} lines over ${Math.round(conversation.lines.at(-1).atMs / 1000)} s, at most ${most[i]} evaluations${options.input === 'named' && conversation.listener ? `; userName "${conversation.listener}"` : ''}`,
       );
+      const sent = testCaseFor(
+        conversation,
+        conversation.lines,
+        conversation.seedCue,
+        options.input,
+      );
+      for (const event of sent.events)
+        print(`  ${event.id}  ${event.speaker}: ${event.text}`);
+      if (sent.existingCue)
+        print(
+          `  cue on screen from ${sent.existingCue.sourceIds.join(', ')}: ${sent.existingCue.text}`,
+        );
+    }
+    print(
+      `\nEach request also carries the cue on screen at that moment: its text and the IDs of the lines it cites. A cue the evaluator wrote in an earlier reply is therefore sent back to it.`,
+    );
     print(
       `At most ${mostTotal} evaluations in all. A slow evaluator makes fewer, because lines arriving while a request is in flight share one catch-up.`,
     );
-    if (evaluator.hosted) {
+    for (const prompt of systemPrompts(conversations, evaluator, options.input))
+      print(`\nSystem prompt:\n${prompt}`);
+    if (!hosted)
       print(
-        `A run sends the lines of these fictional conversations, a few at a time as they are "heard", off this device to ${evaluator.destination}. That is hosted inference and uses the subscription's shared allowance. No API key is used or accepted. Before the first request it makes 2 local CLI checks that send no text.`,
+        `\nTo run it:\n  npm run lab:sim -- ${chosen} --evaluator ${name}${latencyMs === undefined ? '' : ` --latency-ms ${latencyMs}`} --run --out <directory outside the repository>`,
       );
+    else if (mostTotal > MAX_CALLS_CEILING)
       print(
-        `System prompt:\n${systemPromptFor({ userName: options.input === 'named' ? 'x' : null })}`,
+        `\nThis selection could need ${mostTotal} requests, more than the ${MAX_CALLS_CEILING} one invocation allows. Split it: choose fewer conversations with --conversations.`,
       );
+    else
       print(
-        `To run it, after checking that paid extra usage is off and with the owner's go-ahead for this run:\n  npm run lab:sim -- ${flags['--set'] ? `--set ${flags['--set']}` : `--conversations ${conversations.map((c) => c.id).join(',')}`} --run --out <directory outside the repository> --max-calls ${mostTotal} --included-usage-confirmed`,
-      );
-    } else
-      print(
-        'A run evaluates on this device. No model, account or network is used.',
+        `\nTo run it, after checking that paid extra usage is off and with the owner's go-ahead for this run:\n  npm run lab:sim -- ${chosen} --run --out <directory outside the repository> --max-calls ${mostTotal} --included-usage-confirmed`,
       );
     return null;
   }
   let maxCalls;
-  if (evaluator.hosted) {
+  // Anything not explicitly on-device needs the acknowledgement and a cap.
+  if (hosted) {
     if (!flags['--included-usage-confirmed'])
       throw new Error(
         'A hosted run needs --included-usage-confirmed, after checking in the Claude account that paid extra usage is off. Nothing was started.',

@@ -6,7 +6,7 @@ The tooling exists to learn when a cue should appear, stay away, or leave. It ca
 
 ## Evaluators
 
-Everything that decides about a cue sits behind one adapter in `scripts/cue-evaluators.mjs`, so another provider (a different CLI, a local model) is one more function there and nothing else changes.
+Everything that decides about a cue sits behind one adapter in `scripts/cue-evaluators.mjs`, so another provider (a different CLI, a local model) is one more entry in its list. The adapter itself says what each request carries (`request`), and the dry run, the run and the log all take it from there.
 
 | Evaluator | What it is | Leaves the device |
 | --- | --- | --- |
@@ -38,7 +38,7 @@ npm run lab:batch -- --set independent --evaluator fake --run --out <directory o
 npm run lab:batch -- --set cue-lab --evaluator rules --run --out <directory outside the repository>
 ```
 
-`--out` (or the `TALKQTE_LAB_OUTPUT` environment variable) must be an absolute path outside the checkout. The runner refuses a path inside the repository, including through a link, so results, logs and recordings cannot be committed by accident.
+`--out` (or the `TALKQTE_LAB_OUTPUT` environment variable) must be an absolute path outside the checkout. The runner refuses a path inside the repository, including through a link or another letter case of the same folder, and writes to the resolved location, so results, logs and recordings cannot be committed by accident.
 
 ## A bounded model run
 
@@ -51,9 +51,9 @@ npm run lab:batch -- --set held-out --run --out <directory outside the repositor
 
 What the runner enforces:
 
-- **A call cap.** `--max-calls` is required, from 1 to 100. A run that would need more requests than the cap is refused before anything starts, and the loop stops at the cap regardless.
-- **No API key, ever.** If the shell carries an API key, auth token, base-URL override or provider switch (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_…` and similar), the run is refused before any process starts and the message names the variables, never their values. The existing checks still apply after that: the child process gets an allowlisted environment, and an API-key, routed or unknown sign-in is rejected before any model request.
-- **One sign-in check, then one request per case, one at a time.** No retry, no alternate model, no fallback.
+- **A call cap.** `--max-calls` is required, from 1 to 100. An evaluator counts as hosted unless its adapter says explicitly that it is not, so a new adapter cannot skip the acknowledgement or the cap by omission. A run that would need more requests than the cap is refused before anything starts, and the loop stops at the cap regardless.
+- **No API key, ever.** If the shell carries an API key, auth token, base-URL override or provider switch (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_…` and similar), the run is refused before any process starts and the message names the variables, never their values. The single-case command refuses the same way, and so does a shell with `HTTPS_PROXY`, `HTTP_PROXY` or `ALL_PROXY` set. The existing checks still apply after that: the child process gets an allowlisted environment, and an API-key, routed or unknown sign-in is rejected before any model request.
+- **One version check and one sign-in check, which send no case text, then one request per case, one at a time.** No retry, no alternate model, no fallback.
 - **Stop at the first failure.** A usage limit, an error, a reply from another model, or a malformed decision ends the batch. Whatever completed is written, with the reason.
 - **Nothing recurring.** There is no schedule and no loop that starts by itself; CI never runs a model.
 
@@ -142,10 +142,10 @@ What it does, following the app's [evaluator bridge](cue-evaluator.md#transcript
 - A line reaches the evaluator a fixed time after it is said (`--transcript-delay-ms`, 3,000 by default, standing in for local transcription).
 - Each request holds the newest six lines and the lines the cue on screen cites. With `--input app` (the default) every line has the one label "Speaker" and no name is sent, as the app would send today; `--input named` adds speaker names and the listener's name, to see what they change.
 - One request at a time. A line that arrives while a request is in flight overtakes it: that decision is dropped, and one catch-up request follows with the latest lines. `--apply-stale` applies overtaken decisions anyway, to see how late they would have been.
-- Evaluations start only on a new line and at least `--min-gap-ms` apart (2,000 by default), so a conversation of N lines makes at most N requests. The dry run prints that bound for each conversation.
+- Evaluations start only on a new line and at least `--min-gap-ms` apart (2,000 by default), so a conversation of N lines makes at most N requests. The dry run prints that bound for each conversation, and every line as a request would carry it.
 - One cue at a time. An unread cue lives 18 seconds from its newest cited line; a cue proposed later than that is refused.
 
-It does not simulate cooldown, focus, hold, dismissal, note reminders or the companion window. A model run needs the same flags as a batch (`--run`, `--included-usage-confirmed`, `--max-calls`, an output directory) and the owner's go-ahead for that stated run; it is refused if it could need more requests than the cap, and stops at the first failure.
+It does not simulate cooldown, focus, hold, dismissal, note reminders or the companion window. A model run needs the same flags as a batch (`--run`, `--included-usage-confirmed`, `--max-calls`, an output directory) and the owner's go-ahead for that stated run; it is refused if it could need more requests than the cap, and stops at the first failure. Conversations that finished are written to the results file; the one in progress when a run stops is only in the event log. Each request carries up to six recent lines, the lines the cue on screen cites, and that cue's text, so a cue the model wrote is sent back to it.
 
 With `--set`, each case of a set is replayed as a two-second conversation from the fixture's own cue. The phrase rules can be used there (`--evaluator rules`), but only as their recorded final outcome applied at the last line. **The rules have not been replayed on the timed conversations**: they run in Rust, and that needs an engine replay that records each line.
 
@@ -154,13 +154,13 @@ With `--set`, each case of a set is replayed as a two-second conversation from t
 | Number | Meaning |
 | --- | --- |
 | Evaluations: started, applied, overtaken | Requests made; decisions that took effect; decisions dropped because a newer line arrived first |
-| Labelled moments: in time, late, missed | Of the `show` labels: a cue was on screen before the moment closed; after it closed; or never |
+| Labelled moments: in time, late, missed | Of the `show` labels: a cue was on screen before the moment closed; after it closed; or never. A cue belongs to the latest moment still open when its request was made |
 | Line said to cue on screen | From the end of the labelled line to the cue appearing: transcription delay, any wait, and the decision. This is the number the 5-second [budget](budgets.md) is about |
 | Decision time | The evaluator's own time per request |
 | Unexpected cues | Cues shown that belong to no open labelled moment |
-| Flips | Cues the evaluator showed and then withdrew at a line not labelled as a reason to withdraw |
+| Flips | Cues the evaluator showed and then withdrew when no line heard by then was labelled as a reason to withdraw that cue |
 | Duplicates | A second cue for a moment already cued, or the same words shown again |
-| Quiet kept | Of the evaluated lines labelled quiet, those where the decision was quiet. A cue that arrives a line late for a moment still open is not counted against quiet |
+| Quiet kept | Of the evaluated lines labelled quiet, those where the decision was quiet, whether or not that decision was later dropped. A decision that is only catching up (a cue for a moment still open, or clearing a cue after the line labelled as ending it) is not counted against quiet |
 | Endings: as labelled, otherwise, lingered | When a line answers or removes the basis of a cue on screen: cleared with the labelled action, cleared with the other one, or left until it expired, with how long it stayed |
 
 ### What replaying the labels shows
