@@ -172,7 +172,7 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
   await page.evaluate(() => window.captureTest.finishStop());
   await expect(title(page)).toHaveText('Live session ended');
   await expect(session(page)).toContainText(
-    'Nothing was saved. The transcript stays here until you start another session or quit; your notes stay until you quit.',
+    'Nothing was saved. The transcript stays here until you start another session or quit and is never exported; your notes stay until you quit and can be exported.',
   );
   await expect(page.getByRole('heading', { name: firstCue })).toHaveCount(0);
   await expect(
@@ -187,10 +187,19 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
   await expect(
     page.getByRole('textbox', { name: 'Meeting notes' }),
   ).toHaveValue('Fictional note: ask about the welcome guide.');
-  // A live session is never exported, and a new one can be started.
-  await expect(
-    page.getByRole('button', { name: 'Export', exact: true }),
-  ).toBeDisabled();
+  // After Stop the notes can be exported; the transcript never is.
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  const review = page.getByRole('dialog', { name: 'Review your export' });
+  await expect(review.locator('pre')).toHaveText(
+    '# TalkQTE notes\n\nFictional note: ask about the welcome guide.\n',
+    { useInnerText: true },
+  );
+  await expect(review).not.toContainText('first draft');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.notebook-footer')).toHaveText(
+    'The transcript is never saved or exported. Your notes stay in memory until you quit; export anything you want to keep before closing.',
+  );
+  // A new session can be started.
   await expect(
     session(page).getByRole('button', { name: 'Start live session' }),
   ).toBeEnabled();
