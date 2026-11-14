@@ -353,13 +353,17 @@ async function dryRun({ flags, meeting, appCommit, seconds, helper, print }) {
       const byTitle = talkqte.some(
         (window) => window.title === 'TalkQTE companion',
       );
+      // A preview build shares the app's name; two copies would be a guess.
+      const copies = new Set(talkqte.map((window) => window.pid)).size;
       step(
-        talkqte.length > 0,
-        byTitle
-          ? 'TalkQTE companion: found by its title.'
-          : talkqte.length
-            ? 'TalkQTE companion: its title is not visible; the smallest TalkQTE window would be used. Check that is the companion.'
-            : 'TalkQTE companion: no TalkQTE window on screen. Open TalkQTE and show the companion.',
+        talkqte.length > 0 && copies <= 1,
+        copies > 1
+          ? `TalkQTE companion: ${copies} running copies of TalkQTE have windows on screen. Quit every copy but the one under test.`
+          : byTitle
+            ? 'TalkQTE companion: found by its title.'
+            : talkqte.length
+              ? 'TalkQTE companion: its title is not visible; the smallest TalkQTE window would be used. Check that is the companion.'
+              : 'TalkQTE companion: no TalkQTE window on screen. Open TalkQTE and show the companion.',
       );
     } else
       step(
