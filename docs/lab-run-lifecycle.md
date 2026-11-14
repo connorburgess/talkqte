@@ -61,8 +61,8 @@ auto-start. A matching `dev_stop` event has `run_id` and one of these steps:
 
 Before `armed`, JS retains Stop intent and sends no signal. Arming has a five-second
 owned-spawn deadline; missing/foreign/duplicate arming fails closed without a kill
-fallback. After the single signal, release has a separate three-second bound.
-The lifecycle's eight-second default release wait covers both bounds. Timing
+fallback. After the single signal, release has a separate six-second bound, covering native's five-second cleanup observation.
+The lifecycle's twelve-second default release wait covers both bounds. Timing
 loss, process error or process exit before release fails cleanup. Transcript and
 cue text are not forwarded into lifecycle events or logs.
 

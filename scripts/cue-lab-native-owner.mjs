@@ -7,7 +7,7 @@ export function createLabNativeOwner({
   executable,
   launch,
   armingMs = 5000,
-  releaseMs = 3000,
+  releaseMs = 6000,
 } = {}) {
   if (
     !isAbsolute(executable ?? '') ||

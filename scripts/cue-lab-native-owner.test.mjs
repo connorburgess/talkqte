@@ -148,3 +148,16 @@ test('dropped timing evidence fails closed rather than accepting a later apparen
   await assert.rejects(stopped, { category: 'cleanup' });
   assert.deepEqual(f.signals, []);
 });
+
+test('the release deadline starts after arming and signal, not at early Stop intent', async () => {
+  const f = setup({ armingMs: 100, releaseMs: 10 });
+  const starting = f.start();
+  const stopping = f.owner.stop();
+  await delay(20);
+  assert.deepEqual(f.signals, []);
+  f.timing('armed');
+  await starting;
+  assert.deepEqual(f.signals, ['SIGUSR2']);
+  f.timing('released');
+  assert.deepEqual(await stopping, { released: true });
+});

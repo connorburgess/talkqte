@@ -18,7 +18,7 @@ export function createLabRun({
   signal,
   processEvents = process,
   startupMs = 10000,
-  releaseMs = 8000,
+  releaseMs = 12000,
 } = {}) {
   if (
     !settings ||
@@ -31,7 +31,7 @@ export function createLabRun({
     startupMs > 30000 ||
     !Number.isSafeInteger(releaseMs) ||
     releaseMs < 1 ||
-    releaseMs > 10000 ||
+    releaseMs > 20000 ||
     typeof processEvents?.on !== 'function' ||
     typeof processEvents?.off !== 'function'
   )
