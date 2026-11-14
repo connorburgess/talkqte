@@ -1,0 +1,678 @@
+{
+  "status": "Fictional independent cases. Labels written on 14 November 2026 by a lane that had not read the phrase rules, without running the rules on them, and awaiting the owner's review.",
+  "authorship": "The author read PRODUCT.md, the structure and action names of cue-rules-held-out.json, and the description of what a held-out case is. During unrelated demo work the author had also read the browser preview's demo stand-in (src/lib/preview.ts), and saw the opening cases of the held-out file while reading its structure. The engine's rules and their written descriptions were not read.",
+  "replay": "Same format as cue-rules-held-out.json: lines arrive in order with one speaker label. Where a case has an existingCue, that cue is on screen after its source line. userName, when present, is the session-only name from Settings.",
+  "actions": {
+    "show": "A new cue should appear.",
+    "quiet": "Nothing should change: no new cue, and a cue on screen stays as it is.",
+    "withdraw": "The cue on screen should be removed because it is stale or unwanted.",
+    "resolved": "The cue on screen has been answered by the conversation."
+  },
+  "cases": [
+    {
+      "id": "storeroom-chairs",
+      "category": "no-owner",
+      "events": [
+        {
+          "id": "e1",
+          "text": "The hall gave us forty chairs, but they are all still stacked in the storeroom."
+        },
+        {
+          "id": "e2",
+          "text": "Right, and somebody has to get those out before the doors open on Saturday."
+        }
+      ],
+      "expected": {
+        "action": "show",
+        "reason": "Getting the chairs out is a task with a time attached and nobody named to do it."
+      }
+    },
+    {
+      "id": "server-cupboard",
+      "category": "no-owner",
+      "events": [
+        {
+          "id": "e1",
+          "text": "The server cupboard still has to be emptied before the movers turn up."
+        },
+        {
+          "id": "e2",
+          "text": "Yeah. It's mostly old cables and a printer nobody uses."
+        }
+      ],
+      "expected": {
+        "action": "show",
+        "reason": "Emptying the cupboard is needed before the move and no one has taken it."
+      }
+    },
+    {
+      "id": "tombola-owner-lost",
+      "category": "correction",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Lena's running the tombola, so that one's covered."
+        },
+        {
+          "id": "e2",
+          "text": "No, wait, Lena's away that weekend. So the tombola hasn't got anybody."
+        }
+      ],
+      "expected": {
+        "action": "show",
+        "reason": "The correction removes the only owner, leaving the tombola without one."
+      }
+    },
+    {
+      "id": "gate-shift-taken",
+      "category": "answered-later",
+      "events": [
+        {
+          "id": "e1",
+          "text": "We still need a person on the gate for the morning shift."
+        },
+        {
+          "id": "e2",
+          "text": "I'll do the gate, I'm there from eight anyway."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Owner",
+        "text": "Who will take the gate in the morning?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "resolved",
+        "reason": "A speaker takes the gate shift in the next line."
+      }
+    },
+    {
+      "id": "compost-bins-later",
+      "category": "answered-later",
+      "events": [
+        {
+          "id": "e1",
+          "text": "The compost bins want turning, and no one has touched them since June."
+        },
+        {
+          "id": "e2",
+          "text": "They do, they're starting to smell."
+        },
+        {
+          "id": "e3",
+          "text": "Leave that with me. I can do it Sunday morning."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Owner",
+        "text": "Who will turn the compost bins?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "resolved",
+        "reason": "Two lines later a speaker takes the job and says when."
+      }
+    },
+    {
+      "id": "permit-form-sometime",
+      "category": "vague-deadline",
+      "events": [
+        {
+          "id": "e1",
+          "text": "We've got to get the street-closure form in to the parish office at some point fairly soon."
+        }
+      ],
+      "expected": {
+        "action": "show",
+        "reason": "The form has a deadline in spirit but no date."
+      }
+    },
+    {
+      "id": "floor-plan-when-free",
+      "category": "vague-deadline",
+      "events": [
+        {
+          "id": "e1",
+          "text": "I'll send the floor plan over to the movers once I get a minute."
+        },
+        {
+          "id": "e2",
+          "text": "Great, they keep asking for it."
+        }
+      ],
+      "expected": {
+        "action": "show",
+        "reason": "Others are waiting on the floor plan and the promise has no time."
+      }
+    },
+    {
+      "id": "stall-list-thursday",
+      "category": "answered-later",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Let's have the stall list finished nice and early this time."
+        },
+        {
+          "id": "e2",
+          "text": "And by early I mean Thursday at noon, before the newsletter goes out."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Timing",
+        "text": "When does the stall list need to be finished?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "resolved",
+        "reason": "The next line turns \"early\" into a day and time."
+      }
+    },
+    {
+      "id": "seed-order-twentieth",
+      "category": "answered-later",
+      "events": [
+        {
+          "id": "e1",
+          "text": "We ought to get the seed order in before too long."
+        },
+        {
+          "id": "e2",
+          "text": "The catalogue price only holds until the end of the month, mind."
+        },
+        {
+          "id": "e3",
+          "text": "Then let's order on the twentieth."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Timing",
+        "text": "What date should the seed order go in?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "resolved",
+        "reason": "The group settles on the twentieth two lines later."
+      }
+    },
+    {
+      "id": "cake-stall-tables",
+      "category": "asked-by-name",
+      "events": [
+        {
+          "id": "e1",
+          "text": "So that's the budget done."
+        },
+        {
+          "id": "e2",
+          "text": "Maren, could you tell us how many tables the cake stall wants?"
+        }
+      ],
+      "userName": "Maren",
+      "expected": {
+        "action": "show",
+        "reason": "Maren is asked a direct question by name."
+      }
+    },
+    {
+      "id": "lift-name-at-end",
+      "category": "asked-by-name",
+      "events": [
+        {
+          "id": "e1",
+          "text": "I think the van is sorted, but what did the landlord say about using the lift, Tobias?"
+        }
+      ],
+      "userName": "Tobias",
+      "expected": {
+        "action": "show",
+        "reason": "The question is put to Tobias, with his name at the end."
+      }
+    },
+    {
+      "id": "posters-praise",
+      "category": "plain",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Maren did the posters last year and they were lovely."
+        },
+        {
+          "id": "e2",
+          "text": "They really were. People kept them."
+        }
+      ],
+      "userName": "Maren",
+      "expected": {
+        "action": "quiet",
+        "reason": "Maren is mentioned and thanked, not asked anything."
+      }
+    },
+    {
+      "id": "as-maren-said",
+      "category": "plain",
+      "events": [
+        {
+          "id": "e1",
+          "text": "As Maren said earlier, the hall's booked from ten, so we can set up from then."
+        }
+      ],
+      "userName": "Maren",
+      "expected": {
+        "action": "quiet",
+        "reason": "The listener is quoted, not addressed, and nothing is open."
+      }
+    },
+    {
+      "id": "urn-for-idris",
+      "category": "another-addressee",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Idris, do you know whether the big urn still works?"
+        }
+      ],
+      "userName": "Maren",
+      "expected": {
+        "action": "quiet",
+        "reason": "The question is for Idris, not for Maren."
+      }
+    },
+    {
+      "id": "desks-via-hana",
+      "category": "another-addressee",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Hana, can you check with Tobias's team afterwards and tell me how many desks they need?"
+        }
+      ],
+      "userName": "Tobias",
+      "expected": {
+        "action": "quiet",
+        "reason": "Hana is the one asked; Tobias's name appears only as whose team it is."
+      }
+    },
+    {
+      "id": "anyone-seen-gazebo",
+      "category": "uncertain-addressee",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Does anyone know if we still have the gazebo, or did it go in the skip?"
+        }
+      ],
+      "userName": "Maren",
+      "expected": {
+        "action": "quiet",
+        "reason": "The question goes to the whole room, so it is not clearly for the listener."
+      }
+    },
+    {
+      "id": "you-grab-the-float",
+      "category": "uncertain-addressee",
+      "events": [
+        {
+          "id": "e1",
+          "text": "The cash tin is in the school office."
+        },
+        {
+          "id": "e2",
+          "text": "Could you grab the float from there on Friday?"
+        }
+      ],
+      "userName": "Tobias",
+      "expected": {
+        "action": "quiet",
+        "reason": "Nothing says who \"you\" is, so it cannot be treated as asked of the listener."
+      }
+    },
+    {
+      "id": "caretaker-keys-again",
+      "category": "repeat",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Nobody's down to collect the keys from the caretaker yet."
+        },
+        {
+          "id": "e2",
+          "text": "The bunting's in my boot, by the way."
+        },
+        {
+          "id": "e3",
+          "text": "Like I say, we still haven't got anyone collecting those keys."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Owner",
+        "text": "Who will collect the keys from the caretaker?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "quiet",
+        "reason": "The same gap is restated; the question already showing covers it."
+      }
+    },
+    {
+      "id": "risk-form-again",
+      "category": "repeat",
+      "events": [
+        {
+          "id": "e1",
+          "text": "That risk form needs to go to the council soon."
+        },
+        {
+          "id": "e2",
+          "text": "Honestly, it really does need to go in soon."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Timing",
+        "text": "When does the risk form need to go in?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "quiet",
+        "reason": "The second line only repeats the first, adding no date and no new point."
+      }
+    },
+    {
+      "id": "bouncy-castle-to-parking",
+      "category": "topic-change",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Somebody has to ring the bouncy castle people."
+        },
+        {
+          "id": "e2",
+          "text": "Anyway, moving on to parking. The field's waterlogged."
+        },
+        {
+          "id": "e3",
+          "text": "We might have to ask for the school car park."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Owner",
+        "text": "Who will ring the bouncy castle people?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "withdraw",
+        "reason": "The meeting has moved on to parking and stays there."
+      }
+    },
+    {
+      "id": "carpet-tiles-same-subject",
+      "category": "topic-change",
+      "events": [
+        {
+          "id": "e1",
+          "text": "It's either the blue carpet tiles or the grey ones."
+        },
+        {
+          "id": "e2",
+          "text": "The other thing about the grey is that it hides coffee."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Decision",
+        "text": "How will you choose between the blue and grey tiles?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "quiet",
+        "reason": "Still weighing the same two options; \"the other thing\" is not a new subject."
+      }
+    },
+    {
+      "id": "skip-or-trailer-settled",
+      "category": "answered-later",
+      "events": [
+        {
+          "id": "e1",
+          "text": "We could hire a skip, or do tip runs with Yusuf's trailer."
+        },
+        {
+          "id": "e2",
+          "text": "Tip runs are a faff, to be fair."
+        },
+        {
+          "id": "e3",
+          "text": "Let's just go with the skip, then. Settled."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Decision",
+        "text": "How will you choose between the skip and the trailer?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "resolved",
+        "reason": "The choice is made two lines later."
+      }
+    },
+    {
+      "id": "work-party-parked",
+      "category": "deferral",
+      "events": [
+        {
+          "id": "e1",
+          "text": "We should fix a date for the autumn work party at some stage."
+        },
+        {
+          "id": "e2",
+          "text": "Let's park that until we've seen what the weather does, and come back to it in September."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Timing",
+        "text": "What date should the autumn work party be?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "withdraw",
+        "reason": "The group puts the date off on purpose, so asking for it now is unwanted."
+      }
+    },
+    {
+      "id": "shed-colour-not-tonight",
+      "category": "deferral",
+      "events": [
+        {
+          "id": "e1",
+          "text": "What colour are we painting the new shed, green or that dark blue?"
+        },
+        {
+          "id": "e2",
+          "text": "Let's not get into that tonight. It's on the agenda for March."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Decision",
+        "text": "How will you choose between green and dark blue?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "withdraw",
+        "reason": "The choice is deferred to a named later meeting."
+      }
+    },
+    {
+      "id": "floor-not-moving",
+      "category": "correction",
+      "events": [
+        {
+          "id": "e1",
+          "text": "The move is coming up, so we need the crates packed in good time."
+        },
+        {
+          "id": "e2",
+          "text": "Sorry, scrap that. Facilities have just told me our floor isn't moving at all."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Timing",
+        "text": "When do the crates need to be packed?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "withdraw",
+        "reason": "The speaker takes the whole thing back, so there is nothing to time."
+      }
+    },
+    {
+      "id": "minibus-already-booked",
+      "category": "correction",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Someone needs to book the minibus for the trip to the seed swap."
+        },
+        {
+          "id": "e2",
+          "text": "Oh, hang on, I'm wrong. Farah booked it last week, it's on the sheet."
+        }
+      ],
+      "existingCue": {
+        "ruleType": "Owner",
+        "text": "Who will book the minibus?",
+        "sourceIds": ["e1"]
+      },
+      "expected": {
+        "action": "resolved",
+        "reason": "The speaker corrects themselves: the booking is done and has a name on it."
+      }
+    },
+    {
+      "id": "tomato-glut",
+      "category": "plain",
+      "events": [
+        {
+          "id": "e1",
+          "text": "The tomatoes went mad this year."
+        },
+        {
+          "id": "e2",
+          "text": "We had three crates off the end bed alone."
+        }
+      ],
+      "expected": {
+        "action": "quiet",
+        "reason": "Small talk about the harvest; nothing is open."
+      }
+    },
+    {
+      "id": "lead-and-urn-covered",
+      "category": "plain",
+      "events": [
+        {
+          "id": "e1",
+          "text": "I'll bring the extension lead on Friday, and Wes is fetching the urn at nine."
+        }
+      ],
+      "expected": {
+        "action": "quiet",
+        "reason": "Both jobs have a person and a time."
+      }
+    },
+    {
+      "id": "thanks-and-tea",
+      "category": "plain",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Thanks, everyone, for coming out in this rain."
+        },
+        {
+          "id": "e2",
+          "text": "Tea's in the pot if anybody wants one."
+        }
+      ],
+      "expected": {
+        "action": "quiet",
+        "reason": "A welcome and an offer of tea."
+      }
+    },
+    {
+      "id": "rhetorical-cake-stall",
+      "category": "plain",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Who'd have thought a cake stall could make four hundred pounds?"
+        },
+        {
+          "id": "e2",
+          "text": "I know. Absolutely brilliant."
+        }
+      ],
+      "expected": {
+        "action": "quiet",
+        "reason": "A rhetorical question that nobody is expected to answer."
+      }
+    },
+    {
+      "id": "t-shirts-arrived",
+      "category": "plain",
+      "events": [
+        {
+          "id": "e1",
+          "text": "We went with the green T-shirts in the end, and they turned up yesterday."
+        }
+      ],
+      "expected": {
+        "action": "quiet",
+        "reason": "Reports a choice already made and delivered."
+      }
+    },
+    {
+      "id": "hall-already-swept",
+      "category": "plain",
+      "events": [
+        {
+          "id": "e1",
+          "text": "Somebody had already swept the hall by the time I got there, which was nice."
+        }
+      ],
+      "expected": {
+        "action": "quiet",
+        "reason": "Describes something already done; it is not a job waiting for an owner."
+      }
+    },
+    {
+      "id": "skip-date-on-sheet",
+      "category": "plain",
+      "events": [
+        {
+          "id": "e1",
+          "text": "When's the skip coming? Oh, it's on the sheet. Tuesday the fourth."
+        }
+      ],
+      "expected": {
+        "action": "quiet",
+        "reason": "The speaker answers their own question in the same breath."
+      }
+    },
+    {
+      "id": "new-office-windows",
+      "category": "plain",
+      "events": [
+        {
+          "id": "e1",
+          "text": "The new office has those windows that actually open."
+        },
+        {
+          "id": "e2",
+          "text": "And a kettle on every floor, apparently."
+        }
+      ],
+      "expected": {
+        "action": "quiet",
+        "reason": "Chat about the new office; no task, date, choice or question."
+      }
+    }
+  ]
+}

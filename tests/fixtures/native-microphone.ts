@@ -63,6 +63,7 @@ let delayProcessingSnapshot = new URLSearchParams(location.search).has(
   'delay-processing',
 );
 const stopTargets: StopTarget[] = [];
+const applicationAudio: unknown[] = [];
 async function sendProcessing(value: Partial<ProcessingSnapshot>) {
   processing = {
     ...processing,
@@ -259,6 +260,10 @@ mockIPC(
     if (permissionFixture.commands.includes(command))
       return permissionFixture.command(command, args);
     switch (command) {
+      case 'application_audio':
+        // Development builds only: record what the notebook asked for.
+        applicationAudio.push(structuredClone(args));
+        return null;
       case 'processing_snapshot':
         if (delayProcessingSnapshot)
           return new Promise<ProcessingSnapshot>((resolve) =>
@@ -525,6 +530,7 @@ declare global {
       send: typeof sendProcessing;
       state: () => ProcessingSnapshot;
       targets: StopTarget[];
+      applicationAudio: unknown[];
       releaseStart: () => void;
       holdStart: () => void;
       failStart: (message: string) => void;
@@ -549,6 +555,7 @@ declare global {
       say: typeof say;
       setCue: (cue: Snapshot['cue']) => Promise<void>;
       setQuestionSize: (size: Snapshot['questionSize']) => Promise<void>;
+      setSourceSession: (sourceSession: boolean) => Promise<void>;
       rejectNextPause: () => void;
     };
     modelTest: {
@@ -572,6 +579,7 @@ window.captureTest = {
   send: sendProcessing,
   state: () => structuredClone(processing),
   targets: stopTargets,
+  applicationAudio,
   holdStart: () => {
     heldStart = true;
   },
@@ -630,6 +638,10 @@ window.liveTest = {
   say,
   setCue: (cue) => publish({ cue }),
   setQuestionSize: (questionSize) => publish({ questionSize }),
+  // Development builds only: the cue snapshot marks a session fed by an
+  // application alone.
+  setSourceSession: (sourceSession: boolean) =>
+    publish({ sourceSession } as Partial<Snapshot>),
   rejectNextPause: () => {
     rejectCuePause = true;
   },

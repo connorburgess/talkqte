@@ -10,8 +10,10 @@
 //! every 250 ms as in a live session, and chunks end at the first pause after
 //! N ms; `--chunk-ms` is then the longest a chunk can be.
 //!
-//! Prints only cue questions, source IDs, counts, and timings, never
-//! transcript text. Reads the clip and model; writes nothing.
+//! Prints only cue kinds, source IDs, lengths, counts, and timings. A cue's
+//! words are never printed: a quoted line, an open question, or a question
+//! put to the listener repeats what was said. Reads the clip and model;
+//! writes nothing.
 
 use std::{
     path::PathBuf,
@@ -241,8 +243,10 @@ fn run() -> Result<(), String> {
         if cue != shown || end_now {
             if let Some(cue) = engine.state.cue.as_ref().filter(|_| cue != shown) {
                 println!(
-                    "t={now_ms}ms cue shown kind={} source={} question={:?}",
-                    cue.kind, cue.source_id, cue.question
+                    "t={now_ms}ms cue shown kind={:?} source={} question_chars={}",
+                    cue.kind,
+                    cue.source_id,
+                    cue.question.chars().count()
                 );
             } else if shown.is_some() && cue.is_none() {
                 // An expiry happens within one tick, so little time is left.
@@ -329,9 +333,9 @@ fn run() -> Result<(), String> {
             ))
         );
         println!(
-            "lines={} final_cue={:?}",
+            "lines={} final_cue_kind={:?}",
             engine.state.transcript.len(),
-            engine.state.cue.as_ref().map(|cue| &cue.question)
+            engine.state.cue.as_ref().map(|cue| &cue.kind)
         );
     }
     Ok(())

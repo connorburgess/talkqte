@@ -674,6 +674,47 @@ svg {
     opacity: 1;
   }
 }
+/* The live layout's simulated cue keeps the dark card it was designed on;
+   it also keeps the meta line and Why? button the notebook card dropped. */
+.question.mock-cue {
+  --question-surface: var(--forest);
+  --question-ink: #f4f4e9;
+  --question-muted: #c5d5c7;
+  --question-rule: #547064;
+  padding: 24px 22px 18px;
+  border-radius: var(--radius-question);
+  box-shadow: none;
+}
+.question-meta {
+  color: #c2d4c5;
+  font-size: 14px;
+  margin-top: 10px;
+}
+.question-disclosure {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 8px;
+  min-height: 44px;
+  margin-top: 10px;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: #f4f4e9;
+  font-size: 16px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.question-disclosure:hover:not(:disabled) {
+  color: #dae4cf;
+}
+.question-disclosure[aria-expanded='true'] {
+  width: 46px;
+  min-height: 46px;
+  justify-content: center;
+  text-decoration: none;
+  color: #c5d5c7;
+}
 /* The last seconds of an untouched cue: it softens instead of counting down. */
 .question.is-leaving {
   opacity: 0.55;
@@ -843,6 +884,21 @@ svg {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.context-disclosure > summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding: 10px 4px;
+}
+.context-disclosure > summary span {
+  margin-left: 12px;
+}
+.context-disclosure > summary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+.context-disclosure[open] > summary {
+  margin-bottom: 12px;
+}
 .context-heading {
   display: flex;
   flex-wrap: wrap;
@@ -891,6 +947,22 @@ svg {
   font-size: 14px;
   color: var(--muted);
   white-space: pre-wrap;
+}
+.context-updates {
+  margin-top: 12px;
+}
+.context-updates p {
+  margin: 6px 0 0;
+}
+.context-updates .secondary-button {
+  min-height: 44px;
+}
+.context-updates [role='alert'] {
+  color: #843b2e;
+}
+.context-freshness {
+  display: block;
+  margin-top: 4px;
 }
 .context-dialog[open] {
   display: flex;
@@ -1185,7 +1257,10 @@ svg {
 .companion-shell {
   background: var(--forest);
   border-radius: 24px;
-  flex: 1 0 auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 .companion-bar {
@@ -1264,9 +1339,35 @@ svg {
 .floating-surface .question {
   border-radius: 20px;
   box-shadow: none;
-  min-height: calc(100vh - 82px);
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  /* A long cue or source scrolls inside the card, so the bar, Stop and the
+     cue's actions stay in the window; keys scroll it from a focused action. */
+  overflow: hidden auto;
+  padding-block: 16px 12px;
+  /* A shade marks an edge with more to scroll; it lifts at either end. */
+  background:
+    linear-gradient(var(--question-surface) 30%, transparent) top / 100% 28px
+      no-repeat local,
+    linear-gradient(transparent, var(--question-surface) 70%) bottom / 100% 28px
+      no-repeat local,
+    radial-gradient(farthest-side at 50% 0, rgb(34 55 43 / 0.28), transparent)
+      top / 100% 12px no-repeat scroll,
+    radial-gradient(
+        farthest-side at 50% 100%,
+        rgb(34 55 43 / 0.28),
+        transparent
+      )
+      bottom / 100% 12px no-repeat scroll,
+    var(--question-surface);
+}
+.floating-surface .question h2 {
+  line-height: 1.25;
+}
+.floating-surface .question-source {
+  margin-top: 4px;
 }
 .floating-error,
 .floating-empty {

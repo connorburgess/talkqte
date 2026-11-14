@@ -79,6 +79,16 @@ pub struct ContextItem {
     pub revision: u64,
 }
 
+/// Carried by a reminder that quotes a copy the last update check could not
+/// confirm as the provider's latest, so the reminder can say so.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Unconfirmed {
+    /// When a check last confirmed the copy, by the local clock; `None` if
+    /// no check has confirmed it since it was imported.
+    pub last_confirmed_ms: Option<u64>,
+}
+
 /// Why a fetch failed, as an adapter reports it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceError {
@@ -99,6 +109,12 @@ pub trait NoteSource {
     fn provider(&self) -> Provider;
     fn capabilities(&self) -> Capabilities;
     fn fetch(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError>;
+    /// Whether the chooser asks the person for the date of a note that has
+    /// none. Only a Markdown or plain-text file does; other sources state
+    /// their dates, and a note without one is skipped.
+    fn asks_for_dates(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -256,7 +272,7 @@ fn invisible(character: char) -> bool {
 }
 
 /// A real calendar date in YYYY-MM-DD form.
-fn valid_date(date: &str) -> bool {
+pub(crate) fn valid_date(date: &str) -> bool {
     let parts: Vec<&str> = date.split('-').collect();
     let [year, month, day] = parts.as_slice() else {
         return false;

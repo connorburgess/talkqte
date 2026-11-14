@@ -147,6 +147,90 @@ pub struct ProcessingSnapshot {
     pub approved: Option<Scope>,
     pub issue: Option<Issue>,
     pub last_decision: Option<LastDecision>,
+    /// The microphone alone, when a selected-application source also exists.
+    /// `capture` then combines the two and never understates either.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub microphone: Option<CaptureState>,
+    /// The selected-application source. Present only in a development build
+    /// with the `native-audio-spike` feature; absent from default builds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<SourceCapture>,
+}
+
+/// The selected-application source's phase. Off only when nothing was
+/// started or native cleanup was confirmed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SourcePhase {
+    /// Nothing was started, or native cleanup was confirmed.
+    Off,
+    /// Asking the OS for applications; its own prompt may be showing.
+    Listing,
+    /// One application is under review. Nothing is captured.
+    Reviewing,
+    Starting,
+    Listening,
+    /// Stop was requested and native cleanup has not been confirmed.
+    Stopping,
+    /// The OS reported that Stop or output removal failed. The application
+    /// may still be captured until an explicit retry succeeds.
+    CleanupFailed,
+    /// The worker ended without confirming cleanup. The application may still
+    /// be captured and nothing in TalkQTE can stop it; whether quitting does
+    /// has not been checked.
+    Abandoned,
+}
+
+impl SourcePhase {
+    pub fn may_be_capturing(self) -> bool {
+        matches!(
+            self,
+            Self::Starting
+                | Self::Listening
+                | Self::Stopping
+                | Self::CleanupFailed
+                | Self::Abandoned
+        )
+    }
+}
+
+/// Why the source's last attempt ended, or what is wrong now. Labels only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SourceProblem {
+    NoLiveSession,
+    SessionHasSource,
+    ClockRefused,
+    PermissionDenied,
+    SourceUnavailable,
+    ListFailed,
+    StartFailed,
+    StreamFailed,
+    StopFailed,
+    RemoveFailed,
+    Unavailable,
+    /// A source-only session was asked for while another session or the demo
+    /// was running. Nothing was started.
+    SessionBusy,
+}
+
+/// What the notebook needs to describe the source truthfully. Metadata only:
+/// the application's display name, never audio, transcript or native ids.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceCapture {
+    pub phase: SourcePhase,
+    pub may_be_capturing: bool,
+    /// Stopping has lasted long enough to say so; no answer has arrived.
+    pub stalled: bool,
+    /// One explicit cleanup retry can be requested now.
+    pub can_retry: bool,
+    pub application: Option<String>,
+    pub problem: Option<SourceProblem>,
+    /// Identifies the review or operation, for the source's own Stop.
+    pub operation: Option<String>,
+    /// The live session was started for this source alone; no microphone.
+    pub source_session: bool,
 }
 
 struct ScopeKey {
@@ -216,6 +300,20 @@ impl ProcessingTracker {
         target: StopTarget,
         startup: StartupState,
     ) -> (ProcessingSnapshot, bool) {
+        self.update_with_source(engine, capture, target, startup, None)
+    }
+
+    /// As `update_with_capture_control`, with a selected-application source.
+    /// `capture` must already combine the microphone and the source; the
+    /// microphone alone and the source are reported beside it.
+    pub fn update_with_source(
+        &mut self,
+        engine: &Engine,
+        capture: CaptureState,
+        target: StopTarget,
+        startup: StartupState,
+        source: Option<(CaptureState, SourceCapture)>,
+    ) -> (ProcessingSnapshot, bool) {
         let key = ScopeKey::for_engine(engine);
         let (mut revision, mut scope_revision) =
             self.previous.as_ref().map_or((0, 0), |(old, s)| {
@@ -232,6 +330,7 @@ impl ProcessingTracker {
         let mut next = engine.processing_snapshot(capture, scope_revision);
         next.stop_target = target;
         next.startup = startup;
+        (next.microphone, next.source) = source.map_or((None, None), |(m, s)| (Some(m), Some(s)));
         next.revision = revision;
         let changed = self.previous.as_ref().is_none_or(|(_, s)| *s != next);
         if changed {
@@ -343,6 +442,8 @@ impl Engine {
             approved,
             issue,
             last_decision,
+            microphone: None,
+            source: None,
         }
     }
 }
@@ -529,6 +630,69 @@ mod tests {
         assert_eq!(json["notes"][0]["sourceId"], "same:id");
         assert_eq!(json["processor"]["location"], "hosted");
         assert_eq!(json["lastDecision"], "quiet");
+    }
+
+    #[test]
+    fn an_application_source_is_reported_beside_the_microphone_and_absent_otherwise() {
+        let (e, _) = engine(false);
+        let mut t = ProcessingTracker::default();
+        // Without a source, as in every default build: neither field exists.
+        let (plain, _) = t.update(&e, CaptureState::Off);
+        let json = serde_json::to_value(&plain).unwrap();
+        assert!(json.get("microphone").is_none() && json.get("source").is_none());
+
+        let failed = SourceCapture {
+            phase: SourcePhase::CleanupFailed,
+            may_be_capturing: true,
+            stalled: false,
+            can_retry: true,
+            application: Some("Fictional player".into()),
+            problem: Some(SourceProblem::StopFailed),
+            operation: Some("fictional-operation".into()),
+            source_session: false,
+        };
+        let (with, changed) = t.update_with_source(
+            &e,
+            CaptureState::Stopping,
+            StopTarget::default(),
+            StartupState::Idle,
+            Some((CaptureState::Off, failed.clone())),
+        );
+        assert!(changed && with.revision > plain.revision);
+        let json = serde_json::to_value(&with).unwrap();
+        // The combined state keeps saying stopping; the microphone alone is
+        // off, so a control that concerns only the microphone can say so.
+        assert_eq!(json["capture"], "stopping");
+        assert_eq!(json["microphone"], "off");
+        assert_eq!(json["source"]["phase"], "cleanupFailed");
+        assert_eq!(json["source"]["mayBeCapturing"], true);
+        assert_eq!(json["source"]["canRetry"], true);
+        assert_eq!(json["source"]["application"], "Fictional player");
+        assert_eq!(json["source"]["problem"], "stopFailed");
+        // Unchanged source, unchanged snapshot: no new event.
+        let (_, again) = t.update_with_source(
+            &e,
+            CaptureState::Stopping,
+            StopTarget::default(),
+            StartupState::Idle,
+            Some((CaptureState::Off, failed.clone())),
+        );
+        assert!(!again);
+        // A change in the source alone is an event.
+        let abandoned = SourceCapture {
+            phase: SourcePhase::Abandoned,
+            can_retry: false,
+            problem: None,
+            ..failed
+        };
+        let (_, moved) = t.update_with_source(
+            &e,
+            CaptureState::Stopping,
+            StopTarget::default(),
+            StartupState::Idle,
+            Some((CaptureState::Off, abandoned)),
+        );
+        assert!(moved);
     }
 
     #[test]

@@ -1,4 +1,6 @@
 pub mod application_audio;
+#[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+mod application_audio_host;
 pub mod audio_tap;
 mod capture_control;
 mod companion;
@@ -6,15 +8,20 @@ mod companion;
 mod companion_macos;
 pub mod context;
 mod context_import;
+pub mod context_refresh;
+mod context_runtime;
 pub mod cue_evaluator;
 pub mod engine;
 pub mod granola;
 pub mod live;
 mod live_control;
+mod live_source;
 mod microphone;
 pub mod model;
 #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
 mod native_session_clock;
+#[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+mod native_source;
 pub mod notes_file;
 mod processing_commands;
 pub mod processing_reviews;
@@ -42,12 +49,19 @@ struct Runtime {
     /// delivering transcript lines takes the lock.
     live: Option<Live>,
     live_start: live_control::StartGate,
+    /// The approved application-audio source feeding the live session, if
+    /// any. Dropping it cancels that source's operation.
+    live_source: Option<live_source::LiveSource>,
+    /// A live session started for an application source alone, if any.
+    source_session: Option<live_source::SourceSession>,
     processing_reviews: processing_reviews::Reviews,
     processing_status: engine::ProcessingTracker,
     /// Prior notes the user imported this session, in memory only.
     context: context::ContextStore,
     /// A listed note source kept for selection, retry, or cancellation.
     pending_import: Option<context_import::PendingImport>,
+    /// The explicit Granola update check and what it last found.
+    refresh: context_refresh::Refresh,
     /// The Granola session for this app run, once the person has signed in.
     granola: Option<granola::Shared>,
     /// Set while a Granola sign-in waits for the browser; cleared to cancel.
@@ -64,10 +78,13 @@ impl Default for Runtime {
             export: None,
             live: None,
             live_start: live_control::StartGate::default(),
+            live_source: None,
+            source_session: None,
             processing_reviews: processing_reviews::Reviews::default(),
             processing_status: engine::ProcessingTracker::default(),
             context: context::ContextStore::default(),
             pending_import: None,
+            refresh: context_refresh::Refresh::default(),
             granola: None,
             granola_sign_in: None,
         }
@@ -77,6 +94,20 @@ impl Default for Runtime {
 impl Runtime {
     fn sync(&mut self) {
         self.sync_at(Instant::now());
+    }
+
+    /// The Markdown a person reviews before saving, kept so the save dialog
+    /// writes exactly that text. A live session is refused, and refusing it
+    /// drops any earlier preview.
+    fn prepare_export(&mut self) -> Result<String, String> {
+        // Live transcripts stay in memory only; this version never saves them.
+        if self.engine.state.live {
+            self.export = None;
+            return Err("Live sessions are not saved or exported.".into());
+        }
+        let markdown = self.engine.markdown();
+        self.export = Some(markdown.clone());
+        Ok(markdown)
     }
 
     fn sync_at(&mut self, now: Instant) {
@@ -96,6 +127,7 @@ impl Runtime {
                 .advance(u64::try_from(millis).unwrap_or(u64::MAX));
         }
         self.processing_reviews.reconcile(&self.engine);
+        self.reconcile_live_source();
     }
 }
 
@@ -104,7 +136,7 @@ struct AppState(Mutex<Runtime>);
 // Emit while holding the state lock, preserving revision order across commands/ticks.
 fn publish(app: &tauri::AppHandle, runtime: &mut Runtime) {
     let _ = app.emit_to("main", "session:changed", &runtime.engine.state);
-    let cue_state = runtime.engine.cue_snapshot();
+    let cue_state = runtime.cue_snapshot();
     let _ = app.emit_to("cue", "cue:changed", &cue_state);
     publish_processing(app, runtime);
 }
@@ -131,6 +163,20 @@ fn publish_processing(app: &tauri::AppHandle, runtime: &mut Runtime) -> engine::
     let controller = app.state::<microphone::Controller>();
     let (generation, microphone) = controller.control_snapshot();
     let capture = capture_state(microphone);
+    #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+    let source = application_audio_host::source_status(app).map(|source| {
+        let combined = application_audio_host::overall_capture(capture, source.phase);
+        (combined, (capture, source))
+    });
+    #[cfg(not(all(target_os = "macos", feature = "native-audio-spike")))]
+    let source: Option<(
+        engine::CaptureState,
+        (engine::CaptureState, engine::SourceCapture),
+    )> = None;
+    let (capture, source) = match source {
+        Some((combined, source)) => (combined, Some(source)),
+        None => (capture, None),
+    };
     let (operation, mut startup) = runtime
         .live_start
         .control()
@@ -143,11 +189,12 @@ fn publish_processing(app: &tauri::AppHandle, runtime: &mut Runtime) -> engine::
         operation,
         microphone: generation.to_string(),
     };
-    let (snapshot, changed) = runtime.processing_status.update_with_capture_control(
+    let (snapshot, changed) = runtime.processing_status.update_with_source(
         &runtime.engine,
         capture,
         target,
         startup,
+        source,
     );
     if changed {
         let _ = app.emit_to("main", "processing:changed", &snapshot);
@@ -201,7 +248,7 @@ fn snapshot(
 ) -> Result<serde_json::Value, String> {
     let runtime = state.0.lock().map_err(|_| "The demo is unavailable.")?;
     if window.label() == "cue" {
-        serde_json::to_value(runtime.engine.cue_snapshot())
+        serde_json::to_value(runtime.cue_snapshot())
     } else {
         serde_json::to_value(&runtime.engine.state)
     }
@@ -382,18 +429,11 @@ fn set_overlay(
 
 #[tauri::command]
 fn export_preview(state: tauri::State<AppState>) -> Result<String, String> {
-    let mut runtime = state
+    state
         .0
         .lock()
-        .map_err(|_| "Could not prepare the export.")?;
-    // Live transcripts stay in memory only; this version never saves them.
-    if runtime.engine.state.live {
-        runtime.export = None;
-        return Err("Live sessions are not saved or exported.".into());
-    }
-    let markdown = runtime.engine.markdown();
-    runtime.export = Some(markdown.clone());
-    Ok(markdown)
+        .map_err(|_| "Could not prepare the export.")?
+        .prepare_export()
 }
 
 #[tauri::command]
@@ -693,14 +733,19 @@ struct PickedNotes {
     notes: Vec<notes_file::NoteSummary>,
     /// Notes in the file that are not listed: beyond the limit or repeated.
     skipped: usize,
+    /// Whether a note without a date asks for one: a Markdown or text file.
+    asks_for_dates: bool,
 }
 
 fn publish_context(app: &tauri::AppHandle, runtime: &mut Runtime) {
     // The engine may quote an imported note as a context reminder.
-    let before = runtime.engine.state.revision;
-    runtime.engine.set_notes(runtime.context.items().to_vec());
-    runtime.processing_reviews.reconcile(&runtime.engine);
-    if runtime.engine.state.revision != before {
+    let cue_changed = runtime.sync_prior_notes();
+    emit_context(app, runtime, cue_changed);
+}
+
+/// Tells the windows about prior notes the engine has already been given.
+fn emit_context(app: &tauri::AppHandle, runtime: &mut Runtime, cue_changed: bool) {
+    if cue_changed {
         // A changed or removed note may be visible in either window, even held.
         publish(app, runtime);
     }
@@ -720,7 +765,7 @@ async fn pick_context_file(
         picker
             .dialog()
             .file()
-            .add_filter("TalkQTE notes", &["json"])
+            .add_filter("Notes", &notes_file::EXTENSIONS)
             .blocking_pick_file()
             .map(|file| {
                 file.into_path()
@@ -741,6 +786,7 @@ async fn pick_context_file(
         .map_err(|_| "The file could not be read.")??;
     let notes = source.summaries();
     let skipped = source.skipped;
+    let asks_for_dates = context::NoteSource::asks_for_dates(&source);
     // A new pick replaces any file still waiting for a selection.
     state
         .0
@@ -751,6 +797,7 @@ async fn pick_context_file(
         file_name,
         notes,
         skipped,
+        asks_for_dates,
     }))
 }
 
@@ -760,6 +807,8 @@ async fn import_context_notes(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     ids: Vec<String>,
+    // Dates entered for Markdown or plain-text notes that have none.
+    dates: Option<std::collections::HashMap<String, String>>,
 ) -> Result<context::MergeOutcome, String> {
     // The fetch may go to a provider, so it runs off the main thread and
     // outside the lock, with real pauses between retries.
@@ -779,8 +828,9 @@ async fn import_context_notes(
         )
     };
     let selection = ids.clone();
+    let dates = dates.unwrap_or_default();
     let (attempt, fetched) = tauri::async_runtime::spawn_blocking(move || {
-        let fetched = attempt.fetch(&selection);
+        let fetched = attempt.fetch_with_dates(&selection, &dates);
         (attempt, fetched)
     })
     .await
@@ -809,8 +859,8 @@ async fn import_context_notes(
         _ => "The selected notes could not be read. Nothing was imported. Try again, or cancel to choose other notes.",
     })?;
     runtime.pending_import = None;
-    let outcome = runtime.context.merge(provider, &ids, fetched);
-    publish_context(&app, &mut runtime);
+    let (outcome, cue_changed) = runtime.merge_imported_notes(provider, &ids, fetched);
+    emit_context(&app, &mut runtime, cue_changed);
     Ok(outcome)
 }
 
@@ -842,6 +892,7 @@ fn remove_context_item(
     if !runtime.context.remove(provider, &source_id) {
         return Err("That note is no longer imported.".into());
     }
+    runtime.refresh.forget(provider, &source_id);
     publish_context(&app, &mut runtime);
     Ok(())
 }
@@ -857,6 +908,7 @@ fn remove_context_from(
     let removed = runtime.context.remove_all_from(context::Provider::File)
         + runtime.context.remove_all_from(context::Provider::Granola);
     runtime.pending_import = None;
+    runtime.refresh.forget_all();
     publish_context(&app, &mut runtime);
     Ok(removed)
 }
@@ -868,6 +920,9 @@ fn remove_context_from(
 struct GranolaStatus {
     connected: bool,
     tools: Vec<String>,
+    /// Whether this connection can verify its workspace for an update check.
+    update_check: bool,
+    freshness: Vec<context_refresh::NoteFreshness>,
 }
 
 fn granola_status_now(runtime: &Runtime) -> GranolaStatus {
@@ -878,6 +933,11 @@ fn granola_status_now(runtime: &Runtime) -> GranolaStatus {
             .as_ref()
             .map(granola::Shared::tool_names)
             .unwrap_or_default(),
+        update_check: runtime
+            .granola
+            .as_ref()
+            .is_some_and(context_refresh::RefreshSource::binding_supported),
+        freshness: runtime.refresh.freshness(&runtime.context),
     }
 }
 
@@ -902,17 +962,11 @@ fn granola_error(error: &context::SourceError) -> String {
 /// is read until they list and choose notes; the tokens stay in memory.
 #[tauri::command]
 async fn connect_granola(state: tauri::State<'_, AppState>) -> Result<GranolaStatus, String> {
-    let cancel = Arc::new(AtomicBool::new(false));
-    {
-        let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-        if runtime.granola.is_some() {
-            return Err("Disconnect Granola before connecting again.".into());
-        }
-        if runtime.granola_sign_in.is_some() {
-            return Err("A Granola sign-in is already in progress.".into());
-        }
-        runtime.granola_sign_in = Some(cancel.clone());
-    }
+    let cancel = state
+        .0
+        .lock()
+        .map_err(|_| "The notebook is unavailable.")?
+        .begin_granola_sign_in()?;
     let waiting = cancel.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let tokens = granola::sign_in(
@@ -926,15 +980,65 @@ async fn connect_granola(state: tauri::State<'_, AppState>) -> Result<GranolaSta
     })
     .await
     .map_err(|_| "The sign-in could not finish.".to_string());
-    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-    runtime.granola_sign_in = None;
-    let connection = result??;
-    // A cancel that arrived after the browser returned still wins.
-    if cancel.load(Ordering::Relaxed) {
-        return Err("Sign-in cancelled.".into());
+    state
+        .0
+        .lock()
+        .map_err(|_| "The notebook is unavailable.")?
+        .finish_granola_sign_in(&cancel, result.and_then(|opened| opened))
+}
+
+impl Runtime {
+    /// Registers a sign-in and returns the flag that cancels it; one at a
+    /// time, and never beside an open connection.
+    fn begin_granola_sign_in(&mut self) -> Result<Arc<AtomicBool>, String> {
+        if self.granola.is_some() {
+            return Err("Disconnect Granola before connecting again.".into());
+        }
+        if self.granola_sign_in.is_some() {
+            return Err("A Granola sign-in is already in progress.".into());
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.granola_sign_in = Some(cancel.clone());
+        Ok(cancel)
     }
-    runtime.granola = Some(granola::Shared::new(connection));
-    Ok(granola_status_now(&runtime))
+
+    /// Ends the sign-in that `cancel` belongs to and keeps its connection,
+    /// unless it failed or was cancelled.
+    fn finish_granola_sign_in(
+        &mut self,
+        cancel: &AtomicBool,
+        result: Result<granola::Connection, String>,
+    ) -> Result<GranolaStatus, String> {
+        self.granola_sign_in = None;
+        let connection = result?;
+        // A cancel that arrived after the browser returned still wins.
+        if cancel.load(Ordering::Relaxed) {
+            return Err("Sign-in cancelled.".into());
+        }
+        self.granola = Some(granola::Shared::new(connection));
+        Ok(granola_status_now(self))
+    }
+
+    /// Forgets the Granola session and cancels a sign-in still waiting for
+    /// the browser. Imported notes stay.
+    fn disconnect_granola(&mut self) -> GranolaStatus {
+        if let Some(connection) = self.granola.take() {
+            connection.disconnect();
+        }
+        // Visible to the windows only through `disconnect_granola` below.
+        self.disconnect_update_checks();
+        if let Some(cancel) = &self.granola_sign_in {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        if self
+            .pending_import
+            .as_ref()
+            .is_some_and(|source| source.provider() == context::Provider::Granola)
+        {
+            self.pending_import = None;
+        }
+        granola_status_now(self)
+    }
 }
 
 #[tauri::command]
@@ -982,6 +1086,7 @@ async fn list_granola_notes(state: tauri::State<'_, AppState>) -> Result<PickedN
         file_name: "Granola · the last 30 days".into(),
         notes,
         skipped,
+        asks_for_dates: false,
     })
 }
 
@@ -1020,25 +1125,81 @@ async fn suggest_granola_focus(state: tauri::State<'_, AppState>) -> Result<Vec<
     result
 }
 
+/// Checks once, on request, whether the imported Granola notes are still the
+/// provider's latest revisions. See `context_refresh.rs` for the rules.
+#[tauri::command]
+async fn check_granola_updates(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<context_refresh::Report, String> {
+    let (ticket, shared) = {
+        let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+        let shared = runtime.granola.clone().ok_or("Connect Granola first.")?;
+        if !context_refresh::RefreshSource::binding_supported(&shared) {
+            return Err("This Granola connection cannot be checked for updates yet.".into());
+        }
+        let runtime = &mut *runtime;
+        let ticket = runtime
+            .refresh
+            .begin(&runtime.context)
+            .map_err(|error| match error {
+                context_refresh::BeginError::Running => "A check is already running.",
+                context_refresh::BeginError::Unsettled => {
+                    "The earlier check has not finished at Granola yet. Try again in a moment."
+                }
+                context_refresh::BeginError::NoNotes => "No Granola notes are selected.",
+            })?;
+        (ticket, shared)
+    };
+    let finished = tauri::async_runtime::spawn_blocking(move || {
+        let result =
+            context_refresh::run(&ticket, Box::new(shared), context_refresh::CHECK_TIMEOUT);
+        (ticket, result)
+    })
+    .await;
+    let Ok((ticket, result)) = finished else {
+        // Without a ticket to apply, end the check so another can start.
+        if let Ok(mut runtime) = state.0.lock() {
+            runtime.refresh.stop();
+        }
+        return Err("The check could not finish.".into());
+    };
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis() as u64);
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    let runtime = &mut *runtime;
+    let (report, cue_changed) = runtime.finish_update_check(&ticket, result, now_ms);
+    if let Some(cue_changed) = cue_changed {
+        emit_context(&app, runtime, cue_changed);
+    }
+    Ok(report)
+}
+
+/// Stops a running update check; its result is discarded. A request already
+/// sent may still finish at the provider.
+#[tauri::command]
+fn stop_granola_update_check(state: tauri::State<AppState>) {
+    if let Ok(mut runtime) = state.0.lock() {
+        runtime.refresh.stop();
+    }
+}
+
 /// Forgets the Granola session. Imported notes stay until removed, as they
 /// would for a file; nothing is written back.
 #[tauri::command]
-fn disconnect_granola(state: tauri::State<AppState>) -> Result<GranolaStatus, String> {
+fn disconnect_granola(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<GranolaStatus, String> {
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-    if let Some(connection) = runtime.granola.take() {
-        connection.disconnect();
+    let before = runtime.engine.state.revision;
+    let status = runtime.disconnect_granola();
+    // A reminder's warning may lose its confirmation time.
+    if runtime.engine.state.revision != before {
+        publish(&app, &mut runtime);
     }
-    if let Some(cancel) = &runtime.granola_sign_in {
-        cancel.store(true, Ordering::Relaxed);
-    }
-    if runtime
-        .pending_import
-        .as_ref()
-        .is_some_and(|source| source.provider() == context::Provider::Granola)
-    {
-        runtime.pending_import = None;
-    }
-    Ok(granola_status_now(&runtime))
+    Ok(status)
 }
 
 /// A live session's parts: the engine session it feeds, the microphone start
@@ -1284,6 +1445,8 @@ pub fn run() {
         .manage(microphone::Controller::default())
         .manage(ModelDownload::default())
         .invoke_handler(tauri::generate_handler![
+            #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+            application_audio_host::app::application_audio,
             capture_control::stop_capture,
             processing_commands::review_processing_scope,
             processing_commands::approve_processing_scope,
@@ -1323,6 +1486,8 @@ pub fn run() {
             list_granola_notes,
             disconnect_granola,
             suggest_granola_focus,
+            check_granola_updates,
+            stop_granola_update_check,
             download_model,
             cancel_model_download,
             remove_model,
@@ -1335,6 +1500,8 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             companion_macos::hide_controls(app)?;
+            #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+            application_audio_host::install(app.handle())?;
             // A download interrupted by quitting never counts as installed.
             if let Some(dir) = models_dir(app.handle()) {
                 model::clean_partials(&dir);
@@ -1422,9 +1589,17 @@ pub fn run() {
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
             ) {
                 microphone::stop_on_exit(app);
+                #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+                application_audio_host::exit(app);
             }
         });
 }
+
+#[cfg(test)]
+mod granola_privacy_tests;
+
+#[cfg(test)]
+mod test_isolation;
 
 #[cfg(test)]
 mod carry_over_tests {
@@ -1444,6 +1619,63 @@ mod carry_over_tests {
         assert!(next.state.revision > before);
         let again = carry_over(&next, Engine::default());
         assert!(again.state.revision > next.state.revision);
+    }
+}
+
+#[cfg(test)]
+mod export_tests {
+    use super::*;
+
+    #[test]
+    fn a_live_session_is_never_prepared_for_export_and_drops_an_earlier_preview() {
+        let mut runtime = Runtime::default();
+        runtime
+            .engine
+            .update_notes("A fictional notebook line.".into())
+            .unwrap();
+        let reviewed = runtime.prepare_export().unwrap();
+        assert!(reviewed.contains("A fictional notebook line."));
+        assert_eq!(runtime.export.as_deref(), Some(reviewed.as_str()));
+
+        // Starting a live session forgets the demo preview, so the save
+        // dialog has nothing to write while the microphone is in use.
+        let ticket = runtime.begin_live_start().unwrap();
+        let (ticket, ()) = ticket.load(|| Ok(())).unwrap(); // No model or device.
+        let session = runtime.install_live_start(&ticket).unwrap();
+        assert!(runtime.export.is_none());
+        runtime.engine.advance(1_000);
+        runtime
+            .engine
+            .ingest(
+                session,
+                engine::Segment {
+                    id: "l1".into(),
+                    at_ms: 1_000,
+                    speaker: "Speaker".into(),
+                    text: "The greenhouse keys are in the blue tin.".into(),
+                },
+            )
+            .unwrap();
+        // The notebook still shows the line; only saving it is refused.
+        assert_eq!(runtime.engine.state.transcript.len(), 1);
+        assert_eq!(
+            runtime.prepare_export().unwrap_err(),
+            "Live sessions are not saved or exported."
+        );
+        assert!(runtime.export.is_none());
+
+        // Stopping keeps the transcript on screen and still refuses to save it.
+        runtime.engine.end();
+        assert_eq!(runtime.engine.state.transcript.len(), 1);
+        assert!(runtime.prepare_export().is_err());
+        assert!(runtime.export.is_none());
+
+        // The demo that follows starts from its script: notes carry over, the
+        // live transcript does not, and export works again.
+        runtime.engine = carry_over(&runtime.engine, Engine::default());
+        let after = runtime.prepare_export().unwrap();
+        assert!(after.contains("A fictional notebook line."));
+        assert!(!after.contains("blue tin"));
     }
 }
 

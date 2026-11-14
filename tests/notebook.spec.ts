@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 test.beforeEach(async ({ page }) => {
   await page.clock.install();
   await page.goto('/');
+  await page.locator('.context-disclosure > summary').press('Enter');
   await expect(
     page.getByRole('button', { name: 'Try demo', exact: true }),
   ).toBeVisible();
@@ -33,6 +34,7 @@ test('focus is optional and the setup card can finish without it', async ({
 test('the setup card sends Choose notes to the prior-context panel without changing view', async ({
   page,
 }) => {
+  await page.locator('.context-disclosure > summary').press('Enter');
   await page.locator('.setup-disclosure > summary').press('Enter');
   const card = page.getByRole('region', { name: 'Before your first meeting' });
   await card.getByRole('button', { name: 'Choose notes' }).click();
@@ -389,6 +391,7 @@ test('a chooser with nothing to choose says so instead of showing a blank list',
   page,
 }) => {
   await page.goto('/?notes=empty');
+  await page.locator('.context-disclosure > summary').press('Enter');
   const panel = page.getByRole('region', { name: 'Prior context' });
   await panel.getByRole('button', { name: 'Add notes from a file' }).click();
   const dialog = page.getByRole('dialog', { name: /Choose notes/ });
@@ -450,8 +453,10 @@ test('prior notes from a file are chosen, shown apart from the conversation, rem
   await expect(
     page.getByRole('status').filter({ hasText: 'already imported' }),
   ).toHaveCount(1);
-  // Remove all clears every imported note at once.
-  await panel.getByRole('button', { name: 'Remove all' }).click();
+  // Remove all clears every imported note at once. Focus only follows a
+  // removal made from the focused control, and a pointer click focuses a
+  // button on Linux but not in macOS WebKit, so activate it by keyboard.
+  await panel.getByRole('button', { name: 'Remove all' }).press('Enter');
   await expect(panel.getByRole('listitem')).toHaveCount(0);
   await expect(panel.getByRole('button', { name: 'Remove all' })).toHaveCount(
     0,

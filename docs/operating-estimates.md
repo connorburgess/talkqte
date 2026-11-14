@@ -11,6 +11,8 @@ Status: first estimate, 9 November 2026. It separates what was measured from wha
 
 Derived from these: a first download is about 82 MB (4.7 MB app plus 77.7 MB model), and about 94 MB on disk once installed. The model is optional and only needed for live sessions.
 
+A debug bundle without the speech feature or a Developer ID signature measured 46.0 MiB (48,270,947 bytes) on 13 November 2026 ([release path](release-path.md#what-the-debug-bundle-contains)); it is a development artifact, not a download size.
+
 A disk image, a universal build that also runs on Intel Macs, and a notarized build were not measured. A universal build carries a second copy of the executable, so expect a larger app download than the arm64 figure.
 
 ## Where the bytes come from
@@ -54,4 +56,4 @@ Record the evidence first, as the [product readiness plan](product-readiness.md#
 ## Follow-up
 
 - The downloader does not tell error responses apart: a 429, a 404, and a server error are all reported as "could not be reached" and retried up to three times. It should read the `RateLimit` reset time on a 429 and wait or tell the user, and treat a 403 or 404 as permanent.
-- Measure the disk image, universal, and notarized builds when signing is decided.
+- Measure the disk image, universal, and notarized builds when signing is decided; the [release path](release-path.md#remaining-steps-in-order) lists the steps that produce them.

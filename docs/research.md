@@ -59,6 +59,15 @@ Add a separate context-reminder condition to test the broader participation goal
 
 Include naturally resolved ambiguities, direct questions, topic changes, and cases where silence is the correct app behavior. Test content, timing, placement, and detection separately. If a format increases missed speech, revise it even when users report greater confidence. If automation adds no value over user-requested help, keep the simpler interaction. A small formative study can expose failures and preferences; it cannot establish broad effectiveness or disability-specific benefits. No user study has been run yet.
 
+## Related products
+
+Checked 14 November 2026 against each company's own pages, as competitive context only. No account was used and nothing here describes how well these features work.
+
+- **Otter** [announced Live Assist](https://otter.ai/blog/otter-ai-introduces-live-assist-the-first-live-coaching-agent-for-every-call) on 21 July 2026: in-meeting guidance shown to the user as tip cards while the conversation unfolds, available on Otter Enterprise.
+- **Fireflies** [launched Live Assist](https://fireflies.ai/blog/fireflies-launches-live-assist-and-desktop-app/) on 13 November 2025. Its [feature page](https://fireflies.ai/live-assist) and [help article](https://guide.fireflies.ai/articles/6032274417-what-is-fireflies-live-assist-get-real-time-suggestions-answers-and-notes-live-during-the-meeting) describe real-time suggestions, answers and notes during a meeting.
+
+Both are features inside those note-takers, not live input TalkQTE could use; see [live input options](live-input-options.md#answer). They are one reason not to describe TalkQTE as first or unique ([PRODUCT.md](../PRODUCT.md#brand-commitments)).
+
 ## Keeping the evidence current
 
 For each finding we adopt, record the source and date, population and task studied, relevant result and limitations, the proposed product decision, and a way to check it in TalkQTE. Label the decision as implemented, proposed, or deferred. Distinguish a published result from our inference and from a measured TalkQTE outcome. Preserve contrary findings that could change the decision.

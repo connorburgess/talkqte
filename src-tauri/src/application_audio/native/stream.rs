@@ -57,7 +57,7 @@ impl Selection {
 /// Poll on the constructing worker thread until Released. No Drop or timeout
 /// can substitute for confirmed native Stop and serial callback-queue drain.
 /// Abandoning an unreleased owner quarantines its resources/grant until exit.
-/// This is development scaffolding, not connected to the application runtime.
+/// Development scaffolding, reached only through the feature's host command.
 /// Native ownership cannot move across threads:
 ///
 /// ```compile_fail
