@@ -44,6 +44,8 @@ struct Script {
     recognizer_missing: AtomicBool,
     /// Listing returns what macOS lists, agents and helpers included.
     list_everything: AtomicBool,
+    /// Fictional metadata for the strictly named source observation tests.
+    quicktime_fixture: AtomicBool,
     /// macOS refuses the start, as before TalkQTE is reopened after the grant.
     start_needs_reopen: AtomicBool,
     runs: AtomicU64,
@@ -205,6 +207,13 @@ impl Backend for Fake {
         }
         if self.script.list_everything.load(Ordering::SeqCst) {
             return Ok(everything());
+        }
+        if self.script.quicktime_fixture.load(Ordering::SeqCst) {
+            return Ok(vec![Application::new(
+                "fictional-0".into(),
+                "QuickTime Player".into(),
+            )
+            .unwrap()]);
         }
         Ok(applications())
     }
@@ -1646,5 +1655,78 @@ mod owned_lab_stop {
             assert!(fence.recv_timeout(WAIT).is_err());
         }
         assert!(!fixture.host.lab_stop_released());
+    }
+}
+
+#[cfg(all(
+    debug_assertions,
+    target_os = "macos",
+    feature = "native-audio-spike",
+    feature = "lab-evaluator"
+))]
+mod observation_start {
+    use super::*;
+    use dev_start::{Outcome, Settings};
+    fn settings() -> Settings {
+        Settings {
+            application: "QuickTime Player".into(),
+            stop_after: Ok(None),
+        }
+    }
+    fn waits() -> DevWaits {
+        DevWaits {
+            list: WAIT,
+            start: WAIT,
+            poll: Duration::from_millis(2),
+        }
+    }
+
+    #[test]
+    fn setting_candidate_is_exact_and_runtime_observer_runs_without_host_lock() {
+        let f = fixture(false);
+        f.script.quicktime_fixture.store(true, Ordering::SeqCst);
+        let outcome = f
+            .host
+            .start_by_setting_observed(&settings(), waits(), |operation| {
+                assert!(
+                    f.host.0.state.try_lock().is_ok(),
+                    "host released before Runtime acquisition"
+                );
+                assert!(f.host.lab_listening_candidate(&"f".repeat(32)).is_none());
+                let candidate = f.host.lab_listening_candidate(operation).unwrap();
+                assert_eq!(candidate.host_operation, operation);
+                assert!(crate::dev_source_observation::observe(
+                    &f.runtime,
+                    &candidate,
+                    "fictional-run",
+                    || false
+                )
+                .is_some());
+                true
+            });
+        assert_eq!(outcome, Outcome::Started { stopped: false });
+        let operation = f.view().operation.unwrap();
+        {
+            let _held = f.host.0.state.lock().unwrap();
+            assert!(f.host.lab_listening_candidate(&operation).is_none());
+        }
+        f.host.stop(&operation).unwrap();
+        assert!(f.host.lab_listening_candidate(&operation).is_none());
+        f.wait_phase(Phase::Off);
+    }
+
+    #[test]
+    fn refused_observation_stops_selected_source_without_rearming_or_starting_again() {
+        let f = fixture(false);
+        f.script.quicktime_fixture.store(true, Ordering::SeqCst);
+        let mut settings = settings();
+        settings.stop_after = Ok(Some(Duration::from_millis(30)));
+        let outcome = f
+            .host
+            .start_by_setting_observed(&settings, waits(), |_| false);
+        assert_eq!(outcome, Outcome::Refused("source_observation_unavailable"));
+        f.wait_phase(Phase::Off);
+        assert_eq!(f.script.lists.load(Ordering::SeqCst), 1);
+        assert_eq!(f.script.runs.load(Ordering::SeqCst), 1);
     }
 }
