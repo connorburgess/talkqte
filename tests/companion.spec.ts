@@ -40,13 +40,14 @@ test('companion stays compact between questions and preserves a paused question'
 }) => {
   await page.setViewportSize({ width: 320, height: 76 });
   await expect(page.getByRole('status')).toHaveText('Demo running · Scripted');
-  await expect(page.getByRole('button', { name: 'Pause demo' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Pause demo' })).toHaveText(
-    'Pause',
-  );
-  await expect(page.getByRole('button', { name: 'Hide companion' })).toHaveText(
-    'Hide',
-  );
+  // The controls are icons: each has a name and the same tooltip.
+  for (const name of ['Pause demo', 'Hide companion']) {
+    const control = page.getByRole('button', { name, exact: true });
+    await expect(control).toBeVisible();
+    await expect(control).toHaveAttribute('title', name);
+    await expect(control).toHaveText('');
+  }
+  await expect(page.locator('header').getByRole('button')).toHaveCount(2);
   for (const button of await page.getByRole('button').all()) {
     const bounds = await button.boundingBox();
     expect(bounds!.width).toBeGreaterThanOrEqual(44);
@@ -61,9 +62,9 @@ test('companion stays compact between questions and preserves a paused question'
   await page.getByRole('button', { name: 'Pause demo' }).click();
   await page.clock.runFor(30_000);
   await expect(page.getByRole('status')).toHaveText('Demo paused · Scripted');
-  await expect(page.getByRole('button', { name: 'Resume demo' })).toHaveText(
-    'Resume',
-  );
+  await expect(
+    page.getByRole('button', { name: 'Resume demo' }),
+  ).toHaveAttribute('title', 'Resume demo');
   await expectCompanionToFit(page);
   await expect(
     page.getByRole('region', { name: 'Suggested question' }),
@@ -121,20 +122,6 @@ test('a question fits the narrow window used on a small display', async ({
   await page.setViewportSize({ width: 360, height: 420 });
   await expectCompanionToFit(page);
   expect(await fitsSideways()).toBe(true);
-});
-
-test('the companion switches between only what matters and all questions', async ({
-  page,
-}) => {
-  const focus = page.getByRole('button', { name: 'Show only what matters' });
-  await expect(focus).toHaveAttribute('aria-pressed', 'false');
-  await focus.click();
-  const all = page.getByRole('button', { name: 'Show all questions' });
-  await expect(all).toHaveAttribute('aria-pressed', 'true');
-  await all.click();
-  await expect(
-    page.getByRole('button', { name: 'Show only what matters' }),
-  ).toHaveAttribute('aria-pressed', 'false');
 });
 
 test('the companion bar is the native drag handle and its controls are not', async ({
@@ -201,9 +188,7 @@ test('questions expire quietly without requiring a response', async ({
   await expect(question).not.toContainText(/\b\d+s\b/);
   await page.clock.runFor(18_000);
   await expect(question).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Pause demo' })).toHaveText(
-    'Pause',
-  );
+  await expect(page.getByRole('button', { name: 'Pause demo' })).toBeVisible();
   await expect(page.getByRole('status')).toHaveText('Demo running · Scripted');
 });
 

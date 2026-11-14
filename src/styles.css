@@ -980,68 +980,79 @@ svg {
   flex-direction: column;
   overflow: hidden;
 }
+/* One quiet line above the card: what is being captured, then the few
+   controls, as muted glyphs that brighten under the pointer or the
+   keyboard. Every glyph keeps at least 3:1 against the bar at rest. */
 .companion-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-height: 64px;
-  padding: 8px 12px;
+  gap: 2px;
+  min-height: 44px;
+  padding: 0 6px 0 14px;
+  color: #8eaa95;
 }
-/* Four live controls keep 44px targets; leave room for both status lines
-   even with wider platform fallback fonts at the compact 320px width. */
-.companion-bar-live {
-  gap: 4px;
-  padding-inline: 8px;
+/* With no cue under it, the bar is the whole window. */
+.companion-bar:last-child {
+  flex: 1;
 }
 .companion-status {
-  display: grid;
-  gap: 1px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex: 1;
   min-width: 0;
 }
-.companion-status strong {
-  font-size: 15px;
-  font-weight: 750;
-}
-.companion-title {
-  display: flex;
+.companion-capture {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  flex: none;
 }
-.companion-title .status-dot {
+.companion-capture.is-on {
+  color: #c5d5c7;
+}
+.companion-bar .status-dot {
   width: 6px;
   height: 6px;
+  background: #8eaa95;
 }
-.companion-status span {
+.companion-bar .status-dot.active {
+  background: #b9e3a6;
+}
+.companion-status strong {
+  flex: none;
+  color: #e3edd6;
+  font-size: 13px;
+  font-weight: 700;
+}
+/* A state the glyph cannot say on its own is spelled out, on one line. */
+.companion-status [role='status']:not(.visually-hidden) {
   color: #c5d5c7;
   font-size: 12px;
   line-height: 1.35;
-}
-/* The bar keeps one line each for the title and the status: with Pause,
-   the Focused switch, and Hide beside them at 320 px, the text shortens
-   rather than wraps the bar taller. */
-.companion-status strong,
-.companion-status span {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .companion-control {
   min-width: 44px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
   flex-shrink: 0;
-  min-height: 44px;
-  padding: 8px;
-  font-size: 13px;
-  font-weight: 650;
+  padding: 0;
   border: 0;
+  border-radius: 12px;
   background: transparent;
-  color: #f2f5e9;
+  color: inherit;
+  transition:
+    color 160ms ease-out,
+    background-color 160ms ease-out;
 }
-.companion-control:hover:not(:disabled) {
+.companion-control:hover:not(:disabled),
+.companion-control:focus-visible {
+  color: #f2f5e9;
   background: #39584a;
 }
 .floating-surface button:focus-visible {

@@ -40,6 +40,12 @@ The companion is configured to remain passive and not take keyboard focus. The s
 
 ## Prototype appearance
 
+The bar above the cue is one quiet line (14 November 2026, after the owner found it loud): what is being captured as a glyph with a dot, then Pause, Stop and Hide as icons with names and tooltips. These browser renderings use a fictional cue and the live-session stand-in at 420 × 340 CSS px.
+
+| Before: a title, status text and four labelled controls                                                                   | After: a capture glyph and three icons                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| ![Companion bar reading Live, Mic on · Local, with Pause, Stop, a focus switch and Hide](assets/companion-bar-before.png) | ![Companion bar with a microphone glyph and a lit dot, then pause, stop and hide icons](assets/companion-bar-after.png) |
+
 These browser renderings use only the bundled fictional demo at a 420 × 340 CSS-pixel viewport, with reduced motion; the opened card before the change needed 460. They show appearance, not native placement, focus behavior or the arrival.
 
 | Before: the question alone                                                                          | Before: Why? opened, 120 px taller                                                                                     | After: purpose, time and source in view                                                                                                    |
