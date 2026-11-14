@@ -93,7 +93,8 @@ function FloatingQuestion() {
   const microphone = useMicrophone();
   const mic = microphone.state;
   const live = !!state?.live && state.status === 'running';
-  // Browser preview and tests only: a replay of a fictional conversation.
+  // Browser preview and tests only: a replay of a fictional conversation,
+  // flagged by the tests' stand-in and never by the desktop engine.
   const simulated = !!state?.simulated && state.status === 'running';
   const microphoneControl =
     !live && (microphone.active || (!mic && !!microphone.error));
@@ -760,6 +761,9 @@ function Notebook() {
     );
   const live = state.live && state.status === 'running';
   // Browser preview and tests only: a replay of a fictional conversation.
+  // The flag comes from the browser tests' stand-in (liveTest.simulate in
+  // tests/fixtures/native-microphone.ts); the desktop engine never sends it,
+  // so every `simulated` branch is unreachable in the app.
   const simulated = !!state.simulated && state.status === 'running';
   const modelNeeded =
     model?.status === 'missing' || model?.status === 'downloading';
@@ -1154,8 +1158,11 @@ function Notebook() {
                             ? 'Fictional replay · nothing is captured'
                             : capture.state?.source?.mayBeCapturing
                               ? 'No live session. Audio from a selected application may still be captured; see Cue processing above.'
-                              : microphone.active
-                                ? 'No live session. The microphone check above is on; it records and transcribes nothing.'
+                              : microphone.active &&
+                                  !microphoneNotCapturing(microphone.state)
+                                ? microphone.state?.status === 'error'
+                                  ? 'No live session. The microphone is still being released; see above.'
+                                  : 'No live session. The microphone check above is on; it records and transcribes nothing.'
                                 : liveStatus?.available
                                   ? 'Nothing is being captured. Start a live session when your meeting begins.'
                                   : modelNeeded

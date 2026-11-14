@@ -64,6 +64,13 @@ test('export saves exactly the reviewed notes and nothing about a demo', async (
   await expect(dialog).toContainText('Ask about a large-print welcome guide.');
   const reviewed = await dialog.locator('pre').innerText();
   expect(reviewed).not.toMatch(/demo|transcript/i);
+  // The notes change after the review, while the dialog is still open: the
+  // saved file must be the reviewed text, not the newer notes.
+  await page.evaluate(async () => {
+    const path = '/src/lib/preview.ts';
+    const preview = await import(path);
+    preview.command('update_notes', { notes: 'A later fictional note.' });
+  });
   const downloading = page.waitForEvent('download');
   await dialog.getByRole('button', { name: 'Download Markdown' }).click();
   const download = await downloading;
@@ -71,7 +78,9 @@ test('export saves exactly the reviewed notes and nothing about a demo', async (
   const stream = await download.createReadStream();
   const chunks: Buffer[] = [];
   for await (const chunk of stream) chunks.push(Buffer.from(chunk));
-  expect(Buffer.concat(chunks).toString('utf8')).toBe(reviewed);
+  const saved = Buffer.concat(chunks).toString('utf8');
+  expect(saved).toBe(reviewed);
+  expect(saved).not.toContain('A later fictional note.');
   await expect(dialog).not.toBeVisible();
 });
 

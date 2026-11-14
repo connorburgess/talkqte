@@ -64,8 +64,37 @@ test('before a session, the notebook never says nothing is captured while the mi
     'No live session. The microphone check above is on; it records and transcribes nothing.',
   );
   await expect(session(page)).not.toContainText('Nothing is being captured');
+  // A denied permission leaves the check failed and released: the panel
+  // says Unavailable, and the notebook must not call the check on.
   await page.evaluate(() =>
-    window.microphoneTest.send({ status: 'off', canStart: true }),
+    window.microphoneTest.send({
+      status: 'error',
+      activity: 'quiet',
+      canStart: true,
+      message: 'Check microphone permission in System Settings.',
+    }),
+  );
+  await expect(
+    page
+      .getByRole('region', { name: 'Microphone', exact: true })
+      .getByRole('status'),
+  ).toHaveText('Unavailable');
+  await expect(session(page)).toContainText('Nothing is being captured.');
+  await expect(session(page)).not.toContainText('microphone check above is on');
+  // While a failed device is still being released, it is not called off.
+  await page.evaluate(() =>
+    window.microphoneTest.send({ status: 'error', canStart: false }),
+  );
+  await expect(session(page)).toContainText(
+    'No live session. The microphone is still being released; see above.',
+  );
+  await expect(session(page)).not.toContainText('Nothing is being captured');
+  await page.evaluate(() =>
+    window.microphoneTest.send({
+      status: 'off',
+      canStart: true,
+      message: null,
+    }),
   );
   await expect(session(page)).toContainText('Nothing is being captured.');
   await page.evaluate(() =>
