@@ -34,6 +34,7 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var frames: Int64 = 0
     var phase = "preparing"
     var clockProbed = false
+    var probeOffset: (low: Int64, high: Int64)?
     var first: (ticks: UInt64, sample: Int64)?
     var anchor: UInt64?
     var maximumSample: Int64 = 0
@@ -140,7 +141,10 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
         pcm = decoded.pcm; format = decoded.pcm.format; frames = Int64(decoded.pcm.frameLength)
         engine.attach(node); engine.connect(node, to: engine.mainMixerNode, format: format)
         engine.prepare() // Not started; no scheduled acknowledgement.
-        let video = AVPlayer(playerItem: AVPlayerItem(asset: decoded.video)); video.isMuted = true; self.video = video
+        let video = AVPlayer(playerItem: AVPlayerItem(asset: decoded.video))
+        // Required by setRate(_:time:atHostTime:), including a past host anchor.
+        video.automaticallyWaitsToMinimizeStalling = false
+        video.isMuted = true; self.video = video
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 540), styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Fictional generated meeting — TalkQTE Lab Player"
         window.delegate = self; window.center()
@@ -194,6 +198,24 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
             DispatchQueue.main.async { self.stop(failure: true) }
         }
     }
+    func clockPair() throws -> (before: UInt64, continuous: UInt64, after: UInt64) {
+        let before = mach_absolute_time()
+        let continuous = mach_continuous_time()
+        let after = mach_absolute_time()
+        try require(after >= before)
+        func delta(_ left: UInt64, _ right: UInt64) throws -> Int64 {
+            let magnitude = left >= right ? left - right : right - left
+            try require(magnitude <= UInt64(Int64.max))
+            return left >= right ? Int64(magnitude) : -Int64(magnitude)
+        }
+        let low = try delta(continuous, after), high = try delta(continuous, before)
+        if let offset = probeOffset {
+            // Node/libuv uses continuous time; audio node host time is absolute.
+            // Sleep changes their offset. Reject disjoint brackets, no repair.
+            try require(low <= offset.high && high >= offset.low)
+        }
+        return (before, continuous, after)
+    }
     func control(_ type: String, _ value: [String: Any]) {
         if type == "retire", phase == "stopped", !engine.isRunning {
             window?.orderOut(nil)
@@ -203,8 +225,15 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if type == "clock_probe", phase == "prepared", !clockProbed,
            let probe = value["probeId"] as? String, probe.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil {
             clockProbed = true
-            let ticks = mach_absolute_time()
-            emit("clock_sample", ["probeId": probe, "hostTicks": String(ticks), "timebaseNumer": timebase.numer, "timebaseDenom": timebase.denom])
+            do {
+                let pair = try clockPair()
+                let low = pair.continuous >= pair.after ? Int64(pair.continuous - pair.after) : -Int64(pair.after - pair.continuous)
+                let high = pair.continuous >= pair.before ? Int64(pair.continuous - pair.before) : -Int64(pair.before - pair.continuous)
+                probeOffset = (low, high)
+                emit("clock_sample", ["probeId": probe, "hostTicks": String(pair.continuous),
+                    "absoluteBeforeTicks": String(pair.before), "absoluteAfterTicks": String(pair.after),
+                    "timebaseNumer": timebase.numer, "timebaseDenom": timebase.denom])
+            } catch { stop(failure: true) }
         } else if type == "start", phase == "prepared", clockProbed, !startRequested {
             startRequested = true
             do { try start() } catch { stop(failure: true) }
@@ -241,6 +270,8 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func observeRender() {
         guard phase == "starting" || phase == "playing" else { return }
         guard lab_player_stopped(state) == 0 else { return stop(failure: false) }
+        let pair: (before: UInt64, continuous: UInt64, after: UInt64)
+        do { pair = try clockPair() } catch { return stop(failure: true) }
         let output = engine.outputNode.outputFormat(forBus: 0)
         guard engine.isRunning, output.sampleRate == topology?.0, output.channelCount == topology?.1,
               (try? outputDevice()) == topology?.2 else { return stop(failure: true) }
@@ -265,6 +296,7 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     "observations": [["hostTicks": String(first.ticks), "sampleTime": String(first.sample), "hostTimeValid": true, "sampleTimeValid": true],
                                      ["hostTicks": String(render.hostTime), "sampleTime": String(sample), "hostTimeValid": true, "sampleTimeValid": true]],
                     "timebaseNumer": timebase.numer, "timebaseDenom": timebase.denom,
+                    "clockPair": ["absoluteBeforeTicks": String(pair.before), "continuousTicks": String(pair.continuous), "absoluteAfterTicks": String(pair.after)],
                     "outputLatencyEstimateMs": engine.outputNode.outputPresentationLatency * 1000,
                     "outputSampleRate": output.sampleRate, "outputChannels": output.channelCount,
                     "outputDeviceId": topology!.2,

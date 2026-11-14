@@ -24,6 +24,8 @@ const bridge = {
   sentMs: 1000,
   receivedMs: 1002,
   hostTicks: '10000000000',
+  absoluteBeforeTicks: '10000000000',
+  absoluteAfterTicks: '10000000000',
   timebaseNumer: 1,
   timebaseDenom: 1,
 };
@@ -43,6 +45,11 @@ const frame = {
   outputDeviceId: 42,
   hostTimeValid: true,
   sampleTimeValid: true,
+  clockPair: {
+    absoluteBeforeTicks: '10020000000',
+    continuousTicks: '10020000000',
+    absoluteAfterTicks: '10020000000',
+  },
   observations: [
     {
       hostTicks: '10010000000',
@@ -61,7 +68,7 @@ const frame = {
 test('real advancing coeval render observations map media zero through measured bridge, independent of receipt', () => {
   const start = mapLabPlayerStart(frame, bridge, { nowMs: 1200 });
   assert.equal(start.monotonicMs, 1001);
-  assert.equal(start.uncertaintyMs, 2);
+  assert.equal(start.uncertaintyMs, 1.001);
   assert.equal(start.basis, 'audio-render');
   assert.equal(start.outputLatencyEstimateMs, 12);
   assert.equal(
@@ -114,6 +121,10 @@ test('large host ticks use checked rational delta instead of lossy whole-uptime 
   const offset = 18000000000000000000n;
   const f = structuredClone(frame),
     b = { ...bridge, hostTicks: String(BigInt(bridge.hostTicks) + offset) };
+  b.absoluteBeforeTicks = String(BigInt(bridge.absoluteBeforeTicks) + offset);
+  b.absoluteAfterTicks = String(BigInt(bridge.absoluteAfterTicks) + offset);
+  for (const key of Object.keys(f.clockPair))
+    f.clockPair[key] = String(BigInt(f.clockPair[key]) + offset);
   for (const o of f.observations)
     o.hostTicks = String(BigInt(o.hostTicks) + offset);
   const start = mapLabPlayerStart(f, b, { nowMs: 1200 });
@@ -318,3 +329,49 @@ test(
     }
   },
 );
+
+test('sleep between probe and render cannot silently rebase the absolute/continuous offset', () => {
+  const f = structuredClone(frame);
+  // Audio absolute time excludes sleep; libuv continuous time advances 300ms.
+  f.clockPair.continuousTicks = String(
+    BigInt(f.clockPair.continuousTicks) + 300000000n,
+  );
+  assert.throws(() => mapLabPlayerStart(f, bridge, { nowMs: 1500 }));
+});
+test('existing nonzero sleep offset maps render ticks into continuous time explicitly', () => {
+  const offset = 300000000n,
+    f = structuredClone(frame),
+    b = { ...bridge };
+  b.hostTicks = String(BigInt(b.hostTicks) + offset);
+  f.clockPair.continuousTicks = String(
+    BigInt(f.clockPair.continuousTicks) + offset,
+  );
+  assert.equal(mapLabPlayerStart(f, b, { nowMs: 1200 }).monotonicMs, 1001);
+});
+test('clock read brackets may straddle a zero offset without unsigned underflow', () => {
+  const f = structuredClone(frame),
+    b = { ...bridge };
+  b.absoluteBeforeTicks = '9999999999';
+  b.absoluteAfterTicks = '10000000001';
+  f.clockPair.absoluteBeforeTicks = '10019999999';
+  f.clockPair.absoluteAfterTicks = '10020000001';
+  assert.equal(mapLabPlayerStart(f, b, { nowMs: 1200 }).monotonicMs, 1001);
+});
+test('Swift checks clock discontinuity throughout render and disables AVPlayer stalling wait before host-time rate', () => {
+  const swift = readFileSync(
+    new URL('./lab-owned-player.swift', import.meta.url),
+    'utf8',
+  );
+  assert.match(
+    swift,
+    /try require\(low <= offset.high && high >= offset.low\)/,
+  );
+  assert.match(
+    swift,
+    /do \{ pair = try clockPair\(\) \} catch \{ return stop\(failure: true\) \}/,
+  );
+  assert.ok(
+    swift.indexOf('video.automaticallyWaitsToMinimizeStalling = false') <
+      swift.indexOf('video?.setRate'),
+  );
+});

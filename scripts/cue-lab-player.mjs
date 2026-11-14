@@ -155,6 +155,23 @@ export function verifyLabPlayerBuild({ manifestFile, approved } = {}) {
   }
 }
 
+export function labPlayerClockOffset({
+  absoluteBeforeTicks,
+  continuousTicks,
+  absoluteAfterTicks,
+}) {
+  required(
+    positive(absoluteBeforeTicks) &&
+      positive(continuousTicks) &&
+      positive(absoluteAfterTicks),
+  );
+  const before = BigInt(absoluteBeforeTicks),
+    continuous = BigInt(continuousTicks),
+    after = BigInt(absoluteAfterTicks);
+  required(after >= before);
+  return { low: continuous - after, high: continuous - before };
+}
+
 export function mapLabPlayerStart(
   frame,
   bridge,
@@ -165,12 +182,15 @@ export function mapLabPlayerStart(
       'sentMs',
       'receivedMs',
       'hostTicks',
+      'absoluteBeforeTicks',
+      'absoluteAfterTicks',
       'timebaseNumer',
       'timebaseDenom',
     ]) &&
       Number.isFinite(bridge.sentMs) &&
       Number.isFinite(bridge.receivedMs) &&
       bridge.sentMs >= 0 &&
+      bridge.sentMs <= 2 ** 32 &&
       bridge.receivedMs >= bridge.sentMs &&
       bridge.receivedMs - bridge.sentMs <= 100 &&
       positive(bridge.hostTicks) &&
@@ -183,6 +203,7 @@ export function mapLabPlayerStart(
       'sampleRate',
       'totalFrames',
       'observations',
+      'clockPair',
       'timebaseNumer',
       'timebaseDenom',
       'outputLatencyEstimateMs',
@@ -212,6 +233,23 @@ export function mapLabPlayerStart(
       Array.isArray(frame.observations) &&
       frame.observations.length === 2,
   );
+  required(
+    exact(frame.clockPair, [
+      'absoluteBeforeTicks',
+      'continuousTicks',
+      'absoluteAfterTicks',
+    ]),
+  );
+  const probedOffset = labPlayerClockOffset({
+    ...bridge,
+    continuousTicks: bridge.hostTicks,
+  });
+  const currentOffset = labPlayerClockOffset(frame.clockPair);
+  required(
+    currentOffset.low <= probedOffset.high &&
+      currentOffset.high >= probedOffset.low,
+  );
+  const offsetMid = (currentOffset.low + currentOffset.high) / 2n;
   const n = BigInt(bridge.timebaseNumer),
     d = BigInt(bridge.timebaseDenom),
     rate = 48000n;
@@ -249,13 +287,19 @@ export function mapLabPlayerStart(
   const spread = Math.abs(nsToMs(observations[1].zero - observations[0].zero));
   required(spread <= 5);
   const delta = nsToMs(
-    observations[1].zero - BigInt(bridge.hostTicks) * n * rate,
+    observations[1].zero +
+      offsetMid * n * rate -
+      BigInt(bridge.hostTicks) * n * rate,
   );
   const mid = (bridge.sentMs + bridge.receivedMs) / 2;
-  // The bridge and rendered samples share the macOS monotonic host timebase.
-  // One millisecond allowance covers bounded numeric conversion and relative
-  // clock-rate mapping over this <=110s operation; runtime drift remains evidence.
-  const uncertaintyMs = (bridge.receivedMs - bridge.sentMs) / 2 + spread + 1;
+  // Explicitly map absolute render ticks into continuous ticks used by libuv.
+  // The measured offset brackets must overlap; Swift repeats that check during
+  // playback, so a sleep/wake discontinuity is terminal rather than rebased.
+  const uncertaintyMs =
+    (bridge.receivedMs - bridge.sentMs) / 2 +
+    spread +
+    Number(((currentOffset.high - currentOffset.low) * n) / d) / 1e6 +
+    0.001;
   const monotonicMs = mid + delta;
   required(
     Number.isFinite(monotonicMs) &&
@@ -424,6 +468,8 @@ function playerController({
             ...BASE,
             'probeId',
             'hostTicks',
+            'absoluteBeforeTicks',
+            'absoluteAfterTicks',
             'timebaseNumer',
             'timebaseDenom',
           ]) &&
@@ -436,10 +482,13 @@ function playerController({
         sentMs,
         receivedMs: performance.now(),
         hostTicks: frame.hostTicks,
+        absoluteBeforeTicks: frame.absoluteBeforeTicks,
+        absoluteAfterTicks: frame.absoluteAfterTicks,
         timebaseNumer: frame.timebaseNumer,
         timebaseDenom: frame.timebaseDenom,
       };
       required(bridge.receivedMs - sentMs <= 100);
+      labPlayerClockOffset({ ...bridge, continuousTicks: bridge.hostTicks });
       clock.resolve();
     } else if (frame.type === 'started') {
       required(playing && !started && frame.totalFrames === totalFrames);

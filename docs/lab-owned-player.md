@@ -56,20 +56,28 @@ samples must derive media-zero host anchors within five milliseconds. Invalid,
 backward, inconsistent or stalled observations never establish start. Route,
 output format or engine configuration changes terminate the operation.
 
-A single bounded probe brackets a native mach clock sample with JS
-`performance.now()`. For host ticks H, sample position S, rate R and timebase
-numerator N/denominator D, media zero in nanoseconds is
-`H*N/D - S*1e9/R`. JS computes the difference from the probed host tick with checked
-BigInt rational arithmetic before converting the small relative delta to a Number.
-It adds that delta to the bracket midpoint; receipt time does not replace start.
+A single bounded probe brackets a native `mach_continuous_time` sample with JS
+`performance.now()` (Node/libuv uses continuous time). Audio node host ticks use
+`mach_absolute_time`, which excludes sleep. Both the probe and start include a
+coeval absolute-before/continuous/absolute-after clock bracket. Their offset
+intervals must overlap; the Swift owner repeats this check throughout rendering.
+A sleep/wake offset discontinuity fails terminally without rebasing or retry.
 
-The reported uncertainty includes half the measured bracket, observed anchor
-spread and a one-millisecond numeric/monotonic-rate mapping allowance. The mapping
-assumes the macOS host clock and Node monotonic clock have a stable rate over the
-bounded operation; runtime verification of that assumption remains acceptance
-work. Brackets above 100 ms, stale/future start or total uncertainty above the
-allowed bound fail. The broker independently adds calibration uncertainty and
-rejects combined uncertainty above 100 ms.
+For absolute render ticks H, sample position S, rate R and timebase numerator
+N/denominator D, media zero is `H*N/D - S*1e9/R`. Add the measured continuous-minus-
+absolute offset, subtract the probed continuous tick, convert only that small
+relative delta to milliseconds and add the JS bracket midpoint. Checked BigInt
+rational arithmetic preserves large host tick precision; receipt time never
+replaces the start anchor.
+
+Uncertainty includes half the measured JS bracket, observed render-anchor spread,
+the measured offset-bracket width and one microsecond for numeric quantization.
+The JS monotonic reading is restricted to less than 2^32 milliseconds, bounding
+its floating-point resolution within that allowance. Brackets above 100 ms,
+stale/future start, offset discontinuity or total uncertainty above the allowed
+bound fail. The broker independently adds calibration uncertainty and rejects
+combined uncertainty above 100 ms. API rate/alignment behavior still needs device
+acceptance; no stable-offset assumption across sleep is made.
 
 API output latency and output device identity are reported separately. They are
 estimates/route evidence, not a physical acoustic-arrival bound. No API event here

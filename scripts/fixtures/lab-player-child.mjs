@@ -33,13 +33,17 @@ process.stdin.on('data', (chunk) => {
   for (let end; (end = partial.indexOf('\n')) !== -1;) {
     const f = JSON.parse(partial.slice(0, end));
     partial = partial.slice(end + 1);
-    if (f.type === 'clock_probe')
+    if (f.type === 'clock_probe') {
+      const clockTicks = process.hrtime.bigint();
       emit('clock_sample', {
         probeId: f.probeId,
-        hostTicks: String(process.hrtime.bigint()),
+        hostTicks: String(clockTicks),
+        absoluteBeforeTicks: String(clockTicks),
+        absoluteAfterTicks: String(clockTicks),
         timebaseNumer: 1,
         timebaseDenom: 1,
       });
+    }
     if (f.type === 'start') {
       if (mode === 'no-start') continue;
       if (mode === 'oversize') {
@@ -53,6 +57,11 @@ process.stdin.on('data', (chunk) => {
           totalFrames: frames,
           timebaseNumer: 1,
           timebaseDenom: 1,
+          clockPair: {
+            absoluteBeforeTicks: String(ticks + 10000000n),
+            continuousTicks: String(ticks + 10000000n),
+            absoluteAfterTicks: String(ticks + 10000000n),
+          },
           observations: [
             {
               hostTicks: String(ticks),
