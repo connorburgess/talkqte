@@ -116,43 +116,25 @@ If selecting "Google Chrome for Testing" captures nothing, that route is out.
 
 ## Start capture
 
-The notebook has no Start for application audio yet. In this development build
-the steps go through the app's own command, from the main window's Web
-Inspector. Open it with right-click → Inspect Element (_to confirm_ that debug
-builds allow it).
+In the notebook's **Cue processing** panel, under "Application audio ·
+development build":
 
-```js
-const audio = (action) =>
-  window.__TAURI_INTERNALS__.invoke('application_audio', { action });
-
-// 1. The notebook would show this notice before listing. Read it, then:
-(await audio({ kind: 'snapshot' })).scopeNotice;
-await audio({ kind: 'list', acknowledged: true });
-```
-
-**The first listing shows the macOS Screen Recording prompt.** On recent
-macOS this is listed as "Screen & System Audio Recording". Grant it to TalkQTE
-in System Settings → Privacy & Security, then quit and reopen the app if macOS
-asks (_to confirm_). The permission is granted once per build.
-
-```js
-// 2. Wait for the list, then review QuickTime Player.
-let status = await audio({ kind: 'snapshot' });
-status.choices; // repeat until it lists applications
-const player = status.choices.find((c) => c.name === 'QuickTime Player');
-await audio({ kind: 'review', source: player.id });
-
-// 3. Start a session for QuickTime Player alone, with no microphone.
-status = await audio({ kind: 'snapshot' });
-await audio({ kind: 'startSession', review: status.operation });
-```
+1. Read the notice, then press **List applications**.
+2. **The first listing shows the macOS Screen Recording prompt.** On recent
+   macOS this is listed as "Screen & System Audio Recording". Grant it to
+   TalkQTE in System Settings → Privacy & Security, then quit and reopen the
+   app if macOS asks (_to confirm_), and list again. The permission is granted
+   once per build.
+3. Choose **QuickTime Player** and press **Start session from QuickTime
+   Player**. That starts a session for QuickTime Player alone, with no
+   microphone.
 
 Wait until the notebook's Cue processing panel says "Application audio from
 QuickTime Player is being captured", then press play in QuickTime Player.
 
 A session for one application starts only while the microphone is not
 capturing, no other live session or demo is running, and the speech model is
-installed. A refusal is shown in the status as `problem`.
+installed. A refusal is shown under the panel's Start in words.
 
 ## During the run
 
@@ -169,8 +151,17 @@ installed. A refusal is shown in the status as `problem`.
    session**. Either one stops the source and ends the session.
 2. Wait until the panel no longer reads stopping, cleanup failed or abandoned.
    Only then is capture confirmed off.
-3. **Cleanup failed:** retry once from the Web Inspector:
-   `await audio({ kind: 'retryCleanup', operation: (await audio({ kind: 'snapshot' })).operation })`.
+3. **Cleanup failed:** the panel has no retry. Retry once from the main
+   window's Web Inspector, opened with right-click → Inspect Element (_to
+   confirm_ that debug builds allow it):
+
+   ```js
+   const audio = (action) =>
+     window.__TAURI_INTERNALS__.invoke('application_audio', { action });
+   const { operation } = await audio({ kind: 'snapshot' });
+   await audio({ kind: 'retryCleanup', operation });
+   ```
+
 4. **Abandoned:** nothing in TalkQTE can stop that capture. Quit TalkQTE and
    check that the menu bar's recording indicator has gone. Whether quitting
    ends the capture has not been checked.
@@ -236,7 +227,7 @@ Everything here waits for the owner's first run, with these questions first:
 
 - Whether `open --env` passes the log's path, and which app the Screen
   Recording permission is attributed to.
-- Whether the Web Inspector opens in this build.
+- Whether the Web Inspector opens in this build, for a cleanup retry.
 - That QuickTime Player's audio is captured and nothing else is.
 - How long Stop takes to reach confirmed release.
 - Whether the companion's window title is visible to the lab's recorder.

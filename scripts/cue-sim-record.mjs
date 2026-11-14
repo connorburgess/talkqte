@@ -31,8 +31,12 @@ import {
   parseFlags,
   stamp,
 } from './cue-lab-output.mjs';
-import { SETS, loadSet } from './cue-lab-sets.mjs';
-import { conversationFromCase, loadConversations } from './cue-sim.mjs';
+import {
+  DIALOGUE_SCHEMA,
+  SIM_SCHEMA,
+  assertBundled,
+  loadPlayable,
+} from './lab-playable.mjs';
 import { buildTrack, checkTrack } from './cue-sim-audio.mjs';
 import { IMAGE_MODEL, portraitPlan } from './cue-sim-portraits.mjs';
 import { writeReview } from './cue-sim-review.mjs';
@@ -67,7 +71,7 @@ const ENTRY = '/tests/fixtures/native-microphone.ts';
 const VIEWPORT = { width: 1440, height: 900 };
 const WORD_MS = 360;
 // File names come from a results file, which could have been edited by hand.
-const safe = (text) => String(text).replace(/[^A-Za-z0-9_-]+/g, '-');
+export const safe = (text) => String(text).replace(/[^A-Za-z0-9_-]+/g, '-');
 
 /** What the stage needs to play one replay from a simulation results file. */
 export function stageData(
@@ -75,10 +79,16 @@ export function stageData(
   replay,
   { origin, speed = 1, view = 'call', sound = null, portraits = null },
 ) {
-  if (results.schema !== 'talkqte-cue-sim/1' || results.fictional !== true)
+  if (
+    ![SIM_SCHEMA, DIALOGUE_SCHEMA].includes(results.schema) ||
+    results.fictional !== true
+  )
     throw new Error(
-      'The recorder only plays fictional results written by the cue simulation.',
+      'The recorder only plays fictional results written by the cue simulation or the dialogue generator.',
     );
+  // A generated run names its evaluator among its agents.
+  const evaluator = results.evaluator ??
+    results.agents?.evaluator ?? { label: 'no evaluator', kind: 'none' };
   const lines = replay.lines.map((line, index) => {
     const spoken = 300 + line.text.split(/\s+/).length * WORD_MS;
     return {
@@ -87,16 +97,18 @@ export function stageData(
       text: line.text,
       atMs: line.atMs,
       arrivesAtMs: line.arrivesAtMs,
-      // When the speaker starts: after the previous line, about a line's
-      // length before this one ends.
-      fromMs: Math.max(
-        index ? replay.lines[index - 1].atMs + 100 : 0,
-        line.atMs - spoken,
-      ),
+      // When the speaker starts: as the run says where it says, otherwise
+      // after the previous line, about a line's length before this one ends.
+      fromMs: Number.isFinite(line.startMs)
+        ? line.startMs
+        : Math.max(
+            index ? replay.lines[index - 1].atMs + 100 : 0,
+            line.atMs - spoken,
+          ),
     };
   });
   const last = lines.at(-1);
-  const kind = results.evaluator.kind;
+  const kind = evaluator.kind;
   return {
     origin,
     speed,
@@ -121,7 +133,7 @@ export function stageData(
     })),
     // Shown as a tag for the whole recording when portraits are used.
     portraitsLabel: portraits ? 'Synthetic portraits' : '',
-    evaluator: results.evaluator.label,
+    evaluator: evaluator.label,
     // Said in a tag for the whole recording: whether a model decided.
     decisions:
       kind !== 'model'
@@ -173,7 +185,7 @@ export async function speechEngine() {
   return 'tone';
 }
 
-async function duration(file) {
+export async function duration(file) {
   const { stdout } = await run('ffprobe', [
     '-v',
     'error',
@@ -328,7 +340,7 @@ export async function optimize(raw, target, { ffmpeg } = {}) {
 /** Lays the spoken lines under a finished video: one track built offline
  * from the clips at exact offsets, all at 48 kHz, joined to the picture
  * without re-encoding it. Then measures the result against the clips. */
-async function addSound(video, clips, offsetMs, totalMs, directory) {
+export async function addSound(video, clips, offsetMs, totalMs, directory) {
   const track = join(directory, 'track.wav');
   const placed = await buildTrack(clips, offsetMs, track, { totalMs });
   const joined = `${video}.sound.mp4`;
@@ -433,41 +445,7 @@ function legibility(element) {
 }
 /* c8 ignore stop */
 
-/** Refuses a replay whose words are not the bundled fictional ones: every
- * line, speaker, title and participant must match the fixture it names.
- * A replay may hold fewer lines than its fixture (a run that stopped). */
-export async function assertBundled(results, replay) {
-  const source = String(results.source ?? '');
-  let bundled;
-  if (source.startsWith('set:') && Object.hasOwn(SETS, source.slice(4))) {
-    const set = await loadSet(source.slice(4));
-    bundled = set.cases
-      .map((item) => conversationFromCase(item, set.name))
-      .find((item) => item.id === replay.id);
-  } else bundled = (await loadConversations()).find((c) => c.id === replay.id);
-  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-  const lines = new Map((bundled?.lines ?? []).map((l) => [l.id, l]));
-  const matches =
-    bundled &&
-    replay.title === bundled.title &&
-    replay.setting === bundled.setting &&
-    (replay.listener ?? null) === (bundled.listener ?? null) &&
-    same(replay.participants, bundled.participants) &&
-    replay.lines.length > 0 &&
-    replay.lines.every((line) => {
-      const known = lines.get(line.id);
-      return (
-        known &&
-        line.speaker === known.speaker &&
-        line.text === known.text &&
-        line.atMs === known.atMs
-      );
-    });
-  if (!matches)
-    throw new Error(
-      `The replay "${replay.id}" does not match the bundled fictional conversations. The recorder only plays those.`,
-    );
-}
+export { assertBundled };
 
 /** Plays one replay in the browser and records it: one video of the mock
  * call with the companion, and with `withNotebook` a second of the
