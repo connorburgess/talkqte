@@ -90,8 +90,12 @@ audio, with no microphone.
   while unwinding.
 - A session stopped before its source began ends Off with no problem.
 
-Starting a session for an application, like listing, is reached only through
-the development command; the notebook offers no Start for it.
+In a build with this feature, the notebook's Cue processing panel offers the
+Start: the scope notice and a warning that listing can show the Screen
+Recording prompt, then **List applications**, a choice of one listed
+application, and **Start session from** that application, which reviews it
+and starts a session for it alone. Only a build that reports a source shows
+it. Retrying a failed cleanup is still only the development command.
 
 ## The status
 

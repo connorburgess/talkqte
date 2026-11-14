@@ -11,6 +11,8 @@ import {
   type ProcessingReview,
   type ProcessingScope,
   type ProcessingSnapshot,
+  type ApplicationAudioAction,
+  type ApplicationAudioStatus,
 } from '../../src/lib/processing';
 import '../../src/styles.css';
 
@@ -188,14 +190,16 @@ mockIPC(
         return;
       }
       case 'application_audio':
-        // Development builds only; recorded in calls, answered with nothing.
+        // Development builds only; recorded in calls. Answered with nothing
+        // unless a test has set up the host's own status.
         // A test can have the status event arrive before the reply.
         if (sourceStopEvent) {
           const event = sourceStopEvent;
           sourceStopEvent = null;
           await send(event);
         }
-        return null;
+        if (!host) return null;
+        return hostAction((args as { action: ApplicationAudioAction }).action);
       default:
         throw `Unexpected fictional command: ${command}`;
     }
@@ -204,12 +208,69 @@ mockIPC(
 );
 
 let sourceStopEvent: Partial<ProcessingSnapshot> | null = null;
+// A fictional application-audio host: no OS listing, prompt or capture.
+let host: ApplicationAudioStatus | null = null;
+let hostRefusal: string | null = null;
+let hostReview = 0;
+function hostUpdate(value: Partial<ApplicationAudioStatus>) {
+  host = { ...host!, ...value, revision: host!.revision + 1 };
+  return structuredClone(host);
+}
+function hostAction(action: ApplicationAudioAction) {
+  switch (action.kind) {
+    case 'snapshot':
+      return structuredClone(host!);
+    case 'list':
+      return hostUpdate({ phase: 'listing', choices: [], problem: null });
+    case 'cancelList':
+      return hostUpdate({ phase: 'off' });
+    case 'review': {
+      const choice = host!.choices.find((item) => item.id === action.source);
+      if (!choice) throw 'unknown_source';
+      return hostUpdate({
+        phase: 'reviewing',
+        application: choice.name,
+        operation: `fictional-review-${++hostReview}`,
+        problem: null,
+      });
+    }
+    case 'startSession':
+      if (action.review !== host!.operation) throw 'changed';
+      if (hostRefusal) {
+        const problem = hostRefusal;
+        hostRefusal = null;
+        return hostUpdate({ phase: 'off', operation: null, problem });
+      }
+      return hostUpdate({ phase: 'starting' });
+  }
+}
 const control = {
   calls,
   send,
   /** The next application_audio command publishes this before replying. */
   publishBeforeSourceReply: (value: Partial<ProcessingSnapshot>) => {
     sourceStopEvent = value;
+  },
+  /** Answer application_audio as a fictional host with this status. */
+  host: (value: Partial<ApplicationAudioStatus>) => {
+    host = {
+      revision: 1,
+      phase: 'off',
+      application: null,
+      operation: null,
+      choices: [],
+      problem: null,
+      scopeNotice:
+        'Audio from all windows of this application may be included.',
+      ...value,
+    };
+  },
+  /** The host publishes a change, as when listing finishes. */
+  hostChanged: (value: Partial<ApplicationAudioStatus>) =>
+    emit('application-audio:changed', hostUpdate(value)),
+  /** The next start is refused with this problem. */
+  refuseStart: (problem: string) => {
+    hostRefusal = problem;
   },
   replaceSources: () =>
     boundary({
