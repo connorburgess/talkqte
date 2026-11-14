@@ -6,7 +6,7 @@ The tooling exists to learn when a cue should appear, stay away, or leave. It ca
 
 ## Evaluators
 
-Everything that decides about a cue sits behind one adapter in `scripts/cue-evaluators.mjs`, so another provider (a different CLI, a local model) is one more function there and nothing else changes.
+Everything that decides about a cue sits behind one adapter in `scripts/cue-evaluators.mjs`, so another provider (a different CLI, a local model) is one more entry in its list. The adapter itself says what each request carries (`request`), and the dry run, the run and the log all take it from there.
 
 | Evaluator | What it is | Leaves the device |
 | --- | --- | --- |
@@ -51,9 +51,9 @@ npm run lab:batch -- --set held-out --run --out <directory outside the repositor
 
 What the runner enforces:
 
-- **A call cap.** `--max-calls` is required, from 1 to 100. A run that would need more requests than the cap is refused before anything starts, and the loop stops at the cap regardless.
-- **No API key, ever.** If the shell carries an API key, auth token, base-URL override or provider switch (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_…` and similar), the run is refused before any process starts and the message names the variables, never their values. The single-case command refuses the same way. General network proxy variables are not treated as credentials; they are simply not passed on. The existing checks still apply after that: the child process gets an allowlisted environment, and an API-key, routed or unknown sign-in is rejected before any model request.
-- **One sign-in check, then one request per case, one at a time.** No retry, no alternate model, no fallback.
+- **A call cap.** `--max-calls` is required, from 1 to 100. An evaluator counts as hosted unless its adapter says explicitly that it is not, so a new adapter cannot skip the acknowledgement or the cap by omission. A run that would need more requests than the cap is refused before anything starts, and the loop stops at the cap regardless.
+- **No API key, ever.** If the shell carries an API key, auth token, base-URL override or provider switch (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_…` and similar), the run is refused before any process starts and the message names the variables, never their values. The single-case command refuses the same way, and so does a shell with `HTTPS_PROXY`, `HTTP_PROXY` or `ALL_PROXY` set. The existing checks still apply after that: the child process gets an allowlisted environment, and an API-key, routed or unknown sign-in is rejected before any model request.
+- **One version check and one sign-in check, which send no case text, then one request per case, one at a time.** No retry, no alternate model, no fallback.
 - **Stop at the first failure.** A usage limit, an error, a reply from another model, or a malformed decision ends the batch. Whatever completed is written, with the reason.
 - **Nothing recurring.** There is no schedule and no loop that starts by itself; CI never runs a model.
 

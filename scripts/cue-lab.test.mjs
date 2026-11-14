@@ -23,6 +23,8 @@ const decision = {
   reason: 'The later statement assigns the checklist to Maya.',
   observedUse: 'not_observed',
 };
+// A shell with nothing that could route a request elsewhere.
+const environment = { HOME: '/fictional-home', PATH: '/fictional-bin' };
 const subscription = {
   loggedIn: true,
   authMethod: 'claude.ai',
@@ -99,7 +101,7 @@ test('API, unauthenticated, unknown and routed accounts cannot start inference',
     assert.throws(() => assertSubscription(auth), /subscription login/);
     const fake = fakeRunner({ auth });
     await assert.rejects(
-      runLab(answered, { run: fake.run }),
+      runLab(answered, { environment, run: fake.run }),
       /No model request/,
     );
     assert.equal(fake.calls.length, 2);
@@ -108,7 +110,10 @@ test('API, unauthenticated, unknown and routed accounts cannot start inference',
 
 test('older CLI versions stop before authentication or inference', async () => {
   const fake = fakeRunner({ version: '2.1.200 (Claude Code)' });
-  await assert.rejects(runLab(answered, { run: fake.run }), /2.1.318/);
+  await assert.rejects(
+    runLab(answered, { environment, run: fake.run }),
+    /2.1.318/,
+  );
   assert.equal(fake.calls.length, 1);
 });
 
@@ -116,7 +121,11 @@ test('check mode returns no account identity and never requests a model', async 
   const fake = fakeRunner({
     auth: { ...subscription, email: 'fictional@example.invalid' },
   });
-  const result = await runLab(null, { checkOnly: true, run: fake.run });
+  const result = await runLab(null, {
+    checkOnly: true,
+    environment,
+    run: fake.run,
+  });
   assert.deepEqual(result, {
     version: '2.1.318',
     authentication: 'subscription',
@@ -136,7 +145,7 @@ test('expected labels and fixture IDs are not disclosed to the evaluator', () =>
 
 test('one selected case uses isolated subscription CLI and returns source-checked labels', async () => {
   const fake = fakeRunner();
-  const result = await runLab(answered, { run: fake.run });
+  const result = await runLab(answered, { environment, run: fake.run });
   assert.equal(fake.calls.length, 3);
   const call = fake.calls[2];
   assert.equal(call.command, 'claude');
@@ -218,10 +227,13 @@ test('usage limits, wrong models and malformed replies fail without retry', asyn
     },
   ]) {
     const fake = fakeRunner({ result });
-    await assert.rejects(runLab(answered, { run: fake.run }), (error) => {
-      assert.ok(!error.message.includes('sensitive provider details'));
-      return true;
-    });
+    await assert.rejects(
+      runLab(answered, { environment, run: fake.run }),
+      (error) => {
+        assert.ok(!error.message.includes('sensitive provider details'));
+        return true;
+      },
+    );
     assert.equal(fake.calls.length, 3);
     await assert.rejects(access(fake.calls[0].options.cwd));
   }

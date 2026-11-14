@@ -11,12 +11,7 @@
 // explicit invocation with a call cap, and stops at the first failure.
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildPrompt, systemPromptFor } from './cue-lab.mjs';
-import {
-  claudeEvaluator,
-  fakeEvaluator,
-  rulesEvaluator,
-} from './cue-evaluators.mjs';
+import { EVALUATORS, createEvaluator, isHosted } from './cue-evaluators.mjs';
 import {
   createRunLog,
   latencySummary,
@@ -55,13 +50,26 @@ export function callCap(value) {
   return cap;
 }
 
-/** What a run over these cases would send: one request per case. */
-export function planBatch(cases) {
+/** What a run over these cases would send: one request per case, as the
+ * evaluator itself describes it. */
+export function planBatch(cases, evaluator) {
   return cases.map((testCase) => ({
     caseId: testCase.id,
-    systemPrompt: systemPromptFor(testCase),
-    input: buildPrompt(testCase),
+    ...evaluator.request(testCase),
   }));
+}
+
+/** A hosted run without a usable cap is refused, wherever it is started. */
+export function requireCap(evaluator, maxCalls) {
+  if (!isHosted(evaluator)) return;
+  if (
+    !Number.isInteger(maxCalls) ||
+    maxCalls < 1 ||
+    maxCalls > MAX_CALLS_CEILING
+  )
+    throw new Error(
+      `A hosted run needs a call cap from 1 to ${MAX_CALLS_CEILING}. Nothing was started.`,
+    );
 }
 
 const tally = (records, test) => ({
@@ -118,7 +126,9 @@ export async function runBatch({
   log = createRunLog(null),
   now = () => new Date(),
 }) {
-  const plan = planBatch(cases);
+  requireCap(evaluator, maxCalls);
+  const hosted = isHosted(evaluator);
+  const plan = planBatch(cases, evaluator);
   const records = [];
   let stopped = null;
   let facts = null;
@@ -128,11 +138,13 @@ export async function runBatch({
     setFile: set.file,
     evaluator: evaluator.id,
     evaluatorLabel: evaluator.label,
-    hosted: evaluator.hosted,
+    hosted,
     destination: evaluator.destination ?? null,
     caseIds: cases.map(({ id }) => id),
     maxCalls: maxCalls ?? null,
-    systemPrompts: [...new Set(plan.map((request) => request.systemPrompt))],
+    systemPrompts: [
+      ...new Set(plan.map((request) => request.systemPrompt).filter(Boolean)),
+    ],
     node: process.version,
     platform: `${process.platform}-${process.arch}`,
   });
@@ -148,7 +160,6 @@ export async function runBatch({
         index,
         caseId: testCase.id,
         input: plan[index].input,
-        systemPrompt: plan[index].systemPrompt.length,
       });
       const result = await evaluator.decide(testCase);
       const { decision } = result;
@@ -197,7 +208,7 @@ export async function runBatch({
       id: evaluator.id,
       label: evaluator.label,
       kind: evaluator.kind,
-      hosted: evaluator.hosted,
+      hosted,
       ...facts,
     },
     maxCalls: maxCalls ?? null,
@@ -210,15 +221,15 @@ export async function runBatch({
   return results;
 }
 
-function describePlan(set, cases, evaluator, plan, print) {
+function describePlan(set, cases, evaluator, plan, selection, print) {
   print('Dry run. No process was started and nothing was sent.');
   print(
     `Set: ${set.name} (${set.file}), ${cases.length} of ${set.cases.length} cases.`,
   );
   print(`Evaluator: ${evaluator.label}.`);
-  if (evaluator.hosted) {
+  if (isHosted(evaluator)) {
     print(
-      `A run would make ${plan.length} model requests, one per case, one at a time, with no retry. Before them it makes 2 local CLI checks (version and sign-in) that send no case text.`,
+      `A run would make ${plan.length} model requests, one per case, one at a time, with no retry. Before them it makes 2 CLI checks (version and sign-in) that send no case text.`,
     );
     print(
       `A run sends the fictional case text listed below off this device to ${evaluator.destination}. That is hosted inference and uses the subscription's shared allowance. No API key is used or accepted.`,
@@ -229,17 +240,28 @@ function describePlan(set, cases, evaluator, plan, print) {
     );
   }
   for (const prompt of new Set(plan.map((request) => request.systemPrompt))) {
+    if (!prompt) continue;
     const count = plan.filter((r) => r.systemPrompt === prompt).length;
     print(`\nSystem prompt for ${count} of the requests:\n${prompt}`);
   }
   print('\nInput for each request (labels and case IDs are not sent):');
   for (const [index, request] of plan.entries())
-    print(`[${index + 1}] ${request.caseId}\n    ${request.input}`);
-  print(
-    evaluator.hosted
-      ? `\nTo run it, after checking that paid extra usage is off and with the owner's go-ahead for this run:\n  npm run lab:batch -- --set ${set.name} --run --out <directory outside the repository> --max-calls ${plan.length} --included-usage-confirmed`
-      : `\nTo run it:\n  npm run lab:batch -- --set ${set.name} --evaluator ${evaluator.id} --run --out <directory outside the repository>`,
-  );
+    print(
+      `[${index + 1}] ${request.caseId}\n    ${request.input ?? '(nothing: the recorded outcome for this case is read)'}`,
+    );
+  const chosen = `--set ${set.name}${selection ? ` --cases ${selection}` : ''}`;
+  if (!isHosted(evaluator))
+    print(
+      `\nTo run it:\n  npm run lab:batch -- ${chosen} --evaluator ${evaluator.id} --run --out <directory outside the repository>`,
+    );
+  else if (plan.length > MAX_CALLS_CEILING)
+    print(
+      `\nThis selection needs ${plan.length} requests, more than the ${MAX_CALLS_CEILING} one invocation allows. Split it with --cases.`,
+    );
+  else
+    print(
+      `\nTo run it, after checking that paid extra usage is off and with the owner's go-ahead for this run:\n  npm run lab:batch -- ${chosen} --run --out <directory outside the repository> --max-calls ${plan.length} --included-usage-confirmed`,
+    );
 }
 
 function describeResults(results, print) {
@@ -274,11 +296,7 @@ export async function main(
   {
     print = console.log,
     environment = process.env,
-    evaluators = {
-      claude: () => claudeEvaluator({ environment }),
-      fake: () => fakeEvaluator(),
-      rules: (outcomes) => rulesEvaluator(outcomes),
-    },
+    evaluators = EVALUATORS,
     now = () => new Date(),
   } = {},
 ) {
@@ -294,18 +312,25 @@ export async function main(
   const set = await loadSet(setName);
   const cases = selectCases(set.cases, flags['--cases']?.split(','));
   const rules = await loadRulesOutcomes(set.name);
-  const name = flags['--evaluator'] ?? 'claude';
-  if (!Object.hasOwn(evaluators, name))
-    throw new Error(
-      `Unknown evaluator. Choose one of: ${Object.keys(evaluators).join(', ')}.`,
-    );
-  const evaluator = evaluators[name](rules);
+  const evaluator = createEvaluator(
+    flags['--evaluator'] ?? 'claude',
+    { environment, rules },
+    evaluators,
+  );
   if (!flags['--run']) {
-    describePlan(set, cases, evaluator, planBatch(cases), print);
+    describePlan(
+      set,
+      cases,
+      evaluator,
+      planBatch(cases, evaluator),
+      flags['--cases'],
+      print,
+    );
     return null;
   }
   let maxCalls;
-  if (evaluator.hosted) {
+  // Anything not explicitly on-device needs the acknowledgement and a cap.
+  if (isHosted(evaluator)) {
     // Every check that can refuse does so before any process is started.
     if (!flags['--included-usage-confirmed'])
       throw new Error(
