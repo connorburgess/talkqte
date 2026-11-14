@@ -391,3 +391,63 @@ test('the isolated request refuses inherited credentials, odd models and efforts
     await other.close();
   }
 });
+
+test('the isolated request takes only the efforts the shared contract lists', async () => {
+  const fake = fakeRunner();
+  const cli = await openIsolatedCli({ environment, run: fake.run });
+  try {
+    const before = fake.calls.length;
+    for (const effort of ['high', 'max', ''])
+      await assert.rejects(
+        cli.request({
+          model: MODEL,
+          effort,
+          systemPrompt: 'p',
+          input: 'i',
+          reply: (v) => v,
+        }),
+        /no usable effort/,
+      );
+    assert.equal(fake.calls.length, before);
+    for (const effort of CONTRACT.efforts)
+      await cli.request({
+        model: MODEL,
+        effort,
+        systemPrompt: 'p',
+        input: 'i',
+        reply: (v) => v,
+      });
+    assert.equal(fake.calls.length, before + CONTRACT.efforts.length);
+  } finally {
+    await cli.close();
+  }
+});
+
+test('the isolated request’s options cannot be changed after the credential check', async () => {
+  const fake = fakeRunner();
+  const cli = await openIsolatedCli({ environment, run: fake.run });
+  try {
+    // Strict-mode modules throw on a write to a frozen object.
+    assert.throws(() => {
+      cli.options.env.ANTHROPIC_API_KEY = 'fictional';
+    }, TypeError);
+    assert.throws(() => {
+      cli.options.env = { ANTHROPIC_API_KEY: 'fictional' };
+    }, TypeError);
+    assert.throws(() => {
+      cli.options.cwd = '/elsewhere';
+    }, TypeError);
+    await cli.request({
+      model: MODEL,
+      effort: 'low',
+      systemPrompt: 'p',
+      input: 'i',
+      reply: (v) => v,
+    });
+    const sent = fake.calls.at(-1).options;
+    assert.deepEqual(sent.env, subscriptionEnvironment(environment));
+    assert.equal(sent.cwd, cli.options.cwd);
+  } finally {
+    await cli.close();
+  }
+});

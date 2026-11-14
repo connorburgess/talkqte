@@ -4,8 +4,9 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { fakeEvaluator } from './cue-evaluators.mjs';
+import { claudeEvaluator, fakeEvaluator } from './cue-evaluators.mjs';
 import { createRunLog } from './cue-lab-output.mjs';
+import { COMPACT_PROMPT } from './cue-lab.mjs';
 import { DEFAULTS as SIM_DEFAULTS } from './cue-sim.mjs';
 import {
   briefProblems,
@@ -13,7 +14,11 @@ import {
   loadFixtureBriefs,
 } from './cue-dialogue-briefs.mjs';
 import {
+  CAST_PROMPT,
   GENERATOR_PROMPT,
+  JUDGE_PROMPT,
+  ROLE_MODELS,
+  claudeAgents,
   fakeAgents,
   fakeGenerator,
 } from './cue-dialogue-agents.mjs';
@@ -583,7 +588,11 @@ test('the planned models must differ by role, and a model run is not available y
       ['--run', '--agents', 'claude', '--max-calls', '200', '--out', tmpdir()],
       { print },
     ),
-    /not built yet/,
+    /--included-usage-confirmed/,
+  );
+  await assert.rejects(
+    main(['--judge-effort', 'max'], { print }),
+    /--judge-effort is one of/,
   );
 });
 
@@ -798,4 +807,289 @@ test('a replay with different turn settings is refused by the engine itself', as
     rehearse({ replay, settings: { interjectEvery: 2 } }),
     /must use the saved run's interjectEvery/,
   );
+});
+
+/** A stand-in for the Claude Code CLI: the version and sign-in checks, and
+ * for each request a reply from the matching fake, reported as coming
+ * from the model the request named. Records every call. */
+function fakeCli(brief, { fail = null } = {}) {
+  const fakes = fakeAgents([brief]);
+  const generated = structuredClone(brief);
+  delete generated.offline;
+  for (const c of generated.criteria) delete c.offline;
+  const evaluator = fakeEvaluator({ latencyMs: 1_500 });
+  const calls = [];
+  return {
+    calls,
+    async run(command, args, options) {
+      calls.push({ args, input: options.input });
+      if (args.includes('--version')) return '2.1.318 (Claude Code)';
+      if (args.includes('auth'))
+        return JSON.stringify({
+          loggedIn: true,
+          authMethod: 'claude.ai',
+          apiProvider: 'firstParty',
+          subscriptionType: 'max',
+        });
+      const at = (flag) => args[args.indexOf(flag) + 1];
+      const model = at('--model');
+      const prompt = at('--system-prompt');
+      if (
+        fail &&
+        calls.filter((c) => c.args.includes('--print')).length === fail.at
+      )
+        return JSON.stringify({
+          type: 'result',
+          subtype: 'error',
+          is_error: true,
+          result: fail.text,
+        });
+      const view = JSON.parse(options.input);
+      let value;
+      if (prompt === GENERATOR_PROMPT) value = generated;
+      else if (prompt === CAST_PROMPT)
+        value = (await fakes.cast.reply(view)).value;
+      else if (prompt === JUDGE_PROMPT)
+        value = (await fakes.judge.reply(view)).value;
+      else if (prompt.startsWith('You are '))
+        value = (await fakes.listener.reply(view)).value;
+      else {
+        const { decision } = await evaluator.decide(view);
+        value = prompt.startsWith(COMPACT_PROMPT)
+          ? {
+              action: decision.action,
+              cue: decision.cue,
+              sourceIds: decision.sourceIds,
+            }
+          : decision;
+      }
+      return JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        result: JSON.stringify(value),
+        modelUsage: { [model]: {} },
+        usage: { input_tokens: 10, output_tokens: 5 },
+      });
+    },
+  };
+}
+
+const roleModels = {
+  generator: 'sonnet-5.5',
+  cast: 'haiku-5.5',
+  listener: 'haiku-5.5',
+  judge: 'sonnet-5.5',
+};
+const roleEfforts = {
+  generator: 'medium',
+  cast: 'low',
+  listener: 'low',
+  judge: 'medium',
+};
+const cleanShell = { HOME: '/fictional-home', PATH: '/fictional-bin' };
+
+async function modelRun(
+  cli,
+  { environment = cleanShell, maxCalls = 300 } = {},
+) {
+  return runDialogue({
+    agents: claudeAgents({
+      models: roleModels,
+      efforts: roleEfforts,
+      environment,
+      run: cli.run,
+    }),
+    evaluator: claudeEvaluator({ environment, run: cli.run, effort: 'medium' }),
+    plan: {
+      ...DEFAULT_PLAN,
+      domains: ['software'],
+      open: 2,
+      settled: 0,
+      decoys: 1,
+      scenarios: 1,
+    },
+    maxCalls,
+  });
+}
+
+test('the model-backed agents send each role with its own model and effort through one isolated sign-in', async () => {
+  const cli = fakeCli(byId('release-handoff'));
+  const results = await modelRun(cli);
+  assert.equal(results.stopped, null);
+  assert.equal(results.generated, true);
+  assert.equal(results.scenarios[0].forked, true);
+  const prints = cli.calls.filter((c) => c.args.includes('--print'));
+  assert.equal(prints.length, results.calls.total);
+  const at = (c, flag) => c.args[c.args.indexOf(flag) + 1];
+  for (const c of prints) {
+    const prompt = at(c, '--system-prompt');
+    const role =
+      prompt === GENERATOR_PROMPT
+        ? 'generator'
+        : prompt === CAST_PROMPT
+          ? 'cast'
+          : prompt === JUDGE_PROMPT
+            ? 'judge'
+            : prompt.startsWith('You are ')
+              ? 'listener'
+              : 'evaluator';
+    if (role === 'evaluator') {
+      assert.equal(at(c, '--model'), 'claude-opus-5-5');
+      continue;
+    }
+    assert.equal(at(c, '--model'), ROLE_MODELS[roleModels[role]], role);
+    assert.equal(at(c, '--effort'), roleEfforts[role], role);
+    // The same isolation flags as the cue lab.
+    for (const flag of [
+      '--safe-mode',
+      '--restricted',
+      '--no-session-persistence',
+      '--strict-mcp-config',
+    ])
+      assert.ok(c.args.includes(flag), flag);
+  }
+  // One version and sign-in check for the four agents, one for the evaluator.
+  assert.equal(cli.calls.filter((c) => c.args.includes('--version')).length, 2);
+  assert.equal(results.realtime.measured, true);
+  assert.ok(
+    Object.values(results.agents).every((a) => a.kind === 'model' && a.hosted),
+  );
+});
+
+test('a model run refuses an inherited API key before any process, and stops at the first CLI failure without retry', async () => {
+  const keyed = fakeCli(byId('release-handoff'));
+  const refused = await modelRun(keyed, {
+    environment: { ...cleanShell, ANTHROPIC_API_KEY: 'fictional' },
+  });
+  assert.match(refused.stopped.reason, /No process was started/);
+  assert.equal(keyed.calls.length, 0);
+
+  const limited = fakeCli(byId('release-handoff'), {
+    fail: { at: 3, text: 'You have hit your limit.' },
+  });
+  const stopped = await modelRun(limited);
+  assert.equal(stopped.stopped.category, 'usage-limit');
+  assert.equal(
+    limited.calls.filter((c) => c.args.includes('--print')).length,
+    3,
+  );
+  assert.equal(stopped.calls.total, 3);
+});
+
+test('a saved opening that does not match its hash is refused', async () => {
+  const first = await rehearse();
+  const { text, sha256 } = briefsFile(first.results.briefs, {});
+  first.results.brief = { file: 'run.briefs.json', sha256 };
+  assert.ok(savedRun(first.results, text, 'run.json'));
+  const edited = structuredClone(first.results);
+  edited.scenarios[0].prefix.steps[0].reply.text = 'An edited line.';
+  assert.throws(
+    () => savedRun(edited, text, 'run.json'),
+    /saved opening of release-handoff does not match/,
+  );
+});
+
+test('only --run with --max-calls and --included-usage-confirmed starts the CLI; no flags is a dry run', async () => {
+  const started = [];
+  const spy = async (command, args) => {
+    started.push(args);
+    throw new Error('The test CLI must not start.');
+  };
+  const out = mkdtempSync(join(tmpdir(), 'cue-dialogue-'));
+  const quiet = { print: () => {}, run: spy, environment: cleanShell };
+  try {
+    // No flags: the dry run, with the fakes only.
+    const dry = await main([], quiet);
+    assert.ok(Object.values(dry.agents).every((a) => a.kind === 'fake'));
+    assert.equal(dry.brief, null);
+    // Without --run, even with the other two flags: still the dry run.
+    const alsoDry = await main(
+      ['--max-calls', '110', '--included-usage-confirmed', '--out', out],
+      quiet,
+    );
+    assert.ok(Object.values(alsoDry.agents).every((a) => a.kind === 'fake'));
+    // --run without the cap or the acknowledgement: refused, nothing started.
+    await assert.rejects(
+      main(['--run', '--included-usage-confirmed', '--out', out], quiet),
+      /--max-calls/,
+    );
+    await assert.rejects(
+      main(['--run', '--max-calls', '110', '--out', out], quiet),
+      /--included-usage-confirmed/,
+    );
+    assert.deepEqual(started, []);
+    assert.deepEqual(readdirSync(out), []);
+    // All three: the run starts the CLI (the stand-in refuses at once).
+    const results = await main(
+      [
+        '--run',
+        '--max-calls',
+        '110',
+        '--included-usage-confirmed',
+        '--out',
+        out,
+      ],
+      quiet,
+    );
+    assert.ok(started.length > 0);
+    assert.deepEqual(started[0], ['--version']);
+    assert.ok(results.stopped);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+    process.exitCode = 0;
+  }
+});
+
+test('a model run’s cue evaluator defaults to the lab’s working setting: Opus 5.5, low effort, compact reply', async () => {
+  const printed = [];
+  await main([], { print: (t) => printed.push(t), environment: cleanShell });
+  assert.match(
+    printed.join('\n'),
+    /cue evaluator opus-5\.5 \(low, compact reply\)/,
+  );
+  const cli = fakeCli(byId('release-handoff'));
+  const out = mkdtempSync(join(tmpdir(), 'cue-dialogue-'));
+  try {
+    const results = await main(
+      [
+        '--run',
+        '--max-calls',
+        '110',
+        '--included-usage-confirmed',
+        '--out',
+        out,
+        '--scenarios',
+        '1',
+        '--domains',
+        'software',
+        '--open',
+        '2',
+        '--settled',
+        '0',
+        '--decoys',
+        '1',
+      ],
+      { print: () => {}, run: cli.run, environment: cleanShell },
+    );
+    assert.equal(results.stopped, null);
+    const at = (c, flag) => c.args[c.args.indexOf(flag) + 1];
+    const evaluations = cli.calls.filter(
+      (c) =>
+        c.args.includes('--print') &&
+        at(c, '--system-prompt').startsWith(COMPACT_PROMPT),
+    );
+    assert.ok(evaluations.length > 0);
+    assert.equal(evaluations.length, results.calls.byRole.evaluator);
+    for (const c of evaluations) {
+      assert.equal(at(c, '--model'), 'claude-opus-5-5');
+      assert.equal(at(c, '--effort'), 'low');
+    }
+    await assert.rejects(
+      main(['--evaluator-reply', 'short'], { print: () => {} }),
+      /full or compact/,
+    );
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
 });
