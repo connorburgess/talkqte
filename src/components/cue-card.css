@@ -21,24 +21,26 @@
      in place from the first frame; nothing waits on the motion to be read. */
   animation:
     cue-arrive 200ms var(--cue-ease) both,
-    cue-widen 520ms 70ms var(--cue-ease) both;
+    cue-widen 480ms var(--cue-ease) both;
 }
 .cue-card .cue-scroll {
   padding: 16px 18px 14px;
 }
+/* The card never fades in: at any strength below full its words would be
+   too faint to read, and a glance may land on the very first frame. */
 @keyframes cue-arrive {
   from {
-    opacity: 0;
     transform: translateX(-18px);
   }
   to {
-    opacity: 1;
     transform: none;
   }
 }
+/* It opens from about half its width and is quick at the start, so the
+   last word of a line is uncovered within a fifth of a second. */
 @keyframes cue-widen {
   from {
-    clip-path: inset(0 58% 0 0 round var(--cue-radius));
+    clip-path: inset(0 48% 0 0 round var(--cue-radius));
   }
   to {
     clip-path: inset(0 0 0 0 round var(--cue-radius));
@@ -90,7 +92,7 @@
   }
 }
 .cue-card .cue-line {
-  animation: cue-settle 520ms 70ms var(--cue-ease) both;
+  animation: cue-settle 480ms var(--cue-ease) both;
 }
 .cue-card .cue-track {
   transform-origin: left center;
