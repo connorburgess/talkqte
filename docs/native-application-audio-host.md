@@ -15,7 +15,7 @@ bounded device diagnostic on macOS 26.4 compared QuickTime Player with Chrome
 for Testing 158.0.8127.18 using cached fictional meeting media. It used a
 separate, locally signed audio-only ScreenCaptureKit probe, not the TalkQTE
 host or recognizer. Only aggregate sample counts, peak and RMS were retained;
-no audio, video, microphone input or model calls were involved. Existing
+no audio or video was retained, and no microphone input or model calls were used. Existing
 permission was used without changing settings or requesting another grant.
 
 | Selected source / filter                             | Buffers | Samples at 16 kHz mono |    Peak |     RMS |
