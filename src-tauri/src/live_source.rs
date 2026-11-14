@@ -202,6 +202,15 @@ impl Runtime {
     /// microphone is not used, and its Stop would not release a check that
     /// started inside it.
     pub(crate) fn microphone_may_start(&self) -> bool {
+        #[cfg(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        ))]
+        if crate::dev_stop::source_only() {
+            return false;
+        }
         self.live.is_none()
     }
 
@@ -275,7 +284,21 @@ impl Runtime {
             own.control.cancel();
         }
         if self.live_session() == Some(session) {
-            drop(self.take_live_for_stop());
+            if let Some(live) = self.take_live_for_stop() {
+                #[cfg(all(
+                    debug_assertions,
+                    target_os = "macos",
+                    feature = "native-audio-spike",
+                    feature = "lab-evaluator"
+                ))]
+                self.lab_stop_drains.acknowledge(
+                    live.session,
+                    live.microphone.is_none() && live.runner.is_none(),
+                );
+                // Only the exact empty source-session handle taken here is
+                // acknowledged. A drain already owned by another Stop stays pending.
+                drop(live);
+            }
         }
         self.engine.finish_live_stop(session)
     }
@@ -811,5 +834,33 @@ mod tests {
         assert!(!runtime.is_source_session(session));
         // The worker's own end step later changes nothing.
         assert!(!runtime.end_source_session(session));
+    }
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    #[test]
+    fn source_teardown_acknowledges_only_the_empty_handle_it_owns() {
+        let mut runtime = Runtime::default();
+        let first_source = source("fictional-player");
+        let session = runtime.begin_source_session(&first_source.control).unwrap();
+        assert!(runtime.end_source_session(session));
+        assert!(runtime.lab_stop_drains.settled());
+
+        let source = source("fictional-replacement");
+        let session = runtime.begin_source_session(&source.control).unwrap();
+        let ordinary_stop = runtime.take_live_for_stop().unwrap();
+        runtime.end_source_session(session);
+        assert!(
+            !runtime.lab_stop_drains.settled(),
+            "source end cannot acknowledge another Stop's handle"
+        );
+        runtime
+            .lab_stop_drains
+            .acknowledge(ordinary_stop.session, true);
+        drop(ordinary_stop);
+        assert!(runtime.lab_stop_drains.settled());
     }
 }

@@ -440,6 +440,7 @@ pub fn features() -> Vec<&'static str> {
         ("native-audio-spike", cfg!(feature = "native-audio-spike")),
         ("timing-log", cfg!(feature = "timing-log")),
         ("claude-cli", cfg!(feature = "claude-cli")),
+        ("lab-evaluator", cfg!(feature = "lab-evaluator")),
     ]
     .into_iter()
     .filter_map(|(name, on)| on.then_some(name))

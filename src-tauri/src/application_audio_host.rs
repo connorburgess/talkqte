@@ -1194,11 +1194,14 @@ pub(crate) mod app {
                 .window("main")
                 .permission("allow-application-audio"),
         )?;
+        // Freeze source and finite Stop settings once, shared by arming and
+        // autostart so the approved source cannot change between those steps.
+        let settings = DevSettings::read(|name| std::env::var(name).ok());
         #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
-        crate::dev_stop::install(app, host.clone()).map_err(std::io::Error::other)?;
-        // The development launch setting, read once here and acted on once,
-        // on its own thread: it waits for listing and the start.
-        if let Some(settings) = DevSettings::read(|name| std::env::var(name).ok()) {
+        crate::dev_stop::install(app, host.clone(), settings.as_ref())
+            .map_err(std::io::Error::other)?;
+        // Act once on its own thread: it waits for listing and the start.
+        if let Some(settings) = settings {
             let host = host.clone();
             let _ = std::thread::Builder::new()
                 .name("talkqte-dev-source".into())

@@ -1430,4 +1430,47 @@ mod tests {
         );
         assert!(controller.is_starting(new));
     }
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    #[test]
+    fn source_only_stop_refuses_delayed_microphone_cleanup_and_all_history() {
+        assert!(crate::dev_stop::microphone_is_pristine(
+            &Controller::default()
+        ));
+        let (controller, _, drops, _) = running();
+        let update = controller.request_stop().unwrap();
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        assert!(!crate::dev_stop::microphone_is_pristine(&controller));
+        assert!(!controller.snapshot().unwrap().can_start);
+        finish(&controller, update);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        assert_eq!(controller.snapshot().unwrap().status, Status::Off);
+        assert!(
+            !crate::dev_stop::microphone_is_pristine(&controller),
+            "completed teardown cannot erase unsupported mic history"
+        );
+
+        let controller = Controller::default();
+        let (generation, _) = controller.begin_start().unwrap();
+        controller.request_stop_of(Some(generation)).unwrap();
+        assert_eq!(controller.snapshot().unwrap().status, Status::Off);
+        let (stream, _, drops) = fake(false);
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        assert!(
+            !crate::dev_stop::microphone_is_pristine(&controller),
+            "Off alone does not prove a late device response settled"
+        );
+        controller.complete_start(
+            generation,
+            Arc::new(Meter::default()),
+            Ok(stream),
+            Instant::now(),
+        );
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        assert!(!crate::dev_stop::microphone_is_pristine(&controller));
+    }
 }

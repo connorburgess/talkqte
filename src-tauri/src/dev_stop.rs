@@ -18,8 +18,52 @@ const SIGNAL_ENV: &str = "TALKQTE_DEV_STOP_SIGNAL";
 const RUN_ENV: &str = "TALKQTE_DEV_LAB_RUN_ID";
 const POLL: Duration = Duration::from_millis(10);
 const RELEASE_WAIT: Duration = Duration::from_secs(5);
+static SOURCE_ONLY: AtomicBool = AtomicBool::new(false);
 static REQUESTED: AtomicBool = AtomicBool::new(false);
 static INSTALLED: OnceLock<()> = OnceLock::new();
+
+pub(crate) fn source_only() -> bool {
+    SOURCE_ONLY.load(Ordering::Acquire)
+}
+
+#[derive(Default)]
+pub(crate) struct Drains {
+    pending: std::collections::BTreeMap<u64, bool>,
+    uncertain: bool,
+}
+impl Drains {
+    pub(crate) fn begin(&mut self, session: u64, empty: bool) {
+        if self.uncertain {
+            return;
+        }
+        if !empty || self.pending.contains_key(&session) || self.pending.len() >= 64 {
+            self.uncertain = true;
+            return;
+        }
+        self.pending.insert(session, true);
+    }
+    pub(crate) fn acknowledge(&mut self, session: u64, empty: bool) {
+        if empty && self.pending.get(&session) == Some(&true) {
+            self.pending.remove(&session);
+        } else {
+            self.uncertain = true;
+        }
+    }
+    pub(crate) fn settled(&self) -> bool {
+        self.pending.is_empty() && !self.uncertain
+    }
+}
+
+fn pristine_microphone(generation: u64, snapshot: Option<&crate::microphone::Snapshot>) -> bool {
+    generation == 0
+        && snapshot.is_some_and(|s| {
+            s.revision == 0 && s.status == crate::microphone::Status::Off && s.can_start
+        })
+}
+pub(crate) fn microphone_is_pristine(controller: &crate::microphone::Controller) -> bool {
+    let (generation, snapshot) = controller.control_snapshot();
+    pristine_microphone(generation, snapshot.as_ref())
+}
 
 pub(crate) fn requested() -> bool {
     REQUESTED.load(Ordering::Acquire)
@@ -78,7 +122,16 @@ fn install_handler() -> Result<(), &'static str> {
     Ok(())
 }
 
-pub(crate) fn install(app: &tauri::AppHandle, host: Host) -> Result<(), &'static str> {
+fn supported_source(settings: Option<&crate::application_audio_host::DevSettings>) -> bool {
+    settings
+        .is_some_and(|s| s.application == "QuickTime Player" && matches!(s.stop_after, Ok(Some(_))))
+}
+
+pub(crate) fn install(
+    app: &tauri::AppHandle,
+    host: Host,
+    source: Option<&crate::application_audio_host::DevSettings>,
+) -> Result<(), &'static str> {
     let signal_setting =
         std::env::var_os(SIGNAL_ENV).map(|value| value.into_string().unwrap_or_default());
     let run_setting =
@@ -112,6 +165,29 @@ pub(crate) fn install(app: &tauri::AppHandle, host: Host) -> Result<(), &'static
     };
     if !timing_log::enabled() {
         return Err(fail("development Stop requires its private timing channel"));
+    }
+    // Freeze source-only admission before inspecting state. Any concurrent
+    // microphone reservation must fail its existing second admission check.
+    SOURCE_ONLY.store(true, Ordering::Release);
+    if !supported_source(source) {
+        return Err(fail(
+            "development Stop requires the exact QuickTime source and finite ordinary Stop guard",
+        ));
+    }
+    if !microphone_is_pristine(&app.state::<crate::microphone::Controller>()) {
+        return Err(fail(
+            "development Stop requires a pristine unused microphone",
+        ));
+    }
+    let idle = app.state::<AppState>().0.try_lock().is_ok_and(|runtime| {
+        runtime.live.is_none()
+            && runtime.live_start.lab_stop_settled()
+            && runtime.lab_stop_drains.settled()
+    });
+    if !idle {
+        return Err(fail(
+            "development Stop requires settled initial source ownership",
+        ));
     }
     if INSTALLED.set(()).is_err() {
         return Err(fail("development Stop already installed"));
@@ -217,15 +293,21 @@ fn stop_owned(app: &tauri::AppHandle, host: &Host, run: &str) {
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
-        let startup_idle =
-            app.state::<AppState>().0.try_lock().is_ok_and(|runtime| {
-                runtime.live_start.lab_stop_settled() && runtime.live.is_none()
-            });
+        let startup_idle = app.state::<AppState>().0.try_lock().is_ok_and(|runtime| {
+            runtime.live_start.lab_stop_settled()
+                && runtime.live.is_none()
+                && runtime.lab_stop_drains.settled()
+        });
         if Instant::now() >= deadline {
             emit(run, "failed");
             return;
         }
-        if fenced && drained && startup_idle && host.lab_stop_released() {
+        if fenced
+            && drained
+            && startup_idle
+            && microphone_is_pristine(&app.state::<crate::microphone::Controller>())
+            && host.lab_stop_released()
+        {
             emit(run, "released");
             return;
         }
@@ -256,6 +338,23 @@ mod tests {
             Ok(Some("fictional-run_1".into()))
         );
         assert!(settings(|_| Some("invalid".into())).is_err());
+    }
+    #[test]
+    fn arming_requires_the_exact_frozen_source_and_finite_guard() {
+        use crate::application_audio_host::DevSettings;
+        assert!(!supported_source(None));
+        for application in ["QuickTime Player", "fictional-other-player"] {
+            for stop_after in [Ok(None), Err(()), Ok(Some(Duration::from_secs(1)))] {
+                let settings = DevSettings {
+                    application: application.into(),
+                    stop_after,
+                };
+                assert_eq!(
+                    supported_source(Some(&settings)),
+                    application == "QuickTime Player" && matches!(settings.stop_after, Ok(Some(_)))
+                );
+            }
+        }
     }
     #[test]
     fn signal_disposition_and_sticky_latch_are_isolated() {
@@ -292,10 +391,13 @@ mod tests {
         }
         install_handler().unwrap();
         crate::lab_evaluator::initialize_from_environment();
+        SOURCE_ONLY.store(true, Ordering::Release);
         let mut runtime = crate::Runtime::default();
+        assert!(!runtime.microphone_may_start());
         let ticket = runtime.begin_live_start().unwrap();
         let session = runtime.install_live_start(&ticket).unwrap();
         assert!(!runtime.engine.has_processing_permission());
+        assert!(!runtime.reserve_live_microphone(&ticket.guard(), session, 7));
         assert!(!runtime.live_start.lab_stop_settled());
         assert!(!requested());
         unsafe {
@@ -316,5 +418,71 @@ mod tests {
         runtime.engine.finish_live_stop(session);
         assert!(runtime.begin_live_start().is_err());
         assert!(crate::Runtime::default().begin_live_start().is_err());
+    }
+    #[test]
+    fn overlapping_stop_and_replacement_keep_exact_earlier_drain_pending() {
+        let mut runtime = crate::Runtime::default();
+        let ticket = runtime.begin_live_start().unwrap();
+        runtime.install_live_start(&ticket).unwrap();
+        drop(ticket);
+        let first = runtime.take_live_for_stop().unwrap();
+        assert!(runtime.live.is_none());
+        assert!(!runtime.lab_stop_drains.settled());
+        assert!(runtime.take_live_for_stop().is_none());
+        assert!(
+            !runtime.lab_stop_drains.settled(),
+            "a later Stop owns no earlier handle"
+        );
+        runtime.engine.finish_live_stop(first.session);
+        let next = runtime.begin_live_start().unwrap();
+        runtime.install_live_start(&next).unwrap();
+        drop(next);
+        let second = runtime.take_live_for_stop().unwrap();
+        let runtime = std::sync::Arc::new(std::sync::Mutex::new(runtime));
+        let owned = runtime.clone();
+        let (release, wait) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            wait.recv().unwrap();
+            owned
+                .lock()
+                .unwrap()
+                .lab_stop_drains
+                .acknowledge(first.session, true);
+            drop(first);
+        });
+        assert!(!runtime.lock().unwrap().lab_stop_drains.settled());
+        release.send(()).unwrap();
+        worker.join().unwrap();
+        let mut runtime = runtime.lock().unwrap();
+        assert!(
+            !runtime.lab_stop_drains.settled(),
+            "earlier completion cannot acknowledge replacement"
+        );
+        runtime.lab_stop_drains.acknowledge(second.session, true);
+        drop(second);
+        assert!(runtime.lab_stop_drains.settled());
+    }
+
+    #[test]
+    fn unsupported_and_unknown_drain_ownership_never_becomes_release() {
+        let mut runtime = crate::Runtime::default();
+        let ticket = runtime.begin_live_start().unwrap();
+        let session = runtime.install_live_start(&ticket).unwrap();
+        drop(ticket);
+        runtime.live.as_mut().unwrap().microphone = Some(7);
+        let mut live = runtime.take_live_for_stop().unwrap();
+        live.microphone = None; // As an ordinary Stop plan can do after requesting teardown.
+        runtime.lab_stop_drains.acknowledge(session, true);
+        drop(live);
+        assert!(
+            !runtime.lab_stop_drains.settled(),
+            "erasing a generation cannot erase unsupported ownership"
+        );
+        let mut drains = Drains::default();
+        drains.acknowledge(99, true);
+        assert!(
+            !drains.settled(),
+            "an unknown handle cannot manufacture proof"
+        );
     }
 }

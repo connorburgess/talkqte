@@ -255,7 +255,7 @@ impl Runtime {
             feature = "native-audio-spike",
             feature = "lab-evaluator"
         ))]
-        if crate::dev_stop::requested() {
+        if crate::dev_stop::requested() || crate::dev_stop::source_only() {
             return false;
         }
         if !self.live_start.accepts(guard)
@@ -289,7 +289,22 @@ impl Runtime {
         self.retire_live_source();
         self.processing_reviews.clear();
         self.engine.begin_live_stop();
-        self.live.take()
+        let live = self.live.take();
+        #[cfg(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        ))]
+        if let Some(live) = &live {
+            // Register before ownership escapes Runtime; an overlapping Stop
+            // must still see this drain after `live` becomes None.
+            self.lab_stop_drains.begin(
+                live.session,
+                live.microphone.is_none() && live.runner.is_none(),
+            );
+        }
+        live
     }
 }
 
