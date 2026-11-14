@@ -236,3 +236,33 @@ test('with nothing captured the bar shows no capture glyph, only what is running
     bar.getByRole('button', { name: 'Hide companion', exact: true }),
   ).toBeVisible();
 });
+
+test('a model connection shows while lines may be sent, and why it stopped', async ({
+  page,
+}) => {
+  const bar = await companion(page);
+  await microphone(page, { status: 'listening', activity: 'quiet' });
+  const publish = (value: Record<string, unknown>) =>
+    page.evaluate((value) => window.liveTest.publish(value as never), value);
+  // Lines may leave the device: the cloud shows, and "Local" is not said.
+  await publish({ model: 'on' });
+  await expect(
+    bar.getByRole('img', { name: 'Model cues on: recent lines go to Claude' }),
+  ).toBeVisible();
+  await expect(bar.getByRole('status')).toHaveText(
+    'Mic on · lines go to Claude',
+  );
+  await publish({ model: 'sending' });
+  await expect(
+    bar.getByRole('img', { name: 'Sending recent lines to Claude' }),
+  ).toBeVisible();
+  // A failure takes the cloud away and says why, for eyes and ears alike.
+  await publish({ model: 'stopped', modelIssue: 'allowance' });
+  await expect(bar.getByRole('img', { name: /recent lines/ })).toHaveCount(0);
+  const off = bar.getByText('Cues off', { exact: false });
+  await expect(off).toBeVisible();
+  await expect(off).toContainText(
+    'your Claude usage or rate limit was reached',
+  );
+  await expect(bar.getByRole('status')).toHaveText('Mic on · Local');
+});

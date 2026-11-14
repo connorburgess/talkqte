@@ -26,6 +26,8 @@ export interface ProcessorSummary {
   location: 'onDevice' | 'hosted';
   destination: string;
   dataPolicy: string;
+  /** False when the review must not offer prior notes for this processor. */
+  acceptsNotes?: boolean;
 }
 export type ProcessingIssue =
   | 'scopeChanged'
@@ -37,6 +39,7 @@ export type ProcessingIssue =
   | 'unreachable'
   | 'timedOut'
   | 'invalidReply'
+  | 'misconfigured'
   | 'worker'
   | null;
 export interface StopTarget {

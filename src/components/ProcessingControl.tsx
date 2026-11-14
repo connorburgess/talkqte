@@ -21,27 +21,29 @@ const visuallyHidden = {
   whiteSpace: 'nowrap',
 } as const;
 
-const issues = {
+export const issueText = {
   scopeChanged:
-    'An approved source changed. Processing is off. Review the sources again to continue.',
+    'Cues stopped: an approved note changed. Turn the model connection on again to continue.',
   inputLimit:
-    'This context is too large to process. Choose fewer prior notes in a new review.',
+    'Cues stopped: the conversation lines were too long to send. Nothing more will be sent until you turn the model connection on again.',
+  misconfigured:
+    'Cues are off: TALKQTE_CUE_MODEL or TALKQTE_CUE_EFFORT names an option this build does not have. Nothing can be sent.',
   authentication:
-    'Cues are off: Claude Code is not installed, needs updating, or is not signed in to a Claude subscription. Fix that in Claude Code, then review processing again.',
+    'Cues are off: Claude Code is not installed, needs updating, or is not signed in to a Claude subscription. Fix that in Claude Code, then turn the model connection on again.',
   credentials:
     'Cues are off: an API key or provider setting is present, and this connection uses only your Claude subscription. Nothing was sent.',
   unreachable:
-    'Cues stopped: the model could not be reached. Nothing more will be sent until you review processing again.',
+    'Cues stopped: the model could not be reached. Nothing more will be sent until you turn the model connection on again.',
   timedOut:
-    'Cues stopped: the model took too long to reply twice in a row. Nothing more will be sent until you review processing again.',
+    'Cues stopped: the model took too long to reply twice in a row. Nothing more will be sent until you turn the model connection on again.',
   invalidReply:
-    "Cues stopped: the model's reply could not be used. Nothing more will be sent until you review processing again.",
+    "Cues stopped: the model's reply could not be used. Nothing more will be sent until you turn the model connection on again.",
   allowance:
     'Cues stopped: your Claude usage or rate limit was reached. Nothing more will be sent, and no other service will be used.',
   rateLimit:
-    'The processor is rate limited. Processing has stopped; it will not retry automatically.',
+    "Cues stopped: the model's rate limit was reached. Nothing more will be sent, and it will not retry.",
   worker:
-    'The processor is unavailable. Processing has stopped; no new cues will be generated.',
+    'Cues stopped: the model connection stopped working. Nothing more will be sent until you turn it on again.',
 };
 function NoteLabel({ note }: { note: ProcessingNote }) {
   return (
@@ -157,7 +159,7 @@ export function ProcessingControl({
       .catch(() => {
         if (!disposed)
           setError(
-            'Processing status is unavailable. You can still request Stop capture.',
+            'The model connection status could not be read. You can still request Stop capture.',
           );
       });
     return () => {
@@ -333,16 +335,16 @@ export function ProcessingControl({
       ? `Hosted by ${snapshot.processor.destination}`
       : 'On this device';
   const phase = status?.failed
-    ? 'Processing status unavailable'
+    ? 'Connection status unknown'
     : !snapshot
-      ? 'Checking processing status…'
+      ? 'Checking the model connection…'
       : !snapshot.processor && status
-        ? 'Processing unavailable'
+        ? 'No model connection'
         : {
-            off: 'Processing off',
-            active: 'Processing on',
+            off: 'Model connection off',
+            active: 'Model connection on',
             paused: 'Cues paused',
-            unavailable: 'Processing unavailable',
+            unavailable: 'Cues off',
             stopping: 'Finishing session',
             ended: 'Session ended',
           }[snapshot.phase];
@@ -431,32 +433,33 @@ export function ProcessingControl({
         </p>
       )}
       {!snapshot?.processor && snapshot && (
-        <p>
-          No evaluated-cue processor is available for this session.
-          {status &&
-            ' Live cues use local phrase rules; no reasoning model is connected.'}
-        </p>
+        <p>No model cues: this build has no model connection.</p>
       )}
       {status?.failed && (
         <p className="processing-message">
-          Refresh capture status above before changing processing permissions.
+          Refresh capture status above before turning the model connection on or
+          off.
         </p>
       )}
       {snapshot?.issue && (
         <p className="processing-message" role="status">
-          {issues[snapshot.issue]}
+          {issueText[snapshot.issue]}
+        </p>
+      )}
+      {snapshot?.phase === 'off' && snapshot.processor && !snapshot.issue && (
+        <p className="processing-muted">
+          Cues are off until you turn on the model connection.
         </p>
       )}
       {active && snapshot?.sending && (
         <p className="processing-muted" role="status">
-          Sending recent lines to{' '}
-          {snapshot.processor?.destination ?? 'the processor'}…
+          {snapshot.processor?.name.startsWith('Claude')
+            ? 'Sending recent lines to Claude…'
+            : 'Sending recent lines to the model…'}
         </p>
       )}
       {active && snapshot?.lastDecision === 'quiet' && (
-        <p className="processing-muted">
-          No cue needed from the last evaluated speech.
-        </p>
+        <p className="processing-muted">No cue needed for the latest lines.</p>
       )}
       {approved && (
         <details className="processing-approved">
@@ -583,39 +586,46 @@ export function ProcessingControl({
               Also include recent conversation
             </label>
           </fieldset>
-          <fieldset disabled={!!busy || !!status?.failed}>
-            <legend>Prior notes · optional</legend>
-            <p>Importing a note does not approve it for processing.</p>
-            {snapshot?.notes.length ? (
-              <div className="processing-notes">
-                {snapshot.notes.map((note) => (
-                  <label
-                    className="processing-option processing-note"
-                    key={noteKey(note)}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selected.includes(noteKey(note))}
-                      onChange={(event) =>
-                        setSelected((items) =>
-                          event.target.checked
-                            ? [...items, noteKey(note)]
-                            : items.filter((id) => id !== noteKey(note)),
-                        )
-                      }
-                    />
-                    <span>
-                      <NoteLabel note={note} />
-                    </span>
-                  </label>
-                ))}
-              </div>
-            ) : (
-              <p>
-                No prior notes imported. You can continue with new speech only.
-              </p>
-            )}
-          </fieldset>
+          {snapshot?.processor?.acceptsNotes === false ? (
+            <p>Prior notes are never sent to this processor.</p>
+          ) : (
+            <>
+              <fieldset disabled={!!busy || !!status?.failed}>
+                <legend>Prior notes · optional</legend>
+                <p>Importing a note does not approve it for processing.</p>
+                {snapshot?.notes.length ? (
+                  <div className="processing-notes">
+                    {snapshot.notes.map((note) => (
+                      <label
+                        className="processing-option processing-note"
+                        key={noteKey(note)}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(noteKey(note))}
+                          onChange={(event) =>
+                            setSelected((items) =>
+                              event.target.checked
+                                ? [...items, noteKey(note)]
+                                : items.filter((id) => id !== noteKey(note)),
+                            )
+                          }
+                        />
+                        <span>
+                          <NoteLabel note={note} />
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <p>
+                    No prior notes imported. You can continue with new speech
+                    only.
+                  </p>
+                )}
+              </fieldset>
+            </>
+          )}
           <div className="processing-actions">
             <button
               className="primary-button"

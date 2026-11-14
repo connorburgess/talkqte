@@ -41,7 +41,9 @@ async function enable(page: Page) {
   await panel(page)
     .getByRole('button', { name: 'Enable for this session' })
     .click();
-  await expect(panel(page).getByRole('status')).toHaveText('Processing on');
+  await expect(panel(page).getByRole('status')).toHaveText(
+    'Model connection on',
+  );
 }
 async function calls(page: Page, command: string) {
   return page.evaluate(
@@ -55,8 +57,10 @@ test('unconfigured notebook stays useful with phrase cues, optional setup and a 
   page,
 }) => {
   await open(page, '?live');
-  await expect(panel(page)).toContainText('Processing unavailable');
-  await expect(panel(page)).toContainText('Live cues use local phrase rules');
+  await expect(panel(page)).toContainText('No model connection');
+  await expect(panel(page)).toContainText(
+    'No model cues: this build has no model connection.',
+  );
   await expect(review(page)).toHaveCount(0);
   await expect(stop(page)).toHaveCount(1);
   await expect(
@@ -117,7 +121,9 @@ test('hosted review names exact selected sources, stays optional, and preserves 
   await panel(page)
     .getByRole('button', { name: 'Enable for this session' })
     .click();
-  await expect(panel(page).getByRole('status')).toHaveText('Processing on');
+  await expect(panel(page).getByRole('status')).toHaveText(
+    'Model connection on',
+  );
   expect(await calls(page, 'approve_processing_scope')).toEqual([
     { command: 'approve_processing_scope', args: { id: 'review-1' } },
   ]);
@@ -206,7 +212,7 @@ test('changed notes retire review without stealing focus from Settings', async (
   await expect(
     panel(page).getByRole('button', { name: 'Enable for this session' }),
   ).toHaveCount(0);
-  await expect(panel(page)).toContainText('An approved source changed');
+  await expect(panel(page)).toContainText('an approved note changed');
   await expect(name).toBeFocused();
   await prepare(page);
   expect((await calls(page, 'review_processing_scope'))[1].args).toMatchObject({
@@ -230,7 +236,9 @@ test('approval failure is explicit, private errors stay out of UI, and recovery 
     'Approval was not confirmed',
   );
   await expect(panel(page)).not.toContainText('PRIVATE_PROVIDER_ERROR');
-  await expect(panel(page).getByRole('status')).toHaveText('Processing off');
+  await expect(panel(page).getByRole('status')).toHaveText(
+    'Model connection off',
+  );
   expect(await calls(page, 'approve_processing_scope')).toHaveLength(1);
   await expect(
     panel(page).getByRole('button', { name: 'Enable for this session' }),
@@ -244,7 +252,9 @@ test('approval failure is explicit, private errors stay out of UI, and recovery 
   expect(
     (await calls(page, 'approve_processing_scope')).map((call) => call.args),
   ).toEqual([{ id: 'review-1' }, { id: 'review-2' }]);
-  await expect(panel(page).getByRole('status')).toHaveText('Processing on');
+  await expect(panel(page).getByRole('status')).toHaveText(
+    'Model connection on',
+  );
 });
 
 test('Stop during pending approval cannot enable processing after capture ends', async ({
@@ -313,14 +323,16 @@ test('status failure blocks permission changes until refresh without blocking St
     .getByRole('button', { name: 'Enable for this session' })
     .click();
   await expect(panel(page).getByRole('status')).toHaveText(
-    'Processing status unavailable',
+    'Connection status unknown',
   );
   await expect(
     panel(page).getByRole('button', { name: 'Review selected sources' }),
   ).toBeDisabled();
   await expect(stop(page)).toBeEnabled();
   await page.getByRole('button', { name: 'Refresh capture status' }).click();
-  await expect(panel(page).getByRole('status')).toHaveText('Processing off');
+  await expect(panel(page).getByRole('status')).toHaveText(
+    'Model connection off',
+  );
   await expect(
     panel(page).getByRole('button', { name: 'Review selected sources' }),
   ).toBeEnabled();
@@ -331,5 +343,7 @@ test('status failure blocks permission changes until refresh without blocking St
   await panel(page)
     .getByRole('button', { name: 'Enable for this session' })
     .click();
-  await expect(panel(page).getByRole('status')).toHaveText('Processing on');
+  await expect(panel(page).getByRole('status')).toHaveText(
+    'Model connection on',
+  );
 });

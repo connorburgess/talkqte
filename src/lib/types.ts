@@ -63,7 +63,9 @@ export interface CueSnapshot {
   sensitivity: 'balanced' | 'quiet' | 'focused';
   /** Present while a model connection may send conversation lines off the
    * device: `sending` while a request is on its way. */
-  model?: 'on' | 'sending';
+  model?: 'on' | 'sending' | 'stopped';
+  /** Why sending stopped, when `model` is `stopped`. */
+  modelIssue?: import('./processing').ProcessingIssue;
   /** Development builds only: the running session is fed by a selected
    * application alone, with no microphone. */
   sourceSession?: boolean;

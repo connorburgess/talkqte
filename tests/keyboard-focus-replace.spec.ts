@@ -39,7 +39,7 @@ async function liveWithProcessor(page: Page) {
   await panel
     .getByRole('button', { name: 'Enable for this session' })
     .press('Enter');
-  await expect(panel.getByRole('status')).toHaveText('Processing on');
+  await expect(panel.getByRole('status')).toHaveText('Model connection on');
   return {
     panel,
     review,

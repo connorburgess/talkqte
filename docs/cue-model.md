@@ -63,7 +63,7 @@ The existing request bounds stay:
 - at most 32 KiB in all;
 - an oversized request fails before anything is sent, with no truncation and no partial batch.
 
-Prior notes are not sent in the first version. The approved-note path in the evaluator stays, and the review screen still lists notes. A request holding an approved note fails before anything is sent and stops cues, showing the processor as unavailable, so approve conversation only. Offering notes needs a separate review.
+Prior notes are never sent by the development backend. Its review screen does not offer them, and the permission refuses a review that selects one. The approved-note path in the evaluator stays for other backends; offering notes needs a separate review.
 
 **When a request is made.** A request is made on a new transcript line, at least two seconds after the previous request, as in the simulation. Only one request is ever in flight. A line that arrives while one is in flight cancels it, and one catch-up request follows with the latest lines, using the existing coalesced scheduling. No backlog is kept and nothing is replayed.
 
@@ -120,7 +120,7 @@ The count is `TIMEOUTS_TO_STOP` in `src-tauri/src/engine/evaluation.rs`, so chan
 
 | What happened                                                                   | What the person sees                                                                                               | Sent?                    |
 | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------ |
-| The connection is off, or this build has no backend                             | "No cues: the model connection is off." or "No cues: this build has no model connection."                          | Nothing                  |
+| The connection is off, or this build has no backend                             | "Cues are off until you turn on the model connection." or "No model cues: this build has no model connection."     | Nothing                  |
 | The Claude Code CLI is missing, too old, or not signed in to a subscription     | "Cues are off: Claude Code is not installed / needs updating / is not signed in."                                  | Nothing                  |
 | An API key, provider switch, gateway or proxy setting is inherited              | "Cues are off: an API key or provider setting is present, and this connection uses only your Claude subscription." | Nothing                  |
 | A usage or rate limit was reached                                               | "Cues stopped: your Claude usage limit was reached."                                                               | No more                  |
@@ -130,7 +130,7 @@ The count is `TIMEOUTS_TO_STOP` in `src-tauri/src/engine/evaluation.rs`, so chan
 | The reply was unreadable, malformed, from another model, or cited unknown lines | "Cues stopped: the model's reply could not be used."                                                               | No more                  |
 | The request would be too large                                                  | "Cues stopped: the conversation lines were too long to send."                                                      | Nothing for that request |
 
-The wording above is what the notebook shows; the companion shows that cues are off. A usage limit and a rate limit share one message, because the CLI's wording does not reliably tell them apart.
+The wording above is what the notebook shows. The companion shows "Cues off", with the same reason in its tooltip and for screen readers, and it never says "Local" while lines may be sent. A usage limit and a rate limit share one message, because the CLI's wording does not reliably tell them apart.
 
 ## What leaves the device, and when
 
@@ -142,7 +142,7 @@ The wording above is what the notebook shows; the companion shows that cues are 
 
 **Never sent:**
 
-- audio, or the full transcript;
+- audio, or the full transcript in one request; but because a request follows each new line, over a session nearly every transcript line is sent, a few at a time;
 - notes typed in the notebook, or imported notes;
 - focus lines;
 - file paths, account details, or device or input names.
@@ -156,9 +156,9 @@ The wording above is what the notebook shows; the companion shows that cues are 
 - **Build.** A Cargo feature, `claude-cli`, used in development builds only.
 - **Arguments.** It starts `claude` with the lab's isolated arguments: print mode, no tools, no MCP, no slash commands, no session persistence, hooks off, `switchModelsOnFlag: false`, only the requested model available, and JSON output.
 - **Environment.** It passes an allowlisted environment, and refuses to start if any inherited credential name from the lab's list is present.
-- **Model and effort.** Chosen from the lab's options with the development settings `TALKQTE_CUE_MODEL` (`opus-5.5` or `haiku-5.5`) and `TALKQTE_CUE_EFFORT` (`low` or `medium`), read when a live session starts. The default is the lab's, Opus 5.5 at medium. An unknown name leaves the session with no model connection rather than reaching another model.
-- **Checks.** Version and subscription sign-in are checked once per session, on the first request, before that request is sent. Inherited credentials are checked before every request.
-- **Limits.** Standard output is capped at 128 KiB. Each call runs in a fresh empty folder, removed afterwards, and in its own process group. Cancellation or the deadline ends the whole group, and a helper left holding the output cannot hold the worker. Quitting the app does not end a call already in flight, which may finish on its own.
+- **Model and effort.** Chosen from the lab's options with the development settings `TALKQTE_CUE_MODEL` (`opus-5.5` or `haiku-5.5`) and `TALKQTE_CUE_EFFORT` (`low` or `medium`), read when a live session starts. The default is the lab's, Opus 5.5 at medium. An unknown name leaves cues off with that reason shown ("Cues are off: TALKQTE_CUE_MODEL or TALKQTE_CUE_EFFORT names an option this build does not have"), and no review can be prepared.
+- **Checks.** Version and subscription sign-in are checked once per session, on the first request, before that request is sent. Running them when the connection is turned on would need a separate call outside the request worker, so they stay on the first request. Inherited credentials are checked before every request.
+- **Limits.** Standard output is capped at 128 KiB. Each call runs in a fresh empty folder, removed afterwards, and in its own process group. That group is ended on cancellation, at the deadline, as soon as the call itself finishes (so a helper it left behind cannot hold its output), when the app quits, and on Ctrl-C, a terminal hang-up or a polite kill.
 - **No retries.** There is no `--fallback-model` and no API path.
 
 **The decision log** is development-only and shares one file and one format with the real-app timing log (`src-tauri/src/timing_log.rs`). It is behind the `timing-log` feature and an explicit file path, and nothing is sent anywhere. The backend records four events beside the timing log's own:
@@ -166,9 +166,9 @@ The wording above is what the notebook shows; the companion shows that cues are 
 - `evaluator`: the connection turned on or off, with model, effort and backend;
 - `evaluation_requested`: session, request number, the last line covered, the number of lines sent, and whether a cue was on screen;
 - `evaluation_result`: one of `show`, `quiet`, `resolved`, `withdraw`, `failed`, `stale` or `cancelled`, with latency and a fixed failure code;
-- `cue_decision` with `decider: "model"`, the request number and the cue's words, recorded where the engine accepts the cue. Phrase-rule cues carry `decider: "phrase_rule"`.
+- `cue_decision` with `decider: "model"`, the request number and the first line it cites, recorded where the engine accepts the cue, without the cue's words. Phrase-rule cues carry `decider: "phrase_rule"`.
 
-`evaluation_result` failure codes are `timeout`, `invalid_reply`, `rate_limited`, `input_limit`, `sign_in`, `credentials` and `unavailable`. These events carry ids, counts and fixed codes, never the prompt or the raw reply. A reviewer joins them to the timing log's lines and cue text. Tools such as the dialogue simulation's listener can read the real app's cues from those same events, or from the existing cue snapshot, with no new interface.
+`evaluation_result` failure codes are `timeout`, `invalid_reply`, `rate_limited`, `input_limit`, `sign_in`, `credentials` and `unavailable`. A request ended by Stop, Pause, turning the connection off or newer speech is recorded as `cancelled`. These events carry ids, counts and fixed codes, never the prompt or the raw reply. A reviewer joins them to the timing log's lines and cue text. Tools such as the dialogue simulation's listener can read the real app's cues from those same events, or from the existing cue snapshot, with no new interface.
 
 ## Acceptance for the later changes
 

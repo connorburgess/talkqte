@@ -50,7 +50,7 @@ async function enable(page: Page) {
   await review(page);
   await page.getByRole('button', { name: 'Enable for this session' }).click();
   await expect(
-    page.getByRole('status').filter({ hasText: 'Processing on' }),
+    page.getByRole('status').filter({ hasText: 'Model connection on' }),
   ).toBeVisible();
 }
 
@@ -58,7 +58,9 @@ test('default off, exact source identities, and explicit hosted confirmation', a
   page,
 }) => {
   await open(page, '?hosted');
-  await expect(page.getByText('Processing off', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Model connection off', { exact: true }),
+  ).toBeVisible();
   expect(await calls(page, 'approve_processing_scope')).toEqual([]);
   await page.getByRole('button', { name: 'Review processing' }).click();
   await expect(
@@ -90,7 +92,9 @@ test('default off, exact source identities, and explicit hosted confirmation', a
   ]);
   expect(await calls(page, 'approve_processing_scope')).toEqual([]);
   await page.getByRole('button', { name: 'Enable for this session' }).click();
-  await expect(page.getByText('Processing on', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Model connection on', { exact: true }),
+  ).toBeVisible();
   expect(await calls(page, 'approve_processing_scope')).toEqual([
     { command: 'approve_processing_scope', args: { id: 'review-1' } },
   ]);
@@ -190,7 +194,7 @@ for (const replacement of ['sources', 'session']) {
       .poll(async () => (await calls(page, 'processing_snapshot')).length)
       .toBe(snapshots + 1);
     await expect(
-      page.getByText('Processing on', { exact: true }),
+      page.getByText('Model connection on', { exact: true }),
     ).toBeVisible();
     await expect(
       page.getByRole('button', { name: 'Pause cues' }),
@@ -219,7 +223,7 @@ test('Pause and Disable preserve capture; Stop waits for capture confirmation', 
   await enable(page);
   await send(page, { lastDecision: 'quiet' });
   await expect(
-    page.getByText('No cue needed from the last evaluated speech.'),
+    page.getByText('No cue needed for the latest lines.'),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Pause cues' }).click();
   await expect(page.getByText('Cues paused', { exact: true })).toBeVisible();
@@ -229,7 +233,9 @@ test('Pause and Disable preserve capture; Stop waits for capture confirmation', 
   await page.getByRole('button', { name: 'Resume cues' }).click();
   await expect(page.getByRole('button', { name: 'Pause cues' })).toBeVisible();
   await page.getByRole('button', { name: 'Disable processing' }).click();
-  await expect(page.getByText('Processing off', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Model connection off', { exact: true }),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Stop capture' }).click();
   await expect(
     page.getByText('Waiting for the microphone to stop…'),
@@ -266,7 +272,7 @@ for (const command of ['review_processing_scope', 'approve_processing_scope']) {
       command,
     );
     await expect(
-      page.getByText('Processing off', { exact: true }),
+      page.getByText('Model connection off', { exact: true }),
     ).toBeVisible();
     await expect(
       page.getByRole('button', { name: 'Review processing' }),
@@ -287,7 +293,7 @@ test('changed note revisions close a review; mismatched returned scope is reject
   await expect(
     page.getByRole('button', { name: 'Enable for this session' }),
   ).toHaveCount(0);
-  await expect(page.getByText(/An approved source changed/)).toBeVisible();
+  await expect(page.getByText(/an approved note changed/)).toBeVisible();
   await page.evaluate(() => window.processingTest.mismatch());
   await page.getByRole('button', { name: 'Review processing' }).click();
   await page.getByRole('button', { name: 'Review selected sources' }).click();
@@ -314,11 +320,9 @@ for (const issue of [
     await open(page);
     await enable(page);
     await send(page, { phase: 'unavailable', issue, lastDecision: null });
+    await expect(page.getByText('Cues off', { exact: true })).toBeVisible();
     await expect(
-      page.getByText('Processing unavailable', { exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByText('No cue needed from the last evaluated speech.'),
+      page.getByText('No cue needed for the latest lines.'),
     ).toHaveCount(0);
     await expect(
       page.getByRole('button', { name: 'Stop capture' }),
@@ -460,12 +464,14 @@ test('a failed approval and missing processor do not invent processing or hide S
   await expect(page.getByRole('alert')).toHaveText(
     'Approval was not confirmed. Check the status and review sources again before enabling.',
   );
-  await expect(page.getByText('Processing off', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Model connection off', { exact: true }),
+  ).toBeVisible();
   await expect(page.getByText('PRIVATE_PROVIDER_ERROR')).toHaveCount(0);
   await page.getByRole('button', { name: 'Cancel' }).click();
   await send(page, { processor: null, scopeRevision: 2 });
   await expect(
-    page.getByText('No evaluated-cue processor is available for this session.'),
+    page.getByText('No model cues: this build has no model connection.'),
   ).toBeVisible();
   await expect(
     page.getByRole('button', { name: 'Review processing' }),
@@ -500,7 +506,7 @@ for (const action of ['Pause cues', 'Resume cues']) {
       .poll(async () => (await calls(page, 'processing_snapshot')).length)
       .toBe(snapshots + 1);
     await expect(
-      page.getByText('Processing off', { exact: true }),
+      page.getByText('Model connection off', { exact: true }),
     ).toBeVisible();
     await expect(
       page.getByRole('button', { name: 'Review processing' }),
