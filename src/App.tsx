@@ -1136,7 +1136,7 @@ function Notebook() {
                               : sourceApp
                                 ? `Audio from ${sourceApp} · transcribed on this device · not saved`
                                 : 'Your microphone · transcribed on this device · not saved'
-                            : 'Nothing was saved. The transcript stays here until you start another session or quit; your notes stay until you quit.'
+                            : 'Nothing was saved. The transcript stays here until you start another session or quit and is never exported; your notes stay until you quit and can be exported.'
                           : simulated
                             ? 'Fictional replay · nothing is captured'
                             : capture.state?.source?.mayBeCapturing
@@ -1191,10 +1191,10 @@ function Notebook() {
                   ref={exportButton}
                   className="secondary-button export-button"
                   onClick={prepareExport}
-                  disabled={busy || state.live}
+                  disabled={busy || live || preparing || finishing}
                   title={
-                    state.live
-                      ? 'Live sessions are not saved or exported.'
+                    live || finishing
+                      ? 'Stop the live session to export your notes. The transcript is never exported.'
                       : undefined
                   }
                 >
@@ -1643,9 +1643,11 @@ function Notebook() {
             <footer className="notebook-footer">
               <ShieldCheck size={15} />
               <p>
-                {state.live
-                  ? 'This live session stays in memory and is never saved or exported.'
-                  : 'Your notes stay in memory until you quit. Export anything you want to keep before closing.'}
+                {live || preparing || finishing
+                  ? 'This live session stays in memory. Its transcript is never saved or exported.'
+                  : state.live
+                    ? 'The transcript is never saved or exported. Your notes stay in memory until you quit; export anything you want to keep before closing.'
+                    : 'Your notes stay in memory until you quit. Export anything you want to keep before closing.'}
               </p>
             </footer>
           </div>

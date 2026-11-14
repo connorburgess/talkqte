@@ -97,11 +97,17 @@ impl Runtime {
     }
 
     /// The Markdown a person reviews before saving, kept so the save dialog
-    /// writes exactly that text. A live session is refused, and refusing it
-    /// drops any earlier preview.
+    /// writes exactly that text. It is the notes only. A running live session
+    /// is refused, and refusing it drops any earlier preview; once the
+    /// session has ended the notes can be exported, never its transcript.
     fn prepare_export(&mut self) -> Result<String, String> {
         // Live transcripts stay in memory only; this version never saves them.
-        if self.engine.state.live {
+        if self.engine.state.live
+            && matches!(
+                self.engine.state.status,
+                engine::Status::Running | engine::Status::Paused
+            )
+        {
             self.export = None;
             return Err("Live sessions are not saved or exported.".into());
         }
@@ -1572,7 +1578,7 @@ mod export_tests {
     use super::*;
 
     #[test]
-    fn a_live_session_is_never_prepared_for_export_and_drops_an_earlier_preview() {
+    fn a_running_live_session_is_refused_export_and_afterwards_only_notes_are_exported() {
         let mut runtime = Runtime::default();
         runtime
             .engine
@@ -1609,11 +1615,19 @@ mod export_tests {
         );
         assert!(runtime.export.is_none());
 
-        // Stopping keeps the transcript on screen and still refuses to save it.
-        runtime.engine.end();
-        assert_eq!(runtime.engine.state.transcript.len(), 1);
+        // While the session is stopping it is still running: still refused.
+        runtime.engine.begin_live_stop();
         assert!(runtime.prepare_export().is_err());
         assert!(runtime.export.is_none());
+
+        // After Stop the transcript stays on screen and is never exported;
+        // the notes written beside the session can be.
+        runtime.engine.end();
+        assert_eq!(runtime.engine.state.transcript.len(), 1);
+        let after = runtime.prepare_export().unwrap();
+        assert_eq!(after, "# TalkQTE notes\n\nA fictional notebook line.\n");
+        assert!(!after.contains("blue tin"));
+        assert_eq!(runtime.export.as_deref(), Some(after.as_str()));
     }
 }
 
