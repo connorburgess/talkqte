@@ -44,6 +44,8 @@ pub struct ProcessorConfiguration {
     pub(super) disclosure: ProcessorDisclosure,
     /// The effort asked of the model, for the development timing log.
     effort: Option<String>,
+    /// Whether this backend may be sent approved prior notes.
+    pub(super) accepts_notes: bool,
 }
 
 impl ProcessorConfiguration {
@@ -71,7 +73,15 @@ impl ProcessorConfiguration {
             policy_revision,
             disclosure,
             effort: None,
+            accepts_notes: true,
         })
+    }
+
+    /// A backend that is never sent prior notes: a review that selects one
+    /// is refused, so the review cannot say a note will be sent.
+    pub fn without_notes(mut self) -> Self {
+        self.accepts_notes = false;
+        self
     }
 
     /// Names the effort a model backend asks for, so the development log
@@ -198,7 +208,12 @@ impl Engine {
         {
             return Err(ProcessingError::SessionInactive);
         }
-        if notes.len() > crate::context::MAX_ITEMS {
+        if state.misconfigured {
+            return Err(ProcessingError::Unavailable);
+        }
+        if notes.len() > crate::context::MAX_ITEMS
+            || (!notes.is_empty() && !state.permission.processor.accepts_notes)
+        {
             return Err(ProcessingError::InvalidScope);
         }
         let mut sources = Vec::new();

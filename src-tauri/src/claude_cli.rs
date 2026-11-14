@@ -32,51 +32,132 @@ pub const DATA_POLICY: &str = "Sends to Anthropic, through Claude Code on this M
 Claude subscription: up to six recent transcript lines and any lines the cue on screen cites, \
 the cue on screen, up to four earlier cues with how each ended, and your session name if you set \
 one. It sends after each new line, at most once every two seconds and one request at a time, \
-until you turn this off, stop the session, or a failure stops it. It never sends audio, the \
+until you turn this off, stop the session, or a failure stops it, so over a session nearly every \
+transcript line is sent, a few at a time. It never sends audio, the \
 full transcript, your notes, imported notes or focus lines. Anthropic handles what is sent under \
 your Claude account's terms and settings, and lines already sent cannot be recalled. A \
 development connection for the owner's own use; it is not a supported product feature.";
 
-/// The engine for a new live session. With the `claude-cli` feature it
-/// registers this backend, which sends nothing until the person reviews and
-/// turns the connection on; otherwise, and if the development settings name
-/// an unknown model or effort, it is the plain engine with no cue backend.
-pub fn live_engine() -> crate::engine::Engine {
-    #[cfg(feature = "claude-cli")]
-    if let Some(engine) = connected_engine() {
-        return engine;
+/// What the review screen says when the development settings name an
+/// option this build does not have.
+const MISCONFIGURED_POLICY: &str = "TALKQTE_CUE_MODEL or TALKQTE_CUE_EFFORT names an option \
+this build does not have, so nothing can be sent. Use opus-5.5 or haiku-5.5, and low or medium.";
+
+/// The engine for a new live session with this backend registered. It sends
+/// nothing until the person reviews and turns the connection on. Unknown
+/// development settings leave it unusable, with that reason shown, rather
+/// than silently reaching another model or none.
+pub fn connected_engine() -> crate::engine::Engine {
+    use crate::engine::{ProcessingLocation, ProcessorConfiguration, ProcessorDisclosure};
+    install_signal_cleanup();
+    let processor = |model: String, effort: &str, policy: &str| {
+        ProcessorConfiguration::new(
+            "claude-cli".into(),
+            1,
+            model,
+            ProcessingLocation::Hosted {
+                service: "Anthropic, through Claude Code on this Mac".into(),
+            },
+            format!("cue-model-2026-11-14:{effort}"),
+            ProcessorDisclosure::new("Claude (development connection)".into(), policy.into())
+                .expect("fixed disclosure text is valid"),
+        )
+        .expect("fixed processor configuration is valid")
+        .with_effort(effort.into())
+        .without_notes()
+    };
+    match Choice::from_environment() {
+        Ok(choice) => {
+            let config = processor(choice.model_id.clone(), &choice.effort.clone(), DATA_POLICY);
+            let worker = crate::cue_evaluator::Worker::start(
+                ClaudeCli::new(
+                    None,
+                    choice,
+                    std::env::vars_os()
+                        .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?))),
+                ),
+                DEADLINE,
+            )
+            .expect("the deadline is within the worker's ceiling");
+            crate::engine::Engine::live_with_evaluator(worker, config).with_min_gap_ms(MIN_GAP_MS)
+        }
+        Err(_) => {
+            struct Refuse;
+            impl Evaluator for Refuse {
+                fn evaluate(&mut self, _: &Request, _: &Cancellation) -> Result<String, Failure> {
+                    Err(Failure::EvaluatorUnavailable)
+                }
+            }
+            let worker = crate::cue_evaluator::Worker::start(Refuse, DEADLINE)
+                .expect("the deadline is within the worker's ceiling");
+            crate::engine::Engine::live_with_evaluator(
+                worker,
+                processor("unknown".into(), "unknown", MISCONFIGURED_POLICY),
+            )
+            .misconfigured()
+        }
     }
-    crate::engine::Engine::live()
 }
 
-#[cfg(feature = "claude-cli")]
-fn connected_engine() -> Option<crate::engine::Engine> {
-    use crate::engine::{ProcessingLocation, ProcessorConfiguration, ProcessorDisclosure};
-    let choice = Choice::from_environment().ok()?;
-    let processor = ProcessorConfiguration::new(
-        "claude-cli".into(),
-        1,
-        choice.model_id.clone(),
-        ProcessingLocation::Hosted {
-            service: "Anthropic, through Claude Code on this Mac".into(),
-        },
-        format!("cue-model-2026-11-14:{}", choice.effort),
-        ProcessorDisclosure::new("Claude (development connection)".into(), DATA_POLICY.into())
-            .ok()?,
-    )
-    .ok()?
-    .with_effort(choice.effort.clone());
-    let worker = crate::cue_evaluator::Worker::start(
-        ClaudeCli::new(
-            None,
-            choice,
-            std::env::vars_os()
-                .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?))),
-        ),
-        DEADLINE,
-    )
-    .ok()?;
-    Some(crate::engine::Engine::live_with_evaluator(worker, processor).with_min_gap_ms(MIN_GAP_MS))
+// Process groups of calls in flight, so quitting or a signal can end them.
+// Plain atomics, so the signal handler below only does what is safe there.
+const SLOTS: usize = 8;
+static GROUPS: [std::sync::atomic::AtomicI32; SLOTS] =
+    [const { std::sync::atomic::AtomicI32::new(0) }; SLOTS];
+
+fn track(pid: i32) -> Option<usize> {
+    use std::sync::atomic::Ordering;
+    (0..SLOTS).find(|&slot| {
+        GROUPS[slot]
+            .compare_exchange(0, pid, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    })
+}
+
+fn kill_group(pid: i32) {
+    #[cfg(unix)]
+    // SAFETY: signals only a process group this backend created.
+    unsafe {
+        libc::kill(-pid, libc::SIGKILL);
+    }
+}
+
+/// Ends every call still in flight and any helper it started. Called when
+/// the app quits, and from the signal handler.
+pub fn end_all() {
+    for slot in &GROUPS {
+        let pid = slot.swap(0, std::sync::atomic::Ordering::AcqRel);
+        if pid > 0 {
+            kill_group(pid);
+        }
+    }
+}
+
+/// On Ctrl-C, a terminal hang-up or a polite kill, end the calls in flight
+/// before the app goes. Each call runs in its own process group, so it would
+/// not receive the terminal's signal itself.
+fn install_signal_cleanup() {
+    #[cfg(unix)]
+    {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        extern "C" fn on_signal(signal: libc::c_int) {
+            end_all();
+            // SAFETY: restore the default action and re-raise, so the app
+            // exits as it would have; both calls are async-signal-safe.
+            unsafe {
+                libc::signal(signal, libc::SIG_DFL);
+                libc::raise(signal);
+            }
+        }
+        ONCE.call_once(|| {
+            for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+                // SAFETY: the handler only uses atomics and kill/signal/raise.
+                unsafe {
+                    libc::signal(signal, on_signal as *const () as libc::sighandler_t);
+                }
+            }
+        });
+    }
 }
 
 #[derive(Deserialize)]
@@ -388,16 +469,25 @@ impl ClaudeCli {
                 Failure::Unreachable
             }
         })?;
+        let pid = i32::try_from(child.id()).unwrap_or(0);
+        let slot = (pid > 0).then(|| track(pid)).flatten();
+        let release = move || {
+            if let Some(slot) = slot {
+                let _ = GROUPS[slot].compare_exchange(
+                    pid,
+                    0,
+                    std::sync::atomic::Ordering::AcqRel,
+                    std::sync::atomic::Ordering::Acquire,
+                );
+            }
+        };
         let end = |child: &mut std::process::Child| {
-            #[cfg(unix)]
-            if let Ok(pid) = i32::try_from(child.id()) {
-                // SAFETY: signals only the process group this call created.
-                unsafe {
-                    libc::kill(-pid, libc::SIGKILL);
-                }
+            if pid > 0 {
+                kill_group(pid);
             }
             let _ = child.kill();
             let _ = child.wait();
+            release();
         };
         let mut stdin = child.stdin.take().expect("stdin piped");
         let input = input.to_string();
@@ -438,8 +528,13 @@ impl ClaudeCli {
                 }
             }
         };
-        // A helper left holding a pipe must not hold the worker: wait for
-        // the output only while the call is still current.
+        // The call is done: end any helper it left behind, which would also
+        // keep its output open. Then the output can be read to its end.
+        if pid > 0 {
+            kill_group(pid);
+        }
+        release();
+        // Wait for the output only while the call is still current.
         let mut collect = |pipe: std::sync::mpsc::Receiver<Option<Vec<u8>>>| loop {
             match pipe.recv_timeout(Duration::from_millis(20)) {
                 Ok(out) => return Ok(out),
@@ -652,6 +747,7 @@ mod tests {
         cli: ClaudeCli,
         request: &Request,
     ) -> Result<crate::cue_evaluator::Decision, Failure> {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let mut worker = Worker::start(cli, MAX_BUDGET).unwrap();
         worker.submit(request.clone()).unwrap();
         let until = std::time::Instant::now() + Duration::from_secs(10);
@@ -792,8 +888,143 @@ mod tests {
         );
     }
 
+    // Tests that start long-running fake calls, or end every call, run one
+    // at a time so `end_all` cannot reach another test's call.
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn alive(pid: i32) -> bool {
+        // SAFETY: signal 0 only checks that the process exists.
+        unsafe { libc::kill(pid, 0) == 0 }
+    }
+
+    #[test]
+    fn a_too_old_cli_and_unlisted_environment_never_reach_a_call() {
+        let dir = temp();
+        let path = dir.join("claude");
+        std::fs::write(
+            &path,
+            "#!/bin/sh\ncase \"$*\" in *--version*) echo '2.1.300 (Claude Code)' ;; *) env > \"$(dirname \"$0\")/env\" ;; esac\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            evaluate(backend(path, &[]), &request()),
+            Err(Failure::SignIn)
+        );
+        // A name outside the allowlist never reaches the CLI's environment.
+        let dir = temp();
+        let reply = r#"{"action":"quiet","cue":null,"sourceIds":["transcript:a"]}"#;
+        let path = fake(&dir, SUBSCRIBED, &wrapper("claude-opus-5-5", reply));
+        evaluate(
+            backend(
+                path,
+                &[
+                    ("HOME", "/tmp"),
+                    ("SECRET_PROJECT_TOKEN", "x"),
+                    ("GIT_DIR", "/x"),
+                ],
+            ),
+            &request(),
+        )
+        .unwrap();
+        let env = std::fs::read_to_string(dir.join("env")).unwrap();
+        assert!(!env.contains("SECRET_PROJECT_TOKEN") && !env.contains("GIT_DIR"));
+    }
+
+    #[test]
+    fn the_review_text_names_exactly_what_a_request_carries() {
+        let request = request()
+            .with_listener(
+                Some("Robin".into()),
+                vec![EarlierCue {
+                    text: "Who will send the flyer?".into(),
+                    state: CueEnd::Expired,
+                }],
+            )
+            .unwrap();
+        let input: serde_json::Value =
+            serde_json::from_str(&request.prompt_input().unwrap()).unwrap();
+        let keys: Vec<&String> = input.as_object().unwrap().keys().collect();
+        assert_eq!(keys.len(), 4);
+        for (key, said) in [
+            ("events", "recent transcript lines"),
+            ("existingCue", "the cue on screen"),
+            ("userName", "your session name"),
+            ("earlierCues", "earlier cues with how each ended"),
+        ] {
+            assert!(input.get(key).is_some(), "{key}");
+            assert!(DATA_POLICY.contains(said), "the review does not say {said}");
+        }
+        for event in input["events"].as_array().unwrap() {
+            let fields: Vec<&String> = event.as_object().unwrap().keys().collect();
+            assert_eq!(fields.len(), 3, "a line carries only id, speaker and text");
+        }
+        for never in [
+            "audio",
+            "full transcript",
+            "your notes",
+            "imported notes",
+            "focus lines",
+        ] {
+            assert!(DATA_POLICY.contains(never), "{never}");
+        }
+    }
+
+    #[test]
+    fn helpers_left_by_a_call_are_ended_when_it_finishes() {
+        let dir = temp();
+        let reply = r#"{"action":"quiet","cue":null,"sourceIds":["transcript:a"]}"#;
+        let path = fake(
+            &dir,
+            SUBSCRIBED,
+            &format!(
+                "sleep 30 & echo $! > \"{}/helper\"; {}",
+                dir.display(),
+                wrapper("claude-opus-5-5", reply)
+            ),
+        );
+        // The helper keeps the output open, yet the reply arrives in time.
+        let started = std::time::Instant::now();
+        evaluate(backend(path, &[]), &request()).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let helper: i32 = std::fs::read_to_string(dir.join("helper"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        thread::sleep(Duration::from_millis(100));
+        assert!(!alive(helper), "the helper outlived its call");
+    }
+
+    #[test]
+    fn quitting_ends_a_call_in_flight() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = temp();
+        let path = fake(&dir, SUBSCRIBED, "sleep 30");
+        let request = request();
+        let mut worker = Worker::start(backend(path, &[]), MAX_BUDGET).unwrap();
+        worker.submit(request.clone()).unwrap();
+        // Wait for the call itself to start, after the checks.
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        while !dir.join("input").exists() {
+            assert!(std::time::Instant::now() < until, "the call never started");
+            thread::sleep(Duration::from_millis(10));
+        }
+        let started = std::time::Instant::now();
+        end_all();
+        // The ended call reports back long before its 30-second sleep.
+        while worker.poll(&request).is_none() {
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "the call ran on"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     #[test]
     fn a_slow_call_is_ended_at_the_deadline() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let dir = temp();
         let path = fake(&dir, SUBSCRIBED, "sleep 30");
         let request = request();

@@ -74,6 +74,10 @@ pub struct Request {
     existing_cue: Option<ExistingCue>,
     user_name: Option<String>,
     earlier_cues: Vec<EarlierCue>,
+    // Bytes of source text, ids and metadata, so the listener's name and
+    // earlier cues are counted within the same aggregate limit.
+    #[serde(skip)]
+    bytes: usize,
 }
 
 /// How a cue this session showed ended, as the lab names it.
@@ -163,6 +167,7 @@ impl Request {
             existing_cue,
             user_name: None,
             earlier_cues: Vec::new(),
+            bytes,
         };
         if let Some(cue) = &request.existing_cue {
             if !bounded_text(&cue.id, 128)
@@ -182,9 +187,12 @@ impl Request {
         user_name: Option<String>,
         earlier_cues: Vec<EarlierCue>,
     ) -> Result<Self, Failure> {
-        if user_name
-            .as_deref()
-            .is_some_and(|name| !bounded_text(name, 128))
+        let added = user_name.as_ref().map_or(0, String::len)
+            + earlier_cues.iter().map(|cue| cue.text.len()).sum::<usize>();
+        if self.bytes + added > MAX_CONTEXT_BYTES
+            || user_name
+                .as_deref()
+                .is_some_and(|name| !bounded_text(name, 128))
             || earlier_cues.len() > MAX_EARLIER_CUES
             || earlier_cues.iter().any(|cue| !bounded_text(&cue.text, 240))
         {

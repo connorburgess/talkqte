@@ -12,7 +12,7 @@ pub use permission::{
     ProcessorConfiguration, ProcessorDisclosure,
 };
 pub use projection::{
-    CaptureState, NoteSelection, NoteSummary, ProcessingSnapshot, ProcessingTracker,
+    CaptureState, Issue, NoteSelection, NoteSummary, ProcessingSnapshot, ProcessingTracker,
     ProcessorSummary, Scope, SourceCapture, SourcePhase, SourceProblem, StartupState, StopTarget,
 };
 
@@ -47,6 +47,8 @@ pub enum EvaluationIssue {
     Credentials,
     UsageLimit,
     Unreachable,
+    /// The development settings name a model or effort this build lacks.
+    Misconfigured,
 }
 
 /// The owner's rule for slow replies: one reply over the deadline is skipped
@@ -66,6 +68,7 @@ pub(super) struct State {
     min_gap_ms: u64,
     last_dispatch_ms: Option<u64>,
     requests_sent: u64,
+    misconfigured: bool,
     // The evaluated cue on screen: its id, words, and whether a held cue was
     // marked answered. Recorded as an earlier cue when it leaves.
     shown: Option<(String, String, bool)>,
@@ -97,10 +100,21 @@ impl Engine {
             min_gap_ms: 0,
             last_dispatch_ms: None,
             requests_sent: 0,
+            misconfigured: false,
             shown: None,
             earlier: Vec::new(),
         });
         engine
+    }
+
+    /// A backend that cannot be used as configured: the reason stays shown,
+    /// and no review can be prepared, so nothing can be approved or sent.
+    pub fn misconfigured(mut self) -> Self {
+        if let Some(state) = &mut self.evaluation {
+            state.misconfigured = true;
+            state.status = EvaluationStatus::Unavailable(EvaluationIssue::Misconfigured);
+        }
+        self
     }
 
     /// At least this long between two requests on the session clock. Newer
@@ -148,6 +162,12 @@ impl Engine {
 
     fn set_evaluation_status(&mut self, status: EvaluationStatus) {
         if let Some(state) = &mut self.evaluation {
+            // A misconfigured backend keeps saying so; nothing clears it.
+            let status = if state.misconfigured {
+                EvaluationStatus::Unavailable(EvaluationIssue::Misconfigured)
+            } else {
+                status
+            };
             if state.status != status {
                 state.status = status;
                 state.outcome_at_ms = None;
@@ -199,6 +219,19 @@ impl Engine {
                 // Stop need not receive another clock tick to release the
                 // caller's copies of the request and its source text.
                 let _ = state.worker.poll(&pending.request);
+                // Stop, pause, turning the connection off and newer speech
+                // all end a request this way; the log says it was cancelled.
+                if crate::timing_log::enabled() {
+                    crate::timing_log::record(crate::timing_log::Event::EvaluationResult {
+                        session: self.generation,
+                        request: pending.number,
+                        outcome: "cancelled",
+                        latency_ms: u64::try_from(pending.sent.elapsed().as_millis())
+                            .unwrap_or(u64::MAX),
+                        failure: None,
+                        elapsed_ms: self.state.elapsed_ms,
+                    });
+                }
             }
         }
         // An error stays visible through new speech and controls until an
@@ -547,7 +580,9 @@ impl Engine {
                         source: "evaluated",
                         decider: "model",
                         request: Some(number),
-                        question: self.state.cue.as_ref().map(|cue| cue.question.clone()),
+                        // Ids only: the cue's words may come from the focus
+                        // or the session name.
+                        question: None,
                         source_id: Some(first.id.clone()),
                         elapsed_ms: now,
                     });
@@ -1982,6 +2017,112 @@ mod tests {
                 "{change}"
             );
         }
+    }
+
+    #[test]
+    fn each_backend_failure_stops_cues_with_its_own_reason() {
+        use crate::engine::ModelLink;
+        struct Fails(Failure);
+        impl Evaluator for Fails {
+            fn evaluate(&mut self, _: &Request, _: &Cancellation) -> Result<String, Failure> {
+                Err(self.0)
+            }
+        }
+        for (failure, issue, shown) in [
+            (
+                Failure::SignIn,
+                EvaluationIssue::SignIn,
+                Issue::Authentication,
+            ),
+            (
+                Failure::Credentials,
+                EvaluationIssue::Credentials,
+                Issue::Credentials,
+            ),
+            (
+                Failure::UsageLimit,
+                EvaluationIssue::UsageLimit,
+                Issue::Allowance,
+            ),
+            (
+                Failure::Unreachable,
+                EvaluationIssue::Unreachable,
+                Issue::Unreachable,
+            ),
+        ] {
+            let worker = Worker::start(Fails(failure), Duration::from_secs(5)).unwrap();
+            let mut h = Harness::new();
+            h.engine = Engine::live_with_evaluator(worker, fictional_processor());
+            h.engine.start().unwrap();
+            h.approve_notes();
+            h.line("Someone should take the checklist.");
+            h.settle();
+            assert_eq!(
+                h.engine.evaluation_status(),
+                Some(EvaluationStatus::Unavailable(issue)),
+                "{failure:?}"
+            );
+            // Stopped at once, not skipped like a single timeout.
+            assert!(!h.engine.has_processing_permission(), "{failure:?}");
+            let snapshot = h.engine.cue_snapshot();
+            assert_eq!(snapshot.model, Some(ModelLink::Stopped));
+            assert_eq!(snapshot.model_issue, Some(shown));
+            assert_eq!(h.engine.processing_issue(), Some(shown));
+            // Capture carries on.
+            h.line("Capture continues.");
+            assert_eq!(h.engine.state.transcript.len(), 2);
+        }
+    }
+
+    #[test]
+    fn a_backend_without_notes_refuses_a_review_that_selects_one() {
+        let processor = fictional_processor().without_notes();
+        let mut h = Harness::unapproved(processor, Duration::from_secs(5));
+        let note = ContextItem {
+            provider: crate::context::Provider::File,
+            source_id: "one".into(),
+            title: "Earlier launch review".into(),
+            source_date: "2026-11-01".into(),
+            excerpt: "Selected prior excerpt".into(),
+            revision: 1,
+        };
+        h.engine.set_notes(vec![note]);
+        assert_eq!(
+            h.engine
+                .review_processing(
+                    ConversationScope::NewSpeechOnly,
+                    &[(crate::context::Provider::File, "one".into(), 1)],
+                )
+                .err(),
+            Some(ProcessingError::InvalidScope)
+        );
+        // Conversation alone is still allowed.
+        assert!(h
+            .engine
+            .review_processing(ConversationScope::NewSpeechOnly, &[])
+            .is_ok());
+        let summary = h
+            .engine
+            .processing_snapshot(CaptureState::Running, 0)
+            .processor
+            .unwrap();
+        assert!(!summary.accepts_notes);
+    }
+
+    #[test]
+    fn a_misconfigured_backend_says_so_and_cannot_be_approved() {
+        let mut h = Harness::unapproved(fictional_processor(), Duration::from_secs(5));
+        h.engine = std::mem::replace(&mut h.engine, Engine::live()).misconfigured();
+        assert_eq!(
+            h.engine
+                .review_processing(ConversationScope::NewSpeechOnly, &[])
+                .err(),
+            Some(ProcessingError::Unavailable)
+        );
+        h.engine.revoke_processing();
+        h.line("Someone should take the checklist.");
+        assert_eq!(h.engine.processing_issue(), Some(Issue::Misconfigured));
+        assert!(h.requests.try_recv().is_err(), "nothing was sent");
     }
 
     #[test]

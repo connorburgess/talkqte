@@ -74,16 +74,14 @@ pub enum Event {
         accepted: bool,
     },
     /// The engine first holds a cue. `question` and `source_id` are written
-    /// for a phrase cue raised by a transcript line, where `source_id` is
-    /// that line, and for a model cue. A cue that quotes a note, lists focus
-    /// lines or concerns the focus has `source` `note` or `focus` and no
+    /// only for a phrase cue raised by a transcript line, where `source_id`
+    /// is that line. A model cue has `source` `evaluated`, the first line it
+    /// cites as `source_id`, and no question. A cue that quotes a note, lists
+    /// focus lines or concerns the focus has `source` `note` or `focus` and no
     /// question, so neither note titles nor focus lines reach the log.
     ///
     /// `decider` is `phrase_rule` or `model`. A model cue is recorded where
-    /// the engine accepts the evaluator's reply, with its `request` and the
-    /// words the companion shows. Those can repeat the session name or an
-    /// earlier cue, both of which the model was sent; never a prior note,
-    /// which this path does not send.
+    /// the engine accepts the evaluator's reply, with its `request`.
     CueDecision {
         session: u64,
         cue: String,

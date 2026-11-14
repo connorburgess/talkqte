@@ -54,6 +54,7 @@ pub enum Issue {
     Unreachable,
     TimedOut,
     InvalidReply,
+    Misconfigured,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -118,6 +119,8 @@ pub struct ProcessorSummary {
     pub location: Location,
     pub destination: String,
     pub data_policy: String,
+    /// Whether the review may offer prior notes for this processor.
+    pub accepts_notes: bool,
 }
 
 impl From<&ProcessorConfiguration> for ProcessorSummary {
@@ -134,6 +137,7 @@ impl From<&ProcessorConfiguration> for ProcessorSummary {
             location,
             destination,
             data_policy: config.disclosure.data_policy.clone(),
+            accepts_notes: config.accepts_notes,
         }
     }
 }
@@ -353,21 +357,9 @@ impl ProcessingTracker {
 }
 
 impl Engine {
-    pub(crate) fn processing_snapshot(
-        &self,
-        capture: CaptureState,
-        scope_revision: u64,
-    ) -> ProcessingSnapshot {
-        let mut notes: Vec<_> = self
-            .notes
-            .iter()
-            .map(|n| NoteSummary::from(&n.item))
-            .collect();
-        notes.sort_by(|a, b| {
-            (a.source.provider.id(), &a.source.source_id)
-                .cmp(&(b.source.provider.id(), &b.source.source_id))
-        });
-        let issue = match self.evaluation_status() {
+    /// The plain reason processing stopped, if it did.
+    pub(crate) fn processing_issue(&self) -> Option<Issue> {
+        match self.evaluation_status() {
             Some(EvaluationStatus::Unavailable(EvaluationIssue::ScopeChanged)) => {
                 Some(Issue::ScopeChanged)
             }
@@ -390,9 +382,29 @@ impl Engine {
             Some(EvaluationStatus::Unavailable(EvaluationIssue::InvalidReply)) => {
                 Some(Issue::InvalidReply)
             }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::Misconfigured)) => {
+                Some(Issue::Misconfigured)
+            }
             Some(EvaluationStatus::Unavailable(_)) => Some(Issue::Worker),
             _ => None,
-        };
+        }
+    }
+
+    pub(crate) fn processing_snapshot(
+        &self,
+        capture: CaptureState,
+        scope_revision: u64,
+    ) -> ProcessingSnapshot {
+        let mut notes: Vec<_> = self
+            .notes
+            .iter()
+            .map(|n| NoteSummary::from(&n.item))
+            .collect();
+        notes.sort_by(|a, b| {
+            (a.source.provider.id(), &a.source.source_id)
+                .cmp(&(b.source.provider.id(), &b.source.source_id))
+        });
+        let issue = self.processing_issue();
         let approved = if self.has_processing_permission() {
             let grant = self
                 .evaluation

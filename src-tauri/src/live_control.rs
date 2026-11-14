@@ -194,7 +194,7 @@ impl Runtime {
             return Err(CANCELLED.into());
         }
         self.check_live_start()?;
-        let mut engine = carry_over(&self.engine, crate::claude_cli::live_engine());
+        let mut engine = carry_over(&self.engine, crate::live_engine());
         engine.start()?;
         self.export = None;
         self.processing_reviews.clear();
