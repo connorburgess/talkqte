@@ -304,6 +304,16 @@
         color: #6c7682;
       }
       /* The optional second video: the notebook alone, with the labels. */
+      /* The meeting emulator: the mock call alone, with no TalkQTE in it,
+         for the real app to hear. */
+      .view-meeting #companion,
+      .view-meeting #side,
+      .view-meeting #lab {
+        display: none;
+      }
+      .no-captions #caption {
+        visibility: hidden;
+      }
       .view-notebook #call,
       .view-notebook #companion {
         display: none;
@@ -351,7 +361,7 @@
   </head>
   <body>
     <div id="banner" role="note" aria-label="Recording label">
-      <span class="tag">Simulated</span>
+      <span class="tag" id="simulated">Simulated</span>
       <span class="tag">Fictional</span>
       <span class="tag" id="decisions"></span>
       <span class="tag" id="sound" hidden></span>
@@ -408,9 +418,19 @@
       let now = 0;
       // One TalkQTE frame per video: the companion over the call, or the
       // notebook by itself.
-      const frames = () => [
-        $(data.view === 'notebook' ? 'notebook' : 'companion').contentWindow,
-      ];
+      const frames = () =>
+        data.view === 'meeting'
+          ? []
+          : [
+              $(data.view === 'notebook' ? 'notebook' : 'companion')
+                .contentWindow,
+            ];
+      // Times things happened, for the live emulator to report.
+      const report = (type, extra = {}) =>
+        window.stageEvents?.(type, { clockMs: Math.round(now), ...extra });
+      // Set while playing, so lines can be added to a live meeting.
+      let schedule = [];
+      let next = 0;
 
       function note(text, kind = '') {
         const item = document.createElement('li');
@@ -440,22 +460,35 @@
             'view-notebook',
             data.view === 'notebook',
           );
-          $('intro-rule').textContent =
-            data.view === 'notebook'
+          const meeting = data.view === 'meeting';
+          document.body.classList.toggle('view-meeting', meeting);
+          document.body.classList.toggle(
+            'no-captions',
+            data.captions === false,
+          );
+          $('intro-rule').textContent = meeting
+            ? 'A simulated meeting with fictional people and synthetic voices. TalkQTE is not in this window.'
+            : data.view === 'notebook'
               ? 'Simulated replay of a fictional conversation. This is the TalkQTE notebook during it.'
               : 'Simulated replay of a fictional conversation. The call is a mock; the companion is TalkQTE.';
+          if (meeting) $('simulated').textContent = 'Simulated meeting';
+          // The tags' own style would override the hidden attribute.
+          $('decisions').style.display = meeting ? 'none' : '';
           $('title').textContent = data.title;
-          $('decisions').textContent = data.decisions;
+          // A meeting has no cue decisions of its own: the app makes them.
+          $('decisions').textContent = meeting ? '' : data.decisions;
           $('sound').textContent = data.sound;
           $('sound').hidden = !data.sound;
           $('portraits').textContent = data.portraitsLabel;
           $('portraits').hidden = !data.portraitsLabel;
-          $('source').textContent =
-            `${data.title} · cue decisions: ${data.evaluator} · ${data.timing}`;
+          $('source').textContent = meeting
+            ? `${data.title} · a mock call for TalkQTE to hear`
+            : `${data.title} · cue decisions: ${data.evaluator} · ${data.timing}`;
           $('intro-title').textContent = data.title;
           $('intro-setting').textContent = data.setting;
-          $('intro-source').textContent =
-            `Cue decisions: ${data.evaluator}. ${data.timing}.`;
+          $('intro-source').textContent = meeting
+            ? ''
+            : `Cue decisions: ${data.evaluator}. ${data.timing}.`;
           const tiles = $('tiles');
           tiles.classList.toggle('odd', data.participants.length % 2 === 1);
           for (const [i, person] of data.participants.entries()) {
@@ -489,6 +522,7 @@
             tile.append(avatar, name);
             tiles.append(tile);
           }
+          if (meeting) return;
           if (data.view === 'notebook') $('notebook').src = `${data.origin}/`;
           else $('companion').src = `${data.origin}/?window=cue`;
           await waitFor(
@@ -507,13 +541,34 @@
         /** Plays the replay on its own clock; resolves when it is over. */
         async play() {
           const lines = new Map(data.lines.map((line) => [line.id, line]));
-          const schedule = [
+          schedule = [
             ...data.lines.flatMap((line) => [
               { atMs: line.fromMs, kind: 'speak', line },
               { atMs: line.atMs, kind: 'spoken', line },
             ]),
-            ...data.timeline.map((event) => ({ ...event, kind: event.type })),
+            // The meeting emulator shows no cues: the real app makes its own.
+            ...(data.view === 'meeting' ? [] : data.timeline).map((event) => ({
+              ...event,
+              kind: event.type,
+            })),
           ].sort((a, b) => a.atMs - b.atMs);
+          next = 0;
+          // Lines added while a live meeting plays.
+          this.append = (added) => {
+            for (const line of added) {
+              lines.set(line.id, line);
+              data.lines.push(line);
+              if (line.clip) (data.clips ??= {})[line.id] = line.clip;
+              schedule.push(
+                { atMs: line.fromMs, kind: 'speak', line },
+                { atMs: line.atMs, kind: 'spoken', line },
+              );
+              data.endsAtMs = Math.max(data.endsAtMs, line.atMs + 3_000);
+            }
+            const done = schedule.slice(0, next);
+            const rest = schedule.slice(next).sort((a, b) => a.atMs - b.atMs);
+            schedule = [...done, ...rest];
+          };
           const transcript = [];
           let cue = null;
           let newestText = null;
@@ -560,6 +615,10 @@
           };
           const apply = (event) => {
             if (event.kind === 'speak') {
+              // The live emulator plays each line's own clip as it starts.
+              const clip = data.clips?.[event.line.id];
+              if (clip) new Audio(clip).play().catch(() => {});
+              report('speak', { lineId: event.line.id, sound: Boolean(clip) });
               for (const tile of document.querySelectorAll('#tiles .tile'))
                 tile.classList.toggle(
                   'speaking',
@@ -571,6 +630,7 @@
               who.textContent = `${event.line.speaker}: `;
               caption.append(who, event.line.text);
             } else if (event.kind === 'spoken') {
+              report('spoken', { lineId: event.line.id });
               for (const tile of document.querySelectorAll('.tile'))
                 tile.classList.remove('speaking');
             } else if (event.kind === 'line') {
@@ -643,7 +703,7 @@
           };
           $('intro').hidden = true;
           startedAt = performance.now();
-          let next = 0;
+          report('start');
           let published = -Infinity;
           for (;;) {
             now = (performance.now() - startedAt) * data.speed;
@@ -664,8 +724,29 @@
           }
           for (const tile of document.querySelectorAll('.tile'))
             tile.classList.remove('speaking');
+          report('end');
         },
       };
+
+      // The live meeting emulator: the page fetches its meeting from the
+      // local server that served it, plays it in real time with each
+      // line's sound, takes lines added while it plays, and reports when
+      // each line started and ended. Only with ?live in the address.
+      if (new URLSearchParams(location.search).has('live'))
+        (async () => {
+          const value = await (await fetch('/data.json')).json();
+          window.stageEvents = (type, extra) =>
+            fetch('/played', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ type, wallMs: Date.now(), ...extra }),
+            }).catch(() => {});
+          await window.stage.prepare(value);
+          new EventSource('/events').addEventListener('append', (event) =>
+            window.stage.append?.(JSON.parse(event.data)),
+          );
+          setTimeout(() => window.stage.play(), value.startDelayMs ?? 3_000);
+        })();
     </script>
   </body>
 </html>

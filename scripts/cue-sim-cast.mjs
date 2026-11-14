@@ -70,7 +70,51 @@ const pick = (list, seed) =>
 /** For each speaker of a conversation: how they are cast, their preset
  * voice, and the description of their invented portrait. The same speaker
  * in the same conversation always gets the same answer. */
+// Preset voices by the kind of voice a brief asks for. Nothing is cloned.
+const CAST_VOICES = {
+  feminine: ['marin', 'coral', 'sage', 'shimmer'],
+  masculine: ['cedar', 'ash', 'verse', 'echo'],
+  neutral: ['alloy', 'fable'],
+};
+const PERSON = {
+  feminine: 'a woman',
+  masculine: 'a man',
+  neutral: 'a person',
+};
+
+/** Casting written by a brief: each person's voice, age range and portrait
+ * description come from the brief's own fields, never from the name. */
+function castFromBrief(conversation) {
+  const used = { feminine: 0, masculine: 0, neutral: 0 };
+  return Object.fromEntries(
+    conversation.participants.map((person) => {
+      const { voice: kind, age, portrait } = person.casting;
+      const voices = CAST_VOICES[kind];
+      if (!voices) throw new Error(`No preset voice for "${kind}".`);
+      const voice = voices[used[kind]++ % voices.length];
+      const prompt = [
+        `A photorealistic still from a laptop webcam during a work video call, showing ${PERSON[kind]} aged ${age}. ${portrait.trim()}`,
+        'Head and shoulders, centred, looking toward the camera with a relaxed, attentive expression, mouth closed, mid-conversation.',
+        'Soft natural daylight from the side, slightly soft background, ordinary webcam quality, 3:2 landscape framing.',
+        'This is an invented person who does not exist: not a real, famous or recognisable person. No text, captions, logos or watermarks.',
+      ].join(' ');
+      return [person.name, { presents: kind, voice, prompt }];
+    }),
+  );
+}
+
 export function castFor(conversation) {
+  const people = conversation.participants ?? [];
+  const briefed = people.filter((person) => person.casting);
+  // A conversation whose people carry casting is cast from it, and only
+  // from it; the name list below serves the bundled conversations alone.
+  if (briefed.length) {
+    if (briefed.length !== people.length)
+      throw new Error(
+        'Some people in this conversation carry casting and some do not.',
+      );
+    return castFromBrief(conversation);
+  }
   const speakers = [
     ...new Set([
       ...conversation.participants.map((p) => p.name),

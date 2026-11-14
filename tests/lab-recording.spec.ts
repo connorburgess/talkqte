@@ -1,7 +1,9 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   realpathSync,
   statSync,
@@ -362,4 +364,345 @@ test('the command plays only bundled fictional conversations from the preview on
     );
   }
   expect(videos(directory)).toEqual([]);
+});
+
+// The meeting emulator and the window-only recorder. A small generated run
+// in the dialogue lane's format, with its brief beside it.
+function generatedRun() {
+  const directory = outside();
+  const brief = JSON.stringify({ people: ['Maya', 'Robin'] });
+  writeFileSync(join(directory, 'run.briefs.json'), brief);
+  const run = {
+    schema: 'talkqte-cue-dialogue/1',
+    fictional: true,
+    generated: true,
+    brief: {
+      file: 'run.briefs.json',
+      sha256: createHash('sha256').update(brief).digest('hex'),
+    },
+    branches: [
+      {
+        id: 'workshop-a',
+        title: 'Fictional planning call',
+        setting: 'Two invented people plan a workshop.',
+        listener: 'Robin',
+        participants: [
+          {
+            name: 'Maya',
+            role: 'Organizer',
+            casting: {
+              voice: 'feminine',
+              age: '30-39',
+              portrait: 'Dark hair.',
+            },
+          },
+          {
+            name: 'Robin',
+            role: 'Engineer',
+            casting: { voice: 'neutral', age: '40-49', portrait: 'Grey hair.' },
+          },
+        ],
+        lines: [
+          {
+            id: 't1',
+            speaker: 'Maya',
+            text: 'Somebody needs to book the room.',
+            startMs: 600,
+            atMs: 2_200,
+          },
+          {
+            id: 't2',
+            speaker: 'Robin',
+            text: 'I will book it today.',
+            startMs: 2_700,
+            atMs: 3_900,
+          },
+        ],
+        timeline: [],
+      },
+    ],
+  };
+  const file = join(directory, 'run.json');
+  writeFileSync(file, JSON.stringify(run));
+  return { directory, file };
+}
+const emulatorPath = '../scripts/lab-emulator.mjs';
+const windowRecordPath = '../scripts/lab-window-record.mjs';
+
+test('the emulator renders a labelled meeting with its sound and no TalkQTE in it', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  test.skip(!(tool('ffmpeg') && tool('ffprobe')), 'needs ffmpeg');
+  const { renderMeeting } = await import(emulatorPath);
+  const { file } = generatedRun();
+  const directory = outside();
+  const manifest = await renderMeeting({
+    browser,
+    file,
+    id: 'workshop-a',
+    directory,
+    speech: 'tone',
+  });
+  expect(manifest.mode).toBe('prerendered');
+  expect(manifest.fictional).toBe(true);
+  expect(manifest.labels).toEqual([
+    'Simulated meeting',
+    'Fictional',
+    'Test tones',
+  ]);
+  expect(manifest.source).toMatchObject({
+    generated: true,
+    conversation: 'workshop-a',
+  });
+  const video = join(directory, manifest.video);
+  expect(streams(video).sort()).toEqual(['audio', 'video']);
+  expect(manifest.sound.check.passed).toBe(true);
+  // Where each line is in the video, to line up with the app's log.
+  expect(
+    manifest.timing.lines.map((line: { lineId: string }) => line.lineId),
+  ).toEqual(['t1', 't2']);
+  for (const line of manifest.timing.lines)
+    expect(line.endsAtMs).toBeGreaterThan(line.startsAtMs);
+  expect(videos(directory)).toEqual([manifest.video]);
+});
+
+test('the meeting view shows the call and its labels, and nothing of TalkQTE', async ({
+  page,
+}) => {
+  const { STAGE_HTML } = await import(recorderPath);
+  await page.route('**/__lab-stage', (route) =>
+    route.fulfill({ contentType: 'text/html', body: STAGE_HTML() }),
+  );
+  await page.goto('/__lab-stage');
+  await page.evaluate(() =>
+    (
+      window as unknown as {
+        stage: { prepare: (value: unknown) => Promise<void> };
+      }
+    ).stage.prepare({
+      view: 'meeting',
+      captions: false,
+      title: 'Fictional planning call',
+      setting: 'Two invented people.',
+      listener: 'Robin',
+      participants: [
+        { name: 'Maya', role: 'Organizer' },
+        { name: 'Robin', role: 'Engineer' },
+      ],
+      lines: [],
+      timeline: [],
+      decisions: 'No model',
+      sound: 'Synthetic voices',
+      portraitsLabel: '',
+      endsAtMs: 1_000,
+      speed: 1,
+    }),
+  );
+  const label = page.getByRole('note', { name: 'Recording label' });
+  await expect(label).toContainText('Simulated meeting');
+  await expect(label).toContainText('Fictional');
+  await expect(label).toContainText('Synthetic voices');
+  await expect(label).not.toContainText('No model');
+  await expect(page.getByTitle('TalkQTE companion')).toBeHidden();
+  await expect(page.getByTitle('TalkQTE notebook')).toBeHidden();
+  await expect(page.getByRole('region', { name: 'Lab overlay' })).toBeHidden();
+  await expect(
+    page.getByRole('region', { name: 'Mock video call' }),
+  ).toBeVisible();
+});
+
+test('the live meeting plays in real time, takes added lines and logs when each was heard', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const { serveMeeting } = await import(emulatorPath);
+  const { file } = generatedRun();
+  const live = await serveMeeting({
+    file,
+    id: 'workshop-a',
+    directory: outside(),
+    speech: null,
+    startDelayMs: 200,
+  });
+  const post = (lines: unknown) =>
+    fetch(live.address.replace('/?live', '/append'), {
+      method: 'POST',
+      body: JSON.stringify({ lines }),
+    });
+  try {
+    expect(
+      (await post([{ speaker: 'Robin', text: 'Too early.' }])).status,
+    ).toBe(409);
+    await page.goto(live.address);
+    await expect(
+      page.getByRole('note', { name: 'Recording label' }),
+    ).toContainText('Simulated meeting');
+    await expect(page.locator('#intro')).toBeHidden();
+    const added = await post([
+      {
+        speaker: 'Robin',
+        text: 'Actually, I can take the badges too.',
+        startMs: 1_000,
+      },
+    ]);
+    expect(added.status).toBe(200);
+    expect(await added.json()).toEqual([
+      expect.objectContaining({
+        lineId: 'x3',
+        startsAtMs: 1_000,
+        sound: false,
+      }),
+    ]);
+    await expect(page.locator('#caption')).toContainText('the badges too', {
+      timeout: 10_000,
+    });
+    const refused = await post([{ speaker: 'Someone Else', text: 'Hello.' }]);
+    expect(refused.status).toBe(400);
+    expect(await refused.text()).toContain('not in this meeting');
+    await expect
+      .poll(() =>
+        readFileSync(live.log, 'utf8')
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line).type),
+      )
+      .toEqual(
+        expect.arrayContaining(['served', 'start', 'appended', 'speak']),
+      );
+    for (const event of readFileSync(live.log, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line)))
+      expect(typeof event.wallMs).toBe('number');
+  } finally {
+    live.server.closeAllConnections();
+    live.server.close();
+  }
+});
+
+test('the label bar goes above the recorded picture, not over it, and the sound is kept', async ({
+  browser,
+}) => {
+  test.setTimeout(60_000);
+  test.skip(!(tool('ffmpeg') && tool('ffprobe')), 'needs ffmpeg');
+  const { labelBar, burnLabels, barSize, windowLabels } = await import(
+    windowRecordPath
+  );
+  const directory = outside();
+  const raw = join(directory, 'raw.mov');
+  execFileSync('ffmpeg', [
+    '-loglevel',
+    'error',
+    '-y',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc=size=640x400:rate=30',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440',
+    '-t',
+    '2',
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    raw,
+  ]);
+  const labels = windowLabels({
+    meeting: {
+      labels: ['Simulated meeting', 'Fictional'],
+      mode: 'prerendered',
+    },
+    appCommit: 'd703485',
+    cues: 'cues: unknown',
+  });
+  const picture = { width: 640, scale: 2 };
+  const bar = await labelBar(browser, labels, picture);
+  const out = await burnLabels(
+    raw,
+    bar,
+    join(directory, 'take'),
+    barSize(picture),
+  );
+  const size = execFileSync(
+    'ffprobe',
+    [
+      '-v',
+      'error',
+      '-select_streams',
+      'v',
+      '-show_entries',
+      'stream=width,height',
+      '-of',
+      'csv=p=0',
+      out,
+    ],
+    { encoding: 'utf8' },
+  ).trim();
+  expect(size).toBe(`640,${400 + barSize(picture).height}`);
+  expect(streams(out).sort()).toEqual(['audio', 'video']);
+});
+
+test('the capture program builds on a Mac and reports the recording permission without asking', async () => {
+  test.setTimeout(240_000);
+  test.skip(
+    process.platform !== 'darwin' || !tool('swiftc'),
+    'macOS with swiftc only',
+  );
+  const { ensureHelper, main } = await import(windowRecordPath);
+  const binary = await ensureHelper();
+  const check = JSON.parse(
+    execFileSync(binary, ['--check'], { encoding: 'utf8' }).trim(),
+  );
+  expect(check.event).toBe('check');
+  expect(typeof check.screenRecording).toBe('boolean');
+  // Arguments it does not know are refused before it looks at the screen.
+  let refused = '';
+  try {
+    execFileSync(binary, ['--whole-screen'], { encoding: 'utf8' });
+  } catch (error) {
+    refused = String((error as { stdout?: string }).stdout);
+  }
+  expect(refused).toContain('Unknown argument --whole-screen');
+
+  // Where the permission is missing, the recorder stops before recording.
+  const fake = join(outside(), 'capture');
+  writeFileSync(
+    fake,
+    '#!/bin/sh\necho \'{"event":"check","screenRecording":false}\'\n',
+    { mode: 0o755 },
+  );
+  const meeting = join(outside(), 'meeting.json');
+  writeFileSync(
+    meeting,
+    JSON.stringify({
+      schema: 'talkqte-meeting-emulator/1',
+      fictional: true,
+      mode: 'prerendered',
+      labels: ['Simulated meeting', 'Fictional'],
+      source: { conversation: 'workshop-a', sha256: 'x' },
+    }),
+  );
+  const directory = outside();
+  await expect(
+    main(
+      [
+        '--meeting',
+        meeting,
+        '--seconds',
+        '5',
+        '--out',
+        directory,
+        '--app-commit',
+        'd703485',
+      ],
+      { print: () => {}, helper: async () => fake },
+    ),
+  ).rejects.toThrow(/Screen & System Audio Recording is not allowed/);
+  expect(readdirSync(directory)).toEqual([]);
 });
