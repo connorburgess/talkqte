@@ -72,7 +72,33 @@ pub struct Request {
     context_revision: u64,
     sources: Vec<Source>,
     existing_cue: Option<ExistingCue>,
+    user_name: Option<String>,
+    earlier_cues: Vec<EarlierCue>,
+    // Bytes of source text, ids and metadata, so the listener's name and
+    // earlier cues are counted within the same aggregate limit.
+    #[serde(skip)]
+    bytes: usize,
 }
+
+/// How a cue this session showed ended, as the lab names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CueEnd {
+    Resolved,
+    Withdrawn,
+    /// Expired, or dismissed by the person.
+    Expired,
+}
+
+/// A cue this session already showed, so the model does not repeat it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct EarlierCue {
+    pub text: String,
+    pub state: CueEnd,
+}
+
+/// At most this many earlier cues are sent, oldest first.
+pub const MAX_EARLIER_CUES: usize = 4;
 
 // Never expose meeting text, source IDs, cue text, or speaker metadata in logs.
 impl fmt::Debug for Request {
@@ -139,6 +165,9 @@ impl Request {
             context_revision,
             sources,
             existing_cue,
+            user_name: None,
+            earlier_cues: Vec::new(),
+            bytes,
         };
         if let Some(cue) = &request.existing_cue {
             if !bounded_text(&cue.id, 128)
@@ -151,11 +180,80 @@ impl Request {
         Ok(request)
     }
 
+    /// Adds the listener's session name and the cues this session already
+    /// showed. Both are bounded; too many or too long fails without truncation.
+    pub fn with_listener(
+        mut self,
+        user_name: Option<String>,
+        earlier_cues: Vec<EarlierCue>,
+    ) -> Result<Self, Failure> {
+        let added = user_name.as_ref().map_or(0, String::len)
+            + earlier_cues.iter().map(|cue| cue.text.len()).sum::<usize>();
+        if self.bytes + added > MAX_CONTEXT_BYTES
+            || user_name
+                .as_deref()
+                .is_some_and(|name| !bounded_text(name, 128))
+            || earlier_cues.len() > MAX_EARLIER_CUES
+            || earlier_cues.iter().any(|cue| !bounded_text(&cue.text, 240))
+        {
+            return Err(Failure::InvalidInput);
+        }
+        self.user_name = user_name;
+        self.earlier_cues = earlier_cues;
+        Ok(self)
+    }
+
     pub fn sources(&self) -> &[Source] {
         &self.sources
     }
     pub fn existing_cue(&self) -> Option<&ExistingCue> {
         self.existing_cue.as_ref()
+    }
+    pub fn user_name(&self) -> Option<&str> {
+        self.user_name.as_deref()
+    }
+    pub fn earlier_cues(&self) -> &[EarlierCue] {
+        &self.earlier_cues
+    }
+
+    /// The model's input, in the shape and field order of the lab's
+    /// app-style request (`buildPrompt` in scripts/cue-lab.mjs). Every line
+    /// carries the one label "Speaker", as live transcripts do. Prior notes
+    /// are not sent by this path; a request holding one fails closed.
+    pub fn prompt_input(&self) -> Result<String, Failure> {
+        let mut events = Vec::new();
+        for source in &self.sources {
+            match source.provenance {
+                Provenance::Transcript { .. } => events.push(serde_json::json!({
+                    "id": source.id, "speaker": "Speaker", "text": source.text,
+                })),
+                Provenance::PriorNote { .. } => return Err(Failure::InvalidInput),
+            }
+        }
+        // Built by hand to keep the lab's field order: text, then sourceIds.
+        let cue = self.existing_cue.as_ref().map(|cue| {
+            format!(
+                "{{\"text\":{},\"sourceIds\":{}}}",
+                serde_json::Value::from(cue.text.as_str()),
+                serde_json::Value::from(cue.source_ids.clone())
+            )
+        });
+        let mut text = format!(
+            "{{\"events\":{},\"existingCue\":{}",
+            serde_json::Value::Array(events),
+            cue.unwrap_or_else(|| "null".into())
+        );
+        if let Some(name) = &self.user_name {
+            text += &format!(",\"userName\":{}", serde_json::Value::from(name.as_str()));
+        }
+        if !self.earlier_cues.is_empty() {
+            text += &format!(
+                ",\"earlierCues\":{}",
+                serde_json::to_string(&self.earlier_cues).map_err(|_| Failure::InvalidInput)?
+            );
+        }
+        text.push('}');
+        Ok(text)
     }
 
     fn has_sources(&self, ids: &[String]) -> bool {
@@ -176,14 +274,8 @@ pub enum Action {
     Withdraw,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ObservedUse {
-    NotObserved,
-    Possible,
-    Unknown,
-}
-
+/// The compact reply: exactly the three fields the app acts on. A reason
+/// or any other field fails validation.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RawDecision {
@@ -191,8 +283,6 @@ struct RawDecision {
     // Value keeps this field required; an absent Option would deserialize as None.
     cue: serde_json::Value,
     source_ids: Vec<String>,
-    reason: String,
-    observed_use: ObservedUse,
 }
 
 /// A checked proposal, never an instruction to the app. Rust still decides
@@ -202,8 +292,6 @@ pub struct Decision {
     pub action: Action,
     pub cue: Option<String>,
     pub source_ids: Vec<String>,
-    pub reason: String,
-    pub observed_use: ObservedUse,
 }
 
 impl fmt::Debug for Decision {
@@ -230,10 +318,8 @@ fn validate(text: &str, request: &Request) -> Result<Decision, Failure> {
         _ => return Err(Failure::InvalidDecision),
     };
     if !request.has_sources(&raw.source_ids)
-        || !bounded_text(&raw.reason, 300)
         || (matches!(raw.action, Action::Resolved | Action::Withdraw)
             && request.existing_cue.is_none())
-        || (request.existing_cue.is_none() && raw.observed_use != ObservedUse::NotObserved)
     {
         return Err(Failure::InvalidDecision);
     }
@@ -241,8 +327,6 @@ fn validate(text: &str, request: &Request) -> Result<Decision, Failure> {
         action: raw.action,
         cue,
         source_ids: raw.source_ids,
-        reason: raw.reason,
-        observed_use: raw.observed_use,
     })
 }
 
@@ -257,6 +341,15 @@ pub enum Failure {
     Stale,
     EvaluatorUnavailable,
     WorkerUnavailable,
+    /// The backend is not installed, too old, or not signed in to a
+    /// subscription.
+    SignIn,
+    /// An API key, provider switch, gateway or proxy setting was inherited.
+    Credentials,
+    /// A usage or rate limit was reached.
+    UsageLimit,
+    /// The model could not be reached, or the backend reported an error.
+    Unreachable,
 }
 
 pub struct Cancellation {
@@ -336,7 +429,16 @@ impl Worker {
                     } else {
                         evaluator
                             .evaluate(&job.request, &job.cancel)
-                            .map_err(|_| Failure::EvaluatorUnavailable)
+                            // Keep a backend's fixed codes, so the person
+                            // sees why; anything else is an unavailable backend.
+                            .map_err(|failure| match failure {
+                                Failure::SignIn
+                                | Failure::Credentials
+                                | Failure::UsageLimit
+                                | Failure::Unreachable
+                                | Failure::InvalidDecision => failure,
+                                _ => Failure::EvaluatorUnavailable,
+                            })
                             .and_then(|text| {
                                 if job.cancel.is_cancelled() {
                                     Err(Failure::Cancelled)
@@ -512,8 +614,7 @@ mod tests {
 
     fn reply(action: &str) -> String {
         json!({"action":action,"cue": if action == "show" {json!("Who will send the garden checklist?")} else {json!(null)},
-            "sourceIds":["e1","e2"], "reason":"The supplied lines support this fictional decision.",
-            "observedUse":"not_observed"}).to_string()
+            "sourceIds":["e1","e2"]}).to_string()
     }
 
     struct Fixed(Result<String, Failure>);
@@ -578,7 +679,7 @@ mod tests {
     }
 
     #[test]
-    fn all_decisions_are_proposals_with_explicit_evidence_and_observed_use() {
+    fn all_decisions_are_compact_proposals_with_explicit_evidence() {
         for (action, existing, expected) in [
             ("show", false, Action::Show),
             ("quiet", false, Action::Quiet),
@@ -591,17 +692,14 @@ mod tests {
             let result = finish(&mut worker, &input).unwrap();
             assert_eq!(result.action, expected);
             assert_eq!(result.source_ids, ["e1", "e2"]);
-            assert_eq!(result.observed_use, ObservedUse::NotObserved);
             assert_eq!(result.cue.is_some(), action == "show");
         }
+        // The lab's full five-field reply is not the app's reply.
         let mut value: serde_json::Value = serde_json::from_str(&reply("quiet")).unwrap();
-        value["observedUse"] = json!("possible");
+        value["reason"] = json!("A fictional reason.");
+        value["observedUse"] = json!("not_observed");
         assert_eq!(
-            validate(&value.to_string(), &request(true)).unwrap().action,
-            Action::Quiet
-        );
-        assert_eq!(
-            validate(&value.to_string(), &request(false)),
+            validate(&value.to_string(), &request(true)),
             Err(Failure::InvalidDecision)
         );
     }
@@ -623,10 +721,9 @@ mod tests {
             ("cue", json!(null)),
             ("cue", json!(" ")),
             ("cue", json!("x".repeat(241))),
-            ("reason", json!("x".repeat(301))),
-            ("reason", json!("")),
+            ("reason", json!("An explanation nobody asked for.")),
             ("action", json!("execute")),
-            ("observedUse", json!("useful")),
+            ("observedUse", json!("possible")),
             ("capture", json!(true)),
             ("cue", json!("hidden\u{001b} instruction")),
         ] {

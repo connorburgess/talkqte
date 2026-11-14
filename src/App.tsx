@@ -6,6 +6,8 @@ import {
   BookOpen,
   ChevronRight,
   CircleHelp,
+  Cloud,
+  CloudUpload,
   EyeOff,
   FileText,
   MessageCircle,
@@ -30,7 +32,7 @@ import {
 
 const megabytes = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
 import { CueCard } from './components/Question';
-import { ProcessingControl } from './components/ProcessingControl';
+import { ProcessingControl, issueText } from './components/ProcessingControl';
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { ContextNotes } from './components/ContextNotes';
 import { SetupCard, type SetupTarget } from './components/SetupCard';
@@ -110,17 +112,25 @@ function FloatingQuestion() {
   // Capture is on and nothing about it is changing or wrong.
   const capturing =
     (listening || appAudio) && !(microphoneControl && microphone.stopPending);
+  // While a model connection may send lines, "Local" would be untrue.
+  // Paused cues send nothing, so they say only that they are paused.
+  const modelLinked =
+    !state?.cuesPaused && (state?.model === 'on' || state?.model === 'sending');
   const statusText = !state
     ? ''
     : live
       ? mic?.status === 'listening'
         ? state.cuesPaused
           ? 'Mic still on'
-          : 'Mic on · Local'
+          : modelLinked
+            ? 'Mic on · lines go to Claude'
+            : 'Mic on · Local'
         : state.sourceSession
           ? state.cuesPaused
             ? 'App audio still on'
-            : 'App audio · Local'
+            : modelLinked
+              ? 'App audio · lines go to Claude'
+              : 'App audio · Local'
           : microphoneLabel(mic)
       : microphoneControl
         ? microphone.stopPending && mic?.status !== 'stopping'
@@ -187,6 +197,50 @@ function FloatingQuestion() {
                               : 'Quiet input'
                         }
                       />
+                    )}
+                  </span>
+                )}
+                {/* Conversation lines may leave the device while this
+                    shows; the arrow means a request is on its way. */}
+                {state?.model === 'stopped' && !state.cuesPaused && (
+                  <strong
+                    className="companion-title"
+                    title={
+                      state.modelIssue
+                        ? issueText[state.modelIssue]
+                        : 'Cues off: sending stopped.'
+                    }
+                    data-tauri-drag-region
+                  >
+                    Cues off
+                    <span className="visually-hidden">
+                      {': '}
+                      {state.modelIssue
+                        ? issueText[state.modelIssue]
+                        : 'sending stopped.'}
+                    </span>
+                  </strong>
+                )}
+                {modelLinked && (
+                  <span
+                    className={`companion-capture is-on`}
+                    title={
+                      state.model === 'sending'
+                        ? 'Sending recent lines to Claude'
+                        : 'Model cues on: recent lines go to Claude'
+                    }
+                    role="img"
+                    aria-label={
+                      state.model === 'sending'
+                        ? 'Sending recent lines to Claude'
+                        : 'Model cues on: recent lines go to Claude'
+                    }
+                    data-tauri-drag-region
+                  >
+                    {state.model === 'sending' ? (
+                      <CloudUpload size={16} aria-hidden="true" />
+                    ) : (
+                      <Cloud size={16} aria-hidden="true" />
                     )}
                   </span>
                 )}
@@ -1427,8 +1481,8 @@ function Notebook() {
                   <p className="companion-footnote">
                     {state.live && capture.state?.processor
                       ? capture.state.approved
-                        ? 'Cues use the sources approved for this session. Pause cues or disable processing above at any time.'
-                        : 'Evaluated cues need approval in Cue processing above. You can leave processing off.'
+                        ? 'Cues come from the model, using the lines approved for this session. Pause cues or turn the connection off above at any time.'
+                        : 'Cues are off until you turn on the model connection in Cue processing above.'
                       : state.live
                         ? 'Suggestions use simple phrase rules on what was transcribed. Use a cue in the conversation or let it pass.'
                         : 'This replay is fictional. Its cues were decided before it was played.'}

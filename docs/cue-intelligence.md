@@ -1,6 +1,6 @@
 # Cue intelligence and feedback
 
-Status: evaluation plan with an optional [fictional Claude Code lab](claude-cue-lab.md), 8 November 2026. No reasoning model is connected to the app, and no production provider, conversational feedback system, or learning pipeline is selected. This supports the [participation goal](../PRODUCT.md#goal-and-first-proof) and [product readiness plan](product-readiness.md).
+Status: evaluation plan with an optional [fictional Claude Code lab](claude-cue-lab.md), 8 November 2026. Ordinary builds connect no model. A `claude-cli` development build can send conversation lines to Claude for cue decisions, on the owner's own subscription, after the person approves the session ([model-decided cues](cue-model.md)); no production provider, conversational feedback system, or learning pipeline is selected. This supports the [participation goal](../PRODUCT.md#goal-and-first-proof) and [product readiness plan](product-readiness.md).
 
 ## What powers the prototype today
 

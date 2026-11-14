@@ -174,7 +174,7 @@ test('processing is reviewed, enabled, paused, resumed and disabled from the key
   await expectToFit(approve, 'Enable for this session');
   await expectNoSidewaysScroll(page);
   await approve.press('Enter');
-  await expect(status).toHaveText('Processing on');
+  await expect(status).toHaveText('Model connection on');
 
   const pause = panel.getByRole('button', { name: 'Pause cues', exact: true });
   const resume = panel.getByRole('button', { name: 'Resume cues' });
@@ -193,7 +193,7 @@ test('processing is reviewed, enabled, paused, resumed and disabled from the key
   await expectToFit(resume, 'Resume cues');
   await expect(microphone).toHaveText('On');
   await resume.press('Enter');
-  await expect(status).toHaveText('Processing on');
+  await expect(status).toHaveText('Model connection on');
   await expect(pause).toBeFocused();
 
   // Disabling returns to an unapproved session without ending capture.
