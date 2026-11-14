@@ -256,6 +256,12 @@ test('a model connection shows while lines may be sent, and why it stopped', asy
   await expect(
     bar.getByRole('img', { name: 'Sending recent lines to Claude' }),
   ).toBeVisible();
+  // Paused cues send nothing: only the paused state shows.
+  await publish({ model: 'on', cuesPaused: true });
+  await expect(bar.getByRole('img', { name: /recent lines/ })).toHaveCount(0);
+  await expect(bar.getByText('lines go to Claude')).toHaveCount(0);
+  await expect(bar.getByText('Cues off', { exact: true })).toBeVisible();
+  await publish({ cuesPaused: false });
   // A failure takes the cloud away and says why, for eyes and ears alike.
   await publish({ model: 'stopped', modelIssue: 'allowance' });
   await expect(bar.getByRole('img', { name: /recent lines/ })).toHaveCount(0);

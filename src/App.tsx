@@ -113,7 +113,9 @@ function FloatingQuestion() {
   const capturing =
     (listening || appAudio) && !(microphoneControl && microphone.stopPending);
   // While a model connection may send lines, "Local" would be untrue.
-  const modelLinked = state?.model === 'on' || state?.model === 'sending';
+  // Paused cues send nothing, so they say only that they are paused.
+  const modelLinked =
+    !state?.cuesPaused && (state?.model === 'on' || state?.model === 'sending');
   const statusText = !state
     ? ''
     : live
@@ -219,7 +221,7 @@ function FloatingQuestion() {
                     </span>
                   </strong>
                 )}
-                {(state?.model === 'on' || state?.model === 'sending') && (
+                {modelLinked && (
                   <span
                     className={`companion-capture is-on`}
                     title={
