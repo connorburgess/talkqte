@@ -13,7 +13,7 @@
     "test": "playwright test",
     "test:e2e": "playwright test",
     "test:contributions": "node --test scripts/check-contributions.test.mjs",
-    "test:cue-lab": "node --test scripts/cue-lab.test.mjs scripts/cue-lab-batch.test.mjs scripts/cue-sim.test.mjs scripts/cue-sim-voices.test.mjs scripts/cue-sim-media.test.mjs scripts/cue-sim-review.test.mjs scripts/cue-dialogue.test.mjs scripts/cue-dialogue-stream.test.mjs scripts/lab-meeting.test.mjs scripts/cue-lab-codex.test.mjs scripts/cue-lab-provider.test.mjs scripts/cue-lab-operation-gate.test.mjs scripts/cue-lab-broker.test.mjs scripts/cue-lab-run.test.mjs scripts/cue-lab-native-owner.test.mjs",
+    "test:cue-lab": "node --test scripts/cue-lab.test.mjs scripts/cue-lab-batch.test.mjs scripts/cue-sim.test.mjs scripts/cue-sim-voices.test.mjs scripts/cue-sim-media.test.mjs scripts/cue-sim-review.test.mjs scripts/cue-dialogue.test.mjs scripts/cue-dialogue-stream.test.mjs scripts/lab-meeting.test.mjs scripts/cue-lab-codex.test.mjs scripts/cue-lab-provider.test.mjs scripts/cue-lab-operation-gate.test.mjs scripts/cue-lab-broker.test.mjs scripts/cue-lab-run.test.mjs scripts/cue-lab-native-owner.test.mjs scripts/cue-lab-launcher.test.mjs",
     "test:cue-cases": "node --test scripts/cue-rules-independent.test.mjs",
     "test:docs": "node --test scripts/check-docs.test.mjs",
     "check:docs": "node scripts/check-docs.mjs",
