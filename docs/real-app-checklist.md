@@ -31,9 +31,9 @@ One page to follow at the Mac for a recorded run of the real TalkQTE app hearing
 6. **Launch TalkQTE with a new timing log** (a new file each run, outside the repository):
 
    ```sh
-   mkdir -p ~/talkqte-lab
-   open -a <bundle>/TalkQTE.app --stderr "$HOME/talkqte-lab/run-01.stderr" \
-     --env TALKQTE_TIMING_LOG="$HOME/talkqte-lab/run-01.jsonl"
+   mkdir -p ~/talkqte-lab-runs
+   open -a <bundle>/TalkQTE.app --stderr "$HOME/talkqte-lab-runs/run-01.stderr" \
+     --env TALKQTE_TIMING_LOG="$HOME/talkqte-lab-runs/run-01.jsonl"
    ```
 
 7. **Check the log is on:** `run-01.stderr` has a line `TalkQTE timing log: on`.
@@ -47,7 +47,7 @@ One page to follow at the Mac for a recorded run of the real TalkQTE app hearing
 
     ```sh
     npm run lab:window-record -- --meeting <meeting record .json> \
-      --out <recordings folder> --timing-log ~/talkqte-lab/run-01.jsonl --dry-run
+      --out <recordings folder> --timing-log ~/talkqte-lab-runs/run-01.jsonl --dry-run
     ```
 
 11. **Record.** Run the same command without `--dry-run`, then **press play in QuickTime Player within a few seconds**. It records only the two windows, with QuickTime Player's sound, and stops by itself after the meeting's length plus 15 seconds.

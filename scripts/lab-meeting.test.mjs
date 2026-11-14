@@ -4,10 +4,10 @@
 // browser, screen, model or network is used.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { testFolder } from './lab-test-folders.mjs';
 import { castFor } from './cue-sim-cast.mjs';
 import { main as emulator, meetingLabels } from './lab-emulator.mjs';
 import { assertBrief, loadPlayable } from './lab-playable.mjs';
@@ -20,8 +20,7 @@ import {
   windowLabels,
 } from './lab-window-record.mjs';
 
-const outside = () =>
-  realpathSync.native(mkdtempSync(join(tmpdir(), 'talkqte-meeting-test-')));
+const outside = () => realpathSync.native(testFolder('talkqte-meeting-test-'));
 
 /** A small generated run in the dialogue lane's format, with its brief. */
 function generatedRun(edit = (run) => run) {
