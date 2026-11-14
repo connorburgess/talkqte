@@ -81,6 +81,9 @@ export const DEFAULTS = {
   firstTurnMs: 1_000,
   branches: ['A', 'B'],
 };
+/** A turn's length for planning, about what a short spoken turn and its
+ * gap take: the generator is told the call lasts maxTurns of these. */
+export const TURN_MS_ESTIMATE = 6_000;
 /** The settings that shape a conversation's turns; a replay must match. */
 export const TURN_SETTINGS = [
   'maxTurns',
@@ -961,6 +964,8 @@ export async function runDialogue({
           settled: plan.settled,
           decoys: plan.decoys,
           people: '3 to 5 including the focus person',
+          // How long the simulated call runs, so distraction falls inside it.
+          callLengthMs: settings.maxTurns * TURN_MS_ESTIMATE,
         };
         const value = await ask(context, agents.generator, request, {
           scenario: `plan-${index + 1}`,

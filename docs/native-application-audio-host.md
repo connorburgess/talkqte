@@ -108,6 +108,14 @@ application, and **Start session from** that application, which reviews it
 and starts a session for it alone. Only a build that reports a source shows
 it. Retrying a failed cleanup is still only the development command.
 
+For unattended lab runs, `TALKQTE_DEV_APPLICATION_SOURCE`, read once at launch,
+takes the same steps through the same host: one listing, a review of the one
+application with exactly that name, and a session for it alone.
+`TALKQTE_DEV_STOP_AFTER_S` later asks the host's ordinary Stop. A refusal,
+including no exact match or a refused permission, ends the attempt with its
+reason in the status and is not retried
+([runbook](real-app-lab.md#start-and-stop-without-clicks)).
+
 ## The status
 
 The status says **Off only when nothing was started or native cleanup was

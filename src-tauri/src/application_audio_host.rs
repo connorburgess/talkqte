@@ -87,6 +87,9 @@ struct View {
     operation: Option<String>,
     /// The live session was started for this source alone.
     source_session: bool,
+    /// The last attempt came from the development launch setting, which
+    /// stands for the acknowledged scope notice.
+    by_setting: bool,
     choices: Vec<Choice>,
     problem: Option<Problem>,
     /// What the last released operation did, for acceptance records.
@@ -296,6 +299,9 @@ struct State {
     /// Counts from the last operation that reached release.
     last_run: Option<Evidence>,
     exiting: bool,
+    /// The last attempt came from the development launch setting, not the
+    /// panel. Cleared by the next step the panel asks for.
+    by_setting: bool,
 }
 
 struct Inner {
@@ -326,6 +332,7 @@ impl Host {
                 problem: None,
                 operation: None,
                 source_session: false,
+                by_setting: false,
             }),
             state: Mutex::new(State {
                 revision: 0,
@@ -340,6 +347,7 @@ impl Host {
                 problem: None,
                 last_run: None,
                 exiting: false,
+                by_setting: false,
             }),
         }))
     }
@@ -353,6 +361,16 @@ impl Host {
     /// One command surface for the main window. Never waits for the worker,
     /// the OS or the runtime.
     pub(crate) fn apply(&self, action: Action) -> Result<(), Error> {
+        if matches!(
+            action,
+            Action::List { .. }
+                | Action::Review { .. }
+                | Action::Start { .. }
+                | Action::StartSession { .. }
+        ) {
+            // The panel is choosing now, not the launch setting.
+            self.lock().by_setting = false;
+        }
         match action {
             Action::Snapshot => Ok(()),
             Action::List { acknowledged } => self.list(acknowledged),
@@ -547,6 +565,7 @@ impl Host {
             operation: Some(id.clone()),
             // Not until the worker has begun the session.
             source_session: false,
+            by_setting: state.by_setting,
         });
         worker
             .send(Command::Run {
@@ -741,6 +760,7 @@ impl Host {
                 .collect(),
             problem,
             last_run: state.last_run.clone(),
+            by_setting: state.by_setting,
             scope_notice: SCOPE_NOTICE,
         }
     }
@@ -791,6 +811,7 @@ impl Host {
             problem: view.problem,
             operation: view.operation.clone(),
             source_session: view.source_session,
+            by_setting: view.by_setting,
         });
         if state.last.as_ref() != Some(&view) {
             state.revision += 1;
@@ -1113,6 +1134,16 @@ pub(crate) mod app {
                 .window("main")
                 .permission("allow-application-audio"),
         )?;
+        // The development launch setting, read once here and acted on once,
+        // on its own thread: it waits for listing and the start.
+        if let Some(settings) = DevSettings::read(|name| std::env::var(name).ok()) {
+            let host = host.clone();
+            let _ = std::thread::Builder::new()
+                .name("talkqte-dev-source".into())
+                .spawn(move || {
+                    host.start_by_setting(&settings, DevWaits::default());
+                });
+        }
         let app = app.clone();
         std::thread::spawn(move || loop {
             std::thread::sleep(REFRESH);
@@ -1142,6 +1173,9 @@ pub(crate) mod app {
 }
 
 pub(crate) use app::{exit, install, source_status};
+
+mod dev_start;
+pub(crate) use dev_start::{Settings as DevSettings, Waits as DevWaits};
 
 #[cfg(test)]
 mod tests;

@@ -56,27 +56,35 @@ build with no grant was refused at once, with no prompt, and the setting
 below reported `permission_denied`. System Settings can then list several
 TalkQTE entries. Turn on only the one for the build you are running.
 
-### Proposed: a stable development signature
+### A stable development signature
 
-_Not set up yet._ A self-signed code-signing certificate makes every
-development build the same app to macOS, so one grant survives rebuilds. The
-certificate lives only in the developer's login keychain, never in the
-repository, and it signs nothing for distribution.
+A self-signed code-signing certificate, `TalkQTE Development`, makes every
+development build the same app to macOS, so one grant survives rebuilds. It
+lives only in the developer's login keychain, never in the repository, and
+signs nothing for distribution. **Sign TalkQTE with this identity only**,
+never with another code-signing identity the keychain may hold, such as an
+employer's Developer ID.
 
-1. Keychain Access → Certificate Assistant → Create a Certificate. Name it
-   `TalkQTE Development`, identity type Self Signed Root, certificate type
-   Code Signing.
-2. Build with it:
+1. Once: Keychain Access → Certificate Assistant → Create a Certificate. Name
+   it `TalkQTE Development`, identity type Self Signed Root, certificate type
+   Code Signing. macOS reports it as not trusted, but `codesign` accepts it.
+2. After each build, sign the bundle with it under the app's identifier:
 
    ```sh
-   APPLE_SIGNING_IDENTITY="TalkQTE Development" \
-     TALKQTE_COMMIT="$(git rev-parse HEAD)" \
-     npm run tauri -- build --debug --bundles app \
-     --features local-whisper,native-audio-spike,timing-log
+   codesign --force --deep -s "TalkQTE Development" -i com.talkqte.desktop \
+     src-tauri/target/debug/bundle/macos/TalkQTE.app
+   codesign -dr - src-tauri/target/debug/bundle/macos/TalkQTE.app
    ```
 
-3. Grant Screen & System Audio Recording once, then confirm that a rebuild is
-   not asked again (_to confirm_).
+   The second line should print `identifier "com.talkqte.desktop" and
+certificate leaf = H"…"`. Whether `APPLE_SIGNING_IDENTITY` does this
+   during the build has not been tried.
+
+3. Grant Screen & System Audio Recording once. Remove any older TalkQTE
+   entries first: an entry for another signature makes macOS deny the new
+   build without asking.
+
+On 14 November 2026 a rebuild signed this way kept the grant.
 
 ## Speech model
 
@@ -180,6 +188,47 @@ one:
 The timing log's `source_problem` line has the reason and ScreenCaptureKit's
 error code, and its `source_ended` line says how many chunks were transcribed.
 
+## Start and stop without clicks
+
+For a run nobody is at the Mac for, two development launch settings take the
+same steps. Only a `native-audio-spike` build reads them, once, at launch.
+Use them for fictional runs only.
+
+```sh
+open -a ./src-tauri/target/debug/bundle/macos/TalkQTE.app \
+  --stderr "$HOME/talkqte-lab-runs/run-01.stderr" \
+  --env TALKQTE_TIMING_LOG="$HOME/talkqte-lab-runs/run-01.jsonl" \
+  --env TALKQTE_DEV_APPLICATION_SOURCE="QuickTime Player" \
+  --env TALKQTE_DEV_STOP_AFTER_S=600
+```
+
+- **`TALKQTE_DEV_APPLICATION_SOURCE`** names the application exactly, as the
+  panel lists it. Setting it is your acknowledgement of the scope notice:
+  audio from all windows of that application may be included. The app then
+  lists applications once, reviews the one with exactly that name, and starts
+  a session from it alone. It never starts the microphone. The panel says
+  that the setting acknowledged the notice, and the capture line ends
+  "Started by the TALKQTE_DEV_APPLICATION_SOURCE launch setting."
+- **`TALKQTE_DEV_STOP_AFTER_S`**, a whole number of seconds from 1, asks the
+  ordinary Stop that long after capture is confirmed. Release then follows
+  as in [Stop cleanly](#stop-cleanly). Any other value starts nothing.
+- **One attempt, no retry.** Nothing is started, and the reason is shown under
+  the panel's Start, when:
+  - no running application, or more than one, has that exact name;
+  - macOS refuses or never answers within 2 minutes;
+  - the microphone or another session is running;
+  - the speech model is missing.
+
+  macOS is asked at most once per launch. The **one-time Screen Recording
+  grant still needs a person**: grant it once, as in
+  [Start capture](#start-capture), and relaunch.
+
+- Each step is one stderr line starting `TalkQTE development source:`, and a
+  `dev_source` line in the timing log.
+
+Press play in QuickTime Player only once `dev_source` reads `started`. For an
+unattended run, start the video with the lab's own tooling.
+
 ## During the run
 
 - The notebook and the companion credit "Audio from QuickTime Player" and say
@@ -243,6 +292,7 @@ session clock.
 | `cue_cleared`    | `session`, `cue`, `elapsed_ms`                                                         | That cue has left the snapshot sent to the companion window.                                                                                            |
 | `source_problem` | `problem`, `os_code`                                                                   | An application source failed to start or stopped on its own. `os_code` is ScreenCaptureKit's error code, when it gave one.                              |
 | `source_ended`   | `application`, `problem`, `recognized_chunks`                                          | An application source's run ended, with its reason if it failed and how many chunks of its audio were transcribed.                                      |
+| `dev_source`     | `step`, `application`, `reason`                                                        | The launch setting acted: `acknowledged`, `started`, `refused` with a `reason`, or `stopping` when the stop setting asked the ordinary Stop.            |
 | `dropped`        | `count`                                                                                | Lines were lost since the last line written, because the queue was full or a write failed. Written before the next line.                                |
 
 What it can and cannot tell you:

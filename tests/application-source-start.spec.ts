@@ -187,3 +187,41 @@ test('the list says what to do when an app is missing, and a start macOS refused
     'macOS has not given this copy of TalkQTE Screen & System Audio Recording yet. If you just granted it, quit and reopen TalkQTE, then start again.',
   );
 });
+
+test('a start by the launch setting says so, and a refusal says why in plain words', async ({
+  page,
+}) => {
+  const section = await panel(page);
+  await page.evaluate(() =>
+    window.processingTest.host({
+      bySetting: true,
+      problem: 'noMatchingApplication',
+    }),
+  );
+  await send(page, {
+    microphone: 'off',
+    capture: 'off',
+    source: { ...source('off'), problem: 'noMatchingApplication' },
+  });
+  await expect(
+    section.getByText(
+      'The TALKQTE_DEV_APPLICATION_SOURCE launch setting acknowledged this notice',
+      { exact: false },
+    ),
+  ).toBeVisible();
+  await expect(section.getByRole('alert')).toHaveText(
+    'No single running application has the exact name TALKQTE_DEV_APPLICATION_SOURCE gives. Nothing was started.',
+  );
+  // Nothing was listed or started from the panel by showing this.
+  expect(await hostCalls(page)).toEqual([]);
+
+  await send(page, {
+    capture: 'running',
+    source: { ...source('listening'), bySetting: true },
+  });
+  await expect(
+    section.getByText(
+      'Application audio from Fictional player is being captured, including all of its windows. Started by the TALKQTE_DEV_APPLICATION_SOURCE launch setting.',
+    ),
+  ).toBeVisible();
+});

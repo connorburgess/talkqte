@@ -223,6 +223,12 @@ pub enum SourceProblem {
     StoppedByMacOS,
     /// The application's audio arrived in a form TalkQTE could not read.
     AudioUnreadable,
+    /// Development builds only: no single running application has the exact
+    /// name the launch setting gave. Nothing was started.
+    NoMatchingApplication,
+    /// Development builds only: a launch setting could not be read, so the
+    /// setting started nothing.
+    DevSettingInvalid,
 }
 
 /// What the notebook needs to describe the source truthfully. Metadata only:
@@ -242,6 +248,9 @@ pub struct SourceCapture {
     pub operation: Option<String>,
     /// The live session was started for this source alone; no microphone.
     pub source_session: bool,
+    /// Development builds only: the last attempt came from the launch
+    /// setting, which stands for the acknowledged scope notice.
+    pub by_setting: bool,
 }
 
 struct ScopeKey {
@@ -661,6 +670,7 @@ mod tests {
             problem: Some(SourceProblem::StopFailed),
             operation: Some("fictional-operation".into()),
             source_session: false,
+            by_setting: false,
         };
         let (with, changed) = t.update_with_source(
             &e,

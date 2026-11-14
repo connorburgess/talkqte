@@ -93,6 +93,12 @@ export function ApplicationAudioStart() {
         microphone. {status.scopeNotice} Listing applications can show the macOS
         Screen &amp; System Audio Recording prompt.
       </p>
+      {status.bySetting && (
+        <p className="processing-muted">
+          The TALKQTE_DEV_APPLICATION_SOURCE launch setting acknowledged this
+          notice and asked for one start; it does not retry.
+        </p>
+      )}
       {status.phase === 'listing' ? (
         <div className="processing-actions">
           <button
