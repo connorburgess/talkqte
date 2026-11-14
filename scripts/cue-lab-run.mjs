@@ -61,14 +61,7 @@ export function createLabRun({
   const stopped = new Promise((_, reject) => (rejectStopped = reject));
   stopped.catch(() => {});
   const stop = (reason = 'cancelled') => {
-    if (!terminal) {
-      terminal = reason === 'cleanup' ? 'cleanup' : 'cancelled';
-      phase = 'stopping';
-      // This does not depend on native authentication or signal delivery.
-      root.abort();
-      broker?.gate.stop(terminal);
-      rejectStopped(gateFailure(terminal));
-    }
+    if (!terminal) terminal = reason === 'cleanup' ? 'cleanup' : 'cancelled';
     return close();
   };
   const fail = (reason) => {
@@ -127,16 +120,22 @@ export function createLabRun({
   );
   ready.catch(() => fail('cancelled'));
 
-  async function close() {
+  function close() {
     if (closing) return closing;
-    if (!terminal) {
-      terminal = 'cancelled';
-      phase = 'stopping';
-      root.abort();
-      broker?.gate.stop('cancelled');
-      rejectStopped(gateFailure('cancelled'));
-    }
-    closing = (async () => {
+    let resolveClosing, rejectClosing;
+    // Reserve ownership before abort/native/teardown callbacks can re-enter.
+    closing = new Promise((resolve, reject) => {
+      resolveClosing = resolve;
+      rejectClosing = reject;
+    });
+    closing.catch(() => {});
+    terminal ??= 'cancelled';
+    phase = 'stopping';
+    // This does not depend on native authentication or signal delivery.
+    root.abort();
+    broker?.gate.stop(terminal);
+    rejectStopped(gateFailure(terminal));
+    (async () => {
       // Creation/start callbacks must settle on abort. Never detach a late
       // provider/broker creation and accidentally leak it after cleanup.
       let released = !nativeStarted;
@@ -187,8 +186,7 @@ export function createLabRun({
         throw gateFailure('cleanup');
       }
       phase = 'closed';
-    })();
-    closing.catch(() => {});
+    })().then(resolveClosing, rejectClosing);
     return closing;
   }
   initialized = true;

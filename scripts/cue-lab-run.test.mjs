@@ -43,6 +43,7 @@ function fixture({
   startupMs = 500,
   closeFailure = false,
   releaseValue = { released: true },
+  synchronousNotifications = false,
 } = {}) {
   const processEvents = new EventEmitter();
   const nativeEvents = new EventEmitter();
@@ -51,6 +52,7 @@ function fixture({
   let opened = 0,
     closed = 0,
     stops = 0,
+    unsubscribes = 0,
     starts = 0,
     socket,
     descriptorPath;
@@ -86,7 +88,12 @@ function fixture({
   const native = {
     subscribe(handler) {
       nativeEvents.on('event', handler);
-      return () => nativeEvents.off('event', handler);
+      return () => {
+        unsubscribes++;
+        if (synchronousNotifications)
+          nativeEvents.emit('event', { type: 'session-ended' });
+        nativeEvents.off('event', handler);
+      };
     },
     async start({ descriptorPath: path, runId, metadata }) {
       starts++;
@@ -144,6 +151,8 @@ function fixture({
     },
     async stop() {
       stops++;
+      if (synchronousNotifications)
+        nativeEvents.emit('event', { type: 'session-ended' });
       if (release) await release;
       socket?.destroy();
       return releaseValue;
@@ -175,6 +184,9 @@ function fixture({
     },
     get stops() {
       return stops;
+    },
+    get unsubscribes() {
+      return unsubscribes;
     },
     get descriptorPath() {
       return descriptorPath;
@@ -411,4 +423,78 @@ test('provider cleanup failure remains terminal even after native release', asyn
   assert.equal(f.run.phase, 'failed-cleanup');
   assert.equal(f.closed, 1);
   assert.equal(f.stops, 1);
+});
+
+test('synchronous native stop and unsubscribe notifications cannot re-enter cleanup ownership', async () => {
+  const f = fixture({ authenticate: false, synchronousNotifications: true });
+  await f.started();
+  const closing = f.run.stop();
+  assert.equal(f.run.close(), closing);
+  assert.equal(f.run.stop(), closing);
+  await bounded(closing);
+  await assert.rejects(f.run.ready);
+  assert.equal(f.stops, 1);
+  assert.equal(f.unsubscribes, 1);
+  assert.equal(f.closed, 1);
+  assert.equal(f.run.phase, 'closed');
+});
+
+test('owned-child signal delivery failure synchronously notifies once without duplicating cleanup', async () => {
+  const executable = '/fictional/TalkQTE.app/Contents/MacOS/talkqte';
+  const launched = deferred();
+  const child = new EventEmitter();
+  Object.assign(child, {
+    pid: 4242,
+    spawnfile: executable,
+    exitCode: null,
+    signalCode: null,
+  });
+  let signals = 0,
+    stops = 0,
+    unsubscribes = 0,
+    timing,
+    runId;
+  child.kill = () => {
+    signals++;
+    return false;
+  };
+  const owner = createLabNativeOwner({
+    executable,
+    stopAfterS: 120,
+    armingMs: 200,
+    releaseMs: 200,
+    launch(options) {
+      timing = options.onTiming;
+      runId = options.environment.TALKQTE_DEV_LAB_RUN_ID;
+      launched.resolve();
+      return child;
+    },
+  });
+  const native = {
+    start: owner.start,
+    stop() {
+      stops++;
+      return owner.stop();
+    },
+    subscribe(handler) {
+      const off = owner.subscribe(handler);
+      return () => {
+        unsubscribes++;
+        off();
+      };
+    },
+  };
+  const f = fixture({ nativeOverride: native });
+  await launched.promise;
+  timing({ event: 'dev_stop', run_id: runId, step: 'armed' });
+  const closing = f.run.stop();
+  assert.equal(f.run.close(), closing);
+  await assert.rejects(bounded(closing), { category: 'cleanup' });
+  await assert.rejects(f.run.ready);
+  assert.equal(signals, 1);
+  assert.equal(stops, 1);
+  assert.equal(unsubscribes, 1);
+  assert.equal(f.closed, 1);
+  assert.equal(f.run.phase, 'failed-cleanup');
+  assert.equal(f.run.dispatchesUsed, 0);
 });
