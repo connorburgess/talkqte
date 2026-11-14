@@ -102,11 +102,31 @@
   animation-duration: 360ms;
   animation-delay: calc(300ms + var(--i) * 22ms);
 }
+/* Spoken words wait, still readable, and darken at about the pace they
+   were said. */
+@keyframes cue-spoken {
+  from {
+    opacity: var(--cue-unsaid);
+  }
+  to {
+    opacity: 1;
+  }
+}
+.cue-card .cue-word.cue-spoken {
+  --cue-unsaid: 0.5;
+  animation: cue-spoken 260ms ease-out both;
+  animation-delay: var(--at);
+}
+/* Small text keeps more of its strength while it waits. */
+.cue-card .cue-quote .cue-word.cue-spoken {
+  --cue-unsaid: 0.68;
+}
 .question.cue-card.is-leaving {
   animation: cue-leave 190ms cubic-bezier(0.7, 0, 0.84, 0) both;
   pointer-events: none;
 }
-.cue-card.is-leaving * {
+.cue-card.is-leaving *,
+.cue-card.is-settled .cue-word {
   animation: none;
 }
 

@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
+import type {} from './fixtures/native-microphone';
 
 /** Starts the bundled demo and returns the first cue, 8.2 seconds in. */
 async function firstCue(page: Page, surface: 'notebook' | 'companion') {
@@ -95,13 +96,19 @@ for (const surface of ['notebook', 'companion'] as const) {
           quote: shade('blockquote .cue-word'),
         };
       }, at);
+    // Nothing is hidden at the start: the quoted line waits at a readable
+    // strength, the cue's own words lighter because they darken at once.
     const first = await shades(0);
-    for (const shade of [...first.cue, ...first.quote])
-      expect(shade).toBeGreaterThan(0.2);
+    for (const shade of first.cue) expect(shade).toBeGreaterThan(0.2);
+    for (const shade of first.quote) expect(shade).toBeGreaterThan(0.6);
+    // The cue's words darken in reading order within moments.
     const during = await shades(200);
     expect(during.cue[0]).toBeGreaterThan(during.cue.at(-1)!);
-    expect(during.cue.at(-1)!).toBeGreaterThanOrEqual(during.quote.at(-1)!);
-    expect(during.quote.at(-1)!).toBeLessThan(0.5);
+    expect((await shades(750)).cue.every((shade) => shade === 1)).toBe(true);
+    // The quoted line follows at about the pace it was said, word by word.
+    const spoken = await shades(1_800);
+    expect(spoken.quote[0]).toBe(1);
+    expect(spoken.quote.at(-1)!).toBeLessThan(1);
     const after = await shades('end');
     expect([...after.cue, ...after.quote].every((shade) => shade === 1)).toBe(
       true,
@@ -122,15 +129,15 @@ for (const surface of ['notebook', 'companion'] as const) {
         return {
           ends: Number(timing.endTime),
           repeats: timing.iterations,
-          cue: !!target?.closest('.cue-line'),
+          spoken: !!target?.classList.contains('cue-spoken'),
         };
       }),
     );
     expect(motion.length).toBeGreaterThan(0);
-    for (const { ends, repeats, cue } of motion) {
-      // The cue itself is fully dark within three quarters of a second;
-      // the quoted line and the time line within a second and a half.
-      expect(ends).toBeLessThanOrEqual(cue ? 750 : 1500);
+    for (const { ends, repeats, spoken } of motion) {
+      // The card, the cue and the time line settle within a second; only
+      // the replay of spoken words runs on, and never past six and a half.
+      expect(ends).toBeLessThanOrEqual(spoken ? 6_500 : 1_000);
       expect(repeats).toBe(1);
     }
     // The cue and its source are there from the first frame.
@@ -159,6 +166,110 @@ for (const surface of ['notebook', 'companion'] as const) {
     await expect(page.locator('.cue-card')).toHaveCount(0);
   });
 }
+
+/** When each word of a locator's text starts to darken, in milliseconds. */
+const wordStarts = (words: Locator) =>
+  words.evaluateAll((spans) =>
+    spans.map((span) =>
+      Number(span.getAnimations()[0].effect!.getComputedTiming().delay),
+    ),
+  );
+
+test('a quoted line is replayed at about the pace it was said', async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.clock.install();
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
+  await page.clock.runFor(51_200);
+  const heading = page
+    .getByRole('region', { name: 'Suggested question' })
+    .getByRole('heading');
+  // Fifteen words, said in a little over three seconds in the demo.
+  await expect(heading).toHaveText(
+    "“Let's have it ready by Friday and try it with a few new visitors first.”",
+  );
+  const said = await wordStarts(heading.locator('span'));
+  expect(said).toHaveLength(15);
+  expect(said).toEqual([...said].sort((a, b) => a - b));
+  expect(new Set(said).size).toBe(15);
+  // A longer word ("Friday") holds the line longer than a short one ("a").
+  expect(said[6] - said[5]).toBeGreaterThan(said[11] - said[10]);
+  expect(said.at(-1)!).toBeGreaterThan(2_500);
+  expect(said.at(-1)!).toBeLessThan(4_500);
+  // While they wait, the words are readable, not hidden.
+  expect(
+    await heading.evaluate((element) => {
+      for (const animation of element.getAnimations({ subtree: true })) {
+        animation.pause();
+        animation.currentTime = 0;
+      }
+      return [...element.querySelectorAll('span')].map((word) =>
+        Number(getComputedStyle(word).opacity),
+      );
+    }),
+  ).toEqual(Array(15).fill(0.5));
+});
+
+test('a very long quoted line still finishes within about six seconds, and a cue first seen held does not replay', async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.route('**/*', async (route) => {
+    if (route.request().resourceType() !== 'document') return route.continue();
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      body: (await response.text()).replace(
+        '/src/main.tsx',
+        '/tests/fixtures/native-microphone.ts',
+      ),
+    });
+  });
+  await page.setViewportSize({ width: 420, height: 340 });
+  await page.goto('/?window=cue');
+  await page.waitForFunction(() => !!window.liveTest);
+  await page.evaluate(() => window.liveTest.start());
+  const cue = {
+    id: 'fictional-long-line',
+    kind: 'Owner',
+    question: 'Who will take the first draft of the welcome guide?',
+    // About a minute of fictional speech in one line.
+    evidence: `${'We talked about the gate code, the tool shed, the accessible route past the herb beds and the rota for the open day. '.repeat(8)}Someone can take the first draft.`,
+    sourceId: 'transcript:fictional-long',
+    remainingMs: 18_000,
+    totalMs: 18_000,
+    held: false,
+    expanded: false,
+    resolvedBy: null,
+    note: null,
+    aboutFocus: false,
+  };
+  await page.evaluate((value) => window.liveTest.setCue(value), cue);
+  const question = page.getByRole('region', { name: 'Suggested question' });
+  const words = question.locator('blockquote span');
+  await expect(words.first()).toBeVisible();
+  const starts = await wordStarts(words);
+  expect(starts.length).toBeGreaterThan(150);
+  expect(starts).toEqual([...starts].sort((a, b) => a - b));
+  expect(starts.at(-1)!).toBeLessThanOrEqual(6_260);
+
+  // The same line shown already held, as after the companion is reopened.
+  await page.evaluate((value) => window.liveTest.setCue(value), {
+    ...cue,
+    id: 'fictional-long-line-held',
+    held: true,
+  });
+  await expect(
+    question.getByRole('button', { name: 'Held', exact: true }),
+  ).toBeVisible();
+  expect(
+    await words.evaluateAll((spans) =>
+      spans.every((span) => span.getAnimations().length === 0),
+    ),
+  ).toBe(true);
+});
 
 test('a dismissed cue leaves with a short fold and cannot be used while it goes', async ({
   page,

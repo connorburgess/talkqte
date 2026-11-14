@@ -19,6 +19,11 @@ import './cue-card.css';
 /** Words after these arrive together, so no line keeps the eye waiting. */
 const CUE_WORDS = 14;
 const QUOTE_WORDS = 36;
+/** An even speaking pace: about 160 words a minute. */
+const LETTER_MS = 60;
+/** A spoken line starts once the card has opened, and never runs long. */
+const SPOKEN_START_MS = 260;
+const SPOKEN_MAX_MS = 6_000;
 
 function hasPriorNotes(sources?: CueSource[]) {
   return sources?.some((source) => source.provenance.kind === 'priorNote');
@@ -97,32 +102,53 @@ function sourceLine(cue: Cue) {
 }
 
 /**
- * Text as separate words, so an arriving cue can darken them in reading
- * order. `from` continues the order across two runs of words; the delay
- * stops growing after `cap` words so a long line still finishes soon.
+ * Text as separate words, so an arriving cue can darken them one by one.
+ *
+ * Words read on the card (its purpose, a suggested question, a note) darken
+ * in reading order, quickly: `from` continues the order across two runs,
+ * and the delay stops growing after `cap` words.
+ *
+ * Words that were spoken darken at about the pace they were said. The
+ * engine gives a line one time and no word timings, and a live line reaches
+ * the card only after it has been transcribed, so this is a replay at an
+ * even pace per letter, not the speaker's own timing.
  */
 function Words({
   text,
   from = 0,
-  cap,
+  cap = 0,
+  spoken = false,
 }: {
   text: string;
   from?: number;
-  cap: number;
+  cap?: number;
+  spoken?: boolean;
 }) {
-  return text.split(/(\s+)/).map((part, index) =>
-    index % 2 ? (
-      part
-    ) : (
+  const parts = text.split(/(\s+)/);
+  const letters = parts.map((part, index) =>
+    index % 2 ? 0 : Math.max(1, part.replace(/[^\p{L}\p{N}]/gu, '').length),
+  );
+  const total = letters.reduce((sum, count) => sum + count, 0);
+  const duration = Math.min(total * LETTER_MS, SPOKEN_MAX_MS);
+  let before = 0;
+  return parts.map((part, index) => {
+    if (index % 2) return part;
+    const style = spoken
+      ? {
+          '--at': `${Math.round(SPOKEN_START_MS + (before / total) * duration)}ms`,
+        }
+      : { '--i': Math.min(from + index / 2, cap) };
+    before += letters[index];
+    return (
       <span
         key={index}
-        className="cue-word"
-        style={{ '--i': Math.min(from + index / 2, cap) } as CSSProperties}
+        className={spoken ? 'cue-word cue-spoken' : 'cue-word'}
+        style={style as CSSProperties}
       >
         {part}
       </span>
-    ),
-  );
+    );
+  });
 }
 
 /** The warning for a reminder whose copy the last update check left unconfirmed. */
@@ -205,6 +231,8 @@ export function Question({
 }) {
   const reduced = useReducedMotion();
   const card = useRef<HTMLElement>(null);
+  // A cue first seen already held was read earlier: its words do not replay.
+  const [settled] = useState(cue.held);
   // A leaving card takes no input, so it must not keep keyboard focus: the
   // window that dismissed it decides where focus goes next.
   useLayoutEffect(() => {
@@ -230,7 +258,9 @@ export function Question({
       ref={card}
       className={`question question-${size} cue-card${
         cue.kind === 'Asked you' ? ' cue-asked' : ''
-      }${cue.held ? ' is-held' : ''}${leaving ? ' is-leaving' : ''}`}
+      }${cue.held ? ' is-held' : ''}${settled ? ' is-settled' : ''}${
+        leaving ? ' is-leaving' : ''
+      }`}
       aria-label={leaving ? undefined : 'Suggested question'}
       aria-hidden={leaving || undefined}
       inert={leaving || undefined}
@@ -248,6 +278,7 @@ export function Question({
             text={cue.question}
             from={purpose.split(/\s+/).length}
             cap={CUE_WORDS}
+            spoken={said}
           />
           {said && '”'}
         </h2>
@@ -293,7 +324,7 @@ export function Question({
             />
           ) : (
             <blockquote className="cue-quote">
-              “<Words text={cue.resolvedBy.evidence} cap={QUOTE_WORDS} />”
+              “<Words text={cue.resolvedBy.evidence} spoken />”
             </blockquote>
           )}
         </div>
@@ -338,7 +369,8 @@ export function Question({
               <>
                 {' '}
                 <blockquote className="cue-quote">
-                  “<Words text={quote} cap={QUOTE_WORDS} />”
+                  “
+                  <Words text={quote} cap={QUOTE_WORDS} spoken={!said} />”
                 </blockquote>
               </>
             )}
