@@ -232,7 +232,10 @@ names recursively. This is an accidental-field guard, not a secret detector:
 the evidence producer must never supply credentials, nonce, authentication data,
 environment dumps, secrets or hidden reasoning, including inside strings. Raw
 provider output is not retained by this report. Safe metadata is limited to dropped
-counts, accepted flags and native-reported latency.
+counts, accepted flags, native-reported latency and `decider: "phrase_rule" | "model"`.
+The native cue-decision decider is preserved in the timeline and cue table. Absent
+or ambiguous decider evidence remains unknown; evaluation presence or absence does
+not establish cue provenance. Deterministic phrase cues must be labelled as such.
 
 These files remain private, external and fictional. Do not commit recordings,
 transcripts, actual private paths or generated reports. Existing app and normal

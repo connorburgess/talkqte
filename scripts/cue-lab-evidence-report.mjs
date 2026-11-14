@@ -240,6 +240,11 @@ function validateEvent(e, m) {
     )
       fail('paint requires independently observed recording frame');
   }
+  if (
+    e.payload?.decider !== undefined &&
+    !['phrase_rule', 'model'].includes(e.payload.decider)
+  )
+    fail('invalid cue decider');
   if (e.stage.startsWith('video.') && !e.timing)
     fail('paint requires frame timing');
   if (
@@ -291,6 +296,7 @@ export function importNativeRows(rows, { runId, artifactId, clockId }) {
         break;
       case 'cue_decision':
         stage = 'cue.decided';
+        if (r.decider !== undefined) payload = { decider: r.decider };
         if (r.source_id !== undefined) identity.segmentId = String(r.source_id);
         break;
       case 'cue_published':
@@ -394,6 +400,8 @@ function safePayload(payload, includeContent) {
   if (!object(payload)) return undefined;
   const result = {};
   if (Number.isSafeInteger(payload.dropped)) result.dropped = payload.dropped;
+  if (['phrase_rule', 'model'].includes(payload.decider))
+    result.decider = payload.decider;
   if (typeof payload.accepted === 'boolean') result.accepted = payload.accepted;
   if (number(payload.nativeReportedLatencyMs))
     result.nativeReportedLatencyMs = payload.nativeReportedLatencyMs;
@@ -566,8 +574,12 @@ export function buildEvidenceReport(
             'speech.render-end',
           )
         : null;
+    const decision = pick(group, 'cue.decided');
     return {
       id,
+      decider: successful(decision)
+        ? (decision.payload?.decider ?? 'unknown')
+        : 'unknown',
       requestId: requestIds.length === 1 ? requestIds[0] : null,
       publication: successful(published) ? 'observed' : 'unobserved',
       paint: successful(painted) ? 'observed' : 'unobserved',
@@ -776,11 +788,11 @@ export function renderEvidenceMarkdown(r, { recordingHref } = {}) {
         `| ${escape(e.id)}${e.ambiguous ? ' (ambiguous context)' : ''} | ${e.outcome} | ${metric(e.gateWait)} | ${metric(e.modelDuration)} | ${metric(e.returnedAfterDispatch)} |`,
     ),
     '',
-    '| Cue | Publication / paint | Validated → published | Visible duration | Heard end → paint |',
+    '| Cue / declared decider | Publication / paint | Validated → published | Visible duration | Heard end → paint |',
     '| --- | --- | --- | --- | --- |',
     ...r.cues.map(
       (c) =>
-        `| ${escape(c.id)} | ${c.publication} / ${c.paint} | ${metric(c.publicationDelay)} | ${metric(c.visibleDuration)} | ${metric(c.endToEnd)} |`,
+        `| ${escape(c.id)} / ${c.decider} | ${c.publication} / ${c.paint} | ${metric(c.publicationDelay)} | ${metric(c.visibleDuration)} | ${metric(c.endToEnd)} |`,
     ),
     '',
     '| Transcript event | Heard end → arrival |',

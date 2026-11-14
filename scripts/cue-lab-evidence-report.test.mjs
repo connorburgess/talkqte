@@ -553,3 +553,64 @@ test('partial native import reports unmapped rows instead of silently presenting
   assert.ok(renderEvidenceMarkdown(report).includes('| native | 3 | 1 | 2 |'));
   assert.equal(report.gaps.length, 0); // Unmapped is distinct from known dropped evidence.
 });
+
+for (const decider of ['phrase_rule', 'model']) {
+  test(`native ${decider} cue provenance survives metadata-only import and report without evaluator inference`, () => {
+    const m = manifest();
+    m.artifacts = [
+      {
+        id: 'native',
+        kind: 'native-timing',
+        clockId: 'audio',
+        path: 'native.jsonl',
+        bytes: 0,
+        sha256: 'a'.repeat(64),
+      },
+    ];
+    const rows = [
+      {
+        event: 'cue_decision',
+        session: sid,
+        cue: 'c1',
+        decider,
+        source: decider === 'model' ? 'evaluated' : 'phrase',
+        kind: 'question',
+        mono_ms: 2000,
+      },
+      { event: 'cue_published', session: sid, cue: 'c1', mono_ms: 2010 },
+    ];
+    const events = importNativeRows(rows, {
+      runId: m.runId,
+      artifactId: 'native',
+      clockId: 'audio',
+    });
+    const r = buildEvidenceReport(m, events);
+    assert.equal(
+      r.timeline.find((e) => e.stage === 'cue.decided').payload.decider,
+      decider,
+    );
+    assert.equal(r.cues[0].decider, decider);
+    assert.equal(r.cues[0].paint, 'unobserved');
+    assert.ok(renderEvidenceMarkdown(r).includes(`/ ${decider} |`));
+  });
+}
+test('cue decider remains unknown without explicit unambiguous provenance, regardless of evaluator evidence', () => {
+  const events = take();
+  assert.equal(
+    buildEvidenceReport(manifest(), events).cues[0].decider,
+    'unknown',
+  );
+  events[10].payload = { decider: 'model' };
+  events.push(
+    event(
+      'cue.decided',
+      2820,
+      { cueId: 'c1' },
+      { payload: { decider: 'phrase_rule' } },
+    ),
+  );
+  assert.equal(
+    buildEvidenceReport(manifest(), events).cues[0].decider,
+    'unknown',
+  );
+});
