@@ -204,36 +204,6 @@ svg {
   max-width: 1280px;
   margin: 0 auto;
 }
-.meeting-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 24px;
-  justify-content: space-between;
-  margin-bottom: 24px;
-}
-.meeting-header h1 {
-  margin-bottom: 8px;
-  font-size: 28px;
-}
-.meeting-header p {
-  color: var(--muted);
-  font-size: 16px;
-  max-width: 48ch;
-}
-.participants {
-  margin-top: 12px;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  font-size: 14px;
-  color: var(--muted);
-}
-.meta-divider {
-  height: 12px;
-  width: 1px;
-  background: #d1d6c9;
-  margin: 0 3px;
-}
 .primary-button,
 .secondary-button {
   display: inline-flex;
@@ -284,9 +254,10 @@ svg {
   flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
-  gap: 14px;
-  padding: 14px 0;
-  border-block: 1px solid var(--line);
+  gap: 14px 24px;
+  padding: 0 0 20px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--line);
 }
 .microphone-panel {
   margin: 20px clamp(16px, 3vw, 44px) 0;
@@ -350,8 +321,10 @@ svg {
 }
 .session-state {
   display: flex;
-  align-items: center;
-  gap: 11px;
+  align-items: baseline;
+  gap: 12px;
+  flex: 1 1 320px;
+  min-width: 0;
 }
 .status-dot {
   width: 9px;
@@ -366,16 +339,18 @@ svg {
 .status-dot.paused {
   background: #986329;
 }
-.session-state strong {
-  font-size: 16px;
-  font-weight: 700;
-  display: block;
+.session-state .status-dot {
+  transform: translateY(-3px);
 }
-.session-state div > span {
-  display: block;
-  font-size: 14px;
-  color: #626e55;
-  margin-top: 2px;
+.session-state h1 {
+  font-size: 24px;
+  margin: 0;
+}
+.session-state p {
+  font-size: 15px;
+  color: var(--muted);
+  margin-top: 6px;
+  max-width: 62ch;
 }
 .session-actions {
   display: flex;
@@ -388,14 +363,6 @@ svg {
   font-size: 14px;
   margin-right: 5px;
   white-space: nowrap;
-}
-.session-clock > span {
-  color: #69745c;
-}
-.end-button {
-  border: 1px solid #cfd2c7;
-  height: 48px;
-  width: 48px;
 }
 .meeting-focus {
   margin-top: 28px;
@@ -1340,26 +1307,12 @@ svg {
   .notebook-body {
     padding: 25px 20px;
   }
-  .meeting-header {
-    gap: 10px;
-    margin-bottom: 25px;
-  }
-  .meeting-header h1 {
-    font-size: 28px;
-  }
-  .meeting-header p {
-    font-size: 15px;
-  }
-  .participants {
-    flex-wrap: wrap;
-    font-size: 13px;
-  }
   .export-button {
     padding: 7px;
     font-size: 14px;
   }
-  .session-strip {
-    padding: 12px 0;
+  .session-state h1 {
+    font-size: 22px;
   }
   .focus-disclosure > summary span {
     display: block;
@@ -1464,11 +1417,4 @@ svg {
   width: 19px;
   height: 19px;
   flex-shrink: 0;
-}
-
-.demo-practice-hint {
-  color: var(--muted);
-  font-size: 13px;
-  margin: 10px 0 22px;
-  max-width: 75ch;
 }

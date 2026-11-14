@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import type {} from './fixtures/native-microphone';
+import { liveCue, standIn } from './fixtures/stand-in';
 
 // Keyboard operation and focus placement at the 480 px width, for flows that
 // were otherwise exercised with a pointer or only at other widths. A browser
@@ -79,7 +79,7 @@ test('arrow keys move both ways between notebook tabs, which stay a single tab s
   await expect(transcript).toHaveAttribute('aria-selected', 'true');
   await expect(
     page.getByRole('tabpanel', { name: /Transcript/ }),
-  ).toContainText('A conversation starts here.');
+  ).toContainText('No transcript yet.');
   await page.keyboard.press('ArrowLeft');
   await expect(notes).toBeFocused();
   await expect(notes).toHaveAttribute('aria-selected', 'true');
@@ -146,14 +146,8 @@ test('the companion shows a question and its source without animation under redu
 }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 420, height: 420 });
-  await page.clock.install();
-  await page.goto('/?window=cue');
-  await page.evaluate(async () => {
-    const previewPath = '/src/lib/preview.ts';
-    const preview = await import(previewPath);
-    preview.command('start_demo');
-  });
-  await page.clock.runFor(5_200);
+  await standIn(page, '/?window=cue');
+  await liveCue(page);
   const question = page.getByRole('region', { name: 'Suggested question' });
   await expect(question.getByRole('heading')).toBeVisible();
   expect(

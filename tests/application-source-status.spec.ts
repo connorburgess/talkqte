@@ -268,7 +268,7 @@ test('the microphone panel claims no system audio only when no source may be cap
 }) => {
   const { microphone } = await notebook(page);
   const plain =
-    'Activity check only. No recording, transcription, or system audio. Demo questions are scripted.';
+    'Activity check only. No recording, transcription, or system audio.';
   await expect(microphone).toContainText(plain);
   for (const state of stuck) {
     await page.evaluate((value) => window.captureTest.send(value), {

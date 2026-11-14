@@ -10,7 +10,7 @@ test('the notebook starts with the editor visible and optional setup folded away
   });
   await expect(notes).toBeInViewport();
   await expect(
-    page.getByRole('button', { name: 'Try demo', exact: true }),
+    page.getByRole('heading', { name: 'No session yet', level: 1 }),
   ).toBeInViewport();
   await expect(page.getByRole('button', { name: 'Add your name' })).toHaveCount(
     0,

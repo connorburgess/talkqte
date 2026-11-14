@@ -1,14 +1,21 @@
 import { expect, test, type Page } from '@playwright/test';
+import {
+  cue,
+  firstCue,
+  firstLine,
+  standIn,
+  startLive,
+} from './fixtures/stand-in';
 
-// The browser adapter supplies the same session transitions as Rust IPC. These
-// tests exercise companion controls; native placement is checked separately.
-async function sessionAction(page: Page, name: 'start_demo' | 'end_demo') {
-  await page.evaluate(async (command) => {
-    const previewPath = '/src/lib/preview.ts';
-    const preview = await import(previewPath);
-    preview.command(command);
-  }, name);
-}
+// The fictional native stand-in supplies a live session's snapshots without a
+// device or transcription. These tests exercise companion controls; native
+// placement is checked separately.
+
+const say = (page: Page, text = firstLine, question = firstCue) =>
+  page.evaluate(
+    ([line, asked]) => window.liveTest.say(line, asked),
+    [text, question],
+  );
 
 async function expectCompanionToFit(page: Page) {
   const bounds = await page.evaluate(() => ({
@@ -27,23 +34,25 @@ async function expectCompanionToFit(page: Page) {
 
 test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 420, height: 420 });
-  await page.clock.install();
-  await page.goto('/?window=cue');
+  await standIn(page, '/?window=cue');
   await expect(
-    page.getByText('Start the demo or microphone from your notebook.'),
+    page.getByText(
+      'Start a live session or the microphone check in your notebook.',
+    ),
   ).toBeVisible();
-  await sessionAction(page, 'start_demo');
+  await expect(page.getByRole('button')).toHaveCount(0);
+  await startLive(page);
 });
 
-test('companion stays compact between questions and preserves a paused question', async ({
+test('companion stays compact between cues and returns to its bar after Dismiss', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 76 });
-  await expect(page.getByRole('status')).toHaveText('Demo running · Scripted');
-  await expect(page.getByRole('button', { name: 'Pause demo' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Pause demo' })).toHaveText(
-    'Pause',
-  );
+  await expect(page.getByRole('status')).toHaveText('Mic on · Local');
+  await expect(page.getByRole('button', { name: 'Pause cues' })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Stop live session' }),
+  ).toHaveText('Stop');
   await expect(page.getByRole('button', { name: 'Hide companion' })).toHaveText(
     'Hide',
   );
@@ -53,31 +62,16 @@ test('companion stays compact between questions and preserves a paused question'
     expect(bounds!.height).toBeGreaterThanOrEqual(44);
   }
   await expectCompanionToFit(page);
-  await page.clock.runFor(8_200);
+  await say(page);
   await page.setViewportSize({ width: 420, height: 420 });
-  await expect(
-    page.getByRole('heading', { name: 'Who will take the first draft?' }),
-  ).toBeVisible();
-  await page.getByRole('button', { name: 'Pause demo' }).click();
-  await page.clock.runFor(30_000);
-  await expect(page.getByRole('status')).toHaveText('Demo paused · Scripted');
-  await expect(page.getByRole('button', { name: 'Resume demo' })).toHaveText(
-    'Resume',
-  );
+  await expect(page.getByRole('heading', { name: firstCue })).toBeVisible();
   await expectCompanionToFit(page);
-  await expect(
-    page.getByRole('region', { name: 'Suggested question' }),
-  ).toBeVisible();
-  await page.getByRole('button', { name: 'Resume demo' }).click();
-  await page.setViewportSize({ width: 420, height: 420 });
-  await expect(
-    page.getByRole('heading', { name: 'Who will take the first draft?' }),
-  ).toBeVisible();
   await page.getByRole('button', { name: 'Dismiss' }).click();
   await expect(
     page.getByRole('region', { name: 'Suggested question' }),
   ).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Pause demo' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Pause cues' })).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('Mic on · Local');
 });
 
 test('a question fits the narrow window used on a small display', async ({
@@ -87,11 +81,9 @@ test('a question fits the narrow window used on a small display', async ({
   // Measured without the entrance animation, which scales the card briefly.
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 360, height: 340 });
-  await page.clock.runFor(8_200);
+  await say(page);
   const question = page.getByRole('region', { name: 'Suggested question' });
-  await expect(question.getByRole('heading')).toHaveText(
-    'Who will take the first draft?',
-  );
+  await expect(question.getByRole('heading')).toHaveText(firstCue);
   const fitsSideways = () =>
     page.evaluate(() => {
       const main = document.querySelector('main')!;
@@ -113,11 +105,7 @@ test('a question fits the narrow window used on a small display', async ({
   await expectCompanionToFit(page);
   expect(await fitsSideways()).toBe(true);
   // Large text in the same narrow window: 420 px tall.
-  await page.evaluate(async () => {
-    const previewPath = '/src/lib/preview.ts';
-    const preview = await import(previewPath);
-    preview.command('set_question_size', { value: 'large' });
-  });
+  await page.evaluate(() => window.liveTest.setQuestionSize('large'));
   await page.setViewportSize({ width: 360, height: 420 });
   await expectCompanionToFit(page);
   expect(await fitsSideways()).toBe(true);
@@ -151,19 +139,21 @@ test('the companion bar is the native drag handle and its controls are not', asy
   }
 });
 
-test('hiding a companion suppresses later questions and ending clears its controls', async ({
+test('hiding the companion suppresses later cues and its controls', async ({
   page,
 }) => {
   await page.getByRole('button', { name: 'Hide companion' }).click();
-  await page.clock.runFor(6_000);
   await expect(
     page.getByText('Companion hidden. Show it again in Settings.'),
   ).toBeVisible();
+  await say(page);
   await expect(
     page.getByRole('region', { name: 'Suggested question' }),
   ).toHaveCount(0);
   await expect(page.getByRole('button')).toHaveCount(0);
-  await sessionAction(page, 'end_demo');
+  await page.evaluate(() =>
+    window.liveTest.publish({ status: 'ended', cue: null }),
+  );
   await expect(page.getByRole('button')).toHaveCount(0);
 });
 
@@ -171,7 +161,7 @@ test('question controls remain usable with reduced motion and longer wrapping', 
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.clock.runFor(8_200);
+  await say(page);
   await expect(
     page.getByRole('button', { name: 'Dismiss', exact: true }),
   ).toBeVisible();
@@ -192,53 +182,68 @@ test('question controls remain usable with reduced motion and longer wrapping', 
   ).toHaveCount(0);
 });
 
-test('questions expire quietly without requiring a response', async ({
+test('a cue that passes untouched leaves the bar, with no countdown shown meanwhile', async ({
   page,
 }) => {
-  await page.clock.runFor(8_200);
+  await say(page);
   const question = page.getByRole('region', { name: 'Suggested question' });
   await expect(question).toBeVisible();
   await expect(question).not.toContainText(/\b\d+s\b/);
-  await page.clock.runFor(18_000);
+  await page.evaluate(() => window.liveTest.setCue(null));
   await expect(question).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Pause demo' })).toHaveText(
-    'Pause',
-  );
-  await expect(page.getByRole('status')).toHaveText('Demo running · Scripted');
+  await expect(page.getByRole('button', { name: 'Pause cues' })).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('Mic on · Local');
 });
 
-test('a question answered by the conversation leaves, and the words that answered it are quoted', async ({
+const soon = 'We should have it ready soon, before the next visitors arrive.';
+const friday = "A single page sounds right. Let's have it ready by Friday.";
+
+test('a quoted line says it is word for word and can be kept', async ({
   page,
 }) => {
-  await page.clock.runFor(37_200);
-  const question = page.getByRole('region', { name: 'Suggested question' });
+  await say(page, soon, 'What date should we aim for?');
   await expect(
     page.getByRole('heading', { name: 'What date should we aim for?' }),
   ).toBeVisible();
-  // The fictional speakers agree on Friday at 51 s, before the cue would expire.
-  await page.clock.runFor(14_000);
+  // The answer replaces the question, as the engine does when a line
+  // answers it: the words that answered are quoted.
+  await page.evaluate((text) => window.liveTest.say(text), friday);
+  await page.evaluate(
+    (value) => window.liveTest.setCue(value),
+    cue({
+      kind: 'Said',
+      question: "Let's have it ready by Friday.",
+      evidence: friday,
+      sourceId: 't1-0-1',
+    }),
+  );
+  const question = page.getByRole('region', { name: 'Suggested question' });
   await expect(
     page.getByRole('heading', { name: 'What date should we aim for?' }),
   ).toHaveCount(0);
-  await expect(question).toContainText("“Let's have it ready by Friday");
+  await expect(question).toContainText("Let's have it ready by Friday");
   await expect(question).toContainText('Just said');
   await expect(question).toContainText('a date or commitment, word for word');
   await expect(
     question.getByRole('button', { name: 'Keep this line' }),
   ).toBeVisible();
-  await expect(page.getByRole('status')).toHaveText('Demo running · Scripted');
-  // The shorter voiced scene ends without leaving an unheld cue behind.
-  await page.clock.runFor(18_500);
-  await expect(question).toHaveCount(0);
+  await expect(page.getByRole('status')).toHaveText('Mic on · Local');
 });
 
 test('an answered question being read stays and shows the answer', async ({
   page,
 }) => {
-  await page.clock.runFor(37_200);
+  await say(page, soon, 'What date should we aim for?');
   await page.getByRole('button', { name: 'Hold', exact: true }).click();
-  // The window keeps its size; the answer joins the source in the card.
-  await page.clock.runFor(14_000);
+  // A later line answers it; the held cue stays and carries the answer.
+  await page.evaluate(async (text) => {
+    await window.liveTest.say(text);
+    const held = window.liveTest.session().cue!;
+    await window.liveTest.setCue({
+      ...held,
+      resolvedBy: { sourceId: 't1-0-1', evidence: text },
+    });
+  }, friday);
   const question = page.getByRole('region', { name: 'Suggested question' });
   await expect(
     question.getByRole('heading', { name: 'What date should we aim for?' }),
@@ -255,11 +260,7 @@ test('an answered question being read stays and shows the answer', async ({
     'We should have it ready soon',
   );
   await expectCompanionToFit(page);
-  await page.evaluate(async () => {
-    const previewPath = '/src/lib/preview.ts';
-    const preview = await import(previewPath);
-    preview.command('set_question_size', { value: 'large' });
-  });
+  await page.evaluate(() => window.liveTest.setQuestionSize('large'));
   await page.setViewportSize({ width: 420, height: 420 });
   await expectCompanionToFit(page);
   await page.getByRole('button', { name: 'Dismiss', exact: true }).click();

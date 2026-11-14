@@ -462,7 +462,7 @@
 
       window.stage = {
         clock: () => now,
-        /** Loads the TalkQTE frame and starts a scripted session in it. */
+        /** Loads the TalkQTE frame and starts a simulated session in it. */
         async prepare(value) {
           data = value;
           document.body.classList.toggle(
@@ -518,19 +518,13 @@
             () => frames().every((frame) => frame.liveTest),
             'TalkQTE frames',
           );
-          // A scripted session, not a live one: the app then says in its own
-          // words that this is scripted, and never claims a microphone.
+          // A simulated session, not a live one: the app then says in its
+          // own words that this is a simulated, fictional replay, and never
+          // claims a microphone.
           for (const frame of frames())
-            await frame.liveTest.publish({
-              live: false,
-              cuesPaused: false,
-              status: 'running',
+            await frame.liveTest.simulate({
               title: data.title,
-              description: 'Simulated replay of a fictional conversation.',
-              elapsedMs: 0,
               durationMs: data.endsAtMs,
-              transcript: [],
-              cue: null,
             });
         },
         /** Plays the replay on its own clock; resolves when it is over. */

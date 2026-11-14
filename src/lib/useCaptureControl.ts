@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { desktop } from './bridge';
 import { processingApi, type ProcessingSnapshot } from './processing';
 
-/** Notebook capture controls bypass the ordered note/demo command queue. */
+/** Notebook capture controls bypass the ordered notes command queue. */
 export function useCaptureControl() {
   const [state, setState] = useState<ProcessingSnapshot | null>(null);
   const [statusError, setStatusError] = useState(false);

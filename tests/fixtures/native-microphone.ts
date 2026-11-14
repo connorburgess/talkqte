@@ -193,9 +193,27 @@ async function publish(value: Partial<Snapshot>) {
   await emit('session:changed', session);
   await emit('cue:changed', session);
 }
+/** A replay of a fictional conversation: no microphone, nothing captured.
+ * The app labels it as simulated in its own words. Used by the lab recorder. */
+async function simulate(value: Partial<Snapshot> = {}) {
+  await publish({
+    title: 'Simulated session',
+    description: 'Simulated replay of a fictional conversation.',
+    durationMs: 0,
+    ...value,
+    live: false,
+    simulated: true,
+    cuesPaused: false,
+    status: 'running',
+    elapsedMs: 0,
+    transcript: [],
+    cue: null,
+  });
+}
 async function startLive() {
   await publish({
     live: true,
+    simulated: false,
     cuesPaused: false,
     status: 'running',
     title: 'Live session',
@@ -373,8 +391,6 @@ mockIPC(
       }
       case 'context_items':
         return [];
-      case 'keep_line':
-        return preview.command('keep_line', args as Commands['keep_line']);
       case 'granola_status':
         return preview.granolaStatus();
       case 'connect_granola':
@@ -473,8 +489,6 @@ mockIPC(
       case 'export_markdown':
         return true;
       case 'inspect_cue': {
-        if (!session.live)
-          return preview.command(command, args as Commands['inspect_cue']);
         const { id, expanded } = args as Commands['inspect_cue'];
         if (session.cue?.id !== id)
           throw new Error('That question has already passed.');
@@ -482,13 +496,9 @@ mockIPC(
         return;
       }
       case 'respond_to_cue':
-        if (session.live) {
-          if (session.cue?.id !== (args as Commands['respond_to_cue']).id)
-            throw new Error('That question has already passed.');
-          await publish({ cue: null });
-          return;
-        }
-        preview.command(command, args as Commands['respond_to_cue']);
+        if (session.cue?.id !== (args as Commands['respond_to_cue']).id)
+          throw new Error('That question has already passed.');
+        await publish({ cue: null });
         if (delayQuestionResponse) {
           delayQuestionResponse = false;
           await new Promise<void>((resolve) => {
@@ -496,6 +506,28 @@ mockIPC(
           });
         }
         return;
+      case 'update_notes':
+        // Keep the stand-in's copy current for Keep this line.
+        if (session.revision >= 1_000)
+          session = {
+            ...session,
+            notes: (args as Commands['update_notes']).notes,
+          };
+        return preview.command(command, args as Commands['update_notes']);
+      case 'keep_line': {
+        const cue = session.cue;
+        if (cue?.id !== (args as Commands['keep_line']).id)
+          throw new Error('That line has already passed.');
+        if (cue.kind !== 'Said')
+          throw new Error('Only a quoted line can be kept.');
+        const line = session.transcript.find((s) => s.id === cue.sourceId);
+        const atMs = line?.atMs ?? session.elapsedMs;
+        const stamp = `${String(Math.floor(atMs / 60_000)).padStart(2, '0')}:${String(Math.floor(atMs / 1000) % 60).padStart(2, '0')}`;
+        const entry = `[${stamp}] ${line?.speaker ? `${line.speaker}: ` : ''}“${cue.question}”`;
+        const notes = `${session.notes}${session.notes && !session.notes.endsWith('\n') ? '\n' : ''}${entry}\n`;
+        await publish({ notes, cue: null });
+        return;
+      }
       default:
         return preview.command(
           command as keyof Commands,
@@ -507,6 +539,20 @@ mockIPC(
 );
 
 preview.connect((value) => {
+  // Once this stand-in runs a session, the adapter's idle state must not
+  // replace it; the app already ignores those older revisions.
+  if (session && session.revision >= 1_000) {
+    // Settings changed during the session still reach it.
+    void publish({
+      sensitivity: value.sensitivity,
+      overlayEnabled: value.overlayEnabled,
+      companionPosition: value.companionPosition,
+      questionSize: value.questionSize,
+      userName: value.userName,
+      focus: value.focus,
+    });
+    return;
+  }
   session = value;
   void emit('session:changed', value);
   void emit('cue:changed', value);
@@ -552,6 +598,10 @@ declare global {
     };
     liveTest: {
       start: typeof startLive;
+      /** The stand-in's current session, for assertions. */
+      session: () => Snapshot;
+      /** A fictional replay the app labels as simulated; captures nothing. */
+      simulate: typeof simulate;
       say: typeof say;
       /** Lab recordings replay a whole session state at its own times. */
       publish: typeof publish;
@@ -637,6 +687,8 @@ window.nameTest = {
 };
 window.liveTest = {
   start: startLive,
+  session: () => structuredClone(session),
+  simulate,
   say,
   publish,
   setCue: (cue) => publish({ cue }),

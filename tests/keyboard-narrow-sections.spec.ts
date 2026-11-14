@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import type {} from './fixtures/native-microphone';
+import { cue, liveCue, standIn } from './fixtures/stand-in';
 
 // Keyboard operation and focus placement at the 480 px width for the cue
 // card, the Prior context section and the processing controls. A browser
@@ -28,14 +28,8 @@ test.beforeEach(async ({ page }) => {
 test('a question is held, dismissed and its quoted line kept from the keyboard at 480px', async ({
   page,
 }) => {
-  await page.clock.install();
-  await page.goto('/');
-  await page
-    .getByRole('button', { name: 'Try demo', exact: true })
-    .press('Enter');
-  // Try demo opens the transcript; return to Notes, where focus is checked.
-  await page.getByRole('tab', { name: 'Notes', exact: true }).press('Enter');
-  await page.clock.runFor(8_200);
+  await standIn(page, '/?live');
+  await liveCue(page);
   const question = page.getByRole('region', { name: 'Suggested question' });
   const notes = page.getByRole('textbox', { name: 'Meeting notes' });
   await expect(
@@ -62,7 +56,17 @@ test('a question is held, dismissed and its quoted line kept from the keyboard a
 
   // The next cue quotes what was said; keeping it writes the line to the
   // notes and leaves focus there.
-  await page.clock.runFor(46_000);
+  const friday = "A single page sounds right. Let's have it ready by Friday.";
+  await page.evaluate((text) => window.liveTest.say(text), friday);
+  await page.evaluate(
+    (value) => window.liveTest.setCue(value),
+    cue({
+      kind: 'Said',
+      question: "Let's have it ready by Friday.",
+      evidence: friday,
+      sourceId: 't1-0-1',
+    }),
+  );
   await expect(question).toContainText('Just said');
   const keep = question.getByRole('button', { name: 'Keep this line' });
   await expectToFit(question, 'quoted line');
@@ -71,7 +75,7 @@ test('a question is held, dismissed and its quoted line kept from the keyboard a
   await keep.press('Enter');
   await expect(question).toHaveCount(0);
   await expect(notes).toHaveValue(
-    /\[00:51\] Robin: “Let's have it ready by Friday/,
+    /\[00:02\] Speaker: “Let's have it ready by Friday/,
   );
   await expect(notes).toBeFocused();
 });
