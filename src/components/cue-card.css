@@ -132,6 +132,13 @@
 .cue-card.is-settled .cue-word {
   animation: none;
 }
+/* An answer that has just arrived is new even on a cue that was not. */
+.cue-card.is-settled:not(.is-leaving)
+  .cue-answer.is-arriving
+  .cue-word.cue-spoken {
+  animation: cue-spoken 260ms ease-out both;
+  animation-delay: var(--at);
+}
 
 /* The purpose is the first words of the sentence; the cue completes it. */
 .cue-card .cue-line {
@@ -288,10 +295,58 @@
   color: var(--cue-soft);
   overflow-wrap: anywhere;
 }
-.cue-card .cue-source + .cue-source {
+/* A later line that answered a held cue sits above the cue's source, with
+   a rule between them and a small tick beside its label. When it arrives
+   while the cue is showing it opens in place, so the words below move down
+   smoothly; nothing jumps. */
+.cue-card .cue-answer {
+  display: grid;
+  grid-template-rows: 1fr;
+}
+.cue-card .cue-answer > .cue-source {
+  min-height: 0;
+  overflow: hidden;
+}
+.cue-card .cue-answer > .cue-source::after {
+  content: '';
+  display: block;
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--cue-rule);
+}
+.cue-card .cue-answer .cue-source-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.cue-card .cue-tick {
+  flex: none;
+  stroke-width: 2.6;
+}
+@keyframes cue-answer-open {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+  to {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+}
+@keyframes cue-tick-draw {
+  from {
+    stroke-dashoffset: 24;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.cue-card .cue-answer.is-arriving {
+  animation: cue-answer-open 380ms var(--cue-ease) both;
+}
+.cue-card .cue-answer.is-arriving .cue-tick path {
+  stroke-dasharray: 24;
+  animation: cue-tick-draw 360ms 260ms var(--cue-ease) both;
 }
 .cue-card .cue-source-label {
   display: block;

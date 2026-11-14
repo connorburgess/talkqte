@@ -271,6 +271,132 @@ test('a very long quoted line still finishes within about six seconds, and a cue
   ).toBe(true);
 });
 
+test('an answer to a held cue opens in place with a tick, keeps focus, and does not replay for a cue already answered', async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.route('**/*', async (route) => {
+    if (route.request().resourceType() !== 'document') return route.continue();
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      body: (await response.text()).replace(
+        '/src/main.tsx',
+        '/tests/fixtures/native-microphone.ts',
+      ),
+    });
+  });
+  await page.setViewportSize({ width: 420, height: 340 });
+  await page.goto('/?window=cue');
+  await page.waitForFunction(() => !!window.liveTest);
+  await page.evaluate(() => window.liveTest.start());
+  const held = {
+    id: 'fictional-held',
+    kind: 'Timing',
+    question: 'What date should we aim for?',
+    evidence:
+      'We should have it ready soon, before the next group of visitors arrives.',
+    sourceId: 'transcript:fictional-1',
+    remainingMs: 9_000,
+    totalMs: 18_000,
+    held: true,
+    expanded: false,
+    resolvedBy: null,
+    note: null,
+    aboutFocus: false,
+  };
+  const answer = {
+    sourceId: 'transcript:fictional-2',
+    evidence: "Let's have it ready by Friday.",
+  };
+  await page.evaluate((value) => window.liveTest.setCue(value), held);
+  const question = page.getByRole('region', { name: 'Suggested question' });
+  const heldControl = question.getByRole('button', {
+    name: 'Held',
+    exact: true,
+  });
+  await heldControl.focus();
+  await expect(question.locator('.cue-answer')).toHaveCount(0);
+
+  // The conversation answers it. Hold the opening at its start to read it.
+  await page.evaluate(() => {
+    document.addEventListener('animationstart', (event) => {
+      if (event.animationName !== 'cue-answer-open') return;
+      for (const animation of (event.target as HTMLElement).getAnimations())
+        animation.pause();
+    });
+  });
+  await page.evaluate((value) => window.liveTest.setCue(value), {
+    ...held,
+    remainingMs: 0,
+    resolvedBy: answer,
+  });
+  const block = question.locator('.cue-answer');
+  await expect(block).toContainText('Answered later in the conversation');
+  await expect(block.locator('blockquote')).toHaveText(
+    "“Let's have it ready by Friday.”",
+  );
+  // It starts closed, so the words under it do not jump, and opens briefly.
+  const opening = await block.evaluate((element) => {
+    const [animation] = element.getAnimations();
+    animation.pause();
+    animation.currentTime = 0;
+    return {
+      height: element.getBoundingClientRect().height,
+      ends: Number(animation.effect!.getComputedTiming().endTime),
+    };
+  });
+  expect(opening.height).toBeLessThan(2);
+  expect(opening.ends).toBeLessThanOrEqual(500);
+  await block.evaluate((element) => {
+    for (const animation of element.getAnimations({ subtree: true }))
+      animation.finish();
+  });
+  expect((await block.boundingBox())!.height).toBeGreaterThan(40);
+  await expect(block.locator('svg')).toBeVisible();
+  // The cue is still whole and in view, and focus has not moved.
+  await expect(question.getByRole('heading')).toBeInViewport({ ratio: 1 });
+  await expect(heldControl).toBeFocused();
+  expect(
+    await page.evaluate(
+      () => document.querySelector('main')!.scrollHeight <= innerHeight,
+    ),
+  ).toBe(true);
+
+  // A cue first shown with its answer already there does not open again.
+  await page.evaluate((value) => window.liveTest.setCue(value), {
+    ...held,
+    id: 'fictional-already-answered',
+    remainingMs: 0,
+    resolvedBy: answer,
+  });
+  await expect(block).toContainText('Answered later in the conversation');
+  expect(
+    await block.evaluate((element) => element.getAnimations().length),
+  ).toBe(0);
+
+  // With reduced motion an arriving answer is simply there.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.evaluate((value) => window.liveTest.setCue(value), {
+    ...held,
+    id: 'fictional-held-reduced',
+  });
+  await expect(block).toHaveCount(0);
+  await page.evaluate((value) => window.liveTest.setCue(value), {
+    ...held,
+    id: 'fictional-held-reduced',
+    remainingMs: 0,
+    resolvedBy: answer,
+  });
+  await expect(block.locator('blockquote')).toBeVisible();
+  expect(
+    await question.evaluate(
+      (card) => card.getAnimations({ subtree: true }).length,
+    ),
+  ).toBe(0);
+  expect((await block.boundingBox())!.height).toBeGreaterThan(40);
+});
+
 test('a dismissed cue leaves with a short fold and cannot be used while it goes', async ({
   page,
 }) => {
