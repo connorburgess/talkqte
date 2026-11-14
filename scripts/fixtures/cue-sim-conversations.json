@@ -1,7 +1,7 @@
 {
   "status": "Fictional timed conversations for the cue timing simulation. Labels written on 14 November 2026 by the lab lane, before any evaluator was run on them, and awaiting the owner's review.",
   "authorship": "Written for people who work in software, AI and hiring. The author had read the three case sets, the phrase rules as described in docs/cue-intelligence.md, and an anonymized, abstracted description of how real meeting transcripts flow (turn lengths, backchannels, restatements, and which kinds of moment the conversation settles by itself). No real wording, name, organization or scenario is used.",
-  "format": "atMs is when the speaker finishes the line, from the start of the call. expect is what should happen once that line has been heard: quiet (nothing changes); show (a cue about this line would help, described in about; until names the line after which it no longer would, and without until it stays useful for the 18 seconds a cue lives); resolved or withdraw (this line answers, or removes the basis of, the cue for the line named in of); null (unlabelled: the note says why either choice is defensible). listener is the person TalkQTE would be helping. Labels are never sent to an evaluator.",
+  "format": "atMs is when the speaker finishes the line, from the start of the call. expect is what should happen once that line has been heard: quiet (nothing changes); show (a cue about this line would help, described in about, with cue as words short enough for a card: at most ten; until names the line after which it no longer would, and without until it stays useful for the 18 seconds a cue lives); resolved or withdraw (this line answers, or removes the basis of, the cue for the line named in of); null (unlabelled: the note says why either choice is defensible). listener is the person TalkQTE would be helping. Labels are never sent to an evaluator.",
   "conversations": [
     {
       "id": "standup-flaky-test",
@@ -63,6 +63,7 @@
           "text": "Right, somebody needs to actually look at that test instead of rerunning it, it's been three weeks.",
           "expect": "show",
           "about": "The flaky payment retry test has no owner.",
+          "cue": "Who will look at the flaky retry test?",
           "until": "l8"
         },
         {
@@ -102,6 +103,7 @@
           "text": "Robin, is that endpoint going to be ready for her by Thursday?",
           "expect": "show",
           "about": "Priya asked Robin whether the postcode endpoint will be ready by Thursday.",
+          "cue": "Asked you: endpoint ready by Thursday?",
           "until": "l11"
         },
         {
@@ -189,6 +191,7 @@
           "text": "Right, the write-up. That needs to go out at some point this week.",
           "expect": "show",
           "about": "The customer write-up has no owner and only \"at some point this week\".",
+          "cue": "Who writes the customer write-up, and by when?",
           "until": "l9"
         },
         {
@@ -233,7 +236,8 @@
           "speaker": "Dana",
           "text": "Last thing. The runbook said to restart the auth workers first, and that's wrong now, so that page needs fixing before the next on-call rotation.",
           "expect": "show",
-          "about": "The runbook fix has no owner and is needed before the next on-call rotation."
+          "about": "The runbook fix has no owner and is needed before the next on-call rotation.",
+          "cue": "Who fixes the runbook before the next rotation?"
         },
         {
           "id": "l12",
@@ -318,6 +322,7 @@
           "text": "Fine, bug first. Ines, how big is the search upgrade, is it a three or more like an eight?",
           "expect": "show",
           "about": "Tomas asked Ines how big the search upgrade is: a three or an eight.",
+          "cue": "Asked you: search upgrade, a three or an eight?",
           "until": "l7"
         },
         {
@@ -334,7 +339,8 @@
           "speaker": "Tomas",
           "text": "Okay, so eight for search, five for the bug, thirteen for export stage one. That's twenty-six, which leaves room against our thirty points.",
           "expect": "show",
-          "about": "Capacity was thirty-four points a minute ago and is now given as thirty."
+          "about": "Capacity was thirty-four points a minute ago and is now given as thirty.",
+          "cue": "Capacity was thirty-four earlier; now thirty?"
         },
         {
           "id": "l9",
@@ -357,7 +363,8 @@
           "speaker": "Ravi",
           "text": "One thing, the export needs the new permissions check, and that's not in anyone's estimate.",
           "expect": "show",
-          "about": "The permissions check for the export is in no estimate and has no owner."
+          "about": "The permissions check for the export is in no estimate and has no owner.",
+          "cue": "Who estimates the export's permissions check?"
         },
         {
           "id": "l12",
@@ -454,7 +461,8 @@
           "speaker": "Viktor",
           "text": "It is, but you need to be in the data-readers group first, and I can't add you. Somebody on the platform team has to.",
           "expect": "show",
-          "about": "June has to be added to the data-readers group by the platform team, and no one is named."
+          "about": "June has to be added to the data-readers group by the platform team, and no one is named.",
+          "cue": "Who on platform adds you to data-readers?"
         },
         {
           "id": "l10",
@@ -546,6 +554,7 @@
           "text": "One sec, Aiko. On summarization, did the prompt template change between runs? Somebody should diff the two configs before we blame the model.",
           "expect": "show",
           "about": "Nobody has taken the diff of the two evaluation configs.",
+          "cue": "Who will diff the two eval configs?",
           "until": "l10"
         },
         {
@@ -591,7 +600,8 @@
           "speaker": "Jonas",
           "text": "Yeah, let's take that offline. Okay, latency, we're at nine hundred milliseconds at the ninety-fifth percentile, and the target was eight hundred.",
           "expect": "show",
-          "about": "Aiko's retrieval concern (twelve thousand new passages, score flat) was put off with no owner or time."
+          "about": "Aiko's retrieval concern (twelve thousand new passages, score flat) was put off with no owner or time.",
+          "cue": "Aiko's retrieval concern was put off. Who follows up?"
         },
         {
           "id": "l13",
@@ -663,6 +673,7 @@
           "text": "Three of two hundred, so one and a half percent. Is that acceptable? I genuinely don't know who decides that.",
           "expect": "show",
           "about": "No one is named to decide whether a one and a half percent wrong-refund rate is acceptable.",
+          "cue": "Who decides if 1.5% wrong refunds is acceptable?",
           "until": "l8"
         },
         {
@@ -700,7 +711,8 @@
           "speaker": "Hana",
           "text": "Separately, the guardrail for that prompt is a two-line fix, but someone has to rerun the full red-team set afterwards, and that takes about six hours of compute.",
           "expect": "show",
-          "about": "Rerunning the red-team set after the fix has no owner; it takes about six hours."
+          "about": "Rerunning the red-team set after the fix has no owner; it takes about six hours.",
+          "cue": "Who reruns the red-team set after the fix?"
         },
         {
           "id": "l10",
@@ -723,6 +735,7 @@
           "text": "Elif, you ran the last eval, what would you want to see before fifty?",
           "expect": "show",
           "about": "Marcus asked Elif what she would want to see before going to fifty percent.",
+          "cue": "Asked you: what do you need before fifty percent?",
           "until": "l13"
         },
         {
@@ -833,6 +846,7 @@
           "text": "Okay, who's picking next month's paper?",
           "expect": "show",
           "about": "Nobody has said they will pick next month's paper.",
+          "cue": "Who picks next month's paper?",
           "until": "l11"
         },
         {
@@ -886,7 +900,8 @@
           "speaker": "Greg",
           "text": "Great. So here's the problem. Design a service that shortens links for an internal tool. Assume about five hundred writes a second, reads are a hundred times that, and links have to keep working for five years.",
           "expect": "show",
-          "about": "The constraints, said once: five hundred writes a second, a hundred times as many reads, links kept for five years."
+          "about": "The constraints, said once: five hundred writes a second, a hundred times as many reads, links kept for five years.",
+          "cue": "500 writes a second, 100× reads, five years."
         },
         {
           "id": "l4",
@@ -915,7 +930,8 @@
           "speaker": "Greg",
           "text": "Not guessable, they can point at private documents. So think about how you'd generate the IDs.",
           "expect": "show",
-          "about": "The second question, one region or several, was not answered."
+          "about": "The second question, one region or several, was not answered.",
+          "cue": "Unanswered: one region or several?"
         },
         {
           "id": "l8",
@@ -946,6 +962,7 @@
           "text": "Okay, good. Now two things. How would you handle a hot link that suddenly gets a million reads a minute, and, separately, what happens to a link when the person who made it leaves the company?",
           "expect": "show",
           "about": "Two questions: a hot link with a million reads a minute, and what happens to a link when its creator leaves.",
+          "cue": "Two parts: the hot link, and departed creators' links.",
           "until": "l13"
         },
         {
@@ -970,6 +987,7 @@
           "text": "Sorry to jump in. Amara, you mentioned seven characters earlier, is that enough for eighty billion?",
           "expect": "show",
           "about": "Ilse asked Amara whether seven characters are enough for eighty billion links.",
+          "cue": "Asked you: are seven characters enough for eighty billion?",
           "until": "l15"
         },
         {
@@ -1024,6 +1042,7 @@
           "text": "Jules, you did the coding round?",
           "expect": "show",
           "about": "Renata asked Jules for the coding round score.",
+          "cue": "Asked you: your coding round score?",
           "until": "l4"
         },
         {
@@ -1054,7 +1073,8 @@
           "speaker": "Renata",
           "text": "So we've got a four on design, a four on coding and a three on leadership, that's above the bar.",
           "expect": "show",
-          "about": "Ben scored system design a three; it was just read back as a four."
+          "about": "Ben scored system design a three; it was just read back as a four.",
+          "cue": "Ben scored design a three, not a four."
         },
         {
           "id": "l8",
@@ -1063,6 +1083,7 @@
           "text": "The references are the other piece. Someone needs to call her last manager before the offer goes out.",
           "expect": "show",
           "about": "No one has taken the reference call, which is needed before the offer.",
+          "cue": "Who calls her last manager before the offer?",
           "until": "l11"
         },
         {
@@ -1135,6 +1156,7 @@
           "text": "Okay. So three things I need from you: what level, when you'd want them to start, and what the salary band is.",
           "expect": "show",
           "about": "Three things were asked: the level, the start date and the salary band.",
+          "cue": "Three asked: level, start date, salary band.",
           "until": "l8"
         },
         {
@@ -1171,7 +1193,8 @@
           "speaker": "Paula",
           "text": "And for interviews, when are you free? I'd want two slots a week.",
           "expect": "show",
-          "about": "The salary band was asked for and never answered."
+          "about": "The salary band was asked for and never answered.",
+          "cue": "Salary band still unanswered."
         },
         {
           "id": "l9",
@@ -1194,7 +1217,8 @@
           "speaker": "Kai",
           "text": "Me, Farid for the technical round, and someone from data platform, I haven't asked them yet.",
           "expect": "show",
-          "about": "The data platform interviewer has not been asked or named."
+          "about": "The data platform interviewer has not been asked or named.",
+          "cue": "Who from data platform joins the panel?"
         },
         {
           "id": "l12",
@@ -1265,6 +1289,7 @@
           "text": "From security, I need to know two things. Where is build data stored, and can we bring our own encryption keys?",
           "expect": "show",
           "about": "Nils asked two things: where build data is stored, and whether they can bring their own encryption keys.",
+          "cue": "Two asked: where data is stored, and own keys.",
           "until": "l8"
         },
         {
@@ -1287,7 +1312,8 @@
           "speaker": "Marta",
           "text": "And pricing, is that per seat or per build minute?",
           "expect": "show",
-          "about": "Nils's second question, bringing their own encryption keys, was not answered."
+          "about": "Nils's second question, bringing their own encryption keys, was not answered.",
+          "cue": "Unanswered: can they bring their own encryption keys?"
         },
         {
           "id": "l9",
@@ -1311,6 +1337,7 @@
           "text": "The twentieth, noted. Should we set up a trial in the meantime? Tess, how long does setup usually take?",
           "expect": "show",
           "about": "Arjun asked Tess how long setup usually takes.",
+          "cue": "Asked you: how long does setup take?",
           "until": "l12"
         },
         {
@@ -1397,6 +1424,7 @@
           "text": "Six of eight. Hm. Wren, is B much more work to build?",
           "expect": "show",
           "about": "Callum asked Wren whether option B is much more work to build.",
+          "cue": "Asked you: is option B much more work?",
           "until": "l6"
         },
         {
@@ -1441,7 +1469,8 @@
           "speaker": "Callum",
           "text": "Good point, let's park that. Zara, can you mock up B with the banner by next week?",
           "expect": "show",
-          "about": "Odette's point about the default, everything switched on, was parked with no owner or time."
+          "about": "Odette's point about the default, everything switched on, was parked with no owner or time.",
+          "cue": "Defaults were parked. Who owns them, and when?"
         },
         {
           "id": "l12",
@@ -1511,6 +1540,7 @@
           "text": "I think it could be. You'd need a sponsor outside our team, and the packet is due soonish, I'd have to check the date.",
           "expect": "show",
           "about": "The promotion packet is due \"soonish\"; the date is not known.",
+          "cue": "When is the promotion packet due?",
           "until": "l8"
         },
         {

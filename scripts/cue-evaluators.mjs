@@ -27,11 +27,17 @@ import {
 } from './cue-lab.mjs';
 
 /** Claude Code through the subscription sign-in. Hosted inference. */
-export function claudeEvaluator({ environment = process.env, run } = {}) {
+export function claudeEvaluator({
+  environment = process.env,
+  run,
+  glance = false,
+} = {}) {
   let lab;
+  const request = (testCase) => requestFor(testCase, { glance });
   return {
     id: 'claude',
     label: `Claude Code, ${MODEL}`,
+    prompt: glance ? 'glance' : 'recorded',
     kind: 'model',
     hosted: true,
     destination:
@@ -46,9 +52,9 @@ export function claudeEvaluator({ environment = process.env, run } = {}) {
         authentication: lab.access.authentication,
       };
     },
-    request: requestFor,
+    request,
     async decide(testCase) {
-      const report = await lab.evaluate(testCase);
+      const report = await lab.evaluate(testCase, request(testCase));
       return {
         decision: report.decision,
         elapsedMs: report.elapsedMs,
@@ -226,7 +232,8 @@ export function labelsEvaluator(conversations, { latencyMs = 4_000 } = {}) {
       if (cue) {
         // The moment this cue is for; a fixture's own cue has none.
         const moment = lines.find(
-          (item) => item.expect === 'show' && item.about === cue.text,
+          (item) =>
+            item.expect === 'show' && (item.cue ?? item.about) === cue.text,
         );
         const ending = heard.findLast(
           (item) =>
@@ -250,7 +257,9 @@ export function labelsEvaluator(conversations, { latencyMs = 4_000 } = {}) {
         );
         if (moment) {
           decision.action = 'show';
-          decision.cue = moment.about ?? 'A cue for the labelled moment.';
+          // The label's own short wording for a card, where it has one.
+          decision.cue =
+            moment.cue ?? moment.about ?? 'A cue for the labelled moment.';
           decision.sourceIds = [moment.id];
           decision.reason = 'A labelled moment is open.';
         }
@@ -267,7 +276,7 @@ export function labelsEvaluator(conversations, { latencyMs = 4_000 } = {}) {
  * made-up delay. Adding a provider
  * means adding one entry here. */
 export const EVALUATORS = {
-  claude: ({ environment }) => claudeEvaluator({ environment }),
+  claude: ({ environment, glance }) => claudeEvaluator({ environment, glance }),
   fake: ({ latencyMs }) => fakeEvaluator({ latencyMs }),
   rules: ({ rules }) => {
     if (!rules)

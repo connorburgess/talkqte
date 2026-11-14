@@ -6,7 +6,16 @@ import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { MODEL, buildPrompt } from './cue-lab.mjs';
+import {
+  GLANCE_WORDS,
+  MODEL,
+  SYSTEM_PROMPT,
+  buildPrompt,
+  classifyFailure,
+  execute,
+  subscriptionEnvironment,
+  systemPromptFor,
+} from './cue-lab.mjs';
 import {
   EVALUATORS,
   claudeEvaluator,
@@ -23,6 +32,8 @@ import {
   loadConversations,
   main,
   maxEvaluations,
+  resumingEvaluator,
+  reusableDecisions,
   runSimulation,
   score,
   simulate,
@@ -616,6 +627,11 @@ test('the timed conversations cover software, AI and hiring work and are mostly 
           item.about?.length > 10,
           `${where} says what the cue is about`,
         );
+        // And in words short enough to read on a card at a glance.
+        assert.ok(
+          item.cue?.split(/\s+/).length <= GLANCE_WORDS,
+          `${where} has a cue of at most ${GLANCE_WORDS} words`,
+        );
         if (item.until) assert.ok(order.get(item.until) > i, where);
       } else if (item.expect === 'resolved' || item.expect === 'withdraw') {
         const of = c.lines[order.get(item.of)];
@@ -908,4 +924,190 @@ test("a case whose cue is given never asks about that cue's own line", async () 
       item.id,
     );
   }
+});
+
+test('a stopped run can be resumed without asking again for the decisions it already has', async () => {
+  const [conversation] = await loadConversations();
+  // A "model" whose requests are measured, and which fails on its fifth.
+  const measured = (failAt) => {
+    let asked = 0;
+    return {
+      ...fakeEvaluator({ latencyMs: 300 }),
+      id: 'measured',
+      get asked() {
+        return asked;
+      },
+      async decide(testCase) {
+        if (++asked === failAt)
+          throw Object.assign(new Error('Claude Code failed.'), {
+            category: 'usage-limit',
+            exitCode: 1,
+          });
+        const result = await fakeEvaluator({ latencyMs: 300 }).decide(testCase);
+        return { ...result, latency: 'measured' };
+      },
+    };
+  };
+  const events = [];
+  const first = await runSimulation({
+    source: 'conversations',
+    conversations: [conversation],
+    evaluator: measured(5),
+    log: { write: (type, data) => events.push({ type, ...data }) },
+  });
+  // The stop is recorded with its kind and exit code, not the CLI's words.
+  assert.deepEqual(
+    [first.stopped.afterCalls, first.stopped.category, first.stopped.exitCode],
+    [5, 'usage-limit', 1],
+  );
+  const logText = events.map((event) => JSON.stringify(event)).join('\n');
+
+  const again = measured(0);
+  const reusable = reusableDecisions(logText, again);
+  assert.equal(reusable.size, 4);
+  const resumed = await runSimulation({
+    source: 'conversations',
+    conversations: [conversation],
+    evaluator: resumingEvaluator(again, reusable),
+  });
+  assert.equal(resumed.stopped, null);
+  assert.equal(resumed.reused, 4);
+  const decisions = resumed.conversations[0].timeline.filter(
+    (e) => e.type === 'decision',
+  );
+  // The first four are the earlier answers, in order and not asked again;
+  // only the rest were requests, and only those are counted.
+  assert.deepEqual(
+    decisions.slice(0, 5).map((d) => d.reused),
+    [true, true, true, true, false],
+  );
+  assert.equal(again.asked, decisions.length - 4);
+  assert.equal(resumed.calls, again.asked);
+  const earlier = events.filter((e) => e.type === 'sim-decision');
+  assert.deepEqual(
+    decisions.slice(0, 4).map((d) => [d.lineId, d.action, d.latencyMs, d.atMs]),
+    earlier.map((d) => [d.lineId, d.action, d.latencyMs, d.atMs]),
+  );
+
+  // The cap counts new requests only.
+  const capped = measured(0);
+  const tight = await runSimulation({
+    source: 'conversations',
+    conversations: [conversation],
+    evaluator: { ...resumingEvaluator(capped, reusable), hosted: true },
+    maxCalls: 2,
+  });
+  assert.equal(capped.asked, 2);
+  assert.equal(tight.reused, 4);
+  assert.match(tight.stopped.reason, /call cap/);
+
+  // Nothing is reused under another prompt, or from another evaluator.
+  const reworded = {
+    ...measured(0),
+    request: (testCase) => ({
+      systemPrompt: 'A different prompt.',
+      input: buildPrompt(testCase),
+    }),
+  };
+  const none = resumingEvaluator(
+    reworded,
+    reusableDecisions(logText, reworded),
+  );
+  assert.equal(
+    (
+      await runSimulation({
+        source: 'conversations',
+        conversations: [conversation],
+        evaluator: none,
+      })
+    ).reused,
+    0,
+  );
+  assert.throws(
+    () => reusableDecisions(logText, fakeEvaluator()),
+    /not from a simulation with this evaluator/,
+  );
+});
+
+test('a failed request is sorted into a kind without keeping what the CLI said', async () => {
+  for (const [text, kind] of [
+    [
+      'Claude usage limit reached. Your limit will reset at 3pm.',
+      'usage-limit',
+    ],
+    ['API Error: 429 too many requests', 'usage-limit'],
+    ['Invalid API key · Please run /login', 'auth'],
+    ['OAuth token has expired', 'auth'],
+    ['API Error: 529 Overloaded', 'transient'],
+    ['fetch failed: ECONNRESET', 'transient'],
+    ['something nobody expected', 'other'],
+    ['', 'other'],
+  ])
+    assert.equal(classifyFailure({ code: 1, text }), kind, text);
+  assert.equal(classifyFailure({ code: 'ENOENT' }), 'not-installed');
+  assert.equal(
+    classifyFailure({ code: null, killed: true }),
+    'time-or-output-limit',
+  );
+
+  // A real child process that prints account-like text and exits 3.
+  const secret = 'fictional-account@example.invalid hit your limit';
+  await assert.rejects(
+    execute(
+      process.execPath,
+      ['-e', `console.error(${JSON.stringify(secret)}); process.exit(3)`],
+      { cwd: tmpdir(), env: subscriptionEnvironment(process.env) },
+    ),
+    (error) => {
+      assert.equal(error.category, 'usage-limit');
+      assert.equal(error.exitCode, 3);
+      assert.match(error.message, /a usage or rate limit \(exit code 3\)/);
+      assert.ok(!error.message.includes('fictional-account'));
+      assert.ok(!JSON.stringify(error).includes('fictional-account'));
+      return true;
+    },
+  );
+});
+
+test('the simulation asks for cues that can be read at a glance, and counts the ones that cannot', async () => {
+  const plain = { events: [], existingCue: null };
+  assert.equal(systemPromptFor(plain), SYSTEM_PROMPT);
+  const glance = systemPromptFor(plain, { glance: true });
+  assert.ok(glance.startsWith(SYSTEM_PROMPT));
+  assert.match(glance, new RegExp(`at most ${GLANCE_WORDS} words`));
+  // The dry run prints the prompt a run would use; the recorded one on request.
+  const dry = async (args) => {
+    const lines = [];
+    await main(['--conversations', 'paper-reading-group', ...args], {
+      print: (text) => lines.push(text),
+      environment: {},
+    });
+    return lines.join('\n');
+  };
+  assert.match(await dry([]), /read at a glance/);
+  const recorded = await dry(['--prompt', 'recorded']);
+  assert.ok(!recorded.includes('read at a glance'));
+  assert.match(recorded, /--prompt recorded --run/);
+  await assert.rejects(dry(['--prompt', 'long']), /recorded or glance/);
+
+  // Two cues: one a glance, one not.
+  const conversation = talk([
+    line('l1', 0, 'Someone needs to book the room.', { expect: 'show' }),
+    line('l2', 30_000, 'Someone needs to order lunch.', { expect: 'show' }),
+  ]);
+  const long =
+    'Who will own booking the larger meeting room that the workshop needs before the visitors arrive on Thursday?';
+  const metrics = score(
+    conversation,
+    await simulate(
+      conversation,
+      scripted({
+        l1: ['show', 500, long],
+        l2: ['show', 500, 'Who will order lunch?'],
+      }),
+      noDelay,
+    ),
+  );
+  assert.deepEqual(metrics.cueWords, [long.split(' ').length, 4]);
+  assert.equal(metrics.cuesOverGlance, 1);
 });
