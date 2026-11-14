@@ -105,9 +105,11 @@
   animation: cue-word 320ms ease-out both;
   animation-delay: calc(50ms + var(--i) * 24ms);
 }
-/* Spoken words darken at about the pace they were said. */
+/* Spoken words fill at about the pace they were said. Each takes about as
+   long as two words do, so the fill has a soft leading edge. */
 .cue-card .cue-word.cue-spoken {
-  animation-duration: 260ms;
+  animation-duration: var(--fade);
+  animation-timing-function: linear;
   animation-delay: var(--at);
 }
 .cue-card .cue-quote .cue-word,
@@ -126,7 +128,7 @@
 .cue-card.is-settled:not(.is-leaving)
   .cue-answer.is-arriving
   .cue-word.cue-spoken {
-  animation: cue-word 260ms ease-out both;
+  animation: cue-word var(--fade) linear both;
   animation-delay: var(--at);
 }
 

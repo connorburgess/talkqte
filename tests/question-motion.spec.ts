@@ -203,6 +203,23 @@ test('a quoted line is replayed at about the pace it was said', async ({
       );
     }),
   ).toEqual(Array(15).fill(0.55));
+  // The fill has a soft leading edge: a word or two part-filled at a time,
+  // everything before them full and everything after still waiting.
+  const filling = await heading.evaluate((element) => {
+    for (const animation of element.getAnimations({ subtree: true })) {
+      animation.pause();
+      animation.currentTime = 2_000;
+    }
+    return [...element.querySelectorAll('span')].map((word) =>
+      Number(getComputedStyle(word).opacity),
+    );
+  });
+  const partly = filling.filter((shade) => shade > 0.55 && shade < 1);
+  expect(partly.length).toBeGreaterThanOrEqual(1);
+  expect(partly.length).toBeLessThanOrEqual(3);
+  expect(filling).toEqual([...filling].sort((a, b) => b - a));
+  expect(filling[0]).toBe(1);
+  expect(filling.at(-1)).toBe(0.55);
 });
 
 /** Opens the companion with the live-session stand-in, motion allowed. */

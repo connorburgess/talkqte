@@ -137,8 +137,9 @@ function sourceLine(cue: Cue) {
  * A suggested cue's words darken in reading order, quickly; the delay stops
  * growing after `cap` words.
  *
- * Words that were spoken (a Said quote, a later answer) darken at about the
- * pace they were said. The engine gives a line one time and no word
+ * Words that were spoken (a Said quote, a later answer) fill from dim to
+ * full in order at about the pace they were said, with a soft leading edge
+ * about two words wide. The engine gives a line one time and no word
  * timings, and a live line reaches the card only after it has been
  * transcribed, so this is a replay at an even pace per letter, not the
  * speaker's own timing. The line a cue came from is shown at once.
@@ -158,12 +159,17 @@ function Words({
   );
   const total = letters.reduce((sum, count) => sum + count, 0);
   const duration = Math.min(total * LETTER_MS, SPOKEN_MAX_MS);
+  // About two words are part-filled at any moment.
+  const fade = Math.round(
+    Math.min(520, Math.max(220, (2 * duration) / Math.ceil(parts.length / 2))),
+  );
   let before = 0;
   return parts.map((part, index) => {
     if (index % 2) return part;
     const style = spoken
       ? {
           '--at': `${Math.round(SPOKEN_START_MS + (before / total) * duration)}ms`,
+          '--fade': `${fade}ms`,
         }
       : { '--i': Math.min(index / 2, cap) };
     before += letters[index];
