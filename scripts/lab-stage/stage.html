@@ -93,14 +93,22 @@
         display: flex;
         flex-direction: column;
         gap: 12px;
-        /* The right of the frame belongs to the companion. */
-        margin-right: 820px;
-        opacity: 0.72;
+        /* The call fills the screen, as a meeting window does. */
       }
+      /* A gallery, as a call shows a few people: equal tiles, with the
+         companion floating over the seam between the top two. */
       #tiles {
-        display: flex;
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        grid-auto-rows: 1fr;
         gap: 10px;
-        height: 104px;
+      }
+      #tiles.odd .tile:last-child {
+        grid-column: 1 / -1;
+        justify-self: center;
+        width: calc(50% - 5px);
       }
       .tile {
         position: relative;
@@ -117,31 +125,6 @@
       .tile.speaking {
         outline-color: #4f9a66;
         background: linear-gradient(160deg, #2b3640, #1c232b);
-      }
-      #tiles .tile {
-        flex: 1;
-        border-radius: 12px;
-      }
-      #tiles .avatar {
-        width: 46px;
-        height: 46px;
-        font-size: 20px;
-        margin-bottom: 22px;
-      }
-      #tiles .name {
-        left: 6px;
-        right: 6px;
-        bottom: 6px;
-        padding: 2px 7px;
-        font-size: 12px;
-        justify-content: center;
-      }
-      #tiles .name small {
-        display: none;
-      }
-      #main-tile {
-        flex: 1;
-        min-height: 0;
       }
       .avatar {
         width: 112px;
@@ -206,7 +189,7 @@
       }
       #caption {
         min-height: 82px;
-        margin: 12px 820px 0 0;
+        margin: 12px 0 0;
         padding: 10px 16px;
         border-radius: 12px;
         background: rgba(8, 10, 12, 0.72);
@@ -227,7 +210,6 @@
         align-items: center;
         gap: 10px;
         height: 58px;
-        margin-right: 820px;
         opacity: 0.6;
       }
       #toolbar span.btn {
@@ -240,22 +222,27 @@
         background: #b6453c;
         width: 60px;
       }
-      /* The real companion: the subject of the recording. It is the app's
-         own window at its own size, drawn larger so the cue card can be
-         read at a glance in a video. */
+      /* The real companion at its real size, floating over the call near
+         the top centre, where someone would keep it by the camera. */
       #companion {
         position: absolute;
-        top: 96px;
-        right: 60px;
+        top: 46px;
+        left: calc(50% - 210px);
         width: 420px;
         height: 76px;
         border: 0;
         border-radius: 28px;
-        box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
         z-index: 3;
         background: transparent;
-        transform: scale(1.75);
-        transform-origin: top right;
+      }
+      /* Invented portraits in the tiles, when the take has them. */
+      .tile.has-portrait {
+        background-size: cover;
+        background-position: center 25%;
+      }
+      .tile.has-portrait .avatar {
+        display: none;
       }
       #side {
         display: none;
@@ -269,10 +256,10 @@
       /* Small print for the lab's own account of what happened. */
       #lab {
         position: absolute;
-        right: 60px;
-        bottom: 26px;
-        width: 520px;
-        height: 132px;
+        left: 20px;
+        bottom: 4px;
+        width: 430px;
+        height: 52px;
         padding: 7px 12px 8px;
         border-left: 2px solid #f3c94b;
         background: rgba(14, 17, 20, 0.82);
@@ -293,7 +280,7 @@
         padding: 0;
         display: flex;
         flex-direction: column-reverse;
-        height: calc(100% - 20px);
+        height: calc(100% - 16px);
         overflow: hidden;
       }
       #activity li {
@@ -368,6 +355,7 @@
       <span class="tag">Fictional</span>
       <span class="tag" id="decisions"></span>
       <span class="tag" id="sound" hidden></span>
+      <span class="tag" id="portraits" hidden></span>
       <span class="grow" id="source"></span>
       <span id="clock">0:00</span>
     </div>
@@ -378,14 +366,6 @@
         <span>Mock call. Not a real meeting or meeting app.</span>
       </header>
       <div id="speaker-view">
-        <div class="tile" id="main-tile">
-          <div class="avatar" id="main-avatar"></div>
-          <div class="name">
-            <span class="bars"><i></i><i></i><i></i></span>
-            <span id="main-name"></span>
-            <small id="main-role"></small>
-          </div>
-        </div>
         <div id="tiles"></div>
       </div>
       <p id="caption" aria-live="off"></p>
@@ -451,15 +431,6 @@
         }
       }
 
-      /** Puts one participant in the large tile, as a call's speaker view. */
-      function feature(person, speaking) {
-        $('main-avatar').style.background = person.color;
-        $('main-avatar').textContent = person.name[0];
-        $('main-name').textContent = person.label;
-        $('main-role').textContent = person.role;
-        $('main-tile').classList.toggle('speaking', speaking);
-      }
-
       window.stage = {
         clock: () => now,
         /** Loads the TalkQTE frame and starts a simulated session in it. */
@@ -477,6 +448,8 @@
           $('decisions').textContent = data.decisions;
           $('sound').textContent = data.sound;
           $('sound').hidden = !data.sound;
+          $('portraits').textContent = data.portraitsLabel;
+          $('portraits').hidden = !data.portraitsLabel;
           $('source').textContent =
             `${data.title} · cue decisions: ${data.evaluator} · ${data.timing}`;
           $('intro-title').textContent = data.title;
@@ -484,6 +457,7 @@
           $('intro-source').textContent =
             `Cue decisions: ${data.evaluator}. ${data.timing}.`;
           const tiles = $('tiles');
+          tiles.classList.toggle('odd', data.participants.length % 2 === 1);
           for (const [i, person] of data.participants.entries()) {
             person.color = COLORS[i % COLORS.length];
             person.label =
@@ -494,6 +468,10 @@
             const tile = document.createElement('div');
             tile.className = 'tile';
             tile.dataset.name = person.name;
+            if (person.portrait) {
+              tile.classList.add('has-portrait');
+              tile.style.backgroundImage = `url("${person.portrait}")`;
+            }
             const avatar = document.createElement('div');
             avatar.className = 'avatar';
             avatar.style.background = person.color;
@@ -511,7 +489,6 @@
             tile.append(avatar, name);
             tiles.append(tile);
           }
-          feature(data.participants[0], false);
           if (data.view === 'notebook') $('notebook').src = `${data.origin}/`;
           else $('companion').src = `${data.origin}/?window=cue`;
           await waitFor(
@@ -588,10 +565,6 @@
                   'speaking',
                   tile.dataset.name === event.line.speaker,
                 );
-              const person = data.participants.find(
-                (item) => item.name === event.line.speaker,
-              );
-              if (person) feature(person, true);
               const caption = $('caption');
               caption.textContent = '';
               const who = document.createElement('b');

@@ -170,6 +170,11 @@ test('a results file becomes one labelled video of the call and companion, with 
       expect(clip.startMs + clip.durationMs).toBeGreaterThan(line.atMs - 60);
     }
     expect(manifest.audio.endLate).toEqual([]);
+    // The finished file was measured against its clips: nothing missing,
+    // cut short or overlapping, at one sample rate.
+    expect(manifest.audio.check.passed).toBe(true);
+    expect(manifest.audio.check.sampleRate).toBe(48_000);
+    expect(manifest.audio.check.clips).toBe(3);
   } else expect(manifest.audio).toBeNull();
 });
 
@@ -220,10 +225,16 @@ test('the recording says on screen what it is, and the main view has no notebook
   );
   await expect(page.getByTitle('TalkQTE companion')).toBeVisible();
   await expect(page.getByTitle('TalkQTE notebook')).toBeHidden();
-  // The companion is drawn larger than the labels around it.
+  // The companion is its real size, not enlarged, and floats near the top
+  // centre of the call; the labels stay small.
   const companion = await page.getByTitle('TalkQTE companion').boundingBox();
   const banner = await label.boundingBox();
-  expect(companion!.width).toBeGreaterThan(600);
+  const width = page.viewportSize()!.width;
+  expect(companion!.width).toBe(420);
+  expect(
+    Math.abs(companion!.x + companion!.width / 2 - width / 2),
+  ).toBeLessThan(2);
+  expect(companion!.y).toBeLessThan(80);
   expect(banner!.height).toBeLessThan(40);
 
   // What the labels will say once a replay is loaded.
@@ -233,6 +244,16 @@ test('the recording says on screen what it is, and the main view has no notebook
   expect(data.timing).toContain('made up');
   expect(data.decisions).toBe('No model');
   expect(data.sound).toBe('Synthetic voices');
+  // Portraits are labelled when a take has them, and only then.
+  expect(data.portraitsLabel).toBe('');
+  const withPortraits = stageData(results, replay, {
+    origin: baseURL,
+    portraits: { Maya: { file: 'a.png' }, Robin: { file: 'b.png' } },
+  });
+  expect(withPortraits.portraitsLabel).toBe('Synthetic portraits');
+  expect(withPortraits.participants[0].portrait).toBe(
+    `${baseURL}/__lab-portrait/a.png`,
+  );
   expect(stageData(results, replay, { origin: baseURL }).sound).toBe('');
   // A results file from a model run is labelled as one.
   const model = {

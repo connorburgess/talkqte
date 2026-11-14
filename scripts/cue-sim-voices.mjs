@@ -23,24 +23,25 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { outputDirectory, parseFlags } from './cue-lab-output.mjs';
+import { castFor } from './cue-sim-cast.mjs';
 import { loadConversations } from './cue-sim.mjs';
 import { isMain } from './is-main.mjs';
 
 export const SPEECH_MODEL = 'gpt-4o-mini-tts';
 const ENDPOINT = 'https://api.openai.com/v1/audio/speech';
-// The provider's own preset voices, one per speaker. Nothing is cloned.
-const PRESET_VOICES = ['marin', 'cedar', 'coral', 'ash', 'sage', 'verse'];
 // So speakers do not all read at one pace.
 const MANNER = [
   'A little brisk and matter-of-fact, the way someone runs a meeting.',
-  'Relaxed and unhurried, thinking as they talk.',
+  'Relaxed and easy, at a comfortable pace.',
   'Warm and direct, with easy energy.',
-  'Quieter and measured, choosing words carefully.',
+  'Quieter and thoughtful, still fluent.',
   'Friendly and quick, slightly informal.',
-  'Calm and even, with short natural pauses.',
+  'Calm and even.',
 ];
+// An earlier wording asked for small hesitations, and the speech came out
+// halting: about 25 pauses a minute inside lines. This asks for fluency.
 const BASE =
-  'You are one person speaking in an ordinary work video call, not a narrator or an announcer. Sound like natural, unscripted conversation: everyday rhythm, small hesitations where the words suggest them, and a normal speaking pace. Do not add or change any words.';
+  'You are one person speaking in an ordinary work video call, not a narrator or an announcer. Speak fluently and continuously in a natural conversational voice, the way people talk when they know what they want to say: connected phrases, no gaps between words, and only the brief pauses that punctuation calls for. Do not add or change any words.';
 /** No single invocation may send more text than this. */
 export const MAX_CHARS_CEILING = 20_000;
 // Rough guide only, for deciding whether to go ahead: about a cent and a
@@ -53,11 +54,10 @@ const ESTIMATED_USD_PER_1000_CHARS = 0.017;
  * the same line is never bought twice. */
 export function voicePlan(conversation) {
   const speakers = [...new Set(conversation.lines.map((line) => line.speaker))];
+  // Preset voices only, cast so a voice and a portrait agree.
+  const cast = castFor(conversation);
   const voices = Object.fromEntries(
-    speakers.map((speaker, i) => [
-      speaker,
-      PRESET_VOICES[i % PRESET_VOICES.length],
-    ]),
+    speakers.map((speaker) => [speaker, cast[speaker].voice]),
   );
   const roles = Object.fromEntries(
     conversation.participants.map((p) => [

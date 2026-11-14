@@ -25,8 +25,11 @@ import {
 import {
   CONTEXT_LINES,
   CUE_LIFETIME_MS,
+  HISTORY_CUES,
+  budgetTable,
   conversationFromCase,
   coverage,
+  isBackchannel,
   finalOutcomeEvaluator,
   labelsEvaluator,
   loadConversations,
@@ -93,7 +96,15 @@ function scripted(script) {
     async close() {},
   };
 }
-const noDelay = { transcriptDelayMs: 0, minGapMs: 0 };
+// The simulation as it was before acknowledgements, cue history and the
+// listener's name: the tests of the clock and the scoring use it so that
+// each of those three is tested on its own, further down.
+const plain = {
+  ignoreBackchannels: false,
+  cueHistory: false,
+  listenerName: false,
+};
+const noDelay = { transcriptDelayMs: 0, minGapMs: 0, ...plain };
 const types = (timeline) => timeline.map((e) => `${e.atMs} ${e.type}`);
 
 test('a cue appears one decision after its line and is scored against the moment it was for', async () => {
@@ -111,7 +122,7 @@ test('a cue appears one decision after its line and is scored against the moment
       l1: ['show', 4_000, 'Who will book the room?'],
       l3: ['resolved'],
     }),
-    { transcriptDelayMs: 3_000, minGapMs: 2_000 },
+    { transcriptDelayMs: 3_000, minGapMs: 2_000, ...plain },
   );
   assert.deepEqual(types(replay.timeline), [
     '4000 line',
@@ -313,7 +324,11 @@ test('a request holds the newest six lines plus the cue, and only what the app w
     }
   }
   const named = scripted({});
-  await simulate(conversation, named, { ...noDelay, input: 'named' });
+  await simulate(conversation, named, {
+    ...noDelay,
+    input: 'named',
+    listenerName: true,
+  });
   assert.equal(named.seen[0].events[0].speaker, 'Maya');
   assert.equal(named.seen[0].userName, 'Robin');
 });
@@ -450,10 +465,10 @@ test('a hosted simulation is refused before any process without confirmation, a 
     [['--run', '--included-usage-confirmed'], /call cap/],
     [
       ['--run', '--included-usage-confirmed', '--max-calls', '5'],
-      /could need 11 model requests and the cap is 5/,
+      /could need 10 model requests and the cap is 5/,
     ],
     [
-      ['--run', '--included-usage-confirmed', '--max-calls', '11'],
+      ['--run', '--included-usage-confirmed', '--max-calls', '10'],
       /Say where to write/,
     ],
     [['--evaluator', 'rules'], /no recorded outcomes for the timed/],
@@ -500,9 +515,10 @@ test('the dry run starts nothing and says how many requests could leave the devi
   assert.equal(result, null);
   const text = lines.join('\n');
   assert.match(text, /Dry run\. No process was started and nothing was sent/);
-  assert.match(text, /paper-reading-group: 11 lines over 69 s, at most 11/);
+  // One line is a bare acknowledgement and starts no request.
+  assert.match(text, /paper-reading-group: 11 lines over 69 s, at most 10/);
   assert.match(text, /off this device to Anthropic/);
-  assert.match(text, /--max-calls 11 --included-usage-confirmed/);
+  assert.match(text, /--max-calls 10 --included-usage-confirmed/);
   // Every line is listed as a request would carry it: one speaker label,
   // no speaker names, no labels.
   const [conversation] = (await loadConversations()).filter(
@@ -514,8 +530,13 @@ test('the dry run starts nothing and says how many requests could leave the devi
   }
   assert.ok(!text.includes('Sofia'));
   assert.match(text, /A cue the evaluator wrote .* is therefore sent back/);
-  assert.equal(text.match(/System prompt:/g).length, 1);
-  assert.ok(!text.includes('userName is'));
+  // The listener's name is sent, and both prompts a run can use are
+  // printed: with and without the sentence about earlier cues.
+  assert.match(text, /userName "Dev"/);
+  assert.equal(text.match(/System prompt:/g).length, 2);
+  assert.equal(text.match(/userName is the listener's own name/g).length, 2);
+  assert.equal(text.match(/earlierCues lists cues already shown/g).length, 1);
+  assert.match(text, /up to 4 cues already shown with how each ended/);
 });
 
 test('a run is repeatable and writes results and a full event log outside the repository', async () => {
@@ -796,14 +817,30 @@ test('the dry run prints the prompts and command a run would really use', async 
     named,
     /--conversations recruiter-intake --input named --min-gap-ms 3000 --transcript-delay-ms 1000 --apply-stale --run .* --max-calls \d+ --included-usage-confirmed/,
   );
-  // A set: each case's own cue is listed, and cases without a session
-  // name get the plain prompt, so both prompts are printed.
+  // A set: each case's own cue is listed. Cases with and without a
+  // session name, each with and without earlier cues, make four prompts.
   const set = await dry(['--set', 'held-out', '--input', 'named']);
   assert.match(set, /cue on screen from e1: Who will book the hall\?/);
-  assert.equal(set.match(/System prompt:/g).length, 2);
+  assert.equal(set.match(/System prompt:/g).length, 4);
+  // Each of the three additions can be switched off, and the command a
+  // dry run suggests keeps the switch.
+  const bare = await dry([
+    '--conversations',
+    'paper-reading-group',
+    '--overtake-backchannels',
+    '--no-cue-history',
+    '--no-listener-name',
+  ]);
+  assert.match(bare, /at most 11 evaluations/);
+  assert.equal(bare.match(/System prompt:/g).length, 1);
+  assert.ok(!bare.includes('userName'));
+  assert.match(
+    bare,
+    /--overtake-backchannels --no-cue-history --no-listener-name --run/,
+  );
   // More than one invocation allows: no command that would be refused.
   const all = await dry([]);
-  assert.match(all, /could need 168 requests, more than the 100/);
+  assert.match(all, /could need 163 requests, more than the 100/);
   assert.ok(!all.includes('--included-usage-confirmed'));
 });
 
@@ -861,7 +898,7 @@ test('a cue shown after its moment closed is late, not missed, and a labelled wi
   const replay = await simulate(
     late,
     scripted({ l1: ['show', 500, 'Maya asked you to book the room.'] }),
-    { transcriptDelayMs: 3_000, minGapMs: 0 },
+    { transcriptDelayMs: 3_000, minGapMs: 0, ...plain },
   );
   const scored = score(late, replay);
   assert.deepEqual(
@@ -1110,4 +1147,215 @@ test('the simulation asks for cues that can be read at a glance, and counts the 
   );
   assert.deepEqual(metrics.cueWords, [long.split(' ').length, 4]);
   assert.equal(metrics.cuesOverGlance, 1);
+});
+
+test('a bare acknowledgement neither starts an evaluation nor throws away a decision in flight', async () => {
+  for (const [text, previous, expected] of [
+    ['Mm.', '', true],
+    ['Yeah.', '', true],
+    ['Mm-hm, right.', '', true],
+    ['Ha. Yeah.', '', true],
+    ['Ah, okay.', '', true],
+    // Not acknowledgements: a turn with content, a question, a topic
+    // change, more than three words, and an answer to a question.
+    ['Yeah, I will do it.', '', false],
+    ['Right?', '', false],
+    ['Okay, next item.', '', false],
+    ['Sure, someday.', '', false],
+    ['Oh. Good point.', '', false],
+    ['Yeah yeah yeah yeah.', '', false],
+    ['Yeah.', 'Are we done?', false],
+    ['Okay.', 'Can you take the draft?', false],
+  ])
+    assert.equal(isBackchannel(text, previous), expected, text);
+
+  const conversation = talk([
+    line('l1', 0, 'Someone needs to book the room.', {
+      expect: 'show',
+      until: 'l5',
+    }),
+    line('l2', 1_500, 'Mm.', { expect: 'quiet' }),
+    line('l3', 2_000, 'Yeah.', { expect: 'quiet' }),
+    line('l4', 9_000, 'And lunch needs ordering too.', { expect: 'quiet' }),
+    line('l5', 30_000, 'Moving on to the budget.', { expect: 'quiet' }),
+  ]);
+  const script = { l1: ['show', 4_000, 'Who will book the room?'] };
+  const options = { transcriptDelayMs: 0, minGapMs: 0, ...plain };
+
+  // As the app is today: the two acknowledgements overtake the decision.
+  const before = scripted(script);
+  const old = await simulate(conversation, before, options);
+  assert.equal(
+    old.timeline.find((e) => e.type === 'decision').outcome,
+    'superseded',
+  );
+  assert.equal(score(conversation, old).opportunities.missed, 1);
+
+  // With acknowledgements set aside, the same decision lands and is shown.
+  const after = scripted(script);
+  const kept = await simulate(conversation, after, {
+    ...options,
+    ignoreBackchannels: true,
+  });
+  assert.deepEqual(
+    kept.timeline
+      .filter((e) => e.type === 'evaluation-skipped')
+      .map((e) => [e.lineId, e.why]),
+    [
+      ['l2', 'backchannel'],
+      ['l3', 'backchannel'],
+    ],
+  );
+  assert.equal(
+    kept.timeline.find((e) => e.type === 'decision').outcome,
+    'applied',
+  );
+  const scored = score(conversation, kept);
+  assert.equal(scored.opportunities.inTime, 1);
+  assert.equal(scored.evaluations.skippedBackchannel, 2);
+  // Fewer requests, and the acknowledgements are still in later ones.
+  assert.equal(after.seen.length, before.seen.length - 1);
+  assert.deepEqual(
+    after.seen[1].events.map((e) => e.id),
+    ['l1', 'l2', 'l3', 'l4'],
+  );
+
+  // A real new turn still overtakes a decision in flight.
+  const turn = talk([
+    line('l1', 0, 'Someone needs to book the room.'),
+    line('l2', 1_500, 'Actually, I booked it this morning.'),
+  ]);
+  const overtaken = await simulate(turn, scripted(script), {
+    ...options,
+    ignoreBackchannels: true,
+  });
+  assert.equal(
+    overtaken.timeline.find((e) => e.type === 'decision').outcome,
+    'superseded',
+  );
+});
+
+test('each request lists the cues already shown and how each ended, and says so in the prompt', async () => {
+  const conversation = talk([
+    line('l1', 0, 'Someone needs to book the room.'),
+    line('l2', 5_000, 'Moving on to the budget.'),
+    line('l3', 10_000, 'Lunch needs ordering too.'),
+    line('l4', 20_000, 'I ordered lunch.'),
+    line('l5', 25_000, 'Good.'),
+    line('l6', 80_000, 'That is everything.'),
+  ]);
+  const evaluator = scripted({
+    l1: ['show', 500, 'Who will book the room?'],
+    l2: ['withdraw', 500],
+    l3: ['show', 500, 'Who will order lunch?'],
+    l4: ['resolved', 500],
+    l5: ['show', 500, 'Anything else to order?'],
+  });
+  const options = { transcriptDelayMs: 0, minGapMs: 0, ...plain };
+  await simulate(conversation, evaluator, { ...options, cueHistory: true });
+  assert.deepEqual(
+    evaluator.seen.map((testCase) => testCase.earlierCues ?? []),
+    [
+      [],
+      [],
+      [{ text: 'Who will book the room?', state: 'withdrawn' }],
+      [{ text: 'Who will book the room?', state: 'withdrawn' }],
+      [
+        { text: 'Who will book the room?', state: 'withdrawn' },
+        { text: 'Who will order lunch?', state: 'resolved' },
+      ],
+      [
+        { text: 'Who will book the room?', state: 'withdrawn' },
+        { text: 'Who will order lunch?', state: 'resolved' },
+        { text: 'Anything else to order?', state: 'expired' },
+      ],
+    ],
+  );
+  // What is sent: the same request shape with one more field, only once
+  // there is something to list, and one more sentence in the prompt.
+  const first = buildPrompt(evaluator.seen[0]);
+  const third = buildPrompt(evaluator.seen[2]);
+  assert.deepEqual(Object.keys(JSON.parse(first)), ['events', 'existingCue']);
+  assert.deepEqual(Object.keys(JSON.parse(third)), [
+    'events',
+    'existingCue',
+    'earlierCues',
+  ]);
+  assert.deepEqual(JSON.parse(third).earlierCues, [
+    { text: 'Who will book the room?', state: 'withdrawn' },
+  ]);
+  assert.equal(systemPromptFor(evaluator.seen[0]), SYSTEM_PROMPT);
+  assert.match(
+    systemPromptFor(evaluator.seen[2]),
+    /Do not show a cue that repeats or rewords one of them/,
+  );
+
+  // Never more than the last few, and none at all when switched off.
+  const many = talk(
+    Array.from({ length: 14 }, (_, i) =>
+      line(`l${i + 1}`, i * 30_000, `Fictional line ${i + 1}.`),
+    ),
+  );
+  const chatty = scripted(
+    Object.fromEntries(
+      many.lines.map((item, i) => [item.id, ['show', 500, `Cue ${i + 1}?`]]),
+    ),
+  );
+  await simulate(many, chatty, { ...options, cueHistory: true });
+  assert.equal(chatty.seen.at(-1).earlierCues.length, HISTORY_CUES);
+  assert.equal(chatty.seen.at(-1).earlierCues.at(-1).text, 'Cue 13?');
+  const silent = scripted({ l1: ['show', 500, 'Who will book the room?'] });
+  await simulate(conversation, silent, options);
+  assert.ok(silent.seen.every((testCase) => !('earlierCues' in testCase)));
+});
+
+test("the listener's name is sent as the session name, with one speaker label kept", async () => {
+  const conversation = talk([line('l1', 0, 'Robin, is that endpoint ready?')]);
+  const options = { transcriptDelayMs: 0, minGapMs: 0, ...plain };
+  const named = scripted({});
+  await simulate(conversation, named, { ...options, listenerName: true });
+  assert.equal(named.seen[0].userName, 'Robin');
+  assert.equal(named.seen[0].events[0].speaker, 'Speaker');
+  assert.match(
+    systemPromptFor(named.seen[0]),
+    /userName is the listener's own name/,
+  );
+  assert.equal(JSON.parse(buildPrompt(named.seen[0])).userName, 'Robin');
+  // A conversation with no listener sends no name.
+  const nobody = scripted({});
+  await simulate({ ...conversation, listener: null }, nobody, {
+    ...options,
+    listenerName: true,
+  });
+  assert.ok(!('userName' in nobody.seen[0]));
+  // With the name, the labels evaluator's "asked you" moments are the same
+  // as before: only what the evaluator is told changes, not the scoring.
+  const without = scripted({});
+  await simulate(conversation, without, options);
+  assert.ok(!('userName' in without.seen[0]));
+});
+
+test('the budget estimate shows what transcript delay and decision time each allow', async () => {
+  const rows = await budgetTable();
+  assert.deepEqual(
+    [...new Set(rows.map((row) => row.transcriptDelayMs))],
+    [0, 1_000, 2_000, 3_000],
+  );
+  for (const row of rows) {
+    assert.equal(row.moments, 30);
+    assert.ok(row.withinBudget <= row.shown);
+    assert.ok(row.inTime <= row.moments);
+    // Nothing can be inside the budget when the two together exceed it.
+    if (row.transcriptDelayMs + row.decisionMs > 5_000)
+      assert.equal(row.withinBudget, 0, JSON.stringify(row));
+  }
+  const at = (delay, decision) =>
+    rows.find(
+      (row) => row.transcriptDelayMs === delay && row.decisionMs === decision,
+    );
+  // Today's two numbers put no cue inside the budget; halving both does.
+  assert.equal(at(3_000, 4_000).withinBudget, 0);
+  assert.ok(at(1_000, 2_000).withinBudget > 20);
+  assert.ok(at(3_000, 1_000).withinBudget > at(3_000, 2_000).withinBudget - 30);
+  assert.ok(at(0, 500).inTime >= at(3_000, 4_000).inTime);
 });
