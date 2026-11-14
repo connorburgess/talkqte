@@ -10,6 +10,8 @@
   --cue-accent: #9a452f;
   --cue-radius: var(--radius-panel);
   --cue-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
   background: var(--cue-surface);
   color: var(--cue-ink);
   padding: 0;
@@ -334,19 +336,28 @@
   min-height: 44px;
   color: var(--cue-ink);
 }
+/* A light corner control: the cue is the focus, not the way out. */
 .cue-card .dismiss-question {
+  position: absolute;
   top: 2px;
   right: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
   color: var(--cue-lead);
+  background: transparent;
+  transition:
+    background-color 160ms ease-out,
+    scale 120ms ease-out;
 }
 .cue-card .dismiss-question:hover:not(:disabled) {
   color: var(--cue-ink);
   background: #d6dfca;
-}
-.cue-card .dismiss-question {
-  transition:
-    background-color 160ms ease-out,
-    scale 120ms ease-out;
 }
 .cue-card .dismiss-question svg {
   transition: rotate 260ms var(--cue-ease);
@@ -378,8 +389,9 @@
   --cue-radius: 20px;
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
   margin: 0 6px 6px;
-  border-top: 0;
   border-radius: var(--cue-radius);
   padding: 0;
   overflow: hidden;
