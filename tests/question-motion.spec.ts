@@ -87,7 +87,7 @@ for (const surface of ['notebook', 'companion'] as const) {
         );
         return inset ? inset.slice(1, 5).map(Number) : null;
       }, at);
-    const early = await drawn(80);
+    const early = await drawn(20);
     expect(early).not.toBeNull();
     const [top, right, bottom, left] = early!;
     expect([top, bottom, left]).toEqual([0, 0, 0]);
@@ -327,50 +327,113 @@ for (const [name, width, cue, needed] of [
   }) => {
     const question = await liveCompanion(page, width);
     await page.evaluate((value) => window.liveTest.setCue(value), cue);
-    await expect(question.getByRole('heading')).toHaveText(cue.question);
-    // Contrast of each cue word against the card at a moment of the
-    // arrival, from the colours and strengths actually drawn.
-    const sample = (at: number) =>
-      question.evaluate((card, time) => {
+    const heading = question.getByRole('heading');
+    // The lab's review measures a cue the moment it is first on screen. This
+    // is the same measurement: each word's ink over what is behind it,
+    // through the strength of the word and of everything it sits inside,
+    // the card included. `at` freezes the arrival at a moment; without it
+    // the card is measured wherever its arrival has got to.
+    const weakest = (at?: number) =>
+      heading.evaluate((element, time) => {
+        const card = element.closest('.cue-card')!;
+        if (time !== undefined)
+          for (const animation of card.getAnimations({ subtree: true })) {
+            animation.pause();
+            animation.currentTime = time;
+          }
+        type Colour = { r: number; g: number; b: number; a: number };
+        const colour = (value: string): Colour => {
+          const [r, g, b, a = 1] = value.match(/[\d.]+/g)!.map(Number);
+          return { r, g, b, a };
+        };
+        const over = (top: Colour, under: Colour): Colour => ({
+          r: top.r * top.a + under.r * (1 - top.a),
+          g: top.g * top.a + under.g * (1 - top.a),
+          b: top.b * top.a + under.b * (1 - top.a),
+          a: 1,
+        });
+        const luminance = ({ r, g, b }: Colour) => {
+          const channel = (value: number) => {
+            const c = value / 255;
+            return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+          };
+          return (
+            0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+          );
+        };
+        const measure = (node: Element) => {
+          const chain: Element[] = [];
+          for (let at: Element | null = node; at; at = at.parentElement)
+            chain.unshift(at);
+          let behind: Colour = { r: 255, g: 255, b: 255, a: 1 };
+          let strength = 1;
+          for (const at of chain) {
+            const style = getComputedStyle(at);
+            const fill = colour(style.backgroundColor);
+            // A new background resets how much of it shows through.
+            if (fill.a > 0) {
+              behind = over(fill, behind);
+              strength = 1;
+            }
+            strength *= Number(style.opacity);
+          }
+          const ink = colour(getComputedStyle(node).color);
+          const seen = over({ ...ink, a: ink.a * strength }, behind);
+          const [light, dark] = [luminance(seen), luminance(behind)].sort(
+            (a, b) => b - a,
+          );
+          return (light + 0.05) / (dark + 0.05);
+        };
+        const words = [element, ...element.querySelectorAll('*')].filter(
+          (node) =>
+            [...node.childNodes].some(
+              (child) => child.nodeType === 3 && child.nodeValue!.trim(),
+            ),
+        );
+        return {
+          ratio: Math.min(...words.map(measure)),
+          size: parseFloat(getComputedStyle(element).fontSize),
+        };
+      }, at);
+    // As it appears, the way the lab samples it.
+    await heading.waitFor({ state: 'visible' });
+    const appearing = await weakest();
+    await expect(heading).toHaveText(cue.question);
+    // Bold text counts as large from 18.66 px.
+    expect(appearing.size >= 18.66 ? 3 : 4.5).toBe(needed);
+    expect(appearing.ratio).toBeGreaterThanOrEqual(needed);
+    // And at fixed moments of the arrival, the first frame above all. The
+    // card does not fade in, so nothing is ever fainter than this.
+    for (const at of [0, 16, 66, 150])
+      expect((await weakest(at)).ratio, `${at} ms`).toBeGreaterThanOrEqual(
+        needed,
+      );
+
+    // The sideways opening covers the ends of lines only briefly: a fifth
+    // of a second in, every word of the cue is uncovered.
+    const covered = (at: number) =>
+      heading.evaluate((element, time) => {
+        const card = element.closest('.cue-card')!;
         for (const animation of card.getAnimations({ subtree: true })) {
           animation.pause();
           animation.currentTime = time;
         }
-        const channels = (colour: string) =>
-          colour
-            .match(/[\d.]+/g)!
-            .slice(0, 3)
-            .map(Number);
-        const luminance = (rgb: number[]) => {
-          const [r, g, b] = rgb.map((value) => {
-            const c = value / 255;
-            return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-          });
-          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        };
-        const heading = card.querySelector('h2')!;
-        const surface = channels(getComputedStyle(card).backgroundColor);
-        const ink = channels(getComputedStyle(heading).color);
-        const size = parseFloat(getComputedStyle(heading).fontSize);
-        const shown = Number(getComputedStyle(card).opacity);
-        const ratios = [...heading.querySelectorAll('span')].map((word) => {
-          const strength = Number(getComputedStyle(word).opacity);
-          const drawn = ink.map(
-            (value, index) =>
-              value * strength + surface[index] * (1 - strength),
-          );
-          return (luminance(surface) + 0.05) / (luminance(drawn) + 0.05);
-        });
-        return { weakest: Math.min(...ratios), size, shown };
+        const box = card.getBoundingClientRect();
+        const inset = getComputedStyle(card).clipPath.match(
+          /inset\([\d.]+(?:px|%)? ([\d.]+)(px|%)?/,
+        );
+        const hidden = inset
+          ? inset[2] === 'px'
+            ? Number(inset[1])
+            : (Number(inset[1]) / 100) * box.width
+          : 0;
+        const open = box.right - hidden;
+        return [...element.querySelectorAll('span')].filter(
+          (word) => word.getBoundingClientRect().right > open + 0.5,
+        ).length;
       }, at);
-    const first = await sample(0);
-    // Bold text counts as large from 18.66 px.
-    expect(first.size >= 18.66 ? 3 : 4.5).toBe(needed);
-    expect(first.weakest).toBeGreaterThanOrEqual(needed);
-    // By 150 ms the card itself has finished fading in.
-    const soon = await sample(150);
-    expect(soon.shown).toBeGreaterThan(0.95);
-    expect(soon.weakest).toBeGreaterThanOrEqual(needed);
+    expect(await covered(0)).toBeGreaterThan(0);
+    expect(await covered(200)).toBe(0);
   });
 
 test('an answer to a held cue opens in place with a tick, keeps focus, and does not replay for a cue already answered', async ({

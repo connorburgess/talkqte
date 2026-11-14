@@ -1,0 +1,469 @@
+{
+  "status": "Hand-written fictional briefs for the dialogue lab's offline fakes, written 14 November 2026. Real runs generate their briefs; these only exercise the engine in tests and CI.",
+  "format": "See docs/cue-dialogue.md#the-brief. The offline blocks are read only by the deterministic fakes: castTurns are the fake cast's fixed lines, listener holds the fake listener's lines, and each criterion's offline pattern is what the fake judge looks for. No agent request ever carries an offline block, a moment or a criterion's offline pattern.",
+  "briefs": [
+    {
+      "id": "release-handoff",
+      "domain": "software",
+      "title": "Release readiness check",
+      "setting": "A four-person video call two days before a mobile app release. The release is planned for Thursday.",
+      "focus": {
+        "name": "Noor",
+        "role": "Backend engineer",
+        "goal": "Leave knowing what you personally must do before Thursday, without taking on more than you can finish.",
+        "knows": [
+          "Your payment retry change is merged and ships on Thursday.",
+          "You have Wednesday afternoon free and nothing else before the release."
+        ],
+        "distracted": [],
+        "casting": {
+          "voice": "feminine",
+          "age": "28-35",
+          "portrait": "Long dark hair tied back, plain green jumper, home office with a bookshelf, head and shoulders, webcam framing."
+        }
+      },
+      "people": [
+        {
+          "name": "Elena",
+          "role": "Engineering manager",
+          "goal": "Confirm the release is ready and that every open item has a name against it.",
+          "privately": [
+            "The rollback runbook still lists Sam, who moved to another team last month. Nobody owns it now.",
+            "You assume the release is on Thursday."
+          ],
+          "casting": {
+            "voice": "feminine",
+            "age": "40-49",
+            "portrait": "Short grey bob and glasses, navy cardigan, plain meeting room with a whiteboard, head and shoulders."
+          }
+        },
+        {
+          "name": "Tomas",
+          "role": "QA lead",
+          "goal": "Report regression results honestly and keep your own workload manageable.",
+          "privately": [
+            "The last regression run found two flaky checkout tests. You plan to triage them yourself this afternoon.",
+            "You are off on Thursday morning."
+          ],
+          "casting": {
+            "voice": "masculine",
+            "age": "30-39",
+            "portrait": "Curly brown hair and stubble, casual checked shirt, small study with plants, head and shoulders."
+          }
+        },
+        {
+          "name": "Ines",
+          "role": "Product manager",
+          "goal": "Keep the partner demo on Wednesday and the announcement on track.",
+          "privately": [
+            "Marketing moved the announcement from Thursday to Friday. Mention it only late in the call.",
+            "You promised a partner a demo build on Wednesday."
+          ],
+          "casting": {
+            "voice": "feminine",
+            "age": "30-39",
+            "portrait": "Wavy brown hair, olive skin, white blouse, bright kitchen table by a window, head and shoulders."
+          }
+        }
+      ],
+      "moments": [
+        {
+          "id": "runbook-owner",
+          "kind": "unowned-task",
+          "by": "Elena",
+          "description": "The rollback runbook has no owner since Sam moved teams."
+        },
+        {
+          "id": "announcement-moves",
+          "kind": "date-slip",
+          "by": "Ines",
+          "description": "The announcement moves to Friday late in the call; whether the release moves too is left to the group."
+        },
+        {
+          "id": "flaky-tests",
+          "kind": "decoy",
+          "by": "Tomas",
+          "description": "Flaky tests sound like a loose end, but Tomas takes them on in the same breath."
+        }
+      ],
+      "criteria": [
+        {
+          "id": "runbook-owned",
+          "moment": "runbook-owner",
+          "text": "Before the call ends, someone says who will own the rollback runbook.",
+          "offline": {
+            "pattern": "take the rollback runbook"
+          }
+        },
+        {
+          "id": "release-day-stated",
+          "moment": "announcement-moves",
+          "text": "After Ines says the announcement moved, someone states which day the release itself is on.",
+          "offline": {
+            "pattern": "release stays (on )?Thursday"
+          }
+        },
+        {
+          "id": "no-duplicate-triage",
+          "moment": "flaky-tests",
+          "text": "Nobody asks who will triage the flaky tests after Tomas has said he will.",
+          "offline": {
+            "pattern": "who.*triage",
+            "absent": true
+          }
+        }
+      ],
+      "offline": {
+        "castTurns": [
+          {
+            "speaker": "Elena",
+            "text": "Okay, thanks for joining. Two days to the release, so let's check what's left.",
+            "next": "Tomas"
+          },
+          {
+            "speaker": "Tomas",
+            "text": "Regression mostly passed. Two checkout tests are flaky again, and I'll triage both of them this afternoon.",
+            "next": "Elena"
+          },
+          {
+            "speaker": "Elena",
+            "text": "Good. The rollback runbook still lists Sam, who moved teams, so someone needs to own it before Thursday.",
+            "next": "Ines"
+          },
+          {
+            "speaker": "Ines",
+            "text": "Not me, sorry. I'm building the partner demo for Wednesday.",
+            "next": "Tomas"
+          },
+          {
+            "speaker": "Tomas",
+            "text": "Ines, is the demo build coming from the release branch or from main?",
+            "next": "Ines"
+          },
+          {
+            "speaker": "Ines",
+            "text": "The release branch, so it's the same code.",
+            "next": "Elena"
+          },
+          {
+            "speaker": "Elena",
+            "text": "Noor, anything from the payments side?",
+            "next": "Noor"
+          },
+          {
+            "speaker": "Ines",
+            "text": "One more thing. Marketing moved the announcement to Friday.",
+            "next": "Elena"
+          },
+          {
+            "speaker": "Elena",
+            "text": "Then the release stays Thursday and we announce on Friday. Anything else?",
+            "next": "Tomas"
+          },
+          {
+            "speaker": "Tomas",
+            "text": "Nothing from me. Thanks, everyone.",
+            "next": "end"
+          }
+        ],
+        "listener": {
+          "plain": [
+            "Payments is ready from my side. The retry change is merged.",
+            "That works for me."
+          ],
+          "withCard": "I can take the rollback runbook. I have Wednesday afternoon free."
+        }
+      }
+    },
+    {
+      "id": "renewal-seat-count",
+      "domain": "customer",
+      "title": "Renewal check-in",
+      "setting": "A video call between an account manager and two people from a customer, a month before the contract renews.",
+      "focus": {
+        "name": "Malik",
+        "role": "Account manager",
+        "goal": "Keep the renewal on track and leave with the customer's numbers right.",
+        "knows": [
+          "The signed order form covers 60 seats at the current price until March.",
+          "A new team at the customer can start onboarding on the 3rd."
+        ],
+        "distracted": [
+          {
+            "fromMs": 16000,
+            "toMs": 22000,
+            "doing": "answering a colleague's message about another account"
+          }
+        ],
+        "casting": {
+          "voice": "masculine",
+          "age": "35-44",
+          "portrait": "Short black hair and a trimmed beard, light blue shirt, tidy home office, head and shoulders."
+        }
+      },
+      "people": [
+        {
+          "name": "Greta",
+          "role": "Operations director at the customer",
+          "goal": "Get a new team onboarded soon and avoid surprises at renewal.",
+          "privately": [
+            "A new team of eight joins next month and you want them onboarded quickly.",
+            "You will send the call summary yourself."
+          ],
+          "casting": {
+            "voice": "feminine",
+            "age": "45-54",
+            "portrait": "Blonde hair in a low ponytail, dark blazer, shared office with desks behind, head and shoulders."
+          }
+        },
+        {
+          "name": "Owen",
+          "role": "Finance analyst at the customer",
+          "goal": "Make sure the renewal budget is right.",
+          "privately": [
+            "You believe the contract covers 40 seats. The signed order form actually says 60, but you have not checked it."
+          ],
+          "casting": {
+            "voice": "masculine",
+            "age": "25-32",
+            "portrait": "Sandy hair, round glasses, grey crew-neck top, living room with a lamp, head and shoulders."
+          }
+        }
+      ],
+      "moments": [
+        {
+          "id": "seat-figure",
+          "kind": "wrong-figure",
+          "by": "Owen",
+          "description": "Owen states 40 seats; the signed order says 60."
+        },
+        {
+          "id": "onboarding-question",
+          "kind": "question-to-focus",
+          "by": "Greta",
+          "description": "Greta asks Malik by name when the new team can start, while Malik is half-listening."
+        },
+        {
+          "id": "summary-sender",
+          "kind": "decoy",
+          "by": "Greta",
+          "description": "Greta says someone should send a summary, then says she will."
+        }
+      ],
+      "criteria": [
+        {
+          "id": "seats-corrected",
+          "moment": "seat-figure",
+          "text": "Someone states that the contract covers 60 seats, correcting the figure of 40.",
+          "offline": {
+            "pattern": "60 seats"
+          }
+        },
+        {
+          "id": "onboarding-answered",
+          "moment": "onboarding-question",
+          "text": "Malik gives Greta a date when the new team can start onboarding.",
+          "offline": {
+            "pattern": "onboarding on the 3rd"
+          }
+        },
+        {
+          "id": "summary-not-duplicated",
+          "moment": "summary-sender",
+          "text": "Malik does not offer to send the summary after Greta has said she will.",
+          "offline": {
+            "pattern": "I'll send the summary",
+            "absent": true
+          }
+        }
+      ],
+      "offline": {
+        "castTurns": [
+          {
+            "speaker": "Greta",
+            "text": "Thanks for making time. We mostly want to talk about the renewal and the new team.",
+            "next": "Owen"
+          },
+          {
+            "speaker": "Owen",
+            "text": "On the renewal, our budget assumes the same 40 seats we have today.",
+            "next": "Greta"
+          },
+          {
+            "speaker": "Greta",
+            "text": "And we have a new team of eight joining next month. Malik, when could they start onboarding?",
+            "next": "Malik"
+          },
+          {
+            "speaker": "Greta",
+            "text": "Someone should send a summary after this. Actually, I'll send it myself.",
+            "next": "Owen"
+          },
+          {
+            "speaker": "Owen",
+            "text": "Fine by me. I'll share the budget sheet once it's updated.",
+            "next": "Greta"
+          },
+          {
+            "speaker": "Greta",
+            "text": "Great. That's everything from us, thank you.",
+            "next": "end"
+          }
+        ],
+        "listener": {
+          "plain": [
+            "Sorry, I missed the last part there. Could you say that again?",
+            "Thank you both, talk soon."
+          ],
+          "withCard": "The new team can start onboarding on the 3rd."
+        }
+      }
+    },
+    {
+      "id": "interview-debrief",
+      "domain": "hiring",
+      "title": "Interview panel debrief",
+      "setting": "A four-person debrief after a candidate named Rowan finished a day of interviews for a backend role.",
+      "focus": {
+        "name": "Aziz",
+        "role": "Interviewer for the coding round",
+        "goal": "Give a fair, specific read of the coding round and keep the decision moving.",
+        "knows": [
+          "Rowan solved the coding problem with a clear approach but missed one edge case until prompted."
+        ],
+        "distracted": [],
+        "casting": {
+          "voice": "masculine",
+          "age": "30-39",
+          "portrait": "Black hair, clean-shaven, dark jumper, home office with a plain wall, head and shoulders."
+        }
+      },
+      "people": [
+        {
+          "name": "Hana",
+          "role": "Hiring manager, chairing",
+          "goal": "Reach a decision today and assign the follow-ups.",
+          "privately": [
+            "Reference checks have not been assigned to anyone.",
+            "You will write up the panel feedback yourself."
+          ],
+          "casting": {
+            "voice": "feminine",
+            "age": "40-49",
+            "portrait": "Straight black hair at shoulder length, cream cardigan, meeting room with a window, head and shoulders."
+          }
+        },
+        {
+          "name": "Diego",
+          "role": "Interviewer for the systems design round",
+          "goal": "Share your concerns about Rowan's design depth without dominating.",
+          "privately": [
+            "You think Rowan's design answer was shallow on data consistency."
+          ],
+          "casting": {
+            "voice": "masculine",
+            "age": "35-44",
+            "portrait": "Wavy dark hair, short beard, denim shirt, small study with a guitar on the wall, head and shoulders."
+          }
+        },
+        {
+          "name": "Wen",
+          "role": "Recruiter",
+          "goal": "Keep the offer timeline realistic.",
+          "privately": [
+            "The offer deadline moved from Friday to Monday because Rowan asked for more time. Mention it near the end."
+          ],
+          "casting": {
+            "voice": "neutral",
+            "age": "25-34",
+            "portrait": "Short dark hair, black t-shirt under an open overshirt, bright shared office, head and shoulders."
+          }
+        }
+      ],
+      "moments": [
+        {
+          "id": "references-unowned",
+          "kind": "unowned-task",
+          "by": "Hana",
+          "description": "Reference checks need doing and nobody has them."
+        },
+        {
+          "id": "feedback-writeup",
+          "kind": "settled",
+          "by": "Hana",
+          "description": "Diego asks who writes up the feedback and Hana says she will."
+        }
+      ],
+      "criteria": [
+        {
+          "id": "references-owned",
+          "moment": "references-unowned",
+          "text": "Before the call ends, someone says who will do the reference checks.",
+          "offline": {
+            "pattern": "I can do the reference checks"
+          }
+        },
+        {
+          "id": "writeup-not-duplicated",
+          "moment": "feedback-writeup",
+          "text": "Aziz does not offer to write up the feedback after Hana has said she will.",
+          "offline": {
+            "pattern": "I can write (it|the feedback) up",
+            "absent": true
+          }
+        }
+      ],
+      "offline": {
+        "castTurns": [
+          {
+            "speaker": "Hana",
+            "text": "Thanks, everyone. Let's go round the panel and try to decide on Rowan today.",
+            "next": "Diego"
+          },
+          {
+            "speaker": "Diego",
+            "text": "My worry is the design round. The answer on data consistency stayed quite shallow.",
+            "next": "Hana"
+          },
+          {
+            "speaker": "Hana",
+            "text": "Noted. Somebody also needs to do the reference checks, we haven't started them.",
+            "next": "Wen"
+          },
+          {
+            "speaker": "Wen",
+            "text": "Rowan sent two referees this morning, both former managers.",
+            "next": "Diego"
+          },
+          {
+            "speaker": "Diego",
+            "text": "Who's writing up the feedback for the panel?",
+            "next": "Hana"
+          },
+          {
+            "speaker": "Hana",
+            "text": "I'll write it up tonight. Aziz, how did the coding round go?",
+            "next": "Aziz"
+          },
+          {
+            "speaker": "Wen",
+            "text": "Also, the offer deadline moved to Monday. Rowan asked for more time.",
+            "next": "Hana"
+          },
+          {
+            "speaker": "Hana",
+            "text": "Okay. Let's meet again on Thursday with the references in. Thanks, all.",
+            "next": "end"
+          }
+        ],
+        "listener": {
+          "plain": [
+            "Solid overall. Clear approach, and Rowan missed one edge case until I prompted.",
+            "Thanks, see you Thursday."
+          ],
+          "withCard": "I can do the reference checks tomorrow, since I'm free in the morning."
+        }
+      }
+    }
+  ]
+}

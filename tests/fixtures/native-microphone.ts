@@ -482,7 +482,7 @@ mockIPC(
         });
         return;
       case 'export_preview':
-        if (session.live)
+        if (session.live && session.status === 'running')
           throw new Error('Live sessions are not saved or exported.');
         return preview.exportPreview();
       case 'export_markdown':

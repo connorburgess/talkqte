@@ -75,11 +75,11 @@ If a problem is not listed, the [feedback route](#reporting-a-problem) at the en
 
 ## Export
 
-| You see                                                   | What to do                                                       |
-| --------------------------------------------------------- | ---------------------------------------------------------------- |
-| "Review the export before choosing a destination."        | Choose Export, read the preview, then choose Choose destination. |
-| "Could not save the file. Choose a writable destination." | Pick a folder you can write to.                                  |
-| "Live sessions are not saved or exported."                | Expected: a live transcript stays in memory only.                |
+| You see                                                   | What to do                                                                                                                                       |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| "Review the export before choosing a destination."        | Choose Export, read the preview, then choose Choose destination.                                                                                 |
+| "Could not save the file. Choose a writable destination." | Pick a folder you can write to.                                                                                                                  |
+| "Live sessions are not saved or exported."                | Expected while a live session runs: the transcript stays in memory only. After Stop live session, Export saves your notes, never the transcript. |
 
 ## Other messages
 
