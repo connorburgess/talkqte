@@ -18,9 +18,10 @@ or merge approval of this workflow is not dispatch or runtime approval.
 
 Dispatch from the repository's `main` workflow only, with `source_commit` set to
 the approved full 40-character lowercase commit SHA. Branch names, tags, short
-SHAs, expressions and zero SHAs fail before source checkout. The helper then
-requires the checkout to match that SHA, be clean and be reachable from
-`origin/main`. Main ancestry establishes source location; it does not replace the
+SHAs, expressions and zero SHAs fail before source checkout. Immediately after source checkout, literal trusted workflow commands require
+exact HEAD equality and ancestry from `refs/remotes/origin/main`, before `npm ci`,
+tests or any selected-source helper can execute. The helper repeats the identity
+and ancestry checks and requires a clean checkout before building. Main ancestry establishes source location; it does not replace the
 coordinator's exact-commit approval. The selected commit must already contain the
 reviewed helper/tests and assembled native dependencies. There is no arbitrary
 command, feature, artifact path or signing input.

@@ -40,6 +40,10 @@ jobs:
           ref: ${{ inputs.source_commit }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Verify trusted source ancestry before source execution
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          git merge-base --is-ancestor "$SOURCE_COMMIT" refs/remotes/origin/main
       - run: npm ci
       - name: Check artifact contracts without building or launching
         run: node --test scripts/lab-build-artifact.test.mjs

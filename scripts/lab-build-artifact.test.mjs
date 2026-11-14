@@ -7,6 +7,7 @@ import {
   rmSync,
   symlinkSync,
   writeFileSync,
+  existsSync,
   linkSync,
   truncateSync,
 } from 'node:fs';
@@ -288,3 +289,70 @@ test(
     assert.ok(!entries.some((path) => path.includes('__MACOSX')));
   },
 );
+
+test('trusted workflow rejects non-main source before any selected-source execution', (t) => {
+  const workflow = readFileSync(
+    new URL('../.github/workflows/lab-build-artifact.yml', import.meta.url),
+    'utf8',
+  );
+  const marker =
+    '      - name: Verify trusted source ancestry before source execution\n        run: |\n';
+  const start = workflow.indexOf(marker);
+  assert.ok(start > workflow.indexOf('ref: ${{ inputs.source_commit }}'));
+  const end = workflow.indexOf('      - run: npm ci', start);
+  assert.ok(end > start);
+  const shell = workflow
+    .slice(start + marker.length, end)
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => line.slice(10))
+    .join('\n');
+  assert.match(shell, /git merge-base --is-ancestor/);
+  assert.ok(end < workflow.indexOf('node --test'));
+  const root = temp(t);
+  const git = (...args) =>
+    execFileSync('git', args, {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+  git('init', '-q');
+  git('config', 'user.name', 'Fictional Maintainer');
+  git('config', 'user.email', 'maintainer@example.invalid');
+  writeFileSync(join(root, 'fixture'), 'fictional trusted source');
+  git('add', '.');
+  git('commit', '-qm', 'test: trusted source');
+  const main = git('rev-parse', 'HEAD');
+  git('update-ref', 'refs/remotes/origin/main', main);
+  const execute = (sha) =>
+    spawnSync(
+      'bash',
+      [
+        '--noprofile',
+        '--norc',
+        '-eo',
+        'pipefail',
+        '-c',
+        `${shell}\nprintf reached > selected-source-executed`,
+      ],
+      {
+        cwd: root,
+        env: { ...process.env, SOURCE_COMMIT: sha },
+        encoding: 'utf8',
+      },
+    );
+  assert.equal(execute(main).status, 0);
+  assert.ok(existsSync(join(root, 'selected-source-executed')));
+  rmSync(join(root, 'selected-source-executed'));
+  writeFileSync(join(root, 'fixture'), 'fictional non-main source');
+  git('add', '.');
+  git('commit', '-qm', 'test: unmerged source');
+  assert.notEqual(execute(git('rev-parse', 'HEAD')).status, 0);
+  assert.ok(!existsSync(join(root, 'selected-source-executed')));
+  assert.notEqual(
+    execute(main).status,
+    0,
+    'wrong checked-out HEAD must also fail',
+  );
+  assert.ok(!existsSync(join(root, 'selected-source-executed')));
+});
