@@ -204,12 +204,18 @@ impl Request {
     }
 
     #[cfg(any(test, feature = "lab-evaluator"))]
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(
+        dead_code,
+        reason = "native facade activation and API usage vary by build/test configuration"
+    )]
     pub(crate) fn session_id(&self) -> u64 {
         self.session
     }
     #[cfg(any(test, feature = "lab-evaluator"))]
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(
+        dead_code,
+        reason = "native facade activation and API usage vary by build/test configuration"
+    )]
     pub(crate) fn context_revision(&self) -> u64 {
         self.context_revision
     }
@@ -371,7 +377,10 @@ pub struct Cancellation {
 
 impl Cancellation {
     #[cfg(any(test, feature = "lab-evaluator"))]
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(
+        dead_code,
+        reason = "native facade activation and API usage vary by build/test configuration"
+    )]
     pub(crate) fn deadline(&self) -> Instant {
         self.deadline
     }

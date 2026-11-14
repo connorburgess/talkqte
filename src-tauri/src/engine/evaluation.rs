@@ -122,7 +122,10 @@ impl Engine {
     }
 
     #[cfg(any(test, all(debug_assertions, feature = "lab-evaluator")))]
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(
+        dead_code,
+        reason = "native facade activation and API usage vary by build/test configuration"
+    )]
     pub(crate) fn with_lab_lifecycle(
         mut self,
         lifecycle: std::sync::Arc<dyn crate::cue_evaluator::EvaluationLifecycle>,
@@ -157,7 +160,10 @@ impl Engine {
     }
 
     #[cfg(any(test, feature = "lab-evaluator"))]
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(
+        dead_code,
+        reason = "native facade activation and API usage vary by build/test configuration"
+    )]
     pub(crate) fn lab_cue_metadata(&self, id: &str) -> Option<(u64, u64)> {
         self.evaluation
             .as_ref()?
@@ -170,7 +176,10 @@ impl Engine {
     /// A backend that cannot be used as configured: the reason stays shown,
     /// and no review can be prepared, so nothing can be approved or sent.
     #[cfg(any(test, all(debug_assertions, feature = "lab-evaluator")))]
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(
+        dead_code,
+        reason = "native facade activation and API usage vary by build/test configuration"
+    )]
     pub(crate) fn lab_unavailable(mut self) -> Self {
         if let Some(state) = &mut self.evaluation {
             state.misconfigured = true;

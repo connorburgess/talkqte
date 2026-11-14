@@ -6008,8 +6008,17 @@ mod tests {
     }
 }
 
-// Compile the actual inert lab facade before native activates its root module.
-// No non-test runtime selection is introduced here.
-#[cfg(all(test, unix))]
+// Compile the inert facade where native activation is unavailable. Activated
+// builds run its root-module tests once, without duplicate socket fixtures.
+#[cfg(all(
+    test,
+    unix,
+    not(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))
+))]
 #[path = "lab_evaluator.rs"]
 mod lab_evaluator_offline;

@@ -36,11 +36,10 @@ const QUEUE: usize = 16;
 #[derive(Clone, Copy)]
 pub(crate) enum ControlReason {
     Stop,
-    Pause,
-    Revoke,
     Replace,
-    Dismiss,
     Exit,
+    // Engine Pause/revoke/Dismiss and other eligibility changes share this
+    // terminal lifecycle path; native hooks only need Stop/Replace/Exit.
     EligibilityChange,
     PublicationFailed,
     TransportFailed,
@@ -49,10 +48,7 @@ impl ControlReason {
     fn wire(self) -> &'static str {
         match self {
             Self::Stop => "stop",
-            Self::Pause => "pause",
-            Self::Revoke => "revoke",
             Self::Replace => "replace",
-            Self::Dismiss => "dismiss",
             Self::Exit => "exit",
             Self::EligibilityChange => "eligibility_change",
             Self::PublicationFailed => "publication_failed",
