@@ -20,9 +20,11 @@ export function createLabCaptureTake({
   nativeReleaseMs = 6000,
   processEvents = process,
   onGuard,
+  observe,
 } = {}) {
   required(
     (onGuard === undefined || typeof onGuard === 'function') &&
+      (observe === undefined || typeof observe === 'function') &&
       player?.identity &&
       launcher?.playerSource === player.identity &&
       recorder?.playerSource === player.identity &&
@@ -63,6 +65,18 @@ export function createLabCaptureTake({
       completionReserveMs >= 1000 &&
       completionReserveMs <= 3000,
   );
+  const report = (stage, outcome = 'observed', ids = {}, timing) =>
+    observe?.({
+      stage,
+      outcome,
+      ids,
+      timing: timing ?? {
+        clockId: 'node',
+        atMs: performance.now(),
+        uncertaintyMs: 0,
+        basis: 'receipt',
+      },
+    });
   const root = new AbortController(),
     subscriptions = [];
   let phase = 'starting',
@@ -148,6 +162,15 @@ export function createLabCaptureTake({
         : normal && !failure
           ? 'completed'
           : 'stopped';
+      try {
+        report(
+          'run.ended',
+          failed ? 'failure' : normal && !failure ? 'observed' : 'cancelled',
+        );
+      } catch {
+        failed = true;
+        phase = 'failed-cleanup';
+      }
       if (failed) throw gateFailure('cleanup');
       if (failure || !normal) throw gateFailure('cancelled');
       return Object.freeze({
@@ -201,6 +224,7 @@ export function createLabCaptureTake({
         launcher.playerSource === player.identity &&
         recorder.playerSource === player.identity,
     );
+    report('run.started');
     nativeStartedAt = performance.now();
     await owner.start({ runId, signal: root.signal });
     const listening = await source.waitListening({
@@ -213,6 +237,7 @@ export function createLabCaptureTake({
         listening.listening === true &&
         listening.source?.application === 'TalkQTE Lab Player',
     );
+    report('source.listening', 'observed', { sessionId: listening.sessionId });
     const recordDeadline = setTimeout(fail, recorderMs);
     try {
       const recording = await recorder.start({
@@ -221,6 +246,7 @@ export function createLabCaptureTake({
         signal: root.signal,
       });
       required(recording?.started === true);
+      report('recorder.frame-accepted');
     } finally {
       clearTimeout(recordDeadline);
     }
@@ -277,6 +303,17 @@ export function createLabCaptureTake({
               sourceDeadline - anchor.monotonicMs - anchor.uncertaintyMs,
           });
           onGuard?.(guard);
+          report(
+            'speech.render-start',
+            'observed',
+            {},
+            {
+              clockId: 'node',
+              atMs: anchor.monotonicMs,
+              uncertaintyMs: anchor.uncertaintyMs,
+              basis: 'event',
+            },
+          );
         } catch {
           fail();
         }
@@ -288,6 +325,7 @@ export function createLabCaptureTake({
         result?.completed === true &&
         result.sha256 === media.sha256,
     );
+    report('speech.render-end'); // Receipt of validated completion, not an exact final sample timestamp.
     normal = true;
   });
   const done = work.then(close, () => {
