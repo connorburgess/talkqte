@@ -25,7 +25,8 @@ backend does not require the separate `claude-cli` feature. No constructor grant
 permission. Construction is inert: the transport worker waits
 for its first permission-gated evaluation before reading a descriptor or opening
 a socket. Before that lazy authentication, the orchestrator must independently
-abort/close the shared run on Stop; a nonexistent socket cannot carry cancellation.
+abort/close the shared run on Stop and use the owned-process handshake below; a
+nonexistent socket cannot carry cancellation.
 There is no public command for injecting a cue or choosing an executable.
 
 The notebook and companion name the selected provider while lines may leave the
@@ -34,6 +35,61 @@ cues; it refuses prior/imported notes and excludes focus lines. Model-generated
 cue text may return to the same provider as current/earlier context. Processing is
 fictional-lab-only, uses the explicitly selected subscription, and remains subject
 to that account's retention terms.
+
+## Stop for an owned development process
+
+A macOS debug build with `native-audio-spike`, `lab-evaluator` and a private
+`timing-log` channel can explicitly opt into a Stop-only signal handshake for a
+fictional QuickTime application-source session:
+`TALKQTE_DEV_STOP_SIGNAL=usr2` and `TALKQTE_DEV_LAB_RUN_ID` set to the broker's
+same opaque run ID (1–64 ASCII letters, digits, hyphens or underscores). Settings
+are frozen at setup, together with the exact `TALKQTE_DEV_APPLICATION_SOURCE`
+value `QuickTime Player` and a required finite positive `TALKQTE_DEV_STOP_AFTER_S`.
+Other sources or a missing/invalid guard refuse arming. The microphone must be
+pristine and unused in this process before arming (generation/revision zero, Off,
+no cleanup pending). This mode blocks standalone microphone admission and live
+microphone reservation before any native request. Any unexpected microphone
+history remains unsupported even after teardown; it cannot become release proof.
+Ordinary builds and controls outside this opt-in retain their behavior.
+
+Ordinary builds install no handler. Invalid settings, an
+existing nondefault SIGUSR2 disposition or failed worker/handler installation
+refuse setup before application-source autostart; existing dispositions are not
+overwritten. This adds no Start, source-selection, permission or cue command.
+
+The launcher must own the exact child process and its unique timing stream.
+It aborts the shared provider gate immediately when Stop is requested, including
+before authentication or native readiness. It remembers early Stop intent and
+sends SIGUSR2 once only after that child's matching `dev_stop` event with
+`run_id` and `step: armed`. Native emits `armed` after handler/worker installation
+and before source autostart. The launcher waits at most five seconds for arming;
+missing arming fails startup without signaling a default-disposition process.
+
+The raw handler only sets a one-way atomic latch. Off-handler work emits
+`latched`, cancels the lab model, then emits `stopping` and requests ordinary
+source/live Stop. Admission stays closed, including late startup completion.
+`released` requires the source worker's FIFO settlement fence, confirmed host
+release, explicit completion acknowledgement for every extracted ordinary Live
+drain, settled startup admission and a still-pristine microphone. Removing Live
+from Runtime transfers ownership; it is not completion. Earlier concurrent Stop
+drains remain pending across replacement until their exact empty source-session
+handle is acknowledged. Unknown, microphone-bearing or runner-bearing handles
+remain unconfirmed; this handshake does not establish their cleanup. A detached
+source transcription worker, abandoned operation or cleanup deadline cannot
+establish release. A five-second native cleanup observation timeout emits terminal `failed`,
+with no later `released`; it does not force cleanup or stop the process. The
+launcher allows at least six seconds after signaling and twelve seconds overall
+for its Stop lifecycle. These are wait ceilings, not measured release guarantees.
+
+The timing channel is lossy and has no delivery acknowledgement. Missing `armed`
+or `released` means unconfirmed cleanup; signal success and process exit are not
+release evidence. The first integrated launcher must also set a finite
+`TALKQTE_DEV_STOP_AFTER_S` ordinary-Stop guard independently of SIGUSR2. Its Stop
+request also needs release evidence. A missing handshake can require owner
+intervention; the launcher must not signal blindly or use termination as proof.
+Offline tests cover sticky Stop, delayed startup/listing, overlapping ordinary
+Stop/replacement, delayed microphone teardown/history refusal and release fences; this
+handshake has not been exercised with a native app or real capture.
 
 ## One request and one newest context
 

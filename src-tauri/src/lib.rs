@@ -19,6 +19,13 @@ pub mod cue_evaluator;
     feature = "native-audio-spike"
 ))]
 mod dev_model;
+#[cfg(all(
+    debug_assertions,
+    target_os = "macos",
+    feature = "native-audio-spike",
+    feature = "lab-evaluator"
+))]
+mod dev_stop;
 pub mod engine;
 pub mod granola;
 #[cfg(all(
@@ -65,6 +72,13 @@ struct Runtime {
     /// delivering transcript lines takes the lock.
     live: Option<Live>,
     live_start: live_control::StartGate,
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    lab_stop_drains: dev_stop::Drains,
     /// The approved application-audio source feeding the live session, if
     /// any. Dropping it cancels that source's operation.
     live_source: Option<live_source::LiveSource>,
@@ -94,6 +108,13 @@ impl Default for Runtime {
             export: None,
             live: None,
             live_start: live_control::StartGate::default(),
+            #[cfg(all(
+                debug_assertions,
+                target_os = "macos",
+                feature = "native-audio-spike",
+                feature = "lab-evaluator"
+            ))]
+            lab_stop_drains: dev_stop::Drains::default(),
             live_source: None,
             source_session: None,
             processing_reviews: processing_reviews::Reviews::default(),
@@ -1274,6 +1295,13 @@ struct Live {
 /// ends the engine session if it is still the one this fed. Blocks; call it
 /// without holding the runtime lock, because delivering lines takes it.
 fn finish_live(app: &tauri::AppHandle, live: Live, flush: bool) {
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    let empty_source_handle = live.microphone.is_none() && live.runner.is_none();
     if let Some(generation) = live.microphone {
         let controller = app.state::<microphone::Controller>().inner().clone();
         microphone::stop_blocking(app, controller, generation);
@@ -1286,10 +1314,25 @@ fn finish_live(app: &tauri::AppHandle, live: Live, flush: bool) {
         }
     }
     let state = app.state::<AppState>();
-    let _ = change(app, &state, |e| {
+    let finished = change(app, &state, |e| {
         e.finish_live_stop(live.session);
         Ok(())
-    });
+    })
+    .is_ok();
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    if finished {
+        if let Ok(mut runtime) = state.0.lock() {
+            runtime
+                .lab_stop_drains
+                .acknowledge(live.session, empty_source_handle);
+        }
+    }
+    let _ = finished;
 }
 
 /// Starts a live session: the microphone feeds local transcription, and the

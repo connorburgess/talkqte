@@ -254,6 +254,9 @@ impl Drop for Listed {
 }
 
 enum Command {
+    /// FIFO fence after every previously admitted list/start has settled.
+    #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+    LabStopFence(Sender<()>),
     List(Listed),
     Run {
         source: String,
@@ -299,6 +302,7 @@ struct State {
     /// Counts from the last operation that reached release.
     last_run: Option<Evidence>,
     exiting: bool,
+    lab_stop_closed: bool,
     /// The last attempt came from the development launch setting, not the
     /// panel. Cleared by the next step the panel asks for.
     by_setting: bool,
@@ -347,6 +351,7 @@ impl Host {
                 problem: None,
                 last_run: None,
                 exiting: false,
+                lab_stop_closed: false,
                 by_setting: false,
             }),
         }))
@@ -390,8 +395,21 @@ impl Host {
     }
 
     fn idle(&self, state: &mut State) -> Result<(), Error> {
+        #[cfg(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        ))]
+        if crate::dev_stop::requested() {
+            return Err(Error::Busy);
+        }
         self.settle(state);
-        if state.exiting || state.active.is_some() || state.listing.is_some() {
+        if state.exiting
+            || state.lab_stop_closed
+            || state.active.is_some()
+            || state.listing.is_some()
+        {
             return Err(Error::Busy);
         }
         Ok(())
@@ -417,6 +435,10 @@ impl Host {
                 let mut backend = factory();
                 while let Ok(command) = commands.recv() {
                     match command {
+                        #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+                        Command::LabStopFence(done) => {
+                            let _ = done.send(());
+                        }
                         Command::List(mut listed) => {
                             // Cancelled or quit while this waited: the OS is
                             // not asked at all, so no prompt can follow.
@@ -484,17 +506,17 @@ impl Host {
         let worker = self.worker(&mut state)?;
         let cancelled = Arc::new(AtomicBool::new(false));
         state.listing = Some(cancelled.clone());
-        // A request answers itself when dropped unanswered, and that takes
-        // this lock. So the request exists only after the lock is released.
-        drop(state);
+        // Enqueue under the admission lock, so a later Stop fence cannot
+        // overtake this admitted listing. Retain a failed send until after
+        // unlocking: dropping its self-answering request also takes the lock.
         let listed = Listed {
             host: Arc::downgrade(&self.0),
             cancelled,
             answered: false,
         };
-        worker
-            .send(Command::List(listed))
-            .map_err(|_| Error::Unavailable)
+        let sent = worker.send(Command::List(listed));
+        drop(state);
+        sent.map_err(|_| Error::Unavailable)
     }
 
     pub(crate) fn cancel_list(&self) -> Result<(), Error> {
@@ -626,6 +648,44 @@ impl Host {
         }
         state.review = None;
         stop_active(&self.0.gate, &mut state, None);
+    }
+
+    /// Permanently close admission and request the ordinary source Stop. The
+    /// returned FIFO fence is not a release report: it confirms that queued or
+    /// in-flight listing/start work can no longer acquire resources later.
+    #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+    pub(crate) fn close_for_lab_stop(&self) -> Result<std::sync::mpsc::Receiver<()>, Error> {
+        let mut state = self.lock();
+        state.lab_stop_closed = true;
+        if let Some(cancelled) = state.listing.take() {
+            cancelled.store(true, Ordering::Release);
+        }
+        state.review = None;
+        stop_active(&self.0.gate, &mut state, None);
+        let (done, settled) = channel();
+        if let Some(worker) = &state.worker {
+            worker
+                .send(Command::LabStopFence(done))
+                .map_err(|_| Error::Unavailable)?;
+        } else {
+            let _ = done.send(());
+        }
+        Ok(settled)
+    }
+
+    #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+    pub(crate) fn lab_stop_released(&self) -> bool {
+        let Ok(mut state) = self.0.state.try_lock() else {
+            return false;
+        };
+        self.settle(&mut state);
+        state.lab_stop_closed
+            && state.active.is_none()
+            && state.listing.is_none()
+            && !state
+                .last_run
+                .as_ref()
+                .is_some_and(|run| run.worker_detached)
     }
 
     /// Take a finished operation out, keeping why it ended.
@@ -1134,9 +1194,14 @@ pub(crate) mod app {
                 .window("main")
                 .permission("allow-application-audio"),
         )?;
-        // The development launch setting, read once here and acted on once,
-        // on its own thread: it waits for listing and the start.
-        if let Some(settings) = DevSettings::read(|name| std::env::var(name).ok()) {
+        // Freeze source and finite Stop settings once, shared by arming and
+        // autostart so the approved source cannot change between those steps.
+        let settings = DevSettings::read(|name| std::env::var(name).ok());
+        #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+        crate::dev_stop::install(app, host.clone(), settings.as_ref())
+            .map_err(std::io::Error::other)?;
+        // Act once on its own thread: it waits for listing and the start.
+        if let Some(settings) = settings {
             let host = host.clone();
             let _ = std::thread::Builder::new()
                 .name("talkqte-dev-source".into())
