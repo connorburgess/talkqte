@@ -602,3 +602,22 @@ test('a bundled conversation needs no results file, and an unknown one is refuse
     /Use --conversation/,
   );
 });
+
+test('a live meeting refuses a start delay outside 0 to 600 seconds before anything is served', async () => {
+  for (const delay of ['-1', '601', '2.5', 'soon'])
+    await assert.rejects(
+      emulator(
+        [
+          'live',
+          '--conversation',
+          'standup-flaky-test',
+          '--out',
+          outside(),
+          '--start-delay',
+          delay,
+        ],
+        { print: () => {} },
+      ),
+      /--start-delay is a whole number of seconds from 0 to 600/,
+    );
+});

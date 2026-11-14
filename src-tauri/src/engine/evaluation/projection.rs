@@ -55,6 +55,8 @@ pub enum Issue {
     TimedOut,
     InvalidReply,
     Misconfigured,
+    DevSettings,
+    CallLimit,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -159,6 +161,7 @@ pub struct ProcessingSnapshot {
     pub last_decision: Option<LastDecision>,
     /// Conversation lines are being sent to the processor right now.
     pub sending: bool,
+    pub approval_by_setting: bool,
     /// The microphone alone, when a selected-application source also exists.
     /// `capture` then combines the two and never understates either.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -402,6 +405,12 @@ impl Engine {
             Some(EvaluationStatus::Unavailable(EvaluationIssue::InvalidReply)) => {
                 Some(Issue::InvalidReply)
             }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::DevSettings)) => {
+                Some(Issue::DevSettings)
+            }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::CallLimit)) => {
+                Some(Issue::CallLimit)
+            }
             Some(EvaluationStatus::Unavailable(EvaluationIssue::Misconfigured)) => {
                 Some(Issue::Misconfigured)
             }
@@ -486,6 +495,10 @@ impl Engine {
             phase == Phase::Active && self.evaluation_status() == Some(EvaluationStatus::Pending);
         ProcessingSnapshot {
             sending,
+            approval_by_setting: self
+                .evaluation
+                .as_ref()
+                .is_some_and(|s| s.approval_by_setting),
             revision: 0,
             session: self.session().to_string(),
             scope_revision,

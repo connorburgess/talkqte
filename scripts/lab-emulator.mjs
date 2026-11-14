@@ -23,7 +23,7 @@
 //     node scripts/lab-emulator.mjs live [--results <results .json>] \
 //       --conversation <id> --out <directory outside the repository> \
 //       [--port 1445] [--voices-cache <dir>] [--portraits-cache <dir>] \
-//       [--no-captions] [--open]
+//       [--no-captions] [--start-delay <seconds, default 3>] [--open]
 //
 // Without --results it plays one of the bundled fictional conversations.
 // It plays only fictional conversations that pass the lab's checks, sends
@@ -550,6 +550,7 @@ export async function main(args, { print = console.log } = {}) {
       '--voices-cache',
       '--portraits-cache',
       '--port',
+      '--start-delay',
     ],
     switches: ['--no-captions', '--no-sound', '--open'],
   });
@@ -576,10 +577,17 @@ export async function main(args, { print = console.log } = {}) {
     throw new Error(
       `No conversation "${shared.id}" ${shared.file ? 'in that results file' : 'among the bundled ones'}. It has: ${replays.map((item) => item.id).join(', ')}.`,
     );
+  // Seconds the live meeting waits after its window opens before the first
+  // line, so the app's capture can start first.
+  const startDelay = Number(flags['--start-delay'] ?? 3);
   if (mode === 'live') {
     const port = Number(flags['--port'] ?? 1445);
     if (!Number.isInteger(port) || port < 1024 || port > 65535)
       throw new Error('--port is a number from 1024 to 65535.');
+    if (!Number.isInteger(startDelay) || startDelay < 0 || startDelay > 600)
+      throw new Error(
+        '--start-delay is a whole number of seconds from 0 to 600.',
+      );
   }
   outputDirectory(shared.directory, {});
   const { chromium } = await import('@playwright/test');
@@ -601,6 +609,7 @@ export async function main(args, { print = console.log } = {}) {
   const live = await serveMeeting({
     ...shared,
     port: Number(flags['--port'] ?? 1445),
+    startDelayMs: startDelay * 1000,
   });
   const profile = mkdtempSync(join(tmpdir(), 'talkqte-meeting-window-'));
   const [executable, windowArgs] = windowCommand(

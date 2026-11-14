@@ -8,6 +8,71 @@ it, but nothing to list, review or start. It was not run:
 no application was listed, no permission prompt was shown and no stream was
 created for this change. Roadmap item **T2** stays open.
 
+## Selected-browser diagnostic — 14 November 2026
+
+The dated implementation and offline checks below are historical. A later
+bounded device diagnostic on macOS 26.4 compared QuickTime Player with Chrome
+for Testing 158.0.8127.18 using cached fictional meeting media. It used a
+separate, locally signed audio-only ScreenCaptureKit probe, not the TalkQTE
+host or recognizer. Only aggregate sample counts, peak and RMS were retained;
+no audio or video was retained, and no microphone input or model calls were used. Existing
+permission was used without changing settings or requesting another grant.
+
+| Selected source / filter                             | Buffers | Samples at 16 kHz mono |    Peak |     RMS |
+| ---------------------------------------------------- | ------: | ---------------------: | ------: | ------: |
+| QuickTime Player, main process                       |     618 |                197,760 | 0.67734 | 0.06820 |
+| Chrome for Testing, main process                     |     616 |                197,120 |       0 |       0 |
+| Chrome for Testing, listed verified helpers included |     616 |                197,120 |       0 |       0 |
+
+Each meter ran once for 12 seconds and completed native Stop without an error
+or unsupported buffer format. QuickTime's exact fictional document was
+verified, positioned at zero, unmuted and played once, then paused. Two earlier
+preparation attempts stopped before any playback/capture: a desktop bridge
+startup failure and an unsupported scripting document-ID report. Neither is
+capture evidence.
+
+Chrome ran in one dedicated instance with an isolated profile. The browser and
+its helpers were verified through executable paths inside that installation,
+bundle identifiers and parent process relationships. The helper that Core
+Audio reported as actively outputting audio was a direct child of that
+browser, with bundle ID `com.google.chrome.for.testing.helper`. It started
+after the initial process-tree inspection. ScreenCaptureKit omitted it from
+both capture-time application listings, so **both actual inclusion sets
+contained only the selected browser's main process**. No unrelated browser or
+application was added. This was not a successful test of capturing the absent
+helper.
+
+The main-only probe process ran approximately 6.45–19.05 seconds after playback
+release, overlapping three fictional clips; the second ran at 19.05–31.66
+seconds, overlapping two later clips. These are process bounds, not precise
+stream-start timestamps. Page clip events support that overlap, and Core Audio
+reported the helper's output active throughout both meters. Different clips
+were compared, so this is not a sample-for-sample comparison. Playback stopped
+after about 45.5 seconds; the dedicated browser, audio helper, local server and
+temporary profile were released. QuickTime remained paused.
+
+**Conclusion and limits.** The existing list-based helper inclusion cannot
+include an audio-active helper absent from ScreenCaptureKit's listing. The
+Chrome filters yielded silence while the same probe captured nonzero QuickTime
+PCM. Core Audio's active-output flag does not prove that the helper produced
+nonzero samples, and no one verified physical speaker audibility. Direct
+helper capture, browser transcription and Google Meet remain unverified; this
+record establishes neither browser support nor an end-to-end TalkQTE pass.
+
+**Next readiness blocker and acceptance.** Establish a supported way to capture
+only the selected browser's verified audio-producing process, including one
+that starts after selection, without including unrelated apps. Apple's
+[application filter](<https://developer.apple.com/documentation/screencapturekit/sccontentfilter/init(display:includingapplications:exceptingwindows:)>)
+accepts `SCRunningApplication` objects; its
+[application metadata](https://developer.apple.com/documentation/screencapturekit/scrunningapplication)
+does not document constructing one from an arbitrary PID. Do not forge those
+objects or fall back to all-system capture. The
+[process-tap alternative and OS decision](system-audio-plan.md#compare-two-apis-without-silently-changing-the-target)
+need a separately scoped proof: verified helper-only nonzero PCM, unrelated
+fictional audio excluded, bounded Stop/release, then QuickTime regression and
+host-seam tests. A new adapter, permission flow or feature OS floor is not
+chosen or implemented by this record. **T2 remains open.**
+
 ## What a development build adds
 
 - `application_audio_host.rs`: the host, its status and the app wiring.
@@ -35,9 +100,11 @@ The command takes one action at a time and returns the current status.
    application (its activation policy is regular, so it appears in the Dock),
    has a bundle identifier, and has at least one window at the normal level,
    on any Space. Background agents, view services and helpers are left out. A
-   helper whose bundle identifier extends a listed application's, as
+   helper present in that same listing whose bundle identifier extends a listed application's, as
    `com.google.Chrome.helper` extends `com.google.Chrome`, is captured with
-   that application and not listed. ScreenCaptureKit's listing cannot tell
+   that application and not listed. Helpers absent from ScreenCaptureKit's
+   listing cannot be added by this path; the browser diagnostic above records
+   one such limitation. ScreenCaptureKit's listing cannot tell
    which applications are playing audio. Meeting and playback applications
    come first, in a fixed order (Zoom, Microsoft Teams, Webex, FaceTime,
    Slack, Google Chrome, Safari, Arc, Firefox, QuickTime Player), then the
