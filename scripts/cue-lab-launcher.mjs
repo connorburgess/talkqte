@@ -298,6 +298,7 @@ function launcher({
   }
   const created = openSync(timingPath, 'wx', 0o600);
   closeSync(created);
+  const timingStamp = lstatSync(timingPath, { bigint: true });
   let used = false,
     child = null,
     reader = null,
@@ -320,6 +321,15 @@ function launcher({
     mode,
     directory,
     timingPath,
+    get timingFileIdentity() {
+      return activeRunId
+        ? Object.freeze({
+            dev: timingStamp.dev.toString(),
+            ino: timingStamp.ino.toString(),
+            runId: activeRunId,
+          })
+        : null;
+    },
     subscribe(listener) {
       requireThat(
         !closed && typeof listener === 'function' && subscribers.size < 8,

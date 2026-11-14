@@ -398,7 +398,15 @@ export function createLabEvidenceWriter({
         return false;
       }
     },
-    attach({ id, kind, path, clockId, durationMs, sealed } = {}) {
+    attach({
+      id,
+      kind,
+      path,
+      clockId,
+      durationMs,
+      sealed,
+      snapshotCoverage,
+    } = {}) {
       required(
         !closed &&
           !terminal &&
@@ -416,6 +424,78 @@ export function createLabEvidenceWriter({
       required(
         kind !== 'recording' || !artifacts.some((a) => a.kind === 'recording'),
       );
+      if (snapshotCoverage !== undefined) {
+        const c = snapshotCoverage;
+        required(
+          kind === 'native-timing' &&
+            exact(c, [
+              'schema',
+              'runId',
+              'sourcePath',
+              'sourceIdentity',
+              'sourceReleaseObserved',
+              'recorderFinalizationObserved',
+              'nativeWriterMayRemainOpen',
+              'cutoffReceipt',
+              'observedBytesAtOpen',
+              'observedBytesAtEnd',
+              'cutoffBytes',
+              'readBytes',
+              'copiedBytes',
+              'rows',
+              'trailingPartialBytes',
+              'omittedBytesAtCutoff',
+              'unobservedBytesAtOpen',
+              'grewDuringCopy',
+              'rowLimitReached',
+              'completeRunCoverage',
+              'unknownLateRecords',
+              'sha256',
+            ]) &&
+            c.schema === 'talkqte.lab.timing-snapshot.v1' &&
+            c.runId === runId &&
+            typeof c.sourcePath === 'string' &&
+            isAbsolute(c.sourcePath) &&
+            exact(c.sourceIdentity, ['dev', 'ino']) &&
+            ['dev', 'ino'].every(
+              (k) =>
+                typeof c.sourceIdentity[k] === 'string' &&
+                /^(0|[1-9]\d*)$/.test(c.sourceIdentity[k]),
+            ) &&
+            c.sourceReleaseObserved === true &&
+            c.recorderFinalizationObserved === true &&
+            c.nativeWriterMayRemainOpen === true &&
+            c.completeRunCoverage === false &&
+            c.unknownLateRecords === true &&
+            exact(c.cutoffReceipt, ['clockId', 'atMs', 'basis']) &&
+            clocks.some((clock) => clock.id === c.cutoffReceipt.clockId) &&
+            number(c.cutoffReceipt.atMs) &&
+            c.cutoffReceipt.basis === 'receipt' &&
+            [
+              'observedBytesAtOpen',
+              'observedBytesAtEnd',
+              'cutoffBytes',
+              'readBytes',
+              'copiedBytes',
+              'rows',
+              'omittedBytesAtCutoff',
+              'unobservedBytesAtOpen',
+            ].every((k) => Number.isSafeInteger(c[k]) && c[k] >= 0) &&
+            typeof c.grewDuringCopy === 'boolean' &&
+            typeof c.rowLimitReached === 'boolean' &&
+            (c.rowLimitReached
+              ? c.trailingPartialBytes === null
+              : Number.isSafeInteger(c.trailingPartialBytes) &&
+                c.trailingPartialBytes >= 0) &&
+            c.observedBytesAtEnd >= c.observedBytesAtOpen &&
+            c.copiedBytes <= c.readBytes &&
+            c.readBytes <= c.cutoffBytes &&
+            c.cutoffBytes <= c.observedBytesAtOpen &&
+            c.omittedBytesAtCutoff === c.cutoffBytes - c.copiedBytes &&
+            c.unobservedBytesAtOpen === c.observedBytesAtOpen - c.cutoffBytes &&
+            /^[a-f0-9]{64}$/.test(c.sha256),
+        );
+      }
       const source = outside(path);
       required(source === path && !lstatSync(path).isSymbolicLink());
       const max = kind === 'recording' ? 4 * 1024 ** 3 : limits.maxFileBytes;
@@ -491,12 +571,28 @@ export function createLabEvidenceWriter({
         closeSync(input);
         if (output !== undefined) closeSync(output);
       }
+      const sha256 = hash.digest('hex');
+      if (
+        snapshotCoverage &&
+        (snapshotCoverage.sha256 !== sha256 ||
+          snapshotCoverage.copiedBytes !== size ||
+          snapshotCoverage.rows !== rows)
+      ) {
+        try {
+          unlinkSync(destination);
+        } catch {}
+        fail();
+        throw gateFailure('protocol');
+      }
       const artifact = {
         id,
         kind,
         path: destination.slice(directory.length + 1),
-        sha256: hash.digest('hex'),
+        sha256,
         bytes: size,
+        ...(snapshotCoverage
+          ? { snapshotCoverage: structuredClone(snapshotCoverage) }
+          : {}),
         ...(clockId ? { clockId } : {}),
       };
       artifacts.push(artifact);
