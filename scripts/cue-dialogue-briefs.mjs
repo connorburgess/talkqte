@@ -216,6 +216,18 @@ export function briefProblems(
     fail(`domain must be one of ${DOMAINS.join(', ')}.`);
   if (plan?.domain && brief.domain !== plan.domain)
     fail(`domain must be ${plan.domain}, as asked.`);
+  // A distraction after the call has ended can never happen, and nor can a
+  // moment planted in it.
+  if (
+    plan?.callLengthMs &&
+    Array.isArray(brief.focus?.distracted) &&
+    brief.focus.distracted.some(
+      (window) => !(Number(window?.toMs) <= plan.callLengthMs),
+    )
+  )
+    fail(
+      `Every distracted window must end within the call's ${plan.callLengthMs} ms.`,
+    );
   if (!isText(brief.title, 80)) fail('title must be short text.');
   if (!isText(brief.setting, 300))
     fail('setting must be one or two sentences.');
