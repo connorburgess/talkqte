@@ -13,7 +13,7 @@ import {
   fstatSync,
   constants,
 } from 'node:fs';
-import { join, relative, isAbsolute } from 'node:path';
+import { join, relative, isAbsolute, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -39,9 +39,12 @@ const hex = (value, n) =>
 const requireThat = (condition) => {
   if (!condition) throw gateFailure('protocol');
 };
+const CHECKOUT = realpathSync(fileURLToPath(new URL('../', import.meta.url)));
 const outside = (path) => {
-  const relation = relative(realpathSync(process.cwd()), realpathSync(path));
-  return relation.startsWith('..') || isAbsolute(relation);
+  const relation = relative(CHECKOUT, realpathSync(path));
+  return (
+    relation === '..' || relation.startsWith('..' + sep) || isAbsolute(relation)
+  );
 };
 const stamp = (s) =>
   [s.dev, s.ino, s.size, s.mtimeMs, s.ctimeMs, s.mode].join(':');
@@ -170,12 +173,13 @@ function verifyBuild(manifestFile, approved) {
       ],
       { encoding: 'utf8', timeout: 5000, maxBuffer: 65536 },
     ).trim();
-  requireThat(
-    readPlist('CFBundleIdentifier') === 'com.talkqte.desktop' &&
-      readPlist('CFBundleExecutable') === 'talkqte',
-  );
   // display's stderr is needed as structured input, not a log or shell command.
   const inspect = () => {
+    requireThat(
+      realpathSync(m.bundlePath) === m.bundlePath &&
+        readPlist('CFBundleIdentifier') === 'com.talkqte.desktop' &&
+        readPlist('CFBundleExecutable') === 'talkqte',
+    );
     execFileSync(
       '/usr/bin/codesign',
       ['--verify', '--strict', '--deep', m.bundlePath],
@@ -214,6 +218,7 @@ function verifyBuild(manifestFile, approved) {
     manifest: m,
     executable: m.executable,
     check() {
+      inspect();
       const current = digest(m.executable);
       requireThat(
         current.sha256 === m.sha256 &&
@@ -267,7 +272,9 @@ function launcher({
         lstatSync(whisperModel).isFile() &&
         outside(whisperModel),
     );
-  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'tq-owned-')));
+  const temporaryRoot = realpathSync(tmpdir());
+  requireThat(outside(temporaryRoot));
+  const directory = realpathSync(mkdtempSync(join(temporaryRoot, 'tq-owned-')));
   chmodSync(directory, 0o700);
   requireThat(outside(directory));
   const timingPath = join(directory, 'timing.jsonl');

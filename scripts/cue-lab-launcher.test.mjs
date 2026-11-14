@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { test as nodeTest } from 'node:test';
+import { test as nodeTest, mock } from 'node:test';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 const test = (name, fn) =>
   nodeTest(name, { skip: process.platform === 'win32' }, fn);
 import {
@@ -12,6 +16,10 @@ import {
   utimesSync,
   renameSync,
   copyFileSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -401,3 +409,220 @@ for (const mutation of ['content', 'time', 'identity'])
       await f.close();
     }
   });
+
+// Exercise production preparation and final verification with bounded OS-command
+// stand-ins only. No signature command or app executable is run by these tests.
+function fakeBuild() {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'tq-build-')));
+  const bundlePath = join(directory, 'Fixture.app');
+  mkdirSync(join(bundlePath, 'Contents', 'MacOS'), { recursive: true });
+  const executable = join(bundlePath, 'Contents', 'MacOS', 'talkqte');
+  const plist = join(bundlePath, 'Contents', 'Info.plist');
+  const resource = join(bundlePath, 'Contents', 'resource.txt');
+  writeFileSync(executable, 'offline fixture; must never execute', {
+    mode: 0o700,
+  });
+  writeFileSync(plist, 'original');
+  writeFileSync(resource, 'original');
+  const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
+  const value = {
+    ...record,
+    executable,
+    bundlePath,
+    sha256: hash(readFileSync(executable)),
+  };
+  const bytes = JSON.stringify(value);
+  const manifestFile = join(directory, 'manifest.json');
+  writeFileSync(manifestFile, bytes, { mode: 0o600 });
+  const descriptor = join(directory, 'descriptor.json');
+  const model = join(directory, 'model.bin');
+  writeFileSync(descriptor, '{}', { mode: 0o600 });
+  writeFileSync(model, 'offline');
+  let verifies = 0;
+  mock.method(childProcess, 'execFileSync', (command, args) => {
+    if (command === '/usr/bin/plutil') {
+      assert.equal(args.at(-1), plist);
+      return args[1] === 'CFBundleIdentifier'
+        ? readFileSync(plist, 'utf8') === 'original'
+          ? 'com.talkqte.desktop'
+          : 'changed.id'
+        : 'talkqte';
+    }
+    assert.equal(command, '/usr/bin/codesign');
+    assert.deepEqual(args, ['--verify', '--strict', '--deep', bundlePath]);
+    verifies++;
+    assert.equal(
+      readFileSync(resource, 'utf8'),
+      'original',
+      'bundle seal mismatch',
+    );
+    return '';
+  });
+  mock.method(childProcess, 'spawnSync', (command, args) => {
+    assert.equal(command, '/usr/bin/codesign');
+    assert.deepEqual(args, [
+      '--display',
+      '--verbose=4',
+      '--requirements',
+      '-',
+      bundlePath,
+    ]);
+    return {
+      status: 0,
+      stdout: 'designated => ' + value.signature.designatedRequirement,
+      stderr: 'Authority=TalkQTE Development\nIdentifier=com.talkqte.desktop',
+    };
+  });
+  syncBuiltinESMExports();
+  const options = {
+    manifestFile,
+    approved: {
+      manifestSha256: hash(bytes),
+      executableSha256: value.sha256,
+      commit: value.commit,
+    },
+    selection,
+    sourceApplication: 'QuickTime Player',
+    stopAfterS: 120,
+    whisperModel: model,
+    modelConnection: 'on',
+    environment: {},
+  };
+  const launchOptions = {
+    executable,
+    metadata: selection,
+    onTiming() {},
+    environment: {
+      TALKQTE_DEV_STOP_SIGNAL: 'usr2',
+      TALKQTE_DEV_STOP_AFTER_S: '120',
+      TALKQTE_DEV_LAB_RUN_ID: 'fixture-run',
+      TALKQTE_DEV_CUE_BACKEND: 'lab-subscription',
+      TALKQTE_DEV_LAB_DESCRIPTOR: descriptor,
+      TALKQTE_DEV_LAB_PROVIDER: selection.provider,
+      TALKQTE_DEV_LAB_MODEL: selection.model,
+      TALKQTE_DEV_LAB_EFFORT: selection.effort,
+    },
+  };
+  return {
+    directory,
+    options,
+    launchOptions,
+    resource,
+    plist,
+    get verifies() {
+      return verifies;
+    },
+    close() {
+      mock.restoreAll();
+      syncBuiltinESMExports();
+      rmSync(directory, { recursive: true, force: true });
+    },
+  };
+}
+
+for (const changed of ['resource', 'plist'])
+  test(`production final check rejects changed bundle ${changed} with unchanged executable`, () => {
+    const f = fakeBuild();
+    let prepared;
+    try {
+      prepared = prepareLabLauncher(f.options);
+      assert.equal(f.verifies, 1);
+      writeFileSync(f[changed], 'changed');
+      assert.throws(() => prepared.launch(f.launchOptions));
+      assert.equal(prepared.processStarted, false);
+      if (changed === 'resource') assert.equal(f.verifies, 2);
+    } finally {
+      prepared?.close();
+      if (prepared)
+        rmSync(prepared.directory, { recursive: true, force: true });
+      f.close();
+    }
+  });
+
+test('changed caller cwd cannot admit repository-local manifest, model or descriptor via direct or symlink paths', () => {
+  const f = fakeBuild();
+  const cwd = process.cwd();
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const inside = mkdtempSync(join(root, '.launcher-test-'));
+  let prepared;
+  try {
+    const manifest = join(inside, 'manifest.json');
+    const model = join(inside, 'model.bin');
+    const descriptor = join(inside, 'descriptor.json');
+    copyFileSync(f.options.manifestFile, manifest);
+    chmodSync(manifest, 0o600);
+    writeFileSync(model, 'offline');
+    writeFileSync(descriptor, '{}', { mode: 0o600 });
+    process.chdir(f.directory);
+    assert.throws(() =>
+      prepareLabLauncher({ ...f.options, manifestFile: manifest }),
+    );
+    assert.throws(() =>
+      prepareLabLauncher({ ...f.options, whisperModel: model }),
+    );
+    const alias = join(f.directory, 'inside-alias');
+    symlinkSync(inside, alias);
+    assert.throws(() =>
+      prepareLabLauncher({
+        ...f.options,
+        manifestFile: join(alias, 'manifest.json'),
+      }),
+    );
+    assert.throws(() =>
+      prepareLabLauncher({
+        ...f.options,
+        whisperModel: join(alias, 'model.bin'),
+      }),
+    );
+    prepared = prepareLabLauncher(f.options);
+    for (const path of [descriptor, join(alias, 'descriptor.json')]) {
+      // Each rejected launch consumes its instance, as every launch attempt does.
+      const candidate =
+        path === descriptor ? prepared : prepareLabLauncher(f.options);
+      try {
+        assert.throws(() =>
+          candidate.launch({
+            ...f.launchOptions,
+            environment: {
+              ...f.launchOptions.environment,
+              TALKQTE_DEV_LAB_DESCRIPTOR: path,
+            },
+          }),
+        );
+        assert.equal(candidate.processStarted, false);
+      } finally {
+        candidate.close();
+        rmSync(candidate.directory, { recursive: true, force: true });
+      }
+    }
+  } finally {
+    process.chdir(cwd);
+    rmSync(inside, { recursive: true, force: true });
+    f.close();
+  }
+});
+
+test('temporary output under a two-dot checkout descendant or its alias is refused', () => {
+  const root = realpathSync(fileURLToPath(new URL('../', import.meta.url)));
+  const inside = mkdtempSync(join(root, '..runtime-'));
+  const external = realpathSync(mkdtempSync(join(tmpdir(), 'tq-alias-')));
+  const alias = join(external, 'inside');
+  symlinkSync(inside, alias);
+  const original = process.env.TMPDIR;
+  const cwd = process.cwd();
+  try {
+    process.chdir(external);
+    for (const path of [root, inside, alias]) {
+      process.env.TMPDIR = path;
+      assert.throws(() =>
+        prepareLabFixtureLauncher({ fixtureCase: 'normal', selection }),
+      );
+    }
+  } finally {
+    process.chdir(cwd);
+    if (original === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = original;
+    rmSync(inside, { recursive: true, force: true });
+    rmSync(external, { recursive: true, force: true });
+  }
+});

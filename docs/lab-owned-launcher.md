@@ -32,8 +32,10 @@ or name-only fallback exists. The approved SHA256 binds the signed executable to
 the reviewed source/features receipt; a valid signature alone cannot establish
 those feature/commit claims.
 
-Immediately before the direct owned spawn, executable hash, file identity, size,
-mode and timestamps must still match preparation. A changed artifact is refused.
+Immediately before the direct owned spawn, strict/deep bundle signature,
+pinned identity/designated requirement and Info.plist metadata are verified
+again, and executable hash, file identity, size, mode and timestamps must still
+match preparation. A changed artifact is refused.
 This is not an atomic verify-and-exec primitive or protection against an adversary
 changing files after the final check. Runtime session metadata cross-checks the
 reviewed commit and all four features when observed; it never supplies prelaunch
@@ -55,7 +57,9 @@ The environment retains only HOME/PATH/TMPDIR/LANG/LC_ALL plus the frozen approv
 lab/source/model/Stop settings. Ambient API keys, endpoint/proxy/provider overrides
 and runtime injection settings are refused. The ordinary timed Stop guard is
 independent of USR2; neither its expiry nor process termination proves release.
-The descriptor's owned regular file is validated and its canonical path forwarded,
+The outside-checkout boundary is anchored to the canonical module repository
+root, independently of the caller's current directory, and resolves symlink
+targets. The descriptor's owned regular file is validated and its canonical path forwarded,
 including macOS `/var` aliases. No nonce or credential is read or copied.
 
 The prepared object's `launch` is passed to `createLabNativeOwner`; it returns
