@@ -68,11 +68,12 @@
     transform: none;
   }
 }
-/* Words are there, light, from the first frame, and darken in reading
-   order: the purpose and the cue first, then the quoted line. */
+/* A cue's words are there from the first frame and darken one by one. They
+   start no lighter than text may be: 55% strength is 3.2:1 against the card,
+   enough for the large bold cue, and 68% is 4.6:1, for anything smaller. */
 @keyframes cue-word {
   from {
-    opacity: 0.26;
+    opacity: var(--cue-wait);
   }
   to {
     opacity: 1;
@@ -95,36 +96,25 @@
   transform-origin: left center;
   animation: cue-draw 640ms 180ms var(--cue-ease) both;
 }
-.cue-card .cue-source,
-.cue-card .keep-line {
+.cue-card .cue-source {
   animation: cue-follow 420ms 120ms var(--cue-ease) both;
 }
+/* A suggested cue darkens in reading order, within moments. */
 .cue-card .cue-word {
+  --cue-wait: 0.55;
   animation: cue-word 320ms ease-out both;
   animation-delay: calc(50ms + var(--i) * 24ms);
 }
-.cue-card .cue-quote .cue-word {
-  animation-duration: 360ms;
-  animation-delay: calc(300ms + var(--i) * 22ms);
-}
-/* Spoken words wait, still readable, and darken at about the pace they
-   were said. */
-@keyframes cue-spoken {
-  from {
-    opacity: var(--cue-unsaid);
-  }
-  to {
-    opacity: 1;
-  }
-}
+/* Spoken words fill at about the pace they were said. Each takes about as
+   long as two words do, so the fill has a soft leading edge. */
 .cue-card .cue-word.cue-spoken {
-  --cue-unsaid: 0.5;
-  animation: cue-spoken 260ms ease-out both;
+  animation-duration: var(--fade);
+  animation-timing-function: linear;
   animation-delay: var(--at);
 }
-/* Small text keeps more of its strength while it waits. */
-.cue-card .cue-quote .cue-word.cue-spoken {
-  --cue-unsaid: 0.68;
+.cue-card .cue-quote .cue-word,
+.question-standard.cue-card.cue-longer .cue-word {
+  --cue-wait: 0.68;
 }
 .question.cue-card.is-leaving {
   animation: cue-leave 190ms cubic-bezier(0.7, 0, 0.84, 0) both;
@@ -138,7 +128,7 @@
 .cue-card.is-settled:not(.is-leaving)
   .cue-answer.is-arriving
   .cue-word.cue-spoken {
-  animation: cue-spoken 260ms ease-out both;
+  animation: cue-word var(--fade) linear both;
   animation-delay: var(--at);
 }
 
@@ -231,33 +221,12 @@
     transform 260ms linear,
     background-color 300ms ease-out;
 }
-/* The moving end of the line: a small bead, so a glance finds it. */
-.cue-card .cue-bead {
-  position: absolute;
-  top: 50%;
-  left: calc(var(--left) * 100%);
-  width: 7px;
-  height: 7px;
-  translate: -50% -50%;
-  border-radius: 50%;
-  background: var(--cue-fill);
-  box-shadow: 0 0 0 4px rgb(47 90 72 / 0.14);
-  transition:
-    left 260ms linear,
-    opacity 240ms ease-out;
-}
-/* Held: the line runs back to full and rests, and the bead goes with it. */
+/* Held: the line runs back to full and rests. */
 .cue-card.is-held .cue-fill {
   background: #7d967e;
   transition:
     transform 560ms var(--cue-ease),
     background-color 300ms ease-out;
-}
-.cue-card.is-held .cue-bead {
-  opacity: 0;
-  transition:
-    left 560ms var(--cue-ease),
-    opacity 240ms ease-out 380ms;
 }
 .cue-card .cue-stays {
   flex: 1;
@@ -387,10 +356,6 @@
 .question-large.cue-card .question-warning {
   font-size: 14px;
 }
-.cue-card .keep-line {
-  min-height: 44px;
-  color: var(--cue-ink);
-}
 /* A light corner control: the cue is the focus, not the way out. */
 .cue-card .dismiss-question {
   position: absolute;
@@ -473,9 +438,6 @@
 .floating-surface .cue-card .cue-scroll > * {
   flex: none;
 }
-.floating-surface .cue-card .keep-line {
-  align-self: flex-start;
-}
 /* More to read beyond an edge: the words fade into the card there, so no
    line is ever shown cut in half, and the rest is reached by scrolling. */
 .floating-surface .cue-card::before,
@@ -513,6 +475,9 @@
   }
   .floating-surface .cue-card.cue-long .cue-line {
     font-size: 18px;
+  }
+  .floating-surface .question-standard.cue-card.cue-long .cue-word {
+    --cue-wait: 0.68;
   }
   .floating-surface .cue-card.cue-longer .cue-line {
     font-size: 16px;

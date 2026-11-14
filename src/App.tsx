@@ -2,12 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowDownToLine,
   ArrowUpRight,
+  AudioLines,
   BookOpen,
   ChevronRight,
   CircleHelp,
-  Crosshair,
+  EyeOff,
   FileText,
   MessageCircle,
+  Mic,
   Pause,
   Play,
   Settings,
@@ -100,8 +102,35 @@ function FloatingQuestion() {
     !live && (microphone.active || (!mic && !!microphone.error));
   const active =
     state?.overlayEnabled && (live || microphoneControl || simulated);
-  // The switch returns to the setting it left, so Quiet is not lost.
-  const beforeFocused = useRef<'balanced' | 'quiet'>('balanced');
+  // What the bar says about capture, in words: read by assistive technology
+  // always, and shown whenever the glyph alone would not say it.
+  const listening = mic?.status === 'listening';
+  // Development builds only: a session fed by an application alone.
+  const appAudio = live && !!state?.sourceSession && !listening;
+  // Capture is on and nothing about it is changing or wrong.
+  const capturing =
+    (listening || appAudio) && !(microphoneControl && microphone.stopPending);
+  const statusText = !state
+    ? ''
+    : live
+      ? mic?.status === 'listening'
+        ? state.cuesPaused
+          ? 'Mic still on'
+          : 'Mic on · Local'
+        : state.sourceSession
+          ? state.cuesPaused
+            ? 'App audio still on'
+            : 'App audio · Local'
+          : microphoneLabel(mic)
+      : microphoneControl
+        ? microphone.stopPending && mic?.status !== 'stopping'
+          ? 'Stop requested…'
+          : !mic
+            ? 'Status unavailable'
+            : microphoneLabel(mic)
+        : // Only the tests' simulated session reaches here; it has no
+          // capture glyph, so the words always show.
+          'Simulated session · Fictional';
   // A dismissal made here removes the focused control. Once the companion's
   // other controls are enabled again, focus goes to the first of them, but
   // only if it was dropped; never from another control or application.
@@ -126,50 +155,55 @@ function FloatingQuestion() {
           <>
             {/* The bar is the handle: the native window follows a drag on
                 it or on its text, and remembers where it was put. */}
-            <header
-              className={`companion-bar${live ? ' companion-bar-live' : ''}`}
-              data-tauri-drag-region
-            >
+            <header className="companion-bar" data-tauri-drag-region>
               <div className="companion-status" data-tauri-drag-region>
-                <strong className="companion-title" data-tauri-drag-region>
-                  {mic?.status === 'listening' && (
-                    <span
-                      className={`status-dot ${mic.activity}`}
-                      data-tauri-drag-region
-                      role="img"
-                      aria-label={
-                        mic.activity === 'active'
-                          ? 'Signal detected'
-                          : 'Quiet input'
-                      }
-                    />
-                  )}
-                  {microphoneControl
-                    ? 'Mic only'
-                    : live
-                      ? state.cuesPaused
-                        ? 'Cues off'
-                        : 'Live'
-                      : 'TalkQTE'}
-                </strong>
-                <span role="status" data-tauri-drag-region>
-                  {live
-                    ? mic?.status === 'listening'
-                      ? state.cuesPaused
-                        ? 'Mic still on'
-                        : 'Mic on · Local'
-                      : state.sourceSession
-                        ? state.cuesPaused
-                          ? 'App audio still on'
-                          : 'App audio · Local'
-                        : microphoneLabel(mic)
-                    : microphoneControl
-                      ? microphone.stopPending && mic?.status !== 'stopping'
-                        ? 'Stop requested…'
-                        : !mic
-                          ? 'Status unavailable'
-                          : microphoneLabel(mic)
-                      : 'Simulated session · Fictional'}
+                {/* What is being captured, as a glyph with a dot while it
+                    is on. Nothing here when nothing is captured. */}
+                {(listening || appAudio || live || microphoneControl) && (
+                  <span
+                    className={`companion-capture${
+                      listening || appAudio ? ' is-on' : ''
+                    }`}
+                    title={statusText}
+                    data-tauri-drag-region
+                  >
+                    {appAudio ? (
+                      <AudioLines size={16} aria-hidden="true" />
+                    ) : (
+                      <Mic size={16} aria-hidden="true" />
+                    )}
+                    {(listening || appAudio) && (
+                      <span
+                        className={`status-dot ${
+                          listening ? (mic?.activity ?? 'quiet') : 'active'
+                        }`}
+                        data-tauri-drag-region
+                        role="img"
+                        aria-label={
+                          appAudio
+                            ? 'Application audio on'
+                            : mic?.activity === 'active'
+                              ? 'Signal detected'
+                              : 'Quiet input'
+                        }
+                      />
+                    )}
+                  </span>
+                )}
+                {(microphoneControl || (live && state.cuesPaused)) && (
+                  <strong className="companion-title" data-tauri-drag-region>
+                    {microphoneControl ? 'Mic only' : 'Cues off'}
+                  </strong>
+                )}
+                {/* Always there for assistive technology. While capture is
+                    on and well the glyph and its dot say it for the eye;
+                    any other state is spelled out. */}
+                <span
+                  role="status"
+                  className={capturing ? 'visually-hidden' : undefined}
+                  data-tauri-drag-region
+                >
+                  {statusText}
                 </span>
               </div>
               {live ? (
@@ -194,9 +228,9 @@ function FloatingQuestion() {
                     }
                   >
                     {state.cuesPaused ? (
-                      <Play size={16} />
+                      <Play size={16} aria-hidden="true" />
                     ) : (
-                      <Pause size={16} />
+                      <Pause size={16} aria-hidden="true" />
                     )}
                   </button>
                   <button
@@ -208,7 +242,7 @@ function FloatingQuestion() {
                       void run(() => bridge.command('stop_live_session'))
                     }
                   >
-                    <span>Stop</span>
+                    <Square size={14} fill="currentColor" aria-hidden="true" />
                   </button>
                 </>
               ) : microphoneControl ? (
@@ -223,40 +257,9 @@ function FloatingQuestion() {
                   }
                   onClick={() => void microphone.stop()}
                 >
-                  Stop mic
+                  <Square size={14} fill="currentColor" aria-hidden="true" />
                 </button>
               ) : null}
-              {state && state.status !== 'ended' && (
-                <button
-                  className="companion-control"
-                  aria-label={
-                    state.sensitivity === 'focused'
-                      ? 'Show all questions'
-                      : 'Show only what matters'
-                  }
-                  title={
-                    state.sensitivity === 'focused'
-                      ? 'Show all questions'
-                      : 'Show only what matters'
-                  }
-                  aria-pressed={state.sensitivity === 'focused'}
-                  disabled={busy}
-                  onClick={() => {
-                    if (state.sensitivity !== 'focused')
-                      beforeFocused.current = state.sensitivity;
-                    void run(() =>
-                      bridge.command('set_sensitivity', {
-                        value:
-                          state.sensitivity === 'focused'
-                            ? beforeFocused.current
-                            : 'focused',
-                      }),
-                    );
-                  }}
-                >
-                  <Crosshair size={16} />
-                </button>
-              )}
               <button
                 className="companion-control"
                 aria-label="Hide companion"
@@ -268,14 +271,13 @@ function FloatingQuestion() {
                   )
                 }
               >
-                <span>Hide</span>
+                <EyeOff size={16} aria-hidden="true" />
               </button>
             </header>
             {state && (
               <CueCard
                 cue={state.cue}
                 size={state.questionSize}
-                live={state.live || !!state.simulated}
                 announce={false}
                 busy={busy}
                 onInspect={(expanded) =>
@@ -295,11 +297,6 @@ function FloatingQuestion() {
                     }),
                   );
                 }}
-                onKeep={() =>
-                  void run(() =>
-                    bridge.command('keep_line', { id: state.cue!.id }),
-                  )
-                }
               />
             )}
           </>
@@ -767,15 +764,6 @@ function Notebook() {
   const simulated = !!state.simulated && state.status === 'running';
   const modelNeeded =
     model?.status === 'missing' || model?.status === 'downloading';
-  // Keeps a quoted line in the notes; the cue then goes like a dismissal.
-  const keepLine = () => {
-    if (!state.cue) return;
-    void run(async () => {
-      await bridge.command('keep_line', { id: state.cue!.id });
-      setNotice('Line kept in your notes.');
-      notesEditor.current?.focus();
-    });
-  };
   const inspectCue = (expanded: boolean) => {
     if (!state.cue) return;
     void run(() =>
@@ -1414,10 +1402,8 @@ function Notebook() {
                 <CueCard
                   cue={state.cue}
                   size={state.questionSize}
-                  live={state.live || simulated}
                   busy={busy}
                   onDismiss={dismiss}
-                  onKeep={keepLine}
                   onInspect={inspectCue}
                   empty={
                     <div className="question-idle">

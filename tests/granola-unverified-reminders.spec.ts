@@ -413,9 +413,14 @@ for (const size of ['standard', 'large'] as const) {
         );
         await question.getByRole('button', { name: 'Hold' }).focus();
         await page.keyboard.press('End');
-        await expect(
-          question.locator('blockquote').getByText('four.', { exact: true }),
-        ).toBeInViewport();
+        await expect
+          .poll(() =>
+            question.locator('blockquote').evaluate((excerpt) => {
+              const { bottom } = excerpt.getBoundingClientRect();
+              return bottom > 0 && bottom <= innerHeight + 1;
+            }),
+          )
+          .toBe(true);
         await expect(
           question.getByRole('button', { name: 'Dismiss' }),
         ).toBeInViewport();

@@ -49,13 +49,17 @@ test('companion stays compact between cues and returns to its bar after Dismiss'
 }) => {
   await page.setViewportSize({ width: 320, height: 76 });
   await expect(page.getByRole('status')).toHaveText('Mic on · Local');
-  await expect(page.getByRole('button', { name: 'Pause cues' })).toBeVisible();
+  // The controls are icons: each has a name and a tooltip.
+  for (const name of ['Stop live session', 'Hide companion']) {
+    const control = page.getByRole('button', { name, exact: true });
+    await expect(control).toBeVisible();
+    await expect(control).toHaveAttribute('title', name);
+    await expect(control).toHaveText('');
+  }
   await expect(
-    page.getByRole('button', { name: 'Stop live session' }),
-  ).toHaveText('Stop');
-  await expect(page.getByRole('button', { name: 'Hide companion' })).toHaveText(
-    'Hide',
-  );
+    page.getByRole('button', { name: 'Pause cues', exact: true }),
+  ).toHaveAttribute('title', 'Pause cues; microphone and transcript continue');
+  await expect(page.locator('header').getByRole('button')).toHaveCount(3);
   for (const button of await page.getByRole('button').all()) {
     const bounds = await button.boundingBox();
     expect(bounds!.width).toBeGreaterThanOrEqual(44);
@@ -109,20 +113,6 @@ test('a question fits the narrow window used on a small display', async ({
   await page.setViewportSize({ width: 360, height: 420 });
   await expectCompanionToFit(page);
   expect(await fitsSideways()).toBe(true);
-});
-
-test('the companion switches between only what matters and all questions', async ({
-  page,
-}) => {
-  const focus = page.getByRole('button', { name: 'Show only what matters' });
-  await expect(focus).toHaveAttribute('aria-pressed', 'false');
-  await focus.click();
-  const all = page.getByRole('button', { name: 'Show all questions' });
-  await expect(all).toHaveAttribute('aria-pressed', 'true');
-  await all.click();
-  await expect(
-    page.getByRole('button', { name: 'Show only what matters' }),
-  ).toHaveAttribute('aria-pressed', 'false');
 });
 
 test('the companion bar is the native drag handle and its controls are not', async ({
@@ -198,7 +188,7 @@ test('a cue that passes untouched leaves the bar, with no countdown shown meanwh
 const soon = 'We should have it ready soon, before the next visitors arrive.';
 const friday = "A single page sounds right. Let's have it ready by Friday.";
 
-test('a quoted line says it is word for word and can be kept', async ({
+test('a quoted line is the cue itself, with nothing repeated under it', async ({
   page,
 }) => {
   await say(page, soon, 'What date should we aim for?');
@@ -223,10 +213,10 @@ test('a quoted line says it is word for word and can be kept', async ({
   ).toHaveCount(0);
   await expect(question).toContainText("Let's have it ready by Friday");
   await expect(question).toContainText('Just said');
-  await expect(question).toContainText('a date or commitment, word for word');
-  await expect(
-    question.getByRole('button', { name: 'Keep this line' }),
-  ).toBeVisible();
+  // The quote is the cue: nothing is repeated under it, and the card has
+  // no control but Hold and Dismiss.
+  await expect(question.locator('blockquote')).toHaveCount(0);
+  await expect(question.getByRole('button')).toHaveCount(2);
   await expect(page.getByRole('status')).toHaveText('Mic on · Local');
 });
 

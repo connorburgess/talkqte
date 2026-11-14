@@ -66,11 +66,11 @@ const cues = {
 } satisfies Record<string, Cue>;
 
 // What each kind says at a glance: its purpose, where it came from, and
-// the quoted line or note. A cue that is itself words from its line (a Said
-// quote, a question put to you) repeats only the rest of that line.
+// the quoted line or note. A Said cue is its line, so nothing is quoted
+// under it; a question put to you shows only the rest of its line.
 const glance: Record<
   keyof typeof cues,
-  { lead: string; source: string; quote: string }
+  { lead: string; source: string; quote: string | null }
 > = {
   question: {
     lead: 'You could ask',
@@ -79,12 +79,12 @@ const glance: Record<
   },
   'Said quote': {
     lead: 'Just said',
-    source: 'From this conversation · a date or commitment, word for word',
-    quote: 'A single page sounds right. …',
+    source: 'From this conversation',
+    quote: null,
   },
   'Asked you': {
     lead: 'Asked you',
-    source: 'From this conversation · uses your name',
+    source: 'From this conversation',
     quote:
       'It should cover the tools, the seedlings and who to ask for help. …',
   },
@@ -194,6 +194,18 @@ async function expectControls(page: Page, question: Locator, held: boolean) {
   await expect(question.locator('[aria-expanded]')).toHaveCount(0);
 }
 
+/** The last line of a block of text is inside the window. */
+async function expectEndInView(text: Locator) {
+  await expect
+    .poll(() =>
+      text.evaluate((element) => {
+        const { bottom } = element.getBoundingClientRect();
+        return bottom > 0 && bottom <= innerHeight + 1;
+      }),
+    )
+    .toBe(true);
+}
+
 /** Keys pressed on the card's Hold control scroll it to its last line. */
 async function expectEndReachable(
   page: Page,
@@ -203,7 +215,7 @@ async function expectEndReachable(
   const hold = question.getByRole('button', { name: /^(Hold|Held)$/ });
   await hold.focus();
   await page.keyboard.press('End');
-  await expect(last).toBeInViewport({ ratio: 1 });
+  await expectEndInView(last);
   await expect(hold).toBeFocused();
 }
 
@@ -232,14 +244,22 @@ for (const [kind, cue] of Object.entries(cues) as [keyof typeof cues, Cue][])
           question.getByText(glance[kind].source, { exact: true }),
         ).toBeInViewport({ ratio: 1 });
         const quote = question.locator('blockquote');
-        await expect(quote).toHaveText(`“${glance[kind].quote}”`);
-        await expect(quote).toBeInViewport({ ratio: 1 });
+        const quoted = glance[kind].quote;
+        if (quoted === null) await expect(quote).toHaveCount(0);
+        else {
+          await expect(quote).toHaveText(`“${quoted}”`);
+          await expect(quote).toBeInViewport({ ratio: 1 });
+        }
+        // No control on the card but Hold and Dismiss.
+        await expect(question.getByRole('button')).toHaveCount(2);
 
         // Holding the cue moves nothing: the cue and its source stay where
         // they were being read.
         const places = async () => [
           await question.getByRole('heading').boundingBox(),
-          await quote.boundingBox(),
+          await question
+            .getByText(glance[kind].source, { exact: true })
+            .boundingBox(),
         ];
         const before = await places();
         question = await show(page, { ...shown, held: true });
@@ -385,7 +405,7 @@ for (const size of ['standard', 'large'] as const)
       await expectEndReachable(
         page,
         question,
-        question.locator('blockquote').last().getByText('visitors.'),
+        question.locator('blockquote').last(),
       );
       await expect
         .poll(() => fadesAtEnd(question), `${label}, at the end`)
@@ -435,12 +455,7 @@ for (const size of ['standard', 'large'] as const)
         `“${cue.evidence}”`,
       );
       await page.keyboard.press('End');
-      await expect(
-        question
-          .locator('blockquote')
-          .getByText(cue.evidence.split(' ').pop()!, { exact: true })
-          .last(),
-      ).toBeInViewport();
+      await expectEndInView(question.locator('blockquote'));
       await expect(hold).toBeFocused();
     }
   });

@@ -8,7 +8,7 @@ This gives someone control over interruptions while continuing to follow the con
 
 - Rust accepts cue-pause changes only for a running live session. An ended session cannot be resumed through this control, and a new session starts with cues enabled.
 - Both windows receive `cuesPaused` in their snapshots. The frontend waits for native state; a rejected command leaves the existing controls and an actionable error.
-- The notebook says that microphone and transcript continue. The compact companion shows **Cues off** and **Mic still on** when microphone state confirms it is listening. Starting, stopping, and microphone errors retain their own status text.
+- The notebook says that microphone and transcript continue. The compact companion shows **Cues off** beside its microphone glyph, whose dot stays lit while microphone state confirms it is listening (assistive technology reads "Mic still on"). Starting, stopping, and microphone errors are spelled out in words, without the dot.
 - Transcript lines still enter the bounded transcript and update which focus topics were mentioned. They do not raise questions, quotations, or note reminders while paused.
 - Resume records the engine's current elapsed time. Delayed transcription at or before that time is kept in the transcript but cannot raise a cue. No paused suggestion is queued for later display.
 - Stop, dismissal, source removal, and the ordinary one-cue/expiry policies remain Rust-owned. No capture permission, model call, persistence, export, or background inference is added.

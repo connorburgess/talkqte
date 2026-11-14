@@ -4,7 +4,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { runSimulation } from './cue-sim.mjs';
-import { reviewMarkdown, reviewTake } from './cue-sim-review.mjs';
+import {
+  compareRuns,
+  comparisonMarkdown,
+  reviewMarkdown,
+  reviewTake,
+} from './cue-sim-review.mjs';
 
 const line = (id, atMs, text, label = {}) => ({
   id,
@@ -275,4 +280,101 @@ test('a take that misrepresents the product says so', async () => {
   // Large bold text needs 3:1, and the first take's words pass it.
   const fine = await take(lines, script);
   assert.equal(fine.represents.find((r) => /stand out/.test(r.name)).ok, true);
+});
+
+test('two runs of the same conversation are set side by side, and one that stopped short is left out where it did not reach', async () => {
+  const conversation = (id, lines) => ({
+    id,
+    context: 'test',
+    title: id,
+    setting: 'Fictional.',
+    listener: 'Robin',
+    participants: [],
+    lines,
+  });
+  const first = conversation('first', [
+    line('l1', 0, 'Someone needs to book the room.', {
+      expect: 'show',
+      about: 'The room has no one booking it.',
+    }),
+    line('l2', 30_000, 'Lovely weather.', { expect: 'quiet' }),
+  ]);
+  const second = conversation('second', [
+    line('l1', 0, 'Someone needs to order lunch.', { expect: 'show' }),
+  ]);
+  const run = (label, model, script, conversations) =>
+    runSimulation({
+      source: 'conversations',
+      conversations,
+      evaluator: { ...scripted(script), label, model },
+      options: { transcriptDelayMs: 0, minGapMs: 0 },
+    });
+  const long =
+    'Who will own booking the larger meeting room that the workshop needs before Thursday?';
+  const slow = await run(
+    'Slow model',
+    'slow',
+    { l1: ['show', 6_000, long], l2: ['quiet', 6_000] },
+    [first, second],
+  );
+  const fast = await run(
+    'Fast model',
+    'fast',
+    {
+      l1: ['show', 1_000, 'Who will book the room?'],
+      l2: ['show', 1_000, 'Who will book the room?'],
+    },
+    [first],
+  );
+  const comparison = compareRuns([slow, fast]);
+  assert.deepEqual(
+    comparison.conversations.map((c) => c.id),
+    ['first'],
+  );
+  assert.deepEqual(comparison.leftOut, ['second']);
+  const [a, b] = comparison.conversations[0].runs;
+  assert.deepEqual(
+    [
+      a.evaluator,
+      a.medianDecisionMs,
+      a.cued,
+      a.inTime,
+      a.withinBudget,
+      a.glance,
+      a.cuesShown,
+      a.longestCueWords,
+      a.repeats,
+    ],
+    ['Slow model', 6_000, 1, 1, 0, 0, 1, 14, 0],
+  );
+  // The fast run is inside the budget and short, but shows the same words
+  // again at a quiet line: a repeat, and a broken quiet.
+  assert.deepEqual(
+    [
+      b.evaluator,
+      b.medianDecisionMs,
+      b.cued,
+      b.withinBudget,
+      b.glance,
+      b.cuesShown,
+      b.repeats,
+      b.unexpected,
+      b.quietKept,
+      b.quietAsked,
+    ],
+    ['Fast model', 1_000, 1, 1, 2, 2, 1, 1, 0, 1],
+  );
+  const page = comparisonMarkdown(comparison);
+  assert.match(page, /\| \| Slow model \| Fast model \|/);
+  assert.match(page, /\| On screen within 5\.0 s \| 0 of 1 \| 1 of 1 \|/);
+  assert.match(
+    page,
+    /\| Cues of 10 words or fewer \| 0 of 1 \(longest 14\) \| 2 of 2 \(longest 5\) \|/,
+  );
+  assert.match(page, /\| Repeats \| 0 \| 1 \|/);
+  assert.match(
+    page,
+    /Not compared, because not every run reached them: second\./,
+  );
+  assert.match(page, /One run of each model: a difference here may not repeat/);
 });
