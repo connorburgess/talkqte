@@ -98,8 +98,7 @@ function FloatingQuestion() {
   const microphoneControl =
     !live && (microphone.active || (!mic && !!microphone.error));
   const active =
-    state?.overlayEnabled &&
-    (live || microphoneControl || simulated || state.cue);
+    state?.overlayEnabled && (live || microphoneControl || simulated);
   // The switch returns to the setting it left, so Quiet is not lost.
   const beforeFocused = useRef<'balanced' | 'quiet'>('balanced');
   // A dismissal made here removes the focused control. Once the companion's
@@ -169,9 +168,7 @@ function FloatingQuestion() {
                         : !mic
                           ? 'Status unavailable'
                           : microphoneLabel(mic)
-                      : simulated
-                        ? 'Simulated session · Fictional'
-                        : 'Live session ended'}
+                      : 'Simulated session · Fictional'}
                 </span>
               </div>
               {live ? (
@@ -277,7 +274,7 @@ function FloatingQuestion() {
               <CueCard
                 cue={state.cue}
                 size={state.questionSize}
-                live={state.live}
+                live={state.live || !!state.simulated}
                 announce={false}
                 busy={busy}
                 onInspect={(expanded) =>
@@ -1152,16 +1149,20 @@ function Notebook() {
                               : sourceApp
                                 ? `Audio from ${sourceApp} · transcribed on this device · not saved`
                                 : 'Your microphone · transcribed on this device · not saved'
-                            : 'Nothing was saved. Your notes and the transcript stay here until you start another session or quit.'
+                            : 'Nothing was saved. The transcript stays here until you start another session or quit; your notes stay until you quit.'
                           : simulated
                             ? 'Fictional replay · nothing is captured'
-                            : liveStatus?.available
-                              ? 'Nothing is being captured. Start a live session when your meeting begins.'
-                              : modelNeeded
-                                ? 'Nothing is being captured. A live session needs the speech model first.'
-                                : liveStatus?.reason
-                                  ? `Nothing is being captured. Cues appear only during a live session. ${liveStatus.reason}`
-                                  : 'Nothing is being captured.'}
+                            : capture.state?.source?.mayBeCapturing
+                              ? 'No live session. Audio from a selected application may still be captured; see Cue processing above.'
+                              : microphone.active
+                                ? 'No live session. The microphone check above is on; it records and transcribes nothing.'
+                                : liveStatus?.available
+                                  ? 'Nothing is being captured. Start a live session when your meeting begins.'
+                                  : modelNeeded
+                                    ? 'Nothing is being captured. A live session needs the speech model first.'
+                                    : liveStatus?.reason
+                                      ? `Nothing is being captured. Cues appear only during a live session. ${liveStatus.reason}`
+                                      : 'Nothing is being captured.'}
                   </p>
                 </div>
               </div>
@@ -1340,15 +1341,15 @@ function Notebook() {
                     aria-labelledby="transcript-tab"
                     className="transcript"
                   >
-                    <p className="muted small">
-                      {state.live
-                        ? sourceApp
-                          ? `Audio from ${sourceApp} · transcribed on this device`
-                          : 'Your microphone · transcribed on this device'
-                        : simulated
-                          ? 'Fictional replay · not from microphone audio'
-                          : 'Lines appear here during a live session.'}
-                    </p>
+                    {(state.live || simulated) && (
+                      <p className="muted small">
+                        {state.live
+                          ? sourceApp
+                            ? `Audio from ${sourceApp} · transcribed on this device`
+                            : 'Your microphone · transcribed on this device'
+                          : 'Fictional replay · not from microphone audio'}
+                      </p>
+                    )}
                     {state.transcript.length ? (
                       state.transcript.map((segment) => (
                         <article
@@ -1366,16 +1367,20 @@ function Notebook() {
                       <div className="empty-inline">
                         <MessageCircle size={25} />
                         <h2>
-                          {state.live || simulated
+                          {live || simulated
                             ? 'A conversation starts here.'
                             : 'No transcript yet.'}
                         </h2>
                         <p>
-                          {state.live
+                          {live
                             ? sourceApp
                               ? 'Lines from the application appear here a few seconds after they are heard.'
                               : 'Lines from your microphone appear here a few seconds after they are spoken.'
-                            : 'Nothing has been transcribed. Nothing is being captured.'}
+                            : state.live
+                              ? 'No lines were transcribed in this session.'
+                              : simulated
+                                ? 'Lines of the replay appear here.'
+                                : 'Lines appear here during a live session.'}
                         </p>
                       </div>
                     )}

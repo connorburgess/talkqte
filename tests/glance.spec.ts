@@ -98,7 +98,7 @@ test('a delayed Dismiss acknowledgement does not take focus back from another no
   await expect(other).toBeFocused();
 });
 
-test('the source shows without a click, and Hold keeps a question through later lines and the end of the session', async ({
+test('the source shows without a click, and Hold keeps a question through later lines', async ({
   page,
 }) => {
   await standIn(page, '/?live');
@@ -128,12 +128,6 @@ test('the source shows without a click, and Hold keeps a question through later 
   await expect(question.getByRole('heading')).toHaveText(firstCue);
   await expect(question).toContainText('From earlier in this conversation');
   await expect(source).toBeVisible();
-  // The session ends with the held cue still showing.
-  await page.evaluate(() => window.liveTest.publish({ status: 'ended' }));
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText(
-    'Live session ended',
-  );
-  await expect(question.getByRole('heading')).toHaveText(firstCue);
   await question.getByRole('button', { name: 'Dismiss' }).click();
   await expect(question).toHaveCount(0);
 });

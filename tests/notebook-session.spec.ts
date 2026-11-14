@@ -35,7 +35,7 @@ test('before a session, a build without local transcription says plainly that it
   );
   await page.getByRole('tab', { name: /Transcript/ }).click();
   await expect(page.getByRole('tabpanel')).toContainText(
-    'No transcript yet.Nothing has been transcribed. Nothing is being captured.',
+    'No transcript yet.Lines appear here during a live session.',
   );
   await expect(page.locator('.notebook-footer')).toHaveText(
     'Your notes stay in memory until you quit. Export anything you want to keep before closing.',
@@ -46,6 +46,46 @@ test('before a session, a build without local transcription says plainly that it
   await expect(page.locator('body')).not.toContainText(/demo|fictional/i);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(page.locator('body')).not.toContainText(/demo|fictional/i);
+});
+
+test('before a session, the notebook never says nothing is captured while the microphone check or an application source is on', async ({
+  page,
+}) => {
+  await standIn(page, '/?live');
+  await expect(session(page)).toContainText('Nothing is being captured.');
+  await page.evaluate(() =>
+    window.microphoneTest.send({
+      status: 'listening',
+      activity: 'active',
+      canStart: false,
+    }),
+  );
+  await expect(session(page)).toContainText(
+    'No live session. The microphone check above is on; it records and transcribes nothing.',
+  );
+  await expect(session(page)).not.toContainText('Nothing is being captured');
+  await page.evaluate(() =>
+    window.microphoneTest.send({ status: 'off', canStart: true }),
+  );
+  await expect(session(page)).toContainText('Nothing is being captured.');
+  await page.evaluate(() =>
+    window.captureTest.send({
+      source: {
+        phase: 'stopping',
+        mayBeCapturing: true,
+        stalled: false,
+        canRetry: false,
+        application: 'Fictional player',
+        problem: null,
+        operation: 'fictional-operation',
+        sourceSession: false,
+      },
+    }),
+  );
+  await expect(session(page)).toContainText(
+    'No live session. Audio from a selected application may still be captured; see Cue processing above.',
+  );
+  await expect(session(page)).not.toContainText('Nothing is being captured');
 });
 
 test('before a session, a build that needs its speech model points to setup', async ({
@@ -103,7 +143,7 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
   await page.evaluate(() => window.captureTest.finishStop());
   await expect(title(page)).toHaveText('Live session ended');
   await expect(session(page)).toContainText(
-    'Nothing was saved. Your notes and the transcript stay here until you start another session or quit.',
+    'Nothing was saved. The transcript stays here until you start another session or quit; your notes stay until you quit.',
   );
   await expect(page.getByRole('heading', { name: firstCue })).toHaveCount(0);
   await expect(
