@@ -194,3 +194,27 @@ test('strict timing validates v1 source identity and refuses duplicate session k
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('throwing and reentrant observers cannot suppress exactly-once root Stop after retirement', async () => {
+  const f = fixture();
+  let rootStops = 0,
+    notifications = 0,
+    removeRoot;
+  f.source.subscribe(() => {
+    notifications++;
+    removeRoot();
+    f.source.close();
+    throw Error('fictional observer failure');
+  });
+  removeRoot = f.source.subscribe(() => rootStops++);
+  f.bootstrap();
+  const ready = f.source.waitListening({ runId: f.identity.runId });
+  f.emit(f.tuple);
+  await ready;
+  assert.doesNotThrow(() => f.emit({ ...f.tuple, step: 'retired' }));
+  f.emit({ ...f.tuple, step: 'retired' });
+  f.source.close();
+  assert.equal(rootStops, 1);
+  assert.equal(notifications, 1);
+  await assert.rejects(f.source.waitListening({ runId: f.identity.runId }));
+});

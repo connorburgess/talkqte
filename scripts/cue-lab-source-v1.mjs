@@ -45,7 +45,15 @@ export function createLabSourceV1({
     terminal = true;
     clearTimeout(timer);
     waiter?.reject(gateFailure('protocol'));
-    for (const listener of listeners) listener({ type: 'failed' });
+    // Snapshot before callbacks: throwing or reentrant unsubscription cannot
+    // suppress another owner's terminal notification. Preserve the failure.
+    for (const listener of [...listeners]) {
+      try {
+        listener(Object.freeze({ type: 'failed' }));
+      } catch {
+        // Observers cannot veto root Stop or replace the protocol failure.
+      }
+    }
   };
   const sameOwner = () =>
     identity &&
@@ -153,10 +161,16 @@ export function createLabSourceV1({
     close() {
       if (closed) return;
       closed = true;
-      fail();
-      unsubscribe();
-      listeners.clear();
-      signal?.removeEventListener('abort', abort);
+      try {
+        fail();
+      } finally {
+        try {
+          unsubscribe();
+        } finally {
+          listeners.clear();
+          signal?.removeEventListener('abort', abort);
+        }
+      }
     },
   });
 }
