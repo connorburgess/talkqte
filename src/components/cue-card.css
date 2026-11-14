@@ -57,12 +57,20 @@
 }
 @keyframes cue-follow {
   from {
-    opacity: 0;
     transform: translateX(-8px);
   }
   to {
-    opacity: 1;
     transform: none;
+  }
+}
+/* Words are there, light, from the first frame, and darken in reading
+   order: the purpose and the cue first, then the quoted line. */
+@keyframes cue-word {
+  from {
+    opacity: 0.26;
+  }
+  to {
+    opacity: 1;
   }
 }
 @keyframes cue-leave {
@@ -84,7 +92,15 @@
 }
 .cue-card .cue-source,
 .cue-card .keep-line {
-  animation: cue-follow 360ms 200ms var(--cue-ease) both;
+  animation: cue-follow 420ms 120ms var(--cue-ease) both;
+}
+.cue-card .cue-word {
+  animation: cue-word 320ms ease-out both;
+  animation-delay: calc(50ms + var(--i) * 24ms);
+}
+.cue-card .cue-quote .cue-word {
+  animation-duration: 360ms;
+  animation-delay: calc(300ms + var(--i) * 22ms);
 }
 .question.cue-card.is-leaving {
   animation: cue-leave 190ms cubic-bezier(0.7, 0, 0.84, 0) both;
@@ -148,11 +164,15 @@
   cursor: default;
 }
 .cue-card .cue-track {
+  position: relative;
   flex: 1;
   height: 3px;
   border-radius: 2px;
   background: var(--cue-rule);
-  overflow: hidden;
+  transition: height 140ms ease-out;
+}
+.cue-card .cue-time:hover:not([aria-disabled='true']) .cue-track {
+  height: 5px;
 }
 .cue-card .cue-fill {
   display: block;
@@ -160,16 +180,38 @@
   border-radius: 2px;
   background: var(--cue-fill);
   transform-origin: left center;
+  transform: scaleX(var(--left));
   transition:
     transform 260ms linear,
     background-color 300ms ease-out;
 }
-/* Held: the line fills and rests. */
+/* The moving end of the line: a small bead, so a glance finds it. */
+.cue-card .cue-bead {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--left) * 100%);
+  width: 7px;
+  height: 7px;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background: var(--cue-fill);
+  box-shadow: 0 0 0 4px rgb(47 90 72 / 0.14);
+  transition:
+    left 260ms linear,
+    opacity 240ms ease-out;
+}
+/* Held: the line runs back to full and rests, and the bead goes with it. */
 .cue-card.is-held .cue-fill {
   background: #7d967e;
   transition:
     transform 560ms var(--cue-ease),
     background-color 300ms ease-out;
+}
+.cue-card.is-held .cue-bead {
+  opacity: 0;
+  transition:
+    left 560ms var(--cue-ease),
+    opacity 240ms ease-out 380ms;
 }
 .cue-card .cue-stays {
   flex: 1;
@@ -263,6 +305,20 @@
 .cue-card .dismiss-question:hover:not(:disabled) {
   color: var(--cue-ink);
   background: #d6dfca;
+}
+.cue-card .dismiss-question {
+  transition:
+    background-color 160ms ease-out,
+    scale 120ms ease-out;
+}
+.cue-card .dismiss-question svg {
+  transition: rotate 260ms var(--cue-ease);
+}
+.cue-card .dismiss-question:hover:not(:disabled) svg {
+  rotate: 90deg;
+}
+.cue-card .dismiss-question:active:not(:disabled) {
+  scale: 0.94;
 }
 .question.cue-card button:focus-visible,
 .floating-surface .question.cue-card button:focus-visible {

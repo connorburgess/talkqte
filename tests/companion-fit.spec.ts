@@ -344,7 +344,10 @@ for (const size of ['standard', 'large'] as const)
       );
       await page.keyboard.press('End');
       await expect(
-        question.locator('blockquote').getByText(cue.evidence.slice(-30)),
+        question
+          .locator('blockquote')
+          .getByText(cue.evidence.split(' ').pop()!, { exact: true })
+          .last(),
       ).toBeInViewport();
       await expect(hold).toBeFocused();
     }

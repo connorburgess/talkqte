@@ -1,4 +1,5 @@
 import {
+  type CSSProperties,
   useEffect,
   useId,
   useLayoutEffect,
@@ -14,6 +15,10 @@ import {
   type CueSource,
 } from '../lib/types';
 import './cue-card.css';
+
+/** Words after these arrive together, so no line keeps the eye waiting. */
+const CUE_WORDS = 14;
+const QUOTE_WORDS = 36;
 
 function hasPriorNotes(sources?: CueSource[]) {
   return sources?.some((source) => source.provenance.kind === 'priorNote');
@@ -91,6 +96,35 @@ function sourceLine(cue: Cue) {
   return before || after ? [before, '…', after].filter(Boolean).join(' ') : '';
 }
 
+/**
+ * Text as separate words, so an arriving cue can darken them in reading
+ * order. `from` continues the order across two runs of words; the delay
+ * stops growing after `cap` words so a long line still finishes soon.
+ */
+function Words({
+  text,
+  from = 0,
+  cap,
+}: {
+  text: string;
+  from?: number;
+  cap: number;
+}) {
+  return text.split(/(\s+)/).map((part, index) =>
+    index % 2 ? (
+      part
+    ) : (
+      <span
+        key={index}
+        className="cue-word"
+        style={{ '--i': Math.min(from + index / 2, cap) } as CSSProperties}
+      >
+        {part}
+      </span>
+    ),
+  );
+}
+
 /** The warning for a reminder whose copy the last update check left unconfirmed. */
 function Unconfirmed({ at }: { at: number | null }) {
   return (
@@ -130,7 +164,9 @@ function Sources({ sources, label }: { sources: CueSource[]; label: string }) {
                 } · ${source.provenance.date} · prior note`
               : `This conversation · ${clockTime(source.provenance.atMs)} · ${source.provenance.speaker}`}
           </span>{' '}
-          <blockquote className="cue-quote">“{source.text}”</blockquote>
+          <blockquote className="cue-quote">
+            “<Words text={source.text} cap={QUOTE_WORDS} />”
+          </blockquote>
         </li>
       ))}
     </ul>
@@ -188,6 +224,7 @@ export function Question({
   // Reduced motion: the line moves in four steps, not continuously.
   const shown = reduced ? Math.ceil(left * 4) / 4 : left;
   const quote = sourceLine(cue);
+  const purpose = lead(cue);
   return (
     <section
       ref={card}
@@ -202,9 +239,17 @@ export function Question({
       }}
     >
       <div className="cue-line">
-        <span className="cue-lead">{lead(cue)}</span>{' '}
+        <span className="cue-lead">
+          <Words text={purpose} cap={CUE_WORDS} />
+        </span>{' '}
         <h2 aria-live={announce ? 'polite' : undefined}>
-          {said ? `“${cue.question}”` : cue.question}
+          {said && '“'}
+          <Words
+            text={cue.question}
+            from={purpose.split(/\s+/).length}
+            cap={CUE_WORDS}
+          />
+          {said && '”'}
         </h2>
       </div>
       <button
@@ -220,11 +265,12 @@ export function Question({
         }}
       >
         {timed || cue.held ? (
-          <span className="cue-track">
-            <span
-              className="cue-fill"
-              style={cue.held ? undefined : { transform: `scaleX(${shown})` }}
-            />
+          <span
+            className="cue-track"
+            style={{ '--left': cue.held ? 1 : shown } as CSSProperties}
+          >
+            <span className="cue-fill" />
+            <span className="cue-bead" />
           </span>
         ) : (
           <span className="cue-stays" id={staysId}>
@@ -247,7 +293,7 @@ export function Question({
             />
           ) : (
             <blockquote className="cue-quote">
-              “{cue.resolvedBy.evidence}”
+              “<Words text={cue.resolvedBy.evidence} cap={QUOTE_WORDS} />”
             </blockquote>
           )}
         </div>
@@ -281,7 +327,9 @@ export function Question({
                 <Unconfirmed at={cue.note.unconfirmed.lastConfirmedMs} />
               )}
             </span>
-            <blockquote className="cue-quote">“{cue.evidence}”</blockquote>
+            <blockquote className="cue-quote">
+              “<Words text={cue.evidence} cap={QUOTE_WORDS} />”
+            </blockquote>
           </>
         ) : (
           <>
@@ -289,7 +337,9 @@ export function Question({
             {quote && (
               <>
                 {' '}
-                <blockquote className="cue-quote">“{quote}”</blockquote>
+                <blockquote className="cue-quote">
+                  “<Words text={quote} cap={QUOTE_WORDS} />”
+                </blockquote>
               </>
             )}
           </>

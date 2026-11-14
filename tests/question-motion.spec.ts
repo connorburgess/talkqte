@@ -77,19 +77,60 @@ for (const surface of ['notebook', 'companion'] as const) {
     expect(right).toBeGreaterThan(20);
     expect((await drawn(300))![1]).toBeLessThan(right);
     expect((await drawn('end'))![1]).toBe(0);
-    // What has started so far, including this check's own rewinding.
-    const arrivals = await events(page);
-    expect(arrivals.length).toBeGreaterThan(0);
+    // Its words are there from the first frame, light, and darken in
+    // reading order: the purpose first, the quoted line last.
+    const shades = (at: number | 'end') =>
+      question.evaluate((card, time) => {
+        for (const animation of card.getAnimations({ subtree: true })) {
+          animation.pause();
+          if (time === 'end') animation.finish();
+          else animation.currentTime = time;
+        }
+        const shade = (selector: string) =>
+          [...card.querySelectorAll<HTMLElement>(selector)].map((word) =>
+            Number(getComputedStyle(word).opacity),
+          );
+        return {
+          cue: shade('.cue-line .cue-word'),
+          quote: shade('blockquote .cue-word'),
+        };
+      }, at);
+    const first = await shades(0);
+    for (const shade of [...first.cue, ...first.quote])
+      expect(shade).toBeGreaterThan(0.2);
+    const during = await shades(200);
+    expect(during.cue[0]).toBeGreaterThan(during.cue.at(-1)!);
+    expect(during.cue.at(-1)!).toBeGreaterThanOrEqual(during.quote.at(-1)!);
+    expect(during.quote.at(-1)!).toBeLessThan(0.5);
+    const after = await shades('end');
+    expect([...after.cue, ...after.quote].every((shade) => shade === 1)).toBe(
+      true,
+    );
+    // From here on nothing may start the arrival again. Forget the starts
+    // this check caused by rewinding, once they have all been reported.
+    await page.waitForTimeout(150);
+    await page.evaluate(() => {
+      (
+        window as typeof window & { cueMotionEvents: string[] }
+      ).cueMotionEvents.length = 0;
+    });
     // Reading never waits long on the motion, and nothing loops.
     const motion = await question.evaluate((card) =>
       card.getAnimations({ subtree: true }).map((animation) => {
         const timing = animation.effect!.getComputedTiming();
-        return { ends: Number(timing.endTime), repeats: timing.iterations };
+        const target = (animation.effect as KeyframeEffect).target;
+        return {
+          ends: Number(timing.endTime),
+          repeats: timing.iterations,
+          cue: !!target?.closest('.cue-line'),
+        };
       }),
     );
     expect(motion.length).toBeGreaterThan(0);
-    for (const { ends, repeats } of motion) {
-      expect(ends).toBeLessThanOrEqual(900);
+    for (const { ends, repeats, cue } of motion) {
+      // The cue itself is fully dark within three quarters of a second;
+      // the quoted line and the time line within a second and a half.
+      expect(ends).toBeLessThanOrEqual(cue ? 750 : 1500);
       expect(repeats).toBe(1);
     }
     // The cue and its source are there from the first frame.
@@ -98,7 +139,7 @@ for (const surface of ['notebook', 'companion'] as const) {
 
     // Timer updates move the time line; they do not replay the arrival.
     await page.clock.runFor(2_000);
-    expect(await events(page)).toEqual(arrivals);
+    expect(await events(page)).toEqual([]);
 
     // Holding from the keyboard keeps focus, and does not replay it either.
     await question.getByRole('button', { name: 'Hold', exact: true }).focus();
@@ -106,7 +147,7 @@ for (const surface of ['notebook', 'companion'] as const) {
     await expect(
       question.getByRole('button', { name: 'Held', exact: true }),
     ).toBeFocused();
-    expect(await events(page)).toEqual(arrivals);
+    expect(await events(page)).toEqual([]);
 
     // Dismissing takes the cue away from readers and the keyboard at once;
     // the card itself folds away a moment later.
@@ -168,6 +209,14 @@ test('reduced motion shows the complete cue and source without animation, and th
       (element) => element.getAnimations({ subtree: true }).length,
     );
   expect(await animations()).toBe(0);
+  // Every word is at full strength at once.
+  expect(
+    await question.evaluate((card) =>
+      [...card.querySelectorAll('.cue-word')].every(
+        (word) => getComputedStyle(word).opacity === '1',
+      ),
+    ),
+  ).toBe(true);
   // The line shows the time left in quarters, with no gliding between them.
   const filled = () =>
     question.locator('.cue-track').evaluate((track) => {

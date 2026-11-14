@@ -8,7 +8,7 @@ Glance view shows one complete cue, meant to be understood without a click. Its 
 
 A thin line between the cue and its source shows how long an untouched cue has left. It has no numbers and gives no warning as it runs out; it stops while the demo is paused. The line is also the **Hold** control: pressing it keeps the cue until it is dismissed, and the line then fills and rests. The word Hold shows only when the pointer or keyboard is on the card. An "Asked you" question shows no line, only the words "Stays longer · no countdown"; it still leaves after 45 seconds untouched. Dismiss is a small cross in the corner. Dismiss and Hold remain available while the demo is paused and after playback finishes. Explicitly ending or replaying the demo clears the current cue. Untouched cues still expire quietly; there is no countdown in numbers, scrolling script, or word-by-word animation.
 
-A new cue comes in from the left and opens sideways to its full width in about half a second, with its words in place from the first frame, so reading does not wait on the motion. With reduced motion there is no animation and the time line moves in four steps.
+A new cue comes in from the left and opens sideways to its full width in about half a second. Its words are in place from the first frame, light, and darken in reading order, the cue first and then the quoted line; the cue is fully dark within three quarters of a second. The order follows reading, not the timing of the speech: in the demo a cue appears once its line has been spoken. The time line has a small bead at its moving end. With reduced motion there is no animation, every word is dark at once, and the time line moves in four steps.
 
 ### 14 November 2026: source and time in view
 

@@ -412,7 +412,7 @@ for (const size of ['standard', 'large'] as const) {
         await question.getByRole('button', { name: 'Hold' }).focus();
         await page.keyboard.press('End');
         await expect(
-          question.locator('blockquote').getByText('stay open until four'),
+          question.locator('blockquote').getByText('four.', { exact: true }),
         ).toBeInViewport();
         await expect(
           question.getByRole('button', { name: 'Dismiss' }),
