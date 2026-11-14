@@ -553,6 +553,8 @@ declare global {
     liveTest: {
       start: typeof startLive;
       say: typeof say;
+      /** Lab recordings replay a whole session state at its own times. */
+      publish: typeof publish;
       setCue: (cue: Snapshot['cue']) => Promise<void>;
       setQuestionSize: (size: Snapshot['questionSize']) => Promise<void>;
       setSourceSession: (sourceSession: boolean) => Promise<void>;
@@ -636,6 +638,7 @@ window.nameTest = {
 window.liveTest = {
   start: startLive,
   say,
+  publish,
   setCue: (cue) => publish({ cue }),
   setQuestionSize: (questionSize) => publish({ questionSize }),
   // Development builds only: the cue snapshot marks a session fed by an

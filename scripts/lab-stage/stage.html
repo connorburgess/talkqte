@@ -1,0 +1,624 @@
+<!doctype html>
+<!--
+  Stage for lab recordings. Everything on this page except the two frames is
+  a mock: an invented video call that stands in for the meeting app, and a
+  lab overlay that says what the evaluator is doing. The two frames are the
+  real TalkQTE companion and notebook, fed a simulated session.
+  Fictional people and words only. Never used by the app or shipped in it.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Simulated replay (fictional)</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #0e1114;
+        color: #e9edf1;
+        font:
+          15px/1.4 system-ui,
+          -apple-system,
+          'Segoe UI',
+          sans-serif;
+      }
+      #banner {
+        position: absolute;
+        inset: 0 0 auto 0;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 0 18px;
+        background: #f3c94b;
+        color: #1c1500;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        z-index: 5;
+      }
+      #banner .tag {
+        background: #1c1500;
+        color: #f3c94b;
+        border-radius: 5px;
+        padding: 2px 9px;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      #banner .grow {
+        flex: 1;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #clock {
+        font-variant-numeric: tabular-nums;
+        font-size: 17px;
+      }
+      #call {
+        position: absolute;
+        top: 40px;
+        left: 0;
+        bottom: 0;
+        width: 1020px;
+        display: flex;
+        flex-direction: column;
+        padding: 18px 18px 0;
+        background: radial-gradient(120% 90% at 30% 0%, #1b2128, #0e1114);
+      }
+      #call header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        color: #9aa5b1;
+        font-size: 13px;
+        padding: 0 4px 12px;
+      }
+      #call header strong {
+        color: #e9edf1;
+        font-size: 16px;
+        font-weight: 600;
+      }
+      #speaker-view {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        /* The right of the call is left clear for the companion. */
+        margin-right: 452px;
+      }
+      #tiles {
+        display: flex;
+        gap: 10px;
+        height: 104px;
+      }
+      .tile {
+        position: relative;
+        border-radius: 16px;
+        background: linear-gradient(160deg, #262d36, #1a1f26);
+        display: grid;
+        place-items: center;
+        outline: 3px solid transparent;
+        transition:
+          outline-color 160ms ease-out,
+          background 300ms ease-out;
+        overflow: hidden;
+      }
+      .tile.speaking {
+        outline-color: #6fd08c;
+        background: linear-gradient(160deg, #2b3640, #1c232b);
+      }
+      #tiles .tile {
+        flex: 1;
+        border-radius: 12px;
+      }
+      #tiles .avatar {
+        width: 46px;
+        height: 46px;
+        font-size: 20px;
+        margin-bottom: 22px;
+      }
+      #tiles .name {
+        left: 6px;
+        right: 6px;
+        bottom: 6px;
+        padding: 2px 7px;
+        font-size: 12px;
+        justify-content: center;
+      }
+      #tiles .name small {
+        display: none;
+      }
+      #main-tile {
+        flex: 1;
+        min-height: 0;
+      }
+      .avatar {
+        width: 112px;
+        height: 112px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        font-size: 42px;
+        font-weight: 600;
+        color: #10151a;
+      }
+      .tile .name {
+        position: absolute;
+        left: 12px;
+        bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: rgba(8, 10, 12, 0.6);
+        border-radius: 8px;
+        padding: 4px 10px;
+        font-size: 14px;
+      }
+      .tile .name small {
+        color: #9aa5b1;
+      }
+      .bars {
+        display: inline-flex;
+        align-items: flex-end;
+        gap: 2px;
+        height: 12px;
+        opacity: 0;
+      }
+      .speaking .bars {
+        opacity: 1;
+      }
+      .bars i {
+        width: 3px;
+        background: #6fd08c;
+        border-radius: 1px;
+        animation: bar 620ms ease-in-out infinite alternate;
+      }
+      .bars i:nth-child(2) {
+        animation-delay: 150ms;
+      }
+      .bars i:nth-child(3) {
+        animation-delay: 320ms;
+      }
+      @keyframes bar {
+        from {
+          height: 3px;
+        }
+        to {
+          height: 12px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .bars i {
+          animation: none;
+          height: 8px;
+        }
+      }
+      #caption {
+        min-height: 78px;
+        margin: 12px 0 0;
+        padding: 10px 16px;
+        border-radius: 12px;
+        background: rgba(8, 10, 12, 0.72);
+        font-size: 18px;
+        line-height: 1.35;
+      }
+      #caption b {
+        color: #9fe0b3;
+        font-weight: 600;
+      }
+      #caption:empty::before {
+        content: 'Mock call captions';
+        color: #5f6975;
+      }
+      #toolbar {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 10px;
+        height: 62px;
+        color: #7d8793;
+        font-size: 13px;
+      }
+      #toolbar span.btn {
+        width: 44px;
+        height: 34px;
+        border-radius: 17px;
+        background: #2a313a;
+      }
+      #toolbar span.leave {
+        background: #b6453c;
+        width: 60px;
+      }
+      /* The real companion, floating where its window would sit. */
+      #companion {
+        position: absolute;
+        top: 86px;
+        left: calc(1020px - 420px - 18px);
+        width: 420px;
+        height: 76px;
+        border: 0;
+        border-radius: 28px;
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+        z-index: 3;
+        background: transparent;
+      }
+      #side {
+        position: absolute;
+        top: 40px;
+        right: 0;
+        bottom: 0;
+        left: 1020px;
+        display: flex;
+        flex-direction: column;
+        background: #171b20;
+        border-left: 1px solid #2a313a;
+      }
+      #notebook {
+        flex: 1;
+        min-height: 0;
+        border: 0;
+        background: #fff;
+      }
+      #lab {
+        height: 150px;
+        padding: 8px 14px 10px;
+        border-top: 2px solid #f3c94b;
+        background: #14181c;
+        font-size: 13px;
+      }
+      #lab h2 {
+        margin: 0 0 5px;
+        font-size: 12px;
+        font-weight: 600;
+        color: #f3c94b;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      #activity {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column-reverse;
+        height: 108px;
+        overflow: hidden;
+      }
+      #activity li {
+        display: flex;
+        gap: 8px;
+        padding: 1.5px 0;
+        color: #b6bfc9;
+        white-space: nowrap;
+      }
+      #activity time {
+        color: #7d8793;
+        font-variant-numeric: tabular-nums;
+      }
+      #activity .show {
+        color: #9fe0b3;
+      }
+      #activity .gone {
+        color: #e7b38a;
+      }
+      #activity .dropped {
+        color: #7d8793;
+      }
+      #intro {
+        position: absolute;
+        inset: 40px 0 0 0;
+        z-index: 4;
+        display: grid;
+        place-items: center;
+        background: rgba(10, 12, 15, 0.94);
+        text-align: center;
+        /* A title card only: the frames beneath stay reachable. */
+        pointer-events: none;
+      }
+      #intro[hidden] {
+        display: none;
+      }
+      #intro h1 {
+        font-size: 34px;
+        margin: 0 0 10px;
+        font-weight: 600;
+      }
+      #intro p {
+        margin: 6px auto;
+        max-width: 760px;
+        color: #b6bfc9;
+        font-size: 18px;
+      }
+      #intro .rule {
+        color: #f3c94b;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="banner" role="note" aria-label="Recording label">
+      <span class="tag">Simulated</span>
+      <span class="tag">Fictional</span>
+      <span class="grow" id="source"></span>
+      <span id="clock">0:00</span>
+    </div>
+
+    <section id="call" aria-label="Mock video call">
+      <header>
+        <strong id="title"></strong>
+        <span>Mock call. Not a real meeting or meeting app.</span>
+      </header>
+      <div id="speaker-view">
+        <div class="tile" id="main-tile">
+          <div class="avatar" id="main-avatar"></div>
+          <div class="name">
+            <span class="bars"><i></i><i></i><i></i></span>
+            <span id="main-name"></span>
+            <small id="main-role"></small>
+          </div>
+        </div>
+        <div id="tiles"></div>
+      </div>
+      <p id="caption" aria-live="off"></p>
+      <div id="toolbar" aria-hidden="true">
+        <span class="btn"></span><span class="btn"></span
+        ><span class="btn"></span><span class="btn leave"></span>
+      </div>
+    </section>
+
+    <iframe id="companion" title="TalkQTE companion" src="about:blank"></iframe>
+
+    <aside id="side">
+      <iframe id="notebook" title="TalkQTE notebook" src="about:blank"></iframe>
+      <section id="lab" aria-label="Lab overlay">
+        <h2>Lab overlay · not part of TalkQTE</h2>
+        <ol id="activity"></ol>
+      </section>
+    </aside>
+
+    <div id="intro">
+      <div>
+        <h1 id="intro-title"></h1>
+        <p id="intro-setting"></p>
+        <p class="rule">
+          Simulated replay of a fictional conversation. The call is a mock; the
+          companion and notebook are TalkQTE.
+        </p>
+        <p id="intro-source"></p>
+      </div>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const clock = (ms) => {
+        const s = Math.max(0, Math.floor(ms / 1000));
+        return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+      };
+      const COLORS = ['#f2b880', '#9ecbf0', '#c7b3f5', '#9fe0b3', '#f5a3b5'];
+      const COMPANION = { resting: 76, question: 340 };
+      let data = null;
+      let startedAt = null;
+      let now = 0;
+      const frames = () =>
+        ['companion', 'notebook'].map((id) => $(id).contentWindow);
+
+      function note(text, kind = '') {
+        const item = document.createElement('li');
+        item.className = kind;
+        const time = document.createElement('time');
+        time.textContent = clock(now);
+        const span = document.createElement('span');
+        span.textContent = text;
+        item.append(time, span);
+        $('activity').prepend(item);
+      }
+
+      async function waitFor(test, what) {
+        const until = performance.now() + 20_000;
+        while (!test()) {
+          if (performance.now() > until) throw new Error(`Timed out: ${what}`);
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
+
+      /** Puts one participant in the large tile, as a call's speaker view. */
+      function feature(person, speaking) {
+        $('main-avatar').style.background = person.color;
+        $('main-avatar').textContent = person.name[0];
+        $('main-name').textContent = person.label;
+        $('main-role').textContent = person.role;
+        $('main-tile').classList.toggle('speaking', speaking);
+      }
+
+      window.stage = {
+        clock: () => now,
+        /** Loads both TalkQTE frames and starts a simulated live session. */
+        async prepare(value) {
+          data = value;
+          $('title').textContent = data.title;
+          $('source').textContent =
+            `${data.title} · cue decisions: ${data.evaluator} · ${data.timing}`;
+          $('intro-title').textContent = data.title;
+          $('intro-setting').textContent = data.setting;
+          $('intro-source').textContent =
+            `Cue decisions: ${data.evaluator}. ${data.timing}.`;
+          const tiles = $('tiles');
+          for (const [i, person] of data.participants.entries()) {
+            person.color = COLORS[i % COLORS.length];
+            person.label =
+              person.name === data.listener
+                ? `${person.name} (you)`
+                : person.name;
+            person.role = person.role.replace(/ \(listener\)$/, '');
+            const tile = document.createElement('div');
+            tile.className = 'tile';
+            tile.dataset.name = person.name;
+            const avatar = document.createElement('div');
+            avatar.className = 'avatar';
+            avatar.style.background = person.color;
+            avatar.textContent = person.name[0];
+            const name = document.createElement('div');
+            name.className = 'name';
+            const bars = document.createElement('span');
+            bars.className = 'bars';
+            bars.append(...[0, 1, 2].map(() => document.createElement('i')));
+            const label = document.createElement('span');
+            label.textContent = person.label;
+            const role = document.createElement('small');
+            role.textContent = person.role;
+            name.append(bars, label, role);
+            tile.append(avatar, name);
+            tiles.append(tile);
+          }
+          feature(data.participants[0], false);
+          $('companion').src = `${data.origin}/?window=cue`;
+          $('notebook').src = `${data.origin}/`;
+          await waitFor(
+            () => frames().every((frame) => frame.liveTest),
+            'TalkQTE frames',
+          );
+          for (const frame of frames()) await frame.liveTest.start();
+        },
+        /** Plays the replay on its own clock; resolves when it is over. */
+        async play() {
+          const lines = new Map(data.lines.map((line) => [line.id, line]));
+          const schedule = [
+            ...data.lines.flatMap((line) => [
+              { atMs: line.fromMs, kind: 'speak', line },
+              { atMs: line.atMs, kind: 'spoken', line },
+            ]),
+            ...data.timeline.map((event) => ({ ...event, kind: event.type })),
+          ].sort((a, b) => a.atMs - b.atMs);
+          const transcript = [];
+          let cue = null;
+          const publish = async () => {
+            const state = {
+              elapsedMs: Math.round(now),
+              transcript: [...transcript],
+              cue: cue && {
+                ...cue.card,
+                remainingMs: Math.max(0, Math.round(cue.expiresAtMs - now)),
+              },
+            };
+            for (const frame of frames()) await frame.liveTest.publish(state);
+          };
+          const apply = (event) => {
+            if (event.kind === 'speak') {
+              for (const tile of document.querySelectorAll('#tiles .tile'))
+                tile.classList.toggle(
+                  'speaking',
+                  tile.dataset.name === event.line.speaker,
+                );
+              const person = data.participants.find(
+                (item) => item.name === event.line.speaker,
+              );
+              if (person) feature(person, true);
+              const caption = $('caption');
+              caption.textContent = '';
+              const who = document.createElement('b');
+              who.textContent = `${event.line.speaker}: `;
+              caption.append(who, event.line.text);
+            } else if (event.kind === 'spoken') {
+              for (const tile of document.querySelectorAll('.tile'))
+                tile.classList.remove('speaking');
+            } else if (event.kind === 'line') {
+              const line = lines.get(event.lineId);
+              // As a live transcript labels it today: one speaker label.
+              transcript.push({
+                id: line.id,
+                atMs: event.atMs,
+                speaker: 'Speaker',
+                text: line.text,
+              });
+            } else if (event.kind === 'evaluation-start') {
+              note(`Evaluator asked after line ${event.lineId.slice(1)}`);
+            } else if (event.kind === 'decision') {
+              const seconds = `${(event.latencyMs / 1000).toFixed(1)} s`;
+              if (event.outcome === 'superseded')
+                note(
+                  `Decision "${event.action}" dropped after ${seconds}: newer speech arrived`,
+                  'dropped',
+                );
+              else if (event.outcome !== 'applied')
+                note(
+                  `Decision "${event.action}" not applied (${event.outcome})`,
+                  'dropped',
+                );
+              else if (event.action === 'quiet')
+                note(`Decided to stay quiet (${seconds})`);
+              else note(`Decided: ${event.action} (${seconds})`, 'show');
+            } else if (event.kind === 'cue-shown') {
+              const sources = event.sourceIds.map((id) => lines.get(id));
+              cue = {
+                expiresAtMs: event.expiresAtMs,
+                card: {
+                  id: event.cueId,
+                  kind: 'Suggestion',
+                  question: event.text,
+                  evidence: sources.at(-1).text,
+                  sourceId: `transcript:${sources.at(-1).id}`,
+                  sources: sources.map((line) => ({
+                    id: `transcript:${line.id}`,
+                    revision: 0,
+                    text: line.text,
+                    provenance: {
+                      kind: 'transcript',
+                      atMs: line.arrivesAtMs,
+                      speaker: 'Speaker',
+                    },
+                  })),
+                  totalMs: event.expiresAtMs - event.atMs,
+                  held: false,
+                  expanded: false,
+                  resolvedBy: null,
+                  note: null,
+                  aboutFocus: false,
+                },
+              };
+              $('companion').style.height = `${COMPANION.question}px`;
+              note('Cue on screen', 'show');
+            } else if (event.kind === 'cue-cleared') {
+              cue = null;
+              $('companion').style.height = `${COMPANION.resting}px`;
+              note(
+                event.why === 'expired'
+                  ? 'Cue expired unread'
+                  : `Cue cleared: ${event.why}`,
+                'gone',
+              );
+            }
+          };
+          $('intro').hidden = true;
+          startedAt = performance.now();
+          let next = 0;
+          let published = -Infinity;
+          for (;;) {
+            now = (performance.now() - startedAt) * data.speed;
+            let changed = false;
+            while (next < schedule.length && schedule[next].atMs <= now) {
+              apply(schedule[next++]);
+              changed = true;
+            }
+            $('clock').textContent = clock(now);
+            // Republish on a change, and a few times a second so the cue's
+            // remaining time and the session clock keep moving.
+            if (changed || now - published >= 250 * data.speed) {
+              await publish();
+              published = now;
+            }
+            if (now >= data.endsAtMs) break;
+            await new Promise((resolve) => setTimeout(resolve, 40));
+          }
+          for (const tile of document.querySelectorAll('.tile'))
+            tile.classList.remove('speaking');
+        },
+      };
+    </script>
+  </body>
+</html>
