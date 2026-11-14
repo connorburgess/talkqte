@@ -124,8 +124,6 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-inspect-cue",
         "allow-set-overlay",
         "allow-set-sensitivity",
-        "allow-pause-demo",
-        "allow-resume-demo",
         "allow-set-live-cues-paused",
         "allow-microphone-snapshot",
         "allow-stop-microphone",
@@ -259,8 +257,8 @@ fn the_companion_receives_the_cue_and_display_state_but_no_notebook_content() {
 }
 
 #[test]
-fn an_export_holds_notes_and_the_demo_transcript_but_no_name_focus_or_imported_note() {
-    let mut engine = Engine::default();
+fn an_export_holds_notes_and_no_transcript_name_focus_or_imported_note() {
+    let mut engine = Engine::live();
     engine.set_user_name(Some("Marisol".into())).unwrap();
     engine
         .set_focus(vec!["Agree the seating chart for the potluck".into()])
@@ -270,14 +268,29 @@ fn an_export_holds_notes_and_the_demo_transcript_but_no_name_focus_or_imported_n
         .unwrap();
     engine.set_notes(vec![imported_note()]);
     engine.start().unwrap();
-    engine.advance(60_000);
+    engine.advance(1_000);
+    engine
+        .ingest(
+            engine.session(),
+            Segment {
+                id: "l1".into(),
+                at_ms: 1_000,
+                speaker: "Speaker".into(),
+                text: "The greenhouse keys are in the blue tin.".into(),
+            },
+        )
+        .unwrap();
     assert!(!engine.state.transcript.is_empty());
 
+    // The app refuses to export a live session at all; even so, the export
+    // text itself is the notes and nothing else.
     let export = engine.markdown();
-    assert!(export.contains("A notebook line about the seed budget."));
-    assert!(export.contains("Fictional demo transcript; not derived from microphone audio."));
-    assert!(export.contains(&engine.state.transcript[0].text));
+    assert_eq!(
+        export,
+        "# TalkQTE notes\n\nA notebook line about the seed budget.\n"
+    );
     for private in [
+        "blue tin",
         "Marisol",
         "seating chart",
         "Compost rota",

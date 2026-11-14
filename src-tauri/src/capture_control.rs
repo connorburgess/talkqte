@@ -42,7 +42,7 @@ impl Runtime {
         self.live_start.cancel();
         // Taking a live session revokes processing before any transcript drain.
         // No live handle means standalone monitoring or a cancelled model load;
-        // neither may mutate an unrelated demo/engine or its processing review.
+        // neither may mutate an unrelated engine or its processing review.
         let live = if self.live.is_some() {
             self.take_live_for_stop()
         } else {
@@ -200,7 +200,7 @@ mod tests {
     }
 
     #[test]
-    fn standalone_stop_does_not_end_an_independent_demo_and_retains_exact_microphone() {
+    fn standalone_stop_does_not_end_an_independent_session_and_retains_exact_microphone() {
         let mut runtime = Runtime::default();
         runtime.engine.start().unwrap();
         let session = runtime.engine.session();

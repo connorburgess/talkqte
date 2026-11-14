@@ -50,8 +50,11 @@ export interface Cue {
 export interface CueSnapshot {
   revision: number;
   status: Status;
-  /** A live session fed by local transcription, not the scripted demo. */
+  /** A live session fed by local transcription. */
   live: boolean;
+  /** Browser preview and test stand-in only: a replay of a fictional
+   * conversation that captures nothing. The desktop app never sends it. */
+  simulated?: boolean;
   /** Suppresses cues while the live microphone and transcript continue. */
   cuesPaused: boolean;
   cue: Cue | null;
@@ -76,11 +79,7 @@ export interface Snapshot extends CueSnapshot {
   focus: string[];
 }
 export type Commands = {
-  start_demo: undefined;
-  pause_demo: undefined;
-  resume_demo: undefined;
   set_live_cues_paused: { paused: boolean };
-  end_demo: undefined;
   respond_to_cue: { id: string; response: 'dismiss' };
   keep_line: { id: string };
   inspect_cue: { id: string; expanded: boolean };

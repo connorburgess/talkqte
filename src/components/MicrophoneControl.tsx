@@ -148,13 +148,12 @@ export function MicrophoneControl({
       <p>
         {sourceMayBeCapturing
           ? 'Activity check only. No recording or transcription from the microphone. Audio from a selected application may still be captured; see Cue processing below.'
-          : 'Activity check only. No recording, transcription, or system audio.'}{' '}
-        Demo questions are scripted.
+          : 'Activity check only. No recording, transcription, or system audio.'}
       </p>
       {active && state?.status !== 'error' && (
         <p>
-          Demo and companion controls do not stop this check. Use Stop
-          microphone to release it.
+          Companion controls do not stop this check. Use Stop microphone to
+          release it.
         </p>
       )}
       {microphone.stopPending && state?.status !== 'stopping' && (

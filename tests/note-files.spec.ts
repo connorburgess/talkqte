@@ -16,7 +16,7 @@ async function chooseFile(page: Page, kind: string) {
     .click();
 }
 
-test('a Markdown note without a date waits for the date the person enters, then is used, removable, and never exported', async ({
+test('a Markdown note without a date waits for the date the person enters, then is listed, removable, and never exported', async ({
   page,
 }) => {
   await chooseFile(page, 'markdown');
@@ -60,28 +60,13 @@ test('a Markdown note without a date waits for the date the person enters, then 
     page.getByRole('status').filter({ hasText: '1 imported.' }),
   ).toHaveCount(1);
 
-  // The note reminds with the date the person entered, labeled as theirs.
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(5200);
-  const question = page.getByRole('region', { name: 'Suggested question' });
-  await expect(
-    question.getByRole('heading', { name: 'Welcome guide printing' }),
-  ).toBeVisible();
-  await expect(question).toContainText('From your notes');
-  await expect(question).toContainText(
-    'Its title came up · imported note, 2026-10-21',
-  );
-  await question.getByRole('button', { name: 'Hold', exact: true }).click();
-  await page.getByRole('button', { name: 'Pause', exact: true }).click();
-
-  // Removing the note clears its held reminder; export never includes it.
+  // Removing the note takes it off the list; export never includes it.
   await panel(page)
     .getByRole('button', {
       name: 'Remove Welcome guide printing (2026-10-21)',
       exact: true,
     })
     .click();
-  await expect(question).toHaveCount(0);
   await expect(panel(page).getByRole('listitem')).toHaveCount(0);
   await expect(panel(page)).toContainText('No prior notes selected.');
   await page.getByRole('button', { name: 'Export', exact: true }).click();

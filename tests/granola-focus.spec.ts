@@ -43,7 +43,7 @@ test('a pending focus suggestion keeps disconnect and the notebook usable', asyn
   });
   await expect(disconnect).toBeEnabled();
   await expect(
-    page.getByRole('button', { name: 'Try demo', exact: true }),
+    page.getByRole('button', { name: 'Export', exact: true }),
   ).toBeEnabled();
   await page.setViewportSize({ width: 600, height: 700 });
   await page.emulateMedia({ reducedMotion: 'reduce' });

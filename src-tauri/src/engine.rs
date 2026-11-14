@@ -31,7 +31,10 @@ pub struct Segment {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Demo {
+/// Scripted lines played on the session clock. The app never supplies any:
+/// a live session's lines arrive through `ingest`. The engine's own tests
+/// use a script to replay fictional scenarios.
+pub struct Script {
     pub title: String,
     pub description: String,
     pub duration_ms: u64,
@@ -452,7 +455,7 @@ pub struct Snapshot {
     pub overlay_enabled: bool,
     pub companion_position: CompanionPosition,
     pub question_size: QuestionSize,
-    /// True for a live session fed by transcription rather than the demo.
+    /// True for a live session fed by transcription.
     pub live: bool,
     /// Live cue suppression only; capture, transcription and the clock continue.
     pub cues_paused: bool,
@@ -489,7 +492,7 @@ pub struct CueSnapshot {
 
 pub struct Engine {
     identity: std::sync::Arc<()>,
-    demo: Demo,
+    script: Script,
     pub state: Snapshot,
     generation: u64,
     evaluation_revision: u64,
@@ -501,8 +504,6 @@ pub struct Engine {
     next_segment: usize,
     cue_deadline: u64,
     cooldown_until: u64,
-    /// Whether this session's transcript includes ingested (non-demo) lines.
-    live_input: bool,
     /// Ignore delayed transcription from before the most recent cue resume.
     cues_after_ms: Option<u64>,
     /// The user's name for this app session, used to recognize questions
@@ -530,19 +531,23 @@ pub struct Engine {
 }
 
 impl Default for Engine {
+    /// No session: nothing runs and nothing is scripted until a live session
+    /// replaces this engine.
     fn default() -> Self {
-        Self::from_demo(
-            serde_json::from_str(include_str!("../../src/demo.json"))
-                .expect("bundled fictional demo is valid"),
-        )
+        Self::from_script(Script {
+            title: String::new(),
+            description: String::new(),
+            duration_ms: 0,
+            segments: vec![],
+        })
     }
 }
 
 impl Engine {
-    /// A session with no scripted demo lines, for transcript input through
+    /// A session with no scripted lines, for transcript input through
     /// `ingest`. It runs until ended.
     pub fn live() -> Self {
-        Self::from_demo(Demo {
+        Self::from_script(Script {
             title: "Live session".into(),
             description: "Transcript lines from a local transcription source.".into(),
             duration_ms: u64::MAX,
@@ -550,16 +555,25 @@ impl Engine {
         })
     }
 
-    fn from_demo(demo: Demo) -> Self {
+    /// The fictional scenario the engine's tests replay. Never in the app.
+    #[cfg(test)]
+    pub(crate) fn fictional() -> Self {
+        Self::from_script(
+            serde_json::from_str(include_str!("engine/fictional_scenario.json"))
+                .expect("the fictional test scenario is valid"),
+        )
+    }
+
+    fn from_script(script: Script) -> Self {
         Self {
             identity: std::sync::Arc::new(()),
             state: Snapshot {
                 revision: 0,
-                title: demo.title.clone(),
-                description: demo.description.clone(),
+                title: script.title.clone(),
+                description: script.description.clone(),
                 status: Status::Ready,
                 elapsed_ms: 0,
-                duration_ms: demo.duration_ms,
+                duration_ms: script.duration_ms,
                 transcript: vec![],
                 cue: None,
                 notes: String::new(),
@@ -567,12 +581,12 @@ impl Engine {
                 overlay_enabled: true,
                 companion_position: CompanionPosition::BottomRight,
                 question_size: QuestionSize::Standard,
-                live: demo.segments.is_empty() && demo.duration_ms == u64::MAX,
+                live: script.segments.is_empty() && script.duration_ms == u64::MAX,
                 cues_paused: false,
                 user_name: None,
                 focus: vec![],
             },
-            demo,
+            script,
             generation: 0,
             evaluation_revision: 0,
             evaluation: None,
@@ -581,7 +595,6 @@ impl Engine {
             next_segment: 0,
             cue_deadline: 0,
             cooldown_until: 0,
-            live_input: false,
             cues_after_ms: None,
             last_shown: vec![],
             focus_terms: vec![],
@@ -620,14 +633,13 @@ impl Engine {
 
     pub fn start(&mut self) -> Result<(), String> {
         if matches!(self.state.status, Status::Running | Status::Paused) {
-            return Err("End the current demo before replaying it.".into());
+            return Err("End the current session before starting another.".into());
         }
         self.revoke_processing();
         self.live_stopping = false;
         self.invalidate_evaluation();
         self.evaluated_cue = None;
         self.generation += 1;
-        self.live_input = false;
         self.state.cues_paused = false;
         self.cues_after_ms = None;
         self.last_shown.clear();
@@ -646,9 +658,12 @@ impl Engine {
         Ok(())
     }
 
-    pub fn pause(&mut self) -> Result<(), String> {
+    /// Freezes a scripted scenario's clock. The app has no such control: a
+    /// live session is stopped, and its cues are paused separately.
+    #[cfg(test)]
+    pub(crate) fn pause(&mut self) -> Result<(), String> {
         if self.state.status != Status::Running {
-            return Err("Only a running demo can be paused.".into());
+            return Err("Only a running session can be paused.".into());
         }
         self.invalidate_evaluation();
         self.state.status = Status::Paused;
@@ -656,9 +671,10 @@ impl Engine {
         Ok(())
     }
 
-    pub fn resume(&mut self) -> Result<(), String> {
+    #[cfg(test)]
+    pub(crate) fn resume(&mut self) -> Result<(), String> {
         if self.state.status != Status::Paused {
-            return Err("Only a paused demo can be resumed.".into());
+            return Err("Only a paused session can be resumed.".into());
         }
         self.invalidate_evaluation();
         self.state.status = Status::Running;
@@ -734,7 +750,7 @@ impl Engine {
             .state
             .elapsed_ms
             .saturating_add(delta_ms)
-            .min(self.demo.duration_ms);
+            .min(self.script.duration_ms);
         let now = self.state.elapsed_ms;
         if let Some(cue) = self.state.cue.as_mut() {
             cue.remaining_ms = self.cue_deadline.saturating_sub(now);
@@ -748,7 +764,7 @@ impl Engine {
                 }
             }
         }
-        while let Some(segment) = self.demo.segments.get(self.next_segment) {
+        while let Some(segment) = self.script.segments.get(self.next_segment) {
             if segment.at_ms > now {
                 break;
             }
@@ -756,11 +772,11 @@ impl Engine {
             self.next_segment += 1;
             self.consume(segment, now);
         }
-        if now >= self.demo.duration_ms {
+        if now >= self.script.duration_ms {
             self.revoke_processing();
             self.state.status = Status::Ended;
             // A deliberately opened question stays readable after playback ends.
-            // Explicit End demo and Replay still clear it.
+            // An explicit end or a new session still clears it.
             if !self.state.cue.as_ref().is_some_and(|cue| cue.held) {
                 self.state.cue = None;
                 self.forget_unshown();
@@ -780,7 +796,7 @@ impl Engine {
     /// Accepts one transcript segment from a live source for the running
     /// session. Invalid, late, or out-of-order input is rejected without
     /// changing state. Accepted input follows the same cue, answer, and
-    /// stale-cue rules as the bundled demo.
+    /// stale-cue rules as a scripted line.
     pub fn ingest(&mut self, session: u64, segment: Segment) -> Result<(), String> {
         if session != self.generation {
             return Err("That transcript belongs to an earlier session.".into());
@@ -813,7 +829,7 @@ impl Engine {
             .iter()
             .any(|existing| existing.id == segment.id)
             || self
-                .demo
+                .script
                 .segments
                 .iter()
                 .any(|scripted| scripted.id == segment.id)
@@ -837,7 +853,6 @@ impl Engine {
             speaker: speaker.into(),
             ..segment
         };
-        self.live_input = true;
         self.consume(segment, now);
         self.changed();
         Ok(())
@@ -1602,26 +1617,10 @@ impl Engine {
         self.changed();
     }
 
+    /// The notes export. It holds the person's notes and nothing else: no
+    /// transcript, cue, name, focus line or imported note.
     pub fn markdown(&self) -> String {
-        // Never label supplied transcript lines as fictional demo content.
-        let source = if self.live_input {
-            "Transcript includes lines from a transcription source, not only the fictional demo."
-        } else {
-            "Fictional demo transcript; not derived from microphone audio."
-        };
-        let mut out = format!(
-            "# {}\n\n{source}\n\n## Notes\n\n{}\n",
-            self.state.title, self.state.notes
-        );
-        out.push_str(if self.live_input {
-            "\n## Transcript\n\n"
-        } else {
-            "\n## Demo transcript\n\n"
-        });
-        for segment in &self.state.transcript {
-            out.push_str(&format!("**{}:** {}\n\n", segment.speaker, segment.text));
-        }
-        out
+        format!("# TalkQTE notes\n\n{}\n", self.state.notes)
     }
 }
 
@@ -2687,15 +2686,15 @@ mod tests {
     use super::*;
 
     fn with_cue() -> Engine {
-        let mut engine = Engine::default();
+        let mut engine = Engine::fictional();
         engine.start().unwrap();
         engine.advance(8_000);
         engine
     }
 
     fn play_statement(text: &str) -> Engine {
-        let mut engine = Engine::default();
-        engine.demo.segments = vec![Segment {
+        let mut engine = Engine::fictional();
+        engine.script.segments = vec![Segment {
             id: "example".into(),
             at_ms: 1_000,
             speaker: "Robin".into(),
@@ -2707,10 +2706,10 @@ mod tests {
     }
 
     fn play(lines: &[(u64, &str)]) -> Engine {
-        let mut engine = Engine::default();
-        // Custom scenarios own their length, independently of the bundled demo.
-        engine.demo.duration_ms = lines.last().map_or(600_000, |(at, _)| at + 600_000);
-        engine.demo.segments = lines
+        let mut engine = Engine::fictional();
+        // Custom scenarios own their length, independently of the fixture.
+        engine.script.duration_ms = lines.last().map_or(600_000, |(at, _)| at + 600_000);
+        engine.script.segments = lines
             .iter()
             .enumerate()
             .map(|(index, (at_ms, text))| Segment {
@@ -2735,7 +2734,7 @@ mod tests {
 
     fn live_session() -> Engine {
         let mut engine = play(&[]);
-        engine.demo.duration_ms = 600_000;
+        engine.script.duration_ms = 600_000;
         engine.advance(10_000);
         engine
     }
@@ -2817,8 +2816,8 @@ mod tests {
     }
 
     #[test]
-    fn cue_pause_cannot_restart_a_stopped_session_or_pause_the_demo() {
-        let mut e = Engine::default();
+    fn cue_pause_cannot_restart_a_stopped_session_or_pause_a_scripted_one() {
+        let mut e = Engine::fictional();
         e.start().unwrap();
         let revision = e.state.revision;
         assert!(e.set_live_cues_paused(true).is_err());
@@ -2891,7 +2890,7 @@ mod tests {
             .ingest(old, live("w1", 9_000, "Someone can take it."))
             .is_err());
         e.start().unwrap();
-        e.demo.duration_ms = 600_000;
+        e.script.duration_ms = 600_000;
         e.advance(10_000);
         // Work started for the earlier session still carries its old ID.
         assert!(e
@@ -2904,7 +2903,7 @@ mod tests {
 
     #[test]
     fn paused_or_stopped_sessions_reject_transcript_input() {
-        let mut e = Engine::default();
+        let mut e = Engine::fictional();
         assert!(e.ingest(e.session(), live("w1", 0, "Hello.")).is_err());
         let mut e = live_session();
         e.pause().unwrap();
@@ -2988,8 +2987,8 @@ mod tests {
     }
 
     #[test]
-    fn live_ids_cannot_reuse_a_scripted_demo_id() {
-        let mut e = Engine::default();
+    fn live_ids_cannot_reuse_a_scripted_id() {
+        let mut e = Engine::fictional();
         e.start().unwrap();
         e.advance(2_000);
         assert!(e.ingest(e.session(), live("s5", 2_000, "Hello.")).is_err());
@@ -2997,16 +2996,31 @@ mod tests {
     }
 
     #[test]
-    fn export_stops_calling_supplied_lines_fictional() {
+    fn the_export_holds_notes_and_never_a_transcript_line() {
+        let mut e = Engine::default();
+        e.update_notes("Fictional note: ask about the welcome guide.".into())
+            .unwrap();
+        assert_eq!(
+            e.markdown(),
+            "# TalkQTE notes\n\nFictional note: ask about the welcome guide.\n"
+        );
+        // Even where a session has lines, the export text carries none.
         let mut e = live_session();
-        assert!(e.markdown().contains("Fictional demo transcript"));
+        e.update_notes("Fictional note.".into()).unwrap();
         e.ingest(e.session(), live("w1", 9_000, "Hello.")).unwrap();
-        let markdown = e.markdown();
-        assert!(!markdown.contains("Fictional demo transcript"));
-        assert!(markdown.contains("## Transcript\n\n**Speaker 1:** Hello."));
-        e.end();
-        e.start().unwrap();
-        assert!(e.markdown().contains("## Demo transcript"));
+        assert_eq!(e.markdown(), "# TalkQTE notes\n\nFictional note.\n");
+    }
+
+    #[test]
+    fn with_no_session_nothing_is_scripted_and_nothing_plays() {
+        let mut e = Engine::default();
+        assert_eq!(e.state.status, Status::Ready);
+        assert!(!e.state.live);
+        assert!(e.state.title.is_empty() && e.state.description.is_empty());
+        assert!(e.script.segments.is_empty());
+        e.advance(60_000);
+        assert_eq!(e.state.elapsed_ms, 0);
+        assert!(e.state.transcript.is_empty() && e.state.cue.is_none());
     }
 
     #[test]
@@ -3333,8 +3347,8 @@ mod tests {
     }
 
     #[test]
-    fn the_bundled_demo_withdraws_its_timing_question_once_a_date_is_set() {
-        let mut e = Engine::default();
+    fn the_fictional_scenario_withdraws_its_timing_question_once_a_date_is_set() {
+        let mut e = Engine::fictional();
         e.start().unwrap();
         e.advance(37_000);
         assert_eq!(e.state.cue.as_ref().unwrap().kind, "Timing");
@@ -3357,7 +3371,7 @@ mod tests {
             (60_000, "We should finish soon."),
             (125_000, "Someone can take the layout."),
         ]);
-        e.demo.duration_ms = 200_000;
+        e.script.duration_ms = 200_000;
         e.advance(1_000);
         let first = e.state.cue.as_ref().unwrap().id.clone();
         e.respond(&first, Response::Dismiss).unwrap();
@@ -3384,7 +3398,7 @@ mod tests {
             (100_000, "Someone can take the second draft."),
             (122_000, "Someone can take the layout."),
         ]);
-        e.demo.duration_ms = 200_000;
+        e.script.duration_ms = 200_000;
         e.advance(122_000);
         assert_eq!(e.state.cue.as_ref().unwrap().source_id, "t3");
     }
@@ -3417,7 +3431,7 @@ mod tests {
 
     #[test]
     fn replay_forgets_which_questions_were_shown() {
-        let mut e = Engine::default();
+        let mut e = Engine::fictional();
         e.start().unwrap();
         e.advance(8_000);
         assert!(e.state.cue.is_some());
@@ -4101,7 +4115,7 @@ mod tests {
 
     #[test]
     fn focus_lines_need_identifying_words_and_there_are_at_most_five() {
-        let mut e = Engine::default();
+        let mut e = Engine::fictional();
         assert!(e.set_focus(vec!["Decide".into()]).is_err(), "one word");
         assert!(
             e.set_focus(vec!["Sync on the team update".into()]).is_err(),
@@ -4153,10 +4167,10 @@ mod tests {
         e.advance(2_000);
         assert!(e.state.cue.is_none(), "two of seven words is not about it");
 
-        let mut next = Engine::default();
+        let mut next = Engine::fictional();
         next.copy_focus_from(&e);
         assert_eq!(next.state.focus, [line]);
-        next.demo.segments = vec![Segment {
+        next.script.segments = vec![Segment {
             id: "t1".into(),
             at_ms: 1_000,
             speaker: "Robin".into(),
@@ -4541,7 +4555,7 @@ mod tests {
 
     #[test]
     fn invalid_names_are_rejected_and_an_empty_name_clears() {
-        let mut e = Engine::default();
+        let mut e = Engine::fictional();
         assert!(e.set_user_name(Some("Robin<script>".into())).is_err());
         assert!(e.set_user_name(Some("x".repeat(41))).is_err());
         assert!(
@@ -5175,8 +5189,8 @@ mod tests {
     }
 
     #[test]
-    fn appearance_is_shared_with_companion_and_retained_across_demo_replay() {
-        let mut e = Engine::default();
+    fn appearance_is_shared_with_companion_and_retained_across_a_replay() {
+        let mut e = Engine::fictional();
         assert_eq!(e.state.companion_position, CompanionPosition::BottomRight);
         assert_eq!(e.state.question_size, QuestionSize::Standard);
         e.set_companion_position(CompanionPosition::TopCenter);
@@ -5197,8 +5211,8 @@ mod tests {
     }
 
     #[test]
-    fn waking_after_demo_ends_does_not_show_stale_prompts() {
-        let mut e = Engine::default();
+    fn waking_after_a_scripted_session_ends_does_not_show_stale_prompts() {
+        let mut e = Engine::fictional();
         e.start().unwrap();
         e.advance(u64::MAX);
         assert!(e.state.cue.is_none());
@@ -5208,7 +5222,7 @@ mod tests {
 
     #[test]
     fn rejected_notes_leave_previous_content_intact() {
-        let mut e = Engine::default();
+        let mut e = Engine::fictional();
         e.update_notes("Keep this.".into()).unwrap();
         assert!(e.update_notes("x".repeat(20_001)).is_err());
         assert_eq!(e.state.notes, "Keep this.");
@@ -5227,11 +5241,11 @@ mod tests {
 
     #[test]
     fn a_replacement_engine_never_reuses_an_earlier_session_id() {
-        let mut demo = Engine::default();
-        demo.start().unwrap();
-        let old = demo.session();
+        let mut scripted = Engine::fictional();
+        scripted.start().unwrap();
+        let old = scripted.session();
         let mut next = Engine::live();
-        next.continue_sessions_from(&demo);
+        next.continue_sessions_from(&scripted);
         next.start().unwrap();
         next.advance(2_000);
         assert_ne!(next.session(), old);
@@ -5488,33 +5502,6 @@ mod tests {
             .unwrap();
         // Kept on purpose: the user may still want to answer.
         assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
-    }
-
-    /// Pins the demo to the bundled fictional script: the default session
-    /// is that script, playing it yields only its lines, and it never counts
-    /// as live input. That the script is compiled in (`include_str!`) and
-    /// that the app keeps no meeting store are properties of the code, not
-    /// something this test can observe.
-    #[test]
-    fn the_demo_is_the_bundled_fictional_script_and_reads_nothing_else() {
-        let bundled: Demo = serde_json::from_str(include_str!("../../src/demo.json")).unwrap();
-        let e = Engine::default();
-        assert_eq!(e.state.title, bundled.title);
-        assert_eq!(e.demo.segments.len(), bundled.segments.len());
-        assert!(e.demo.segments.len() >= 5, "a real script, not a stub");
-        assert!(!e.live_input);
-        // Playing it through produces only lines from that script.
-        let mut e = e;
-        e.start().unwrap();
-        e.advance(u64::MAX);
-        assert_eq!(e.state.transcript.len(), bundled.segments.len());
-        let scripted: Vec<&str> = bundled.segments.iter().map(|s| s.text.as_str()).collect();
-        assert!(e
-            .state
-            .transcript
-            .iter()
-            .all(|line| scripted.contains(&line.text.as_str())));
-        assert!(!e.live_input);
     }
 
     #[test]

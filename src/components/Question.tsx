@@ -102,12 +102,11 @@ function lead(cue: Cue) {
 }
 
 /** Where the cue came from and, in a few words, why it is here now. */
-function origin(cue: Cue, live: boolean) {
-  const conversation = live ? 'this conversation' : 'the demo conversation';
+function origin(cue: Cue) {
   const from =
     cue.held && cue.remainingMs === 0 && !cue.resolvedBy
-      ? `From earlier in ${conversation}`
-      : `From ${conversation}`;
+      ? 'From earlier in this conversation'
+      : 'From this conversation';
   if (cue.kind === 'Still open')
     return `${from} · no line has used these focus words yet`;
   return cue.aboutFocus ? `${from} · uses words from your focus list` : from;
@@ -234,8 +233,6 @@ function Sources({ sources, label }: { sources: CueSource[]; label: string }) {
 interface QuestionProps {
   cue: Cue;
   size: CueSnapshot['questionSize'];
-  /** The question comes from local transcription, not the fictional demo. */
-  live?: boolean;
   announce?: boolean;
   busy: boolean;
   onDismiss: () => void;
@@ -246,7 +243,6 @@ interface QuestionProps {
 export function Question({
   cue,
   size,
-  live = false,
   announce = true,
   busy,
   onDismiss,
@@ -396,7 +392,7 @@ export function Question({
             </>
           ) : (
             <>
-              <span className="cue-source-label">{origin(cue, live)}</span>
+              <span className="cue-source-label">{origin(cue)}</span>
               {quote && (
                 <>
                   {' '}

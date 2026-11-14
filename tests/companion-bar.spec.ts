@@ -220,16 +220,20 @@ test('with nothing captured the bar shows no capture glyph, only what is running
     await page.locator('main').evaluate((element) => element.scrollHeight),
   ).toBeLessThanOrEqual(76);
 
-  // The scripted demo captures nothing: no glyph, no dot, and it says so.
+  // The tests' simulated session captures nothing: no glyph, no dot, the
+  // words say what it is, and there is no pause or stop to press.
   await microphone(page, { status: 'off', canStart: true });
-  await page.evaluate(() =>
-    window.liveTest.publish({ live: false, status: 'running' }),
+  await page.evaluate(() => window.liveTest.simulate());
+  await expect(bar.getByRole('status')).toHaveText(
+    'Simulated session · Fictional',
   );
-  await expect(bar.getByRole('status')).toHaveText('Demo running · Scripted');
   await expect(bar.getByRole('status')).toBeVisible();
+  await expect(bar.getByRole('status')).not.toHaveClass(/visually-hidden/);
   await expect(bar.getByRole('img')).toHaveCount(0);
   await expect(bar.locator('.companion-capture')).toHaveCount(0);
+  await expect(bar.getByText(/Mic|Live/)).toHaveCount(0);
+  await expect(bar.getByRole('button')).toHaveCount(1);
   await expect(
-    bar.getByRole('button', { name: 'Pause demo', exact: true }),
-  ).toHaveAttribute('title', 'Pause demo');
+    bar.getByRole('button', { name: 'Hide companion', exact: true }),
+  ).toBeVisible();
 });

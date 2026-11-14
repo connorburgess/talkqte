@@ -1,5 +1,6 @@
-// Browser-only visual development adapter. This is not the desktop session engine.
-import demo from '../demo.json';
+// Browser-only visual development adapter. This is not the desktop session
+// engine: it holds notes, settings and selected prior notes, and never runs a
+// session, opens a microphone or raises a cue.
 import type {
   Commands,
   ContextItem,
@@ -14,13 +15,13 @@ import type {
 
 const state: Snapshot = {
   revision: 0,
-  title: demo.title,
-  description: demo.description,
+  title: '',
+  description: '',
   status: 'ready',
   live: false,
   cuesPaused: false,
   elapsedMs: 0,
-  durationMs: demo.durationMs,
+  durationMs: 0,
   transcript: [],
   cue: null,
   notes: '',
@@ -32,172 +33,20 @@ const state: Snapshot = {
   questionSize: 'standard',
 };
 const listeners = new Set<(state: Snapshot) => void>();
-const prompts: Record<string, [string, string]> = {
-  s2: ['Owner', 'Who will take the first draft?'],
-  s4: ['Timing', 'What date should we aim for?'],
-  s6: ['Decision', 'How will we choose between those options?'],
-};
-// Mirrors the desktop engine's answer detection for the bundled demo only.
-const resolutions: Record<string, string> = { s5: 'Timing' };
-let generation = 0;
-let cooldown = 0;
-let deadline = 0;
-let last = performance.now();
-let timer: ReturnType<typeof setInterval> | undefined;
 let reviewedExport: string | null = null;
-const quietMs = () => (state.sensitivity === 'quiet' ? 30_000 : 10_000);
 function emit() {
   state.revision++;
   for (const receive of listeners) receive(structuredClone(state));
 }
-function tick() {
-  const now = performance.now();
-  const delta = now - last;
-  last = now;
-  if (state.status !== 'running') return;
-  state.elapsedMs = Math.min(state.durationMs, state.elapsedMs + delta);
-  if (state.cue) {
-    state.cue.remainingMs = Math.max(0, deadline - state.elapsedMs);
-    if (!state.cue.remainingMs && !state.cue.held) {
-      // A quote leaves no pause behind it: it asked for nothing.
-      const quote = state.cue.kind === 'Said';
-      state.cue = null;
-      if (!quote) cooldown = deadline + quietMs();
-    }
-  }
-  for (const segment of demo.segments.slice(state.transcript.length)) {
-    if (segment.atMs > state.elapsedMs) break;
-    state.transcript.push(segment);
-    if (
-      state.cue &&
-      !state.cue.resolvedBy &&
-      resolutions[segment.id] === state.cue.kind
-    ) {
-      if (state.cue.held)
-        state.cue.resolvedBy = { sourceId: segment.id, evidence: segment.text };
-      else {
-        state.cue = null;
-        cooldown = segment.atMs + quietMs();
-        // The words that answered it are quoted in its place.
-        const quote = saidLine(segment.text);
-        if (quote) {
-          deadline = segment.atMs + 18_000;
-          state.cue = {
-            id: `${generation}:${segment.id}`,
-            kind: 'Said',
-            question: quote,
-            evidence: segment.text,
-            sourceId: segment.id,
-            remainingMs: deadline - state.elapsedMs,
-            totalMs: 18_000,
-            held: false,
-            expanded: false,
-            resolvedBy: null,
-            note: null,
-            aboutFocus: false,
-          };
-        }
-      }
-      continue;
-    }
-    const prompt = prompts[segment.id];
-    if (
-      prompt &&
-      !state.cue &&
-      segment.atMs >= cooldown &&
-      state.elapsedMs - segment.atMs < 18_000
-    ) {
-      deadline = segment.atMs + 18_000;
-      state.cue = {
-        id: `${generation}:${segment.id}`,
-        kind: prompt[0],
-        question: prompt[1],
-        evidence: segment.text,
-        sourceId: segment.id,
-        remainingMs: deadline - state.elapsedMs,
-        totalMs: 18_000,
-        held: false,
-        expanded: false,
-        resolvedBy: null,
-        note: null,
-        aboutFocus: false,
-      };
-    }
-    // A line about an imported note reminds the user of it once, with the
-    // note as its source; lowest in priority.
-    if (!state.cue && segment.atMs >= cooldown) {
-      const words = segment.text
-        .toLowerCase()
-        .split(/[^\p{L}\p{N}']+/u)
-        .filter(Boolean);
-      const note = contextItems.find((item) => {
-        if (shownNotes.includes(item.sourceId)) return false;
-        const terms = identifyingTerms(item.title);
-        const needed = terms.length > 6 ? 3 : 2;
-        return (
-          terms.length >= needed &&
-          terms.filter((t) => words.includes(t)).length >= needed
-        );
-      });
-      if (note) {
-        shownNotes.push(note.sourceId);
-        deadline = segment.atMs + 18_000;
-        state.cue = {
-          id: `${generation}:${segment.id}:note`,
-          kind: 'Context',
-          question: note.title,
-          evidence: note.excerpt,
-          sourceId: `file:${note.sourceId}`,
-          remainingMs: deadline - state.elapsedMs,
-          totalMs: 18_000,
-          held: false,
-          expanded: false,
-          resolvedBy: null,
-          note: {
-            title: note.title,
-            sourceDate: note.sourceDate,
-            provider: 'file',
-          },
-          aboutFocus: false,
-        };
-      }
-    }
-  }
-  if (state.elapsedMs >= state.durationMs) {
-    state.status = 'ended';
-    if (!state.cue?.held) state.cue = null;
-  }
-  emit();
-}
 export function connect(receive: (value: Snapshot) => void) {
   listeners.add(receive);
   receive(structuredClone(state));
-  if (!timer) {
-    last = performance.now();
-    timer = setInterval(tick, 200);
-  }
   return () => {
     listeners.delete(receive);
-    if (!listeners.size) {
-      clearInterval(timer);
-      timer = undefined;
-    }
   };
 }
 export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
-  tick();
   switch (name) {
-    case 'start_demo':
-      if (state.status === 'running' || state.status === 'paused')
-        throw new Error('End the current demo before replaying it.');
-      generation++;
-      cooldown = 0;
-      shownNotes = [];
-      state.elapsedMs = 0;
-      state.transcript = [];
-      state.cue = null;
-      state.status = 'running';
-      break;
     case 'cancel_context_import':
       break;
     case 'remove_context_item': {
@@ -215,50 +64,12 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
     case 'cancel_model_download':
     case 'remove_model':
       throw new Error('Live sessions are available in the desktop app.');
-    case 'pause_demo':
-      state.status = 'paused';
-      break;
-    case 'resume_demo':
-      state.status = 'running';
-      break;
-    case 'end_demo':
-      state.status = 'ended';
-      state.cue = null;
-      break;
-    case 'respond_to_cue': {
-      const { id, response } = args as Commands['respond_to_cue'];
-      const cue = state.cue;
-      if (!cue || cue.id !== id)
-        throw new Error('That question has already passed.');
-      void response; // Dismiss is the only response.
-      const quote = cue.kind === 'Said';
-      state.cue = null;
-      if (!quote) cooldown = state.elapsedMs + quietMs();
-      break;
-    }
-    case 'keep_line': {
-      const { id } = args as Commands['keep_line'];
-      if (!state.cue || state.cue.id !== id)
-        throw new Error('That line has already passed.');
-      if (state.cue.kind !== 'Said')
-        throw new Error('Only a quoted line can be kept.');
-      const line = state.transcript.find((s) => s.id === state.cue!.sourceId);
-      const atMs = line?.atMs ?? state.elapsedMs;
-      const stamp = `${String(Math.floor(atMs / 60_000)).padStart(2, '0')}:${String(Math.floor(atMs / 1000) % 60).padStart(2, '0')}`;
-      const speaker = line?.speaker ? `${line.speaker}: ` : '';
-      const entry = `[${stamp}] ${speaker}“${state.cue.question}”`;
-      state.notes = `${state.notes}${state.notes && !state.notes.endsWith('\n') ? '\n' : ''}${entry}\n`;
-      state.cue = null;
-      break;
-    }
-    case 'inspect_cue': {
-      const { id, expanded } = args as Commands['inspect_cue'];
-      if (!state.cue || state.cue.id !== id)
-        throw new Error('That question has already passed.');
-      state.cue.expanded = expanded;
-      state.cue.held = true;
-      break;
-    }
+    case 'respond_to_cue':
+    case 'inspect_cue':
+      // The browser preview never has a cue.
+      throw new Error('That question has already passed.');
+    case 'keep_line':
+      throw new Error('That line has already passed.');
     case 'set_companion_position':
       state.companionPosition = (
         args as Commands['set_companion_position']
@@ -275,12 +86,12 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
       break;
     }
     case 'set_user_name':
-      // Stored only; the preview's scripted questions never use the name.
+      // Stored only; the preview raises no cue that could use the name.
       state.userName = (args as Commands['set_user_name']).name?.trim() || null;
       break;
     case 'set_focus': {
-      // Stands in for the engine's checks; the preview's scripted questions
-      // never use the focus lines.
+      // Stands in for the engine's checks; the preview raises no cue that
+      // could use the focus lines.
       const lines = (args as Commands['set_focus']).lines
         .map((line) => line.trim())
         .filter(Boolean);
@@ -383,29 +194,6 @@ const refusedFiles: Record<string, string> = {
 // The notes of the file last picked, as the desktop app keeps them.
 let pickedNotes: ContextItem[] = exampleNotes;
 let contextItems: ContextItem[] = [];
-// Notes already quoted as a reminder this demo run.
-let shownNotes: string[] = [];
-/** A demo-only subset of the engine's quoted-line rule, enough for the
- * bundled script: a sentence with a time word and a commitment word, not a
- * question, not hedged. Months, counts, and "end of" live in the engine. */
-function saidLine(text: string): string | null {
-  const time =
-    /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|tonight|weekend|next (?:week|month)|(?:two|three|four|five|\d+) (?:days?|weeks?))\b/i;
-  const commitment =
-    /\b(by|before|until|from|starting|start|ready|done|finish|finished|send|deliver|takes|take|needs?|due|deadline|back|ship|review|share)\b/i;
-  const hedge = /\b(maybe|perhaps|might|probably|possibly)\b/i;
-  for (const raw of text.split(/(?<=[.?!;])/)) {
-    const sentence = raw.trim();
-    if (!sentence || sentence.endsWith('?')) continue;
-    if (
-      time.test(sentence) &&
-      commitment.test(sentence) &&
-      !hedge.test(sentence)
-    )
-      return sentence.length > 160 ? `${sentence.slice(0, 160)}…` : sentence;
-  }
-  return null;
-}
 /** Words of a note title or focus line that could identify it in conversation. */
 function identifyingTerms(text: string): string[] {
   return [
@@ -469,20 +257,6 @@ const STOP_WORDS = new Set([
 ]);
 const contextListeners = new Set<(items: ContextItem[]) => void>();
 function emitContext() {
-  shownNotes = shownNotes.filter((id) =>
-    contextItems.some((item) => item.sourceId === id),
-  );
-  const cue = state.cue;
-  if (
-    cue?.note &&
-    !contextItems.some(
-      (item) => `${item.provider}:${item.sourceId}` === cue.sourceId,
-    )
-  ) {
-    state.cue = null;
-    cooldown = state.elapsedMs + quietMs();
-    emit();
-  }
   for (const receive of contextListeners)
     receive(structuredClone(contextItems));
 }
@@ -496,7 +270,6 @@ export function connectContext(receive: (items: ContextItem[]) => void) {
 export function removeAllContext(): number {
   const removed = contextItems.length;
   contextItems = [];
-  shownNotes = [];
   emitContext();
   return removed;
 }
@@ -601,7 +374,7 @@ export function modelStatus(): ModelStatus {
   };
 }
 export function exportPreview() {
-  reviewedExport = `# ${state.title}\n\nFictional demo transcript; not derived from microphone audio.\n\n## Notes\n\n${state.notes}\n\n## Demo transcript\n\n${state.transcript.map((segment) => `**${segment.speaker}:** ${segment.text}`).join('\n\n')}\n`;
+  reviewedExport = `# TalkQTE notes\n\n${state.notes}\n`;
   return reviewedExport;
 }
 export function exportMarkdown() {
@@ -611,7 +384,7 @@ export function exportMarkdown() {
   );
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'talkqte-demo.md';
+  a.download = 'talkqte-notes.md';
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   return true;

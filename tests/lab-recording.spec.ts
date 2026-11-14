@@ -113,10 +113,10 @@ test('a results file becomes one labelled video of the call and companion, with 
     // Plain tones stand in for speech, so no voice has to be installed.
     speech: canMix ? 'tone' : null,
     // During the take, the app must describe the session in its own words
-    // as scripted, and never claim a microphone or a live session.
+    // as simulated, and never claim a microphone or a live session.
     whilePlaying: async (companion: FrameLocator) => {
       await expect(companion.getByRole('status').first()).toContainText(
-        'Scripted',
+        'Simulated session',
       );
       await expect(companion.getByText(/Mic on|Live/)).toHaveCount(0);
     },

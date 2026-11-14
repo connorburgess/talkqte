@@ -38,7 +38,6 @@ test('browser preview never asks for microphone access or invents activity', asy
   await expect(
     panel.getByRole('button', { name: 'Start microphone' }),
   ).toBeDisabled();
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
   await expect(panel).not.toContainText('Signal detected');
 });
 
@@ -60,19 +59,14 @@ test('microphone requires explicit start and only native snapshots confirm activ
     message: null,
   });
   await expect(panel).toContainText('Signal detected');
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.getByRole('button', { name: 'Pause', exact: true }).click();
+  // Other notebook actions leave the check running; only Stop ends it.
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await expect(page.getByRole('dialog')).not.toContainText(/microphone/i);
+  await page.keyboard.press('Escape');
   await expect(panel.getByRole('status')).toHaveText('On');
   expect(await page.evaluate(() => window.microphoneTest.calls)).not.toContain(
     'stop_microphone',
   );
-  await page.getByRole('button', { name: 'End demo' }).click();
-  await expect(panel.getByRole('status')).toHaveText('On');
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
-  await expect(page.getByRole('dialog')).toContainText(
-    'not derived from microphone audio',
-  );
-  await page.keyboard.press('Escape');
   await panel.getByRole('button', { name: 'Stop microphone' }).click();
   await expect(panel.getByRole('status')).toHaveText('Stopping…');
   await expect(panel.getByRole('button')).toBeDisabled();
@@ -177,7 +171,7 @@ test('a delayed initial snapshot and older events cannot overwrite the microphon
   await expect(panel.getByRole('status')).toHaveText('Off');
 });
 
-test('compact companion can stop microphone activity without starting the demo', async ({
+test('compact companion can stop microphone activity without a session', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 76 });
@@ -203,7 +197,6 @@ test('compact companion can stop microphone activity without starting the demo',
     canStart: false,
   });
   await expect(page.getByText('Mic only', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Pause demo' })).toHaveCount(0);
   for (const button of await page.getByRole('button').all()) {
     const bounds = await button.boundingBox();
     expect(bounds!.width).toBeGreaterThanOrEqual(44);
@@ -249,12 +242,9 @@ test('a live session is labelled live, has no end time, and cannot be exported',
 }) => {
   await nativePage(page, '?live');
   await page.getByRole('button', { name: 'Start live session' }).click();
-  const strip = page.getByRole('region', { name: 'Live session controls' });
+  const strip = page.getByRole('region', { name: 'Session', exact: true });
   await expect(strip).toContainText('Live session in progress');
   await expect(strip).not.toContainText('/');
-  await expect(
-    page.getByRole('button', { name: 'Pause', exact: true }),
-  ).toHaveCount(0);
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
   await expect(panel).toContainText('transcribed on this device');
   await expect(panel).not.toContainText('Activity check only');
@@ -268,7 +258,7 @@ test('a live session is labelled live, has no end time, and cannot be exported',
     ),
   );
   const question = page.getByRole('region', { name: 'Suggested question' });
-  // Where it came from shows at once, and is not called the demo.
+  // Where it came from shows at once.
   await expect(question).toContainText('You could ask');
   await expect(question).toContainText('From this conversation');
   await expect(question.locator('blockquote')).toHaveText(
@@ -279,11 +269,10 @@ test('a live session is labelled live, has no end time, and cannot be exported',
   await page.getByRole('tab', { name: /Transcript/ }).click();
   const transcript = page.getByRole('tabpanel');
   await expect(transcript).toContainText('Someone can take the first draft.');
-  await expect(transcript).not.toContainText('Scripted');
   await page.getByRole('button', { name: 'Stop live session' }).click();
   await expect(strip).toContainText('Live session ended');
   await expect(
-    page.getByRole('button', { name: 'Try demo', exact: true }),
+    strip.getByRole('button', { name: 'Start live session' }),
   ).toBeVisible();
   expect(await page.evaluate(() => window.microphoneTest.calls)).toContain(
     'stop_capture',
@@ -294,9 +283,9 @@ test('without local transcription, the notebook offers no live session and says 
   page,
 }) => {
   await nativePage(page);
-  await expect(
-    page.getByRole('button', { name: 'Try demo', exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+    'No session yet',
+  );
   await expect(
     page.getByRole('button', { name: 'Start live session' }),
   ).toHaveCount(0);
@@ -323,7 +312,7 @@ test('live cues pause independently of the microphone and transcript', async ({
   await expect(question).toBeVisible();
   await page.getByRole('button', { name: 'Pause cues', exact: true }).focus();
   await page.keyboard.press('Enter');
-  const strip = page.getByRole('region', { name: 'Live session controls' });
+  const strip = page.getByRole('region', { name: 'Session', exact: true });
   await expect(strip).toContainText('Cues paused · session continues');
   await expect(strip).toContainText('Microphone and transcript continue');
   await expect(question).toHaveCount(0);
@@ -434,7 +423,6 @@ test('the companion labels a live session and its Stop ends the session', async 
     page.getByRole('img', { name: /Signal detected|Quiet input/ }),
   ).toBeVisible();
   await expect(page.getByRole('status')).toHaveText('Mic on · Local');
-  await expect(page.getByRole('button', { name: 'Pause demo' })).toHaveCount(0);
   await expect(
     page.getByRole('button', { name: 'Stop microphone' }),
   ).toHaveCount(0);

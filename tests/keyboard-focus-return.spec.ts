@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import type {} from './fixtures/native-microphone';
+import { liveCue, standIn } from './fixtures/stand-in';
 
 // Where keyboard focus goes when the control that was just used disappears.
 // A browser check does not establish native keyboard or screen-reader
@@ -8,16 +8,11 @@ import type {} from './fixtures/native-microphone';
 const focusedOnBody = (page: Page) =>
   page.evaluate(() => document.activeElement === document.body);
 
+/** The companion during the stand-in's live session, with its first cue. */
 async function companionWithQuestion(page: Page) {
   await page.setViewportSize({ width: 420, height: 500 });
-  await page.clock.install();
-  await page.goto('/?window=cue');
-  await page.evaluate(async () => {
-    const path = '/src/lib/preview.ts';
-    const preview = await import(path);
-    preview.command('start_demo');
-  });
-  await page.clock.runFor(5_200);
+  await standIn(page, '/?window=cue');
+  await liveCue(page);
   const question = page.getByRole('region', { name: 'Suggested question' });
   await expect(question).toBeVisible();
   return question;
@@ -77,12 +72,12 @@ test('keyboard Dismiss in the companion moves focus to its first remaining contr
   await question.getByRole('button', { name: 'Dismiss' }).press('Enter');
   await expect(question).toHaveCount(0);
   await expect(
-    page.getByRole('button', { name: 'Pause demo', exact: true }),
+    page.getByRole('button', { name: 'Pause cues', exact: true }),
   ).toBeFocused();
   // The control that received focus works from the keyboard.
   await page.keyboard.press('Enter');
   await expect(
-    page.getByRole('button', { name: 'Resume demo', exact: true }),
+    page.getByRole('button', { name: 'Resume cues', exact: true }),
   ).toBeVisible();
 });
 
@@ -93,16 +88,7 @@ test('a question dismissed elsewhere does not pull focus into the companion', as
   expect(await focusedOnBody(page)).toBe(true);
   // The notebook window sends the same command; the companion only receives
   // the shared snapshot.
-  await page.evaluate(async () => {
-    const path = '/src/lib/preview.ts';
-    const preview = await import(path);
-    let id: string | undefined;
-    const stop = preview.connect((state: { cue: { id: string } | null }) => {
-      id = state.cue?.id;
-    });
-    stop();
-    preview.command('respond_to_cue', { id, response: 'dismiss' });
-  });
+  await page.evaluate(() => window.liveTest.setCue(null));
   await expect(question).toHaveCount(0);
   expect(await focusedOnBody(page)).toBe(true);
 });
@@ -110,24 +96,13 @@ test('a question dismissed elsewhere does not pull focus into the companion', as
 test('a delayed Dismiss acknowledgement still ends with focus on a companion control', async ({
   page,
 }) => {
-  await page.route('**/*', async (route) => {
-    if (route.request().resourceType() !== 'document') return route.continue();
-    const response = await route.fetch();
-    await route.fulfill({
-      response,
-      body: (await response.text()).replace(
-        '/src/main.tsx',
-        '/tests/fixtures/native-microphone.ts',
-      ),
-    });
-  });
   const question = await companionWithQuestion(page);
   await page.evaluate(() => window.questionTest.holdNextResponse());
   await question.getByRole('button', { name: 'Dismiss' }).press('Enter');
   // The shared snapshot removes the card while the companion's controls are
   // still disabled, so nothing can take focus yet.
   await expect(question).toHaveCount(0);
-  const pause = page.getByRole('button', { name: 'Pause demo', exact: true });
+  const pause = page.getByRole('button', { name: 'Pause cues', exact: true });
   await expect(pause).toBeDisabled();
   expect(await focusedOnBody(page)).toBe(true);
   await page.evaluate(() => window.questionTest.releaseResponse());

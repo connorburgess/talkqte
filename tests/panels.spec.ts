@@ -31,7 +31,7 @@ async function noOverflow(page: Page) {
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await expect(
-    page.getByRole('button', { name: 'Try demo', exact: true }),
+    page.getByRole('heading', { name: 'No session yet', level: 1 }),
   ).toBeVisible();
   await expect(
     page.getByRole('separator', { name: 'Sidebar', exact: true }),

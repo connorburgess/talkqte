@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "cue",
-  "description": "The companion can read the prompt, dismiss it, keep a quoted line in the notebook, pause or resume the demo or live cues, hide itself, switch between Focused and Balanced, be dragged by its bar, inspect or stop microphone activity, and stop a live session; it cannot start the microphone or a live session, export, or edit notes beyond appending the quoted line it is showing.",
+  "description": "The companion can read the prompt, dismiss it, keep a quoted line in the notebook, pause or resume live cues, hide itself, switch between Focused and Balanced, be dragged by its bar, inspect or stop microphone activity, and stop a live session; it cannot start the microphone or a live session, export, or edit notes beyond appending the quoted line it is showing.",
   "windows": [
     "cue"
   ],
@@ -15,8 +15,6 @@
     "allow-inspect-cue",
     "allow-set-overlay",
     "allow-set-sensitivity",
-    "allow-pause-demo",
-    "allow-resume-demo",
     "allow-set-live-cues-paused",
     "allow-microphone-snapshot",
     "allow-stop-microphone",

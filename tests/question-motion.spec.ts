@@ -1,12 +1,18 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import type {} from './fixtures/native-microphone';
+import {
+  cue as fictionalCue,
+  firstCue as firstQuestion,
+  liveCue as startWithCue,
+  standIn,
+  startLive,
+} from './fixtures/stand-in';
 
-/** Starts the bundled demo and returns the first cue, 8.2 seconds in. */
+/** Starts the stand-in's live session and returns its first cue. No device
+ * or transcription is involved. */
 async function firstCue(page: Page, surface: 'notebook' | 'companion') {
-  await page.clock.install();
   if (surface === 'companion')
     await page.setViewportSize({ width: 420, height: 340 });
-  await page.goto(surface === 'companion' ? '/?window=cue' : '/');
+  await standIn(page, surface === 'companion' ? '/?window=cue' : '/?live');
   await page.evaluate(() => {
     const events: string[] = [];
     Object.assign(window, { cueMotionEvents: events });
@@ -15,23 +21,33 @@ async function firstCue(page: Page, surface: 'notebook' | 'companion') {
         events.push(event.animationName);
     });
   });
-  await page.evaluate(async () => {
-    const path = '/src/lib/preview.ts';
-    const preview = await import(path);
-    preview.command('start_demo');
-  });
+  await startLive(page);
   const focusTarget =
     surface === 'companion'
-      ? page.getByRole('button', { name: 'Pause demo', exact: true })
+      ? page.getByRole('button', { name: 'Pause cues', exact: true })
       : page.getByRole('textbox', { name: 'Meeting notes' });
   await focusTarget.focus();
-  await page.clock.runFor(8_200);
-  const question = page.getByRole('region', { name: 'Suggested question' });
-  await expect(question.getByRole('heading')).toHaveText(
-    'Who will take the first draft?',
+  await page.evaluate(() =>
+    window.liveTest.say(
+      'Agreed. Someone can take the first draft of the welcome guide.',
+      'Who will take the first draft?',
+    ),
   );
+  const question = page.getByRole('region', { name: 'Suggested question' });
+  await expect(question.getByRole('heading')).toHaveText(firstQuestion);
   return { question, focusTarget };
 }
+
+/** Moves the cue's remaining time, as the engine's timer updates do. */
+const remaining = (page: Page, remainingMs: number) =>
+  page.evaluate(
+    (ms) =>
+      window.liveTest.setCue({
+        ...window.liveTest.session().cue!,
+        remainingMs: ms,
+      }),
+    remainingMs,
+  );
 
 const events = (page: Page) =>
   page.evaluate(
@@ -138,7 +154,7 @@ for (const surface of ['notebook', 'companion'] as const) {
     await expect(question.locator('blockquote')).toBeVisible();
 
     // Timer updates move the time line; they do not replay the arrival.
-    await page.clock.runFor(2_000);
+    await remaining(page, 16_000);
     expect(await events(page)).toEqual([]);
 
     // Holding from the keyboard keeps focus, and does not replay it either.
@@ -172,14 +188,24 @@ test('a quoted line is replayed at about the pace it was said', async ({
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await page.clock.install();
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(51_200);
+  await standIn(page, '/?live');
+  await startLive(page);
+  const line =
+    "A single page sounds right. Let's have it ready by Friday and try it with a few new visitors first.";
+  await page.evaluate((text) => window.liveTest.say(text), line);
+  await page.evaluate(
+    (value) => window.liveTest.setCue(value),
+    fictionalCue({
+      kind: 'Said',
+      question:
+        "Let's have it ready by Friday and try it with a few new visitors first.",
+      evidence: line,
+    }),
+  );
   const heading = page
     .getByRole('region', { name: 'Suggested question' })
     .getByRole('heading');
-  // Fifteen words, said in a little over three seconds in the demo.
+  // Fifteen words, about three seconds of speech.
   await expect(heading).toHaveText(
     "“Let's have it ready by Friday and try it with a few new visitors first.”",
   );
@@ -225,20 +251,8 @@ test('a quoted line is replayed at about the pace it was said', async ({
 /** Opens the companion with the live-session stand-in, motion allowed. */
 async function liveCompanion(page: Page, width: number) {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await page.route('**/*', async (route) => {
-    if (route.request().resourceType() !== 'document') return route.continue();
-    const response = await route.fetch();
-    await route.fulfill({
-      response,
-      body: (await response.text()).replace(
-        '/src/main.tsx',
-        '/tests/fixtures/native-microphone.ts',
-      ),
-    });
-  });
   await page.setViewportSize({ width, height: 340 });
-  await page.goto('/?window=cue');
-  await page.waitForFunction(() => !!window.liveTest);
+  await standIn(page, '/?window=cue');
   await page.evaluate(() => window.liveTest.start());
   return page.getByRole('region', { name: 'Suggested question' });
 }
@@ -523,10 +537,8 @@ test('reduced motion shows the complete cue and source without animation, and th
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.clock.install();
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(8_200);
+  await standIn(page, '/?live');
+  await startWithCue(page);
   const question = page.getByRole('region', { name: 'Suggested question' });
   await expect(question.getByRole('heading')).toBeVisible();
   await expect(question.locator('blockquote')).toBeVisible();
@@ -550,10 +562,10 @@ test('reduced motion shows the complete cue and source without animation, and th
       return fill / track.getBoundingClientRect().width;
     });
   expect(await filled()).toBeCloseTo(1, 2);
-  await page.clock.runFor(6_000);
-  expect(await filled()).toBeCloseTo(0.75, 2);
+  await remaining(page, 12_000);
+  await expect.poll(filled).toBeCloseTo(0.75, 2);
   expect(await animations()).toBe(0);
-  await page.clock.runFor(1_000);
+  await remaining(page, 11_000);
   expect(await filled()).toBeCloseTo(0.75, 2);
   await question.getByRole('button', { name: 'Hold', exact: true }).click();
   await expect(

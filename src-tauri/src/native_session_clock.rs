@@ -611,7 +611,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn demo_ended_stopping_and_wrong_operation_refused_but_cue_pause_runs() {
+    fn scripted_ended_stopping_and_wrong_operation_refused_but_cue_pause_runs() {
         for case in 0..6 {
             let (mut runtime, _gate, _review, control) = setup();
             let at = runtime.last_tick;

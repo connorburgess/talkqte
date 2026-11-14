@@ -287,6 +287,24 @@ test('the session strip and Transcript tab credit the application, not the micro
   ).toBeVisible();
 });
 
+test('the notebook Pause cues hint and paused line credit the application, not the microphone', async ({
+  page,
+}) => {
+  await notebook(page);
+  await sourceSession(page, 'listening');
+  const strip = page.getByRole('region', { name: 'Session', exact: true });
+  const pause = strip.getByRole('button', { name: 'Pause cues' });
+  await expect(pause).toHaveAttribute(
+    'title',
+    'Clear the current cue; application audio and transcript continue.',
+  );
+  await pause.click();
+  await expect(strip).toContainText(
+    'Application audio and transcript continue. Stop live session to stop listening.',
+  );
+  await expect(strip).not.toContainText(/microphone/i);
+});
+
 test('a stale source-session flag beside a listening microphone credits the microphone', async ({
   page,
 }) => {

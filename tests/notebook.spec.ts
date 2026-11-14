@@ -5,7 +5,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await page.locator('.context-disclosure > summary').press('Enter');
   await expect(
-    page.getByRole('button', { name: 'Try demo', exact: true }),
+    page.getByRole('heading', { name: 'No session yet', level: 1 }),
   ).toBeVisible();
 });
 
@@ -25,10 +25,6 @@ test('focus is optional and the setup card can finish without it', async ({
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();
   await expect(card).toHaveCount(0);
   await expect(page.getByRole('textbox', { name: 'Focus' })).toHaveValue('');
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await expect(
-    page.getByRole('button', { name: 'Pause', exact: true }),
-  ).toBeVisible();
 });
 
 test('the setup card sends Choose notes to the prior-context panel without changing view', async ({
@@ -57,97 +53,34 @@ test('the setup card can be put away for the session', async ({ page }) => {
   await expect(card).toHaveCount(0);
 });
 
-test('dismisses a cue without turning it into a saved question', async ({
-  page,
-}) => {
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(8200);
-  await expect(
-    page.getByRole('heading', { name: 'Who will take the first draft?' }),
-  ).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Save question' })).toHaveCount(
-    0,
-  );
-  await expect(
-    page.getByRole('button', { name: 'Saved questions' }),
-  ).toHaveCount(0);
-  await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
-  await expect(
-    page.getByRole('region', { name: 'Suggested question' }),
-  ).toHaveCount(0);
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Review your export' });
-  await expect(dialog.locator('pre')).not.toContainText(
-    'Who will take the first draft?',
-  );
-  await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'End demo', exact: true }).click();
-  await page.getByRole('button', { name: 'Replay demo', exact: true }).click();
-  await page.clock.runFor(8200);
-  await expect(
-    page.getByRole('heading', { name: 'Who will take the first draft?' }),
-  ).toBeVisible();
-});
-
-test('a quoted line shows as a cue and leaves the notes alone', async ({
-  page,
-}) => {
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(51_200);
-  const question = page.getByRole('region', { name: 'Suggested question' });
-  await expect(question).toContainText('Just said');
-  await expect(question.getByRole('heading')).toHaveText(
-    "“Let's have it ready by Friday and try it with a few new visitors first.”",
-  );
-  // The card offers no way to save the line: the cue is for the moment.
-  await expect(question.getByRole('button')).toHaveCount(2);
-  await question.getByRole('button', { name: 'Dismiss', exact: true }).click();
-  await page.getByRole('tab', { name: 'Notes', exact: true }).click();
-  await expect(
-    page.getByRole('textbox', { name: 'Meeting notes' }),
-  ).toHaveValue('');
-});
-
-test('pause freezes a question, resume lets it expire without saving it', async ({
-  page,
-}) => {
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(8200);
-  await page.getByRole('button', { name: 'Pause', exact: true }).click();
-  await page.clock.runFor(30_000);
-  await expect(
-    page.getByRole('button', { name: 'Dismiss', exact: true }),
-  ).toBeEnabled();
-  await expect(
-    page.getByRole('heading', { name: 'Who will take the first draft?' }),
-  ).toBeVisible();
-  await page.getByRole('button', { name: 'Resume', exact: true }).click();
-  await page.clock.runFor(18_200);
-  await expect(
-    page.getByRole('region', { name: 'Suggested question' }),
-  ).toHaveCount(0);
-});
-
-test('export saves exactly the reviewed text even as the demo moves on', async ({
+test('export saves exactly the reviewed notes and nothing about a demo', async ({
   page,
 }) => {
   await page
     .getByRole('textbox', { name: 'Meeting notes', exact: true })
     .fill('Ask about a large-print welcome guide.');
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(1200);
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Review your export' });
   await expect(dialog).toContainText('Ask about a large-print welcome guide.');
   const reviewed = await dialog.locator('pre').innerText();
-  expect(reviewed).toContain('not derived from microphone audio');
-  await page.clock.runFor(12_000);
+  expect(reviewed).not.toMatch(/demo|transcript/i);
+  // The notes change after the review, while the dialog is still open: the
+  // saved file must be the reviewed text, not the newer notes.
+  await page.evaluate(async () => {
+    const path = '/src/lib/preview.ts';
+    const preview = await import(path);
+    preview.command('update_notes', { notes: 'A later fictional note.' });
+  });
   const downloading = page.waitForEvent('download');
   await dialog.getByRole('button', { name: 'Download Markdown' }).click();
-  const stream = await (await downloading).createReadStream();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe('talkqte-notes.md');
+  const stream = await download.createReadStream();
   const chunks: Buffer[] = [];
   for await (const chunk of stream) chunks.push(Buffer.from(chunk));
-  expect(Buffer.concat(chunks).toString('utf8')).toBe(reviewed);
+  const saved = Buffer.concat(chunks).toString('utf8');
+  expect(saved).toBe(reviewed);
+  expect(saved).not.toContain('A later fictional note.');
   await expect(dialog).not.toBeVisible();
 });
 
@@ -159,7 +92,6 @@ test('the sidebar has no meeting list or search, and settings explain the protot
   });
   await expect(sidebar.getByRole('textbox')).toHaveCount(0);
   await expect(sidebar.getByText('Meetings', { exact: true })).toHaveCount(0);
-  await expect(sidebar.getByText('A better welcome')).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page
     .getByRole('combobox', { name: 'Question timing' })
@@ -234,73 +166,13 @@ test('the browser preview never offers a live microphone session', async ({
   ).toBeVisible();
 });
 
-test('narrow layout keeps the demo and question controls usable with reduced motion', async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(8200);
-  await expect(
-    page.getByRole('button', { name: 'Dismiss', exact: true }),
-  ).toBeVisible();
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
-  await expect(
-    page.getByRole('button', { name: 'Dismiss', exact: true }),
-  ).toHaveCSS('transition-duration', '0s');
-  await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
-  await expect(
-    page.getByRole('region', { name: 'Suggested question' }),
-  ).toHaveCount(0);
-});
-
-for (const width of [320, 880]) {
-  test(`notebook controls remain readable and comfortably sized at ${width}px`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width, height: 844 });
-    await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-    await page.clock.runFor(8_200);
-    await expect(
-      page.getByRole('heading', {
-        name: 'Who will take the first draft?',
-      }),
-    ).toBeVisible();
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= innerWidth,
-      ),
-    ).toBe(true);
-    for (const name of ['Export', 'Pause', 'End demo', 'Dismiss']) {
-      const button = page.getByRole('button', { name, exact: true });
-      const bounds = await button.boundingBox();
-      expect(bounds!.width, name).toBeGreaterThanOrEqual(44);
-      expect(bounds!.height, name).toBeGreaterThanOrEqual(44);
-      expect(
-        await button.evaluate((el) => el.scrollWidth <= el.clientWidth),
-        name,
-      ).toBe(true);
-    }
-    await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
-    await expect(
-      page.getByRole('region', { name: 'Suggested question' }),
-    ).toHaveCount(0);
-  });
-}
-
 test('keyboard users can change notebook tabs and close the export preview', async ({
   page,
 }) => {
   await page.getByRole('tab', { name: 'Notes', exact: true }).focus();
   await page.keyboard.press('ArrowRight');
   await expect(page.getByRole('tab', { name: /Transcript/ })).toBeFocused();
-  await expect(page.getByRole('tabpanel')).toContainText(
-    'A conversation starts here.',
-  );
+  await expect(page.getByRole('tabpanel')).toContainText('No transcript yet.');
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).not.toBeVisible();
@@ -321,74 +193,6 @@ test('the browser preview offers no Granola connection and says where it lives',
     panel.getByRole('button', { name: 'Add notes from a file' }),
   ).toBeVisible();
 });
-
-test('a line about an imported note shows a reminder that names the note as its source', async ({
-  page,
-}) => {
-  const panel = page.getByRole('region', { name: 'Prior context' });
-  await panel.getByRole('button', { name: 'Add notes from a file' }).click();
-  const dialog = page.getByRole('dialog', { name: /Choose notes/ });
-  await dialog.getByRole('checkbox', { name: /Garden welcome guide/ }).check();
-  await dialog.getByRole('button', { name: 'Import 1 selected' }).click();
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(8200);
-  const question = page.getByRole('region', { name: 'Suggested question' });
-  await expect(
-    question.getByRole('heading', { name: 'Garden welcome guide' }),
-  ).toBeVisible();
-  // The note is named as the source at once, with its excerpt.
-  await expect(question).toContainText('From your notes');
-  await expect(question).toContainText(
-    'Its title came up · imported note, 2026-10-28',
-  );
-  await expect(question).not.toContainText('demo conversation');
-  await expect(question).toContainText('tool shed');
-  await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
-  await expect(question).toHaveCount(0);
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
-  await expect(
-    page.getByRole('dialog', { name: 'Review your export' }).locator('pre'),
-  ).not.toContainText('tool shed');
-});
-
-for (const removeAll of [false, true]) {
-  test(`removing ${removeAll ? 'all prior notes' : 'a prior note'} clears its held reminder while paused`, async ({
-    page,
-  }) => {
-    const panel = page.getByRole('region', { name: 'Prior context' });
-    await panel.getByRole('button', { name: 'Add notes from a file' }).click();
-    const dialog = page.getByRole('dialog', { name: /Choose notes/ });
-    await dialog
-      .getByRole('checkbox', { name: /Garden welcome guide/ })
-      .check();
-    await dialog.getByRole('checkbox', { name: /Visitor questions/ }).check();
-    await dialog.getByRole('button', { name: 'Import 2 selected' }).click();
-    await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-    await page.clock.runFor(8200);
-    const question = page.getByRole('region', { name: 'Suggested question' });
-    await question.getByRole('button', { name: 'Hold', exact: true }).click();
-    await expect(question).toContainText('tool shed');
-    await expect(
-      question.getByRole('button', { name: 'Held', exact: true }),
-    ).toBeVisible();
-    await page.getByRole('button', { name: 'Pause', exact: true }).click();
-    await panel
-      .getByRole('button', {
-        name: removeAll
-          ? 'Remove all'
-          : 'Remove Garden welcome guide (2026-10-28)',
-        exact: true,
-      })
-      .click();
-    await expect(question).toHaveCount(0);
-    await expect(panel.getByRole('listitem')).toHaveCount(removeAll ? 0 : 1);
-    await expect(page.getByText(/map of the tool shed/)).toHaveCount(0);
-    await page.getByRole('button', { name: 'Export', exact: true }).click();
-    await expect(
-      page.getByRole('dialog', { name: 'Review your export' }).locator('pre'),
-    ).not.toContainText('tool shed');
-  });
-}
 
 test('a chooser with nothing to choose says so instead of showing a blank list', async ({
   page,
@@ -479,29 +283,4 @@ test('prior notes from a file are chosen, shown apart from the conversation, rem
     panel.getByRole('button', { name: 'Add notes from a file' }),
   ).toBeFocused();
   await expect(panel.getByRole('listitem')).toHaveCount(0);
-});
-
-test('starting the demo shows its conversation while notes remain available', async ({
-  page,
-}) => {
-  await page
-    .getByRole('textbox', { name: 'Meeting notes' })
-    .fill('My fictional practice note.');
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await expect(page.getByRole('tab', { name: /Transcript/ })).toHaveAttribute(
-    'aria-selected',
-    'true',
-  );
-  await page.clock.runFor(8200);
-  await expect(
-    page.getByRole('tabpanel', { name: /Transcript/ }),
-  ).toContainText('Someone can take the first draft');
-  await page.getByRole('tab', { name: 'Notes', exact: true }).click();
-  await expect(
-    page.getByRole('textbox', { name: 'Meeting notes' }),
-  ).toHaveValue('My fictional practice note.');
-  await page.getByRole('button', { name: 'Pause', exact: true }).click();
-  await expect(
-    page.getByRole('tab', { name: 'Notes', exact: true }),
-  ).toHaveAttribute('aria-selected', 'true');
 });

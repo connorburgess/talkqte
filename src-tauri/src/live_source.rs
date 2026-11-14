@@ -61,7 +61,7 @@ pub(crate) enum LineRefused {
 }
 
 impl Runtime {
-    /// The startup operation of the live session a source may feed now. Demo,
+    /// The startup operation of the live session a source may feed now. Idle,
     /// ended, stopping and mismatched states have none.
     pub(crate) fn live_source_operation(&self) -> Option<&str> {
         let live = self.live.as_ref()?;
@@ -212,8 +212,8 @@ impl Runtime {
 
     /// Start a live session that only an application source will feed. No
     /// model is loaded and no microphone is opened here; the source's worker
-    /// loads its own recognizer. Refused while any session or the demo runs,
-    /// as an ordinary live start is.
+    /// loads its own recognizer. Refused while any session runs, as an
+    /// ordinary live start is.
     #[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
     pub(crate) fn begin_source_session(
         &mut self,
@@ -224,7 +224,7 @@ impl Runtime {
         if control.is_cancelled() {
             return Err(Failure::Cancelled);
         }
-        // Another session, the demo, or a start still loading: busy, as an
+        // Another session, or a start still loading: busy, as an
         // ordinary start would be told.
         let starting = self
             .live_start
@@ -590,7 +590,7 @@ mod tests {
             match case {
                 0 => {
                     runtime = Runtime::default();
-                    runtime.engine.start().unwrap(); // The fictional demo.
+                    runtime.engine.start().unwrap(); // A session that is not live.
                 }
                 1 => runtime.engine.end(),
                 2 => runtime.engine.begin_live_stop(),
@@ -619,7 +619,7 @@ mod tests {
 
     #[test]
     fn a_source_session_starts_without_a_microphone_and_is_refused_beside_another() {
-        // Another live session, or the demo, is running: nothing starts.
+        // Another session, live or not, is running: nothing starts.
         let mut running = live();
         let before = running.engine.session();
         let source = source("fictional-player");
@@ -630,10 +630,10 @@ mod tests {
         );
         assert_eq!(running.engine.session(), before);
         assert!(!running.is_source_session(before));
-        let mut demo = Runtime::default();
-        demo.engine.start().unwrap();
+        let mut other = Runtime::default();
+        other.engine.start().unwrap();
         assert_eq!(
-            demo.begin_source_session(&source.control),
+            other.begin_source_session(&source.control),
             Err(Failure::Busy)
         );
         // A start that is still loading is busy too.

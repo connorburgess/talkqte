@@ -1,15 +1,15 @@
 import { expect, test } from '@playwright/test';
+import { firstCue, firstLine, liveCue, standIn } from './fixtures/stand-in';
 
-test('keyboard Dismiss returns to notes after removing a paused question', async ({
+// Cues here come from the fictional native stand-in's live session: no
+// device, model or transcription is involved.
+
+test('keyboard Dismiss returns to notes after removing a held question', async ({
   page,
 }) => {
-  await page.clock.install();
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(8_200);
-  await page.getByRole('button', { name: 'Pause', exact: true }).click();
+  await standIn(page, '/?live');
+  await liveCue(page);
   const question = page.getByRole('region', { name: 'Suggested question' });
-  await page.getByRole('tab', { name: 'Notes', exact: true }).click();
   const notes = page.getByRole('textbox', { name: 'Meeting notes' });
   // Native Tab navigation is checked separately; begin at the control so
   // this regression does not depend on the browser's tab-to-buttons setting.
@@ -33,10 +33,8 @@ test('keyboard Dismiss returns to notes after removing a paused question', async
 test('a transcript reader returns to the selected tab after dismissing a question', async ({
   page,
 }) => {
-  await page.clock.install();
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(8_200);
+  await standIn(page, '/?live');
+  await liveCue(page);
   const transcript = page.getByRole('tab', { name: /Transcript/ });
   await transcript.click();
   const dismiss = page.getByRole('button', { name: 'Dismiss', exact: true });
@@ -52,34 +50,31 @@ test('a transcript reader returns to the selected tab after dismissing a questio
   ).toBeVisible();
 });
 
-test('timed expiry and a remote companion response leave the current notebook control focused', async ({
+test('a cue that passes, arrives or is answered elsewhere leaves the current notebook control focused', async ({
   page,
 }) => {
-  await page.clock.install();
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(8_200);
+  await standIn(page, '/?live');
+  await liveCue(page);
+  const question = page.getByRole('region', { name: 'Suggested question' });
+  await expect(question).toBeVisible();
   const other = page.getByRole('button', { name: 'Settings', exact: true });
   await other.focus();
-  await page.clock.runFor(18_000);
-  const question = page.getByRole('region', { name: 'Suggested question' });
+  // The cue passes untouched, as an expiry does.
+  await page.evaluate(() => window.liveTest.setCue(null));
   await expect(question).toHaveCount(0);
   await expect(other).toBeFocused();
-  await page.clock.runFor(20_000);
+  // A later line raises another cue.
+  await page.evaluate(() =>
+    window.liveTest.say(
+      'We should have it ready soon.',
+      'What date should we aim for?',
+    ),
+  );
   await expect(question).toBeVisible();
   await expect(other).toBeFocused();
-  // A second window sends the same command without invoking the notebook's
-  // response handler. The resulting shared snapshot must not move focus.
-  await page.evaluate(async () => {
-    const path = '/src/lib/preview.ts';
-    const preview = await import(path);
-    let id: string | undefined;
-    const stop = preview.connect((state: { cue: { id: string } | null }) => {
-      id = state.cue?.id;
-    });
-    stop();
-    preview.command('respond_to_cue', { id, response: 'dismiss' });
-  });
+  // The companion window dismisses it; the notebook only receives the
+  // resulting snapshot, which must not move focus.
+  await page.evaluate(() => window.liveTest.setCue(null));
   await expect(question).toHaveCount(0);
   await expect(other).toBeFocused();
 });
@@ -87,21 +82,8 @@ test('timed expiry and a remote companion response leave the current notebook co
 test('a delayed Dismiss acknowledgement does not take focus back from another notebook control', async ({
   page,
 }) => {
-  await page.clock.install();
-  await page.route(/:\d+\/$/, async (route) => {
-    if (route.request().resourceType() !== 'document') return route.continue();
-    const response = await route.fetch();
-    await route.fulfill({
-      response,
-      body: (await response.text()).replace(
-        '/src/main.tsx',
-        '/tests/fixtures/native-microphone.ts',
-      ),
-    });
-  });
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(8_200);
+  await standIn(page, '/?live');
+  await liveCue(page);
   await page.evaluate(() => window.questionTest.holdNextResponse());
   const question = page.getByRole('region', { name: 'Suggested question' });
   await question.getByRole('button', { name: 'Dismiss' }).focus();
@@ -116,20 +98,16 @@ test('a delayed Dismiss acknowledgement does not take focus back from another no
   await expect(other).toBeFocused();
 });
 
-test('the source shows without a click, and Hold keeps a question through later prompts and playback completion', async ({
+test('the source shows without a click, and Hold keeps a question through later lines', async ({
   page,
 }) => {
-  await page.clock.install();
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(8_200);
+  await standIn(page, '/?live');
+  await liveCue(page);
   const question = page.getByRole('region', { name: 'Suggested question' });
-  const source = question.getByText(
-    '“Agreed. Someone can take the first draft of the welcome guide.”',
-  );
+  const source = question.getByText(`“${firstLine}”`);
   await expect(source).toBeVisible();
   await expect(question).toContainText('You could ask');
-  await expect(question).toContainText('From the demo conversation');
+  await expect(question).toContainText('From this conversation');
   // No disclosure is left to open.
   await expect(question.locator('[aria-expanded]')).toHaveCount(0);
   await question.getByRole('button', { name: 'Hold', exact: true }).focus();
@@ -139,36 +117,25 @@ test('the source shows without a click, and Hold keeps a question through later 
   ).toBeFocused();
   // Holding does not ask for the taller window that opening context used.
   expect(
-    await page.evaluate(async () => {
-      const path = '/src/lib/preview.ts';
-      const preview = await import(path);
-      let cue: { held: boolean; expanded: boolean } | null = null;
-      preview.connect((state: { cue: typeof cue }) => {
-        cue = state.cue;
-      })();
-      return cue;
-    }),
+    await page.evaluate(() => window.liveTest.session().cue),
   ).toMatchObject({ held: true, expanded: false });
-  await page.clock.runFor(75_000);
-  await expect(question.getByRole('heading')).toHaveText(
-    'Who will take the first draft?',
-  );
-  await expect(question).toContainText('From earlier in the demo conversation');
+  // Its time passes and a later line is heard; the held cue stays.
+  await page.evaluate(async () => {
+    const held = window.liveTest.session().cue!;
+    await window.liveTest.setCue({ ...held, remainingMs: 0 });
+    await window.liveTest.say('We should have it ready soon.');
+  });
+  await expect(question.getByRole('heading')).toHaveText(firstCue);
+  await expect(question).toContainText('From earlier in this conversation');
   await expect(source).toBeVisible();
-  await page.clock.runFor(30_000);
-  await expect(page.getByRole('button', { name: 'Replay demo' })).toBeVisible();
-  await expect(question.getByRole('heading')).toHaveText(
-    'Who will take the first draft?',
-  );
   await question.getByRole('button', { name: 'Dismiss' }).click();
   await expect(question).toHaveCount(0);
 });
 
-test('appearance controls are discoverable, apply to questions, and survive demo replay', async ({
+test('appearance controls are discoverable, apply to cues, and last into the next session', async ({
   page,
 }) => {
-  await page.clock.install();
-  await page.goto('/');
+  await standIn(page, '/?live');
   await page
     .getByRole('button', { name: 'Question appearance & timing' })
     .click();
@@ -182,19 +149,12 @@ test('appearance controls are discoverable, apply to questions, and survive demo
   await page.getByLabel('Question text').selectOption('large');
   await page.getByLabel('Position', { exact: true }).selectOption('topCenter');
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();
-  await page.getByRole('button', { name: 'Try demo', exact: true }).click();
-  await page.clock.runFor(8_200);
+  const size = await page.evaluate(
+    () => window.liveTest.session().questionSize,
+  );
+  expect(size).toBe('large');
+  await liveCue(page);
   const question = page.getByRole('region', { name: 'Suggested question' });
-  await expect(question.getByRole('heading')).toHaveCSS('font-size', '28px');
-  await question.getByRole('button', { name: 'Hold', exact: true }).click();
-  await page.getByRole('button', { name: 'End demo' }).click();
-  await expect(question).toHaveCount(0);
-  await page.getByRole('button', { name: 'Replay demo' }).click();
-  await page.clock.runFor(8_200);
-  // The replayed cue is a new one, not held.
-  await expect(
-    question.getByRole('button', { name: 'Hold', exact: true }),
-  ).toBeVisible();
   await expect(question.getByRole('heading')).toHaveCSS('font-size', '28px');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(page.getByLabel('Position', { exact: true })).toHaveValue(
@@ -212,25 +172,22 @@ for (const size of ['standard', 'large'] as const) {
   test(`companion fits ${size} text and keeps controls usable with custom spacing`, async ({
     page,
   }) => {
-    await page.clock.install();
     // The native companion's question height: 340 CSS px, 420 with large text.
     const height = size === 'large' ? 420 : 340;
     await page.setViewportSize({ width: 420, height });
-    await page.goto('/?window=cue');
+    await standIn(page, '/?window=cue');
     await expect(
-      page.getByText('Start the demo or microphone from your notebook.'),
+      page.getByText(
+        'Start a live session or the microphone check in your notebook.',
+      ),
     ).toBeVisible();
-    await page.evaluate(async (value) => {
-      const path = '/src/lib/preview.ts';
-      const preview = await import(path);
-      preview.command('set_question_size', { value });
-      preview.command('start_demo');
-    }, size);
-    await page.clock.runFor(8_200);
-    const question = page.getByRole('region', { name: 'Suggested question' });
-    await expect(question.getByRole('heading')).toHaveText(
-      'Who will take the first draft?',
+    await liveCue(page);
+    await page.evaluate(
+      (value) => window.liveTest.setQuestionSize(value),
+      size,
     );
+    const question = page.getByRole('region', { name: 'Suggested question' });
+    await expect(question.getByRole('heading')).toHaveText(firstCue);
     expect(
       await page.evaluate(
         () => document.querySelector('main')!.scrollHeight <= innerHeight,

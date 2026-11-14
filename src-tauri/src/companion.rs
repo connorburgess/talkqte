@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn companion_follows_session_and_question_lifecycle() {
-        let mut engine = Engine::default();
+        let mut engine = Engine::fictional();
         assert_eq!(
             Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
             Mode::Hidden
@@ -551,7 +551,7 @@ mod tests {
 
     #[test]
     fn a_held_or_answered_question_keeps_the_window_at_one_size() {
-        let mut engine = Engine::default();
+        let mut engine = Engine::fictional();
         engine.start().unwrap();
         engine.advance(37_000);
         let id = engine.state.cue.as_ref().unwrap().id.clone();
@@ -563,7 +563,7 @@ mod tests {
             engine.inspect_cue(&id, expanded).unwrap();
             assert_eq!(mode(&engine), Mode::Question);
         }
-        engine.advance(14_000); // The demo agrees on Friday at 51 s.
+        engine.advance(14_000); // The scenario agrees on Friday at 51 s.
         assert!(engine.state.cue.as_ref().unwrap().resolved_by.is_some());
         assert_eq!(mode(&engine), Mode::Question);
         let height = |size| {
@@ -583,8 +583,8 @@ mod tests {
     }
 
     #[test]
-    fn microphone_keeps_companion_available_without_demo_and_respects_hide() {
-        let mut engine = Engine::default();
+    fn microphone_keeps_companion_available_without_a_session_and_respects_hide() {
+        let mut engine = Engine::fictional();
         for status in [
             MicrophoneStatus::Starting,
             MicrophoneStatus::Listening,
@@ -736,7 +736,7 @@ mod tests {
 
     #[test]
     fn a_held_cue_stays_visible_after_playback_finishes() {
-        let mut engine = Engine::default();
+        let mut engine = Engine::fictional();
         engine.start().unwrap();
         engine.advance(8_000);
         engine.inspect_cue("1:s2", false).unwrap();

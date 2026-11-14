@@ -41,7 +41,6 @@ import {
 } from './components/PanelDivider';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
 import { useCaptureControl } from './lib/useCaptureControl';
-import { useDemoVoices } from './lib/useDemoVoices';
 import {
   microphoneNotCapturing,
   sourceOnlyApplication,
@@ -96,15 +95,13 @@ function FloatingQuestion() {
   const microphone = useMicrophone();
   const mic = microphone.state;
   const live = !!state?.live && state.status === 'running';
+  // Browser preview and tests only: a replay of a fictional conversation,
+  // flagged by the tests' stand-in and never by the desktop engine.
+  const simulated = !!state?.simulated && state.status === 'running';
   const microphoneControl =
     !live && (microphone.active || (!mic && !!microphone.error));
   const active =
-    state?.overlayEnabled &&
-    (live ||
-      microphoneControl ||
-      state.cue ||
-      ['running', 'paused'].includes(state.status));
-  const paused = state?.status === 'paused';
+    state?.overlayEnabled && (live || microphoneControl || simulated);
   // What the bar says about capture, in words: read by assistive technology
   // always, and shown whenever the glyph alone would not say it.
   const listening = mic?.status === 'listening';
@@ -131,13 +128,9 @@ function FloatingQuestion() {
           : !mic
             ? 'Status unavailable'
             : microphoneLabel(mic)
-        : paused
-          ? 'Demo paused · Scripted'
-          : state.status === 'ended'
-            ? state.live
-              ? 'Live session ended'
-              : 'Demo ended · Question kept'
-            : 'Demo running · Scripted';
+        : // Only the tests' simulated session reaches here; it has no
+          // capture glyph, so the words always show.
+          'Simulated session · Fictional';
   // A dismissal made here removes the focused control. Once the companion's
   // other controls are enabled again, focus goes to the first of them, but
   // only if it was dropped; never from another control or application.
@@ -266,24 +259,6 @@ function FloatingQuestion() {
                 >
                   <Square size={14} fill="currentColor" aria-hidden="true" />
                 </button>
-              ) : state.status !== 'ended' ? (
-                <button
-                  className="companion-control"
-                  aria-label={paused ? 'Resume demo' : 'Pause demo'}
-                  title={paused ? 'Resume demo' : 'Pause demo'}
-                  disabled={busy}
-                  onClick={() =>
-                    void run(() =>
-                      bridge.command(paused ? 'resume_demo' : 'pause_demo'),
-                    )
-                  }
-                >
-                  {paused ? (
-                    <Play size={16} aria-hidden="true" />
-                  ) : (
-                    <Pause size={16} aria-hidden="true" />
-                  )}
-                </button>
               ) : null}
               <button
                 className="companion-control"
@@ -303,7 +278,6 @@ function FloatingQuestion() {
               <CueCard
                 cue={state.cue}
                 size={state.questionSize}
-                live={state.live}
                 announce={false}
                 busy={busy}
                 onInspect={(expanded) =>
@@ -330,7 +304,7 @@ function FloatingQuestion() {
           <p className="floating-empty">
             {state?.overlayEnabled === false
               ? 'Companion hidden. Show it again in Settings.'
-              : 'Start the demo or microphone from your notebook.'}
+              : 'Start a live session or the microphone check in your notebook.'}
           </p>
         )}
         {(error || microphone.error) && (
@@ -361,7 +335,6 @@ function Notebook() {
   const resizeNotes = (value: number) =>
     setNotesRatio(value / (gridWidth - 28));
   const { state, error, setError, busy, run } = useSession<Snapshot>();
-  const voices = useDemoVoices(state);
   const microphone = useMicrophone();
   const capture = useCaptureControl();
   // A session fed by a selected application alone, with the microphone off
@@ -755,19 +728,6 @@ function Notebook() {
       stop?.();
     };
   }, []);
-  // Starting the demo replaces the button that was pressed. When that drops
-  // focus to the page, it goes to Pause; focus that has moved to another
-  // control or application is left alone.
-  const demoPause = useRef<HTMLButtonElement>(null);
-  const demoStarted = useRef(false);
-  useEffect(() => {
-    if (!demoStarted.current || busy) return;
-    if (error) demoStarted.current = false;
-    if (!demoStarted.current || !demoPause.current) return;
-    demoStarted.current = false;
-    if (document.hasFocus() && document.activeElement === document.body)
-      demoPause.current.focus();
-  }, [busy, error, state?.status]);
   const returnToExport = useRef(false);
   useEffect(() => {
     if (preview !== null) modal.current?.showModal();
@@ -796,8 +756,14 @@ function Notebook() {
         {error && <button onClick={() => location.reload()}>Try again</button>}
       </main>
     );
-  const active = state.status === 'running' || state.status === 'paused';
   const live = state.live && state.status === 'running';
+  // Browser preview and tests only: a replay of a fictional conversation.
+  // The flag comes from the browser tests' stand-in (liveTest.simulate in
+  // tests/fixtures/native-microphone.ts); the desktop engine never sends it,
+  // so every `simulated` branch is unreachable in the app.
+  const simulated = !!state.simulated && state.status === 'running';
+  const modelNeeded =
+    model?.status === 'missing' || model?.status === 'downloading';
   const inspectCue = (expanded: boolean) => {
     if (!state.cue) return;
     void run(() =>
@@ -919,7 +885,8 @@ function Notebook() {
           <div className="meeting-list-content">
             {state &&
               !setupDismissed &&
-              !active &&
+              !live &&
+              !simulated &&
               !(
                 state.userName &&
                 (!model || !['missing', 'downloading'].includes(model.status))
@@ -975,10 +942,10 @@ function Notebook() {
           <div className="breadcrumb">
             <BookOpen size={16} />
             <span>{view === 'notebook' ? 'Notebook' : 'Settings'}</span>
-            {view === 'notebook' && (
+            {view === 'notebook' && state.live && (
               <>
                 <ChevronRight size={14} />
-                <span>{state.live ? 'Live session' : 'Demo'}</span>
+                <span>Live session</span>
               </>
             )}
           </div>
@@ -1133,52 +1100,14 @@ function Notebook() {
 
         {view === 'notebook' && (
           <div className="notebook-body">
-            <div className="meeting-header">
-              <div>
-                <h1>{state.title}</h1>
-                <p>{state.description}</p>
-                {state.live ? (
-                  <div className="participants">
-                    <span>Your microphone</span>
-                    <span className="meta-divider" />
-                    <span>Not saved</span>
-                  </div>
-                ) : (
-                  <div className="participants">
-                    <span>Robin & Alex</span>
-                    <span className="meta-divider" />
-                    <span>Fictional demo</span>
-                  </div>
-                )}
-              </div>
-              <button
-                ref={exportButton}
-                className="secondary-button export-button"
-                onClick={prepareExport}
-                disabled={busy || live}
-                title={
-                  state.live
-                    ? 'Live sessions are not saved or exported.'
-                    : undefined
-                }
-              >
-                <ArrowUpRight size={16} />
-                Export
-              </button>
-            </div>
-
-            <section
-              className="session-strip"
-              aria-label={
-                state.live || preparing
-                  ? 'Live session controls'
-                  : 'Demo controls'
-              }
-            >
+            <section className="session-strip" aria-label="Session">
               <div className="session-state">
-                <span className={`status-dot ${state.status}`} />
+                {/* A dot only while something runs; idle and ended have none. */}
+                {(live || simulated || preparing || finishing) && (
+                  <span className={`status-dot ${state.status}`} />
+                )}
                 <div>
-                  <strong>
+                  <h1>
                     {preparing
                       ? cancelling
                         ? 'Cancelling start'
@@ -1191,15 +1120,11 @@ function Notebook() {
                               ? 'Cues paused · session continues'
                               : 'Live session in progress'
                             : 'Live session ended'
-                          : state.status === 'running'
-                            ? 'Demo in progress'
-                            : state.status === 'paused'
-                              ? 'Demo paused'
-                              : state.status === 'ended'
-                                ? 'Demo finished'
-                                : 'Ready when you are'}
-                  </strong>
-                  <span>
+                          : simulated
+                            ? 'Simulated session'
+                            : 'No session yet'}
+                  </h1>
+                  <p>
                     {preparing
                       ? 'Local speech model · capture status shown above'
                       : finishing
@@ -1208,97 +1133,84 @@ function Notebook() {
                           ? 'Ending the live session. Application audio is shown under Cue processing.'
                           : 'Waiting for microphone release and remaining transcription.'
                         : state.live
-                          ? state.cuesPaused && live
-                            ? sourceApp
-                              ? 'Application audio and transcript continue. Stop live session to stop listening.'
-                              : 'Microphone and transcript continue. Stop live session to stop listening.'
-                            : sourceApp
-                              ? `Audio from ${sourceApp} · transcribed on this device · not saved`
-                              : 'Your microphone · transcribed on this device · not saved'
-                          : 'Fictional conversation · synthetic voices'}
-                  </span>
+                          ? live
+                            ? state.cuesPaused
+                              ? sourceApp
+                                ? 'Application audio and transcript continue. Stop live session to stop listening.'
+                                : 'Microphone and transcript continue. Stop live session to stop listening.'
+                              : sourceApp
+                                ? `Audio from ${sourceApp} · transcribed on this device · not saved`
+                                : 'Your microphone · transcribed on this device · not saved'
+                            : 'Nothing was saved. The transcript stays here until you start another session or quit; your notes stay until you quit.'
+                          : simulated
+                            ? 'Fictional replay · nothing is captured'
+                            : capture.state?.source?.mayBeCapturing
+                              ? 'No live session. Audio from a selected application may still be captured; see Cue processing above.'
+                              : microphone.active &&
+                                  !microphoneNotCapturing(microphone.state)
+                                ? microphone.state?.status === 'error'
+                                  ? 'No live session. The microphone is still being released; see above.'
+                                  : 'No live session. The microphone check above is on; it records and transcribes nothing.'
+                                : liveStatus?.available
+                                  ? 'Nothing is being captured. Start a live session when your meeting begins.'
+                                  : modelNeeded
+                                    ? 'Nothing is being captured. A live session needs the speech model first.'
+                                    : liveStatus?.reason
+                                      ? `Nothing is being captured. Cues appear only during a live session. ${liveStatus.reason}`
+                                      : 'Nothing is being captured.'}
+                  </p>
                 </div>
               </div>
               <div className="session-actions">
-                {!state.live && !preparing && !finishing && (
-                  <button
-                    className="text-button"
-                    onClick={voices.toggle}
-                    aria-pressed={voices.muted}
-                  >
-                    {voices.muted ? 'Enable voices' : 'Mute voices'}
-                  </button>
-                )}
-                {!preparing && (
+                {(state.live || simulated) && !preparing && (
                   <span className="session-clock">
+                    {state.live && !live && !finishing ? 'Length ' : ''}
                     {clockTime(state.elapsedMs)}
-                    {!state.live && (
-                      <span> / {clockTime(state.durationMs)}</span>
-                    )}
                   </span>
                 )}
-                {preparing || finishing ? null : live ? (
-                  <>
-                    {!capture.state?.processor && (
-                      <button
-                        className="secondary-button"
-                        disabled={busy}
-                        title={
-                          state.cuesPaused
-                            ? 'Only new speech can raise a cue after resuming.'
-                            : sourceApp
-                              ? 'Clear the current cue; application audio and transcript continue.'
-                              : 'Clear the current cue; microphone and transcript continue.'
-                        }
-                        onClick={toggleLiveCues}
-                      >
-                        {state.cuesPaused ? (
-                          <Play size={15} />
-                        ) : (
-                          <Pause size={15} />
-                        )}
-                        {state.cuesPaused ? 'Resume cues' : 'Pause cues'}
-                      </button>
-                    )}
-                  </>
-                ) : active ? (
-                  <>
+                {!preparing &&
+                  !finishing &&
+                  live &&
+                  !capture.state?.processor && (
                     <button
-                      ref={demoPause}
                       className="secondary-button"
                       disabled={busy}
-                      onClick={() =>
-                        void run(() =>
-                          bridge.command(
-                            state.status === 'paused'
-                              ? 'resume_demo'
-                              : 'pause_demo',
-                          ),
-                        )
+                      title={
+                        state.cuesPaused
+                          ? 'Only new speech can raise a cue after resuming.'
+                          : sourceApp
+                            ? 'Clear the current cue; application audio and transcript continue.'
+                            : 'Clear the current cue; microphone and transcript continue.'
                       }
+                      onClick={toggleLiveCues}
                     >
-                      {state.status === 'paused' ? (
+                      {state.cuesPaused ? (
                         <Play size={15} />
                       ) : (
                         <Pause size={15} />
                       )}
-                      {state.status === 'paused' ? 'Resume' : 'Pause'}
+                      {state.cuesPaused ? 'Resume cues' : 'Pause cues'}
                     </button>
-                    <button
-                      className="icon-button end-button"
-                      title="End demo"
-                      aria-label="End demo"
-                      disabled={busy}
-                      onClick={() => void run(() => bridge.command('end_demo'))}
-                    >
-                      <Square size={14} />
-                    </button>
-                  </>
-                ) : (
+                  )}
+                <button
+                  ref={exportButton}
+                  className="secondary-button export-button"
+                  onClick={prepareExport}
+                  disabled={busy || state.live}
+                  title={
+                    state.live
+                      ? 'Live sessions are not saved or exported.'
+                      : undefined
+                  }
+                >
+                  <ArrowUpRight size={16} />
+                  Export
+                </button>
+                {!preparing && !finishing && !live && !simulated && (
                   <>
                     {liveStatus?.available && (
                       <button
-                        className="secondary-button"
+                        className="primary-button"
                         ref={startButton}
                         disabled={busy || startPending || microphone.active}
                         title={
@@ -1308,64 +1220,28 @@ function Notebook() {
                         }
                         onClick={startLive}
                       >
+                        <Play size={15} />
                         Start live session
                       </button>
                     )}
-                    {!liveStatus?.available &&
-                      (model?.status === 'missing' ||
-                        model?.status === 'downloading') && (
-                        <button
-                          className="text-button"
-                          onClick={() => {
-                            setFocusLiveSetup(true);
-                            setView('settings');
-                          }}
-                        >
-                          {model.status === 'downloading'
-                            ? 'View download progress'
-                            : 'Set up live session'}
-                        </button>
-                      )}
-                    <button
-                      className="primary-button"
-                      disabled={busy}
-                      onClick={() =>
-                        void run(async () => {
-                          setNotice('');
-                          voices.start();
-                          demoStarted.current = true;
-                          try {
-                            await bridge.command('start_demo');
-                          } catch (error) {
-                            voices.pause();
-                            throw error;
-                          }
-                          setTab('transcript');
-                        })
-                      }
-                    >
-                      <Play size={15} />
-                      {state.status === 'ended' && !state.live
-                        ? 'Replay demo'
-                        : 'Try demo'}
-                    </button>
+                    {!liveStatus?.available && modelNeeded && (
+                      <button
+                        className="secondary-button"
+                        onClick={() => {
+                          setFocusLiveSetup(true);
+                          setView('settings');
+                        }}
+                      >
+                        {model?.status === 'downloading'
+                          ? 'View download progress'
+                          : 'Set up live session'}
+                      </button>
+                    )}
                   </>
                 )}
               </div>
             </section>
 
-            {!state.live && !preparing && !finishing && (
-              <p className="demo-practice-hint">
-                {voices.unavailable && (
-                  <span role="status">
-                    Voices could not play. The transcript and cues still
-                    work.{' '}
-                  </span>
-                )}
-                Pause to try a response aloud, or keep listening. This demo does
-                not listen to your response or change its script.
-              </p>
-            )}
             <div
               className={`notebook-grid${splitContent ? ' is-split' : ''}`}
               ref={measureGrid}
@@ -1460,13 +1336,15 @@ function Notebook() {
                     aria-labelledby="transcript-tab"
                     className="transcript"
                   >
-                    <p className="muted small">
-                      {state.live
-                        ? sourceApp
-                          ? `Audio from ${sourceApp} · transcribed on this device`
-                          : 'Your microphone · transcribed on this device'
-                        : 'Scripted conversation · not from microphone audio'}
-                    </p>
+                    {(state.live || simulated) && (
+                      <p className="muted small">
+                        {state.live
+                          ? sourceApp
+                            ? `Audio from ${sourceApp} · transcribed on this device`
+                            : 'Your microphone · transcribed on this device'
+                          : 'Fictional replay · not from microphone audio'}
+                      </p>
+                    )}
                     {state.transcript.length ? (
                       state.transcript.map((segment) => (
                         <article
@@ -1483,13 +1361,21 @@ function Notebook() {
                     ) : (
                       <div className="empty-inline">
                         <MessageCircle size={25} />
-                        <h2>A conversation starts here.</h2>
+                        <h2>
+                          {live || simulated
+                            ? 'A conversation starts here.'
+                            : 'No transcript yet.'}
+                        </h2>
                         <p>
-                          {state.live
+                          {live
                             ? sourceApp
                               ? 'Lines from the application appear here a few seconds after they are heard.'
                               : 'Lines from your microphone appear here a few seconds after they are spoken.'
-                            : 'Try the demo to watch the fictional transcript arrive.'}
+                            : state.live
+                              ? 'No lines were transcribed in this session.'
+                              : simulated
+                                ? 'Lines of the replay appear here.'
+                                : 'Lines appear here during a live session.'}
                         </p>
                       </div>
                     )}
@@ -1516,7 +1402,6 @@ function Notebook() {
                 <CueCard
                   cue={state.cue}
                   size={state.questionSize}
-                  live={state.live}
                   busy={busy}
                   onDismiss={dismiss}
                   onInspect={inspectCue}
@@ -1525,35 +1410,35 @@ function Notebook() {
                       <h3>
                         {state.cuesPaused
                           ? 'Cues are paused.'
-                          : state.status === 'ready'
-                            ? 'Room for a good question.'
-                            : state.status === 'ended'
-                              ? 'Take the useful bits with you.'
-                              : 'A little room to think.'}
+                          : live || simulated
+                            ? 'A little room to think.'
+                            : state.live
+                              ? 'Cues have stopped.'
+                              : 'No cue yet.'}
                       </h3>
                       <p>
                         {state.cuesPaused
                           ? 'Resume cues when you want suggestions again. Speech from the pause will not become a new cue.'
-                          : state.status === 'ready'
-                            ? 'When something could use a little clarity, a question will appear here.'
-                            : state.status === 'ended'
-                              ? state.live
-                                ? 'Your notes stay here until you close the app.'
-                                : 'Your notes are still here. Export them before closing the app.'
-                              : 'Questions pass quietly. You can keep listening without responding.'}
+                          : live || simulated
+                            ? 'Cues pass quietly. You can keep listening without responding.'
+                            : state.live
+                              ? 'Start another session to see cues again.'
+                              : 'During a live session, one cue at a time appears here. Cues come from simple phrase rules on what is transcribed, not from AI.'}
                       </p>
                     </div>
                   }
                 />
-                <p className="companion-footnote">
-                  {state.live && capture.state?.processor
-                    ? capture.state.approved
-                      ? 'Cues use the sources approved for this session. Pause cues or disable processing above at any time.'
-                      : 'Evaluated cues need approval in Cue processing above. You can leave processing off.'
-                    : state.live
-                      ? 'Suggestions use simple phrase rules on what was transcribed. Use a cue in the conversation or let it pass.'
-                      : 'Suggestions in this demo use simple phrase rules. Use a cue in the conversation or let it pass.'}
-                </p>
+                {(live || simulated) && (
+                  <p className="companion-footnote">
+                    {state.live && capture.state?.processor
+                      ? capture.state.approved
+                        ? 'Cues use the sources approved for this session. Pause cues or disable processing above at any time.'
+                        : 'Evaluated cues need approval in Cue processing above. You can leave processing off.'
+                      : state.live
+                        ? 'Suggestions use simple phrase rules on what was transcribed. Use a cue in the conversation or let it pass.'
+                        : 'This replay is fictional. Its cues were decided before it was played.'}
+                  </p>
+                )}
                 <button
                   className="text-button companion-settings"
                   onClick={() => {
@@ -1765,7 +1650,7 @@ function Notebook() {
               <p>
                 {state.live
                   ? 'This live session stays in memory and is never saved or exported.'
-                  : 'This demo stays in memory. Export anything you want to keep before closing.'}
+                  : 'Your notes stay in memory until you quit. Export anything you want to keep before closing.'}
               </p>
             </footer>
           </div>
@@ -1943,7 +1828,7 @@ function Notebook() {
                 <h2>Floating question window</h2>
                 <p>
                   {bridge.desktop
-                    ? 'Keep a small companion in your chosen position during the demo or microphone check. Stop microphone controls take priority while it is on. Hide only hides the window; it does not stop the microphone. For keyboard controls, use the question in your notebook.'
+                    ? 'Keep a small companion in your chosen position during a live session or microphone check. Stop microphone controls take priority while it is on. Hide only hides the window; it does not stop the microphone. For keyboard controls, use the question in your notebook.'
                     : 'Available in the desktop app. The browser preview shows questions inside the notebook.'}
                 </p>
                 <p className="small">
