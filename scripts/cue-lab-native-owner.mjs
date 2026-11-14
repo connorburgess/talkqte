@@ -130,10 +130,10 @@ export function createLabNativeOwner({
         throw gateFailure('protocol');
       began = true;
       runId = id;
-      armingTimer = setTimeout(fail, armingMs);
       try {
         child = launch({
           executable,
+          metadata,
           environment: Object.freeze({
             TALKQTE_DEV_STOP_SIGNAL: 'usr2',
             TALKQTE_DEV_STOP_AFTER_S: String(stopAfterS),
@@ -163,6 +163,7 @@ export function createLabNativeOwner({
           if (!released) fail();
         });
         child.once('error', fail);
+        if (!armed) armingTimer = setTimeout(fail, armingMs);
         sendStop(); // Also handles an armed event emitted during launch.
         await ready;
       } catch {
