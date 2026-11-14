@@ -1,6 +1,6 @@
 # Notebook processing permissions
 
-Development acceptance, 11 November 2026. The main notebook and Settings now share native processing status with the existing capture controls. **No evaluator is registered in the normal app.** It shows **Processing unavailable**, explains that live cues still use local phrase rules, and offers no approval action. This change does not select a provider or enable inference.
+Development acceptance, 11 November 2026. The main notebook and Settings now share native processing status with the existing capture controls. **No evaluator is registered in the normal app.** It shows **No model connection** with "No model cues: this build has no model connection." (worded that way since 14 November 2026), and offers no approval action. This change does not select a provider or enable inference.
 
 ## User task and boundaries
 
