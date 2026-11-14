@@ -10,7 +10,10 @@ run plan remain required before an actual-app experiment.
 `openLabBroker({provider,maxCalls,signal})` accepts one already selected provider
 session. It returns `descriptorPath`, a `ready` promise, `gate`, clock/playback
 methods, in-memory observation access and `close()`. It starts no inference until
-an admitted role requests it. Every control, first failure or disconnect terminates
+an admitted role requests it. Before the lazy native connection exists, the
+orchestrator must independently abort/close this shared run on coordinated Stop;
+it cannot rely on an unauthenticated native socket to notify it.
+Every control, first failure or disconnect terminates
 that run; reconnect, fallback and budget reset are unavailable.
 
 ## Shared ownership
@@ -61,10 +64,10 @@ are finite safe JSON numbers.
 | Broker → app | `ready`        | exact `provider`, `model`, `effort`, `dispatchBudgetKind:"cliDispatchAttempts"`, `dispatchLimit`, `dispatchesUsed` |
 | App → broker | `evaluate`     | `requestId`, `contextRevision`, `budgetMs` (1–10,000), `input` object                                              |
 | Broker → app | `result`       | same request identity, validated `value`, `elapsedMs`, numeric `usage`                                             |
-| App → broker | `settled`      | same request identity, `verdict:"current"                                                                          | "staleSuccess" | "failed"`, optional fixed `code` only on failure |
+| App → broker | `settled`      | same request identity, `verdict` (`current`, `staleSuccess`, `failed`), optional fixed `code` only on failure      |
 | App → broker | `cancel`       | fixed control `reason`, optional active request identity                                                           |
 | Broker → app | `failed`       | request identity and fixed `code`                                                                                  |
-| Broker → app | `terminal`     | fixed `reason`, including while no evaluation is pending                                                           |
+| Broker → app | `terminal`     | fixed `code` and `reason`, including while no evaluation is pending                                                |
 | Broker → app | `clock_probe`  | `probeId`                                                                                                          |
 | App → broker | `clock_sample` | same `probeId`, `nativeSessionElapsedMs`                                                                           |
 | App → broker | `cue_state`    | `observation` described below                                                                                      |
