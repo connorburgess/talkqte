@@ -198,6 +198,7 @@ export function createLabRun({
     }
   };
   return Object.freeze({
+    signal: root.signal,
     ready,
     stop,
     close,
