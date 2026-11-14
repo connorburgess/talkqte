@@ -2,7 +2,7 @@
 
 An optional development runner for one bundled fictional scenario at a time. It asks Claude Code with Opus 5.5 whether to show a cue, stay quiet, mark an existing cue resolved, or withdraw one whose context has moved on. It also distinguishes possible cue use from uncertain attribution. It does not drive the desktop app, listen to calls, import chats, save prompts into notes, or train a model.
 
-The [intelligence plan](cue-intelligence.md) explains the hypotheses. Matching the expected labels on these small examples is a smoke check, not evidence that TalkQTE improves participation.
+The [intelligence plan](cue-intelligence.md) explains the hypotheses. Bounded batches over a whole fictional set, with a dry run, a call cap and a results file, are described in [batches and simulations](cue-simulation.md). Matching the expected labels on these small examples is a smoke check, not evidence that TalkQTE improves participation.
 
 ## Start without inference
 

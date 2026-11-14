@@ -107,7 +107,7 @@ This has been checked with synthetic audio and a scripted recognizer in tests. T
 
 ## Fictional cue lab
 
-An optional developer lab evaluates one bundled fictional scenario through Claude Code with Opus 5.5 using an existing subscription. It explores when to stay quiet or resolve a cue; it is separate from the phrase-based app and does not process real calls. `npm run lab:claude` lists cases without inference. Read the [lab setup and billing checks](docs/claude-cue-lab.md) before explicitly running a case; separately billed inference APIs are not supported.
+An optional developer lab evaluates one bundled fictional scenario through Claude Code with Opus 5.5 using an existing subscription. It explores when to stay quiet or resolve a cue; it is separate from the phrase-based app and does not process real calls. `npm run lab:claude` lists cases without inference. Read the [lab setup and billing checks](docs/claude-cue-lab.md) before explicitly running a case; separately billed inference APIs are not supported. `npm run lab:batch -- --set cue-lab` lists what a bounded batch over a fictional set would send, without sending it; see [batches and simulations](docs/cue-simulation.md).
 
 ## Project context
 

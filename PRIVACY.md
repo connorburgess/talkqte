@@ -26,7 +26,7 @@ Do not use this prototype for real or sensitive meeting data. Closing the app lo
 
 ## Optional fictional development lab
 
-The [Claude cue lab](docs/claude-cue-lab.md) is a separate, explicitly invoked development script. A selected bundled fictional scenario is sent to Claude through the user's subscription; this is hosted processing. It has no microphone, live transcript, arbitrary-file input, or connection to the desktop engine. Listing cases and offline tests do not invoke a model.
+The [Claude cue lab](docs/claude-cue-lab.md) is a separate, explicitly invoked development script. A selected bundled fictional scenario is sent to Claude through the user's subscription; this is hosted processing. It has no microphone, live transcript, arbitrary-file input, or connection to the desktop engine. Listing cases, dry runs and offline tests do not invoke a model. A [bounded batch](docs/cue-simulation.md) sends each selected fictional case the same way, one request at a time, only when explicitly run with a call cap.
 
 The runner disables tools, customizations, MCP connections, and session persistence, uses a temporary working directory, and prints a filtered report to stdout. It does not store a meeting archive or extract credentials. These controls do not establish zero provider retention or prevent all CLI diagnostic/account state. Review the CLI and provider settings independently before any future work with real content. No such input path is implemented here.
 
