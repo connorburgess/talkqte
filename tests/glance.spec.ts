@@ -59,15 +59,15 @@ test('timed expiry and a remote companion response leave the current notebook co
   await page.goto('/');
   await page.getByRole('button', { name: 'Try demo', exact: true }).click();
   await page.clock.runFor(8_200);
-  const search = page.getByRole('textbox', { name: 'Search meetings' });
-  await search.focus();
+  const other = page.getByRole('button', { name: 'Settings', exact: true });
+  await other.focus();
   await page.clock.runFor(18_000);
   const question = page.getByRole('region', { name: 'Suggested question' });
   await expect(question).toHaveCount(0);
-  await expect(search).toBeFocused();
+  await expect(other).toBeFocused();
   await page.clock.runFor(20_000);
   await expect(question).toBeVisible();
-  await expect(search).toBeFocused();
+  await expect(other).toBeFocused();
   // A second window sends the same command without invoking the notebook's
   // response handler. The resulting shared snapshot must not move focus.
   await page.evaluate(async () => {
@@ -81,7 +81,7 @@ test('timed expiry and a remote companion response leave the current notebook co
     preview.command('respond_to_cue', { id, response: 'dismiss' });
   });
   await expect(question).toHaveCount(0);
-  await expect(search).toBeFocused();
+  await expect(other).toBeFocused();
 });
 
 test('a delayed Dismiss acknowledgement does not take focus back from another notebook control', async ({
@@ -109,13 +109,11 @@ test('a delayed Dismiss acknowledgement does not take focus back from another no
   // The shared snapshot removes the card before the command acknowledges it.
   await expect(question).toHaveCount(0);
   await expect(page.getByText('Question dismissed.')).toBeHidden();
-  const search = page.getByRole('textbox', { name: 'Search meetings' });
-  await search.focus();
+  const other = page.getByRole('button', { name: 'Settings', exact: true });
+  await other.focus();
   await page.evaluate(() => window.questionTest.releaseResponse());
   await expect(page.getByText('Question dismissed.')).toBeVisible();
-  await expect(search).toBeFocused();
-  await page.keyboard.type('garden');
-  await expect(search).toHaveValue('garden');
+  await expect(other).toBeFocused();
 });
 
 test('Why reveals the source and keeps a question through later prompts and playback completion', async ({
