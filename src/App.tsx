@@ -10,7 +10,6 @@ import {
   MessageCircle,
   Pause,
   Play,
-  Search,
   Settings,
   ShieldCheck,
   Square,
@@ -456,7 +455,6 @@ function Notebook() {
     setFocusLiveSetup(false);
   }, [view, focusLiveSetup]);
   const [tab, setTab] = useState<'notes' | 'transcript'>('notes');
-  const [search, setSearch] = useState('');
   const [notes, setNotes] = useState('');
   const [userName, setUserName] = useState('');
   const [nameError, setNameError] = useState('');
@@ -613,7 +611,7 @@ function Notebook() {
   // The setup card: put away for this app session with Not now, or gone
   // once the required steps are done.
   const [setupDismissed, setSetupDismissed] = useState(false);
-  const meetingEntry = useRef<HTMLButtonElement>(null);
+  const notebookNav = useRef<HTMLButtonElement>(null);
   const [focusExpanded, setFocusExpanded] = useState(false);
   // A failed background save must stay discoverable even after collapsing Focus.
   useEffect(() => {
@@ -801,9 +799,6 @@ function Notebook() {
     );
   const active = state.status === 'running' || state.status === 'paused';
   const live = state.live && state.status === 'running';
-  const matches = `${state.title} ${state.description} demo`
-    .toLowerCase()
-    .includes(search.toLowerCase().trim());
   // Keeps a quoted line in the notes; the cue then goes like a dismissal.
   const keepLine = () => {
     if (!state.cue) return;
@@ -921,6 +916,7 @@ function Notebook() {
         </a>
         <nav aria-label="Main navigation">
           <button
+            ref={notebookNav}
             className={view === 'notebook' ? 'nav-item selected' : 'nav-item'}
             aria-current={view === 'notebook' ? 'page' : undefined}
             onClick={() => setView('notebook')}
@@ -931,57 +927,6 @@ function Notebook() {
         </nav>
         {view === 'notebook' && (
           <div className="meeting-list-content">
-            <label className="search">
-              <Search size={17} />
-              <input
-                aria-label="Search meetings"
-                placeholder="Search meetings"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              {search && (
-                <button
-                  className="icon-button"
-                  aria-label="Clear search"
-                  onClick={() => setSearch('')}
-                >
-                  <X size={15} />
-                </button>
-              )}
-            </label>
-            <p className="list-label">Meetings</p>
-            {matches ? (
-              <button
-                ref={meetingEntry}
-                className="meeting selected-meeting"
-                aria-current="true"
-                onClick={() => {
-                  setTab('notes');
-                }}
-              >
-                <strong>{state.title}</strong>
-                <span className="meeting-type">
-                  {state.live ? 'Live session' : 'Demo meeting'}
-                </span>
-                {state.live ? (
-                  <p>Your microphone, transcribed on this device</p>
-                ) : (
-                  <>
-                    <span className="meeting-meta">
-                      Robin & Alex <span>{clockTime(state.durationMs)}</span>
-                    </span>
-                  </>
-                )}
-              </button>
-            ) : (
-              <div className="search-empty">
-                <Search size={22} />
-                <p>No matching meetings.</p>
-                <button className="text-button" onClick={() => setSearch('')}>
-                  Clear search
-                </button>
-              </div>
-            )}
             {state &&
               !setupDismissed &&
               !active &&
@@ -1000,7 +945,7 @@ function Notebook() {
                     onGoTo={goToSetup}
                     onDismiss={() => {
                       setSetupDismissed(true);
-                      meetingEntry.current?.focus();
+                      notebookNav.current?.focus();
                     }}
                   />
                 </details>
@@ -1022,7 +967,7 @@ function Notebook() {
         </div>
         {view === 'notebook' && listResizable && (
           <PanelDivider
-            label="Meeting list"
+            label="Sidebar"
             controls="meeting-list"
             className="list-divider"
             value={listWidth}
@@ -1062,7 +1007,7 @@ function Notebook() {
               <div className="layout-controls-body">
                 {listResizable && (
                   <label>
-                    Notebook width
+                    Sidebar width
                     <input
                       type="range"
                       min={200}

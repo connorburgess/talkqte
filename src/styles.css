@@ -169,92 +169,12 @@ svg {
   top: 0;
   height: 100vh;
 }
-.search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 12px;
-  min-height: 48px;
-  border: 1px solid #d5d9cc;
-  border-radius: var(--radius-control);
-  color: #60685b;
-  background: #f8f9f3;
-}
-.search input {
-  width: 100%;
-  min-width: 0;
-  border: none;
-  outline: none;
-  background: transparent;
-  font-size: 14px;
-  min-height: 44px;
-  color: var(--ink);
-}
-.search:focus-within {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-.search input:focus-visible {
-  outline: none;
-}
-.search .icon-button {
-  padding: 0;
-  width: 44px;
-  height: 44px;
-  margin-right: -8px;
-}
-.list-label {
-  font-size: 13px;
-  color: #67705f;
-  margin: 26px 7px 11px;
-}
-.meeting {
-  text-align: left;
-  width: 100%;
-  border: 0;
-  background: #e5eadb;
-  border-radius: 8px;
-  padding: 12px;
-}
-.meeting:hover {
-  background: #dee5d1;
-}
 .meeting-line {
   display: flex;
   align-items: center;
   justify-content: space-between;
   color: #506146;
   margin-bottom: 12px;
-}
-.meeting strong {
-  display: block;
-  font-size: 16px;
-  font-weight: 650;
-}
-.meeting-type {
-  display: block;
-  font-size: 13px;
-  color: var(--muted);
-  margin-top: 4px;
-}
-.meeting p {
-  font-size: 14px;
-  margin-top: 4px;
-  color: #59634f;
-}
-.meeting-meta {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  color: #5d6852;
-  margin-top: 8px;
-}
-.search-empty {
-  padding: 24px 7px;
-  color: var(--muted);
-}
-.search-empty p {
-  margin: 10px 0;
 }
 .workspace {
   flex: 1;
@@ -508,7 +428,6 @@ svg {
   margin-top: 12px;
 }
 .setup-disclosure {
-  margin-top: 20px;
   border-top: 1px solid var(--line);
 }
 .meeting-focus-heading {
@@ -1409,21 +1328,10 @@ svg {
     grid-column: 1 / -1;
     grid-row: 2;
   }
-  .list-label {
-    display: none;
-  }
-  .meeting {
-    margin-top: 10px;
-    padding: 12px;
-  }
   .meeting-line {
     float: right;
     margin: 0;
     gap: 10px;
-  }
-  .meeting-meta,
-  .meeting p {
-    display: none;
   }
   .toolbar {
     height: 48px;
@@ -1431,9 +1339,6 @@ svg {
   }
   .notebook-body {
     padding: 25px 20px;
-  }
-  .meeting-icon {
-    display: none;
   }
   .meeting-header {
     gap: 10px;
@@ -1485,7 +1390,7 @@ svg {
   }
 }
 
-/* Optional setup is reachable after the meeting list. */
+/* Optional setup sits below the navigation. */
 .setup-card {
   text-align: left;
   padding: 12px 4px;

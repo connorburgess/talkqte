@@ -84,7 +84,7 @@ This track runs alongside the feature milestones below. The goal includes a depe
 
 ## Runnable prototype
 
-- [x] Simplify the notebook hierarchy while keeping the green and cream palette and existing controls: compact meeting rows, optional setup/focus disclosures, and a paper-like editor. [Fictional browser and UI/UX checks](docs/notebook-simplification.md) cover keyboard access, draft preservation, narrow layouts and save-error recovery; native accessibility and user acceptance remain separate.
+- [x] Simplify the notebook hierarchy while keeping the green and cream palette and existing controls: compact meeting rows (the one-row meeting list and its search were removed on 14 November 2026), optional setup/focus disclosures, and a paper-like editor. [Fictional browser and UI/UX checks](docs/notebook-simplification.md) cover keyboard access, draft preservation, narrow layouts and save-error recovery; native accessibility and user acceptance remain separate.
 
 - [x] Resize the notebook and notes/question columns with draggable dividers, keyboard controls, a non-drag slider alternative and reset. [Fictional browser and UI/UX evidence](docs/panel-sizing.md) covers limits, cancellation and narrow layouts; native VoiceOver and usefulness remain separate checks.
 - [x] Preserve later Focus submissions while an earlier save is pending, including Clear, accepted suggestions and inline rejection recovery. [Fictional browser and UI/UX checks](docs/focus-save-recovery.md) cover the field; live relevance and participation acceptance remain separate.
