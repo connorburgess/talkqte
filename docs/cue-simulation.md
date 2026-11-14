@@ -1,6 +1,6 @@
 # Cue lab batches and simulations
 
-Status: development tooling, 14 November 2026. It extends the [Claude cue lab](claude-cue-lab.md) from one case per invocation to a bounded batch over a bundled fictional set. No model run was made for this change; everything recorded here was run offline with a fake evaluator or with the phrase rules' recorded outcomes. Nothing here connects a model to the app.
+Status: development tooling, 14 November 2026. It extends the [Claude cue lab](claude-cue-lab.md) from one case per invocation to a bounded batch over a bundled fictional set, and adds a timing simulation over longer fictional conversations. No model run was made for this change; everything recorded here was run offline with a fake evaluator or with the phrase rules' recorded outcomes. Nothing here connects a model to the app.
 
 The tooling exists to learn when a cue should appear, stay away, or leave. It cannot show that a cue helps anyone. Read [what the numbers do not show](#what-the-numbers-do-not-show) before quoting any of them.
 
@@ -83,15 +83,102 @@ The log deliberately leaves out the CLI's raw output, session IDs, account ident
 
 Always read `label` beside `quietLabelled`: a companion that never did anything would match every quiet label (14 of 23 held-out, 17 of 34 independent).
 
+## What the three case sets cover, and what they leave out
+
+`npm run lab:sim -- --coverage` prints this from the fixtures; nothing is started.
+
+| Material | Items | Lines | Lines each | Median words a line | Times | Labels |
+| --- | --- | --- | --- | --- | --- | --- |
+| `cue-lab` | 11 | 24 | 2 to 3 | 8 | none | show 2, quiet 5, resolved 2, withdraw 2 |
+| `held-out` | 23 | 37 | 1 to 2 | 9 | none | show 4, quiet 14, resolved 1, withdraw 4 |
+| `independent` | 34 | 63 | 1 to 3 | 11 | none | show 7, quiet 17, resolved 6, withdraw 4 |
+
+Read together, the 68 cases are good at one thing: a single decision about a single moment, with the phrasing varied. They leave out most of what decides whether a cue arrives in time:
+
+- **No time.** No case has timestamps; the replay spaces lines two seconds apart. Nothing can be late.
+- **No length.** No case is longer than three lines and 19 are one line, so nothing exercises the six-line window, a cue expiring, a second cue, or a cue being taken back.
+- **One moment each.** There is no backchannel, no housekeeping, no question answered in the same breath around the moment, so staying quiet through ordinary talk is barely tested.
+- **One kind of setting.** The talk is about halls, stalls, checklists and office moves. No case is about software, AI work or hiring: across all 124 lines "deploy", "model", "interview", "candidate", "release" and "bug" never appear.
+- **Speakers.** Only the first set names a speaker role; the other two have one label, as a live transcript does today.
+
+## Timed conversations
+
+`scripts/fixtures/cue-sim-conversations.json` adds 13 fictional conversations of 11 to 15 lines (168 lines, 69 to 128 seconds each) for people who work in software, AI and hiring:
+
+| Context | Conversations |
+| --- | --- |
+| Engineering | a stand-up, an incident review, sprint planning, a new-starter setup call |
+| AI | a model evaluation review, a rollout decision for a support assistant, a paper reading group |
+| Interviews and hiring | a system design interview (the listener is the candidate), a panel debrief, a role intake with a recruiter |
+| Customer | a technical call with a prospective customer |
+| Product | a design review |
+| One-to-one | a weekly one-to-one with a manager |
+
+Each line has the time its speaker finishes it, and a label for what should happen once it has been heard:
+
+- `quiet` (113 lines): nothing should change. These include backchannels, tag questions, questions answered in the same breath, housekeeping about screens and sound, text dictated or read aloud, names mentioned but not addressed, jokes shaped like a task, and "we could" brainstorming.
+- `show` (30): a cue about this line would help, with what it is about and, for 17 of them, `until`: the line after which it no longer would. The moments are a task nobody takes, a vague deadline, a question put to the listener by name, a question in several parts with one part left unanswered, a number that changes when it is repeated, a concern that is put off, and constraints said once.
+- `resolved` (13) and `withdraw` (2): this line answers, or removes the basis of, an earlier labelled moment.
+- unlabelled (10): the line could defensibly go either way, and a note says why. These are not scored.
+
+The labels were written by the lab lane before any evaluator was run on the conversations, and **await the owner's review**. The fixture records what its author had read. Line lengths, pauses, backchannels and restatements were written to resemble a live transcript rather than tidy dialogue; they are still invented, and cleaner than real speech: there is no overlap, no mis-heard word and no merged speaker.
+
+Some labelled moments are short on purpose. A question put to someone by name is usually answered within seconds, so a cue for it can only be late; the simulation should show that, not hide it.
+
+## Timing simulation
+
+The simulation replays a conversation on a virtual clock and asks the evaluator, each time a line arrives, what to do given only the lines so far:
+
+```sh
+npm run lab:sim                                   # dry run over all 13 conversations
+npm run lab:sim -- --conversations standup-flaky-test,model-eval-review
+npm run lab:sim -- --evaluator fake --run --out <directory outside the repository>
+npm run lab:sim -- --set cue-lab --evaluator rules --run --out <directory outside the repository>
+```
+
+What it does, following the app's [evaluator bridge](cue-evaluator.md#transcript-lifecycle-bridge) where one exists:
+
+- A line reaches the evaluator a fixed time after it is said (`--transcript-delay-ms`, 3,000 by default, standing in for local transcription).
+- Each request holds the newest six lines and the lines the cue on screen cites. With `--input app` (the default) every line has the one label "Speaker" and no name is sent, as the app would send today; `--input named` adds speaker names and the listener's name, to see what they change.
+- One request at a time. A line that arrives while a request is in flight overtakes it: that decision is dropped, and one catch-up request follows with the latest lines. `--apply-stale` applies overtaken decisions anyway, to see how late they would have been.
+- Evaluations start only on a new line and at least `--min-gap-ms` apart (2,000 by default), so a conversation of N lines makes at most N requests. The dry run prints that bound for each conversation.
+- One cue at a time. An unread cue lives 18 seconds from its newest cited line; a cue proposed later than that is refused.
+
+It does not simulate cooldown, focus, hold, dismissal, note reminders or the companion window. A model run needs the same flags as a batch (`--run`, `--included-usage-confirmed`, `--max-calls`, an output directory) and the owner's go-ahead for that stated run; it is refused if it could need more requests than the cap, and stops at the first failure.
+
+With `--set`, each case of a set is replayed as a two-second conversation from the fixture's own cue. The phrase rules can be used there (`--evaluator rules`), but only as their recorded final outcome applied at the last line. **The rules have not been replayed on the timed conversations**: they run in Rust, and that needs an engine replay that records each line.
+
+### What each number means
+
+| Number | Meaning |
+| --- | --- |
+| Evaluations: started, applied, overtaken | Requests made; decisions that took effect; decisions dropped because a newer line arrived first |
+| Labelled moments: in time, late, missed | Of the `show` labels: a cue was on screen before the moment closed; after it closed; or never |
+| Line said to cue on screen | From the end of the labelled line to the cue appearing: transcription delay, any wait, and the decision. This is the number the 5-second [budget](budgets.md) is about |
+| Decision time | The evaluator's own time per request |
+| Unexpected cues | Cues shown that belong to no open labelled moment |
+| Flips | Cues the evaluator showed and then withdrew at a line not labelled as a reason to withdraw |
+| Duplicates | A second cue for a moment already cued, or the same words shown again |
+| Quiet kept | Of the evaluated lines labelled quiet, those where the decision was quiet. A cue that arrives a line late for a moment still open is not counted against quiet |
+| Endings: as labelled, otherwise, lingered | When a line answers or removes the basis of a cue on screen: cleared with the labelled action, cleared with the other one, or left until it expired, with how long it stayed |
+
+### What an offline run shows
+
+Run offline on 14 November 2026 with the fake evaluator and default settings, all 13 conversations: 168 evaluations, 41 of them overtaken and dropped, and the two cues it showed appeared a median 6.8 seconds after their line was said. Those figures say nothing about cues: the fake matches keywords and its delay is made up. They show that the harness counts, drops, places and scores as described. One thing in them is real arithmetic, though: a 3-second transcription delay plus any decision slower than 2 seconds is over the 5-second budget before the companion draws anything.
+
 ## What the numbers do not show
 
-- **The cases are fictional.** Sixty-eight short conversations give no rate for real meetings.
+- **The cases are fictional.** Sixty-eight short cases and thirteen invented conversations give no rate for real meetings.
 - **Label agreement is not usefulness.** A match means the evaluator chose what the author of the case expected. The labels were written by the lanes, not observed in meetings, and await the owner's review. One label in the first set is already disputed.
 - **Nothing here is evidence of participation or comprehension.** Whether a cue helps someone stay grounded and respond is the question for the [comparison study](comparison-study.md), with people.
 - **Agreement with the rules is not correctness.** Both can be wrong together, and the rules were tuned on two of the three sets.
 - **Batch latency is not cue latency.** It is one isolated request including CLI start-up, with no transcription delay, no other speech arriving, and no window to draw.
+- **Simulated timing is not measured timing.** The clock is virtual, the transcription delay is one fixed number, and a model's decision is placed using the time of an isolated request. It can show that a design cannot be on time; it cannot show that one is.
+- **A moment labelled `show` is the author's opinion that a cue would help.** Whether it would is exactly what has not been tested.
 - **The fake evaluator's scores mean nothing.** They exist so that the harness, the files and the summary can be checked before any model is involved.
 
 ## Checks
 
-`npm run test:cue-lab` runs the offline tests for the single-case lab and the batch runner. They cover: the dry run starting nothing; every refusal above happening before any process; one sign-in check and one request per case; stopping at the first limit, error, wrong model or malformed reply without retry; the call cap; labels never reaching the evaluator; the first set's prompt being unchanged; the rules record matching the engine's tests; results being refused inside the checkout; and the fake evaluator being repeatable. CI runs them with no model, credentials or network.
+`npm run test:cue-lab` runs the offline tests for the single-case lab, the batch runner and the simulation. For the batch runner they cover: the dry run starting nothing; every refusal above happening before any process; one sign-in check and one request per case; stopping at the first limit, error, wrong model or malformed reply without retry; the call cap; labels never reaching the evaluator; the first set's prompt being unchanged; the rules record matching the engine's tests; results being refused inside the checkout; and the fake evaluator being repeatable. CI runs them with no model, credentials or network.
+
+For the simulation they cover: a cue appearing one decision after its line and being scored against its moment; an overtaken decision being dropped with one catch-up; never two requests at once; the minimum gap and the dry-run bound; expiry after 18 seconds; the six-line window and what an app-style request contains; each count in the table above on a small scripted conversation; stopping at the cap and at the first failure with the log intact; every refusal happening before any process; repeatability; and the shape of the conversation fixture.
