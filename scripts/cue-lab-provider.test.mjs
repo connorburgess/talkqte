@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { openLabProvider } from './cue-lab-provider.mjs';
+import { openLabProvider, requestClaudeRole } from './cue-lab-provider.mjs';
 
 const schema = {
   type: 'object',
@@ -225,4 +225,34 @@ test('hard deadline cancels a runner, counts its attempted dispatch and cannot a
   await rejects(session.request(req()), 'deadline', 1);
   await rejects(session.request(req()), 'terminal', 1);
   await session.close();
+});
+
+test('Claude normalization forwards existing generator/judge output ceilings and preserves other role defaults', async () => {
+  for (const [role, limit] of [
+    ['generator', 4000],
+    ['judge', 1500],
+    ['cast', undefined],
+    ['listener', undefined],
+    ['cue-evaluator', undefined],
+  ]) {
+    let forwarded;
+    const cli = {
+      request: async (params) => {
+        forwarded = params;
+        return { value: params.reply(reply.value), elapsedMs: 2 };
+      },
+    };
+    const settings = { model: 'claude-haiku-5-5', effort: 'medium' };
+    const result = await requestClaudeRole(cli, settings, req({ role }));
+    assert.deepEqual(result.value, reply.value);
+    assert.equal(forwarded.maxOutputTokens, limit);
+    assert.equal(
+      Object.hasOwn(forwarded, 'maxOutputTokens'),
+      limit !== undefined,
+    );
+    assert.equal(forwarded.model, settings.model);
+    assert.equal(forwarded.effort, settings.effort);
+    assert.deepEqual(JSON.parse(forwarded.input).outputSchema, schema);
+    assert.throws(() => forwarded.reply({ invalid: true }));
+  }
 });

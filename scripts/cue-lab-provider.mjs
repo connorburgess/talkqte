@@ -1,7 +1,7 @@
 // Explicit per-run provider selection. The caller's orchestration gate is
 // still authoritative across participant, judge and app-evaluator operations.
 import { openIsolatedCli, EFFORTS } from './cue-lab.mjs';
-import { ROLE_MODELS } from './cue-dialogue-agents.mjs';
+import { ROLE_MODELS, OUTPUT_LIMITS } from './cue-dialogue-agents.mjs';
 import {
   CODEX_SUPPORT,
   openCodexLab,
@@ -49,6 +49,24 @@ const SAFE = new Set([
 const normalizeFailure = (error, calls) =>
   failure(SAFE.has(error?.category) ? error.category : 'provider', calls);
 
+export function requestClaudeRole(
+  cli,
+  { model, effort },
+  { role, instructions, input, schema },
+) {
+  return cli.request({
+    model,
+    effort,
+    systemPrompt: instructions,
+    input: JSON.stringify({ input, outputSchema: schema }),
+    ...(OUTPUT_LIMITS[role] ? { maxOutputTokens: OUTPUT_LIMITS[role] } : {}),
+    reply(value) {
+      validateCodexSchema(schema, value);
+      return value;
+    },
+  });
+}
+
 async function openClaude({
   model,
   effort,
@@ -71,18 +89,9 @@ async function openClaude({
     },
   });
   return {
-    async request({ instructions, input, schema, signal: requestSignal }) {
+    async request({ signal: requestSignal, ...request }) {
       operationSignal = requestSignal;
-      return cli.request({
-        model,
-        effort,
-        systemPrompt: instructions,
-        input: JSON.stringify({ input, outputSchema: schema }),
-        reply(value) {
-          validateCodexSchema(schema, value);
-          return value;
-        },
-      });
+      return requestClaudeRole(cli, { model, effort }, request);
     },
     close: cli.close,
   };

@@ -31,6 +31,8 @@ failed stream, reset that stream's authoritative budget, or silently fall back.
 Missing tools, unsupported configuration and unavailable sign-in stop the selected
 provider. Claude retains the existing isolated CLI implementation and its current
 explicit model/effort allowlist; the selector does not widen it to aliases.
+Claude generator and judge requests retain their existing 4,000/1,500 output-token
+ceilings; other roles retain the contract default.
 
 Both selections return `request({role,instructions,input,schema,signal})` and
 `close()`, immutable metadata and a cumulative `calls` counter. Results contain
@@ -94,6 +96,7 @@ Offline checks do not use a provider or credentials:
 
 ```sh
 node --test scripts/cue-lab-codex.test.mjs scripts/cue-lab-provider.test.mjs
+npm run test:cue-lab
 ```
 
 The installed-CLI regression is separately opt-in and talks only to loopback with
