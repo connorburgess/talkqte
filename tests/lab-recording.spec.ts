@@ -9,7 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test } from '@playwright/test';
+import { expect, test, type FrameLocator } from '@playwright/test';
 
 // The lab's recorder plays a simulation results file over a mock call with
 // the real companion, and saves a video. Everything here is fictional and
@@ -109,8 +109,17 @@ test('a results file becomes one labelled video of the call and companion, with 
     replay: results.conversations[0],
     directory,
     name: 'take',
+    includes: ['913d2df'],
     // Plain tones stand in for speech, so no voice has to be installed.
     speech: canMix ? 'tone' : null,
+    // During the take, the app must describe the session in its own words
+    // as scripted, and never claim a microphone or a live session.
+    whilePlaying: async (companion: FrameLocator) => {
+      await expect(companion.getByRole('status').first()).toContainText(
+        'Scripted',
+      );
+      await expect(companion.getByText(/Mic on|Live/)).toHaveCount(0);
+    },
   });
 
   // One video, no notebook video, no raw capture left, and not empty.
@@ -123,6 +132,9 @@ test('a results file becomes one labelled video of the call and companion, with 
   expect(manifest.simulated).toBe(true);
   expect(manifest.evaluator).toContain('no model');
   expect(manifest.decisions).toBe('No model');
+  // The take names the app it shows.
+  expect(manifest.app.commit).toMatch(/^[0-9a-f]{40}$/);
+  expect(manifest.app.includes).toEqual(['913d2df']);
 
   // The cue was seen in the real companion by its words, no earlier than
   // the results say, and was seen to leave when resolved.

@@ -37,6 +37,24 @@ import { SPEECH_MODEL, voicePlan } from './cue-sim-voices.mjs';
 import { isMain } from './is-main.mjs';
 
 const run = promisify(execFile);
+const repository = new URL('..', import.meta.url).pathname;
+
+/** The commit of this checkout, so a take says which app it shows. */
+async function checkout() {
+  try {
+    const git = (...args) =>
+      run('git', ['-C', repository, ...args]).then(({ stdout }) =>
+        stdout.trim(),
+      );
+    return {
+      commit: await git('rev-parse', 'HEAD'),
+      // Uncommitted changes mean the commit alone does not describe it.
+      uncommittedChanges: (await git('status', '--porcelain')) !== '',
+    };
+  } catch {
+    return null;
+  }
+}
 const STAGE = new URL('./lab-stage/stage.html', import.meta.url);
 /** The stage page: the mock call, the labels and the two TalkQTE frames. */
 export const STAGE_HTML = () => readFileSync(STAGE, 'utf8');
@@ -372,6 +390,12 @@ export async function recordReplay({
   // A folder of clips made earlier by the separate voice step. Used when
   // it holds a clip for every line; otherwise the device's own voices are.
   voicesCache,
+  // Commits merged into this checkout that the take should name, such as
+  // an unmerged card design it was recorded with.
+  includes = [],
+  // Called once playback has started, with the companion's frame, for
+  // checks on what the app shows during a take.
+  whilePlaying,
   ffmpeg,
   cueTimeoutMs = 10_000,
   log = createRunLog(null),
@@ -495,6 +519,7 @@ export async function recordReplay({
     // A failed playback must not be reported as an unhandled rejection
     // while the cue checks below are still waiting.
     playing.catch(() => {});
+    await whilePlaying?.(companion);
 
     // Watch each expected cue arrive and leave, by its words alone, so the
     // check holds for any card design that shows the cue's text.
@@ -584,6 +609,8 @@ export async function recordReplay({
     title: replay.title,
     evaluator: results.evaluator.label,
     decisions: data.decisions,
+    // Which app the take shows: this checkout, and any named commits in it.
+    app: { ...(await checkout()), includes },
     settings: results.settings,
     speed,
     viewport,
@@ -636,6 +663,7 @@ export async function main(args, { print = console.log } = {}) {
       '--speed',
       '--browser',
       '--voices-cache',
+      '--includes',
     ],
     switches: ['--with-notebook', '--no-sound'],
   });
@@ -664,6 +692,11 @@ export async function main(args, { print = console.log } = {}) {
   const speed = Number(flags['--speed'] ?? 1);
   if (!(speed >= 0.25 && speed <= 16))
     throw new Error('--speed is a number from 0.25 to 16.');
+  const includes = flags['--includes']?.split(',') ?? [];
+  if (!includes.every((commit) => /^[0-9a-f]{7,40}$/.test(commit)))
+    throw new Error(
+      '--includes is a list of commit hashes, separated by commas.',
+    );
   const directory = outputDirectory(flags['--out']);
   const { chromium, webkit } = await import('@playwright/test');
   const browser = await (
@@ -687,6 +720,7 @@ export async function main(args, { print = console.log } = {}) {
           name,
           speed,
           withNotebook: Boolean(flags['--with-notebook']),
+          includes,
           ...(flags['--no-sound'] ? { speech: null } : {}),
           ...(flags['--voices-cache']
             ? { voicesCache: outputDirectory(flags['--voices-cache'], {}) }

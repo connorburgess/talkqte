@@ -206,7 +206,7 @@ npm run lab:record -- --results <file> --url <url> --out <directory> --conversat
 
 What is on screen:
 
-- **The real companion**, drawn large, is the subject: the cue card can be read at a glance. It is the app's own companion window at its own size, scaled up, running in the browser preview and fed the simulated session through the same stand-in the browser tests use.
+- **The real companion**, drawn large, is the subject: the cue card can be read at a glance. It is the app's own companion window at its own size, scaled up, running in the browser preview and fed the simulated session through the same stand-in the browser tests use. The session is a scripted one, not a live one, so the app says so in its own words ("Demo running · Scripted", "Demo question") and never claims a microphone.
 - **A mock video call** is quiet background: invented participants as tiles, the current speaker, and captions. It stands in for a meeting app and is labelled "Mock call. Not a real meeting or meeting app."
 - **A small label across the top** for the whole recording: "Simulated", "Fictional", "No model" or "Real model decisions" (with "run stopped early" when it did), "Synthetic voices" when the lines are spoken, the conversation, where the cue decisions came from, and what the decision times are (measured, recorded with none, or made up).
 - **A small lab overlay**, marked as not part of TalkQTE, listing each time the evaluator was asked and what it decided, including decisions that were dropped.
@@ -235,7 +235,7 @@ What is saved, in the output directory:
 
 - one video per conversation, re-encoded with `ffmpeg` to a compact MP4 when `ffmpeg` is installed (the raw capture is then deleted; without `ffmpeg` the raw WebM is kept), and a `-notebook` video when asked for;
 - a still for each cue and one at the end;
-- a manifest (`.json`) with the source of the decisions, the settings, the voices used and any clip that ran over, and for each cue when the results expected it and when it was actually seen;
+- a manifest (`.json`) with the commit of the checkout the take shows (and any commits named with `--includes`, such as an unmerged card design it was recorded with), the source of the decisions, the settings, the voices used and any clip that ran over, and for each cue when the results expected it and when it was actually seen;
 - an event log (`.log.jsonl`).
 
 Limits the recorder enforces:
