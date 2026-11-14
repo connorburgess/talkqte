@@ -1,6 +1,6 @@
 # Meeting emulator and window-only recording
 
-Status: development tooling, 14 November 2026. Built and checked offline. **No real-app run has been made**: that needs the owner at the Mac, a build of TalkQTE with local transcription, and the recording permission described below. The native lane's runbook (docs/real-app-lab.md, once merged) covers the app side.
+Status: development tooling, 14 November 2026. Built and checked offline. **No real-app run has been made**: that needs the owner at the Mac, a build of TalkQTE with local transcription, and the recording permission described below. The [real-app lab runbook](real-app-lab.md) covers the app side: the build, the permissions, the application source and the timing log.
 
 The [cue simulation](cue-simulation.md) replays a conversation inside the browser preview with a stand-in for the app. This page is for the other kind of run: the real TalkQTE desktop app hearing a fictional meeting through its application source, and recording what it does.
 
