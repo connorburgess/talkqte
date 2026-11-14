@@ -196,8 +196,11 @@ Visible duration is not extended to recording end when no clear frame was observ
 
 The importer reads existing `segment`, `evaluation_requested`, `evaluation_result`,
 `cue_decision`, `cue_published`, `cue_cleared` and `dropped` rows. Other native rows
-remain in the original artifact but are not normalized by this version. Numeric
-session/request u64 tokens are preserved using Node 22 JSON reviver source text.
+remain in the original artifact but are not normalized by this version. An
+explicit native `run_id` must match the manifest even on an otherwise unmapped row. Native rows without a run field rely on the manifest's file-to-run declaration;
+the importer cannot independently prove that provenance. Input summaries count
+normalized and unmapped rows separately, without treating unmapped rows as dropped.
+Numeric session/request u64 tokens are preserved using Node 22 JSON reviver source text.
 Imported timing uses the declared native logger clock and `mono_ms`, with 1 ms
 quantization uncertainty; it does not infer playback or session clock anchors.
 

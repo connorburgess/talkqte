@@ -264,6 +264,8 @@ export function parseNativeRow(line) {
 export function importNativeRows(rows, { runId, artifactId, clockId }) {
   const events = [];
   for (const [index, r] of rows.entries()) {
+    if (r.run_id !== undefined && r.run_id !== runId)
+      fail('native run identity mismatch');
     const identity = {};
     if (r.session !== undefined) identity.sessionId = String(r.session);
     if (r.request !== undefined) identity.requestId = String(r.request);
@@ -424,7 +426,7 @@ function safePayload(payload, includeContent) {
 export function buildEvidenceReport(
   manifest,
   input,
-  { includeContent = false } = {},
+  { includeContent = false, inputSummary = [] } = {},
 ) {
   const m = validateManifest(manifest);
   if (includeContent && m.contentMode !== 'fictional-content')
@@ -660,6 +662,24 @@ export function buildEvidenceReport(
           path: m.artifacts.find((a) => a.id === m.recording.artifactId).path,
         }
       : null,
+    inputSummary: inputSummary.map((s) => {
+      if (
+        !m.artifacts.some((a) => a.id === s.artifactId) ||
+        !['rows', 'normalizedEvents', 'unmappedNativeRows'].every(
+          (k) =>
+            Number.isSafeInteger(s[k]) &&
+            s[k] >= 0 &&
+            s[k] <= m.limits.maxEvents,
+        )
+      )
+        fail('invalid input summary');
+      return {
+        artifactId: s.artifactId,
+        rows: s.rows,
+        normalizedEvents: s.normalizedEvents,
+        unmappedNativeRows: s.unmappedNativeRows,
+      };
+    }),
     evidence: m.artifacts.map((a) => ({
       id: a.id,
       kind: a.kind,
@@ -730,6 +750,13 @@ export function renderEvidenceMarkdown(r, { recordingHref } = {}) {
     `Missing stages: ${r.missingEvidence.join(', ') || 'none'}.`,
     '',
     `Ambiguous repeated stages: ${r.ambiguities.length}; inspect endpoint event IDs in JSON rather than selecting a result.`,
+    '',
+    '| Input artifact | Rows | Normalized events | Unmapped native rows (preserved in original) |',
+    '| --- | --- | --- | --- |',
+    ...r.inputSummary.map(
+      (s) =>
+        `| ${escape(s.artifactId)} | ${s.rows} | ${s.normalizedEvents} | ${s.unmappedNativeRows} |`,
+    ),
     '',
     '## Per-take timeline',
     '',
@@ -853,6 +880,7 @@ export async function loadEvidence(manifestPath) {
     JSON.parse((await boundedFile(manifestFile, 256 * 1024)).toString('utf8')),
   );
   const events = [];
+  const inputSummary = [];
   let total = 0;
   let rawRows = 0;
   for (const a of m.artifacts) {
@@ -904,6 +932,7 @@ export async function loadEvidence(manifestPath) {
       .filter((l) => l.trim());
     rawRows += lines.length;
     if (rawRows > m.limits.maxEvents) fail('event limit exceeded');
+    const previousCount = events.length;
     if (a.kind === 'native-timing')
       events.push(
         ...importNativeRows(lines.map(parseNativeRow), {
@@ -919,16 +948,29 @@ export async function loadEvidence(manifestPath) {
           fail('event artifact mismatch');
         events.push({ ...e, artifactId: a.id });
       }
+    inputSummary.push({
+      artifactId: a.id,
+      rows: lines.length,
+      normalizedEvents: events.length - previousCount,
+      unmappedNativeRows:
+        a.kind === 'native-timing'
+          ? lines.length - (events.length - previousCount)
+          : 0,
+    });
   }
-  return { manifest: m, events, root };
+  return { manifest: m, events, root, inputSummary };
 }
 export async function writeEvidenceReport({
   manifestPath,
   outDir,
   includeContent = false,
 }) {
-  const { manifest, events, root } = await loadEvidence(manifestPath);
-  const report = buildEvidenceReport(manifest, events, { includeContent });
+  const { manifest, events, root, inputSummary } =
+    await loadEvidence(manifestPath);
+  const report = buildEvidenceReport(manifest, events, {
+    includeContent,
+    inputSummary,
+  });
   const parent = await privateRoot(dirname(resolve(outDir)));
   const output = resolve(parent, basename(outDir));
   outside(output);

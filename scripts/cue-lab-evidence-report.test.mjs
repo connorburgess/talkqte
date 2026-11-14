@@ -487,3 +487,69 @@ test('event timing arbitrary fields are not copied into the report', () => {
     ),
   );
 });
+
+test('explicit native run identity is checked even on unmapped development rows', () => {
+  assert.throws(
+    () =>
+      importNativeRows(
+        [
+          {
+            event: 'dev_stop',
+            run_id: 'different-fictional-run',
+            step: 'released',
+          },
+        ],
+        { runId: 'fictional-cedar', artifactId: 'native', clockId: 'audio' },
+      ),
+    /run identity/,
+  );
+});
+test('partial native import reports unmapped rows instead of silently presenting complete coverage', async (t) => {
+  const f = await fixture(t);
+  const rows = [
+    { event: 'session', session: 1, mono_ms: 0, state: 'started' },
+    {
+      event: 'audio_received',
+      session: 1,
+      mono_ms: 1,
+      start_ms: 0,
+      duration_ms: 20,
+    },
+    {
+      event: 'evaluation_result',
+      session: 1,
+      request: 1,
+      mono_ms: 50,
+      outcome: 'quiet',
+      latency_ms: 20,
+    },
+  ];
+  const raw = rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
+  await writeFile(join(f.root, 'native.jsonl'), raw, { mode: 0o600 });
+  f.m.artifacts = [
+    {
+      id: 'native',
+      kind: 'native-timing',
+      path: 'native.jsonl',
+      clockId: 'audio',
+      bytes: Buffer.byteLength(raw),
+      sha256: createHash('sha256').update(raw).digest('hex'),
+    },
+  ];
+  delete f.m.recording;
+  await f.save();
+  const { report } = await writeEvidenceReport({
+    manifestPath: f.path,
+    outDir: join(f.root, 'report'),
+  });
+  assert.deepEqual(report.inputSummary, [
+    {
+      artifactId: 'native',
+      rows: 3,
+      normalizedEvents: 1,
+      unmappedNativeRows: 2,
+    },
+  ]);
+  assert.ok(renderEvidenceMarkdown(report).includes('| native | 3 | 1 | 2 |'));
+  assert.equal(report.gaps.length, 0); // Unmapped is distinct from known dropped evidence.
+});
