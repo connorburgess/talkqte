@@ -194,11 +194,18 @@ impl Runtime {
             return Err(CANCELLED.into());
         }
         self.check_live_start()?;
+        #[cfg(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        ))]
+        crate::lab_evaluator::cancel_active(crate::lab_evaluator::ControlReason::Replace);
         let mut engine = carry_over(&self.engine, crate::live_engine());
         engine.start()?;
         #[cfg(all(
             debug_assertions,
-            feature = "claude-cli",
+            any(feature = "claude-cli", feature = "lab-evaluator"),
             feature = "native-audio-spike"
         ))]
         crate::dev_model::apply(&mut engine);
@@ -243,6 +250,13 @@ impl Runtime {
 
     /// Call under the runtime lock BEFORE draining queued transcription.
     pub(crate) fn take_live_for_stop(&mut self) -> Option<Live> {
+        #[cfg(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        ))]
+        crate::lab_evaluator::cancel_active(crate::lab_evaluator::ControlReason::Stop);
         self.live_start.cancel();
         self.retire_live_source();
         self.processing_reviews.clear();

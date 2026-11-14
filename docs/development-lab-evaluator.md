@@ -1,14 +1,14 @@
 # Development lab evaluator client
 
 This is preparation for a fictional, explicitly enabled development experiment.
-The native backend selector, clock sampler and publication/Stop hooks are a
-separate dependency. This change alone does not make Codex available in the app,
-launch a provider or establish streamed-meeting acceptance. Ordinary Claude
+The development-only native backend selector, consent, clock sampler and
+publication/Stop hooks are implemented and tested offline. They do not launch a
+provider or establish streamed-meeting acceptance. Ordinary Claude
 selection and its existing speech-cancellation/two-timeout policy stay unchanged.
 
 ## Enablement boundary
 
-The native integration must restrict selection to a macOS debug build with
+Native selection is restricted to a macOS debug build with
 `native-audio-spike` and `lab-evaluator`, outside all release builds. The release
 builder refuses `lab-evaluator`, including indirect/configuration feature requests.
 Selection is explicit: `TALKQTE_DEV_CUE_BACKEND=lab-subscription`, with an exact
@@ -19,9 +19,10 @@ there is no provider fallback. The client currently accepts `gpt-6.1-sol` for Co
 `claude-opus-5-5` or `claude-haiku-5-5` for Claude Code, and `low` or `medium`
 effort. The broker must confirm the identical provider/model/effort at handshake.
 
-Native integration must reuse [launch consent](real-app-lab.md#model-connection-without-clicks)
-and its session cap, default 100, or the existing explicit session review. No
-constructor grants permission. Construction is inert: the transport worker waits
+Native integration reuses [launch consent](real-app-lab.md#model-connection-without-clicks)
+and its session cap, default 100, or the existing explicit session review. The lab
+backend does not require the separate `claude-cli` feature. No constructor grants
+permission. Construction is inert: the transport worker waits
 for its first permission-gated evaluation before reading a descriptor or opening
 a socket. Before that lazy authentication, the orchestrator must independently
 abort/close the shared run on Stop; a nonexistent socket cannot carry cancellation.
@@ -85,8 +86,8 @@ state stays explicit; the listener wrapper omits it from actionable cards.
 Publication is evidence of emission, not proof that the companion painted it.
 
 After `ready`, exactly one broker clock probe precedes evaluation. An off-lock
-transport worker invokes the native read-only sampler once. Native must use a
-nonblocking Runtime lock attempt and estimate its current session clock without
+transport worker invokes the native read-only sampler once. Native uses a
+nonblocking Runtime lock attempt and estimates its current session clock without
 advancing it. Busy, foreign-session, unavailable or late sampling terminates the
 run. The broker combines the bounded sample with the actual player's playback-start
 acknowledgement, even if that acknowledgement preceded calibration. Combined
@@ -105,8 +106,13 @@ settlement races, coalescing, cap exhaustion, first failure, publication filteri
 and control cancellation. Headless UI fixtures check provider disclosure. These
 checks call no model and launch no native app.
 
-The next readiness blocker is the dependent native integration plus reviewed
-broker/orchestrator startup. Acceptance requires a bounded fictional streamed
-speech → real model cue/silence decision → timely native publication/visible-card
+Native hook tests also check clock arithmetic, busy/invalid session refusal,
+explicit selector failure without fallback and inert engine construction. These
+checks do not establish runtime clock accuracy, provider readiness or companion
+paint.
+
+The next readiness blocker is reviewed broker/orchestrator startup, including
+independent cancellation before lazy authentication. Acceptance requires a bounded
+fictional streamed speech → real model cue/silence decision → timely native publication/visible-card
 run, checking Stop/revoke/replacement cleanup, clock uncertainty, cap accounting,
 latency and starvation. No production readiness or end-to-end success is claimed.
