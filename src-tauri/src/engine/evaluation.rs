@@ -49,6 +49,8 @@ pub enum EvaluationIssue {
     Unreachable,
     /// The development settings name a model or effort this build lacks.
     Misconfigured,
+    DevSettings,
+    CallLimit,
 }
 
 /// The owner's rule for slow replies: one reply over the deadline is skipped
@@ -68,6 +70,8 @@ pub(super) struct State {
     min_gap_ms: u64,
     last_dispatch_ms: Option<u64>,
     requests_sent: u64,
+    call_limit: Option<u64>,
+    approval_by_setting: bool,
     misconfigured: bool,
     // The evaluated cue on screen: its id, words, and whether a held cue was
     // marked answered. Recorded as an earlier cue when it leaves.
@@ -100,6 +104,8 @@ impl Engine {
             min_gap_ms: 0,
             last_dispatch_ms: None,
             requests_sent: 0,
+            call_limit: None,
+            approval_by_setting: false,
             misconfigured: false,
             shown: None,
             earlier: Vec::new(),
@@ -124,6 +130,42 @@ impl Engine {
             state.min_gap_ms = gap;
         }
         self
+    }
+
+    /// A session-wide ceiling; turning permission off/on never resets it.
+    #[cfg(any(
+        test,
+        all(
+            debug_assertions,
+            feature = "claude-cli",
+            feature = "native-audio-spike"
+        )
+    ))]
+    pub(crate) fn set_model_call_limit(&mut self, limit: u64) {
+        if let Some(state) = &mut self.evaluation {
+            state.call_limit = Some(limit);
+        }
+    }
+
+    pub(crate) fn model_calls_exhausted(&self) -> bool {
+        self.evaluation.as_ref().is_some_and(|state| {
+            state
+                .call_limit
+                .is_some_and(|limit| state.requests_sent >= limit)
+        })
+    }
+
+    #[cfg(all(
+        debug_assertions,
+        feature = "claude-cli",
+        feature = "native-audio-spike"
+    ))]
+    pub(crate) fn invalid_dev_model_settings(&mut self) {
+        self.revoke_processing();
+        if let Some(state) = &mut self.evaluation {
+            state.misconfigured = true;
+            state.status = EvaluationStatus::Unavailable(EvaluationIssue::DevSettings);
+        }
     }
 
     /// Records the evaluated cue that has left the screen, with how it ended.
@@ -164,7 +206,7 @@ impl Engine {
         if let Some(state) = &mut self.evaluation {
             // A misconfigured backend keeps saying so; nothing clears it.
             let status = if state.misconfigured {
-                EvaluationStatus::Unavailable(EvaluationIssue::Misconfigured)
+                state.status
             } else {
                 status
             };
@@ -361,6 +403,16 @@ impl Engine {
                     .last_dispatch_ms
                     .is_some_and(|at| now.saturating_sub(at) < state.min_gap_ms)
         }) {
+            return;
+        }
+        if self.model_calls_exhausted() {
+            self.revoke_processing();
+            self.set_evaluation_status(EvaluationStatus::Unavailable(EvaluationIssue::CallLimit));
+            crate::timing_log::record(crate::timing_log::Event::EvaluationStopped {
+                session: self.generation,
+                failure: "call_limit",
+                elapsed_ms: now,
+            });
             return;
         }
         // Build only when the worker can accept work, from current sources and
@@ -897,6 +949,40 @@ mod tests {
             );
             self.engine.state.cue.as_ref().unwrap().id.clone()
         }
+    }
+
+    #[test]
+    fn session_cap_stops_before_extra_dispatch_and_cannot_be_reset_by_review() {
+        let mut h = Harness::new();
+        h.engine.set_model_call_limit(1);
+        let stale = h
+            .engine
+            .review_processing(ConversationScope::NewSpeechOnly, &[])
+            .unwrap();
+        h.line("Who owns the fictional checklist?");
+        h.request();
+        h.reply("quiet", None, &["transcript:line-1"]);
+        assert!(h.engine.approve_processing(stale).is_err());
+        h.engine.revoke_processing();
+        assert!(h
+            .engine
+            .review_processing(ConversationScope::NewSpeechOnly, &[])
+            .is_err());
+        // A fresh harness exercises automatic stopping while permission is on.
+        let mut h = Harness::new();
+        h.engine.set_model_call_limit(1);
+        h.line("Who owns the fictional checklist?");
+        h.request();
+        h.reply("quiet", None, &["transcript:line-1"]);
+        h.line("When is the fictional handoff?");
+        assert_eq!(
+            h.engine.evaluation_status(),
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::CallLimit))
+        );
+        assert!(!h.engine.has_processing_permission());
+        assert!(h.requests.try_recv().is_err());
+        assert_eq!(h.engine.evaluation.as_ref().unwrap().requests_sent, 1);
+        assert_eq!(h.engine.processing_issue(), Some(Issue::CallLimit));
     }
 
     fn fictional_processor() -> ProcessorConfiguration {

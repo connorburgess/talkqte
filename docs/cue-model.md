@@ -134,7 +134,7 @@ The wording above is what the notebook shows. The companion shows "Cues off", wi
 
 ## What leaves the device, and when
 
-**Nothing is sent until the person turns the connection on.** It is off at every start and lasts only for the session. Turning it on shows a review screen stating where lines go, what is sent and when:
+**Nothing is sent until the person turns the connection on.** It is off at every start and lasts only for the session, except for the explicit [development launch consent](real-app-lab.md#model-connection-without-clicks) in debug builds with both development features. That setting approves conversation only, with no notes, and these builds enforce a session-wide call cap (default 100). Turning it on shows a review screen stating where lines go, what is sent and when:
 
 - **Where:** to Anthropic, through the Claude Code CLI on this Mac, using the person's own signed-in Claude subscription and its usage allowance.
 - **What:** the request above. That is up to six recent transcript lines and the lines the cue on screen cites, the cue on screen, up to four earlier cue texts with how each ended, and the session name if one is set.
@@ -163,7 +163,8 @@ The wording above is what the notebook shows. The companion shows "Cues off", wi
 
 **The decision log** is development-only and shares one file and one format with the real-app timing log (`src-tauri/src/timing_log.rs`). It is behind the `timing-log` feature and an explicit file path, and nothing is sent anywhere. The backend records four events beside the timing log's own:
 
-- `evaluator`: the connection turned on or off, with model, effort and backend;
+- `evaluator`: the connection turned on or off, with model, effort, backend and approval origin (`review` or `launchSetting`);
+- `evaluation_stopped`: no further request sent because the session call cap was reached, with failure `call_limit`;
 - `evaluation_requested`: session, request number, the last line covered, the number of lines sent, and whether a cue was on screen;
 - `evaluation_result`: one of `show`, `quiet`, `resolved`, `withdraw`, `failed`, `stale` or `cancelled`, with latency and a fixed failure code;
 - `cue_decision` with `decider: "model"`, the request number and the first line it cites, recorded where the engine accepts the cue, without the cue's words. Phrase-rule cues carry `decider: "phrase_rule"`.

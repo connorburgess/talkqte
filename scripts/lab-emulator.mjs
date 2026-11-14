@@ -10,7 +10,7 @@
 //           they cannot drift apart. For conversations written in full
 //           beforehand.
 //
-//     node scripts/lab-emulator.mjs render --results <results .json> \
+//     node scripts/lab-emulator.mjs render [--results <results .json>] \
 //       --conversation <id> --out <directory outside the repository> \
 //       [--voices-cache <dir>] [--portraits-cache <dir>] [--no-captions]
 //
@@ -20,11 +20,12 @@
 //           that react to the app. Every line's start and end is logged
 //           with the wall-clock time, to line up with the app's timing log.
 //
-//     node scripts/lab-emulator.mjs live --results <results .json> \
+//     node scripts/lab-emulator.mjs live [--results <results .json>] \
 //       --conversation <id> --out <directory outside the repository> \
 //       [--port 1445] [--voices-cache <dir>] [--portraits-cache <dir>] \
-//       [--no-captions] [--open]
+//       [--no-captions] [--start-delay <seconds, default 3>] [--open]
 //
+// Without --results it plays one of the bundled fictional conversations.
 // It plays only fictional conversations that pass the lab's checks, sends
 // nothing anywhere, and makes no speech or images: those come from the
 // caches the separate voice and portrait steps fill, or from the device's
@@ -56,7 +57,29 @@ import {
 } from './cue-sim-record.mjs';
 import { IMAGE_MODEL, portraitPlan } from './cue-sim-portraits.mjs';
 import { SPEECH_MODEL, voicePlan } from './cue-sim-voices.mjs';
-import { loadPlayable } from './lab-playable.mjs';
+import { SIM_SCHEMA, loadPlayable } from './lab-playable.mjs';
+import { loadConversations } from './cue-sim.mjs';
+
+/** The bundled fictional conversations, played without a results file. */
+export const BUNDLED = new URL(
+  './fixtures/cue-sim-conversations.json',
+  import.meta.url,
+).pathname;
+
+/** What a meeting can be played from: a results file the lab may play, or,
+ * with no file, the bundled conversations themselves. */
+async function loadSource(file) {
+  if (file) return loadPlayable(file);
+  return {
+    results: { schema: SIM_SCHEMA, fictional: true },
+    // A bundled conversation has no recorded run, so nothing happened in it.
+    replays: (await loadConversations()).map((replay) => ({
+      ...replay,
+      timeline: [],
+    })),
+    generated: false,
+  };
+}
 import { isMain } from './is-main.mjs';
 
 /** The size of the emulator's window, and of the meeting video. */
@@ -82,7 +105,7 @@ export async function prepareMeeting(
   id,
   { voicesCache, portraitsCache, speech, captions = true, origin, workDir },
 ) {
-  const { results, replays, generated } = await loadPlayable(file);
+  const { results, replays, generated } = await loadSource(file);
   const replay = replays.find((item) => item.id === id);
   if (!replay)
     throw new Error(
@@ -138,8 +161,10 @@ function baseManifest(prepared, file, mode) {
     mode,
     labels: meetingLabels({ sound: engine, portraits }),
     source: {
-      file: basename(file),
-      sha256: createHash('sha256').update(readFileSync(file)).digest('hex'),
+      file: basename(file ?? BUNDLED),
+      sha256: createHash('sha256')
+        .update(readFileSync(file ?? BUNDLED))
+        .digest('hex'),
       generated,
       conversation: replay.id,
       title: replay.title,
@@ -525,12 +550,13 @@ export async function main(args, { print = console.log } = {}) {
       '--voices-cache',
       '--portraits-cache',
       '--port',
+      '--start-delay',
     ],
     switches: ['--no-captions', '--no-sound', '--open'],
   });
-  if (!flags['--results'] || !flags['--conversation'] || !flags['--out'])
+  if (!flags['--conversation'] || !flags['--out'])
     throw new Error(
-      'Use --results <results .json> --conversation <id> --out <directory outside the repository>.',
+      'Use --conversation <id> --out <directory outside the repository>, and --results <results .json> for a conversation that is not bundled.',
     );
   const shared = {
     file: flags['--results'],
@@ -546,15 +572,22 @@ export async function main(args, { print = console.log } = {}) {
     ...(flags['--no-sound'] ? { speech: null } : {}),
   };
   // The run and the conversation are checked before anything is started.
-  const { replays } = await loadPlayable(shared.file);
+  const { replays } = await loadSource(shared.file);
   if (!replays.some((item) => item.id === shared.id))
     throw new Error(
-      `No conversation "${shared.id}" in that results file. It has: ${replays.map((item) => item.id).join(', ')}.`,
+      `No conversation "${shared.id}" ${shared.file ? 'in that results file' : 'among the bundled ones'}. It has: ${replays.map((item) => item.id).join(', ')}.`,
     );
+  // Seconds the live meeting waits after its window opens before the first
+  // line, so the app's capture can start first.
+  const startDelay = Number(flags['--start-delay'] ?? 3);
   if (mode === 'live') {
     const port = Number(flags['--port'] ?? 1445);
     if (!Number.isInteger(port) || port < 1024 || port > 65535)
       throw new Error('--port is a number from 1024 to 65535.');
+    if (!Number.isInteger(startDelay) || startDelay < 0 || startDelay > 600)
+      throw new Error(
+        '--start-delay is a whole number of seconds from 0 to 600.',
+      );
   }
   outputDirectory(shared.directory, {});
   const { chromium } = await import('@playwright/test');
@@ -576,6 +609,7 @@ export async function main(args, { print = console.log } = {}) {
   const live = await serveMeeting({
     ...shared,
     port: Number(flags['--port'] ?? 1445),
+    startDelayMs: startDelay * 1000,
   });
   const profile = mkdtempSync(join(tmpdir(), 'talkqte-meeting-window-'));
   const [executable, windowArgs] = windowCommand(
