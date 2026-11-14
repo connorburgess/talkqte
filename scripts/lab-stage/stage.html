@@ -1,9 +1,11 @@
 <!doctype html>
 <!--
-  Stage for lab recordings. Everything on this page except the two frames is
-  a mock: an invented video call that stands in for the meeting app, and a
-  lab overlay that says what the evaluator is doing. The two frames are the
-  real TalkQTE companion and notebook, fed a simulated session.
+  Stage for lab recordings. Everything on this page except the TalkQTE frame
+  is a mock: an invented video call that stands in for the meeting app, and
+  a small lab overlay that says what the evaluator is doing. The frame is
+  the real TalkQTE companion (or, in the notebook view, the real notebook),
+  fed a simulated session. The cue card is what the recording is about: the
+  companion is drawn large and the call is quiet background.
   Fictional people and words only. Never used by the app or shipped in it.
 -->
 <html lang="en">
@@ -27,28 +29,30 @@
           'Segoe UI',
           sans-serif;
       }
+      /* Small and out of the card's way, but there for the whole recording. */
       #banner {
         position: absolute;
         inset: 0 0 auto 0;
-        height: 40px;
+        height: 28px;
         display: flex;
         align-items: center;
-        gap: 14px;
-        padding: 0 18px;
+        gap: 10px;
+        padding: 0 14px;
         background: #f3c94b;
         color: #1c1500;
+        font-size: 12.5px;
         font-weight: 600;
-        letter-spacing: 0.01em;
         z-index: 5;
       }
       #banner .tag {
         background: #1c1500;
         color: #f3c94b;
-        border-radius: 5px;
-        padding: 2px 9px;
-        font-size: 13px;
+        border-radius: 4px;
+        padding: 1px 7px;
+        font-size: 11px;
         text-transform: uppercase;
         letter-spacing: 0.06em;
+        white-space: nowrap;
       }
       #banner .grow {
         flex: 1;
@@ -59,30 +63,28 @@
       }
       #clock {
         font-variant-numeric: tabular-nums;
-        font-size: 17px;
+        font-size: 13px;
       }
+      /* The mock call: quiet background context on the left. */
       #call {
         position: absolute;
-        top: 40px;
-        left: 0;
-        bottom: 0;
-        width: 1020px;
+        inset: 28px 0 0 0;
         display: flex;
         flex-direction: column;
-        padding: 18px 18px 0;
+        padding: 20px 20px 0;
         background: radial-gradient(120% 90% at 30% 0%, #1b2128, #0e1114);
       }
       #call header {
         display: flex;
-        justify-content: space-between;
+        gap: 14px;
         align-items: baseline;
-        color: #9aa5b1;
+        color: #7d8793;
         font-size: 13px;
         padding: 0 4px 12px;
       }
       #call header strong {
-        color: #e9edf1;
-        font-size: 16px;
+        color: #c5ccd4;
+        font-size: 15px;
         font-weight: 600;
       }
       #speaker-view {
@@ -91,8 +93,9 @@
         display: flex;
         flex-direction: column;
         gap: 12px;
-        /* The right of the call is left clear for the companion. */
-        margin-right: 452px;
+        /* The right of the frame belongs to the companion. */
+        margin-right: 820px;
+        opacity: 0.72;
       }
       #tiles {
         display: flex;
@@ -112,7 +115,7 @@
         overflow: hidden;
       }
       .tile.speaking {
-        outline-color: #6fd08c;
+        outline-color: #4f9a66;
         background: linear-gradient(160deg, #2b3640, #1c232b);
       }
       #tiles .tile {
@@ -202,12 +205,12 @@
         }
       }
       #caption {
-        min-height: 78px;
-        margin: 12px 0 0;
+        min-height: 82px;
+        margin: 12px 820px 0 0;
         padding: 10px 16px;
         border-radius: 12px;
         background: rgba(8, 10, 12, 0.72);
-        font-size: 18px;
+        font-size: 19px;
         line-height: 1.35;
       }
       #caption b {
@@ -223,43 +226,39 @@
         justify-content: center;
         align-items: center;
         gap: 10px;
-        height: 62px;
-        color: #7d8793;
-        font-size: 13px;
+        height: 58px;
+        margin-right: 820px;
+        opacity: 0.6;
       }
       #toolbar span.btn {
         width: 44px;
-        height: 34px;
-        border-radius: 17px;
+        height: 32px;
+        border-radius: 16px;
         background: #2a313a;
       }
       #toolbar span.leave {
         background: #b6453c;
         width: 60px;
       }
-      /* The real companion, floating where its window would sit. */
+      /* The real companion: the subject of the recording. It is the app's
+         own window at its own size, drawn larger so the cue card can be
+         read at a glance in a video. */
       #companion {
         position: absolute;
-        top: 86px;
-        left: calc(1020px - 420px - 18px);
+        top: 96px;
+        right: 60px;
         width: 420px;
         height: 76px;
         border: 0;
         border-radius: 28px;
-        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+        box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
         z-index: 3;
         background: transparent;
+        transform: scale(1.75);
+        transform-origin: top right;
       }
       #side {
-        position: absolute;
-        top: 40px;
-        right: 0;
-        bottom: 0;
-        left: 1020px;
-        display: flex;
-        flex-direction: column;
-        background: #171b20;
-        border-left: 1px solid #2a313a;
+        display: none;
       }
       #notebook {
         flex: 1;
@@ -267,18 +266,24 @@
         border: 0;
         background: #fff;
       }
+      /* Small print for the lab's own account of what happened. */
       #lab {
-        height: 150px;
-        padding: 8px 14px 10px;
-        border-top: 2px solid #f3c94b;
-        background: #14181c;
-        font-size: 13px;
+        position: absolute;
+        right: 60px;
+        bottom: 26px;
+        width: 520px;
+        height: 132px;
+        padding: 7px 12px 8px;
+        border-left: 2px solid #f3c94b;
+        background: rgba(14, 17, 20, 0.82);
+        font-size: 12px;
+        z-index: 2;
       }
       #lab h2 {
-        margin: 0 0 5px;
-        font-size: 12px;
+        margin: 0 0 3px;
+        font-size: 10.5px;
         font-weight: 600;
-        color: #f3c94b;
+        color: #c9a53f;
         text-transform: uppercase;
         letter-spacing: 0.06em;
       }
@@ -288,18 +293,18 @@
         padding: 0;
         display: flex;
         flex-direction: column-reverse;
-        height: 108px;
+        height: calc(100% - 20px);
         overflow: hidden;
       }
       #activity li {
         display: flex;
         gap: 8px;
-        padding: 1.5px 0;
-        color: #b6bfc9;
+        padding: 1px 0;
+        color: #9aa5b1;
         white-space: nowrap;
       }
       #activity time {
-        color: #7d8793;
+        color: #6c7682;
         font-variant-numeric: tabular-nums;
       }
       #activity .show {
@@ -309,11 +314,27 @@
         color: #e7b38a;
       }
       #activity .dropped {
-        color: #7d8793;
+        color: #6c7682;
+      }
+      /* The optional second video: the notebook alone, with the labels. */
+      .view-notebook #call,
+      .view-notebook #companion {
+        display: none;
+      }
+      .view-notebook #side {
+        display: flex;
+        position: absolute;
+        inset: 28px 0 132px 0;
+      }
+      .view-notebook #lab {
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: auto;
       }
       #intro {
         position: absolute;
-        inset: 40px 0 0 0;
+        inset: 28px 0 0 0;
         z-index: 4;
         display: grid;
         place-items: center;
@@ -346,6 +367,7 @@
       <span class="tag">Simulated</span>
       <span class="tag">Fictional</span>
       <span class="tag" id="decisions"></span>
+      <span class="tag" id="sound" hidden></span>
       <span class="grow" id="source"></span>
       <span id="clock">0:00</span>
     </div>
@@ -377,20 +399,18 @@
 
     <aside id="side">
       <iframe id="notebook" title="TalkQTE notebook" src="about:blank"></iframe>
-      <section id="lab" aria-label="Lab overlay">
-        <h2>Lab overlay · not part of TalkQTE</h2>
-        <ol id="activity"></ol>
-      </section>
     </aside>
+
+    <section id="lab" aria-label="Lab overlay">
+      <h2>Lab overlay · not part of TalkQTE</h2>
+      <ol id="activity"></ol>
+    </section>
 
     <div id="intro">
       <div>
         <h1 id="intro-title"></h1>
         <p id="intro-setting"></p>
-        <p class="rule">
-          Simulated replay of a fictional conversation. The call is a mock; the
-          companion and notebook are TalkQTE.
-        </p>
+        <p class="rule" id="intro-rule"></p>
         <p id="intro-source"></p>
       </div>
     </div>
@@ -406,8 +426,11 @@
       let data = null;
       let startedAt = null;
       let now = 0;
-      const frames = () =>
-        ['companion', 'notebook'].map((id) => $(id).contentWindow);
+      // One TalkQTE frame per video: the companion over the call, or the
+      // notebook by itself.
+      const frames = () => [
+        $(data.view === 'notebook' ? 'notebook' : 'companion').contentWindow,
+      ];
 
       function note(text, kind = '') {
         const item = document.createElement('li');
@@ -442,8 +465,18 @@
         /** Loads both TalkQTE frames and starts a simulated live session. */
         async prepare(value) {
           data = value;
+          document.body.classList.toggle(
+            'view-notebook',
+            data.view === 'notebook',
+          );
+          $('intro-rule').textContent =
+            data.view === 'notebook'
+              ? 'Simulated replay of a fictional conversation. This is the TalkQTE notebook during it.'
+              : 'Simulated replay of a fictional conversation. The call is a mock; the companion is TalkQTE.';
           $('title').textContent = data.title;
           $('decisions').textContent = data.decisions;
+          $('sound').textContent = data.sound;
+          $('sound').hidden = !data.sound;
           $('source').textContent =
             `${data.title} · cue decisions: ${data.evaluator} · ${data.timing}`;
           $('intro-title').textContent = data.title;
@@ -479,8 +512,8 @@
             tiles.append(tile);
           }
           feature(data.participants[0], false);
-          $('companion').src = `${data.origin}/?window=cue`;
-          $('notebook').src = `${data.origin}/`;
+          if (data.view === 'notebook') $('notebook').src = `${data.origin}/`;
+          else $('companion').src = `${data.origin}/?window=cue`;
           await waitFor(
             () => frames().every((frame) => frame.liveTest),
             'TalkQTE frames',
@@ -503,7 +536,7 @@
           // Keeps the newest transcript line in view in the notebook. The
           // line is found by its words, and its list or the page is scrolled.
           const follow = () => {
-            if (!newestText) return;
+            if (!newestText || data.view !== 'notebook') return;
             const view = $('notebook').contentWindow;
             const walker = view.document.createTreeWalker(
               view.document.body,

@@ -196,35 +196,44 @@ Run offline on 14 November 2026 with the fake evaluator and default settings, al
 
 ## Recording a simulation
 
-A results file from the simulation can be played back as a video, to watch how and when cues appear. The recorder asks no evaluator anything: every decision comes from the file, whether that was written by the fake, the labels, the rules, or a later approved model run.
+A results file from the simulation can be played back as a video, to watch how and when cue cards appear. The recorder asks no evaluator anything: every decision comes from the file, whether that was written by the fake, the labels, the rules, or an approved model run.
 
 ```sh
 npm run dev -- --port <port>                       # the browser preview, in another terminal
 npm run lab:record -- --results <cue-sim results .json> --url http://127.0.0.1:<port> --out <directory outside the repository>
-npm run lab:record -- --results <file> --url <url> --out <directory> --conversations model-eval-review --speed 2
+npm run lab:record -- --results <file> --url <url> --out <directory> --conversations model-eval-review --with-notebook
 ```
 
 What is on screen:
 
-- **A mock video call** in the background: invented participants as tiles, the current speaker, and captions. It stands in for a meeting app and is labelled "Mock call. Not a real meeting or meeting app."
-- **The real companion**, floating over the call where its window would sit, and **the real notebook** beside it. Both are the app's own interface running in the browser preview, fed the simulated session through the same stand-in the browser tests use. Transcript lines arrive when the results say they reached the app, under the one "Speaker" label a live transcript has today.
-- **A label across the top** for the whole recording: "Simulated", "Fictional", "No model" or "Real model decisions", the conversation, where the cue decisions came from, and what the decision times are (measured, recorded with none, or made up).
-- **A lab overlay** under the notebook, marked as not part of TalkQTE, listing each time the evaluator was asked and what it decided, including decisions that were dropped.
+- **The real companion**, drawn large, is the subject: the cue card can be read at a glance. It is the app's own companion window at its own size, scaled up, running in the browser preview and fed the simulated session through the same stand-in the browser tests use.
+- **A mock video call** is quiet background: invented participants as tiles, the current speaker, and captions. It stands in for a meeting app and is labelled "Mock call. Not a real meeting or meeting app."
+- **A small label across the top** for the whole recording: "Simulated", "Fictional", "No model" or "Real model decisions" (with "run stopped early" when it did), "Synthetic voices" when the lines are spoken, the conversation, where the cue decisions came from, and what the decision times are (measured, recorded with none, or made up).
+- **A small lab overlay**, marked as not part of TalkQTE, listing each time the evaluator was asked and what it decided, including decisions that were dropped.
 
-The notebook's own wording describes the app as it is today (phrase rules, no model connected). In a recording the cue decisions come from the results file, as the label says. The notebook is kept scrolled to the newest transcript line, so its own copy of the cue can move out of view; the companion always shows it.
+The notebook is not in the main video. `--with-notebook` writes a second video of the real notebook by itself, kept scrolled to the newest transcript line, where lines arrive when the results say they reached the app under the one "Speaker" label a live transcript has today. The notebook's own wording describes the app as it is today (phrase rules, no model connected); the label says where the decisions actually came from.
 
-The recorder finds each cue by its words, not by how the card is built, so it works with the current card and with a redesigned one: it waits for the cue's text to appear in the companion, checks it in the notebook, takes a still, and waits for it to go when the results clear it.
+**Sound.** At normal speed the fictional lines are spoken aloud behind the card. The speech is made on this device, offline, with macOS `say` and installed system voices, one per speaker; no speech service is used. Each line's clip starts when its speaker starts in the simulation and is mixed into the MP4 as AAC. Nothing in the simulation is moved to fit the speech: a line that would run into the next speaker is spoken a little faster once, and any clip that still runs over is listed in the manifest. Without `say` the recorder uses plain test tones if `ffmpeg` is there (labelled "Test tones"), and without `ffmpeg`, or with `--no-sound` or another `--speed`, the video is silent.
+
+The recorder finds each cue by its words, not by how the card is built, so it works with the current card and with a redesigned one: it waits for the cue's text to appear in the companion, takes a still, and waits for it to go when the results clear it.
 
 What is saved, in the output directory:
 
-- one video per conversation, re-encoded with `ffmpeg` to a compact MP4 when `ffmpeg` is installed (the raw capture is then deleted; without `ffmpeg` the raw WebM is kept);
+- one video per conversation, re-encoded with `ffmpeg` to a compact MP4 when `ffmpeg` is installed (the raw capture is then deleted; without `ffmpeg` the raw WebM is kept), and a `-notebook` video when asked for;
 - a still for each cue and one at the end;
-- a manifest (`.json`) with the source of the decisions, the settings, and for each cue when the results expected it and when it was actually seen;
+- a manifest (`.json`) with the source of the decisions, the settings, the voices used and any clip that ran over, and for each cue when the results expected it and when it was actually seen;
 - an event log (`.log.jsonl`).
 
-A take in which an expected cue never appeared, or playback failed, is deleted rather than kept. File names are built from the conversation and evaluator names with anything but letters, digits, hyphens and underscores replaced. Recordings are private working files: the output directory must be outside the checkout, and videos or stills of the app never go in the repository, the README, the website or anything promotional.
+Limits the recorder enforces:
 
-A recording shows timing and appearance on invented conversations. Playback runs on the browser's clock, so a cue is drawn a little after the time in the results; the manifest records both. It is not a recording of the desktop app, a real call, or anyone's use of TalkQTE.
+- **Only bundled fictional conversations.** Every line, speaker, title and participant in the results file must match the bundled fixture it names (a run that stopped may hold fewer lines); anything else is refused before a browser starts. Results not marked fictional are refused.
+- **Only the preview on this device.** `--url` must be `http://127.0.0.1`, `http://localhost` or `http://[::1]`.
+- **Only outside the checkout.** The output directory is checked wherever the recorder is called from. File names are built from the conversation and evaluator names with anything but letters, digits, hyphens and underscores replaced.
+- **A failed take is deleted.** If an expected cue never appeared, or playback failed, nothing is kept.
+
+Recordings are private working files: videos or stills of the app never go in the repository, the README, the website or anything promotional.
+
+A recording shows timing and appearance on invented conversations. Playback runs on the browser's clock, so a cue is drawn a little after the time in the results; the manifest records both. It is not a recording of the desktop app, a real call, real voices, or anyone's use of TalkQTE.
 
 ## What the numbers do not show
 
@@ -243,4 +252,4 @@ A recording shows timing and appearance on invented conversations. Playback runs
 
 For the simulation they cover: a cue appearing one decision after its line and being scored against its moment; an overtaken decision being dropped with one catch-up; never two requests at once; the minimum gap and the dry-run bound; expiry after 18 seconds; the six-line window and what an app-style request contains; each count in the table above on a small scripted conversation; the labels evaluator acting only where a label says to and losing moments as its delay grows; stopping at the cap and at the first failure with the log intact; every refusal happening before any process; repeatability; and the shape of the conversation fixture.
 
-A browser test (`tests/lab-recording.spec.ts`, Chromium and WebKit) records a three-line fictional conversation from a results file and checks that one video is saved with no raw capture left, that the cue is seen in the companion and the notebook by its words and seen to leave, that the on-screen labels are present, that a take which cannot show its cue is deleted, and that results not marked fictional are refused.
+The recorder's browser test (`tests/lab-recording.spec.ts`, Chromium and WebKit) is opt-in, `npm run test:lab-record`, and is not part of `npm test` or CI because it records video; it writes only to a temporary directory outside the repository. It records a three-line fictional conversation from a results file, with test tones for speech, and checks: one video with a sound track and no raw capture left; the cue seen in the companion by its words and seen to leave; no notebook in the main view and a second video only with `--with-notebook`; the on-screen labels; a take that cannot show its cue being deleted; a folder inside the checkout being refused; and the command refusing other hosts and anything but the bundled conversations.

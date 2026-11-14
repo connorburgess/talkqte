@@ -26,6 +26,7 @@
     "lab:batch": "node scripts/cue-lab-batch.mjs",
     "lab:sim": "node scripts/cue-sim.mjs",
     "lab:record": "node scripts/cue-sim-record.mjs",
+    "test:lab-record": "playwright test -c playwright.lab.config.ts",
     "check": "tsc -b && playwright test",
     "format": "prettier --write .",
     "format:check": "prettier --check src tests scripts .github/workflows *.json *.ts index.html"
