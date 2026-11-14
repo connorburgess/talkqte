@@ -2070,50 +2070,38 @@ mod tests {
 
     #[test]
     fn a_single_timeout_is_skipped_and_two_in_a_row_stop_cues() {
-        let mut h = Harness::with_budget(Duration::from_millis(20));
-        let time_out = |h: &mut Harness| {
-            std::thread::sleep(Duration::from_millis(30));
-            h.engine.advance(1);
-        };
-        h.line("The garden checklist needs an owner.");
-        h.request();
-        time_out(&mut h);
+        let mut h = Harness::new();
+        // Exercise policy outcomes without racing worker startup against a
+        // 20 ms wall-clock deadline. The worker's exact deadline boundary and
+        // late-result rejection are covered by
+        // expired_or_completed_but_unread_results_never_display.
+        h.engine.fail_evaluation(Failure::Expired);
         // Skipped: permission and status survive, and no cue appears.
         assert!(h.engine.has_processing_permission());
         assert_eq!(h.engine.evaluation_status(), Some(EvaluationStatus::Idle));
-        // The late reply is dropped when it finally arrives.
-        h.replies
-            .send(
-                serde_json::json!({"action": "show", "cue": "Who owns the checklist?",
-                    "sourceIds": ["transcript:line-1"]})
-                .to_string(),
-            )
-            .unwrap();
-        drain_without_another_request(&mut h);
         assert!(h.engine.state.cue.is_none());
-        // A reply in time resets the run of timeouts.
-        h.line("Maya might take it.");
+
+        // A real validated reply resets the run of timeouts.
+        h.line("Maya might take the garden checklist.");
         h.request();
-        h.reply("quiet", None, &["transcript:line-2"]);
-        h.line("Or perhaps Sam.");
-        h.request();
-        time_out(&mut h);
+        h.reply("quiet", None, &["transcript:line-1"]);
+        assert_eq!(
+            h.engine.evaluation_status(),
+            Some(EvaluationStatus::Decided(EvaluationOutcome::Quiet))
+        );
+        h.engine.fail_evaluation(Failure::Expired);
         assert!(h.engine.has_processing_permission());
-        h.replies.send("{}".into()).unwrap();
-        drain_without_another_request(&mut h);
-        // Two in a row stop cues for the session, with the plain reason.
-        h.line("Nobody has said yes yet.");
-        h.request();
-        time_out(&mut h);
+        assert!(h.engine.state.cue.is_none());
+
+        // Two consecutive timeout outcomes stop cues with the plain reason.
+        h.engine.fail_evaluation(Failure::Expired);
         assert_eq!(
             h.engine.evaluation_status(),
             Some(EvaluationStatus::Unavailable(EvaluationIssue::TimedOut))
         );
         assert!(!h.engine.has_processing_permission());
-        h.replies.send("{}".into()).unwrap();
-        drain_without_another_request(&mut h);
-        h.line("Still nobody.");
-        drain_without_another_request(&mut h);
+        h.line("Still nobody has said yes.");
+        assert!(h.requests.try_recv().is_err(), "no work after cues stop");
         assert!(h.engine.state.cue.is_none());
     }
 

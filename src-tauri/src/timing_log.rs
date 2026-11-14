@@ -178,6 +178,21 @@ pub enum Event {
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    DevSourceObservation {
+        version: u8,
+        step: &'static str,
+        application: &'static str,
+        run_id: String,
+        host_operation: String,
+        live_operation: String,
+        session: String,
+    },
     /// Lines lost since the last line written, because the queue was full
     /// or a write failed.
     Dropped { count: u64 },

@@ -92,6 +92,11 @@ Offline tests cover sticky Stop, delayed startup/listing, overlapping ordinary
 Stop/replacement, delayed microphone teardown/history refusal and release fences; this
 handshake has not been exercised with a native app or real capture.
 
+The same armed run can publish [versioned selected-source observations](development-source-observation.md)
+that bind the host operation, live-start operation and exact session/Control.
+These are historical guard-time observations, not atomic current readiness or
+native release. The versioned JavaScript consumer/session join remains separate.
+
 ## One request and one newest context
 
 New validated speech coalesces while one immutable evaluation completes. It does
