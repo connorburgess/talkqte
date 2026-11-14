@@ -67,9 +67,11 @@ test('a Markdown note without a date waits for the date the person enters, then 
   await expect(
     question.getByRole('heading', { name: 'Welcome guide printing' }),
   ).toBeVisible();
-  await expect(question).toContainText('Reminder from your notes · 2026-10-21');
-  await question.getByRole('button', { name: 'Why?' }).click();
-  await expect(question).toContainText('not from this conversation');
+  await expect(question).toContainText('From your notes');
+  await expect(question).toContainText(
+    'Its title came up · imported note, 2026-10-21',
+  );
+  await question.getByRole('button', { name: 'Hold', exact: true }).click();
   await page.getByRole('button', { name: 'Pause', exact: true }).click();
 
   // Removing the note clears its held reminder; export never includes it.

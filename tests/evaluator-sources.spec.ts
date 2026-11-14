@@ -26,17 +26,15 @@ async function show(page: Page, cue: Cue = mixedCue) {
   await expect(page.getByRole('heading', { name: cue.question })).toBeVisible();
 }
 
-test('mixed sources stay distinct and keyboard disclosure holds the suggestion', async ({
+test('mixed sources stay distinct without a click, and the keyboard holds the suggestion', async ({
   page,
 }) => {
   await nativePage(page);
   await show(page, { ...mixedCue, aboutFocus: true });
   const question = page.getByRole('region', { name: 'Suggested question' });
-  await expect(question).toContainText('Suggestion with prior context');
+  await expect(question).toContainText('Suggested');
   const sources = page.getByRole('list', { name: 'Cue sources', exact: true });
-  await expect(sources).toBeHidden();
-  await question.getByRole('button', { name: 'Why?', exact: true }).focus();
-  await page.keyboard.press('Enter');
+  await expect(sources).toBeVisible();
   await expect(sources.getByRole('listitem')).toHaveCount(3);
   await expect(sources.getByRole('listitem').nth(0)).toContainText(
     'This conversation · 1:02 · Maya',
@@ -50,17 +48,19 @@ test('mixed sources stay distinct and keyboard disclosure holds the suggestion',
   await expect(question).toContainText(
     'Prior notes are not from this conversation.',
   );
-  await expect(question).toContainText('Kept here until you dismiss it.');
-  await expect(question).not.toContainText('From the live transcript');
+  await expect(question).not.toContainText('From this conversation');
   await expect(question).toContainText(
     'This suggestion cites speech with words from your focus list.',
   );
   await expect(question).not.toContainText(
     'came through sooner and stays longer',
   );
-  await question.getByRole('button', { name: 'Hide context' }).click();
-  await expect(sources).toBeHidden();
-  await expect(question).toContainText('Kept here until you dismiss it.');
+  await question.getByRole('button', { name: 'Hold', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(
+    question.getByRole('button', { name: 'Held', exact: true }),
+  ).toBeFocused();
+  await expect(sources.getByRole('listitem')).toHaveCount(3);
   await question.getByRole('button', { name: 'Dismiss', exact: true }).click();
   await expect(question).toHaveCount(0);
 });
@@ -87,10 +87,10 @@ test('mixed resolution keeps its own sources and removal releases every excerpt'
   await expect(resolution.getByRole('listitem')).toHaveCount(2);
   await expect(resolution).toContainText('Printing plan');
   await expect(
-    page.getByText('Marked resolved from these sources.', { exact: false }),
+    page.getByText('Marked resolved from these sources', { exact: false }),
   ).toBeVisible();
   await expect(
-    page.getByText('This was answered in the conversation.', { exact: false }),
+    page.getByText('Answered later in the conversation', { exact: false }),
   ).toHaveCount(0);
   // Native source invalidation publishes a newer snapshot with no cue.
   await page.evaluate(() => window.liveTest.setCue(null));

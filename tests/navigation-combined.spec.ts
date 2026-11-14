@@ -56,8 +56,11 @@ test('narrow keyboard flow preserves context controls and independent Stop', asy
     ),
   );
   const cue = page.getByRole('region', { name: 'Suggested question' });
-  await cue.getByRole('button', { name: 'Why?' }).press('Enter');
   await expect(cue).toContainText('Could someone own the guide?');
+  await cue.getByRole('button', { name: 'Hold', exact: true }).press('Enter');
+  await expect(
+    cue.getByRole('button', { name: 'Held', exact: true }),
+  ).toBeFocused();
   await page.evaluate(() => window.granolaTest.holdListing());
   await context
     .getByRole('button', { name: 'Choose Granola notes', exact: true })

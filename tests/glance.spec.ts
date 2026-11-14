@@ -13,14 +13,14 @@ test('keyboard Dismiss returns to notes after removing a paused question', async
   const notes = page.getByRole('textbox', { name: 'Meeting notes' });
   // Native Tab navigation is checked separately; begin at the control so
   // this regression does not depend on the browser's tab-to-buttons setting.
-  await question.getByRole('button', { name: 'Why?' }).focus();
+  await question.getByRole('button', { name: 'Hold', exact: true }).focus();
   await page.keyboard.press('Enter');
-  await expect(
-    question.getByRole('button', { name: 'Hide context' }),
-  ).toBeFocused();
+  // Holding keeps focus on the same control, which now says the cue is held.
+  const held = question.getByRole('button', { name: 'Held', exact: true });
+  await expect(held).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(question.getByRole('button', { name: 'Why?' })).toBeFocused();
-  await expect(question.locator('blockquote')).toBeHidden();
+  await expect(held).toBeFocused();
+  await expect(question.locator('blockquote')).toBeVisible();
   await question.getByRole('button', { name: 'Dismiss' }).focus();
   await expect(question.getByRole('button', { name: 'Dismiss' })).toBeFocused();
   await page.keyboard.press('Enter');
@@ -116,7 +116,7 @@ test('a delayed Dismiss acknowledgement does not take focus back from another no
   await expect(other).toBeFocused();
 });
 
-test('Why reveals the source and keeps a question through later prompts and playback completion', async ({
+test('the source shows without a click, and Hold keeps a question through later prompts and playback completion', async ({
   page,
 }) => {
   await page.clock.install();
@@ -127,24 +127,34 @@ test('Why reveals the source and keeps a question through later prompts and play
   const source = question.getByText(
     '“Agreed. Someone can take the first draft of the welcome guide.”',
   );
-  await expect(source).toBeHidden();
-  const disclosure = question.getByRole('button', {
-    name: 'Why?',
-    exact: true,
-  });
-  await disclosure.focus();
-  await page.keyboard.press('Enter');
   await expect(source).toBeVisible();
+  await expect(question).toContainText('You could ask');
+  await expect(question).toContainText('From the demo conversation');
+  // No disclosure is left to open.
+  await expect(question.locator('[aria-expanded]')).toHaveCount(0);
+  await question.getByRole('button', { name: 'Hold', exact: true }).focus();
+  await page.keyboard.press('Enter');
   await expect(
-    question.getByRole('button', { name: 'Hide context' }),
+    question.getByRole('button', { name: 'Held', exact: true }),
   ).toBeFocused();
+  // Holding does not ask for the taller window that opening context used.
+  expect(
+    await page.evaluate(async () => {
+      const path = '/src/lib/preview.ts';
+      const preview = await import(path);
+      let cue: { held: boolean; expanded: boolean } | null = null;
+      preview.connect((state: { cue: typeof cue }) => {
+        cue = state.cue;
+      })();
+      return cue;
+    }),
+  ).toMatchObject({ held: true, expanded: false });
   await page.clock.runFor(75_000);
   await expect(question.getByRole('heading')).toHaveText(
     'Who will take the first draft?',
   );
-  await expect(question).toContainText('Earlier in the demo.');
-  await question.getByRole('button', { name: 'Hide context' }).click();
-  await expect(source).toBeHidden();
+  await expect(question).toContainText('From earlier in the demo conversation');
+  await expect(source).toBeVisible();
   await page.clock.runFor(30_000);
   await expect(page.getByRole('button', { name: 'Replay demo' })).toBeVisible();
   await expect(question.getByRole('heading')).toHaveText(
@@ -175,17 +185,17 @@ test('appearance controls are discoverable, apply to questions, and survive demo
   await page.getByRole('button', { name: 'Try demo', exact: true }).click();
   await page.clock.runFor(8_200);
   const question = page.getByRole('region', { name: 'Suggested question' });
-  await expect(question.getByRole('heading')).toHaveCSS('font-size', '30px');
-  await question.getByRole('button', { name: 'Why?' }).click();
+  await expect(question.getByRole('heading')).toHaveCSS('font-size', '28px');
+  await question.getByRole('button', { name: 'Hold', exact: true }).click();
   await page.getByRole('button', { name: 'End demo' }).click();
   await expect(question).toHaveCount(0);
   await page.getByRole('button', { name: 'Replay demo' }).click();
   await page.clock.runFor(8_200);
-  await expect(question.getByRole('button', { name: 'Why?' })).toHaveAttribute(
-    'aria-expanded',
-    'false',
-  );
-  await expect(question.getByRole('heading')).toHaveCSS('font-size', '30px');
+  // The replayed cue is a new one, not held.
+  await expect(
+    question.getByRole('button', { name: 'Hold', exact: true }),
+  ).toBeVisible();
+  await expect(question.getByRole('heading')).toHaveCSS('font-size', '28px');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(page.getByLabel('Position', { exact: true })).toHaveValue(
     'topCenter',
@@ -226,13 +236,14 @@ for (const size of ['standard', 'large'] as const) {
         () => document.querySelector('main')!.scrollHeight <= innerHeight,
       ),
     ).toBe(true);
-    await question.getByRole('button', { name: 'Why?' }).click();
-    // Context opens into a 460 px window (540 with large text), no longer 500.
-    await page.setViewportSize({
-      width: 420,
-      height: size === 'large' ? 540 : 460,
-    });
+    // The source is already in view, and holding the cue changes no size.
     await expect(question.locator('blockquote')).toBeVisible();
+    const before = (await question.boundingBox())!.height;
+    await question.getByRole('button', { name: 'Hold', exact: true }).click();
+    await expect(
+      question.getByRole('button', { name: 'Held', exact: true }),
+    ).toBeVisible();
+    expect((await question.boundingBox())!.height).toBe(before);
     expect(
       await page.evaluate(
         () => document.querySelector('main')!.scrollHeight <= innerHeight,
