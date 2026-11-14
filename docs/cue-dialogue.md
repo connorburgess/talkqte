@@ -43,6 +43,7 @@ A brief describes a meeting, not a script. It has exactly these fields:
 The checks every brief must pass, as written:
 
 - **Schema.** Exactly these fields, with the counts and lengths above. When a plan was given, the brief must match its domain and its moment counts.
+- **Within the call.** The generator is told how long the simulated call runs: `maxTurns` turns of about 6 s, so 84 s by default. A distracted window that ends after that is rejected, because it could never happen, and nor could a moment planted in it.
 - **Invented names and looks.** People have single first names, all different. A portrait may not compare anyone to a real or famous person. A whole-word, case-sensitive deny-list of common real companies and products, in `scripts/cue-dialogue-briefs.mjs`, rejects any brief that names one, as does any web address, email, handle or phone number. The list cannot catch everything; the generator is also told to invent every name.
 - **Judgeable criteria.** Each criterion names someone in the meeting, or refers to the group ("someone", "nobody"). None may turn on thoughts, feelings, knowledge or intent, or on the card. Every moment has at least one criterion.
 
@@ -161,6 +162,7 @@ The model-backed generator, cast, listener and judge (`claudeAgents` in `scripts
 - **Refused before any process:** a shell that carries API, provider or proxy settings.
 - **Checked once:** the CLI version and the subscription sign-in, shared by all four agents. The cue evaluator, the lab's own adapter, makes its own check.
 - **Each call:** the role's model and effort, the cue lab's isolation flags (no tools, MCP, hooks, slash commands or session persistence) and its allowlisted environment.
+- **Output limits.** The generator may write up to 4,000 tokens and the judge up to 1,500. The cast, the listener and the cue evaluator keep the shared contract's 800. Every limit stays under the contract's ceiling. A diagnostic generator brief on Sonnet 5.5 at medium effort took 2,845 output tokens and 29 s.
 - **Refused after a call:** a reply reported from any other model. Each reply is then checked against the role's view; an unusable one stops the run.
 - **No retry,** and the cue lab's failure kinds.
 
