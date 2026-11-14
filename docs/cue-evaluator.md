@@ -1,6 +1,6 @@
 # Bounded cue evaluator
 
-`src-tauri/src/cue_evaluator.rs` provides a replaceable Rust worker and decision contract. A development constructor registers it with the Rust cue engine, disabled until an explicit session grant approves transcript input and any exact prior-note selection; no app command enables this path. No model, provider adapter, credentials, network request, or automatic reasoning is supplied. The app continues to use its existing phrase rules.
+`src-tauri/src/cue_evaluator.rs` provides a replaceable Rust worker and decision contract. A development constructor registers it with the Rust cue engine, disabled until an explicit session grant approves transcript input and any exact prior-note selection. Ordinary builds register no evaluator and keep the existing phrase rules. A development build with the `claude-cli` feature registers one backend, the Claude Code CLI on the owner's own subscription, described in [model-decided cues](cue-model.md); it sends nothing until the person approves the session, and is never sent prior notes.
 
 This foundation supports timely context by rejecting late or obsolete proposals before they can reach the cue lifecycle. Structure and source-membership checks do not establish that a proposal is true, relevant, or useful to someone listening.
 
@@ -12,12 +12,12 @@ Requests allow 1–32 sources, at most 4,096 bytes of text per source, and at mo
 
 A reply is at most 4,096 bytes of JSON with exactly five fields: `action`, `cue`, `sourceIds`, `reason`, and `observedUse`. Unknown fields, missing fields, invalid types, and duplicate object fields fail validation.
 
-| Action | Requirements |
-| --- | --- |
-| `show` | No existing cue; nonempty cue text of at most 240 characters. |
-| `quiet` | `cue: null`; a proposal to remain quiet, not an instruction to clear a visible cue. |
-| `resolved` | An existing cue and `cue: null`; resolution remains distinct from observed use. |
-| `withdraw` | An existing cue and `cue: null`; not an automatic failure label. |
+| Action     | Requirements                                                                        |
+| ---------- | ----------------------------------------------------------------------------------- |
+| `show`     | No existing cue; nonempty cue text of at most 240 characters.                       |
+| `quiet`    | `cue: null`; a proposal to remain quiet, not an instruction to clear a visible cue. |
+| `resolved` | An existing cue and `cue: null`; resolution remains distinct from observed use.     |
+| `withdraw` | An existing cue and `cue: null`; not an automatic failure label.                    |
 
 Every decision cites 1–4 distinct supplied source IDs and has a nonempty reason of at most 300 characters. `observedUse` is `not_observed`, `possible`, or `unknown`; without an existing cue it must be `not_observed`. These are proposed observations, never usefulness or participation scores. A valid source ID proves membership, not that the cited words support the decision.
 
@@ -37,10 +37,9 @@ Eight headless Rust tests use fictional evaluators and channels, without model c
 
 The transcript lifecycle bridge below is the next delivered slice. The selected-note development bridge below adds source lifecycle and disclosure; semantic note reasoning and provider/app activation remain separate work. Provider selection, a user-facing permission flow, model quality, actual latency/resource budgets, and comparison with no assistance remain separate gates. These offline tests establish neither semantic quality nor user outcomes.
 
-
 ## Transcript lifecycle bridge
 
-`Engine::live_with_evaluator(worker, processor)` registers one explicitly supplied worker and immutable processor configuration instead of phrase rules, initially without processing permission. No native command uses this constructor. The app and its fictional browser preview retain their current behavior, with no provider selected or inference enabled.
+`Engine::live_with_evaluator(worker, processor)` registers one explicitly supplied worker and immutable processor configuration instead of phrase rules, initially without processing permission. Only a `claude-cli` development build constructs it for live sessions ([model-decided cues](cue-model.md)). Other builds and the fictional browser preview keep their current behavior, with no provider selected or inference enabled.
 
 Each newly accepted eligible transcript line requests evaluation with the last six complete, fresh lines and the visible cue's original references (at most four); waiting speech notifications coalesce as described below. The worker's byte bounds still apply; excessive input stays quiet rather than truncating speech or splitting work. Source IDs, times, speaker labels, and exact text come from the engine. Manual notes, imported excerpts, the session name, and focus text are excluded. Focused mode is enforced locally through the existing word-match policy.
 
@@ -54,10 +53,9 @@ Eight additional headless lifecycle tests use fictional delayed replies. They co
 
 Bounded catch-up scheduling is implemented below. An explicitly scoped activation path still requires a processing/provider decision. Actual semantic quality, latency under ongoing speech, hardware operation, and useful participation while listening remain unvalidated.
 
-
 ## Selected-note development bridge
 
-The earlier selected-note constructor has been replaced by the session permission boundary below. A grant defaults to no notes and can approve exact provider/ID/revision selections from the imported store; importing another note never expands it. No app command uses this evaluator, and no model or provider is selected.
+The earlier selected-note constructor has been replaced by the session permission boundary below. A grant defaults to no notes and can approve exact provider/ID/revision selections from the imported store; importing another note never expands it. The `claude-cli` development backend refuses any note selection, so this path is exercised only with fictional evaluators in tests. No production provider is selected.
 
 The request includes the same recent speech and original cue references, plus up to twenty explicitly approved notes. Each note keeps its complete excerpt, title, provider, source date, and revision. IDs use `prior:<provider>:<source-id>` so file notes, Granola notes, and transcript segments cannot collide. Manual notebook edits, raw focus/name settings, unselected provider notes, and credentials are excluded. A note update does not schedule work by itself.
 
@@ -73,14 +71,13 @@ Five additional fictional Rust tests cover mixed/provider-colliding IDs, disclos
 
 Fictional browser evidence (420 × 560 companion viewport; longer disclosure scrolls):
 
-| Previous single-quote rendering of mixed input | Separate source disclosure |
-| --- | --- |
+| Previous single-quote rendering of mixed input                                            | Separate source disclosure                                                                         |
+| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | ![Mixed source text labelled as the live transcript](assets/evaluator-sources-before.png) | ![Conversation and prior notes labelled separately with dates](assets/evaluator-sources-after.png) |
 
 [320-pixel companion rendering](assets/evaluator-sources-narrow.png).
 
 The bounded scheduling check below is complete. Next readiness check: review an explicit processing/provider choice and its actual latency, privacy, cost and onboarding behavior. The planned no-assistance comparison still needs people and must measure listening together with useful participation.
-
 
 ## Coalesced speech scheduling
 
@@ -90,18 +87,17 @@ The engine now remembers one boolean notification that newer eligible speech is 
 
 Four new headless tests and the updated eviction test use fictional dialogue, a controlled speech clock, and explicit reply gates. The complete Rust library suite passes 247 tests; all-target Clippy and Rust formatting checks also pass. No model, device, account, or network input is involved. These are scheduling measurements, not provider latency or semantic-quality measurements:
 
-| Controlled scenario | Observed acceptance |
-| --- | --- |
-| 25 lines; initial adapter withheld through six seconds of fictional speech | Exactly two requests: the initial attempt and one latest-context catch-up. The final line is evaluated without another line arriving; the obsolete reply never appears. |
-| 25 lines at 250 ms, 1,000 ms and 3,000 ms spacing; three gated returns after eight more lines each | Four requests per scenario, with at most one adapter call occupied. Each new request contains at most six recent lines and includes the latest line. The three superseded replies stay invisible; only the final current proposal appears. |
-| Pause/resume, Stop/new session, dismissal, focus/name/sensitivity change, note revision/removal, and freshness expiry while input waits | No deferred request starts and no cancelled resolution is applied. |
-| Latest dispatched input returns malformed output or exceeds its deadline | The availability boundary below now reports failure and revokes permission; neither ticks nor new speech restart processing without fresh approval. |
-| Transcript eviction during a held cue and occupied evaluation | Old evidence clears; one current context is evaluated, without replaying intermediate inputs or the evicted cue. |
+| Controlled scenario                                                                                                                     | Observed acceptance                                                                                                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 25 lines; initial adapter withheld through six seconds of fictional speech                                                              | Exactly two requests: the initial attempt and one latest-context catch-up. The final line is evaluated without another line arriving; the obsolete reply never appears.                                                                    |
+| 25 lines at 250 ms, 1,000 ms and 3,000 ms spacing; three gated returns after eight more lines each                                      | Four requests per scenario, with at most one adapter call occupied. Each new request contains at most six recent lines and includes the latest line. The three superseded replies stay invisible; only the final current proposal appears. |
+| Pause/resume, Stop/new session, dismissal, focus/name/sensitivity change, note revision/removal, and freshness expiry while input waits | No deferred request starts and no cancelled resolution is applied.                                                                                                                                                                         |
+| Latest dispatched input returns malformed output or exceeds its deadline                                                                | The availability boundary below now reports failure and revokes permission; neither ticks nor new speech restart processing without fresh approval.                                                                                        |
+| Transcript eviction during a held cue and occupied evaluation                                                                           | Old evidence clears; one current context is evaluated, without replaying intermediate inputs or the evicted cue.                                                                                                                           |
 
 Catch-up removes a scheduling gap; it does not make an old answer current. If every evaluation is overtaken by speech, no proposal is applied until a result completes against unchanged, fresh input. Source ageing can also invalidate a request even without new speech. Accepting older output merely to increase cue count would require separate relevance validation. A non-cooperative adapter still blocks its worker indefinitely; the notification adds no copied content and cannot bypass that stall.
 
 The next release dependency is an explicit processing/provider path and permission flow before activation. On that path, measure cancellation responsiveness, request volume, skipped opportunities and trigger-to-visible latency under sustained speech and realistic pauses against [the budgets](budgets.md), including a source-backed already-answered/topic-change check. No production provider or implicit inference is enabled here. Compare useful participation and listening with no assistance separately; fictional scheduling success does not establish either outcome.
-
 
 ## Session processing permission
 
@@ -116,7 +112,6 @@ Dispatch checks the grant and builds input only from approved sources. Polling c
 Seven new headless tests plus the migrated lifecycle/source tests pass; the complete Rust suite passes 254 library tests. All-target Clippy and Rust formatting also pass. Acceptance covers zero adapter calls before approval or after revocation/restart, explicit recent versus new speech, exact selected metadata, stale source/configuration reviews, atomic scope rejection, delayed replies across revocation/reapproval, and oversized combined context without a partial dispatch. Existing source tests additionally confirm that changing approved notes clears held disclosure and prevents subsequent submissions. No model process, account, microphone or provider request ran.
 
 The fictional [processing-control flow](processing-controls.md) now covers location, source selection, availability, continuing capture, Pause/Resume, disable and Stop, with headless keyboard and narrow-layout checks. Native IPC, a concrete adapter, authentication/allowance recovery and app activation remain separate. The native binding and [remaining provider and outcome gates](processing-plan.md#acceptance-and-dependency-order) must be verified before evaluated cues are offered for real conversations.
-
 
 ## Evaluation availability before native controls
 

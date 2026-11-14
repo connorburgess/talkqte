@@ -161,6 +161,33 @@ test('a refused start says why, and listing can be cancelled', async ({
   ]);
 });
 
+test('the list says what to do when an app is missing, and a start macOS refused says to reopen TalkQTE', async ({
+  page,
+}) => {
+  const section = await panel(page);
+  await page.evaluate((choices) => {
+    window.processingTest.host({ choices });
+    window.processingTest.refuseStart('permissionNeedsReopen');
+  }, choices);
+  await send(page, {
+    microphone: 'off',
+    capture: 'off',
+    source: source('off'),
+  });
+  await expect(
+    section.getByText(
+      'Only open applications with a window are listed. If yours is missing, open it or one of its windows, then press List again.',
+    ),
+  ).toBeVisible();
+  await section.getByRole('radio', { name: 'Fictional player' }).check();
+  await section
+    .getByRole('button', { name: 'Start session from Fictional player' })
+    .click();
+  await expect(section.getByRole('alert')).toHaveText(
+    'macOS has not given this copy of TalkQTE Screen & System Audio Recording yet. If you just granted it, quit and reopen TalkQTE, then start again.',
+  );
+});
+
 test('a start by the launch setting says so, and a refusal says why in plain words', async ({
   page,
 }) => {

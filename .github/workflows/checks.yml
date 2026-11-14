@@ -80,8 +80,8 @@ jobs:
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --features native-audio-spike,timing-log
-      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --features native-audio-spike,timing-log -- -D warnings
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --features native-audio-spike,timing-log,claude-cli
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --features native-audio-spike,timing-log,claude-cli -- -D warnings
       - name: Third-party notices match the linked crates and bundled packages
         run: npm run check:notices
       - run: npm run tauri -- build --debug --bundles app

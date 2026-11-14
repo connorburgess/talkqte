@@ -27,6 +27,10 @@ local-whisper = ["dep:whisper-rs"]
 # Development-only timing log for lab runs with fictional audio: writes one
 # JSON line per event to the file named by TALKQTE_TIMING_LOG. No dependency.
 timing-log = []
+# Development cue backend: registers the Claude Code CLI evaluator for live
+# sessions, on the person's own subscription. Sends nothing until the person
+# turns the connection on. Never part of a default or release build.
+claude-cli = ["dep:regex"]
 
 [dependencies]
 tauri = { version = "2", features = [] }
@@ -47,6 +51,9 @@ ureq = { version = "3", default-features = false, features = ["rustls", "json"] 
 getrandom = "0.3"
 # Opens the sign-in page in the person's default browser.
 open = "5"
+# Matches the shared credential pattern in scripts/fixtures/cue-decision.json
+# for the development cue backend. Already in the tree through Tauri.
+regex = { version = "1", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -55,11 +62,11 @@ libc = "0.2"
 cpal = { version = "0.18.2", default-features = false }
 block2 = "0.6"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSButton", "NSView"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSButton", "NSView", "NSRunningApplication", "libc"] }
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "AVCaptureDevice", "AVMediaFormat", "block2"] }
 
 # Direct bindings for the isolated native ownership experiment.
-objc2-screen-capture-kit = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "SCStream", "SCError", "SCShareableContent", "block2", "dispatch2", "objc2-core-media", "objc2-core-graphics"] }
+objc2-screen-capture-kit = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "SCStream", "SCError", "SCShareableContent", "block2", "dispatch2", "libc", "objc2-core-media", "objc2-core-graphics"] }
 objc2-foundation = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "NSObject", "NSArray", "NSDictionary", "NSError", "NSString"] }
 dispatch2 = { version = "=0.3.1", optional = true }
 

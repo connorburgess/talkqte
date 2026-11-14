@@ -14,6 +14,8 @@ use objc2_core_media::{
 use std::ptr::NonNull;
 
 const RATE: i128 = 16_000;
+/// `kCMSampleBufferError_BufferHasNoSampleSizes`: the buffer has no size table.
+const NO_SAMPLE_SIZES: i32 = -12735;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PcmError {
@@ -115,16 +117,24 @@ impl PcmReader {
                 .ok_or(PcmError::Format)?;
             validate_format(asbd)?;
             let frames = usize::try_from(sample.num_samples()).map_err(|_| PcmError::Size)?;
+            // ScreenCaptureKit's audio buffers may leave the total size at
+            // zero and carry no per-sample size table. Either, when given,
+            // must agree; the copy below checks every requested byte arrives.
+            let total = sample.total_sample_size();
             if !(1..=MAX_SAMPLES).contains(&frames)
-                || sample.total_sample_size() != frames * size_of::<f32>()
+                || (total != 0 && total != frames * size_of::<f32>())
             {
                 return Err(PcmError::Size);
             }
             let (mut size, mut entries) = (0usize, 0isize);
-            if sample.sample_size_array(1, &mut size, &mut entries) != 0
-                || entries != 1
-                || size != 4
-            {
+            let table = match sample.sample_size_array(1, &mut size, &mut entries) {
+                // One uniform four-byte size, or no table at all.
+                0 => (entries == 1 && size == 4) || entries == 0,
+                NO_SAMPLE_SIZES => true,
+                // Variable sizes, or anything else CoreMedia refuses.
+                _ => false,
+            };
+            if !table {
                 return Err(PcmError::Size);
             }
             let mut timing = CMSampleTimingInfo {
@@ -136,17 +146,23 @@ impl PcmReader {
                 return Err(PcmError::Time);
             }
             numeric(timing.duration)?;
-            if i128::from(timing.duration.value) * RATE != i128::from(timing.duration.timescale) {
-                return Err(PcmError::Time);
-            }
             (frames, timing.presentationTimeStamp, sample.duration())
         };
         numeric(duration)?;
-        if i128::from(duration.value) * RATE != frames as i128 * i128::from(duration.timescale) {
+        // ScreenCaptureKit resamples the device's periods (512 frames at
+        // 48 kHz is 170⅔ at 16 kHz), so a buffer's duration and timestamp can
+        // fall between 16 kHz frames. Within one frame is the same audio.
+        let exact = i128::from(duration.value) * RATE;
+        let counted = frames as i128 * i128::from(duration.timescale);
+        if (exact - counted).abs() >= i128::from(duration.timescale) {
             return Err(PcmError::Time);
         }
         let origin = self.origin.unwrap_or(pts);
-        let first_frame = frame_position(origin, pts)?;
+        let mut first_frame = frame_position(origin, pts)?;
+        if self.origin.is_some() && first_frame.abs_diff(self.next_frame) <= SNAP {
+            // Continuous with the previous buffer, to within rounding.
+            first_frame = self.next_frame;
+        }
         if first_frame < self.next_frame {
             return Err(PcmError::Overlap);
         }
@@ -193,6 +209,52 @@ impl PcmReader {
     }
 }
 
+/// What a refused buffer looked like: numbers only, for diagnosis. Read in
+/// the callback without allocating.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Seen {
+    pub rate: f64,
+    pub channels: u32,
+    pub flags: u32,
+    pub bits: u32,
+    pub bytes_per_frame: u32,
+    pub frames: i64,
+    pub total_size: usize,
+    pub duration: (i64, i32),
+    pub pts: (i64, i32),
+}
+
+/// The metadata of `sample`, as far as it can be read.
+///
+/// # Safety
+/// As for `PcmReader::read`: stable native metadata for this call.
+pub unsafe fn seen(sample: &CMSampleBuffer) -> Seen {
+    // SAFETY: the caller's native lifetime contract; reads metadata only.
+    unsafe {
+        let mut seen = Seen {
+            frames: sample.num_samples() as i64,
+            total_size: sample.total_sample_size(),
+            ..Seen::default()
+        };
+        let duration = sample.duration();
+        seen.duration = (duration.value, duration.timescale);
+        let pts = sample.presentation_time_stamp();
+        seen.pts = (pts.value, pts.timescale);
+        if let Some(asbd) = sample.format_description().and_then(|description| {
+            CMAudioFormatDescriptionGetStreamBasicDescription(&description)
+                .as_ref()
+                .copied()
+        }) {
+            seen.rate = asbd.mSampleRate;
+            seen.channels = asbd.mChannelsPerFrame;
+            seen.flags = asbd.mFormatFlags;
+            seen.bits = asbd.mBitsPerChannel;
+            seen.bytes_per_frame = asbd.mBytesPerFrame;
+        }
+        seen
+    }
+}
+
 fn validate_format(asbd: &AudioStreamBasicDescription) -> Result<(), PcmError> {
     let flags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
     // Mono planar and interleaved PCM both have one channel in one buffer.
@@ -220,18 +282,24 @@ fn numeric(time: CMTime) -> Result<(), PcmError> {
     Ok(())
 }
 
+/// How far, in 16 kHz frames, a buffer may start from where the previous one
+/// ended and still count as continuous with it.
+const SNAP: u64 = 1;
+
+/// The 16 kHz frame nearest to `pts`, counted from `origin`. A timestamp
+/// before the origin is refused.
 fn frame_position(origin: CMTime, pts: CMTime) -> Result<u64, PcmError> {
     numeric(pts)?;
     let delta = i128::from(pts.value) * i128::from(origin.timescale)
         - i128::from(origin.value) * i128::from(pts.timescale);
     let numerator = delta * RATE;
     let denominator = i128::from(pts.timescale) * i128::from(origin.timescale);
-    // Exact rational mapping, not rounded arrival time or cumulative duration.
-    // Unsupported sub-frame offsets fail closed rather than moving speech.
-    if numerator < 0 || numerator % denominator != 0 {
+    if numerator < 0 {
         return Err(PcmError::Time);
     }
-    u64::try_from(numerator / denominator).map_err(|_| PcmError::Time)
+    // Nearest frame, halves rounded up: the rational mapping from the
+    // source clock, never arrival time or cumulative duration.
+    u64::try_from((2 * numerator + denominator) / (2 * denominator)).map_err(|_| PcmError::Time)
 }
 
 #[cfg(test)]
@@ -377,12 +445,14 @@ pub(crate) mod tests {
         let origin = time(10_000_001, 1_000_000);
         let first = pcm(&[0.25; 8], origin);
         let mut scratch = [0.0; MAX_SAMPLES];
-        // An arbitrary session/host origin is not necessarily on this source's
-        // 16 kHz sample grid. It must not be rounded into a fake frame position.
+        // An origin off this source's 16 kHz grid places the buffer at the
+        // nearest frame: here a sixtieth of a frame after 10 s is frame 0.
         let mut fixed = PcmReader::new(time(10, 1)).unwrap();
         assert_eq!(
-            unsafe { fixed.read(&first, &mut scratch) },
-            Err(PcmError::Time)
+            unsafe { fixed.read(&first, &mut scratch) }
+                .unwrap()
+                .first_frame,
+            0
         );
         let mut reader = PcmReader::from_first_sample();
         assert!(reader.source_origin().is_none());
@@ -413,15 +483,21 @@ pub(crate) mod tests {
             reader.source_origin().map(|value| value.value),
             Some(origin.value)
         );
-        let wrong_phase = pcm(&[0.0; 4], time(10_002_002, 1_000_000));
+        // A timestamp between frames is placed at the nearest one: a
+        // sixtieth of a frame past frame 32, after a real 8-frame gap.
+        let between = pcm(&[0.0; 4], time(10_002_002, 1_000_000));
         assert_eq!(
-            unsafe { reader.read(&wrong_phase, &mut scratch) },
-            Err(PcmError::Time)
+            unsafe { reader.read(&between, &mut scratch) }
+                .unwrap()
+                .first_frame,
+            32
         );
         let valid_later = pcm(&[0.0; 4], time(10_003_001, 1_000_000));
         assert_eq!(
-            unsafe { reader.read(&valid_later, &mut scratch) },
-            Err(PcmError::Time)
+            unsafe { reader.read(&valid_later, &mut scratch) }
+                .unwrap()
+                .first_frame,
+            48
         );
         assert_eq!(
             reader.source_origin().map(|value| value.value),
@@ -539,6 +615,81 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_buffer_without_a_size_table_reads_as_its_frames() {
+        // As ScreenCaptureKit delivered QuickTime Player's audio on the device:
+        // 320 planar float frames on a nanosecond clock, with no per-sample
+        // size table, so the total sample size reads as zero.
+        let mut planar = format();
+        planar.mFormatFlags |= kAudioFormatFlagIsNonInterleaved;
+        let values: Vec<f32> = (0..320).map(|i| i as f32 / 1_000.0).collect();
+        let mut reader = PcmReader::from_first_sample();
+        let mut scratch = [0.0; MAX_SAMPLES];
+        for (index, start) in [117_083_533_724_625_i64, 117_083_553_724_625]
+            .into_iter()
+            .enumerate()
+        {
+            let buffer = sample_with_metadata(
+                planar,
+                &values,
+                time(start, 1_000_000_000),
+                time(1, 16_000),
+                true,
+                &[],
+                None,
+            );
+            let span = unsafe { reader.read(&buffer, &mut scratch) }
+                .unwrap_or_else(|error| panic!("buffer {index}: {error:?}"));
+            assert_eq!(
+                span,
+                PcmSpan {
+                    first_frame: index as u64 * 320,
+                    frames: 320
+                }
+            );
+            assert_eq!(&scratch[..320], values.as_slice());
+        }
+    }
+
+    #[test]
+    fn resampled_device_periods_that_fall_between_frames_read_as_continuous_audio() {
+        // As ScreenCaptureKit delivers QuickTime Player's audio: the device
+        // runs 512-frame periods at 48 kHz, resampled to 16 kHz, so each
+        // buffer holds 170 or 171 frames and starts 170 2/3 frames after the
+        // last, on a 48 kHz timestamp.
+        let mut reader = PcmReader::from_first_sample();
+        let mut scratch = [0.0; MAX_SAMPLES];
+        let mut expected = 0;
+        for period in 0..12_i64 {
+            let frames = if period % 3 == 2 { 170 } else { 171 };
+            let buffer = sample(
+                format(),
+                &vec![0.1; frames],
+                time(9_000_000 + period * 512, 48_000),
+                time(1, 16_000),
+                true,
+            );
+            let span = unsafe { reader.read(&buffer, &mut scratch) }
+                .unwrap_or_else(|error| panic!("period {period}: {error:?}"));
+            assert_eq!(span.first_frame, expected, "period {period}");
+            expected += frames as u64;
+        }
+        // A buffer whose stated duration is off by more than a frame is still
+        // refused.
+        let mut strict = PcmReader::from_first_sample();
+        let wrong = sample(
+            format(),
+            &[0.0; 170],
+            time(0, 48_000),
+            time(1, 15_000),
+            true,
+        );
+        assert_eq!(
+            unsafe { strict.read(&wrong, &mut scratch) },
+            Err(PcmError::Time)
+        );
+    }
+
+    #[test]
     fn overlapping_native_buffers_cannot_replay_already_consumed_frames() {
         let mut reader = PcmReader::new(time(0, 1)).unwrap();
         let mut scratch = [0.0; MAX_SAMPLES];
@@ -548,8 +699,9 @@ pub(crate) mod tests {
                 .frames,
             MAX_SAMPLES
         );
+        // Two frames back is a replay; one frame is rounding (see below).
         assert_eq!(
-            unsafe { reader.read(&pcm(&[0.0; 8], time(2047, 16_000)), &mut scratch) },
+            unsafe { reader.read(&pcm(&[0.0; 8], time(2046, 16_000)), &mut scratch) },
             Err(PcmError::Overlap)
         );
         assert_eq!(
@@ -643,10 +795,10 @@ pub(crate) mod tests {
             assert_eq!(frame_position(time(0, 1), pts), Err(PcmError::Time));
         }
         assert_eq!(frame_position(time(1, 1), time(0, 1)), Err(PcmError::Time));
-        assert_eq!(
-            frame_position(time(0, 1), time(1, 32_000)),
-            Err(PcmError::Time)
-        );
+        // Between frames, the nearest frame; a half rounds up.
+        assert_eq!(frame_position(time(0, 1), time(1, 32_000)), Ok(1));
+        assert_eq!(frame_position(time(0, 1), time(1, 48_000)), Ok(0));
+        assert_eq!(frame_position(time(0, 1), time(512, 48_000)), Ok(171));
         assert_eq!(
             frame_position(time(0, 1), time(i64::MAX, 1)),
             Err(PcmError::Time)
