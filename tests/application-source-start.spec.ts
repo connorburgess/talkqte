@@ -176,7 +176,7 @@ test('the list says what to do when an app is missing, and a start macOS refused
   });
   await expect(
     section.getByText(
-      'Only open applications with a window on screen are listed. If yours is missing, open it or show one of its windows, then press List again.',
+      'Only open applications with a window are listed. If yours is missing, open it or one of its windows, then press List again.',
     ),
   ).toBeVisible();
   await section.getByRole('radio', { name: 'Fictional player' }).check();

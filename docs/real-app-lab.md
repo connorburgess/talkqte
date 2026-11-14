@@ -135,8 +135,8 @@ QuickTime Player is being captured", then press play in QuickTime Player.
 A session for one application starts only while the microphone is not
 capturing, no other live session or demo is running, and the speech model is
 installed. A refusal is shown under the panel's Start in words. Only open
-applications with a window on screen are listed. If QuickTime Player is
-missing, open the MP4 so its window shows, then press **List again**.
+applications with a window are listed, on any desktop. If QuickTime Player is
+missing, open the MP4, then press **List again**.
 
 If the start fails, the panel names the reason where macOS or TalkQTE gave
 one:

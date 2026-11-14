@@ -110,12 +110,13 @@ pub unsafe fn shareable_applications(cancelled: &AtomicBool) -> Result<Vec<Selec
         )
     };
     let display = displays.firstObject().ok_or(Failure::SourceUnavailable)?;
-    // Processes with a window on screen at the normal window level.
+    // Processes with a window at the normal window level, on any Space: a
+    // window on another desktop or behind a full-screen app still counts.
     let on_screen: std::collections::HashSet<i32> = windows
         .to_vec()
         .into_iter()
         // SAFETY: property reads of retained listed windows on this thread.
-        .filter(|window| unsafe { window.isOnScreen() && window.windowLayer() == 0 })
+        .filter(|window| unsafe { window.windowLayer() == 0 })
         .filter_map(|window| unsafe { window.owningApplication() })
         .map(|owner| unsafe { owner.processID() })
         .collect();

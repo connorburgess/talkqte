@@ -131,9 +131,8 @@ export function ApplicationAudioStart() {
             ))}
           </fieldset>
           <p className="processing-muted">
-            Only open applications with a window on screen are listed. If yours
-            is missing, open it or show one of its windows, then press List
-            again.
+            Only open applications with a window are listed. If yours is
+            missing, open it or one of its windows, then press List again.
           </p>
           <div className="processing-actions">
             <button

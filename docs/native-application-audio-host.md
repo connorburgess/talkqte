@@ -33,8 +33,8 @@ The command takes one action at a time and returns the current status.
    overtaken by quitting, before the worker takes it is never put to the OS.
    Only applications a person would recognise are listed. Each is a regular
    application (its activation policy is regular, so it appears in the Dock),
-   has a bundle identifier, and has at least one window on screen at the
-   normal level. Background agents, view services and helpers are left out. A
+   has a bundle identifier, and has at least one window at the normal level,
+   on any Space. Background agents, view services and helpers are left out. A
    helper whose bundle identifier extends a listed application's, as
    `com.google.Chrome.helper` extends `com.google.Chrome`, is captured with
    that application and not listed. ScreenCaptureKit's listing cannot tell
@@ -113,15 +113,15 @@ it. Retrying a failed cleanup is still only the development command.
 The status says **Off only when nothing was started or native cleanup was
 confirmed**. Everything else is one of:
 
-| Phase           | Meaning                                                                                                              |
-| --------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `listing`       | Waiting for the OS to list applications. Nothing is captured.                                                        |
-| `reviewing`     | One application is under review. Nothing is captured.                                                                |
-| `starting`      | Approved; the native start has not been confirmed.                                                                   |
-| `listening`     | The OS confirmed the start and Stop has not been requested.                                                          |
-| `stopping`      | Stop was requested, by this host, the live session or the worker, and native cleanup has not been confirmed.         |
-| `cleanupFailed` | The OS reported that Stop or output removal failed. The application may still be captured until a retry succeeds.    |
-| `abandoned`     | The worker ended without confirming cleanup. The application may still be captured; nothing in TalkQTE can stop it.  |
+| Phase           | Meaning                                                                                                             |
+| --------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `listing`       | Waiting for the OS to list applications. Nothing is captured.                                                       |
+| `reviewing`     | One application is under review. Nothing is captured.                                                               |
+| `starting`      | Approved; the native start has not been confirmed.                                                                  |
+| `listening`     | The OS confirmed the start and Stop has not been requested.                                                         |
+| `stopping`      | Stop was requested, by this host, the live session or the worker, and native cleanup has not been confirmed.        |
+| `cleanupFailed` | The OS reported that Stop or output removal failed. The application may still be captured until a retry succeeds.   |
+| `abandoned`     | The worker ended without confirming cleanup. The application may still be captured; nothing in TalkQTE can stop it. |
 
 `mayBeCapturing` is true for the last five. `stalled` becomes true when one
 unbroken spell of `stopping`, counted from the first status read that saw it,

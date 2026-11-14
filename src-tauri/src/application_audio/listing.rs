@@ -3,7 +3,7 @@
 //! ScreenCaptureKit lists every process that can be captured, including
 //! background agents, view services and helper processes. Only a regular
 //! application (one with a Dock presence) that has a bundle identifier and
-//! at least one on-screen window is offered. Its helpers, whose bundle
+//! at least one window at the normal level, on any Space, is offered. Its helpers, whose bundle
 //! identifiers extend its own, are captured with it rather than listed.
 //! Whether an application is playing audio cannot be told from the listing.
 
@@ -15,7 +15,7 @@ pub struct Traits {
     pub bundle_id: String,
     /// The activation policy is regular: it appears in the Dock.
     pub regular: bool,
-    /// At least one of its windows is on screen, at the normal window level.
+    /// It has at least one window at the normal window level, on any Space.
     pub on_screen: bool,
 }
 
