@@ -93,7 +93,7 @@ fn classify(code: i64, fallback: Problem) -> Problem {
 
 /// Note a start or stream problem and macOS's code in the timing log. Runs
 /// on the owning worker, never in a callback.
-fn record(problem: Problem, code: i64) {
+fn record(problem: Problem, code: i64, detail: Option<String>) {
     let label = match problem {
         Problem::StreamFailed => "stream_failed",
         Problem::StartFailed => "start_failed",
@@ -108,6 +108,7 @@ fn record(problem: Problem, code: i64) {
     crate::timing_log::record(crate::timing_log::Event::SourceProblem {
         problem: label,
         os_code: (code < 0).then_some(code),
+        detail,
     });
 }
 
@@ -130,6 +131,10 @@ trait Driver {
     fn stream_code(&self) -> i64 {
         NO_CODE
     }
+    /// What TalkQTE refused in the audio, if that stopped the stream.
+    fn stream_detail(&self) -> Option<String> {
+        None
+    }
     fn start(&mut self, completion: Arc<AtomicU8>);
     fn stop(&mut self, completion: Arc<AtomicU8>);
     fn remove_output(&mut self) -> bool;
@@ -143,6 +148,9 @@ struct StreamFault {
     failed: AtomicBool,
     /// The first reason given, as a number only; see `NO_CODE`.
     code: std::sync::atomic::AtomicI64,
+    /// For a buffer TalkQTE could not read: which check refused it and its
+    /// metadata. Set once, with a non-waiting lock, in the callback.
+    refused: std::sync::Mutex<Option<(&'static str, pcm::Seen)>>,
 }
 
 impl StreamFault {
@@ -151,7 +159,37 @@ impl StreamFault {
             control,
             failed: AtomicBool::new(false),
             code: std::sync::atomic::AtomicI64::new(NO_CODE),
+            refused: std::sync::Mutex::new(None),
         }
+    }
+
+    /// A buffer could not be read or handed over: keep why, then fail.
+    fn record_refused(&self, why: &'static str, seen: pcm::Seen) {
+        if let Ok(mut refused) = self.refused.try_lock() {
+            refused.get_or_insert((why, seen));
+        }
+        self.record_code(AUDIO_UNREADABLE);
+    }
+
+    /// The refused buffer, as text, for the timing log. Off the callback.
+    fn refused_detail(&self) -> Option<String> {
+        let refused = *self.refused.lock().unwrap_or_else(|e| e.into_inner());
+        refused.map(|(why, seen)| {
+            format!(
+                "{why}: rate {} Hz, {} channels, flags {:#x}, {} bits, {} bytes per frame, {} frames, {} bytes, duration {}/{}, pts {}/{}",
+                seen.rate,
+                seen.channels,
+                seen.flags,
+                seen.bits,
+                seen.bytes_per_frame,
+                seen.frames,
+                seen.total_size,
+                seen.duration.0,
+                seen.duration.1,
+                seen.pts.0,
+                seen.pts.1
+            )
+        })
     }
 
     /// As `record`, keeping the first reason's code.
@@ -235,7 +273,11 @@ impl<D: Driver> Owner<D> {
         if driver.stream_failed() && self.status.problem.is_none() {
             let code = driver.stream_code();
             let problem = classify(code, Problem::StreamFailed);
-            record(problem, code);
+            let detail = driver.stream_detail();
+            if let Some(detail) = &detail {
+                eprintln!("TalkQTE application audio: stopped, {detail}.");
+            }
+            record(problem, code, detail);
             self.status.problem = Some(problem);
         }
         match self.status.stage {
@@ -270,7 +312,10 @@ impl<D: Driver> Owner<D> {
                         if outcome != SUCCEEDED && self.status.problem.is_none() {
                             let code = driver.start_code();
                             let problem = classify(code, Problem::StartFailed);
-                            record(problem, code);
+                            if code != NO_CODE {
+                                eprintln!("TalkQTE application audio: start refused, code {code}.");
+                            }
+                            record(problem, code, None);
                             self.status.problem = Some(problem);
                         }
                         // Even start failure is conservatively stopped. Until the OS

@@ -310,6 +310,9 @@ impl Driver for Stream {
     fn stream_code(&self) -> i64 {
         self.delegate.ivars().code.load(Ordering::Acquire)
     }
+    fn stream_detail(&self) -> Option<String> {
+        self.delegate.ivars().refused_detail()
+    }
     fn start(&mut self, slot: Arc<AtomicU8>) {
         self.start = Some(completion(slot, self.start_code.clone()));
         // SAFETY: stream and block are retained until native cleanup; callback

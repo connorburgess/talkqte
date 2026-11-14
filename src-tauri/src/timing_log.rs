@@ -109,6 +109,10 @@ pub enum Event {
         problem: &'static str,
         #[serde(skip_serializing_if = "Option::is_none")]
         os_code: Option<i64>,
+        /// For audio TalkQTE refused: which check, and the buffer's
+        /// format and timing numbers. No audio.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
     },
     /// An application source's run ended: why, if anything went wrong, and
     /// how many chunks of its audio were transcribed.

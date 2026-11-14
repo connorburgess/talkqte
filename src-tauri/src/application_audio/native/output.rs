@@ -45,8 +45,19 @@ impl Callback {
         // SAFETY: caller's native lifetime contract; exclusive fixed scratch.
         let span = match unsafe { pcm.read(buffer, scratch) } {
             Ok(span) => span,
-            Err(_) => {
-                self.fault.record_code(super::AUDIO_UNREADABLE);
+            Err(error) => {
+                let why = match error {
+                    super::pcm::PcmError::NotReady => "not ready",
+                    super::pcm::PcmError::Format => "format",
+                    super::pcm::PcmError::Size => "size",
+                    super::pcm::PcmError::Time => "timing",
+                    super::pcm::PcmError::Overlap => "overlap",
+                    super::pcm::PcmError::Copy => "copy",
+                    super::pcm::PcmError::NonFinite => "non-finite samples",
+                };
+                // SAFETY: the same buffer, still borrowed for this callback.
+                self.fault
+                    .record_refused(why, unsafe { super::pcm::seen(buffer) });
                 return;
             }
         };
@@ -67,7 +78,15 @@ impl Callback {
                 .0
                 .cancelled
                 .store(true, std::sync::atomic::Ordering::Release),
-            Err(_) => self.fault.record(),
+            // SAFETY: the same buffer, still borrowed for this callback.
+            Err(rejected) => self.fault.record_refused(
+                match rejected {
+                    Rejected::OutOfOrder => "handoff out of order",
+                    Rejected::InvalidBuffer => "handoff invalid buffer",
+                    _ => "handoff refused",
+                },
+                unsafe { super::pcm::seen(buffer) },
+            ),
         }
     }
 }
