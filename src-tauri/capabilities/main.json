@@ -16,7 +16,6 @@
     "allow-set-processing-paused",
     "allow-set-live-cues-paused",
     "allow-respond-to-cue",
-    "allow-keep-line",
     "allow-inspect-cue",
     "allow-set-companion-position",
     "allow-set-question-size",

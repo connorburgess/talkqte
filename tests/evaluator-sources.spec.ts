@@ -72,7 +72,6 @@ test('mixed resolution keeps its own sources and removal releases every excerpt'
   const resolved: Cue = {
     ...mixedCue,
     held: true,
-    expanded: true,
     resolvedBy: {
       sourceId: mixedSources[0].id,
       evidence: 'Legacy resolution text.',
@@ -107,7 +106,6 @@ test('four long sources fit a narrow companion with larger text and usable dismi
   await nativePage(page, true);
   const long: Cue = structuredClone(mixedCue);
   long.held = true;
-  long.expanded = true;
   long.sources!.push({
     ...mixedSources[2],
     id: 'prior:file:long',

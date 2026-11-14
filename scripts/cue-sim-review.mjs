@@ -440,6 +440,117 @@ export function comparisonMarkdown(comparison) {
   return out.join('\n');
 }
 
+// Roughly four characters to a token: enough to tell a reply of seventy
+// tokens from one of six hundred, not to bill by.
+const tokens = (text) => Math.round(text.length / 4);
+
+/** Where a run's output went, from its own counters: how much of what the
+ * model wrote was the reply the lab reads, how much of that reply was
+ * explanation the app does not need, and how much was written and never
+ * shown (the model's working). Then what the request time looks like
+ * against output length, as a straight line through the run's requests. */
+export function outputAnalysis(results) {
+  const decisions = results.conversations
+    .flatMap((replay) => replay.timeline)
+    .filter(
+      (e) =>
+        e.type === 'decision' &&
+        Number.isFinite(e.usage?.output_tokens) &&
+        Number.isFinite(e.provider?.durationApiMs),
+    );
+  if (!decisions.length) return null;
+  const rows = decisions.map((e) => {
+    const full = JSON.stringify({
+      action: e.action,
+      cue: e.cue,
+      sourceIds: e.sourceIds,
+      reason: e.reason,
+      observedUse: e.observedUse,
+    });
+    const compact = JSON.stringify({
+      action: e.action,
+      cue: e.cue,
+      sourceIds: e.sourceIds,
+    });
+    return {
+      output: e.usage.output_tokens,
+      reply: tokens(full),
+      compact: tokens(compact),
+      apiMs: e.provider.durationApiMs,
+    };
+  });
+  const mid = (pick) => median(rows.map(pick));
+  // Least squares: request time = fixed part + time per output token.
+  const n = rows.length;
+  const meanX = rows.reduce((sum, r) => sum + r.output, 0) / n;
+  const meanY = rows.reduce((sum, r) => sum + r.apiMs, 0) / n;
+  const spread = rows.reduce((sum, r) => sum + (r.output - meanX) ** 2, 0);
+  const perToken = spread
+    ? rows.reduce((sum, r) => sum + (r.output - meanX) * (r.apiMs - meanY), 0) /
+      spread
+    : 0;
+  const fixedMs = meanY - perToken * meanX;
+  const at = (output) => Math.round(fixedMs + perToken * output);
+  const output = mid((r) => r.output);
+  const reply = mid((r) => r.reply);
+  const compact = mid((r) => r.compact);
+  return {
+    evaluator: results.evaluator.label,
+    requests: n,
+    medianOutputTokens: output,
+    // What the lab reads: the five-field reply, and the part of it that is
+    // explanation (reason and observed use).
+    medianReplyTokens: reply,
+    medianExplanationTokens: reply - compact,
+    // Written but not in the reply: the model's working.
+    medianUnseenTokens: Math.max(0, output - reply),
+    medianRequestMs: mid((r) => r.apiMs),
+    fixedMs: Math.round(fixedMs),
+    msPerOutputToken: Math.round(perToken * 10) / 10,
+    // The line's guess at a request's time with less written.
+    estimate: {
+      asRunMs: at(output),
+      withoutExplanationMs: at(output - (reply - compact)),
+      withoutUnseenWorkingMs: at(reply),
+      compactReplyOnlyMs: at(compact),
+    },
+  };
+}
+
+export function outputMarkdown(analyses) {
+  const out = [
+    '# Where the output went',
+    '',
+    '| | ' + analyses.map((a) => a.evaluator).join(' | ') + ' |',
+    '| --- |' + analyses.map(() => ' --- |').join(''),
+  ];
+  const row = (name, pick) =>
+    out.push(`| ${name} | ${analyses.map(pick).join(' | ')} |`);
+  row('Requests', (a) => a.requests);
+  row('Output tokens a request, median', (a) => a.medianOutputTokens);
+  row('In the reply the lab reads', (a) => `about ${a.medianReplyTokens}`);
+  row('Of that, explanation', (a) => `about ${a.medianExplanationTokens}`);
+  row('Written but not in the reply', (a) => `about ${a.medianUnseenTokens}`);
+  row('Request time, median', (a) => seconds(a.medianRequestMs));
+  row('Fixed part of a request', (a) => seconds(Math.max(0, a.fixedMs)));
+  row('Time per 100 output tokens', (a) => seconds(a.msPerOutputToken * 100));
+  row('Estimate: without the explanation', (a) =>
+    seconds(a.estimate.withoutExplanationMs),
+  );
+  row('Estimate: without the unseen working', (a) =>
+    seconds(a.estimate.withoutUnseenWorkingMs),
+  );
+  row('Estimate: three-field reply only', (a) =>
+    seconds(a.estimate.compactReplyOnlyMs),
+  );
+  out.push(
+    '',
+    "Reply sizes are estimated at four characters to a token. The estimates are a straight line through one run's requests; they say what shorter output might save, not what a run would measure.",
+    '',
+  );
+  return out.join('\n');
+}
+
 /** Reviews a saved take and writes the report beside it. */
 export function writeReview(manifestPath, results) {
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
@@ -459,8 +570,25 @@ export function writeReview(manifestPath, results) {
 
 export async function main(args, { print = console.log } = {}) {
   const flags = parseFlags(args, {
-    values: ['--take', '--results', '--compare', '--out'],
+    values: ['--take', '--results', '--compare', '--tokens', '--out'],
   });
+  if (flags['--tokens']) {
+    // One or more results files: where each run's output tokens went.
+    const analyses = flags['--tokens']
+      .split(',')
+      .map((file) => outputAnalysis(JSON.parse(readFileSync(file, 'utf8'))))
+      .filter(Boolean);
+    if (!analyses.length)
+      throw new Error('Those results hold no token or timing counters.');
+    const page = outputMarkdown(analyses);
+    if (flags['--out'])
+      writeFileSync(
+        join(outputDirectory(flags['--out'], {}), 'output-tokens.md'),
+        page,
+      );
+    print(page);
+    return analyses;
+  }
   if (flags['--compare']) {
     // Two or more results files of the same conversations, side by side.
     const files = flags['--compare'].split(',');

@@ -97,7 +97,6 @@ pub struct Cue {
     pub remaining_ms: u64,
     pub total_ms: u64,
     pub held: bool,
-    pub expanded: bool,
     /// Later conversation that appears to answer this cue. Only a held cue
     /// can carry this: an unheld answered cue is withdrawn instead.
     pub resolved_by: Option<Resolution>,
@@ -1008,7 +1007,6 @@ impl Engine {
                     remaining_ms: self.cue_deadline - now,
                     total_ms: ASKED_MS,
                     held: false,
-                    expanded: false,
                     resolved_by: None,
                     note: None,
                     about_focus: false,
@@ -1087,7 +1085,6 @@ impl Engine {
                     remaining_ms: self.cue_deadline - now,
                     total_ms,
                     held: false,
-                    expanded: false,
                     resolved_by: None,
                     note: None,
                     about_focus,
@@ -1136,7 +1133,6 @@ impl Engine {
                     remaining_ms: self.cue_deadline - now,
                     total_ms: CUE_MS,
                     held: false,
-                    expanded: false,
                     resolved_by: None,
                     note: Some(NoteRef {
                         title: note.item.title,
@@ -1192,7 +1188,6 @@ impl Engine {
             remaining_ms: self.cue_deadline - now,
             total_ms: ASKED_MS,
             held: false,
-            expanded: false,
             resolved_by: None,
             note: None,
             about_focus: true,
@@ -1241,57 +1236,10 @@ impl Engine {
             remaining_ms: self.cue_deadline - now,
             total_ms: CUE_MS,
             held: false,
-            expanded: false,
             resolved_by: None,
             note: None,
             about_focus,
         });
-    }
-
-    /// Keeps a quoted line in the notebook, with its time and speaker, and
-    /// lets the cue go. An explicit action: nothing is kept otherwise.
-    pub fn keep_line(&mut self, id: &str) -> Result<(), String> {
-        let cue = self
-            .state
-            .cue
-            .as_ref()
-            .filter(|cue| cue.id == id)
-            .ok_or("That line has already passed.")?;
-        if cue.kind != SAID {
-            return Err("Only a quoted line can be kept.".into());
-        }
-        let line = self
-            .state
-            .transcript
-            .iter()
-            .find(|segment| segment.id == cue.source_id);
-        let at_ms = line
-            .map(|segment| segment.at_ms)
-            .unwrap_or(self.state.elapsed_ms);
-        let speaker = line
-            .map(|segment| segment.speaker.trim())
-            .filter(|speaker| !speaker.is_empty())
-            .map(|speaker| format!("{speaker}: "))
-            .unwrap_or_default();
-        let entry = format!(
-            "[{:02}:{:02}] {speaker}“{}”",
-            at_ms / 60_000,
-            at_ms / 1_000 % 60,
-            cue.question
-        );
-        let mut notes = self.state.notes.clone();
-        if !notes.is_empty() && !notes.ends_with('\n') {
-            notes.push('\n');
-        }
-        notes.push_str(&entry);
-        notes.push('\n');
-        if notes.chars().count() > MAX_NOTE_CHARS {
-            return Err("Notes can contain up to 20,000 characters.".into());
-        }
-        self.state.notes = notes;
-        self.state.cue = None;
-        self.changed();
-        Ok(())
     }
 
     /// A cue created and removed before the next publish was never seen, so
@@ -1334,15 +1282,14 @@ impl Engine {
         Ok(())
     }
 
-    pub fn inspect_cue(&mut self, id: &str, expanded: bool) -> Result<(), String> {
+    /// Holds the cue until it is dismissed. There is no way to release it.
+    pub fn inspect_cue(&mut self, id: &str) -> Result<(), String> {
         let cue = self
             .state
             .cue
             .as_mut()
             .filter(|cue| cue.id == id)
             .ok_or("That question has already passed.")?;
-        cue.expanded = expanded;
-        // Collapsing context must not remove the question under the user's eyes.
         cue.held = true;
         self.changed();
         Ok(())
@@ -2753,7 +2700,7 @@ mod tests {
             .unwrap();
             let cue_id = e.state.cue.as_ref().unwrap().id.clone();
             if held {
-                e.inspect_cue(&cue_id, true).unwrap();
+                e.inspect_cue(&cue_id).unwrap();
             }
             e.state.notes = "A manually written note.".into();
             e.set_focus(vec!["Settle the volunteer schedule".into()])
@@ -2764,7 +2711,7 @@ mod tests {
             assert_eq!(e.session(), session);
             assert!(e.state.cues_paused && e.cue_snapshot().cues_paused);
             assert!(e.state.cue.is_none() && e.cue_snapshot().cue.is_none());
-            assert!(e.inspect_cue(&cue_id, true).is_err());
+            assert!(e.inspect_cue(&cue_id).is_err());
             for (i, text) in [
                 "Someone could send it soon.",
                 "Robin, who will check the garden?",
@@ -3154,7 +3101,7 @@ mod tests {
         ]);
         e.advance(1_000);
         let id = e.state.cue.as_ref().unwrap().id.clone();
-        e.inspect_cue(&id, true).unwrap();
+        e.inspect_cue(&id).unwrap();
         e.advance(3_000);
         let cue = e.state.cue.as_ref().unwrap();
         assert_eq!(cue.id, id);
@@ -3554,7 +3501,7 @@ mod tests {
         ]);
         e.advance(1_000);
         let id = e.state.cue.as_ref().unwrap().id.clone();
-        e.inspect_cue(&id, true).unwrap();
+        e.inspect_cue(&id).unwrap();
         e.advance(3_000);
         assert_eq!(e.state.cue.as_ref().unwrap().id, id);
         let mut e = named_session();
@@ -3576,7 +3523,7 @@ mod tests {
         ]);
         e.advance(1_000);
         let id = e.state.cue.as_ref().unwrap().id.clone();
-        e.inspect_cue(&id, true).unwrap();
+        e.inspect_cue(&id).unwrap();
         e.advance(3_000);
         assert!(e.state.cue.as_ref().unwrap().resolved_by.is_some());
         // With no question on screen, a deferral changes nothing: a question
@@ -3684,7 +3631,7 @@ mod tests {
         ]);
         e.advance(1_000);
         let id = e.state.cue.as_ref().unwrap().id.clone();
-        e.inspect_cue(&id, true).unwrap();
+        e.inspect_cue(&id).unwrap();
         e.advance(3_000);
         assert_eq!(e.state.cue.as_ref().unwrap().id, id);
         // So does a question asked of the user by name.
@@ -3920,7 +3867,7 @@ mod tests {
             (20_000, "Someone can book the hall."),
         ]);
         e.advance(1_000);
-        e.inspect_cue("1:t1", true).unwrap();
+        e.inspect_cue("1:t1").unwrap();
         e.advance(3_000);
         e.respond("1:t1", Response::Dismiss).unwrap();
         e.advance(16_000);
@@ -3951,7 +3898,7 @@ mod tests {
             (4_000, "Moving on."),
         ]);
         e.advance(1_000);
-        e.inspect_cue("1:t1", true).unwrap();
+        e.inspect_cue("1:t1").unwrap();
         e.advance(3_000);
         assert_eq!(e.state.cue.as_ref().unwrap().id, "1:t1");
     }
@@ -4040,7 +3987,7 @@ mod tests {
         e.set_user_name(Some("Robin".into())).unwrap();
         e.advance(1_000);
         let first = e.state.cue.as_ref().unwrap().id.clone();
-        e.inspect_cue(&first, true).unwrap();
+        e.inspect_cue(&first).unwrap();
         e.advance(2_000);
         assert_eq!(
             e.state.cue.as_ref().unwrap().id,
@@ -4461,29 +4408,25 @@ mod tests {
     }
 
     #[test]
-    fn keeping_a_quoted_line_puts_it_in_the_notes_with_its_time_and_lets_it_go() {
+    fn a_quoted_line_is_a_cue_for_the_moment_and_never_reaches_the_notes() {
         let mut e = play(&[
             (1_000, "Someone can take the first draft."),
             (65_000, "Legal takes two days, so send it by Thursday."),
         ]);
         e.update_notes("Ask about parking".into()).unwrap();
-        e.advance(1_000);
-        let question = e.state.cue.as_ref().unwrap().id.clone();
-        assert!(
-            e.keep_line(&question).is_err(),
-            "only a quoted line can be kept"
-        );
-        e.advance(64_000);
+        e.advance(65_000);
         let said = e.state.cue.as_ref().expect("the quote");
         assert_eq!(said.kind, SAID);
-        let id = said.id.clone();
-        e.keep_line(&id).unwrap();
         assert_eq!(
-            e.state.notes,
-            "Ask about parking\n[01:05] Alex: “Legal takes two days, so send it by Thursday.”\n"
+            said.question,
+            "Legal takes two days, so send it by Thursday."
         );
+        let id = said.id.clone();
+        // Held, dismissed or left to expire, the quote changes no notes.
+        e.inspect_cue(&id).unwrap();
+        e.respond(&id, Response::Dismiss).unwrap();
         assert!(e.state.cue.is_none());
-        assert!(e.keep_line(&id).is_err(), "gone once kept");
+        assert_eq!(e.state.notes, "Ask about parking");
         // In Focused mode only a line about the focus is quoted.
         let mut e = play(&[(1_000, "We'll have the signage ready by Friday.")]);
         e.set_focus(vec!["Agree the newsletter launch".into()])
@@ -4716,7 +4659,6 @@ mod tests {
                         remaining_ms: CUE_MS,
                         total_ms: CUE_MS,
                         held: false,
-                        expanded: false,
                         resolved_by: None,
                         note: None,
                         about_focus: false,
@@ -4819,7 +4761,6 @@ mod tests {
                         remaining_ms: CUE_MS,
                         total_ms: CUE_MS,
                         held: false,
-                        expanded: false,
                         resolved_by: None,
                         note: None,
                         about_focus: false,
@@ -4996,7 +4937,7 @@ mod tests {
             (6_000, "Let's finish soon."),
         ]);
         e.advance(1_000);
-        e.inspect_cue("1:t1", true).unwrap();
+        e.inspect_cue("1:t1").unwrap();
         e.advance(3_000);
         let cue = e.state.cue.as_ref().expect("held text is not pulled away");
         assert_eq!(cue.question, "Who will take the first draft?");
@@ -5133,42 +5074,41 @@ mod tests {
     #[test]
     fn inspecting_keeps_the_same_question_while_the_transcript_continues() {
         let mut e = with_cue();
-        e.inspect_cue("1:s2", true).unwrap();
+        e.inspect_cue("1:s2").unwrap();
         e.advance(70_000);
         let cue = e.state.cue.as_ref().unwrap();
         assert_eq!(cue.id, "1:s2");
-        assert!(cue.expanded && cue.held);
+        assert!(cue.held);
         assert_eq!(cue.remaining_ms, 0);
         assert_eq!(e.state.transcript.len(), 7);
-        // Collapsing cannot expire the content the user just opened.
-        e.inspect_cue("1:s2", false).unwrap();
-        assert!(!e.state.cue.as_ref().unwrap().expanded);
+        // Holding it again changes nothing and cannot release it.
+        e.inspect_cue("1:s2").unwrap();
         e.advance(1_000);
         assert!(e.state.cue.as_ref().unwrap().held);
         e.respond("1:s2", Response::Dismiss).unwrap();
         e.advance(1_000);
         assert!(e.state.cue.is_none()); // No backlog of skipped questions.
-        assert!(e.inspect_cue("1:s2", true).is_err());
+        assert!(e.inspect_cue("1:s2").is_err());
     }
 
     #[test]
     fn reading_survives_playback_end_but_explicit_end_and_replay_clear_it() {
         let mut e = with_cue();
-        e.inspect_cue("1:s2", true).unwrap();
+        e.inspect_cue("1:s2").unwrap();
         e.advance(u64::MAX);
         assert_eq!(e.state.status, Status::Ended);
         assert!(e.state.cue.is_some());
         e.respond("1:s2", Response::Dismiss).unwrap();
         e.start().unwrap();
         e.advance(8_000);
-        assert!(e.inspect_cue("1:s2", true).is_err());
+        assert!(e.inspect_cue("1:s2").is_err());
         assert!(!e.state.cue.as_ref().unwrap().held);
-        e.inspect_cue("2:s2", true).unwrap();
+        e.inspect_cue("2:s2").unwrap();
         e.end();
         assert!(e.state.cue.is_none());
         e.start().unwrap();
         e.advance(8_000);
-        e.inspect_cue("3:s2", true).unwrap();
+        e.inspect_cue("3:s2").unwrap();
         e.advance(u64::MAX);
         e.start().unwrap();
         assert!(e.state.cue.is_none());
@@ -5178,13 +5118,13 @@ mod tests {
     fn paused_questions_remain_actionable_and_expired_ids_cannot_be_held() {
         let mut e = with_cue();
         e.pause().unwrap();
-        e.inspect_cue("1:s2", true).unwrap();
+        e.inspect_cue("1:s2").unwrap();
         e.respond("1:s2", Response::Dismiss).unwrap();
         assert_eq!(e.state.status, Status::Paused);
         e.resume().unwrap();
         e.advance(32_000);
         assert_eq!(e.state.cue.as_ref().unwrap().kind, "Timing");
-        assert!(e.inspect_cue("1:s2", false).is_err());
+        assert!(e.inspect_cue("1:s2").is_err());
         assert!(!e.state.cue.as_ref().unwrap().held);
     }
 
@@ -5484,7 +5424,7 @@ mod tests {
         e.ingest(e.session(), live("w1", 9_000, "The review is moving soon."))
             .unwrap();
         let id = e.state.cue.as_ref().unwrap().id.clone();
-        e.inspect_cue(&id, true).unwrap();
+        e.inspect_cue(&id).unwrap();
         e.advance(2_000);
         e.ingest(e.session(), live("w2", 11_000, "Scratch that."))
             .unwrap();
@@ -5692,7 +5632,7 @@ mod tests {
                         .unwrap();
                     let id = e.state.cue.as_ref().unwrap().id.clone();
                     if held {
-                        e.inspect_cue(&id, true).unwrap();
+                        e.inspect_cue(&id).unwrap();
                         e.pause().unwrap();
                     }
                     let mut updated = original.clone();
@@ -5714,7 +5654,7 @@ mod tests {
                     assert!(e.state.revision > before, "publish retirement: {change}");
                     assert!(e.state.cue.is_none(), "obsolete {change}, held={held}");
                     assert!(e.cue_snapshot().cue.is_none());
-                    assert!(e.inspect_cue(&id, true).is_err());
+                    assert!(e.inspect_cue(&id).is_err());
                     assert!(!serde_json::to_string(&e.state)
                         .unwrap()
                         .contains("tool shed"));
@@ -5772,7 +5712,7 @@ mod tests {
         e.ingest(e.session(), live("w1", 9_000, "Review the welcome guide."))
             .unwrap();
         let id = e.state.cue.as_ref().unwrap().id.clone();
-        e.inspect_cue(&id, true).unwrap();
+        e.inspect_cue(&id).unwrap();
         let before = serde_json::to_string(&e.cue_snapshot()).unwrap();
         for revision in [1, 0] {
             let mut duplicate = original.clone();
@@ -5827,7 +5767,7 @@ mod tests {
             assert!(cue.evidence.contains("tool shed"));
             let id = cue.id.clone();
             if held {
-                e.inspect_cue(&id, true).unwrap();
+                e.inspect_cue(&id).unwrap();
             }
             assert!(!e.markdown().contains("tool shed"));
             assert!(!e.markdown().contains("file:n1"));
@@ -5852,7 +5792,7 @@ mod tests {
                 .contains("tool shed"));
             assert!(!e.markdown().contains("imported excerpt"));
             assert!(e.markdown().contains("A manual notebook line."));
-            assert!(e.inspect_cue(&id, true).is_err());
+            assert!(e.inspect_cue(&id).is_err());
         }
         let mut e = with_notes();
         e.ingest(

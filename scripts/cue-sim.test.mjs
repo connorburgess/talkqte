@@ -35,11 +35,13 @@ import {
   loadConversations,
   main,
   maxEvaluations,
+  recordedEvaluator,
   resumingEvaluator,
   reusableDecisions,
   runSimulation,
   score,
   simulate,
+  stalePolicies,
 } from './cue-sim.mjs';
 import { loadRulesOutcomes, loadSet } from './cue-lab-sets.mjs';
 
@@ -1358,4 +1360,139 @@ test('the budget estimate shows what transcript delay and decision time each all
   assert.ok(at(1_000, 2_000).withinBudget > 20);
   assert.ok(at(3_000, 1_000).withinBudget > at(3_000, 2_000).withinBudget - 30);
   assert.ok(at(0, 500).inTime >= at(3_000, 4_000).inTime);
+});
+
+test('an overtaken cue can be kept while its lines are still in view, and only then', async () => {
+  const conversation = talk([
+    line('l1', 0, 'Someone needs to book the room.', { expect: 'show' }),
+    line('l2', 2_000, 'And the projector needs a cable.', { expect: 'quiet' }),
+    line('l3', 30_000, 'Lovely weather.', { expect: 'quiet' }),
+  ]);
+  const script = { l1: ['show', 4_000, 'Who will book the room?'] };
+  const run = (extra) =>
+    simulate(conversation, scripted(script), { ...noDelay, ...extra });
+  const decision = (replay) =>
+    replay.timeline.find((e) => e.type === 'decision');
+
+  // As the app is today, the overtaken cue is dropped.
+  const dropped = await run({});
+  assert.equal(decision(dropped).outcome, 'superseded');
+  assert.equal(score(conversation, dropped).opportunities.missed, 1);
+  // Kept: it is shown when it lands, and counted as overtaken.
+  const kept = await run({ applyStale: 'in-window' });
+  assert.deepEqual(
+    [decision(kept).outcome, decision(kept).overtaken],
+    ['applied', true],
+  );
+  assert.equal(score(conversation, kept).opportunities.inTime, 1);
+  // Not kept when told the lines that arrived meanwhile end the moment.
+  const guarded = await run({
+    applyStale: 'in-window',
+    staleGuard: (since) => since.some((item) => item.id === 'l2'),
+  });
+  assert.equal(decision(guarded).outcome, 'superseded');
+
+  // Not kept once the lines it cites have left the newest six.
+  const long = talk([
+    line('l1', 0, 'Someone needs to book the room.', { expect: 'show' }),
+    ...Array.from({ length: 6 }, (_, i) =>
+      line(`l${i + 2}`, 500 + i * 500, `Another fictional point ${i + 1}.`),
+    ),
+  ]);
+  const gone = await simulate(long, scripted(script), {
+    ...noDelay,
+    applyStale: 'in-window',
+  });
+  assert.equal(decision(gone).outcome, 'superseded');
+
+  // Only a cue is ever kept: an overtaken withdrawal is still dropped.
+  const withdrawal = talk([
+    line('l1', 0, 'Someone needs to book the room.'),
+    line('l2', 5_000, 'Moving on to the budget.'),
+    line('l3', 6_000, 'The budget is tight.'),
+  ]);
+  const cleared = await simulate(
+    withdrawal,
+    scripted({
+      l1: ['show', 500, 'Who will book the room?'],
+      l2: ['withdraw', 4_000],
+    }),
+    { ...noDelay, applyStale: 'in-window' },
+  );
+  assert.deepEqual(
+    cleared.timeline
+      .filter((e) => e.type === 'decision')
+      .map((e) => [e.lineId, e.action, e.outcome]),
+    [
+      ['l1', 'show', 'applied'],
+      ['l2', 'withdraw', 'superseded'],
+      ['l3', 'quiet', 'applied'],
+    ],
+  );
+});
+
+test('a recorded run can be looked at again under another policy without asking anything', async () => {
+  const conversations = (await loadConversations()).slice(0, 3);
+  let asked = 0;
+  const counting = {
+    ...fakeEvaluator(),
+    async decide(testCase) {
+      asked++;
+      return fakeEvaluator().decide(testCase);
+    },
+  };
+  const recorded = await runSimulation({
+    source: 'conversations',
+    conversations,
+    evaluator: counting,
+  });
+  const before = asked;
+  // Replayed as it ran, every decision and every score is the same.
+  const again = await runSimulation({
+    source: 'conversations',
+    conversations,
+    evaluator: recordedEvaluator(recorded),
+    options: recorded.settings,
+  });
+  const decisions = (results) =>
+    results.conversations.flatMap((c) =>
+      c.timeline
+        .filter((e) => e.type === 'decision')
+        .map((e) => [e.lineId, e.atMs, e.action, e.outcome]),
+    );
+  assert.deepEqual(decisions(again), decisions(recorded));
+  assert.deepEqual(again.totals.opportunities, recorded.totals.opportunities);
+
+  const rows = await stalePolicies(recorded);
+  assert.equal(asked, before, 'no evaluator was asked again');
+  assert.deepEqual(
+    rows.map((row) => row.policy),
+    [
+      'Dropped, as it ran',
+      'Cue kept while its lines are in view',
+      'The same, unless an answer or topic change arrived',
+      'Everything applied',
+    ],
+  );
+  // The first row is the run itself.
+  assert.deepEqual(
+    [
+      rows[0].inTime,
+      rows[0].late,
+      rows[0].missed,
+      rows[0].cuesShown,
+      rows[0].unknown,
+    ],
+    [
+      recorded.totals.opportunities.inTime,
+      recorded.totals.opportunities.late,
+      recorded.totals.opportunities.missed,
+      recorded.totals.cuesShown,
+      0,
+    ],
+  );
+  // Keeping overtaken cues can only add cues, and the guard only removes.
+  assert.ok(rows[1].cuesShown >= rows[0].cuesShown);
+  assert.ok(rows[2].cuesShown <= rows[1].cuesShown);
+  for (const row of rows) assert.equal(row.moments, rows[0].moments);
 });

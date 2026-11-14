@@ -558,11 +558,8 @@ mod tests {
         let mode =
             |engine: &Engine| Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off);
         assert_eq!(mode(&engine), Mode::Question);
-        // Held, with or without the old request for its context opened.
-        for expanded in [false, true] {
-            engine.inspect_cue(&id, expanded).unwrap();
-            assert_eq!(mode(&engine), Mode::Question);
-        }
+        engine.inspect_cue(&id).unwrap();
+        assert_eq!(mode(&engine), Mode::Question);
         engine.advance(14_000); // The scenario agrees on Friday at 51 s.
         assert!(engine.state.cue.as_ref().unwrap().resolved_by.is_some());
         assert_eq!(mode(&engine), Mode::Question);
@@ -739,7 +736,7 @@ mod tests {
         let mut engine = Engine::fictional();
         engine.start().unwrap();
         engine.advance(8_000);
-        engine.inspect_cue("1:s2", false).unwrap();
+        engine.inspect_cue("1:s2").unwrap();
         engine.advance(200_000);
         assert_eq!(
             Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
