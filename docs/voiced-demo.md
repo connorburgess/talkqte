@@ -1,5 +1,7 @@
 # Voiced practice demo
 
+**Retired on 14 November 2026.** The demo described here was removed from the app at the owner's decision, together with **Try demo**, its controls and the bundled speech. Fictional demonstrations now come from the lab's simulations and recordings ([batches and simulations](cue-simulation.md)). This page is kept as a record of what was built, how the audio was produced and which checks ran; its present-tense descriptions are of the app before that date. The fictional script survives only as a fixture for the engine's own tests.
+
 The fictional community-garden demo ("A better welcome") now plays with two synthetic voices, Robin and Alex. This record covers what the voiced demo does, how its audio was produced, and which acceptance checks from [product readiness](product-readiness.md#voiced-practice-demo) have run.
 
 ## What it does
@@ -38,7 +40,7 @@ Speech now ships inside a script chunk that only the notebook loads. It is decod
 
 - Seven clips, one per line, generated during development with OpenAI's `gpt-4o-mini-tts` speech model using its built-in `marin` (Robin) and `cedar` (Alex) voices. These are the provider's preset voices; nothing was cloned, and the script is fictional.
 - Two lines were regenerated once: the third line was lengthened to replace a long silence, and the opening was reworded so it mentions the welcome guide again, which the imported-note reminder depends on. Generation used existing development credit within a bounded budget; there is no generation at runtime, no automatic regeneration, and no API fallback.
-- The clips are mixed into one 24 kHz mono MP3 (`src/demo/welcome.mp3`, about 740 KB) with each line placed so that it ends at its transcript time. [`src/demo-voices.json`](../src/demo-voices.json) records each line's speaker, voice, start and end.
+- The clips are mixed into one 24 kHz mono MP3 (`src/demo/welcome.mp3`, about 740 KB) with each line placed so that it ends at its transcript time. `src/demo-voices.json` recorded each line's speaker, voice, start and end. Both files were deleted with the demo.
 - The app plays this bundled file. Running the demo needs no account, model download, or provider request.
 - OpenAI's speech guide requires telling listeners that the voice is AI-generated. The notebook's status line does that.
 

@@ -26,7 +26,7 @@ The intended flow is relevant context, an opportunity to respond, then the cue c
 
 **Deliver the defined feature set as a dependable product that people can discover, install, use with their existing tools, and keep up to date with minimal friction.** Production reliability, scalability, integration readiness, distribution, and ongoing support are part of the goal from the start. Plan and validate them alongside feature development rather than leaving them until the prototype feels complete.
 
-The first technical goal is a macOS companion that can receive both sides of a synthetic call, transcribe locally, and show one controllable cue without taking focus from the meeting. Clarification questions remain the bounded first implementation slice. The current fictional demo and separate microphone activity monitor do not meet that goal yet. See the [technical milestone](ROADMAP.md#first-technical-milestone).
+The first technical goal is a macOS companion that can receive both sides of a synthetic call, transcribe locally, and show one controllable cue without taking focus from the meeting. Clarification questions remain the bounded first implementation slice. The developer build's microphone-only live session and the separate microphone activity monitor do not meet that goal yet. See the [technical milestone](ROADMAP.md#first-technical-milestone).
 
 The first product proof is a comparison of short fictional conversations with and without cues. Check whether the cue supplies accurate relevant context, helps the participant stay oriented or make an appropriate response in time, and preserves comprehension of surrounding speech. Compare clarification questions and context reminders separately with human-selected content before automating them. Keep useful clarification as a specific outcome of the question condition. Include already-answered, late, unsupported, and distracting cues, and cases where staying quiet is correct. Check ignore, hold, and dismiss controls. Agree on acceptance criteria before evaluation; more prompts, faster speech, or more saves alone is not success.
 
@@ -50,7 +50,7 @@ For the local-first core, scaling includes resource use on supported devices, re
 
 ## Operating context
 
-The app accompanies a meeting in another application. Its small prompt window must not take keyboard focus. Keep the resting companion quiet and minimal; use rounded surfaces, readable type, and clearly named controls when a cue appears. The current notebook supports the fictional demo and optional notes; it is not a required step in the intended live experience.
+The app accompanies a meeting in another application. Its small prompt window must not take keyboard focus. Keep the resting companion quiet and minimal; use rounded surfaces, readable type, and clearly named controls when a cue appears. The current notebook shows the person's own session and optional notes; it is not a required step in the intended live experience.
 
 The integration direction is to bring cues into the existing note-taker workflow, with Granola first; an embedded presentation surface still needs supported provider access. The TalkQTE notebook can be an optional alternative workspace, with ongoing selected-note refresh as a separate planned capability. Manual import does not complete either integration.
 
@@ -62,7 +62,7 @@ The current notebook is a prototype surface, not a requirement to build a meetin
 - Ground context and response prompts in inspectable sources. Do not invent facts, commitments, or an answer on the user's behalf.
 - Let the conversation answer first. Cancel a candidate that is resolved before display, and remove a displayed question when it becomes stale or redundant. The prototype uses fixed answer, repeat, topic-change and correction patterns to withdraw or suppress some cues; it does not judge their meaning or reliably resolve paraphrases.
 - Timing should preserve relevance without countdown pressure, scores, or a demand to respond.
-- AI should select useful context and prompts, including when to stay quiet. Compare candidate reasoning against simple baselines and human-labeled fictional cases. The current phrase rules are a demo scaffold, not the intended product intelligence.
+- AI should select useful context and prompts, including when to stay quiet. Compare candidate reasoning against simple baselines and human-labeled fictional cases. The current phrase rules are a scaffold, not the intended product intelligence.
 - Plan production operation, integration, installation, updates, and support alongside the feature they enable; distinguish planned readiness from verified capability.
 - Capture and sharing require explicit actions and visible state.
 - Meeting content is private; public demos and tests use fictional data.
@@ -111,7 +111,7 @@ Use the observations to choose the next small change. A demo or a few comparison
 
 ## First implementation
 
-A runnable desktop prototype provides the notebook, Rust-owned prompt lifecycle, and floating prompt window using a fictional demo. An optional macOS microphone activity monitor reports signal activity only. Separately, a `local-whisper` developer build provides model setup and a user-started microphone transcription session using phrase rules. A first hardware session is recorded, while timing, Stop/device edge cases and native cross-app behavior still need verification. System-audio capture and semantic live cues remain subsequent milestones. Development-only evaluator constructors and source/scheduling tests do not enable inference in the app.
+A runnable desktop prototype provides the notebook, Rust-owned prompt lifecycle, and floating prompt window. It has no in-app demo; fictional demonstrations come from the lab's simulations and recordings. An optional macOS microphone activity monitor reports signal activity only. Separately, a `local-whisper` developer build provides model setup and a user-started microphone transcription session using phrase rules. A first hardware session is recorded, while timing, Stop/device edge cases and native cross-app behavior still need verification. System-audio capture and semantic live cues remain subsequent milestones. Development-only evaluator constructors and source/scheduling tests do not enable inference in the app.
 
 ## Open decisions
 
