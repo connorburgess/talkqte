@@ -53,7 +53,7 @@ The first line starts `--start-delay` seconds after the window opens (3 by defau
   - Lines added before the meeting starts are refused.
 - **Played log:** every start, line spoken, line ended and line added is written to a `.played.jsonl` log with the wall-clock time, to line up with the app's timing log.
 
-Select **Google Chrome for Testing** as the application source. Whether the app's capture hears a browser at all is not yet known, because a browser plays sound from a helper process. The first device run settles it; until then, use the pre-rendered meeting.
+Select **Google Chrome for Testing** as the application source. On 14 November 2026 it did not: the app captured Google Chrome for Testing for the whole of a live meeting and every chunk was silent, while the page logged each line played with sound. A browser plays sound from a helper process, which is the likely cause (not yet confirmed). Until the capture handles that, use the pre-rendered meeting.
 
 ## Recording the real app, window by window
 
