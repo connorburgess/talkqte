@@ -2,21 +2,19 @@
 // in this file; nothing is sent anywhere and no key is real.
 import assert from 'node:assert/strict';
 import {
-  mkdtempSync,
   readFileSync,
   readdirSync,
   realpathSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { testFolder } from './lab-test-folders.mjs';
 import { loadConversations } from './cue-sim.mjs';
 import { SPEECH_MODEL, main, voicePlan } from './cue-sim-voices.mjs';
 
 const KEY = 'fictional-key-that-must-never-appear';
-const outside = () =>
-  realpathSync.native(mkdtempSync(join(tmpdir(), 'talkqte-voices-test-')));
+const outside = () => realpathSync.native(testFolder('talkqte-voices-test-'));
 function provider({ failAt } = {}) {
   const calls = [];
   return {

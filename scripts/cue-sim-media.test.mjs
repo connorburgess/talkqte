@@ -4,15 +4,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import {
-  mkdtempSync,
   readFileSync,
   readdirSync,
   realpathSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { testFolder } from './lab-test-folders.mjs';
 import {
   SAMPLE_RATE,
   buildTrack,
@@ -24,8 +23,7 @@ import { loadConversations } from './cue-sim.mjs';
 import { IMAGE_MODEL, main, portraitPlan } from './cue-sim-portraits.mjs';
 
 const KEY = 'fictional-key-that-must-never-appear';
-const outside = () =>
-  realpathSync.native(mkdtempSync(join(tmpdir(), 'talkqte-media-test-')));
+const outside = () => realpathSync.native(testFolder('talkqte-media-test-'));
 const hasFfmpeg = (() => {
   try {
     execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' });

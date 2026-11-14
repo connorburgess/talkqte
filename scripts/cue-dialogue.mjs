@@ -1013,6 +1013,7 @@ export async function runDialogue({
       reason: error.message,
       category: error.category ?? null,
       exitCode: error.exitCode ?? null,
+      signals: error.signals ?? [],
     };
     log.write('stopped', stopped);
   } finally {

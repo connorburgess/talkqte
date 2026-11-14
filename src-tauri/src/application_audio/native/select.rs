@@ -4,8 +4,10 @@
 //! not been run on a device.
 
 use super::{stream::Selection, Failure};
+use crate::application_audio::listing::{helper_of, recognisable, Traits};
 use block2::RcBlock;
 use objc2::rc::Retained;
+use objc2_app_kit::{NSApplicationActivationPolicy, NSRunningApplication};
 use objc2_foundation::NSError;
 use objc2_screen_capture_kit::{SCShareableContent, SCStreamErrorCode, SCStreamErrorDomain};
 use std::{
@@ -100,11 +102,54 @@ pub unsafe fn shareable_applications(cancelled: &AtomicBool) -> Result<Vec<Selec
         }
     };
     // SAFETY: plain property reads of the retained content on this thread.
-    let (displays, applications) = unsafe { (content.displays(), content.applications()) };
+    let (displays, applications, windows) = unsafe {
+        (
+            content.displays(),
+            content.applications(),
+            content.windows(),
+        )
+    };
     let display = displays.firstObject().ok_or(Failure::SourceUnavailable)?;
-    Ok(applications
+    // Processes with a window at the normal window level, on any Space: a
+    // window on another desktop or behind a full-screen app still counts.
+    let on_screen: std::collections::HashSet<i32> = windows
         .to_vec()
         .into_iter()
-        .filter_map(|application| Selection::new(display.clone(), application).ok())
+        // SAFETY: property reads of retained listed windows on this thread.
+        .filter(|window| unsafe { window.windowLayer() == 0 })
+        .filter_map(|window| unsafe { window.owningApplication() })
+        .map(|owner| unsafe { owner.processID() })
+        .collect();
+    let applications = applications.to_vec();
+    let traits: Vec<Traits> = applications
+        .iter()
+        .map(|application| {
+            // SAFETY: property reads of a retained listed application, and a
+            // lookup of the running application for the same process.
+            let pid = unsafe { application.processID() };
+            let regular = NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
+                .is_some_and(|running| {
+                    running.activationPolicy() == NSApplicationActivationPolicy::Regular
+                });
+            Traits {
+                bundle_id: unsafe { application.bundleIdentifier() }.to_string(),
+                regular,
+                on_screen: on_screen.contains(&pid),
+            }
+        })
+        .collect();
+    Ok(applications
+        .iter()
+        .zip(&traits)
+        .filter(|(_, traits)| recognisable(Some(traits)))
+        .filter_map(|(application, owner)| {
+            let helpers = applications
+                .iter()
+                .zip(&traits)
+                .filter(|(_, candidate)| helper_of(&owner.bundle_id, candidate))
+                .map(|(helper, _)| helper.clone())
+                .collect();
+            Selection::new(display.clone(), application.clone(), owner.clone(), helpers).ok()
+        })
         .collect())
 }
