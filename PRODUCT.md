@@ -8,7 +8,7 @@ The interface runs in a Tauri desktop shell. macOS is the first target, with Win
 
 ## Stack
 
-Rust application core, Tauri 2, React, TypeScript, and CSS. Optional local Whisper transcription is available in a developer build; cue reasoning is a separate, unselected runtime.
+Rust application core, Tauri 2, React, TypeScript, and CSS. Optional local Whisper transcription is available in a developer build; production cue reasoning remains unselected, with opt-in development evaluators available.
 
 ## Purpose
 
@@ -101,7 +101,7 @@ Plan and validate integration boundaries now, alongside the core experience. Eva
 
 Evaluate context-aware decisions about when to surface, suppress, or resolve a cue. Conversation can supply possible signals that a question was asked, answered naturally, corrected, or overtaken by a topic change. Observed use is not proof of usefulness: a context reminder may help without being spoken, and dismissal is not necessarily rejection.
 
-The current app engine uses fixed phrase rules, with no reasoning model or conversational learning. Compare a semantic evaluator against rules and human-selected cues; keep lifecycle controls in Rust. An optional [fictional lab](docs/claude-cue-lab.md) evaluates one case through Claude Code with Opus 5.5 using an existing subscription. Cursor CLI with Composer remains an alternative proposal. Avoid separately billed inference APIs and stop at subscription limits. This lab is separate from the app, not a selected production dependency or permission to run background inference. See the [cue intelligence and feedback plan](docs/cue-intelligence.md) for documented access, distribution questions, evaluation criteria, and the separation between session context, personal preferences, and model training.
+The ordinary app has no model connection; its local-transcription developer path uses fixed phrase rules. Explicit development features can instead connect a Claude CLI evaluator or a selected Codex/Claude subscription broker; neither is a production runtime or conversational learning. Compare a semantic evaluator against rules and human-selected cues; keep lifecycle controls in Rust. An optional [fictional lab](docs/claude-cue-lab.md) evaluates one case through Claude Code with Opus 5.5 using an existing subscription. Cursor CLI with Composer remains an alternative proposal. Avoid separately billed inference APIs and stop at subscription limits. The standalone lab is separate from the app; the [development native evaluator](docs/development-lab-evaluator.md) is an explicit opt-in path. Neither selects a production dependency or grants permission for background inference. See the [cue intelligence and feedback plan](docs/cue-intelligence.md) for documented access, distribution questions, evaluation criteria, and the separation between session context, personal preferences, and model training.
 
 ## Smallest useful comparison
 
@@ -111,7 +111,7 @@ Use the observations to choose the next small change. A demo or a few comparison
 
 ## First implementation
 
-A runnable desktop prototype provides the notebook, Rust-owned prompt lifecycle, and floating prompt window. It has no in-app demo; fictional demonstrations come from the lab's simulations and recordings. An optional macOS microphone activity monitor reports signal activity only. Separately, a `local-whisper` developer build provides model setup and a user-started microphone transcription session using phrase rules. A first hardware session is recorded, while timing, Stop/device edge cases and native cross-app behavior still need verification. System-audio capture and semantic live cues remain subsequent milestones. Development-only evaluator constructors and source/scheduling tests do not enable inference in the app.
+A runnable desktop prototype provides the notebook, Rust-owned prompt lifecycle, and floating prompt window. It has no in-app demo; fictional demonstrations come from the lab's simulations and recordings. An optional macOS microphone activity monitor reports signal activity only. Separately, a `local-whisper` developer build provides model setup and a user-started microphone transcription session using phrase rules. A first hardware session is recorded, while timing, Stop/device edge cases and native cross-app behavior still need verification. A selected-application audio spike and opt-in model evaluator paths now exist in development builds. The first integrated generated-meeting capture, transcription, actual model cue/silence, companion rendering and confirmed cleanup take remains unverified; simultaneous microphone and remote-call capture remains a separate milestone. Constructors and offline tests alone establish no native/model acceptance. See the [current lab checkpoint](docs/product-readiness.md#current-lab-checkpoint--15-november-2026).
 
 ## Open decisions
 
