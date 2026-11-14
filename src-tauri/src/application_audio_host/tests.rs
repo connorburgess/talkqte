@@ -1315,3 +1315,162 @@ fn a_failed_microphone_blocks_a_source_session_only_while_it_may_still_capture()
         Err(Failure::Unavailable)
     );
 }
+
+mod by_setting {
+    use super::*;
+    use dev_start::{Outcome, Settings, SOURCE_ENV, STOP_AFTER_ENV};
+
+    fn waits() -> DevWaits {
+        DevWaits {
+            list: WAIT,
+            start: WAIT,
+            poll: Duration::from_millis(2),
+        }
+    }
+
+    fn named(application: &str) -> Settings {
+        Settings {
+            application: application.into(),
+            stop_after: Ok(None),
+        }
+    }
+
+    #[test]
+    fn the_settings_are_read_only_when_an_application_is_named() {
+        let read = |source: Option<&str>, stop: Option<&str>| {
+            Settings::read(|name| match name {
+                SOURCE_ENV => source.map(str::to_owned),
+                STOP_AFTER_ENV => stop.map(str::to_owned),
+                _ => None,
+            })
+        };
+        assert_eq!(read(None, Some("30")), None);
+        assert_eq!(read(Some("  "), None), None);
+        assert_eq!(
+            read(Some("Fictional player"), None),
+            Some(named("Fictional player"))
+        );
+        assert_eq!(
+            read(Some("Fictional player"), Some("30"))
+                .unwrap()
+                .stop_after,
+            Ok(Some(Duration::from_secs(30)))
+        );
+        for invalid in ["0", "-5", "soon", "1.5"] {
+            assert_eq!(
+                read(Some("Fictional player"), Some(invalid))
+                    .unwrap()
+                    .stop_after,
+                Err(()),
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_setting_lists_once_and_starts_only_the_exactly_named_application_alone() {
+        let f = fixture(false);
+        let outcome = f.host.start_by_setting(&named("Fictional player"), waits());
+        assert_eq!(outcome, Outcome::Started { stopped: false });
+        let view = f.view();
+        assert_eq!(view.phase, Phase::Listening);
+        assert_eq!(view.application.as_deref(), Some("Fictional player"));
+        assert!(view.source_session, "a session for the source alone");
+        assert!(view.by_setting, "the setting stands for the notice");
+        assert!(f.host.published().by_setting);
+        assert_eq!(f.script.lists.load(Ordering::SeqCst), 1);
+        assert_eq!(f.script.runs.load(Ordering::SeqCst), 1);
+        // The panel's next step is its own again.
+        f.host
+            .apply(Action::Stop {
+                operation: view.operation.unwrap(),
+            })
+            .unwrap();
+        f.wait_phase(Phase::Off);
+        f.host.apply(Action::List { acknowledged: true }).unwrap();
+        assert!(!f.view().by_setting);
+    }
+
+    #[test]
+    fn the_stop_setting_asks_the_ordinary_stop_after_capture_and_release_follows() {
+        let f = fixture(false);
+        let settings = Settings {
+            application: "Fictional player".into(),
+            stop_after: Ok(Some(Duration::from_millis(30))),
+        };
+        let outcome = f.host.start_by_setting(&settings, waits());
+        assert_eq!(outcome, Outcome::Started { stopped: true });
+        let view = f.wait_phase(Phase::Off);
+        assert_eq!(view.problem, None, "an ordinary, confirmed release");
+        assert!(view.last_run.is_some());
+    }
+
+    #[test]
+    fn no_exact_match_starts_nothing_says_why_and_does_not_list_again() {
+        let f = fixture(false);
+        for name in ["Fictional Player", "Fictional", "Other application"] {
+            let outcome = f.host.start_by_setting(&named(name), waits());
+            assert_eq!(
+                outcome,
+                Outcome::Refused("no_matching_application"),
+                "{name}"
+            );
+            let view = f.view();
+            assert_eq!(view.phase, Phase::Off);
+            assert_eq!(view.problem, Some(Problem::NoMatchingApplication));
+        }
+        // One listing per attempt, and no attempt of its own after that.
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(f.script.lists.load(Ordering::SeqCst), 3);
+        assert_eq!(f.script.runs.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn a_refused_permission_ends_the_attempt_after_one_request() {
+        let f = fixture(false);
+        f.script.list_denied.store(true, Ordering::SeqCst);
+        let outcome = f.host.start_by_setting(&named("Fictional player"), waits());
+        assert_eq!(outcome, Outcome::Refused("permission_denied"));
+        assert_eq!(f.view().problem, Some(Problem::PermissionDenied));
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(f.script.lists.load(Ordering::SeqCst), 1);
+        assert_eq!(f.script.runs.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn a_listing_that_never_answers_is_cancelled_once_its_wait_ends() {
+        let f = fixture(false);
+        f.script.list_waits.store(true, Ordering::SeqCst);
+        let short = DevWaits {
+            list: Duration::from_millis(30),
+            ..waits()
+        };
+        let outcome = f.host.start_by_setting(&named("Fictional player"), short);
+        assert_eq!(outcome, Outcome::Refused("list_timed_out"));
+        let view = f.view();
+        assert_eq!(view.phase, Phase::Off);
+        assert_eq!(view.problem, Some(Problem::ListFailed));
+        assert_eq!(f.script.runs.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn the_setting_never_starts_with_the_microphone_open_or_an_invalid_stop() {
+        let f = fixture(false);
+        f.script.microphone_open.store(true, Ordering::SeqCst);
+        let outcome = f.host.start_by_setting(&named("Fictional player"), waits());
+        assert_eq!(outcome, Outcome::Refused("start_refused"));
+        let view = f.wait_phase(Phase::Off);
+        assert_eq!(view.problem, Some(Problem::SessionBusy));
+        assert_eq!(f.script.captures.load(Ordering::SeqCst), 0);
+
+        let g = fixture(false);
+        let invalid = Settings {
+            application: "Fictional player".into(),
+            stop_after: Err(()),
+        };
+        let outcome = g.host.start_by_setting(&invalid, waits());
+        assert_eq!(outcome, Outcome::Refused("stop_after_invalid"));
+        assert_eq!(g.view().problem, Some(Problem::DevSettingInvalid));
+        assert_eq!(g.script.lists.load(Ordering::SeqCst), 0, "nothing is asked");
+    }
+}
