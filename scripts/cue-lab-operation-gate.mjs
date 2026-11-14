@@ -111,6 +111,7 @@ export function createLabOperationGate({
       stop(safe(error).category);
       throw safe(error);
     } finally {
+      lease.providerSettled = true;
       requestSignal?.removeEventListener('abort', abort);
     }
   };
@@ -150,11 +151,15 @@ export function createLabOperationGate({
       controller,
       dispatched: false,
       providerOperation: null,
+      providerSettled: false,
+      settlement: false,
+      deadlineAt: performance.now() + deadlineMs,
+      timer: null,
       finished: null,
     };
     const abort = () => stop('cancelled');
     operationSignal?.addEventListener('abort', abort, { once: true });
-    const timer = setTimeout(() => stop('deadline'), deadlineMs);
+    lease.timer = setTimeout(() => stop('deadline'), deadlineMs);
     let release;
     lease.finished = new Promise((resolve) => {
       release = resolve;
@@ -181,13 +186,36 @@ export function createLabOperationGate({
       await retireProvider();
       throw gateFailure(terminal);
     } finally {
-      clearTimeout(timer);
+      clearTimeout(lease.timer);
       operationSignal?.removeEventListener('abort', abort);
       if (active === lease) active = null;
       if (pending === lease) pending = null;
       release();
       notify();
     }
+  };
+  const settle = async (task, { deadlineMs = 1000 } = {}) => {
+    const lease = context.getStore();
+    if (terminal) throw gateFailure(terminal);
+    if (
+      !lease ||
+      lease !== active ||
+      lease.role !== 'cue-evaluator' ||
+      !lease.providerSettled ||
+      lease.settlement ||
+      performance.now() > lease.deadlineAt ||
+      typeof task !== 'function' ||
+      !Number.isSafeInteger(deadlineMs) ||
+      deadlineMs < 1 ||
+      deadlineMs > 1000
+    ) {
+      stop('protocol');
+      throw gateFailure('protocol');
+    }
+    lease.settlement = true;
+    clearTimeout(lease.timer);
+    lease.timer = setTimeout(() => stop('deadline'), deadlineMs);
+    return task();
   };
   const waitIdle = async ({ signal: waiterSignal } = {}) => {
     if (terminal) throw gateFailure(terminal);
@@ -217,6 +245,7 @@ export function createLabOperationGate({
   return Object.freeze({
     run,
     request,
+    settle,
     waitIdle,
     stop,
     get dispatchesUsed() {
