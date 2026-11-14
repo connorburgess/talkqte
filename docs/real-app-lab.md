@@ -48,8 +48,35 @@ TALKQTE_COMMIT="$(git rev-parse HEAD)" \
 - The bundle is written to `src-tauri/target/debug/bundle/macos/TalkQTE.app`,
   or under `$CARGO_TARGET_DIR` if that is set.
 
-A debug build is unsigned. macOS ties permissions to the exact binary, so
-rebuilding can mean granting Screen Recording again (_to confirm_).
+A debug build is only ad-hoc signed, with a code-signing identifier such as
+`talkqte-55cecaafd599c0f5`, not the bundle identifier. macOS ties Screen &
+System Audio Recording to that signature. **Every rebuild is a new app to
+macOS and needs the permission granted again.** On 14 November 2026 a fresh
+build with no grant was refused at once, with no prompt, and the setting
+below reported `permission_denied`. System Settings can then list several
+TalkQTE entries. Turn on only the one for the build you are running.
+
+### Proposed: a stable development signature
+
+_Not set up yet._ A self-signed code-signing certificate makes every
+development build the same app to macOS, so one grant survives rebuilds. The
+certificate lives only in the developer's login keychain, never in the
+repository, and it signs nothing for distribution.
+
+1. Keychain Access → Certificate Assistant → Create a Certificate. Name it
+   `TalkQTE Development`, identity type Self Signed Root, certificate type
+   Code Signing.
+2. Build with it:
+
+   ```sh
+   APPLE_SIGNING_IDENTITY="TalkQTE Development" \
+     TALKQTE_COMMIT="$(git rev-parse HEAD)" \
+     npm run tauri -- build --debug --bundles app \
+     --features local-whisper,native-audio-spike,timing-log
+   ```
+
+3. Grant Screen & System Audio Recording once, then confirm that a rebuild is
+   not asked again (_to confirm_).
 
 ## Speech model
 
@@ -66,15 +93,16 @@ nothing is cleared.
 
 ## Launch with the timing log
 
-Make a folder for lab output outside the repository, then launch the app with
+Make a folder for lab output outside the repository and any other git checkout,
+then launch the app with
 the log's path. Use a new file for each run, and never point two running
 copies of the app at the same file: one process writes one file.
 
 ```sh
-mkdir -p ~/talkqte-lab
+mkdir -p ~/talkqte-lab-runs
 open -a ./src-tauri/target/debug/bundle/macos/TalkQTE.app \
-  --stderr "$HOME/talkqte-lab/run-01.stderr" \
-  --env TALKQTE_TIMING_LOG="$HOME/talkqte-lab/run-01.jsonl"
+  --stderr "$HOME/talkqte-lab-runs/run-01.stderr" \
+  --env TALKQTE_TIMING_LOG="$HOME/talkqte-lab-runs/run-01.jsonl"
 ```
 
 **Confirm the log is on** before starting capture. Once the main window has
@@ -84,8 +112,8 @@ opened (_to confirm_ how soon), `run-01.stderr` has one line starting
 - `on`: the log file now exists, readable by your account only.
 - `off`, with the reason: the path is relative, contains `..`, or is inside
   the repository.
-- `could not open`: the folder does not exist or is inside the repository
-  once links are resolved, or the path is a link, a folder or a pipe. Nothing
+- `could not open`: the folder does not exist or is inside the repository or
+  another git checkout once links are resolved, or the path is a link, a folder or a pipe. Nothing
   will be written.
 
 No such line by the time a session starts means the variable did not reach
