@@ -85,7 +85,10 @@ No fallback, resumed failed session or new dispatch is admitted.
 ## Shared bootstrap for an adaptive follow-up
 
 `createLabPlaybackSession({...options,body})` reuses this ownership path. `body`
-is `async ({run,signal}) => ...` with required idempotent `body.close()`. It starts
+is `async ({run,runId,signal}) => ...` with required idempotent `body.close()`.
+`runId` is the lifecycle-generated identity supplied to the exact native launch,
+Listening observer and recorder; the body binds voice/player identity to it at
+invocation, never to a preconfigured or invented mapping. It starts
 only after bootstrap playback completes **and** lifecycle readiness. Root Stop
 closes the body concurrently with run/player cleanup, retaining ownership until
 the body, provider and native settle. It must use the same player, provider and

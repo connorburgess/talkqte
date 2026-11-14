@@ -189,6 +189,7 @@ function fixture({
       return { stopped: true };
     },
   };
+  let recorderRunId, sourceRunId;
   const recorder = {
     subscribe(handler) {
       recorderHandler = handler;
@@ -197,7 +198,8 @@ function fixture({
         handler();
       };
     },
-    async start() {
+    async start({ runId }) {
+      recorderRunId = runId;
       trace.push('record-ready');
       if (recorderFails) throw Error('private recorder failure');
       return { started: true };
@@ -214,6 +216,13 @@ function fixture({
         async (options) => {
           trace.push('body');
           assert.equal(options.run.phase, 'ready');
+          assert.equal(
+            options.runId,
+            launchOptions.environment.TALKQTE_DEV_LAB_RUN_ID,
+          );
+          assert.equal(options.runId, sourceRunId);
+          assert.equal(options.runId, recorderRunId);
+          assert.match(options.runId, /^[a-f0-9-]{36}$/);
           if (bodyFails) throw Error('private body failure');
           return body(options);
         },
@@ -233,6 +242,7 @@ function fixture({
     recorder,
     source: {
       async waitListening({ runId }) {
+        sourceRunId = runId;
         trace.push('listening');
         return { runId, listening };
       },

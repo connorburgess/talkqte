@@ -192,7 +192,7 @@ export function createLabPlaybackSession({
     if (root.signal.aborted) throw gateFailure('cancelled');
     if (body) {
       phase = 'body';
-      await body({ run, signal: root.signal });
+      await body({ run, runId: launchInfo.runId, signal: root.signal });
       if (root.signal.aborted) throw gateFailure('cancelled');
     }
     normal = true;
