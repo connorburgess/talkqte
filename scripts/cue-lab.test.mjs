@@ -451,3 +451,50 @@ test('the isolated request’s options cannot be changed after the credential ch
     await cli.close();
   }
 });
+
+test('the evaluator keeps the contract’s 800-token output limit; another caller may set its own, under the contract’s ceiling', async () => {
+  assert.equal(
+    CONTRACT.childEnvironment.set.CLAUDE_CODE_MAX_OUTPUT_TOKENS,
+    '800',
+  );
+  assert.equal(CONTRACT.cli.maxOutputTokensCeiling, 4000);
+  const evaluatorRun = fakeRunner();
+  await runLab(answered, { environment, run: evaluatorRun.run });
+  const evaluatorEnv = evaluatorRun.calls.at(-1).options.env;
+  assert.equal(evaluatorEnv.CLAUDE_CODE_MAX_OUTPUT_TOKENS, '800');
+  assert.deepEqual(evaluatorEnv, subscriptionEnvironment(environment));
+
+  const fake = fakeRunner();
+  const cli = await openIsolatedCli({ environment, run: fake.run });
+  const ask = (maxOutputTokens) =>
+    cli.request({
+      model: MODEL,
+      effort: 'medium',
+      systemPrompt: 'p',
+      input: 'i',
+      reply: (v) => v,
+      maxOutputTokens,
+    });
+  try {
+    await ask(4000);
+    const sent = fake.calls.at(-1).options.env;
+    assert.equal(sent.CLAUDE_CODE_MAX_OUTPUT_TOKENS, '4000');
+    // Only that one value differs from the checked environment.
+    assert.deepEqual(
+      { ...sent, CLAUDE_CODE_MAX_OUTPUT_TOKENS: '800' },
+      subscriptionEnvironment(environment),
+    );
+    assert.equal(cli.options.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS, '800');
+    await ask(undefined);
+    assert.equal(
+      fake.calls.at(-1).options.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS,
+      '800',
+    );
+    const before = fake.calls.length;
+    for (const bad of [CONTRACT.cli.maxOutputTokensCeiling + 1, 0, 1.5, '4000'])
+      await assert.rejects(ask(bad), /output limit outside 1 to 4000/);
+    assert.equal(fake.calls.length, before);
+  } finally {
+    await cli.close();
+  }
+});
