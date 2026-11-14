@@ -5,6 +5,20 @@ import { join } from 'node:path';
 import { isMain } from './is-main.mjs';
 
 export const MODEL = 'claude-opus-5-5';
+/** The models a run may ask for, by the name given to --model. Anything
+ * else is refused, so a typing mistake cannot reach another model. */
+export const MODELS = {
+  'opus-5.5': MODEL,
+  'haiku-5.5': 'claude-haiku-5-5',
+};
+
+export function modelFor(name = 'opus-5.5') {
+  if (!Object.hasOwn(MODELS, name))
+    throw new Error(
+      `Unknown model. Choose one of: ${Object.keys(MODELS).join(', ')}.`,
+    );
+  return MODELS[name];
+}
 const MIN_VERSION = [2, 1, 318];
 const TIMEOUT_MS = 60_000;
 const MAX_OUTPUT_BYTES = 128 * 1024;
@@ -325,12 +339,13 @@ async function evaluate(
   options,
   run,
   request = requestFor(testCase),
+  model = MODEL,
 ) {
   const args = [
     ...BASE_ARGS,
     '--print',
     '--model',
-    MODEL,
+    model,
     '--effort',
     'medium',
     '--tools',
@@ -352,7 +367,7 @@ async function evaluate(
       // Request failure instead of the CLI's content-based model switch.
       // Managed policy may override these settings; verify the result too.
       switchModelsOnFlag: false,
-      availableModels: [MODEL],
+      availableModels: [model],
     }),
     '--output-format',
     'json',
@@ -382,9 +397,9 @@ async function evaluate(
     );
   }
   const models = Object.keys(result.modelUsage ?? {});
-  if (models.length !== 1 || models[0] !== MODEL) {
+  if (models.length !== 1 || models[0] !== model) {
     throw new Error(
-      'The result did not verify the requested Opus 5.5 model; it was not accepted as an evaluation.',
+      `The result did not verify the requested model (${model}); it was not accepted as an evaluation.`,
     );
   }
   const decision = validateDecision(
@@ -410,7 +425,7 @@ async function evaluate(
   const expected = testCase.expected ?? {};
   return {
     caseId: testCase.id,
-    model: MODEL,
+    model,
     ...access,
     elapsedMs,
     usage,
@@ -432,6 +447,7 @@ async function evaluate(
 export async function openLab({
   environment = process.env,
   run = execute,
+  model = MODEL,
 } = {}) {
   // Refuse rather than quietly drop them: an inherited key, token or gateway
   // means this shell is set up for something other than the subscription.
@@ -450,7 +466,7 @@ export async function openLab({
       // `request` is what the adapter said this case carries; it is sent
       // as given.
       evaluate: (testCase, request) =>
-        evaluate(testCase, access, options, run, request),
+        evaluate(testCase, access, options, run, request, model),
       close,
     };
   } catch (error) {

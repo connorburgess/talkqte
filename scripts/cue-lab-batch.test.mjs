@@ -15,9 +15,11 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import {
   MODEL,
+  MODELS,
   SYSTEM_PROMPT,
   buildPrompt,
   inheritedCredentialNames,
+  modelFor,
   runLab,
   systemPromptFor,
   validateDecision,
@@ -669,4 +671,88 @@ test('the dry run prints what the adapter says it would send, and a command that
   });
   assert.match(rules.join('\n'), /the recorded outcome for this case is read/);
   assert.doesNotMatch(rules.join('\n'), /System prompt/);
+});
+
+test('a run asks for the model it was told to, records it, and accepts a reply from that model only', async () => {
+  assert.equal(modelFor(), MODEL);
+  assert.equal(modelFor('opus-5.5'), MODEL);
+  assert.equal(modelFor('haiku-5.5'), 'claude-haiku-5-5');
+  assert.deepEqual(Object.keys(MODELS), ['opus-5.5', 'haiku-5.5']);
+  for (const name of ['haiku', 'claude-haiku-5-5', 'gpt', ''])
+    assert.throws(() => modelFor(name), /Unknown model\. Choose one of/);
+
+  const set = await loadSet('cue-lab');
+  const cases = set.cases.slice(0, 1);
+  const haiku = MODELS['haiku-5.5'];
+  const from = (model) => reply(quiet(), { modelUsage: { [model]: {} } });
+  const cli = fakeCli([from(haiku)]);
+  const evaluator = claudeEvaluator({
+    environment: clean,
+    run: cli.run,
+    model: haiku,
+  });
+  // Named apart from the first model, so results, logs and resumes of the
+  // two are never taken for one another.
+  assert.equal(evaluator.id, 'claude-haiku-5-5');
+  assert.equal(claudeEvaluator({ environment: clean }).id, 'claude');
+  assert.match(evaluator.label, /claude-haiku-5-5/);
+  const results = await runBatch({
+    set,
+    cases,
+    rules: {},
+    evaluator,
+    maxCalls: 1,
+  });
+  assert.equal(results.stopped, null);
+  assert.equal(results.evaluator.model, haiku);
+  assert.equal(results.evaluator.id, 'claude-haiku-5-5');
+  const args = cli.calls.at(-1).args;
+  assert.equal(args[args.indexOf('--model') + 1], haiku);
+  assert.deepEqual(
+    JSON.parse(args[args.indexOf('--settings') + 1]).availableModels,
+    [haiku],
+  );
+  assert.ok(!args.includes('--fallback-model'));
+
+  // A reply from the other model is not accepted, either way round.
+  for (const [asked, answered] of [
+    [haiku, MODEL],
+    [MODEL, haiku],
+  ]) {
+    const wrong = fakeCli([from(answered)]);
+    const stopped = await runBatch({
+      set,
+      cases,
+      rules: {},
+      evaluator: claudeEvaluator({
+        environment: clean,
+        run: wrong.run,
+        model: asked,
+      }),
+      maxCalls: 1,
+    });
+    assert.equal(stopped.cases.length, 0);
+    assert.match(
+      stopped.stopped.reason,
+      new RegExp(`requested model \\(${asked}\\)`),
+    );
+  }
+
+  // The dry run names the model and keeps it in the command it suggests;
+  // an unknown name is refused before anything else happens.
+  const lines = [];
+  await main(['--set', 'cue-lab', '--model', 'haiku-5.5'], {
+    print: (line) => lines.push(line),
+    environment: clean,
+  });
+  const text = lines.join('\n');
+  assert.match(text, /Evaluator: Claude Code, claude-haiku-5-5\./);
+  assert.match(text, /--set cue-lab --model haiku-5\.5 --run/);
+  await assert.rejects(
+    main(['--set', 'cue-lab', '--model', 'sonnet'], {
+      print: () => {},
+      environment: clean,
+    }),
+    /Unknown model/,
+  );
 });

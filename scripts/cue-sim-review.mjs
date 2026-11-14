@@ -8,7 +8,7 @@
 //
 // The recorder also writes a review for every take it saves.
 import { readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { outputDirectory, parseFlags } from './cue-lab-output.mjs';
 import { isMain } from './is-main.mjs';
 
@@ -321,6 +321,125 @@ export function reviewMarkdown(review) {
   return out.join('\n');
 }
 
+/** One run's numbers for one conversation, for setting runs side by side. */
+function runRow(results, replay) {
+  const timeline = replay.timeline;
+  const decisions = timeline.filter((e) => e.type === 'decision');
+  const shown = timeline.filter(
+    (e) => e.type === 'cue-shown' && e.origin === 'evaluator',
+  );
+  const moments = replay.metrics.opportunities.detail;
+  const timed = decisions.filter((d) => d.latency !== 'none');
+  // A cue brought back: the same words shown twice, a second cue for one
+  // moment, or one proposed again after a cue had been cleared.
+  const cleared = (i) =>
+    decisions
+      .slice(0, i)
+      .some(
+        (d) =>
+          ['withdraw', 'resolved'].includes(d.action) &&
+          d.outcome === 'applied',
+      );
+  const reproposed = decisions.filter(
+    (d, i) => d.action === 'show' && d.outcome === 'too-late' && cleared(i),
+  ).length;
+  return {
+    evaluator: results.evaluator.label,
+    model: results.evaluator.model ?? null,
+    stopped: Boolean(results.stopped),
+    decisions: decisions.length,
+    medianDecisionMs: timed.length
+      ? median(timed.map((d) => d.latencyMs))
+      : null,
+    labelledMoments: moments.length,
+    // Matches the label: a cue for a labelled moment, in time or late.
+    cued: moments.filter((m) => m.outcome !== 'missed').length,
+    inTime: moments.filter((m) => m.outcome === 'in-time').length,
+    withinBudget: moments.filter(
+      (m) => m.afterSaidMs !== null && m.afterSaidMs <= BUDGET_MS,
+    ).length,
+    cuesShown: shown.length,
+    glance: shown.filter((e) => words(e.text) <= GLANCE_WORDS).length,
+    longestCueWords: Math.max(0, ...shown.map((e) => words(e.text))),
+    unexpected: replay.metrics.unexpectedShows,
+    repeats: replay.metrics.duplicates + reproposed,
+    takenBack: replay.metrics.flips,
+    quietKept: replay.metrics.quiet.kept,
+    quietAsked: replay.metrics.quiet.evaluated,
+  };
+}
+
+/** Sets two or more runs of the same conversations side by side: for each
+ * conversation, each run's cues against the labels, the budget, the glance
+ * length, and repeats. It reads only results files; no model is asked. */
+export function compareRuns(runs) {
+  const ids = runs[0].conversations.map((c) => c.id);
+  const conversations = ids
+    .filter((id) => runs.every((r) => r.conversations.some((c) => c.id === id)))
+    .map((id) => ({
+      id,
+      runs: runs.map((results) =>
+        runRow(
+          results,
+          results.conversations.find((c) => c.id === id),
+        ),
+      ),
+    }));
+  return {
+    conversations,
+    // Conversations one run reached and another did not are left out.
+    leftOut: [
+      ...new Set(runs.flatMap((r) => r.conversations.map((c) => c.id))),
+    ].filter((id) => !conversations.some((c) => c.id === id)),
+    limits:
+      'Counts against the lab lane\'s own labels on invented conversations. One run of each model: a difference here may not repeat. "Matches the label" means a cue was shown for a moment the labels marked, not that it helped anyone.',
+  };
+}
+
+export function comparisonMarkdown(comparison) {
+  const out = ['# Comparison of runs', ''];
+  for (const conversation of comparison.conversations) {
+    out.push(
+      `## ${conversation.id}`,
+      '',
+      '| | ' + conversation.runs.map((r) => r.evaluator).join(' | ') + ' |',
+      '| --- |' + conversation.runs.map(() => ' --- |').join(''),
+    );
+    const row = (name, pick) =>
+      out.push(`| ${name} | ${conversation.runs.map(pick).join(' | ')} |`);
+    row('Completed', (r) => (r.stopped ? 'stopped early' : 'yes'));
+    row('Decisions', (r) => r.decisions);
+    row('Median decision time', (r) =>
+      r.medianDecisionMs === null ? 'none' : seconds(r.medianDecisionMs),
+    );
+    row(
+      'Labelled moments cued (matches the label)',
+      (r) => `${r.cued} of ${r.labelledMoments}`,
+    );
+    row('Cued in time', (r) => `${r.inTime} of ${r.labelledMoments}`);
+    row(
+      `On screen within ${seconds(BUDGET_MS)}`,
+      (r) => `${r.withinBudget} of ${r.labelledMoments}`,
+    );
+    row(
+      `Cues of ${GLANCE_WORDS} words or fewer`,
+      (r) => `${r.glance} of ${r.cuesShown} (longest ${r.longestCueWords})`,
+    );
+    row('Cues where the labels expected none', (r) => r.unexpected);
+    row('Repeats', (r) => r.repeats);
+    row('Shown and taken back', (r) => r.takenBack);
+    row('Quiet kept', (r) => `${r.quietKept} of ${r.quietAsked}`);
+    out.push('');
+  }
+  if (comparison.leftOut.length)
+    out.push(
+      `Not compared, because not every run reached them: ${comparison.leftOut.join(', ')}.`,
+      '',
+    );
+  out.push('## Limits', '', comparison.limits, '');
+  return out.join('\n');
+}
+
 /** Reviews a saved take and writes the report beside it. */
 export function writeReview(manifestPath, results) {
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
@@ -339,10 +458,31 @@ export function writeReview(manifestPath, results) {
 }
 
 export async function main(args, { print = console.log } = {}) {
-  const flags = parseFlags(args, { values: ['--take', '--results'] });
+  const flags = parseFlags(args, {
+    values: ['--take', '--results', '--compare', '--out'],
+  });
+  if (flags['--compare']) {
+    // Two or more results files of the same conversations, side by side.
+    const files = flags['--compare'].split(',');
+    if (files.length < 2)
+      throw new Error(
+        '--compare takes two or more results files, separated by commas.',
+      );
+    const comparison = compareRuns(
+      files.map((file) => JSON.parse(readFileSync(file, 'utf8'))),
+    );
+    const page = comparisonMarkdown(comparison);
+    if (flags['--out'])
+      writeFileSync(
+        join(outputDirectory(flags['--out'], {}), 'comparison.md'),
+        page,
+      );
+    print(page);
+    return comparison;
+  }
   if (!flags['--take'] || !flags['--results'])
     throw new Error(
-      'Use --take <take .json> --results <the cue-sim results .json it was recorded from>.',
+      'Use --take <take .json> --results <the cue-sim results .json it was recorded from>, or --compare <results .json>,<results .json> [--out <directory outside the repository>].',
     );
   // Reviews are private working files too.
   outputDirectory(dirname(flags['--take']), {});
