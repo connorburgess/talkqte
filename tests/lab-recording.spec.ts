@@ -140,8 +140,8 @@ test('a results file becomes one labelled video of the call and companion, with 
   expect(existsSync(join(directory, 'take.json'))).toBe(true);
 
   if (canMix) {
-    // The saved file has a sound track, one clip per line at the time its
-    // speaker starts, and the cue times above were not moved to fit it.
+    // The saved file has a sound track, one clip per line, and the cue
+    // times above were not moved to fit it.
     expect(streams(file).sort()).toEqual(['audio', 'video']);
     expect(manifest.audio.engine).toBe('tone');
     expect(Object.keys(manifest.audio.voices)).toEqual(['Maya', 'Robin']);
@@ -149,12 +149,15 @@ test('a results file becomes one labelled video of the call and companion, with 
       manifest.audio.clips.map((clip: { lineId: string }) => clip.lineId),
     ).toEqual(['l1', 'l2', 'l3']);
     for (const clip of manifest.audio.clips) {
-      expect(clip.startMs).toBeLessThan(
-        conversation.lines.find((line) => line.id === clip.lineId)!.atMs,
-      );
+      // Each clip ends when the simulation says its line ends.
+      const line = conversation.lines.find((l) => l.id === clip.lineId)!;
       expect(clip.durationMs).toBeGreaterThan(0);
+      expect(clip.startMs + clip.durationMs).toBeLessThanOrEqual(
+        line.atMs + clip.endsLateMs,
+      );
+      expect(clip.startMs + clip.durationMs).toBeGreaterThan(line.atMs - 60);
     }
-    expect(manifest.audio.overruns).toEqual([]);
+    expect(manifest.audio.endLate).toEqual([]);
   } else expect(manifest.audio).toBeNull();
 });
 

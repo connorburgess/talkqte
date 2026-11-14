@@ -213,7 +213,21 @@ What is on screen:
 
 The notebook is not in the main video. `--with-notebook` writes a second video of the real notebook by itself, kept scrolled to the newest transcript line, where lines arrive when the results say they reached the app under the one "Speaker" label a live transcript has today. The notebook's own wording describes the app as it is today (phrase rules, no model connected); the label says where the decisions actually came from.
 
-**Sound.** At normal speed the fictional lines are spoken aloud behind the card. The speech is made on this device, offline, with macOS `say` and installed system voices, one per speaker; no speech service is used. Each line's clip starts when its speaker starts in the simulation and is mixed into the MP4 as AAC. Nothing in the simulation is moved to fit the speech: a line that would run into the next speaker is spoken a little faster once, and any clip that still runs over is listed in the manifest. Without `say` the recorder uses plain test tones if `ffmpeg` is there (labelled "Test tones"), and without `ffmpeg`, or with `--no-sound` or another `--speed`, the video is silent.
+**Sound.** At normal speed the fictional lines are spoken aloud behind the card, and "Synthetic voices" is shown for the whole recording. By default the speech is made on this device, offline, with macOS `say` and installed system voices, one per speaker; no speech service is used. Each line's clip is placed so that it **ends when the simulation says the line ends**, which is the moment every cue decision is timed from, and is mixed into the MP4 as AAC. Nothing in the simulation is moved to fit the speech: a clip that cannot fit after the previous speaker ends late, and the manifest lists it with by how much. Without `say` the recorder uses plain test tones if `ffmpeg` is there (labelled "Test tones"), and without `ffmpeg`, or with `--no-sound` or another `--speed`, the video is silent.
+
+**More natural voices, as a separate optional step.** `npm run lab:voices` makes the clips with a hosted text-to-speech service instead (OpenAI's `gpt-4o-mini-tts`, the provider's preset voices, one per speaker, with a short instruction for a conversational manner; nothing is cloned) and caches them outside the repository; `--voices-cache <directory>` then makes the recorder use them when the cache holds a clip for every line.
+
+```sh
+npm run lab:voices -- --conversations standup-flaky-test --cache <directory outside the repository>
+npm run lab:voices -- --conversations standup-flaky-test --cache <directory> --run --max-chars 1000 --env-file <private dotenv file>
+npm run lab:record -- --results <file> --url <url> --out <directory> --voices-cache <directory>
+```
+
+- Without `--run` nothing is sent: it lists every line, its voice, how many characters are new and a rough cost.
+- A run sends only the lines of bundled fictional conversations, with a voice name and speaking instructions, to that provider. It is hosted and separately billed, so it needs its owner's explicit decision; it is never needed, and CI and the recorder work without it.
+- It needs `--max-chars` (at most 20,000), is refused if the new text exceeds it, stops at the first failed request, and does not retry.
+- A clip is named by its model, voice, instructions and words, so the same line is never bought twice.
+- The key is read from `--env-file` or `OPENAI_API_KEY` by this process only. It is never printed, logged, or passed on a command line, and this step shares no process or environment with the cue lab's model runs, whose refusal of inherited credentials is unchanged.
 
 The recorder finds each cue by its words, not by how the card is built, so it works with the current card and with a redesigned one: it waits for the cue's text to appear in the companion, takes a still, and waits for it to go when the results clear it.
 
@@ -233,7 +247,7 @@ Limits the recorder enforces:
 
 Recordings are private working files: videos or stills of the app never go in the repository, the README, the website or anything promotional.
 
-A recording shows timing and appearance on invented conversations. Playback runs on the browser's clock, so a cue is drawn a little after the time in the results; the manifest records both. It is not a recording of the desktop app, a real call, real voices, or anyone's use of TalkQTE.
+A recording shows timing and appearance on invented conversations. Playback runs on the browser's clock, so a cue is drawn a little after the time in the results; the manifest records both. It is not a recording of the desktop app, a real call, real voices, or anyone's use of TalkQTE, however natural the synthetic voices sound.
 
 ## What the numbers do not show
 
@@ -251,5 +265,7 @@ A recording shows timing and appearance on invented conversations. Playback runs
 `npm run test:cue-lab` runs the offline tests for the single-case lab, the batch runner and the simulation. For the batch runner they cover: the dry run starting nothing; every refusal above happening before any process; one sign-in check and one request per case; stopping at the first limit, error, wrong model or malformed reply without retry; the call cap; labels never reaching the evaluator; the first set's prompt being unchanged; the rules record matching the engine's tests; results being refused inside the checkout; and the fake evaluator being repeatable. CI runs them with no model, credentials or network.
 
 For the simulation they cover: a cue appearing one decision after its line and being scored against its moment; an overtaken decision being dropped with one catch-up; never two requests at once; the minimum gap and the dry-run bound; expiry after 18 seconds; the six-line window and what an app-style request contains; each count in the table above on a small scripted conversation; the labels evaluator acting only where a label says to and losing moments as its delay grows; stopping at the cap and at the first failure with the log intact; every refusal happening before any process; repeatability; and the shape of the conversation fixture.
+
+`scripts/cue-sim-voices.test.mjs` (part of `npm run test:cue-lab`) checks the voice step against a stand-in provider: nothing sent without `--run`; the cap, the key and a bundled conversation required; only the lines, a voice and instructions sent; each clip cached and not bought again; the key absent from every output and log; and the first failure ending the run.
 
 The recorder's browser test (`tests/lab-recording.spec.ts`, Chromium and WebKit) is opt-in, `npm run test:lab-record`, and is not part of `npm test` or CI because it records video; it writes only to a temporary directory outside the repository. It records a three-line fictional conversation from a results file, with test tones for speech, and checks: one video with a sound track and no raw capture left; the cue seen in the companion by its words and seen to leave; no notebook in the main view and a second video only with `--with-notebook`; the on-screen labels; a take that cannot show its cue being deleted; a folder inside the checkout being refused; and the command refusing other hosts and anything but the bundled conversations.

@@ -33,6 +33,7 @@ import {
 } from './cue-lab-output.mjs';
 import { SETS, loadSet } from './cue-lab-sets.mjs';
 import { conversationFromCase, loadConversations } from './cue-sim.mjs';
+import { SPEECH_MODEL, voicePlan } from './cue-sim-voices.mjs';
 import { isMain } from './is-main.mjs';
 
 const run = promisify(execFile);
@@ -79,12 +80,7 @@ export function stageData(
     speed,
     view,
     // Shown as a tag for the whole recording when the lines are audible.
-    sound:
-      sound === 'say'
-        ? 'Synthetic voices'
-        : sound === 'tone'
-          ? 'Test tones'
-          : '',
+    sound: sound === 'tone' ? 'Test tones' : sound ? 'Synthetic voices' : '',
     title: replay.title,
     setting: replay.setting,
     listener: replay.listener,
@@ -159,10 +155,21 @@ async function duration(file) {
   return Math.round(Number(stdout.trim()) * 1000);
 }
 
-/** Makes one clip per line, each starting when its speaker starts in the
- * simulation. Nothing about the simulation's timing is changed to fit the
- * speech: a clip that runs past the next speaker's start is reported. */
-export async function synthesize(data, directory, engine) {
+/** Gets one clip per line and places each so that it ends when the
+ * simulation says the line ends, which is the moment every cue decision is
+ * timed from. Nothing in the simulation moves to fit the speech: a clip
+ * that cannot fit after the previous speaker ends late, and that is
+ * reported. `data.lines[].fromMs` is updated to when each clip starts, so
+ * the picture shows who is speaking while they are heard.
+ *
+ * engine: 'cache' (clips made earlier by the separate voice step),
+ * 'say' (macOS system voices) or 'tone' (plain test tones). */
+export async function synthesize(
+  data,
+  directory,
+  engine,
+  { cache, plan } = {},
+) {
   const speakers = [...new Set(data.lines.map((line) => line.speaker))];
   let installed = VOICES;
   if (engine === 'say') {
@@ -173,44 +180,48 @@ export async function synthesize(data, directory, engine) {
     if (!installed.length)
       throw new Error('No listed system voice is installed.');
   }
-  const voices = Object.fromEntries(
-    speakers.map((speaker, i) => [
-      speaker,
-      engine === 'say'
-        ? installed[i % installed.length]
-        : `test tone ${220 + 70 * (i % 6)} Hz`,
-    ]),
-  );
+  const voices =
+    engine === 'cache'
+      ? plan.voices
+      : Object.fromEntries(
+          speakers.map((speaker, i) => [
+            speaker,
+            engine === 'say'
+              ? installed[i % installed.length]
+              : `test tone ${220 + 70 * (i % 6)} Hz`,
+          ]),
+        );
   const clips = [];
+  let previousEnd = 0;
   for (const [index, line] of data.lines.entries()) {
-    const file = join(
-      directory,
-      `line-${index + 1}.${engine === 'say' ? 'aiff' : 'wav'}`,
-    );
-    const next = data.lines[index + 1]?.fromMs ?? Infinity;
-    const slotMs = next - line.fromMs;
-    const speak = (rate) =>
-      run('say', [
-        '-v',
-        voices[line.speaker],
-        '-r',
-        String(rate),
-        '-o',
-        file,
-        line.text,
-      ]);
+    // The time this line has: from the previous speaker to its own end.
+    const roomMs = line.atMs - previousEnd;
+    let file = join(directory, `line-${index + 1}.aiff`);
     let rate = null;
-    if (engine === 'say') {
+    if (engine === 'cache')
+      file = join(cache, plan.lines.find((l) => l.lineId === line.id).file);
+    else if (engine === 'say') {
+      const speak = (wordsPerMinute) =>
+        run('say', [
+          '-v',
+          voices[line.speaker],
+          '-r',
+          String(wordsPerMinute),
+          '-o',
+          file,
+          line.text,
+        ]);
       rate = SPEECH_RATE;
       await speak(rate);
       const first = await duration(file);
-      // Once only: speak a little faster when the line would run into the
-      // next speaker, up to a rate that still sounds like speech.
-      if (first > slotMs) {
-        rate = Math.min(240, Math.ceil((SPEECH_RATE * first) / slotMs));
+      // Once only: speak a little faster when the line has less room than
+      // that, up to a rate that still sounds like speech.
+      if (first > roomMs && roomMs > 0) {
+        rate = Math.min(240, Math.ceil((SPEECH_RATE * first) / roomMs));
         await speak(rate);
       }
-    } else
+    } else {
+      file = join(directory, `line-${index + 1}.wav`);
       await run('ffmpeg', [
         '-y',
         '-loglevel',
@@ -218,19 +229,26 @@ export async function synthesize(data, directory, engine) {
         '-f',
         'lavfi',
         '-i',
-        `sine=frequency=${220 + 70 * (speakers.indexOf(line.speaker) % 6)}:duration=${Math.max(0.2, Math.min(line.atMs - line.fromMs, slotMs) / 1000).toFixed(2)}`,
+        `sine=frequency=${220 + 70 * (speakers.indexOf(line.speaker) % 6)}:duration=${Math.max(0.2, Math.min(line.atMs - line.fromMs, roomMs - 150) / 1000).toFixed(2)}`,
         file,
       ]);
+    }
     const durationMs = await duration(file);
+    const startMs = Math.max(
+      previousEnd + (index ? 150 : 0),
+      line.atMs - durationMs,
+    );
+    line.fromMs = startMs;
+    previousEnd = startMs + durationMs;
     clips.push({
       lineId: line.id,
       speaker: line.speaker,
       file,
-      startMs: line.fromMs,
+      startMs,
       durationMs,
       rate,
-      // How far the clip runs past the next speaker's start, if it does.
-      overrunMs: Math.max(0, durationMs - slotMs),
+      // How long after the simulation's end of the line the clip ends.
+      endsLateMs: Math.max(0, previousEnd - line.atMs),
     });
   }
   return { engine, voices, clips };
@@ -351,6 +369,9 @@ export async function recordReplay({
   withNotebook = false,
   // 'say', 'tone' or null; by default whatever this device can do.
   speech,
+  // A folder of clips made earlier by the separate voice step. Used when
+  // it holds a clip for every line; otherwise the device's own voices are.
+  voicesCache,
   ffmpeg,
   cueTimeoutMs = 10_000,
   log = createRunLog(null),
@@ -358,12 +379,18 @@ export async function recordReplay({
   // Wherever this is called from, takes are written outside the checkout.
   directory = outputDirectory(directory, {});
   // Speech is only laid under a replay at its own speed.
+  const plan = voicesCache ? voicePlan(replay) : null;
+  const cached =
+    plan &&
+    plan.lines.every((line) => existsSync(join(voicesCache, line.file)));
   const engine =
     speed !== 1 || ffmpeg === false
       ? null
-      : speech === undefined
-        ? await speechEngine()
-        : speech;
+      : speech !== undefined
+        ? speech
+        : cached && (await available('ffprobe')) && (await ffmpegAvailable())
+          ? 'cache'
+          : await speechEngine();
   const data = stageData(results, replay, {
     origin: baseURL,
     speed,
@@ -412,12 +439,15 @@ export async function recordReplay({
       }),
     );
     if (engine) {
-      audio = await synthesize(data, rawDirectory, engine);
+      audio = await synthesize(data, rawDirectory, engine, {
+        cache: voicesCache,
+        plan,
+      });
       log.write('speech-ready', {
         conversation: replay.id,
         engine,
         voices: audio.voices,
-        overruns: audio.clips.filter((clip) => clip.overrunMs > 0).length,
+        endLate: audio.clips.filter((clip) => clip.endsLateMs > 0).length,
       });
     }
     const open = async (view) => {
@@ -566,15 +596,19 @@ export async function recordReplay({
         ? {
             engine: audio.engine,
             note:
-              audio.engine === 'say'
-                ? 'Synthetic voices made on this device with macOS say. No speech service was used.'
-                : 'Plain test tones, not speech.',
+              audio.engine === 'cache'
+                ? `Synthetic preset voices from OpenAI text-to-speech (${SPEECH_MODEL}), made in a separate step and cached. Only the fictional lines of this bundled conversation were sent to that provider. No voice was cloned.`
+                : audio.engine === 'say'
+                  ? 'Synthetic voices made on this device with macOS say. No speech service was used.'
+                  : 'Plain test tones, not speech.',
+            placement:
+              'Each clip ends when the simulation says its line ends; cue timing is unchanged. A clip listed under endLate could not fit after the previous speaker and ends that much later.',
             voices: audio.voices,
             startsInVideoAtMs: playStartedAt - videoStartedAt,
             clips: audio.clips.map(({ file: _file, ...clip }) => clip),
-            overruns: audio.clips
-              .filter((clip) => clip.overrunMs > 0)
-              .map(({ lineId, overrunMs }) => ({ lineId, overrunMs })),
+            endLate: audio.clips
+              .filter((clip) => clip.endsLateMs > 0)
+              .map(({ lineId, endsLateMs }) => ({ lineId, endsLateMs })),
           }
         : null,
     optimized: saved.optimized,
@@ -601,6 +635,7 @@ export async function main(args, { print = console.log } = {}) {
       '--conversations',
       '--speed',
       '--browser',
+      '--voices-cache',
     ],
     switches: ['--with-notebook', '--no-sound'],
   });
@@ -653,11 +688,14 @@ export async function main(args, { print = console.log } = {}) {
           speed,
           withNotebook: Boolean(flags['--with-notebook']),
           ...(flags['--no-sound'] ? { speech: null } : {}),
+          ...(flags['--voices-cache']
+            ? { voicesCache: outputDirectory(flags['--voices-cache'], {}) }
+            : {}),
           log,
         });
         saved.push(manifest);
         print(
-          `saved      ${manifest.video}${manifest.notebookVideo ? ` and ${manifest.notebookVideo}` : ''}${manifest.audio ? ` [sound: ${manifest.audio.engine}, ${manifest.audio.overruns.length} lines overrun]` : ' [no sound]'} (${(manifest.bytes / 1e6).toFixed(1)} MB${manifest.optimized ? ', optimized' : ', raw capture: ffmpeg not found'}; ${manifest.cues.length} cues seen)`,
+          `saved      ${manifest.video}${manifest.notebookVideo ? ` and ${manifest.notebookVideo}` : ''}${manifest.audio ? ` [sound: ${manifest.audio.engine}, ${manifest.audio.endLate.length} lines end late]` : ' [no sound]'} (${(manifest.bytes / 1e6).toFixed(1)} MB${manifest.optimized ? ', optimized' : ', raw capture: ffmpeg not found'}; ${manifest.cues.length} cues seen)`,
         );
       } catch (error) {
         discarded.push(replay.id);
