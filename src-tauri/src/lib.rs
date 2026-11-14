@@ -15,6 +15,13 @@ mod context_runtime;
 pub mod cue_evaluator;
 #[cfg(all(
     debug_assertions,
+    target_os = "macos",
+    feature = "native-audio-spike",
+    feature = "lab-evaluator"
+))]
+mod dev_lab_source;
+#[cfg(all(
+    debug_assertions,
     any(feature = "claude-cli", feature = "lab-evaluator"),
     feature = "native-audio-spike"
 ))]

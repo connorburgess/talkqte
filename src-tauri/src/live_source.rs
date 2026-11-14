@@ -161,11 +161,12 @@ impl Runtime {
         {
             return None;
         }
-        let identity = crate::dev_source_observation::Identity::new(
+        let identity = crate::dev_source_observation::Identity::for_kind(
             run,
             &candidate.host_operation,
             &source.operation,
             source.session,
+            candidate.kind,
         )?;
         self.live_source.as_mut()?.observation = Some(identity.clone());
         crate::timing_log::record(identity.event("listening"));
@@ -966,6 +967,7 @@ mod observation_tests {
             review,
             Candidate {
                 host_operation: "a".repeat(32),
+                kind: crate::dev_lab_source::Kind::QuickTime,
                 control,
             },
         )
@@ -1123,6 +1125,7 @@ mod observation_tests {
             .observe_lab_source(&old, "fictional-run", false)
             .is_none());
         let current = Candidate {
+            kind: crate::dev_lab_source::Kind::QuickTime,
             host_operation: "c".repeat(32),
             control: next.control(),
         };

@@ -121,8 +121,9 @@ fn install_handler() -> Result<(), &'static str> {
 }
 
 fn supported_source(settings: Option<&crate::application_audio_host::DevSettings>) -> bool {
-    settings
-        .is_some_and(|s| s.application == "QuickTime Player" && matches!(s.stop_after, Ok(Some(_))))
+    settings.is_some_and(|s| {
+        crate::dev_lab_source::supports(&s.application) && matches!(s.stop_after, Ok(Some(_)))
+    })
 }
 
 pub(crate) fn install(
@@ -169,7 +170,7 @@ pub(crate) fn install(
     SOURCE_ONLY.store(true, Ordering::Release);
     if !supported_source(source) {
         return Err(fail(
-            "development Stop requires the exact QuickTime source and finite ordinary Stop guard",
+            "development Stop requires its exact supported source and finite ordinary Stop guard",
         ));
     }
     if !microphone_is_pristine(&app.state::<crate::microphone::Controller>()) {

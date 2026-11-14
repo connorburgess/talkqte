@@ -154,6 +154,15 @@ struct StreamFault {
 }
 
 impl StreamFault {
+    #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+    fn inspect_lab_source(&self, current: impl FnOnce() -> bool) {
+        // Owner thread only. Ordinary Stop wins over a late identity read;
+        // a player disappearing while still active cancels the exact operation.
+        if !self.control.is_cancelled() && !current() && !self.control.is_cancelled() {
+            self.record_code(SCStreamErrorCode::NoCaptureSource.0 as i64);
+        }
+    }
+
     fn new(control: Control) -> Self {
         Self {
             control,

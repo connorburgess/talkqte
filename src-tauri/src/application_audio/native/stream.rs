@@ -55,6 +55,18 @@ impl Selection {
         })
     }
 
+    #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+    pub(crate) fn lab_allowed(&self) -> bool {
+        // Plain retained SCK property reads plus process inspection, only on
+        // this selection's owner thread. No filter mutation or reacquisition.
+        crate::dev_lab_source::selection(
+            unsafe { self.application.processID() },
+            &unsafe { self.application.bundleIdentifier() }.to_string(),
+            self.source.name(),
+            self.helpers.len(),
+        )
+    }
+
     pub fn application(&self) -> &Application {
         &self.source
     }
@@ -95,6 +107,10 @@ impl NativeOwner {
         }
         if start.lease.control.0.application != selection.source {
             return Err(Failure::ReviewChanged);
+        }
+        #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+        if !selection.lab_allowed() {
+            return Err(Failure::SourceUnavailable);
         }
         let pcm = pcm::PcmReader::from_first_sample();
         let (input, reader) = start
@@ -299,6 +315,10 @@ fn stop_completion(slot: Arc<AtomicU8>) -> RcBlock<dyn Fn(*mut NSError)> {
 
 impl Driver for Stream {
     fn consumer_closed(&self) -> bool {
+        #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+        self.delegate
+            .ivars()
+            .inspect_lab_source(|| self._selection.lab_allowed());
         self.consumer_closed.load(Ordering::Acquire)
     }
     fn stream_failed(&self) -> bool {
@@ -348,6 +368,57 @@ impl Driver for Stream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+    #[test]
+    fn active_identity_loss_cancels_but_prior_or_concurrent_stop_dominates() {
+        use crate::application_audio::Gate;
+        let gate = Gate::default();
+        let review = gate
+            .review(
+                Application::new(
+                    "fictional-player".into(),
+                    crate::dev_lab_source::PLAYER.into(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let control = review.control();
+        let fault = StreamFault::new(control.clone());
+        fault.inspect_lab_source(|| false);
+        assert!(control.is_cancelled());
+        assert!(fault.failed.load(Ordering::Acquire));
+        assert_eq!(
+            fault.code.load(Ordering::Acquire),
+            SCStreamErrorCode::NoCaptureSource.0 as i64
+        );
+        drop(review);
+        for concurrent in [false, true] {
+            let review = gate
+                .review(
+                    Application::new(
+                        "fictional-next".into(),
+                        crate::dev_lab_source::PLAYER.into(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+            let control = review.control();
+            let fault = StreamFault::new(control.clone());
+            if !concurrent {
+                control.cancel();
+            }
+            let mut inspected = false;
+            fault.inspect_lab_source(|| {
+                inspected = true;
+                control.cancel();
+                false
+            });
+            assert_eq!(inspected, concurrent);
+            assert!(!fault.failed.load(Ordering::Acquire));
+            assert_eq!(fault.code.load(Ordering::Acquire), NO_CODE);
+        }
+    }
 
     #[test]
     fn a_start_completion_records_only_its_first_result_and_the_first_error_code() {
