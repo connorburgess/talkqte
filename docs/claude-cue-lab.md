@@ -2,7 +2,7 @@
 
 An optional development runner for one bundled fictional scenario at a time. It asks Claude Code with Opus 5.5 whether to show a cue, stay quiet, mark an existing cue resolved, or withdraw one whose context has moved on. It also distinguishes possible cue use from uncertain attribution. It does not drive the desktop app, listen to calls, import chats, save prompts into notes, or train a model.
 
-The [intelligence plan](cue-intelligence.md) explains the hypotheses. Matching the expected labels on these small examples is a smoke check, not evidence that TalkQTE improves participation.
+The [intelligence plan](cue-intelligence.md) explains the hypotheses. Bounded batches over a whole fictional set, with a dry run, a call cap and a results file, are described in [batches and simulations](cue-simulation.md). Matching the expected labels on these small examples is a smoke check, not evidence that TalkQTE improves participation.
 
 ## Start without inference
 
@@ -29,7 +29,7 @@ This verifies the CLI version and a first-party subscription login without infer
 npm run lab:claude -- --run --case already-answered --included-usage-confirmed
 ```
 
-This sends the selected fictional context to Anthropic and consumes the subscription's shared allowance. It is hosted inference. The runner rejects API-key or unknown authentication, removes inherited credential/provider overrides from the child environment, disables Fast mode, and provides no API fallback. It never purchases credits or changes your account. See [subscription access and billing](https://support.claude.com/en/articles/11145838-use-claude-code-with-your-pro-max-or-ultra-plan).
+This sends the selected fictional context to Anthropic and consumes the subscription's shared allowance. It is hosted inference. The runner refuses to start when the shell carries an API key, auth token, provider switch, gateway or proxy setting, naming the variables and never their values. It also rejects API-key or unknown authentication, gives the child process an allowlisted environment, disables Fast mode, and provides no API fallback. It never purchases credits or changes your account. See [subscription access and billing](https://support.claude.com/en/articles/11145838-use-claude-code-with-your-pro-max-or-ultra-plan).
 
 One invocation requests one case, with a 60-second inference deadline and bounded output. The runner does not retry or request an alternate model. Limits and failures end the evaluation. Standard CLI version/authentication checks precede the model request. No `--bare` flag is used because that mode requires API authentication rather than subscription login. [CLI reference](https://code.claude.com/docs/en/cli-reference), [headless mode](https://code.claude.com/docs/en/headless).
 
