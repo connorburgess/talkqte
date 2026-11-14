@@ -15,12 +15,19 @@ mod context_runtime;
 pub mod cue_evaluator;
 #[cfg(all(
     debug_assertions,
-    feature = "claude-cli",
+    any(feature = "claude-cli", feature = "lab-evaluator"),
     feature = "native-audio-spike"
 ))]
 mod dev_model;
 pub mod engine;
 pub mod granola;
+#[cfg(all(
+    debug_assertions,
+    target_os = "macos",
+    feature = "native-audio-spike",
+    feature = "lab-evaluator"
+))]
+mod lab_evaluator;
 pub mod live;
 mod live_control;
 mod live_source;
@@ -144,15 +151,74 @@ impl Runtime {
         self.processing_reviews.reconcile(&self.engine);
         self.reconcile_live_source();
     }
+
+    /// Read the same live clock arithmetic as `sync_at` without advancing the
+    /// engine, polling a provider or reconciling capture. A transport worker
+    /// calls this only after obtaining the Runtime lock without waiting.
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    fn lab_clock_at(&self, now: Instant) -> Option<lab_evaluator::ClockSample> {
+        let session = self.engine.session();
+        if !self.engine.state.live
+            || self.engine.state.status != engine::Status::Running
+            || self.engine.is_live_stopping()
+            || self.live.as_ref()?.session != session
+        {
+            return None;
+        }
+        let remainder = if self.tick_session == session {
+            self.tick_remainder
+        } else {
+            Duration::ZERO
+        };
+        let delta = now.checked_duration_since(self.last_tick)?;
+        let millis = delta.checked_add(remainder)?.as_millis();
+        let elapsed_ms = self
+            .engine
+            .state
+            .elapsed_ms
+            .saturating_add(u64::try_from(millis).unwrap_or(u64::MAX))
+            .min(self.engine.state.duration_ms);
+        Some(lab_evaluator::ClockSample {
+            session_id: session,
+            elapsed_ms,
+        })
+    }
 }
 
 struct AppState(Mutex<Runtime>);
+
+#[cfg(all(
+    debug_assertions,
+    target_os = "macos",
+    feature = "native-audio-spike",
+    feature = "lab-evaluator"
+))]
+fn sample_lab_clock(state: &Mutex<Runtime>) -> Option<lab_evaluator::ClockSample> {
+    let runtime = state.try_lock().ok()?;
+    // Sample after acquiring the lock: never estimate from a cached tick or
+    // from an Instant older than a concurrently completed clock update.
+    runtime.lab_clock_at(Instant::now())
+}
 
 // Emit while holding the state lock, preserving revision order across commands/ticks.
 fn publish(app: &tauri::AppHandle, runtime: &mut Runtime) {
     let _ = app.emit_to("main", "session:changed", &runtime.engine.state);
     let cue_state = runtime.cue_snapshot();
-    let _ = app.emit_to("cue", "cue:changed", &cue_state);
+    let emitted = app.emit_to("cue", "cue:changed", &cue_state).is_ok();
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    lab_evaluator::observe_published(&runtime.engine, &cue_state, emitted);
+    // Publication success is not evidence that the companion painted a cue.
+    let _ = emitted;
     timing_log::observe_published(&runtime.engine);
     publish_processing(app, runtime);
 }
@@ -280,6 +346,17 @@ fn snapshot(
     test
 ))]
 pub(crate) fn live_engine() -> Engine {
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    if lab_evaluator::selected() {
+        // An explicit malformed selection stays unavailable in the lab path;
+        // only an absent selector may use the existing default below.
+        return lab_evaluator::connected_engine();
+    }
     #[cfg(feature = "claude-cli")]
     return claude_cli::connected_engine();
     #[cfg(not(feature = "claude-cli"))]
@@ -1476,10 +1553,24 @@ pub fn run() {
         .setup(|app| {
             #[cfg(all(
                 debug_assertions,
-                feature = "claude-cli",
+                any(feature = "claude-cli", feature = "lab-evaluator"),
                 feature = "native-audio-spike"
             ))]
             dev_model::initialize();
+            #[cfg(all(
+                debug_assertions,
+                target_os = "macos",
+                feature = "native-audio-spike",
+                feature = "lab-evaluator"
+            ))]
+            {
+                lab_evaluator::initialize_from_environment();
+                let handle = app.handle().clone();
+                lab_evaluator::set_clock_sampler(Arc::new(move || {
+                    let state = handle.try_state::<AppState>()?;
+                    sample_lab_clock(&state.0)
+                }));
+            }
             #[cfg(target_os = "macos")]
             companion_macos::hide_controls(app)?;
             #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
@@ -1570,6 +1661,13 @@ pub fn run() {
                 event,
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
             ) {
+                #[cfg(all(
+                    debug_assertions,
+                    target_os = "macos",
+                    feature = "native-audio-spike",
+                    feature = "lab-evaluator"
+                ))]
+                lab_evaluator::cancel_active(lab_evaluator::ControlReason::Exit);
                 microphone::stop_on_exit(app);
                 // End any model call still in flight, and its helpers.
                 #[cfg(feature = "claude-cli")]
@@ -1582,6 +1680,181 @@ pub fn run() {
 
 #[cfg(test)]
 mod granola_privacy_tests;
+
+#[cfg(all(
+    test,
+    debug_assertions,
+    target_os = "macos",
+    feature = "native-audio-spike",
+    feature = "lab-evaluator"
+))]
+mod lab_clock_tests {
+    use super::*;
+
+    fn live(now: Instant) -> Runtime {
+        let mut runtime = Runtime {
+            engine: Engine::live(),
+            last_tick: now,
+            ..Runtime::default()
+        };
+        runtime.engine.start().unwrap();
+        runtime.tick_session = runtime.engine.session();
+        runtime.live = Some(Live {
+            operation: None,
+            session: runtime.engine.session(),
+            microphone: None,
+            runner: None,
+        });
+        runtime
+    }
+
+    #[test]
+    fn sampled_clock_matches_next_sync_without_mutating_the_runtime() {
+        let origin = Instant::now();
+        let now = origin + Duration::from_micros(1_700);
+        let mut runtime = live(origin);
+        runtime.tick_remainder = Duration::from_micros(600);
+        runtime.engine.state.elapsed_ms = 42;
+        let revision = runtime.engine.state.revision;
+        let sample = runtime.lab_clock_at(now).unwrap();
+        assert_eq!(sample.session_id, runtime.engine.session());
+        assert_eq!(sample.elapsed_ms, 44);
+        assert_eq!(runtime.engine.state.elapsed_ms, 42);
+        assert_eq!(runtime.engine.state.revision, revision);
+        assert_eq!(runtime.last_tick, origin);
+        assert_eq!(runtime.tick_remainder, Duration::from_micros(600));
+        runtime.sync_at(now);
+        assert_eq!(runtime.engine.state.elapsed_ms, sample.elapsed_ms);
+        assert_eq!(runtime.tick_remainder, Duration::from_micros(300));
+    }
+
+    #[test]
+    fn a_replaced_session_does_not_borrow_the_previous_fractional_remainder() {
+        let origin = Instant::now();
+        let mut runtime = live(origin);
+        runtime.tick_session = runtime.engine.session() + 1;
+        runtime.tick_remainder = Duration::from_micros(900);
+        let now = origin + Duration::from_micros(200);
+        let sample = runtime.lab_clock_at(now).unwrap();
+        assert_eq!(sample.elapsed_ms, 0);
+        runtime.sync_at(now);
+        assert_eq!(runtime.engine.state.elapsed_ms, sample.elapsed_ms);
+        assert_eq!(runtime.tick_remainder, Duration::from_micros(200));
+    }
+
+    #[test]
+    fn stopped_draining_inactive_and_mismatched_sessions_cannot_calibrate() {
+        let now = Instant::now();
+        let mut runtime = live(now);
+        runtime.engine.begin_live_stop();
+        assert_eq!(runtime.engine.state.status, engine::Status::Running);
+        assert!(runtime.lab_clock_at(now).is_none(), "Stop precedes drain");
+
+        let mut runtime = live(now);
+        runtime.live.as_mut().unwrap().session += 1;
+        assert!(runtime.lab_clock_at(now).is_none());
+        runtime.live = None;
+        assert!(runtime.lab_clock_at(now).is_none());
+
+        let mut runtime = live(now);
+        runtime.engine.end();
+        assert!(runtime.lab_clock_at(now).is_none());
+        assert!(Runtime::default().lab_clock_at(now).is_none());
+    }
+
+    #[test]
+    fn the_sampler_refuses_a_busy_runtime_without_waiting_for_it() {
+        let state = Arc::new(Mutex::new(live(Instant::now())));
+        let guard = state.lock().unwrap();
+        let (send, receive) = std::sync::mpsc::channel();
+        let owner = state.clone();
+        let task = std::thread::spawn(move || {
+            send.send(sample_lab_clock(&owner).is_none()).unwrap();
+        });
+        let result = receive.recv_timeout(Duration::from_secs(2));
+        drop(guard);
+        task.join().unwrap();
+        assert!(result.unwrap());
+        assert!(sample_lab_clock(&state).is_some());
+    }
+
+    #[test]
+    fn a_clock_sample_older_than_the_last_tick_is_unavailable() {
+        let now = Instant::now();
+        let runtime = live(now + Duration::from_millis(1));
+        assert!(runtime.lab_clock_at(now).is_none());
+    }
+
+    #[test]
+    fn backend_selection_is_explicit_inert_and_never_falls_back_on_bad_settings() {
+        let without = [
+            "TALKQTE_DEV_CUE_BACKEND",
+            "TALKQTE_DEV_LAB_DESCRIPTOR",
+            "TALKQTE_DEV_LAB_PROVIDER",
+            "TALKQTE_DEV_LAB_MODEL",
+            "TALKQTE_DEV_LAB_EFFORT",
+        ];
+        for case in ["absent", "malformed", "valid"] {
+            let mut variables = vec![("TALKQTE_TEST_SELECTOR_CASE", case)];
+            if case == "malformed" {
+                variables.push(("TALKQTE_DEV_CUE_BACKEND", "fictional-invalid-selector"));
+            } else if case == "valid" {
+                variables.extend([
+                    ("TALKQTE_DEV_CUE_BACKEND", "lab-subscription"),
+                    (
+                        "TALKQTE_DEV_LAB_DESCRIPTOR",
+                        "/fictional-lab/run/descriptor.json",
+                    ),
+                    ("TALKQTE_DEV_LAB_PROVIDER", "codex"),
+                    ("TALKQTE_DEV_LAB_MODEL", "gpt-6.1-sol"),
+                    ("TALKQTE_DEV_LAB_EFFORT", "medium"),
+                ]);
+            }
+            let result =
+                crate::test_isolation::run("lab_clock_tests::selector_child", &variables, &without);
+            assert!(result.left.is_empty(), "constructor wrote a file");
+        }
+    }
+
+    #[test]
+    #[ignore = "run in an isolated process with frozen fictional settings"]
+    fn selector_child() {
+        lab_evaluator::initialize_from_environment();
+        let case = std::env::var("TALKQTE_TEST_SELECTOR_CASE").unwrap();
+        let mut engine = live_engine();
+        engine.start().unwrap();
+        let snapshot = engine.processing_snapshot(engine::CaptureState::Off, 0);
+        match case.as_str() {
+            "absent" => {
+                assert!(!lab_evaluator::selected());
+                #[cfg(feature = "claude-cli")]
+                assert_eq!(snapshot.processor.unwrap().id, "claude-cli");
+                #[cfg(not(feature = "claude-cli"))]
+                assert!(snapshot.processor.is_none());
+            }
+            "malformed" => {
+                assert!(lab_evaluator::selected());
+                assert_eq!(snapshot.processor.unwrap().id, "lab-subscription");
+                assert_eq!(
+                    engine.evaluation_status(),
+                    Some(engine::EvaluationStatus::Unavailable(
+                        engine::EvaluationIssue::LabUnavailable
+                    ))
+                );
+            }
+            "valid" => {
+                assert!(lab_evaluator::selected());
+                let processor = snapshot.processor.unwrap();
+                assert_eq!(processor.id, "lab-subscription");
+                assert_eq!(processor.model, "gpt-6.1-sol");
+                assert_eq!(snapshot.issue, None);
+            }
+            _ => panic!("unknown fictional selector case"),
+        }
+        assert!(!engine.has_processing_permission());
+        assert!(!snapshot.sending);
+    }
+}
 
 #[cfg(test)]
 mod test_isolation;
