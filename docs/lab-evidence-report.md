@@ -190,7 +190,18 @@ are marked uncertain. A zero declared uncertainty is not physical accuracy proof
 | End-to-end latency   | Explicitly joined heard/render end → observed paint     |
 
 Missing endpoints, ambiguous relationships or absent clock bridges remain unknown.
-Visible duration is not extended to recording end when no clear frame was observed.
+A heard/render-end endpoint must use actual `event` basis. A validated completion
+receipt remains in the timeline, labelled receipt only, but cannot establish
+transcription lag or heard-end-to-paint latency. Other observed receipt stages
+retain their own timing semantics. Visible duration is not extended to recording
+end when no clear frame was observed.
+
+The optional manifest `writer` status is limited in reports to boolean `failed`
+and nonnegative integer `dropped` (at most the declared event limit). A missing
+writer status remains unavailable. This declaration is shown independently of gap
+rows: when writing the gap itself fails, a sealed manifest can still retain the
+failure. Do not add writer and event-gap counts, which may describe the same loss.
+Other writer metadata is not copied.
 
 ## Existing native timing import
 
@@ -242,6 +253,11 @@ transcripts, actual private paths or generated reports. Existing app and normal
 lab cue-text redaction are unchanged. No new native content logging is required.
 
 ## Acceptance and remaining blocker
+
+Metadata-only synthetic writer-file snapshots in `scripts/fixtures/lab-evidence-writer-v1`
+were emitted by writer commit `994a280` with creation/expiry dates normalized. They
+exercise actual sealed manifest/event loading, including receipt-only completion
+and a manifest-only failed gap write; they contain no meeting content or recording.
 
 Deterministic synthetic fixtures exercise complete and partial timelines, exact
 u64 identities, missing/invalid bridges, stale/failure/quiet separation, dropped

@@ -196,6 +196,15 @@ export function validateManifest(m) {
   )
     fail('invalid recording');
   if (
+    m.writer !== undefined &&
+    (!object(m.writer) ||
+      typeof m.writer.failed !== 'boolean' ||
+      !Number.isSafeInteger(m.writer.dropped) ||
+      m.writer.dropped < 0 ||
+      m.writer.dropped > m.limits.maxEvents)
+  )
+    fail('invalid writer status');
+  if (
     m.reviews !== undefined &&
     (!Array.isArray(m.reviews) || m.reviews.length > 1000)
   )
@@ -366,6 +375,12 @@ function duration(start, end, m) {
     b = end.timing;
   if (!a || !b || a.basis === 'scheduled' || b.basis === 'scheduled')
     return unknown('missing actual timing');
+  if (
+    [start, end].some(
+      (e) => e.stage === 'speech.render-end' && e.timing.basis !== 'event',
+    )
+  )
+    return unknown('heard end requires actual event timing');
   let delta, uncertainty;
   if (a.clockId === b.clockId) {
     delta = b.atMs - a.atMs;
@@ -699,6 +714,9 @@ export function buildEvidenceReport(
       bytes: a.bytes,
     })),
     gaps,
+    writerStatus: m.writer
+      ? { failed: m.writer.failed, dropped: m.writer.dropped }
+      : null,
     ambiguities,
     missingEvidence: [...STAGES].filter(
       (s) => !events.some((e) => e.stage === s),
@@ -757,6 +775,10 @@ export function renderEvidenceMarkdown(r, { recordingHref } = {}) {
     '',
     '## Evidence gaps',
     '',
+    r.writerStatus
+      ? `Writer-reported status: failed=${r.writerStatus.failed}; dropped=${r.writerStatus.dropped}. This declaration is independent of gap rows; do not add the counts.`
+      : 'Writer-reported status: unavailable.',
+    '',
     `Dropped-event reports: ${r.gaps.length}; known dropped events: ${r.gaps.reduce((n, g) => n + (g.dropped ?? 0), 0)}. Unknown counts remain unknown.`,
     '',
     `Missing stages: ${r.missingEvidence.join(', ') || 'none'}.`,
@@ -772,11 +794,11 @@ export function renderEvidenceMarkdown(r, { recordingHref } = {}) {
     '',
     '## Per-take timeline',
     '',
-    '| Recording time | Stage / outcome | Identities | Evidence event |',
-    '| --- | --- | --- | --- |',
+    '| Recording time | Timing basis | Stage / outcome | Identities | Evidence event |',
+    '| --- | --- | --- | --- | --- |',
     ...r.timeline.map(
       (e) =>
-        `| ${link(e)} | ${e.stage} / ${e.outcome} | ${escape(JSON.stringify(e.ids))} | ${escape(e.eventId)} |`,
+        `| ${link(e)} | ${e.timing?.basis === 'receipt' ? 'receipt only (not event time)' : (e.timing?.basis ?? 'unknown')} | ${e.stage} / ${e.outcome} | ${escape(JSON.stringify(e.ids))} | ${escape(e.eventId)} |`,
     ),
     '',
     '## Technical measurements',

@@ -614,3 +614,89 @@ test('cue decider remains unknown without explicit unambiguous provenance, regar
     'unknown',
   );
 });
+
+test('completion receipt is not actual heard-end latency and timeline labels its basis', () => {
+  const events = take();
+  events[1].timing.basis = 'receipt';
+  const r = buildEvidenceReport(manifest(), events);
+  assert.equal(r.transcription[0].lag.status, 'unknown');
+  assert.equal(
+    r.transcription[0].lag.reason,
+    'heard end requires actual event timing',
+  );
+  assert.equal(r.cues[0].endToEnd.status, 'unknown');
+  assert.ok(
+    renderEvidenceMarkdown(r).includes('receipt only (not event time)'),
+  );
+  assert.equal(r.evaluations[0].modelDuration.valueMs, 390);
+});
+test('writer failure declaration survives independently from gap rows without copying arbitrary metadata', () => {
+  const m = manifest();
+  m.writer = { failed: true, dropped: 1, secret: 'NEVER_COPY' };
+  const r = buildEvidenceReport(m, []);
+  assert.deepEqual(r.writerStatus, { failed: true, dropped: 1 });
+  assert.equal(r.gaps.length, 0);
+  assert.ok(!JSON.stringify(r).includes('NEVER_COPY'));
+  const md = renderEvidenceMarkdown(r);
+  assert.ok(md.includes('failed=true; dropped=1'));
+  assert.ok(md.includes('do not add the counts'));
+  const withGap = buildEvidenceReport(m, [
+    event('gap', 1500, {}, { payload: { dropped: 1 } }),
+  ]);
+  assert.equal(withGap.writerStatus.dropped, 1);
+  assert.equal(withGap.gaps[0].dropped, 1);
+  assert.equal(buildEvidenceReport(manifest(), []).writerStatus, null);
+});
+test('malformed writer failure declaration is rejected', () => {
+  for (const writer of [
+    { failed: 'false', dropped: 1 },
+    { failed: true, dropped: -1 },
+    { failed: true, dropped: 1.5 },
+    { failed: true, dropped: 1001 },
+  ]) {
+    const m = manifest();
+    m.writer = writer;
+    assert.throws(() => buildEvidenceReport(m, []), /writer status/);
+  }
+});
+// Metadata-only snapshots emitted by writer 994a280; creation/expiry normalized.
+// Copy to a private external directory so normal loader checks are exercised.
+for (const kind of ['receipt-end', 'failed-gap']) {
+  test(`crossloads actual synthetic writer v1 ${kind} files without inventing event timing or losing failure`, async (t) => {
+    const root = await mkdtemp(join(tmpdir(), 'fictional-writer-compat-'));
+    await chmod(root, 0o700);
+    t.after(() => rm(root, { recursive: true, force: true }));
+    for (const file of ['manifest.json', 'events.jsonl']) {
+      const data = await readFile(
+        new URL(
+          `./fixtures/lab-evidence-writer-v1/${kind}/${file}`,
+          import.meta.url,
+        ),
+      );
+      await writeFile(join(root, file), data, { mode: 0o600 });
+    }
+    const { report } = await writeEvidenceReport({
+      manifestPath: join(root, 'manifest.json'),
+      outDir: join(root, 'report'),
+    });
+    if (kind === 'receipt-end') {
+      assert.equal(report.transcription[0].lag.status, 'unknown');
+      assert.equal(
+        report.transcription[0].lag.reason,
+        'heard end requires actual event timing',
+      );
+      assert.equal(report.timeline[0].timing.basis, 'receipt');
+      assert.ok(
+        (await readFile(join(root, 'report/report.md'), 'utf8')).includes(
+          'receipt only (not event time)',
+        ),
+      );
+      assert.deepEqual(report.writerStatus, { failed: false, dropped: 0 });
+    } else {
+      assert.deepEqual(report.writerStatus, { failed: true, dropped: 1 });
+      assert.equal(report.gaps.length, 0);
+      assert.equal(report.timeline.length, 0);
+    }
+    assert.ok(await stat(join(root, 'manifest.json')));
+  });
+}
