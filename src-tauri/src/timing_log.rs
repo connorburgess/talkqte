@@ -175,8 +175,9 @@ fn allowed(path: &Path, checkout: &Path) -> Result<(), String> {
 }
 
 /// Open `path` for appending, readable by its owner only. Runs on the writer
-/// thread. Refuses a folder inside `checkout` once links are resolved, a link,
-/// and anything that is not a regular file, so a pipe cannot be opened.
+/// thread. Refuses a folder inside `checkout` or any other git checkout once
+/// links are resolved, a link, and anything that is not a regular file, so a
+/// pipe cannot be opened.
 #[cfg(feature = "timing-log")]
 fn open_file(path: &Path, checkout: &Path) -> io::Result<std::fs::File> {
     let refuse = |why: &str| io::Error::other(why.to_string());
@@ -188,6 +189,13 @@ fn open_file(path: &Path, checkout: &Path) -> io::Result<std::fs::File> {
         if folder.starts_with(checkout) {
             return Err(refuse("inside the repository"));
         }
+    }
+    // Nor inside any other git checkout, where a log could be committed.
+    if folder
+        .ancestors()
+        .any(|ancestor| ancestor.join(".git").exists())
+    {
+        return Err(refuse("inside a git checkout"));
     }
     match std::fs::symlink_metadata(path) {
         Ok(existing) if !existing.file_type().is_file() => {
@@ -861,6 +869,19 @@ mod tests {
             drop(again);
             assert_eq!(lines(&path).len(), 3);
             let _ = std::fs::remove_file(&path);
+        }
+
+        #[test]
+        fn a_folder_inside_any_git_checkout_is_refused() {
+            let mut fictional = std::env::temp_dir();
+            fictional.push(format!("talkqte-fictional-checkout-{}", std::process::id()));
+            let nested = fictional.join("notes").join("lab");
+            std::fs::create_dir_all(&nested).unwrap();
+            std::fs::create_dir_all(fictional.join(".git")).unwrap();
+            let path = nested.join("timing.jsonl");
+            assert!(open_file(&path, checkout()).is_err());
+            assert!(!path.exists(), "nothing is created there");
+            let _ = std::fs::remove_dir_all(&fictional);
         }
 
         #[cfg(unix)]
