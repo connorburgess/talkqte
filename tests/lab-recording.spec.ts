@@ -122,6 +122,18 @@ test('the recording says on screen that it is simulated and fictional', async ({
   });
   expect(data.evaluator).toContain('no model');
   expect(data.timing).toContain('made up');
+  expect(data.decisions).toBe('No model');
+  // A results file from a model run is labelled as one.
+  const model = stageData(
+    {
+      ...results,
+      evaluator: { ...results.evaluator, kind: 'model', label: 'A model' },
+    },
+    results.conversations[0],
+    { origin: baseURL },
+  );
+  expect(model.decisions).toBe('Real model decisions');
+  expect(model.timing).toContain('measured');
 });
 
 test('a take that does not show its cue is deleted, and real results are refused', async ({

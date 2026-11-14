@@ -208,7 +208,7 @@ What is on screen:
 
 - **A mock video call** in the background: invented participants as tiles, the current speaker, and captions. It stands in for a meeting app and is labelled "Mock call. Not a real meeting or meeting app."
 - **The real companion**, floating over the call where its window would sit, and **the real notebook** beside it. Both are the app's own interface running in the browser preview, fed the simulated session through the same stand-in the browser tests use. Transcript lines arrive when the results say they reached the app, under the one "Speaker" label a live transcript has today.
-- **A label across the top** for the whole recording: "Simulated", "Fictional", the conversation, where the cue decisions came from, and what the decision times are (measured, recorded with none, or made up).
+- **A label across the top** for the whole recording: "Simulated", "Fictional", "No model" or "Real model decisions", the conversation, where the cue decisions came from, and what the decision times are (measured, recorded with none, or made up).
 - **A lab overlay** under the notebook, marked as not part of TalkQTE, listing each time the evaluator was asked and what it decided, including decisions that were dropped.
 
 The notebook's own wording describes the app as it is today (phrase rules, no model connected). In a recording the cue decisions come from the results file, as the label says. The notebook is kept scrolled to the newest transcript line, so its own copy of the cue can move out of view; the companion always shows it.

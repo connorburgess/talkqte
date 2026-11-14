@@ -345,6 +345,7 @@
     <div id="banner" role="note" aria-label="Recording label">
       <span class="tag">Simulated</span>
       <span class="tag">Fictional</span>
+      <span class="tag" id="decisions"></span>
       <span class="grow" id="source"></span>
       <span id="clock">0:00</span>
     </div>
@@ -442,6 +443,7 @@
         async prepare(value) {
           data = value;
           $('title').textContent = data.title;
+          $('decisions').textContent = data.decisions;
           $('source').textContent =
             `${data.title} · cue decisions: ${data.evaluator} · ${data.timing}`;
           $('intro-title').textContent = data.title;

@@ -79,6 +79,8 @@ export function stageData(results, replay, { origin, speed = 1 }) {
           role: '',
         })),
     evaluator: results.evaluator.label,
+    // Said in a tag for the whole recording: whether a model decided.
+    decisions: kind === 'model' ? 'Real model decisions' : 'No model',
     timing:
       kind === 'model'
         ? 'decision times measured on isolated requests, replayed here'
