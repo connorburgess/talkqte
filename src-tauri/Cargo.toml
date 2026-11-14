@@ -24,6 +24,9 @@ native-audio-spike = ["dep:objc2-screen-capture-kit", "dep:objc2-foundation", "d
 # Local speech recognition with whisper.cpp. Off by default until model
 # delivery is decided; needs CMake and a C++ toolchain to build.
 local-whisper = ["dep:whisper-rs"]
+# Development-only timing log for lab runs with fictional audio: writes one
+# JSON line per event to the file named by TALKQTE_TIMING_LOG. No dependency.
+timing-log = []
 
 [dependencies]
 tauri = { version = "2", features = [] }
