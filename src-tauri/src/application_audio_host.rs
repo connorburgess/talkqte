@@ -1203,9 +1203,32 @@ pub(crate) mod app {
         // Act once on its own thread: it waits for listing and the start.
         if let Some(settings) = settings {
             let host = host.clone();
+            #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+            let observer_app = app.clone();
             let _ = std::thread::Builder::new()
                 .name("talkqte-dev-source".into())
                 .spawn(move || {
+                    #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+                    if let Some(run) = crate::dev_stop::armed_run() {
+                        host.start_by_setting_observed(
+                            &settings,
+                            DevWaits::default(),
+                            |operation| {
+                                let Some(candidate) = host.lab_listening_candidate(operation)
+                                else {
+                                    return false;
+                                };
+                                crate::dev_source_observation::observe(
+                                    &observer_app.state::<AppState>().0,
+                                    &candidate,
+                                    run,
+                                    crate::dev_stop::requested,
+                                )
+                                .is_some()
+                            },
+                        );
+                        return;
+                    }
                     host.start_by_setting(&settings, DevWaits::default());
                 });
         }

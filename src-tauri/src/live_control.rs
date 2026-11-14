@@ -75,6 +75,35 @@ impl StartGate {
         })
     }
 
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    pub(crate) fn try_control(&self) -> Option<(Option<String>, crate::engine::StartupState)> {
+        use crate::engine::StartupState;
+        let state = self.0.try_lock().ok()?;
+        let phase = match &state.current {
+            None => StartupState::Idle,
+            Some(flag) if flag.load(Ordering::Acquire) => StartupState::Cancelling,
+            Some(_) => StartupState::Loading,
+        };
+        Some((state.operation.clone(), phase))
+    }
+
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    #[cfg(test)]
+    pub(crate) fn with_test_control_lock<R>(&self, action: impl FnOnce() -> R) -> R {
+        let _held = self.0.lock().unwrap();
+        action()
+    }
+
     pub(crate) fn cancel(&self) {
         if let Ok(current) = self.0.lock() {
             if let Some(flag) = current.current.as_ref() {

@@ -21,6 +21,11 @@ const RELEASE_WAIT: Duration = Duration::from_secs(5);
 static SOURCE_ONLY: AtomicBool = AtomicBool::new(false);
 static REQUESTED: AtomicBool = AtomicBool::new(false);
 static INSTALLED: OnceLock<()> = OnceLock::new();
+static ARMED_RUN: OnceLock<String> = OnceLock::new();
+
+pub(crate) fn armed_run() -> Option<&'static str> {
+    ARMED_RUN.get().map(String::as_str)
+}
 
 pub(crate) fn source_only() -> bool {
     SOURCE_ONLY.load(Ordering::Acquire)
@@ -209,6 +214,9 @@ pub(crate) fn install(
         .map_err(|_| fail("development Stop worker unavailable"))?;
     // Called before the host can spawn the source autostart thread. The owner
     // must observe this exact-run event before sending SIGUSR2.
+    ARMED_RUN
+        .set(run.clone())
+        .map_err(|_| fail("development run already armed"))?;
     emit(&run, "armed");
     Ok(())
 }
