@@ -126,6 +126,8 @@ export function stageData(
         }))
     ).map((person) => ({
       ...person,
+      // Generated conversation participants may omit the optional role label.
+      role: typeof person.role === 'string' ? person.role : '',
       // Where the stage loads this person's invented portrait from.
       portrait: portraits?.[person.name]
         ? `${origin}/__lab-portrait/${portraits[person.name].file}`
