@@ -78,8 +78,9 @@ for (const surface of ['notebook', 'companion'] as const) {
     expect(right).toBeGreaterThan(20);
     expect((await drawn(300))![1]).toBeLessThan(right);
     expect((await drawn('end'))![1]).toBe(0);
-    // Its words are there from the first frame, light, and darken in
-    // reading order: the purpose first, the quoted line last.
+    // The cue's words are there from the first frame, light but readable,
+    // and darken in reading order within moments. The purpose and the line
+    // the cue came from are at full strength throughout.
     const shades = (at: number | 'end') =>
       question.evaluate((card, time) => {
         for (const animation of card.getAnimations({ subtree: true })) {
@@ -87,32 +88,24 @@ for (const surface of ['notebook', 'companion'] as const) {
           if (time === 'end') animation.finish();
           else animation.currentTime = time;
         }
-        const shade = (selector: string) =>
-          [...card.querySelectorAll<HTMLElement>(selector)].map((word) =>
-            Number(getComputedStyle(word).opacity),
+        const strength = (selector: string) =>
+          [...card.querySelectorAll<HTMLElement>(selector)].map((element) =>
+            Number(getComputedStyle(element).opacity),
           );
         return {
-          cue: shade('.cue-line .cue-word'),
-          quote: shade('blockquote .cue-word'),
+          cue: strength('h2 .cue-word'),
+          rest: strength('.cue-lead, blockquote'),
         };
       }, at);
-    // Nothing is hidden at the start: the quoted line waits at a readable
-    // strength, the cue's own words lighter because they darken at once.
     const first = await shades(0);
-    for (const shade of first.cue) expect(shade).toBeGreaterThan(0.2);
-    for (const shade of first.quote) expect(shade).toBeGreaterThan(0.6);
-    // The cue's words darken in reading order within moments.
+    expect(first.cue.length).toBeGreaterThan(3);
+    for (const shade of first.cue) expect(shade).toBeGreaterThanOrEqual(0.55);
+    expect(first.rest).toEqual([1, 1]);
     const during = await shades(200);
     expect(during.cue[0]).toBeGreaterThan(during.cue.at(-1)!);
+    expect(during.rest).toEqual([1, 1]);
     expect((await shades(750)).cue.every((shade) => shade === 1)).toBe(true);
-    // The quoted line follows at about the pace it was said, word by word.
-    const spoken = await shades(1_800);
-    expect(spoken.quote[0]).toBe(1);
-    expect(spoken.quote.at(-1)!).toBeLessThan(1);
-    const after = await shades('end');
-    expect([...after.cue, ...after.quote].every((shade) => shade === 1)).toBe(
-      true,
-    );
+    await shades('end');
     // From here on nothing may start the arrival again. Forget the starts
     // this check caused by rewinding, once they have all been reported.
     await page.waitForTimeout(150);
@@ -209,12 +202,28 @@ test('a quoted line is replayed at about the pace it was said', async ({
         Number(getComputedStyle(word).opacity),
       );
     }),
-  ).toEqual(Array(15).fill(0.5));
+  ).toEqual(Array(15).fill(0.55));
+  // The fill has a soft leading edge: a word or two part-filled at a time,
+  // everything before them full and everything after still waiting.
+  const filling = await heading.evaluate((element) => {
+    for (const animation of element.getAnimations({ subtree: true })) {
+      animation.pause();
+      animation.currentTime = 2_000;
+    }
+    return [...element.querySelectorAll('span')].map((word) =>
+      Number(getComputedStyle(word).opacity),
+    );
+  });
+  const partly = filling.filter((shade) => shade > 0.55 && shade < 1);
+  expect(partly.length).toBeGreaterThanOrEqual(1);
+  expect(partly.length).toBeLessThanOrEqual(3);
+  expect(filling).toEqual([...filling].sort((a, b) => b - a));
+  expect(filling[0]).toBe(1);
+  expect(filling.at(-1)).toBe(0.55);
 });
 
-test('a very long quoted line still finishes within about six seconds, and a cue first seen held does not replay', async ({
-  page,
-}) => {
+/** Opens the companion with the live-session stand-in, motion allowed. */
+async function liveCompanion(page: Page, width: number) {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.route('**/*', async (route) => {
     if (route.request().resourceType() !== 'document') return route.continue();
@@ -227,49 +236,129 @@ test('a very long quoted line still finishes within about six seconds, and a cue
       ),
     });
   });
-  await page.setViewportSize({ width: 420, height: 340 });
+  await page.setViewportSize({ width, height: 340 });
   await page.goto('/?window=cue');
   await page.waitForFunction(() => !!window.liveTest);
   await page.evaluate(() => window.liveTest.start());
-  const cue = {
-    id: 'fictional-long-line',
-    kind: 'Owner',
-    question: 'Who will take the first draft of the welcome guide?',
-    // About a minute of fictional speech in one line.
-    evidence: `${'We talked about the gate code, the tool shed, the accessible route past the herb beds and the rota for the open day. '.repeat(8)}Someone can take the first draft.`,
-    sourceId: 'transcript:fictional-long',
-    remainingMs: 18_000,
-    totalMs: 18_000,
-    held: false,
-    expanded: false,
-    resolvedBy: null,
-    note: null,
-    aboutFocus: false,
-  };
-  await page.evaluate((value) => window.liveTest.setCue(value), cue);
-  const question = page.getByRole('region', { name: 'Suggested question' });
-  const words = question.locator('blockquote span');
+  return page.getByRole('region', { name: 'Suggested question' });
+}
+
+const liveCue = {
+  id: 'fictional-live',
+  kind: 'Owner',
+  question: 'Who will take the first draft of the welcome guide?',
+  evidence: 'Someone can take the first draft of the welcome guide.',
+  sourceId: 'transcript:fictional-1',
+  remainingMs: 18_000,
+  totalMs: 18_000,
+  held: false,
+  expanded: false,
+  resolvedBy: null,
+  note: null,
+  aboutFocus: false,
+};
+
+test('a very long answer still finishes within about six seconds, and a cue first seen held does not replay', async ({
+  page,
+}) => {
+  const question = await liveCompanion(page, 420);
+  // The same cue shown already held, as after the companion is reopened.
+  const held = { ...liveCue, id: 'fictional-held-first', held: true };
+  await page.evaluate((value) => window.liveTest.setCue(value), held);
+  await expect(
+    question.getByRole('button', { name: 'Held', exact: true }),
+  ).toBeVisible();
+  expect(
+    await question
+      .getByRole('heading')
+      .locator('span')
+      .evaluateAll((spans) =>
+        spans.every((span) => span.getAnimations().length === 0),
+      ),
+  ).toBe(true);
+
+  // An answer that took about a minute to say arrives on it.
+  await page.evaluate((value) => window.liveTest.setCue(value), {
+    ...held,
+    remainingMs: 0,
+    resolvedBy: {
+      sourceId: 'transcript:fictional-long',
+      evidence: `${'We talked about the gate code, the tool shed, the accessible route past the herb beds and the rota for the open day. '.repeat(8)}Sam will take the first draft.`,
+    },
+  });
+  const words = question.locator('.cue-answer blockquote span');
   await expect(words.first()).toBeVisible();
   const starts = await wordStarts(words);
   expect(starts.length).toBeGreaterThan(150);
   expect(starts).toEqual([...starts].sort((a, b) => a - b));
   expect(starts.at(-1)!).toBeLessThanOrEqual(6_260);
-
-  // The same line shown already held, as after the companion is reopened.
-  await page.evaluate((value) => window.liveTest.setCue(value), {
-    ...cue,
-    id: 'fictional-long-line-held',
-    held: true,
-  });
-  await expect(
-    question.getByRole('button', { name: 'Held', exact: true }),
-  ).toBeVisible();
-  expect(
-    await words.evaluateAll((spans) =>
-      spans.every((span) => span.getAnimations().length === 0),
-    ),
-  ).toBe(true);
 });
+
+for (const [name, width, cue, needed] of [
+  ['an ordinary cue at 420 px', 420, liveCue, 3],
+  [
+    // 16 px bold is not large text, so it needs the higher ratio.
+    'a long cue at 360 px',
+    360,
+    {
+      ...liveCue,
+      id: 'fictional-live-long',
+      question:
+        'Who will take the first draft of the welcome guide with the map and the tool shed rules, and bring it to the next meeting so we can try it?',
+    },
+    4.5,
+  ],
+] as const)
+  test(`${name} is readable while it arrives: every word meets ${needed}:1 from the first frame`, async ({
+    page,
+  }) => {
+    const question = await liveCompanion(page, width);
+    await page.evaluate((value) => window.liveTest.setCue(value), cue);
+    await expect(question.getByRole('heading')).toHaveText(cue.question);
+    // Contrast of each cue word against the card at a moment of the
+    // arrival, from the colours and strengths actually drawn.
+    const sample = (at: number) =>
+      question.evaluate((card, time) => {
+        for (const animation of card.getAnimations({ subtree: true })) {
+          animation.pause();
+          animation.currentTime = time;
+        }
+        const channels = (colour: string) =>
+          colour
+            .match(/[\d.]+/g)!
+            .slice(0, 3)
+            .map(Number);
+        const luminance = (rgb: number[]) => {
+          const [r, g, b] = rgb.map((value) => {
+            const c = value / 255;
+            return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+          });
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        };
+        const heading = card.querySelector('h2')!;
+        const surface = channels(getComputedStyle(card).backgroundColor);
+        const ink = channels(getComputedStyle(heading).color);
+        const size = parseFloat(getComputedStyle(heading).fontSize);
+        const shown = Number(getComputedStyle(card).opacity);
+        const ratios = [...heading.querySelectorAll('span')].map((word) => {
+          const strength = Number(getComputedStyle(word).opacity);
+          const drawn = ink.map(
+            (value, index) =>
+              value * strength + surface[index] * (1 - strength),
+          );
+          return (luminance(surface) + 0.05) / (luminance(drawn) + 0.05);
+        });
+        return { weakest: Math.min(...ratios), size, shown };
+      }, at);
+    const first = await sample(0);
+    // Bold text counts as large from 18.66 px.
+    expect(first.size >= 18.66 ? 3 : 4.5).toBe(needed);
+    expect(first.weakest).toBeGreaterThanOrEqual(needed);
+    // By 150 ms the card itself has finished fading in.
+    const soon = await sample(150);
+    expect(soon.shown).toBeGreaterThan(0.95);
+    expect(soon.weakest).toBeGreaterThanOrEqual(needed);
+  });
 
 test('an answer to a held cue opens in place with a tick, keeps focus, and does not replay for a cue already answered', async ({
   page,

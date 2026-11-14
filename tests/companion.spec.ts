@@ -222,10 +222,11 @@ test('a question answered by the conversation leaves, and the words that answere
   ).toHaveCount(0);
   await expect(question).toContainText("“Let's have it ready by Friday");
   await expect(question).toContainText('Just said');
-  await expect(question).toContainText('a date or commitment, word for word');
-  await expect(
-    question.getByRole('button', { name: 'Keep this line' }),
-  ).toBeVisible();
+  await expect(question).toContainText('From the demo conversation');
+  // The quote is the cue: nothing is repeated under it, and the card has
+  // no control but Hold and Dismiss.
+  await expect(question.locator('blockquote')).toHaveCount(0);
+  await expect(question.getByRole('button')).toHaveCount(2);
   await expect(page.getByRole('status')).toHaveText('Demo running · Scripted');
   // The shorter voiced scene ends without leaving an unheld cue behind.
   await page.clock.runFor(18_500);

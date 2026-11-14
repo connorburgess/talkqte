@@ -25,7 +25,7 @@ test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width, height: 800 });
 });
 
-test('a question is held, dismissed and its quoted line kept from the keyboard at 480px', async ({
+test('a question is held and dismissed from the keyboard at 480px, and a quoted line fits', async ({
   page,
 }) => {
   await page.clock.install();
@@ -60,19 +60,15 @@ test('a question is held, dismissed and its quoted line kept from the keyboard a
   await expect(question).toHaveCount(0);
   await expect(notes).toBeFocused();
 
-  // The next cue quotes what was said; keeping it writes the line to the
-  // notes and leaves focus there.
+  // The next cue quotes what was said.
   await page.clock.runFor(46_000);
   await expect(question).toContainText('Just said');
-  const keep = question.getByRole('button', { name: 'Keep this line' });
   await expectToFit(question, 'quoted line');
-  await expectToFit(keep, 'Keep this line');
   await expectNoSidewaysScroll(page);
-  await keep.press('Enter');
+  await question
+    .getByRole('button', { name: 'Dismiss', exact: true })
+    .press('Enter');
   await expect(question).toHaveCount(0);
-  await expect(notes).toHaveValue(
-    /\[00:51\] Robin: “Let's have it ready by Friday/,
-  );
   await expect(notes).toBeFocused();
 });
 

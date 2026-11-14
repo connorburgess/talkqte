@@ -17,9 +17,8 @@ import {
 } from '../lib/types';
 import './cue-card.css';
 
-/** Words after these arrive together, so no line keeps the eye waiting. */
+/** Words after these arrive together, so no cue keeps the eye waiting. */
 const CUE_WORDS = 14;
-const QUOTE_WORDS = 36;
 /** An even speaking pace: about 160 words a minute. */
 const LETTER_MS = 60;
 /** A spoken line starts once the card has opened, and never runs long. */
@@ -109,25 +108,19 @@ function origin(cue: Cue, live: boolean) {
     cue.held && cue.remainingMs === 0 && !cue.resolvedBy
       ? `From earlier in ${conversation}`
       : `From ${conversation}`;
-  const focus = cue.aboutFocus ? ' · uses words from your focus list' : '';
-  switch (cue.kind) {
-    case 'Said':
-      return `${from} · a date or commitment, word for word${focus}`;
-    case 'Asked you':
-      return `${from} · uses your name${focus}`;
-    case 'Still open':
-      return `${from} · no line has used these focus words yet`;
-    default:
-      return `${from}${focus}`;
-  }
+  if (cue.kind === 'Still open')
+    return `${from} · no line has used these focus words yet`;
+  return cue.aboutFocus ? `${from} · uses words from your focus list` : from;
 }
 
 /**
- * The line a cue came from. Where the cue is itself words from that line (a
- * Said quote, a question put to you), they are already on the card, so an
- * ellipsis stands in for them and only the rest of the line is repeated.
+ * The line a cue came from. A Said cue is its line, quoted, so nothing is
+ * repeated under it. Where another cue is itself words from its line (a
+ * question put to you), an ellipsis stands in for them and only the rest of
+ * the line is shown.
  */
 function sourceLine(cue: Cue) {
+  if (cue.kind === 'Said') return '';
   const line = cue.evidence.trim();
   const own = cue.question.trim();
   const at = own ? line.indexOf(own) : -1;
@@ -139,24 +132,24 @@ function sourceLine(cue: Cue) {
 
 /**
  * Text as separate words, so an arriving cue can darken them one by one.
+ * Nothing starts hidden: every word is readable from the first frame.
  *
- * Words read on the card (its purpose, a suggested question, a note) darken
- * in reading order, quickly: `from` continues the order across two runs,
- * and the delay stops growing after `cap` words.
+ * A suggested cue's words darken in reading order, quickly; the delay stops
+ * growing after `cap` words.
  *
- * Words that were spoken darken at about the pace they were said. The
- * engine gives a line one time and no word timings, and a live line reaches
- * the card only after it has been transcribed, so this is a replay at an
- * even pace per letter, not the speaker's own timing.
+ * Words that were spoken (a Said quote, a later answer) fill from dim to
+ * full in order at about the pace they were said, with a soft leading edge
+ * about two words wide. The engine gives a line one time and no word
+ * timings, and a live line reaches the card only after it has been
+ * transcribed, so this is a replay at an even pace per letter, not the
+ * speaker's own timing. The line a cue came from is shown at once.
  */
 function Words({
   text,
-  from = 0,
   cap = 0,
   spoken = false,
 }: {
   text: string;
-  from?: number;
   cap?: number;
   spoken?: boolean;
 }) {
@@ -166,14 +159,19 @@ function Words({
   );
   const total = letters.reduce((sum, count) => sum + count, 0);
   const duration = Math.min(total * LETTER_MS, SPOKEN_MAX_MS);
+  // About two words are part-filled at any moment.
+  const fade = Math.round(
+    Math.min(520, Math.max(220, (2 * duration) / Math.ceil(parts.length / 2))),
+  );
   let before = 0;
   return parts.map((part, index) => {
     if (index % 2) return part;
     const style = spoken
       ? {
           '--at': `${Math.round(SPOKEN_START_MS + (before / total) * duration)}ms`,
+          '--fade': `${fade}ms`,
         }
-      : { '--i': Math.min(from + index / 2, cap) };
+      : { '--i': Math.min(index / 2, cap) };
     before += letters[index];
     return (
       <span
@@ -226,9 +224,7 @@ function Sources({ sources, label }: { sources: CueSource[]; label: string }) {
                 } · ${source.provenance.date} · prior note`
               : `This conversation · ${clockTime(source.provenance.atMs)} · ${source.provenance.speaker}`}
           </span>{' '}
-          <blockquote className="cue-quote">
-            “<Words text={source.text} cap={QUOTE_WORDS} />”
-          </blockquote>
+          <blockquote className="cue-quote">“{source.text}”</blockquote>
         </li>
       ))}
     </ul>
@@ -245,8 +241,6 @@ interface QuestionProps {
   onDismiss: () => void;
   /** Holds the cue until it is dismissed; the source is always in view. */
   onInspect: (expanded: boolean) => void;
-  /** Keeps a quoted line in the notebook; only a Said cue offers it. */
-  onKeep?: () => void;
 }
 
 export function Question({
@@ -257,7 +251,6 @@ export function Question({
   busy,
   onDismiss,
   onInspect,
-  onKeep,
   leaving = false,
   onLeft,
 }: QuestionProps & {
@@ -315,17 +308,10 @@ export function Question({
     >
       <div className="cue-scroll" ref={scroller}>
         <div className="cue-line">
-          <span className="cue-lead">
-            <Words text={purpose} cap={CUE_WORDS} />
-          </span>{' '}
+          <span className="cue-lead">{purpose}</span>{' '}
           <h2 aria-live={announce ? 'polite' : undefined}>
             {said && '“'}
-            <Words
-              text={cue.question}
-              from={purpose.split(/\s+/).length}
-              cap={CUE_WORDS}
-              spoken={said}
-            />
+            <Words text={cue.question} cap={CUE_WORDS} spoken={said} />
             {said && '”'}
           </h2>
         </div>
@@ -347,7 +333,6 @@ export function Question({
               style={{ '--left': cue.held ? 1 : shown } as CSSProperties}
             >
               <span className="cue-fill" />
-              <span className="cue-bead" />
             </span>
           ) : (
             <span className="cue-stays" id={staysId}>
@@ -407,9 +392,7 @@ export function Question({
                   <Unconfirmed at={cue.note.unconfirmed.lastConfirmedMs} />
                 )}
               </span>
-              <blockquote className="cue-quote">
-                “<Words text={cue.evidence} cap={QUOTE_WORDS} />”
-              </blockquote>
+              <blockquote className="cue-quote">“{cue.evidence}”</blockquote>
             </>
           ) : (
             <>
@@ -417,24 +400,12 @@ export function Question({
               {quote && (
                 <>
                   {' '}
-                  <blockquote className="cue-quote">
-                    “
-                    <Words text={quote} cap={QUOTE_WORDS} spoken={!said} />”
-                  </blockquote>
+                  <blockquote className="cue-quote">“{quote}”</blockquote>
                 </>
               )}
             </>
           )}
         </div>
-        {said && onKeep && (
-          <button
-            className="text-button keep-line"
-            disabled={busy}
-            onClick={onKeep}
-          >
-            Keep this line
-          </button>
-        )}
       </div>
       {/* Last in reading order; drawn in the corner. */}
       <button
