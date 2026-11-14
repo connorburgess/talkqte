@@ -68,8 +68,6 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
     case 'inspect_cue':
       // The browser preview never has a cue.
       throw new Error('That question has already passed.');
-    case 'keep_line':
-      throw new Error('That line has already passed.');
     case 'set_companion_position':
       state.companionPosition = (
         args as Commands['set_companion_position']

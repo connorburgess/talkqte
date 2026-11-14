@@ -45,7 +45,6 @@ export const mixedCue: Cue = {
   remainingMs: 18_000,
   totalMs: 18_000,
   held: false,
-  expanded: false,
   resolvedBy: null,
   note: null,
   aboutFocus: false,

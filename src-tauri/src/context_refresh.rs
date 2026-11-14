@@ -2059,10 +2059,10 @@ mod tests {
         sync(&mut engine, &refresh, &store);
         say(&mut engine, "w1", 9_000, GUIDE);
         let id = engine.state.cue.as_ref().unwrap().id.clone();
-        engine.inspect_cue(&id, true).unwrap();
+        engine.inspect_cue(&id).unwrap();
         let warning = |engine: &crate::engine::Engine| {
             let cue = engine.state.cue.as_ref().expect("the reminder stays");
-            assert!(cue.held && cue.expanded && cue.id == id);
+            assert!(cue.held && cue.id == id);
             assert_eq!(cue.question, "Garden welcome guide");
             cue.note.as_ref().unwrap().unconfirmed
         };

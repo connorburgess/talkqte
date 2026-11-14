@@ -30,7 +30,6 @@ export interface Cue {
   remainingMs: number;
   totalMs: number;
   held: boolean;
-  expanded: boolean;
   resolvedBy: {
     sourceId: string;
     evidence: string;
@@ -81,8 +80,8 @@ export interface Snapshot extends CueSnapshot {
 export type Commands = {
   set_live_cues_paused: { paused: boolean };
   respond_to_cue: { id: string; response: 'dismiss' };
-  keep_line: { id: string };
-  inspect_cue: { id: string; expanded: boolean };
+  /** Holds the cue until it is dismissed. */
+  inspect_cue: { id: string };
   set_companion_position: { value: CueSnapshot['companionPosition'] };
   set_question_size: { value: CueSnapshot['questionSize'] };
   update_notes: { notes: string };

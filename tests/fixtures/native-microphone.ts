@@ -251,7 +251,6 @@ async function say(text: string, question?: string) {
             remainingMs: 18_000,
             totalMs: 18_000,
             held: false,
-            expanded: false,
             resolvedBy: null,
             note: null,
             aboutFocus: false,
@@ -489,10 +488,10 @@ mockIPC(
       case 'export_markdown':
         return true;
       case 'inspect_cue': {
-        const { id, expanded } = args as Commands['inspect_cue'];
+        const { id } = args as Commands['inspect_cue'];
         if (session.cue?.id !== id)
           throw new Error('That question has already passed.');
-        await publish({ cue: { ...session.cue, expanded, held: true } });
+        await publish({ cue: { ...session.cue, held: true } });
         return;
       }
       case 'respond_to_cue':

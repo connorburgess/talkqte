@@ -13,7 +13,6 @@ const base = {
   remainingMs: 18_000,
   totalMs: 18_000,
   held: false,
-  expanded: false,
   resolvedBy: null,
   aboutFocus: false,
   sourceId: 'transcript:fictional-1',

@@ -23,7 +23,6 @@ fn main() {
             "set_processing_paused",
             "set_live_cues_paused",
             "respond_to_cue",
-            "keep_line",
             "inspect_cue",
             "set_companion_position",
             "set_question_size",

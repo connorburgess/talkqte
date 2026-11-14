@@ -115,10 +115,10 @@ test('the source shows without a click, and Hold keeps a question through later 
   await expect(
     question.getByRole('button', { name: 'Held', exact: true }),
   ).toBeFocused();
-  // Holding does not ask for the taller window that opening context used.
+  // The session holds the cue; that is all Hold asks for.
   expect(
     await page.evaluate(() => window.liveTest.session().cue),
-  ).toMatchObject({ held: true, expanded: false });
+  ).toMatchObject({ held: true });
   // Its time passes and a later line is heard; the held cue stays.
   await page.evaluate(async () => {
     const held = window.liveTest.session().cue!;
