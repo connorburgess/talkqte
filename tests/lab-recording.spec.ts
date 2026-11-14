@@ -619,7 +619,7 @@ test('the label bar goes above the recorded picture, not over it, and the sound 
       mode: 'prerendered',
     },
     appCommit: 'd703485',
-    cues: 'app rules',
+    cues: 'cues: unknown',
   });
   const picture = { width: 640, scale: 2 };
   const bar = await labelBar(browser, labels, picture);

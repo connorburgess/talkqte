@@ -60,7 +60,7 @@ Select **Google Chrome for Testing** as the application source. Whether the app'
 ```sh
 npm run lab:window-record -- --meeting <emulator record .json> --seconds 120 \
   --out <directory outside the repository> (--app-commit <sha> | --timing-log <file>) \
-  [--emulator-app "QuickTime Player"] [--cues "app rules"] [--keep-silent]
+  [--emulator-app "QuickTime Player"] [--keep-silent]
 ```
 
 ### What it records
@@ -79,8 +79,9 @@ It needs **Screen & System Audio Recording** for the app that starts it (Termina
 
 ### What is saved
 
-- **The video:** a label bar is added above the picture, never over it. It reads "Simulated meeting", "Fictional", "Synthetic voices", "Synthetic portraits", "Pre-rendered meeting" or "Live meeting", "Real TalkQTE app" with its commit, and "cues: app rules" (or the model, if a model bridge is ever approved).
+- **The video:** a label bar is added above the picture, never over it. It reads "Simulated meeting", "Fictional", "Synthetic voices", "Synthetic portraits", "Pre-rendered meeting" or "Live meeting", "Real TalkQTE app" with its commit, and where the cues came from.
 - **The commit:** it comes from `--app-commit`, or from the app's timing log when that records it.
+- **Where the cues came from** is read from the app's timing log after the run, never given by hand. Each `cue_decision` names its `decider` (`phrase_rule` or `model`); a log from before that field existed says `source`, where `evaluated` means a model. The model and effort come from the latest `evaluator` event. The label reads, for example, "cues: model, claude-opus-5-5, low effort", "cues: phrase rules", or "cues: none shown". Without a timing log it reads "cues: unknown". The record keeps the counts of each kind of decision.
 - **A take with no sound** is discarded unless `--keep-silent` is given.
 - **The record** names the two windows matched, the picture size, when recording started and stopped (wall-clock milliseconds), how many frames and sound buffers were written, and the emulator record it played.
 

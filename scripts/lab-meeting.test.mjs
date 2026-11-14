@@ -15,6 +15,7 @@ import {
   MAX_SECONDS,
   barSize,
   commitFromLog,
+  cuesFromLog,
   main as recorder,
   windowLabels,
 } from './lab-window-record.mjs';
@@ -201,7 +202,11 @@ test('a real-app recording is labelled with what it is, which app, and where the
     'Synthetic portraits',
   ]);
   assert.deepEqual(
-    windowLabels({ meeting, appCommit: 'd703485abcdef', cues: 'app rules' }),
+    windowLabels({
+      meeting,
+      appCommit: 'd703485abcdef',
+      cues: 'cues: unknown',
+    }),
     [
       'Simulated meeting',
       'Fictional',
@@ -209,14 +214,14 @@ test('a real-app recording is labelled with what it is, which app, and where the
       'Synthetic portraits',
       'Pre-rendered meeting',
       'Real TalkQTE app d703485',
-      'cues: app rules',
+      'cues: unknown',
     ],
   );
   assert.ok(
     windowLabels({
       meeting: { ...meeting, mode: 'live' },
       appCommit: 'abc1234',
-      cues: 'model:claude-opus-5-5',
+      cues: 'cues: model, claude-opus-5-5, low effort',
     }).includes('Live meeting'),
   );
   assert.deepEqual(meetingLabels({ sound: 'tone', portraits: null }), [
@@ -304,7 +309,12 @@ test('the recorder refuses before building or running anything', async () => {
       ['--meeting', meetingFile, '--out', outside(), '--seconds', '60'],
       /Say which TalkQTE/,
     ],
-    [[...base, '--seconds', '60', '--cues', 'anything'], /--cues is/],
+    // Where the cues came from is never given by hand: it is read from
+    // the app's timing log.
+    [
+      [...base, '--seconds', '60', '--cues', 'app rules'],
+      /Unknown or incomplete argument/,
+    ],
     [
       [
         '--meeting',
@@ -365,4 +375,73 @@ test('the emulator refuses unknown modes, missing choices and conversations not 
     ],
   ])
     await assert.rejects(emulator(args, { print: () => {} }), message);
+});
+
+test("where the cues came from is read from the app's timing log, never assumed", () => {
+  const log = (...events) =>
+    events.map((event) => JSON.stringify(event)).join('\n');
+  // No log at all: unknown.
+  assert.deepEqual(cuesFromLog(undefined), {
+    label: 'cues: unknown',
+    decisions: null,
+    model: null,
+    effort: null,
+  });
+  // The decider field, as the app will write it.
+  assert.equal(
+    cuesFromLog(
+      log(
+        { event: 'session', state: 'started' },
+        { event: 'cue_decision', decider: 'phrase_rule', cue: 'c1' },
+        { event: 'cue_decision', decider: 'phrase_rule', cue: 'c2' },
+      ),
+    ).label,
+    'cues: phrase rules',
+  );
+  const model = cuesFromLog(
+    log(
+      {
+        event: 'evaluator',
+        state: 'on',
+        model: 'claude-haiku-5-5',
+        effort: 'medium',
+      },
+      {
+        event: 'evaluator',
+        state: 'on',
+        model: 'claude-opus-5-5',
+        effort: 'low',
+        backend: 'claude-cli',
+      },
+      { event: 'cue_decision', decider: 'model', cue: 'c1', request: 3 },
+    ),
+  );
+  assert.equal(model.label, 'cues: model, claude-opus-5-5, low effort');
+  assert.deepEqual(model.decisions, { phrase_rule: 0, model: 1, unknown: 0 });
+  // A log from before the decider field: its source says the same.
+  assert.equal(
+    cuesFromLog(
+      log(
+        { event: 'cue_decision', source: 'line', cue: 'c1' },
+        { event: 'cue_decision', source: 'evaluated', cue: 'c2' },
+      ),
+    ).label,
+    'cues: phrase rules and model (not named in the log)',
+  );
+  // A decider it does not know is reported as unknown, not as either.
+  assert.equal(
+    cuesFromLog(log({ event: 'cue_decision', decider: 'oracle' })).label,
+    'cues: unknown',
+  );
+  // A run in which no cue was decided says so.
+  assert.equal(
+    cuesFromLog(log({ event: 'session', state: 'started' })).label,
+    'cues: none shown',
+  );
+  assert.equal(
+    cuesFromLog(
+      log({ event: 'evaluator', model: 'claude-opus-5-5', effort: 'low' }),
+    ).label,
+    'cues: model, claude-opus-5-5, low effort, none shown',
+  );
 });

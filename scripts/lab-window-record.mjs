@@ -7,7 +7,10 @@
 //     --seconds 120 --out <directory outside the repository> \
 //     (--app-commit <sha> | --timing-log <TalkQTE timing log .jsonl>) \
 //     [--emulator-app "QuickTime Player"] [--emulator-title <text>] \
-//     [--cues "app rules"] [--keep-silent]
+//     [--keep-silent]
+//
+// Where the cues came from is read from the app's timing log, never assumed:
+// without a log the label says "cues: unknown".
 //
 // It needs the Screen & System Audio Recording permission for the app that
 // starts it (Terminal, for example). It checks that first, without asking,
@@ -41,12 +44,69 @@ const BAR_HEIGHT = 30; // In points, before the display's scale.
 
 /** The labels a real-app recording carries, on screen and in its record. */
 export function windowLabels({ meeting, appCommit, cues }) {
+  // `cues` is the label cuesFromLog worked out, such as "cues: unknown".
   return [
     ...meeting.labels,
     meeting.mode === 'live' ? 'Live meeting' : 'Pre-rendered meeting',
     `Real TalkQTE app ${appCommit.slice(0, 7)}`,
-    `cues: ${cues}`,
+    cues,
   ];
+}
+
+const DECIDERS = { phrase_rule: 'phrase rules', model: 'model' };
+
+/** Where the app's cues came from in this run, from its timing log: each
+ * `cue_decision` names its `decider` ("phrase_rule" or "model"); a log
+ * written before that field existed says `source` instead, where
+ * "evaluated" means a model and anything else the phrase rules. The model
+ * and effort come from the latest `evaluator` event that names a model.
+ * Nothing is guessed: no log gives "cues: unknown". */
+export function cuesFromLog(text) {
+  if (typeof text !== 'string')
+    return {
+      label: 'cues: unknown',
+      decisions: null,
+      model: null,
+      effort: null,
+    };
+  const decisions = { phrase_rule: 0, model: 0, unknown: 0 };
+  let model = null;
+  let effort = null;
+  for (const line of text.split('\n')) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (event.event === 'evaluator' && typeof event.model === 'string') {
+      model = event.model;
+      effort = typeof event.effort === 'string' ? event.effort : null;
+    }
+    if (event.event !== 'cue_decision') continue;
+    const decider =
+      event.decider ??
+      (typeof event.source === 'string'
+        ? event.source === 'evaluated'
+          ? 'model'
+          : 'phrase_rule'
+        : null);
+    decisions[Object.hasOwn(DECIDERS, decider) ? decider : 'unknown']++;
+  }
+  const modelPart = model
+    ? `model, ${model}${effort ? `, ${effort} effort` : ''}`
+    : 'model (not named in the log)';
+  const kinds = [
+    ...(decisions.phrase_rule ? ['phrase rules'] : []),
+    ...(decisions.model ? [modelPart] : []),
+    ...(decisions.unknown ? ['unknown'] : []),
+  ];
+  const label = kinds.length
+    ? `cues: ${kinds.join(' and ')}`
+    : model
+      ? `cues: ${modelPart}, none shown`
+      : 'cues: none shown';
+  return { label, decisions, model, effort };
 }
 
 /** The app's commit from its timing log's first session start, if the log
@@ -219,7 +279,6 @@ export async function main(
       '--timing-log',
       '--emulator-app',
       '--emulator-title',
-      '--cues',
     ],
     switches: ['--keep-silent'],
   });
@@ -253,9 +312,6 @@ export async function main(
     throw new Error(
       "Say which TalkQTE the recording shows: --app-commit <sha>, or --timing-log <file> from a build that records its commit. The recording's label names it.",
     );
-  const cues = flags['--cues'] ?? 'app rules';
-  if (!/^(app rules|model:[a-z0-9.-]+)$/.test(cues))
-    throw new Error('--cues is "app rules" or "model:<model id>".');
   const directory = outputDirectory(flags['--out'], {});
 
   const binary = await helper();
@@ -312,7 +368,13 @@ export async function main(
       throw new Error(
         'Nothing was kept: no sound was recorded from the emulator. If it is a browser, its sound may come from a helper process the capture does not follow; use the pre-rendered meeting in QuickTime Player, or --keep-silent to keep a silent take.',
       );
-    const labels = windowLabels({ meeting, appCommit, cues });
+    // Read after the run, so the log holds this run's decisions.
+    const cues = cuesFromLog(
+      flags['--timing-log']
+        ? readFileSync(flags['--timing-log'], 'utf8')
+        : undefined,
+    );
+    const labels = windowLabels({ meeting, appCommit, cues: cues.label });
     const { chromium } = await import('@playwright/test');
     const browser = await chromium.launch();
     let file;
@@ -333,7 +395,13 @@ export async function main(
       simulated: true,
       labels,
       mode: meeting.mode,
-      app: { commit: appCommit, cues },
+      app: {
+        commit: appCommit,
+        cues: {
+          ...cues,
+          from: flags['--timing-log'] ? 'timing log' : 'no timing log given',
+        },
+      },
       meeting: {
         record: basename(flags['--meeting']),
         conversation: meeting.source.conversation,
