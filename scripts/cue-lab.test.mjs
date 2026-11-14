@@ -3,12 +3,14 @@ import { access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { test } from 'node:test';
 import {
+  CONTRACT,
   MODEL,
   assertSubscription,
   buildPrompt,
   execute,
   loadCases,
   main,
+  openIsolatedCli,
   runLab,
   subscriptionEnvironment,
   validateDecision,
@@ -276,5 +278,116 @@ test('fixtures exercise suppression, resolution, uncertain use and context remin
       fixture.existingCue === null ||
         fixture.existingCue.sourceIds.every((id) => ids.has(id)),
     );
+  }
+});
+
+test('the isolated request is the same for any caller: its own model, effort and reply check, nothing else changed', async () => {
+  const sonnet = 'claude-sonnet-5-5';
+  const reply = { speaker: 'Elena', text: 'Fictional line.', next: 'end' };
+  const fake = fakeRunner({
+    result: {
+      ...success,
+      result: JSON.stringify(reply),
+      modelUsage: { [sonnet]: {} },
+    },
+  });
+  const cli = await openIsolatedCli({ environment, run: fake.run });
+  const seen = [];
+  try {
+    const answer = await cli.request({
+      model: sonnet,
+      effort: 'low',
+      systemPrompt: 'A fictional role prompt.',
+      input: '{"fictional":true}',
+      reply: (value) => {
+        seen.push(value);
+        return value;
+      },
+    });
+    assert.deepEqual(answer.value, reply);
+    assert.deepEqual(seen, [reply]);
+  } finally {
+    await cli.close();
+  }
+  // Same isolation as the evaluator: only the model, effort and prompt differ.
+  const evaluatorRun = fakeRunner();
+  await runLab(answered, { environment, run: evaluatorRun.run });
+  const evaluatorArgs = evaluatorRun.calls.at(-1).args;
+  const args = fake.calls.at(-1).args;
+  const differing = args
+    .map((arg, i) => [arg, evaluatorArgs[i]])
+    .filter(([a, b]) => a !== b);
+  assert.equal(args.length, evaluatorArgs.length);
+  assert.deepEqual(
+    differing.map(([a]) => a),
+    [
+      sonnet,
+      'low',
+      JSON.stringify(CONTRACT.cli.settings).replaceAll('{model}', sonnet),
+      'A fictional role prompt.',
+    ],
+  );
+  assert.equal(fake.calls.at(-1).options.input, '{"fictional":true}');
+  assert.deepEqual(
+    fake.calls.at(-1).options.env,
+    evaluatorRun.calls.at(-1).options.env,
+  );
+});
+
+test('the isolated request refuses inherited credentials, odd models and efforts, other models and rejected replies, without retry', async () => {
+  await assert.rejects(
+    openIsolatedCli({
+      environment: { ...environment, ANTHROPIC_API_KEY: 'x' },
+      run: fakeRunner().run,
+    }),
+    /No process was started/,
+  );
+  const fake = fakeRunner({
+    result: { ...success, modelUsage: { [MODEL]: {}, other: {} } },
+  });
+  const cli = await openIsolatedCli({ environment, run: fake.run });
+  try {
+    const before = fake.calls.length;
+    const ask = (params) =>
+      cli.request({
+        model: MODEL,
+        effort: 'low',
+        systemPrompt: 'p',
+        input: 'i',
+        reply: (v) => v,
+        ...params,
+      });
+    await assert.rejects(
+      ask({ model: '--dangerously-skip-permissions' }),
+      /no usable model/,
+    );
+    await assert.rejects(ask({ effort: 'max' }), /no usable effort/);
+    assert.equal(fake.calls.length, before);
+    await assert.rejects(ask({}), /did not verify the requested model/);
+    assert.equal(fake.calls.length, before + 1);
+  } finally {
+    await cli.close();
+  }
+  const rejecting = fakeRunner();
+  const other = await openIsolatedCli({ environment, run: rejecting.run });
+  try {
+    await assert.rejects(
+      other.request({
+        model: MODEL,
+        effort: 'low',
+        systemPrompt: 'p',
+        input: 'i',
+        reply: () => {
+          throw new Error('Unusable reply.');
+        },
+      }),
+      /Unusable reply/,
+    );
+    assert.equal(
+      rejecting.calls.filter((c) => c.args.includes('--print')).length,
+      1,
+    );
+  } finally {
+    await other.close();
   }
 });
