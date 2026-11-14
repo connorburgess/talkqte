@@ -44,7 +44,7 @@ These browser renderings use only the bundled fictional demo at a 420 × 340 CSS
 
 Earlier companions: [full-width Dismiss](assets/companion-simple-cues.jpg) and [corner Dismiss with Why?](assets/companion-light-controls.png).
 
-When a held question is answered by a later line, the companion keeps it and shows the answer above its source, at the same window size. These earlier browser captures show the previous card in that state, using the bundled fictional demo at 51 seconds, a 420 × 600 CSS-pixel viewport, and reduced motion.
+When a held question is answered by a later line, the companion keeps it and shows the answer above its source, at the same window size. This browser rendering shows a fictional held question after its answer has opened, at 420 × 340 CSS px with reduced motion: ![A held fictional question with a ticked “Answered later in the conversation” label, the answering line, a rule, and the line that raised the question](assets/cue-answer-after.png) These earlier browser captures show the previous card in that state, using the bundled fictional demo at 51 seconds, a 420 × 600 CSS-pixel viewport, and reduced motion.
 
 | Before: held question, no answer shown                                                       | After: answer shown with its source                                                                              |
 | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
