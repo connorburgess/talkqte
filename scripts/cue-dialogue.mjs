@@ -1207,6 +1207,7 @@ export async function main(
       '--generator-effort',
       '--participant-effort',
       '--evaluator-effort',
+      '--evaluator-reply',
       '--judge-effort',
     ],
     switches: ['--run', '--included-usage-confirmed'],
@@ -1284,6 +1285,9 @@ export async function main(
       EFFORTS,
     ),
   };
+  const evaluatorReply = flags['--evaluator-reply'] ?? PLANNED.evaluator.reply;
+  if (!['full', 'compact'].includes(evaluatorReply))
+    throw new Error('--evaluator-reply is full or compact.');
   const seed = flags['--seed'] ?? stamp();
   const latencyMs =
     flags['--latency-ms'] === undefined
@@ -1315,7 +1319,7 @@ export async function main(
       `Branches: ${branches.map((b) => `${b} (${BRANCHES[b]})`).join('; ')}.`,
     );
     print(
-      `Models for a run: generator ${models.generator} (${efforts.generator} effort), participants ${models.participants} (${efforts.cast}), cue evaluator ${models.evaluator} (${efforts.evaluator}) through the lab's own adapter, judge ${models.judge} (${efforts.judge}). A model run sends every request below to Anthropic through the Claude Code subscription sign-in, and needs the owner's go-ahead and --included-usage-confirmed.`,
+      `Models for a run: generator ${models.generator} (${efforts.generator} effort), participants ${models.participants} (${efforts.cast}), cue evaluator ${models.evaluator} (${efforts.evaluator}, ${evaluatorReply} reply) through the lab's own adapter, judge ${models.judge} (${efforts.judge}). A model run sends every request below to Anthropic through the Claude Code subscription sign-in, and needs the owner's go-ahead and --included-usage-confirmed.`,
     );
     if (worst > MAX_CALLS_CEILING) {
       print(
@@ -1409,6 +1413,7 @@ export async function main(
             ...(run ? { run } : {}),
             model: modelFor(models.evaluator),
             effort: efforts.evaluator,
+            compact: evaluatorReply === 'compact',
           })
         : createEvaluator('fake', { latencyMs }),
     plan: {

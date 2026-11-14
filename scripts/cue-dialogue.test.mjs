@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { claudeEvaluator, fakeEvaluator } from './cue-evaluators.mjs';
 import { createRunLog } from './cue-lab-output.mjs';
+import { COMPACT_PROMPT } from './cue-lab.mjs';
 import { DEFAULTS as SIM_DEFAULTS } from './cue-sim.mjs';
 import {
   briefProblems,
@@ -852,7 +853,16 @@ function fakeCli(brief, { fail = null } = {}) {
         value = (await fakes.judge.reply(view)).value;
       else if (prompt.startsWith('You are '))
         value = (await fakes.listener.reply(view)).value;
-      else value = (await evaluator.decide(view)).decision;
+      else {
+        const { decision } = await evaluator.decide(view);
+        value = prompt.startsWith(COMPACT_PROMPT)
+          ? {
+              action: decision.action,
+              cue: decision.cue,
+              sourceIds: decision.sourceIds,
+            }
+          : decision;
+      }
       return JSON.stringify({
         type: 'result',
         subtype: 'success',
@@ -1028,5 +1038,58 @@ test('only --run with --max-calls and --included-usage-confirmed starts the CLI;
   } finally {
     rmSync(out, { recursive: true, force: true });
     process.exitCode = 0;
+  }
+});
+
+test('a model run’s cue evaluator defaults to the lab’s working setting: Opus 5.5, low effort, compact reply', async () => {
+  const printed = [];
+  await main([], { print: (t) => printed.push(t), environment: cleanShell });
+  assert.match(
+    printed.join('\n'),
+    /cue evaluator opus-5\.5 \(low, compact reply\)/,
+  );
+  const cli = fakeCli(byId('release-handoff'));
+  const out = mkdtempSync(join(tmpdir(), 'cue-dialogue-'));
+  try {
+    const results = await main(
+      [
+        '--run',
+        '--max-calls',
+        '110',
+        '--included-usage-confirmed',
+        '--out',
+        out,
+        '--scenarios',
+        '1',
+        '--domains',
+        'software',
+        '--open',
+        '2',
+        '--settled',
+        '0',
+        '--decoys',
+        '1',
+      ],
+      { print: () => {}, run: cli.run, environment: cleanShell },
+    );
+    assert.equal(results.stopped, null);
+    const at = (c, flag) => c.args[c.args.indexOf(flag) + 1];
+    const evaluations = cli.calls.filter(
+      (c) =>
+        c.args.includes('--print') &&
+        at(c, '--system-prompt').startsWith(COMPACT_PROMPT),
+    );
+    assert.ok(evaluations.length > 0);
+    assert.equal(evaluations.length, results.calls.byRole.evaluator);
+    for (const c of evaluations) {
+      assert.equal(at(c, '--model'), 'claude-opus-5-5');
+      assert.equal(at(c, '--effort'), 'low');
+    }
+    await assert.rejects(
+      main(['--evaluator-reply', 'short'], { print: () => {} }),
+      /full or compact/,
+    );
+  } finally {
+    rmSync(out, { recursive: true, force: true });
   }
 });

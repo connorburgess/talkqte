@@ -45,7 +45,8 @@ export const PLANNED = {
   generator: { model: 'sonnet-5.5', effort: 'medium' },
   cast: { model: 'haiku-5.5', effort: 'low' },
   listener: { model: 'haiku-5.5', effort: 'low' },
-  evaluator: { model: 'opus-5.5', effort: 'medium' },
+  // The cue lab's working default: the best of its four-way comparison.
+  evaluator: { model: 'opus-5.5', effort: 'low', reply: 'compact' },
   judge: { model: 'sonnet-5.5', effort: 'medium' },
 };
 
