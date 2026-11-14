@@ -160,6 +160,7 @@ export async function openLabBroker({
   maxCalls,
   signal,
   runId = randomUUID(),
+  onTerminal = () => {},
 } = {}) {
   requireThat(
     provider &&
@@ -168,7 +169,8 @@ export async function openLabBroker({
       ['codex', 'claude-code'].includes(provider.metadata?.provider) &&
       text(provider.metadata.model, 100) &&
       text(provider.metadata.effort, 20) &&
-      /^[A-Za-z0-9_-]{1,64}$/.test(runId),
+      /^[A-Za-z0-9_-]{1,64}$/.test(runId) &&
+      typeof onTerminal === 'function',
   );
   requireThat(
     Number.isSafeInteger(maxCalls) && maxCalls >= 1 && maxCalls <= 100,
@@ -227,6 +229,7 @@ export async function openLabBroker({
     signal,
     onTerminal: (category) => {
       observation = null;
+      onTerminal(category);
       readyReject(gateFailure(category));
       probe?.reject(gateFailure(category));
       evaluation?.rejectAck(gateFailure(category));
