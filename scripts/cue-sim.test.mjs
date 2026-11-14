@@ -2,10 +2,11 @@
 // evaluator here is a script or the deterministic fake: no process, model,
 // account or network is used.
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { testFolder } from './lab-test-folders.mjs';
 import {
   GLANCE_WORDS,
   MODEL,
@@ -542,7 +543,7 @@ test('the dry run starts nothing and says how many requests could leave the devi
 });
 
 test('a run is repeatable and writes results and a full event log outside the repository', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'talkqte-sim-test-'));
+  const directory = testFolder('talkqte-sim-test-');
   const run = () =>
     main(['--evaluator', 'fake', '--run', '--out', directory], {
       print: () => {},

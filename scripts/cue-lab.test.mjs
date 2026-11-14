@@ -8,6 +8,8 @@ import {
   assertSubscription,
   buildPrompt,
   execute,
+  failureSignals,
+  classifyFailure,
   loadCases,
   main,
   openIsolatedCli,
@@ -497,4 +499,65 @@ test('the evaluator keeps the contract’s 800-token output limit; another calle
   } finally {
     await cli.close();
   }
+});
+
+test('failure diagnostics retain fixed labels and classification priority without provider text', async () => {
+  const text =
+    'OAuth credential for fictional-account@example.com: 403; rate limit; network 503';
+  assert.deepEqual(failureSignals({ code: 1, text }), {
+    category: 'usage-limit',
+    signals: ['rate limit', 'credential', 'oauth', '403', 'network', '5xx'],
+  });
+  assert.equal(classifyFailure({ code: 1, text }), 'usage-limit');
+  for (const [details, category] of [
+    [{ code: 'ENOENT', text }, 'not-installed'],
+    [{ killed: true, text }, 'time-or-output-limit'],
+    [
+      { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER', text },
+      'time-or-output-limit',
+    ],
+    [{ code: 1, text: 'unrecognized private detail' }, 'other'],
+  ])
+    assert.deepEqual(failureSignals(details), { category, signals: [] });
+  await assert.rejects(
+    execute(
+      process.execPath,
+      [
+        '-e',
+        "process.stderr.write('OAuth credential fictional-account@example.com 403'); process.exit(1)",
+      ],
+      {
+        cwd: tmpdir(),
+        env: subscriptionEnvironment(process.env),
+      },
+    ),
+    (error) => {
+      assert.equal(error.category, 'auth');
+      assert.equal(error.exitCode, 1);
+      assert.deepEqual(error.signals, ['credential', 'oauth', '403']);
+      assert.ok(!JSON.stringify(error).includes('fictional-account'));
+      assert.ok(!error.message.includes('fictional-account'));
+      return true;
+    },
+  );
+});
+
+test('a failed structured CLI result carries labels without its original text', async () => {
+  const fake = fakeRunner({
+    result: {
+      ...success,
+      subtype: 'error',
+      is_error: true,
+      result: 'not logged in: fictional-account@example.com OAuth 401',
+    },
+  });
+  await assert.rejects(
+    runLab(answered, { environment, run: fake.run }),
+    (error) => {
+      assert.equal(error.category, 'auth');
+      assert.deepEqual(error.signals, ['not logged in', 'oauth', '401']);
+      assert.ok(!error.message.includes('fictional-account'));
+      return true;
+    },
+  );
 });

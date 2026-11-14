@@ -4,16 +4,15 @@ import assert from 'node:assert/strict';
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   realpathSync,
   symlinkSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { testFolder } from './lab-test-folders.mjs';
 import {
   COMPACT_PROMPT,
   CONTRACT,
@@ -94,7 +93,7 @@ function fakeCli(replies) {
   };
 }
 const clean = { HOME: '/fictional-home', PATH: '/fictional-bin' };
-const out = () => mkdtempSync(join(tmpdir(), 'talkqte-lab-test-'));
+const out = () => testFolder('talkqte-lab-test-');
 
 test('the rules record is the engine replay tests, case for case', async () => {
   const engine = readFileSync(

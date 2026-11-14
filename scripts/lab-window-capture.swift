@@ -166,6 +166,7 @@ struct Capture {
         emit([
           "event": "window", "app": window.owningApplication?.applicationName ?? "",
           "title": window.title ?? "", "windowId": Int(window.windowID),
+          "pid": Int(window.owningApplication?.processID ?? 0),
           "onScreen": window.isOnScreen, "frame": frameDictionary(window.frame),
         ])
       }
@@ -199,6 +200,14 @@ struct Capture {
     }
     let companionWindows = visible.filter {
       $0.owningApplication?.applicationName == companionApp
+    }
+    // Two running copies of the app (a preview build, say) share its name:
+    // refuse rather than guess which one is the run.
+    let companionProcesses = Set(companionWindows.compactMap { $0.owningApplication?.processID })
+    guard companionProcesses.count <= 1 else {
+      fail(
+        "\(companionProcesses.count) running copies of \(companionApp) have windows on screen. Quit every copy but the one under test. Nothing was recorded.",
+        code: 2)
     }
     var rule = "title"
     var companion = companionWindows.first { $0.title == companionTitle }
