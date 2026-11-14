@@ -276,6 +276,7 @@ function recorder({
     return stopping;
   }
   return Object.freeze({
+    playerSource,
     output,
     subscribe(listener) {
       requireThat(typeof listener === 'function');

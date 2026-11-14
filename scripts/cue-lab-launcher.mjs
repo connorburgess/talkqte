@@ -315,6 +315,7 @@ function launcher({
     subscribers.clear();
   };
   return Object.freeze({
+    playerSource,
     executable: build.executable,
     mode,
     directory,

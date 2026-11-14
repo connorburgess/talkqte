@@ -22,6 +22,8 @@ function fixture({
   playerDeadline = 1000,
   syncPlayerStop = false,
   syncRecorderStop = false,
+  foreignPlayer = false,
+  wrongSource = false,
 } = {}) {
   const trace = [],
     counts = {
@@ -101,6 +103,9 @@ function fixture({
         version: 1,
         listening: true,
         sessionId: '1',
+        source: {
+          application: wrongSource ? 'QuickTime Player' : 'TalkQTE Lab Player',
+        },
       };
     },
     close() {
@@ -172,6 +177,16 @@ function fixture({
       return { stopped: true };
     },
   };
+  const guardReceipts = [];
+  launcher.playerSource = player.identity;
+  recorder.playerSource = foreignPlayer
+    ? {
+        ...player.identity,
+        pid: 123,
+        processStart: { seconds: '4', microseconds: 5 },
+        executable: '/fictional/other-player',
+      }
+    : player.identity;
   const take = createLabCaptureTake({
     runId: 'fictional-run',
     launcher,
@@ -181,6 +196,7 @@ function fixture({
     media,
     nativeReleaseMs: 20,
     processEvents,
+    onGuard: (receipt) => guardReceipts.push(receipt),
     // An attempted provider hook is deliberately never part of this API.
     settings: {
       openers: {
@@ -196,6 +212,7 @@ function fixture({
     trace,
     counts,
     processEvents,
+    guardReceipts,
     playEntered,
     failSource: () => sourceHandler({ type: 'failed' }),
   };
@@ -290,3 +307,36 @@ for (const mode of ['syncPlayerStop', 'syncRecorderStop'])
     assert.equal(f.take.phase, 'failed-cleanup');
     if (mode === 'syncRecorderStop') assert.equal(f.counts.playerClose, 0);
   });
+
+test('same-run foreign player capture identity is rejected before native construction', () => {
+  assert.throws(() => fixture({ foreignPlayer: true }));
+});
+test('historical Listening for another fixed source does not permit playback', async () => {
+  const f = fixture({ wrongSource: true });
+  await assert.rejects(f.take.done);
+  assert.equal(f.counts.play, 0);
+});
+test('numeric source guard receipts preserve actual Start timing and full-media reserve', async () => {
+  const f = fixture();
+  const result = await f.take.done;
+  assert.equal(f.guardReceipts.length, 2);
+  const [request, actual] = f.guardReceipts;
+  assert.equal(request.sourceDeadline - request.nativeStartedAt, 110000);
+  assert.equal(
+    request.remainingAtRequestMs,
+    request.sourceDeadline - request.startRequestAt,
+  );
+  assert.ok(
+    request.remainingAtRequestMs >=
+      102480 + request.startBudgetMs + request.completionReserveMs,
+  );
+  assert.equal(actual.actualAnchorMs, result.anchor.monotonicMs);
+  assert.equal(
+    actual.remainingAtAnchorMs,
+    actual.sourceDeadline - actual.actualAnchorMs - actual.actualUncertaintyMs,
+  );
+  assert.ok(actual.remainingAtAnchorMs >= 102480 + actual.completionReserveMs);
+  assert.equal(result.guard, actual);
+  assert.equal(f.take.guard, actual);
+  assert.ok(Object.isFrozen(actual));
+});

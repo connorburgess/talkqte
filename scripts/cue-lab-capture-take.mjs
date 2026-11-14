@@ -19,9 +19,14 @@ export function createLabCaptureTake({
   completionReserveMs = 1000,
   nativeReleaseMs = 6000,
   processEvents = process,
+  onGuard,
 } = {}) {
   required(
-    typeof processEvents?.on === 'function' &&
+    (onGuard === undefined || typeof onGuard === 'function') &&
+      player?.identity &&
+      launcher?.playerSource === player.identity &&
+      recorder?.playerSource === player.identity &&
+      typeof processEvents?.on === 'function' &&
       typeof processEvents?.off === 'function' &&
       Number.isSafeInteger(nativeReleaseMs) &&
       nativeReleaseMs >= 1 &&
@@ -66,7 +71,8 @@ export function createLabCaptureTake({
     closing = null,
     work,
     nativeStartedAt = null,
-    anchor = null;
+    anchor = null,
+    guard = null;
   const owner = createLabNativeOwner({
     executable: launcher.executable,
     launch: (options) => launcher.launch(options),
@@ -151,6 +157,7 @@ export function createLabCaptureTake({
         nativeReleased: true,
         mediaSha256: media.sha256,
         anchor,
+        guard,
       });
     })().then(resolve, reject);
     return closing;
@@ -190,7 +197,9 @@ export function createLabCaptureTake({
       verified?.path === media.path &&
         verified.sha256 === media.sha256 &&
         verified.durationMs === media.durationMs &&
-        player.identity?.runId === runId,
+        player.identity?.runId === runId &&
+        launcher.playerSource === player.identity &&
+        recorder.playerSource === player.identity,
     );
     nativeStartedAt = performance.now();
     await owner.start({ runId, signal: root.signal });
@@ -201,7 +210,8 @@ export function createLabCaptureTake({
     required(
       listening?.runId === runId &&
         listening.version === 1 &&
-        listening.listening === true,
+        listening.listening === true &&
+        listening.source?.application === 'TalkQTE Lab Player',
     );
     const recordDeadline = setTimeout(fail, recorderMs);
     try {
@@ -216,14 +226,25 @@ export function createLabCaptureTake({
     }
     const sourceDeadline = nativeStartedAt + 110000;
     // Conservatively measure from before owned spawn, not a late Listening receipt.
+    const startRequestAt = performance.now();
     required(
       !root.signal.aborted &&
-        performance.now() +
+        startRequestAt +
           startBudgetMs +
           media.durationMs +
           completionReserveMs <=
           sourceDeadline,
     );
+    guard = Object.freeze({
+      nativeStartedAt,
+      sourceDeadline,
+      startRequestAt,
+      startBudgetMs,
+      mediaDurationMs: media.durationMs,
+      completionReserveMs,
+      remainingAtRequestMs: sourceDeadline - startRequestAt,
+    });
+    onGuard?.(guard);
     phase = 'playing';
     const result = await player.play({
       media,
@@ -248,6 +269,14 @@ export function createLabCaptureTake({
                 sourceDeadline,
           );
           anchor = Object.freeze({ ...actual });
+          guard = Object.freeze({
+            ...guard,
+            actualAnchorMs: anchor.monotonicMs,
+            actualUncertaintyMs: anchor.uncertaintyMs,
+            remainingAtAnchorMs:
+              sourceDeadline - anchor.monotonicMs - anchor.uncertaintyMs,
+          });
+          onGuard?.(guard);
         } catch {
           fail();
         }
@@ -275,6 +304,9 @@ export function createLabCaptureTake({
     },
     get phase() {
       return phase;
+    },
+    get guard() {
+      return guard;
     },
   });
 }

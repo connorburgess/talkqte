@@ -24,6 +24,12 @@ positive canonical start seconds, microseconds, canonical executable and distinc
 application name. Native independently checks its own process and SCK association;
 the JS receipt is not a substitute for those checks.
 
+The launcher and recorder expose their frozen prepared player-source capability.
+The driver requires this same identity object as the player it actually starts,
+both at construction and immediately before native launch. Matching only a run
+ID cannot join different player processes. Historical Listening must name the
+fixed player application as well as the expected session.
+
 The v1 source observer accepts only explicitly configured QuickTime or TalkQTE Lab
 Player application identity. The recorder binds the player PID/window ID and the
 same owned native process. `createLabOwnedWindowSelector` invokes the dedicated
@@ -52,6 +58,11 @@ start deadline must fit that configured budget (one second for the first-take
 plan); a longer player deadline is rejected before take construction.
 It checks viability again against the actual render anchor and uncertainty.
 A late start is stopped; it is never relabeled successful or restarted.
+Readonly `take.guard`, optional `onGuard` and the final result expose frozen numeric
+request/actual-anchor receipts: conservative native start, source deadline, Start
+request, start budget, full media duration, completion reserve, remaining time and
+actual anchor uncertainty. The callback contains no text and must remain bounded;
+its failure stops the take. These values belong in the private run manifest.
 
 Capture-only has no evaluator calibration and admits zero CLI dispatches. The
 measured player mapping still must satisfy its own clock bound. Native transcript
@@ -86,3 +97,9 @@ strict-listing compilation is not device validation. Remaining setup includes
 approved native/player/helper receipts, exact companion visibility/permission
 observation, a thin reviewed execution plan and bounded private causal evidence
 writer. No app, player, audio, model or capture run is established by these tests.
+
+A failed listing parent close does not end process-group ownership: the bounded
+TERM/KILL path remains armed until the exact group is absent. A synchronous Stop
+exception also cannot skip independent native/player/recorder cleanup or listener
+removal. Either case retains failed-cleanup outcome rather than promoting parent
+exit to success.
