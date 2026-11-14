@@ -28,7 +28,7 @@
 // Every request is built from the role's view alone (see the views in
 // cue-dialogue-briefs.mjs), so what a role cannot see it is never sent.
 import { validateBrief } from './cue-dialogue-briefs.mjs';
-import { openIsolatedCli } from './cue-lab.mjs';
+import { EFFORTS, openIsolatedCli } from './cue-lab.mjs';
 
 export const ROLES = ['generator', 'cast', 'listener', 'judge'];
 
@@ -319,8 +319,8 @@ export function fakeAgents(briefs) {
   };
 }
 
-/** Efforts a role may ask the CLI for. */
-export const ROLE_EFFORTS = ['low', 'medium', 'high'];
+/** Efforts a role may ask the CLI for: those the shared contract lists. */
+export const ROLE_EFFORTS = EFFORTS;
 
 /** The four roles through Claude Code with the subscription sign-in, using
  * the cue lab's own isolated request (scripts/cue-lab.mjs): it refuses a

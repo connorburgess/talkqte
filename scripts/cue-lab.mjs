@@ -376,7 +376,8 @@ async function isolatedRequest(
   // Shapes only; each caller keeps its own list of what it may ask for.
   if (!/^claude-[a-z0-9-]+$/.test(model ?? ''))
     throw new Error('The request names no usable model; nothing was sent.');
-  if (!['low', 'medium', 'high'].includes(effort))
+  // Only the efforts the shared contract lists.
+  if (!EFFORTS.includes(effort))
     throw new Error('The request names no usable effort; nothing was sent.');
   // The argument list comes from the contract, with this request's model,
   // effort, settings and system prompt put in its marked places.
@@ -499,7 +500,12 @@ export async function openIsolatedCli({
       `This shell carries API, provider or proxy settings (${names.join(', ')}). No process was started. Run the lab from a shell without them; it uses the subscription sign-in only.`,
     );
   const cwd = await mkdtemp(join(tmpdir(), 'talkqte-cue-lab-'));
-  const options = { cwd, env: subscriptionEnvironment(environment) };
+  // Frozen, so nothing can change the child's environment or directory
+  // after the credential check.
+  const options = Object.freeze({
+    cwd,
+    env: Object.freeze(subscriptionEnvironment(environment)),
+  });
   const close = () => rm(cwd, { recursive: true, force: true });
   try {
     const access = await preflight(options, run);
