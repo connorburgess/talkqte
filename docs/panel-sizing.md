@@ -1,6 +1,6 @@
 # Adjustable notebook panels
 
-11 November 2026. Drag the divider beside the notebook list to change its width, or the divider between Notes/Transcript and the question to share the available space. Notebook, the meeting list and Settings now share one resizable sidebar; there is no separate fixed navigation rail. This is column resizing; panels are not reordered or detached.
+11 November 2026. Drag the divider beside the notebook list to change its width, or the divider between Notes/Transcript and the question to share the available space. Notebook, the meeting list and Settings now share one resizable sidebar; there is no separate fixed navigation rail. (Since 14 November 2026 the sidebar has no meeting list or search. Its divider is named **Sidebar** and its slider **Sidebar width**; resizing is unchanged.) This is column resizing; panels are not reordered or detached.
 
 The user task is to make context readable without squeezing the current question out of view. The existing paper and evergreen appearance, optional setup and cue controls remain. The notebook column has a bounded width and scrolls when its contents are taller than the window. Notes and the question each retain a minimum width; they stack when their container cannot fit both. Smaller windows use the existing full-width notebook layout.
 

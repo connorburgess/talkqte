@@ -173,12 +173,6 @@ a default build renders exactly as before.
   may be capturing it says instead that the microphone is not recorded or
   transcribed and that audio from a selected application may still be
   captured, pointing to Cue processing.
-- **Live layout preview.** Its intro and banner name Application audio among
-  the real parts while a source is reported. Its Real rows never say or imply that nothing is
-  captured while the source may be capturing. With the microphone off they
-  read "No microphone open." and "The microphone is off." instead.
-  The source has a Real row of its own, Application audio, in the same
-  wording as the panel, so the preview never shows capture state without it.
 
 ## Quitting
 
@@ -309,16 +303,13 @@ abandoned, it is not offered; the line says how cleanup is going.
 In a session for an application alone, the microphone panel says the
 application's audio is transcribed on this device and that the microphone is
 not used, and Stop live session ends the session. The session strip, the cue
-pause hint, the Transcript tab and the live layout's Real cue (its paused note
-and its Pause hint) credit the application instead of the microphone. The
-finishing line names application audio only while the source may still be
-capturing. The companion, which has no processing snapshot, reads a
+pause hint and the Transcript tab credit the application instead of the
+microphone. The finishing line names application audio only while the source
+may still be capturing. The companion, which has no processing snapshot, reads a
 metadata-only flag on its cue snapshot: it shows "App audio · Local" (or "App
 audio still on" with cues paused) instead of a bare "Off", and its pause hint
 names application audio. The flag is absent from every other snapshot, and
-from all of them in a default build. The live layout's Capture row
-says the session runs from application audio, and its transcript note says
-lines come from the application.
+from all of them in a default build.
 
 ## Not run, and the gates that stay open
 

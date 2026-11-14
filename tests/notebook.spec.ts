@@ -150,17 +150,15 @@ test('export saves exactly the reviewed text even as the demo moves on', async (
   await expect(dialog).not.toBeVisible();
 });
 
-test('search has a recoverable empty state and settings explain the prototype', async ({
+test('the sidebar has no meeting list or search, and settings explain the prototype', async ({
   page,
 }) => {
-  await page
-    .getByRole('textbox', { name: 'Search meetings' })
-    .fill('nothing here');
-  await expect(page.getByText('No matching meetings.')).toBeVisible();
-  await page.getByRole('button', { name: 'Clear search' }).first().click();
-  await expect(
-    page.getByRole('button', { name: /A better welcome Demo meeting/ }),
-  ).toBeVisible();
+  const sidebar = page.getByRole('complementary', {
+    name: 'Notebook navigation',
+  });
+  await expect(sidebar.getByRole('textbox')).toHaveCount(0);
+  await expect(sidebar.getByText('Meetings', { exact: true })).toHaveCount(0);
+  await expect(sidebar.getByText('A better welcome')).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page
     .getByRole('combobox', { name: 'Question timing' })

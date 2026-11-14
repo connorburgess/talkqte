@@ -182,33 +182,6 @@ test('an ordinary live session keeps its microphone wording', async ({
   );
 });
 
-test('the live layout says a source session runs without the microphone', async ({
-  page,
-}) => {
-  await notebook(page);
-  await sourceSession(page, 'listening');
-  await page
-    .getByRole('group', { name: 'Layout', exact: true })
-    .getByRole('button', { name: 'Layout preview', exact: true })
-    .press('Enter');
-  const preview = page.getByRole('region', {
-    name: 'Live session layout preview',
-  });
-  const frame = preview.getByRole('group', { name: 'Session layout preview' });
-  const row = (name: string) =>
-    frame.locator('dt', { hasText: name }).locator('+ dd');
-  await expect(row('Capture')).toHaveText(
-    'Real Live session running from application audio. The microphone is not used.',
-  );
-  await expect(row('Application audio')).toHaveText(
-    'Real Application audio from Fictional player is being captured, including all of its windows.',
-  );
-  await expect(preview).toContainText(
-    'No lines yet. Lines from the application appear a few seconds after they are heard.',
-  );
-  await expect(preview).not.toContainText('The microphone is not listening');
-});
-
 test("focus stays in the panel when the source's own Stop goes away", async ({
   page,
 }) => {
@@ -258,42 +231,6 @@ test('with the microphone not off, nothing says the microphone is not used', asy
     'Your microphone is transcribed on this device.',
   );
   await expect(microphone).not.toContainText('the microphone is not used');
-  await page
-    .getByRole('group', { name: 'Layout', exact: true })
-    .getByRole('button', { name: 'Layout preview', exact: true })
-    .press('Enter');
-  const preview = page.getByRole('region', {
-    name: 'Live session layout preview',
-  });
-  await expect(preview).not.toContainText('The microphone is not used');
-});
-
-test('the live layout follows the source session through starting and stopping', async ({
-  page,
-}) => {
-  await notebook(page);
-  await sourceSession(page, 'starting');
-  await page
-    .getByRole('group', { name: 'Layout', exact: true })
-    .getByRole('button', { name: 'Layout preview', exact: true })
-    .press('Enter');
-  const preview = page.getByRole('region', {
-    name: 'Live session layout preview',
-  });
-  await expect(preview).toContainText(
-    'No lines yet. Application audio is starting.',
-  );
-  await expect(preview).not.toContainText('Lines from the application appear');
-  // The live session is finishing: the Capture row says so, not "running".
-  await page.evaluate((value) => window.captureTest.send(value), {
-    phase: 'stopping',
-    capture: 'stopping',
-    microphone: 'off',
-    source: source('stopping', true),
-  } satisfies Partial<ProcessingSnapshot>);
-  await expect(preview).not.toContainText(
-    'Live session running from application audio',
-  );
 });
 
 // The companion has no processing snapshot; the cue snapshot's flag tells it.
@@ -421,32 +358,6 @@ test('an ordinary session draining is not described as application audio', async
   } satisfies Partial<ProcessingSnapshot>);
   await expect(body).toContainText(
     'Ending the live session. Application audio is shown under Cue processing.',
-  );
-});
-
-test('the live layout cue controls credit the application in a session with no microphone', async ({
-  page,
-}) => {
-  await notebook(page);
-  await sourceSession(page, 'listening');
-  await page
-    .getByRole('group', { name: 'Layout', exact: true })
-    .getByRole('button', { name: 'Layout preview', exact: true })
-    .press('Enter');
-  const preview = page.getByRole('region', {
-    name: 'Live session layout preview',
-  });
-  const pause = preview.locator('.mock-real-pause');
-  await expect(pause).toHaveAttribute(
-    'title',
-    'Clear the current cue; application audio and transcript continue.',
-  );
-  await pause.click();
-  await expect(preview).toContainText(
-    'Cues are paused; the application audio and transcript continue.',
-  );
-  await expect(preview).not.toContainText(
-    'the microphone and transcript continue',
   );
 });
 

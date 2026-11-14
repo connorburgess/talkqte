@@ -34,7 +34,7 @@ test.beforeEach(async ({ page }) => {
     page.getByRole('button', { name: 'Try demo', exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole('separator', { name: 'Meeting list', exact: true }),
+    page.getByRole('separator', { name: 'Sidebar', exact: true }),
   ).toBeVisible();
 });
 
@@ -47,7 +47,7 @@ test('dragging the notebook boundary changes width without losing notes', async 
   const before = await size(list);
   await drag(
     page,
-    page.getByRole('separator', { name: 'Meeting list', exact: true }),
+    page.getByRole('separator', { name: 'Sidebar', exact: true }),
     64,
   );
   await page.mouse.up();
@@ -85,7 +85,7 @@ test('notes and cue widths share available space and stop at readable limits', a
 test('keyboard resizing exposes the current width and limits', async ({
   page,
 }) => {
-  for (const name of ['Meeting list', 'Notes and transcript']) {
+  for (const name of ['Sidebar', 'Notes and transcript']) {
     const divider = page.getByRole('separator', { name, exact: true });
     await divider.focus();
     const initial = Number(await divider.getAttribute('aria-valuenow'));
@@ -114,7 +114,7 @@ test('Escape cancels a drag and a released pointer cannot keep resizing', async 
   page,
 }) => {
   const divider = page.getByRole('separator', {
-    name: 'Meeting list',
+    name: 'Sidebar',
     exact: true,
   });
   const list = page.getByRole('complementary', { name: 'Notebook navigation' });
@@ -132,7 +132,7 @@ test('a cancelled pointer restores the width and releases the drag', async ({
   page,
 }) => {
   const divider = page.getByRole('separator', {
-    name: 'Meeting list',
+    name: 'Sidebar',
     exact: true,
   });
   await divider.evaluate((el) =>
@@ -161,7 +161,7 @@ test('clickable sliders and reset work and widths survive Settings navigation on
   page,
 }) => {
   const divider = page.getByRole('separator', {
-    name: 'Meeting list',
+    name: 'Sidebar',
     exact: true,
   });
   await divider.press('End');
@@ -175,7 +175,7 @@ test('clickable sliders and reset work and widths survive Settings navigation on
   await expect(divider).toHaveAttribute('aria-valuenow', '400');
   await page.locator('.layout-controls summary').press('Enter');
   const slider = page.getByRole('slider', {
-    name: 'Notebook width',
+    name: 'Sidebar width',
     exact: true,
   });
   const box = (await slider.boundingBox())!;
@@ -198,7 +198,7 @@ test('narrow windows stack panels without overflow and restore preferred widths 
 }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const listDivider = page.getByRole('separator', {
-    name: 'Meeting list',
+    name: 'Sidebar',
     exact: true,
   });
   await listDivider.press('End');
@@ -206,7 +206,7 @@ test('narrow windows stack panels without overflow and restore preferred widths 
   await notes.fill('Fictional note stays while arranging the notebook.');
   for (const width of [1150, 1000, 880, 600, 375]) {
     await page.setViewportSize({ width, height: 800 });
-    // The meeting list stops resizing below 1000 px. Notes and the question
+    // The sidebar stops resizing below 1000 px. Notes and the question
     // stack only once their container cannot fit both side by side.
     if (width < 1000) await expect(listDivider).toHaveCount(0);
     if (width <= 760) await expect(page.getByRole('separator')).toHaveCount(0);
