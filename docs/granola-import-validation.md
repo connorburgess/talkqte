@@ -72,7 +72,7 @@ An audit compared each promise in [PRIVACY.md](../PRIVACY.md), the README and th
 **Established by test**
 
 - **Companion window:** its capability grants no export, note editing, name, focus, import, Granola, model, processing or capture-start command. Its payload carries the cue, that cue's source line and display state, not the notebook, the rest of the transcript, the name, focus lines or an unrelated imported note.
-- **Export:** it holds notes and the demo transcript, never the name, focus lines or imported notes. A live session is refused while running and after Stop, and starting one drops an earlier demo preview.
+- **Export:** it holds notes and the demo transcript, never the name, focus lines or imported notes. A live session is refused while running and after Stop, and starting one drops an earlier demo preview. (Since the demo was retired on 14 November 2026 the export holds notes only, with no transcript of any kind; the refusal for a live session is unchanged.)
 - **Interface:** the production content security policy allows connections only to the app's own IPC. In the browser preview, typed notes, focus and a name leave local storage, session storage, cookies, IndexedDB and the Cache API empty, every request goes to the page's own origin, and a reload shows nothing that was typed.
 - **Granola requests:** discovery, registration, the token exchange and every MCP request name `TalkQTE` as the user agent. The token travels only as a bearer header, never in an address or body, and is absent from `Debug` output.
 - **Disconnect during sign-in:** a sign-in waiting for the browser ends as cancelled without exchanging a code, and a connection that opens after Disconnect is dropped without another request.
