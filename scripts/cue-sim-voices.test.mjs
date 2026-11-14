@@ -51,7 +51,8 @@ const ID = 'paper-reading-group';
 test('each speaker gets one preset voice, and a line is named by what is said and how', async () => {
   const [conversation] = (await loadConversations()).filter((c) => c.id === ID);
   const plan = voicePlan(conversation);
-  assert.deepEqual(plan.voices, { Sofia: 'marin', Li: 'cedar', Dev: 'coral' });
+  // Preset voices only, a different one for each person in the call.
+  assert.deepEqual(plan.voices, { Sofia: 'marin', Li: 'cedar', Dev: 'ash' });
   assert.equal(plan.lines.length, conversation.lines.length);
   for (const line of plan.lines) {
     assert.equal(line.voice, plan.voices[line.speaker]);
