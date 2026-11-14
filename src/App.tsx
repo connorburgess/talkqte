@@ -318,11 +318,6 @@ function FloatingQuestion() {
                     }),
                   );
                 }}
-                onKeep={() =>
-                  void run(() =>
-                    bridge.command('keep_line', { id: state.cue!.id }),
-                  )
-                }
               />
             )}
           </>
@@ -798,15 +793,6 @@ function Notebook() {
     );
   const active = state.status === 'running' || state.status === 'paused';
   const live = state.live && state.status === 'running';
-  // Keeps a quoted line in the notes; the cue then goes like a dismissal.
-  const keepLine = () => {
-    if (!state.cue) return;
-    void run(async () => {
-      await bridge.command('keep_line', { id: state.cue!.id });
-      setNotice('Line kept in your notes.');
-      notesEditor.current?.focus();
-    });
-  };
   const inspectCue = (expanded: boolean) => {
     if (!state.cue) return;
     void run(() =>
@@ -1528,7 +1514,6 @@ function Notebook() {
                   live={state.live}
                   busy={busy}
                   onDismiss={dismiss}
-                  onKeep={keepLine}
                   onInspect={inspectCue}
                   empty={
                     <div className="question-idle">
