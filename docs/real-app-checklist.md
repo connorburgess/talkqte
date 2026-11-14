@@ -1,6 +1,6 @@
 # Real-app lab run: checklist
 
-One page to follow at the Mac for a recorded run of the real TalkQTE app hearing a fictional meeting. The [runbook](real-app-lab.md) has the detail behind each app step; the [meeting emulator page](meeting-emulator.md) has the detail behind the meeting and the recording. Fictional conversations only. Record on the Mac itself, never in a virtual machine.
+One page to follow at the Mac for a recorded run of the real TalkQTE app hearing a fictional meeting. The [runbook](real-app-lab.md) has the detail behind each app step; the [meeting emulator page](meeting-emulator.md) has the detail behind the meeting and the recording. Fictional conversations only. Record on the Mac itself, never in a virtual machine. Before each run, write its question, why existing evidence is insufficient, and its duration/call bounds. Stop at the first unexpected failure; a new macOS permission prompt requires the owner. Coordinate app launches and capture with other active runs.
 
 ## Once
 
@@ -42,7 +42,7 @@ One page to follow at the Mac for a recorded run of the real TalkQTE app hearing
 8. **Open the meeting video in QuickTime Player**, paused at the start. Nothing else plays in QuickTime Player. Keep its window and the TalkQTE companion both visible.
 9. **Start the session.** In the notebook's Cue processing panel, under "Application audio · development build":
    - press **List applications**;
-   - choose **QuickTime Player** (TalkQTE lists itself too; choosing it starts a session that hears nothing);
+   - choose **QuickTime Player**; only regular applications with a bundle identifier and a normal-level window are offered, with meeting/player apps first;
    - press **Start session from QuickTime Player**;
    - wait for "Application audio from QuickTime Player is being captured". Do not press play yet.
 10. **Dry-run the recorder.** Every line should read `ready`:
@@ -63,12 +63,14 @@ One page to follow at the Mac for a recorded run of the real TalkQTE app hearing
 ## Known on 14 November 2026
 
 - `open --env` and `--stderr` work: the log recorded the build's commit and features.
-- Starting from QuickTime Player failed four times with "Application audio did not start", while starting from TalkQTE itself worked. The native lane is investigating; until that is fixed, this checklist cannot be completed.
+- The earlier QuickTime startup failures were fixed in [#291](https://github.com/connorburgess/talkqte/pull/291), merged on 14 November 2026: resampled buffer timestamps and the observed planar buffer layout are accepted. A development build containing those fixes captured and transcribed the fictional meeting; this does not validate other output devices or sample rates.
+- The first recorded take matched the companion by title and had sound. It showed zero cues and made zero model calls. The recipe above is a capture/transcription run; model cues require a separately enabled development connection and its explicit processing approval. Do not label a take as model-driven unless the timing log establishes that.
+- A later selected-QuickTime aggregate diagnostic received nonzero audio samples, then stopped without saving audio/video. It was a separate probe, not another TalkQTE cue run. Chrome's selected-source comparison remained silent; see the [emulator evidence](meeting-emulator.md#what-has-and-has-not-been-checked).
 
-## Note down on the first run
+## Record for each run
 
 - whether TalkQTE needed reopening after the permission;
 - whether the recorder found the companion by its title;
 - whether the take has sound.
 
-Each of these is unverified until then.
+The companion-title match and recorded sound were observed once on the development Mac. Permission prompts, recovery and other hardware configurations still need their own evidence; the earlier take and aggregate probe do not establish model-cue delivery or usefulness.

@@ -1,12 +1,12 @@
 # Meeting emulator and window-only recording
 
-Status: development tooling, 14 November 2026. Built and checked offline. **No real-app run has been made**: that needs the owner at the Mac, a build of TalkQTE with local transcription, and the recording permission described below. The [real-app lab runbook](real-app-lab.md) covers the app side: the build, the permissions, the application source and the timing log. The [checklist](real-app-checklist.md) is the one page to follow at the Mac.
+Status: development tooling, 14 November 2026. Offline checks and one fictional real-app recording have run on the development Mac. That take captured and transcribed QuickTime Player but showed no cues; it was not a model-cue run. A bounded aggregate diagnostic later confirmed selected-QuickTime audio samples. These observations do not establish supported meeting capture or cue usefulness. The [real-app lab runbook](real-app-lab.md) covers the app side: the build, the permissions, the application source and the timing log. The [checklist](real-app-checklist.md) is the one page to follow at the Mac.
 
 The [cue simulation](cue-simulation.md) replays a conversation inside the browser preview with a stand-in for the app. This page is for the other kind of run: the real TalkQTE desktop app hearing a fictional meeting through its application source, and recording what it does.
 
 ## The meeting emulator
 
-`scripts/lab-emulator.mjs` plays a fictional conversation as a mock video call: invented portraits in a gallery of tiles, a ring on the current speaker, optional captions, and the lines spoken aloud. **TalkQTE is not in it**: the real app makes its own cues from what it hears.
+`scripts/lab-emulator.mjs` plays a fictional conversation as a mock video call: invented portraits in a gallery of tiles, a ring on the current speaker, optional captions, and the lines spoken aloud. **TalkQTE is not in it**: capture, transcription and any separately enabled cue processing belong to the real app. The emulator supplies no cues.
 
 Without `--results` it plays one of the bundled conversations. It plays only conversations the lab may play (the loader is `scripts/lab-playable.mjs`):
 
@@ -53,7 +53,7 @@ This serves the meeting from this Mac only (127.0.0.1) and prints the command th
   - Lines added before the meeting starts are refused.
 - **Played log:** every start, line spoken, line ended and line added is written to a `.played.jsonl` log with the wall-clock time, to line up with the app's timing log.
 
-Select **Google Chrome for Testing** as the application source. Whether the app's capture hears a browser at all is not yet known, because a browser plays sound from a helper process. The first device run settles it; until then, use the pre-rendered meeting.
+Chrome for Testing capture is currently blocked on the tested Mac. On 14 November 2026, an app run received only silent chunks. A later dedicated-instance diagnostic found an audio-active helper in the verified browser process tree that ScreenCaptureKit did not list. Both 12-second meters were silent: the main-only and helper-inclusive modes both had only the main process available to their filters. Page playback events overlapped voiced intervals, but no helper audio samples were captured, so physical audibility remains unverified. Use the pre-rendered QuickTime meeting for the checked capture path; this is not evidence about other browsers or configurations.
 
 ## Recording the real app, window by window
 
@@ -101,18 +101,19 @@ Recordings are private working files: the output directory must be outside the c
 
 ## What has and has not been checked
 
-Checked offline on 14 November 2026, on the macOS host:
+Tooling checks on 14 November 2026, on the macOS host:
 
 - A meeting video rendered from a recorded run with cached voices and portraits; its sound passed the clip check.
 - A live meeting served, opened, given an added line while playing, with its log written and a refusal for a speaker not in the call.
-- The capture program compiles and reports that the permission is not granted to this session.
+- The capture program compiled, and its permission preflight reported both unavailable and allowed states across the earlier sessions; it captures nothing when permission is unavailable.
 - The label bar placed above a test video with its sound kept.
 
 The offline tests are `scripts/lab-meeting.test.mjs` (in `npm run test:cue-lab`) and the opt-in browser tests in `tests/lab-recording.spec.ts` (`npm run test:lab-record`).
 
-Not checked, because each needs the owner and a real-app run:
+Observed native evidence on 14 November 2026:
 
-- whether the window filter finds the companion by its title;
-- whether the capture hears QuickTime Player, and whether it hears Chrome for Testing;
-- the recording itself;
-- lining the recording up with the app's timing log.
+- The first recorded take used a development build containing the QuickTime fixes later merged in [#291](https://github.com/connorburgess/talkqte/pull/291). The recorder matched the companion by title and produced a 92-second take with sound. The app received audible chunks and transcribed the fictional meeting, but showed no cues. Model calls: zero.
+- A separate, coordinated 12-second selected-QuickTime aggregate meter received nonzero audio samples while the exact fictional video played, then stopped. That diagnostic retained no audio or video and did not run TalkQTE transcription or cue inference.
+- The dedicated Chrome comparison above remains a failure of the tested selected-source path; it is not a successful browser meeting run.
+
+Still unverified: model cues reaching the real companion during captured speech, rendered cue timing against the recording, clean-Mac permission/recovery behavior, dependable source release across device changes, and participation/listening usefulness. Each further run needs a written question and bounds, uses fictional content only, and stops at the first unexpected failure. Existing grants permit coordinated runs without the owner present; a new macOS permission prompt still needs the owner's action.
