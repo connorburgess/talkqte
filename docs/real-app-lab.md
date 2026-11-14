@@ -125,7 +125,7 @@ development build":
    TalkQTE in System Settings → Privacy & Security, then quit and reopen the
    app if macOS asks (_to confirm_), and list again. The permission is granted
    once per build.
-3. Choose **QuickTime Player** and press **Start session from QuickTime
+3. Choose **QuickTime Player**, which is listed near the top, and press **Start session from QuickTime
    Player**. That starts a session for QuickTime Player alone, with no
    microphone.
 
@@ -134,7 +134,23 @@ QuickTime Player is being captured", then press play in QuickTime Player.
 
 A session for one application starts only while the microphone is not
 capturing, no other live session or demo is running, and the speech model is
-installed. A refusal is shown under the panel's Start in words.
+installed. A refusal is shown under the panel's Start in words. Only open
+applications with a window on screen are listed. If QuickTime Player is
+missing, open the MP4 so its window shows, then press **List again**.
+
+If the start fails, the panel names the reason where macOS or TalkQTE gave
+one:
+
+- macOS refused capture to this copy of TalkQTE. Right after the Screen
+  Recording grant, that should mean TalkQTE must be quit and reopened (_to
+  confirm_);
+- the application quit;
+- macOS could not capture its audio;
+- capture was stopped from macOS;
+- the audio arrived in a form TalkQTE cannot read.
+
+The timing log's `source_problem` line has the reason and ScreenCaptureKit's
+error code, and its `source_ended` line says how many chunks were transcribed.
 
 ## During the run
 
@@ -197,6 +213,8 @@ session clock.
 | `cue_decision`   | `session`, `cue`, `kind`, `source`, `question`, `source_id`, `elapsed_ms`              | The engine first holds a cue. `source` is `line`, `note`, `focus` or `evaluated`. Only `line` has `question` and `source_id`, the segment it came from. |
 | `cue_published`  | `session`, `cue`, `elapsed_ms`                                                         | The cue is in the snapshot sent to the companion window.                                                                                                |
 | `cue_cleared`    | `session`, `cue`, `elapsed_ms`                                                         | That cue has left the snapshot sent to the companion window.                                                                                            |
+| `source_problem` | `problem`, `os_code`                                                                   | An application source failed to start or stopped on its own. `os_code` is ScreenCaptureKit's error code, when it gave one.                              |
+| `source_ended`   | `application`, `problem`, `recognized_chunks`                                          | An application source's run ended, with its reason if it failed and how many chunks of its audio were transcribed.                                      |
 | `dropped`        | `count`                                                                                | Lines were lost since the last line written, because the queue was full or a write failed. Written before the next line.                                |
 
 What it can and cannot tell you:

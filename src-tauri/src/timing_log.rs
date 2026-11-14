@@ -103,6 +103,21 @@ pub enum Event {
         cue: String,
         elapsed_ms: u64,
     },
+    /// An application source failed to start, or stopped on its own.
+    /// `os_code` is ScreenCaptureKit's error code when it gave one.
+    SourceProblem {
+        problem: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        os_code: Option<i64>,
+    },
+    /// An application source's run ended: why, if anything went wrong, and
+    /// how many chunks of its audio were transcribed.
+    SourceEnded {
+        application: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        problem: Option<String>,
+        recognized_chunks: Option<u64>,
+    },
     /// Lines lost since the last line written, because the queue was full
     /// or a write failed.
     Dropped { count: u64 },

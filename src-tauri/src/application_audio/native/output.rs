@@ -46,7 +46,7 @@ impl Callback {
         let span = match unsafe { pcm.read(buffer, scratch) } {
             Ok(span) => span,
             Err(_) => {
-                self.fault.record();
+                self.fault.record_code(super::AUDIO_UNREADABLE);
                 return;
             }
         };

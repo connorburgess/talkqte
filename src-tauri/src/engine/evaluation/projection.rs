@@ -212,6 +212,17 @@ pub enum SourceProblem {
     /// A source-only session was asked for while another session or the demo
     /// was running. Nothing was started.
     SessionBusy,
+    /// macOS refused capture to this copy of TalkQTE. Just after the Screen
+    /// Recording grant, TalkQTE has to be quit and reopened.
+    PermissionNeedsReopen,
+    /// The application quit or can no longer be captured.
+    ApplicationEnded,
+    /// macOS could not capture the application's audio.
+    AudioCaptureFailed,
+    /// Capture was stopped outside TalkQTE, by the person or the system.
+    StoppedByMacOS,
+    /// The application's audio arrived in a form TalkQTE could not read.
+    AudioUnreadable,
 }
 
 /// What the notebook needs to describe the source truthfully. Metadata only:

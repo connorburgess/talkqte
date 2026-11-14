@@ -3,6 +3,7 @@
 //! Native filtering, callback safety and actual release still need device tests.
 
 use super::{Application, Control, Failure, Lease, Phase, Start};
+use objc2_screen_capture_kit::SCStreamErrorCode;
 use std::sync::{
     atomic::{AtomicBool, AtomicU8, Ordering},
     Arc,
@@ -48,6 +49,66 @@ pub enum Problem {
     StartFailed,
     StopFailed,
     RemoveFailed,
+    /// macOS refused capture to this process. Just after the Screen
+    /// Recording grant, that means TalkQTE must be quit and reopened.
+    PermissionNeeded,
+    /// The selected application quit or can no longer be captured.
+    SourceGone,
+    /// The stream began but macOS could not capture the application's audio.
+    AudioFailed,
+    /// Capture was stopped outside TalkQTE, by the person or the system.
+    StoppedByMacOS,
+    /// Audio arrived in a form TalkQTE could not read.
+    AudioUnreadable,
+}
+
+/// No error was reported.
+pub(crate) const NO_CODE: i64 = 0;
+/// An error from outside ScreenCaptureKit's domain; its code is not kept.
+pub(crate) const OTHER_DOMAIN: i64 = 1;
+/// TalkQTE's own reading of the audio failed; not a macOS code.
+pub(crate) const AUDIO_UNREADABLE: i64 = 2;
+
+/// The problem a ScreenCaptureKit error `code` means, or `fallback`.
+fn classify(code: i64, fallback: Problem) -> Problem {
+    let is = |known: SCStreamErrorCode| code == known.0 as i64;
+    if code == AUDIO_UNREADABLE {
+        Problem::AudioUnreadable
+    } else if is(SCStreamErrorCode::UserDeclined) {
+        Problem::PermissionNeeded
+    } else if is(SCStreamErrorCode::NoCaptureSource)
+        || is(SCStreamErrorCode::FailedNoMatchingApplicationContext)
+        || is(SCStreamErrorCode::FailedApplicationConnectionInvalid)
+        || is(SCStreamErrorCode::FailedApplicationConnectionInterrupted)
+    {
+        Problem::SourceGone
+    } else if is(SCStreamErrorCode::FailedToStartAudioCapture) {
+        Problem::AudioFailed
+    } else if is(SCStreamErrorCode::UserStopped) || is(SCStreamErrorCode::SystemStoppedStream) {
+        Problem::StoppedByMacOS
+    } else {
+        fallback
+    }
+}
+
+/// Note a start or stream problem and macOS's code in the timing log. Runs
+/// on the owning worker, never in a callback.
+fn record(problem: Problem, code: i64) {
+    let label = match problem {
+        Problem::StreamFailed => "stream_failed",
+        Problem::StartFailed => "start_failed",
+        Problem::StopFailed => "stop_failed",
+        Problem::RemoveFailed => "remove_failed",
+        Problem::PermissionNeeded => "permission_needed",
+        Problem::SourceGone => "source_gone",
+        Problem::AudioFailed => "audio_failed",
+        Problem::StoppedByMacOS => "stopped_by_macos",
+        Problem::AudioUnreadable => "audio_unreadable",
+    };
+    crate::timing_log::record(crate::timing_log::Event::SourceProblem {
+        problem: label,
+        os_code: (code < 0).then_some(code),
+    });
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +122,14 @@ pub struct Status {
 trait Driver {
     fn consumer_closed(&self) -> bool;
     fn stream_failed(&self) -> bool;
+    /// macOS's code for the failed start, if any; see `NO_CODE`.
+    fn start_code(&self) -> i64 {
+        NO_CODE
+    }
+    /// macOS's code for the stream stopping on its own, if any.
+    fn stream_code(&self) -> i64 {
+        NO_CODE
+    }
     fn start(&mut self, completion: Arc<AtomicU8>);
     fn stop(&mut self, completion: Arc<AtomicU8>);
     fn remove_output(&mut self) -> bool;
@@ -72,6 +141,8 @@ trait Driver {
 struct StreamFault {
     control: Control,
     failed: AtomicBool,
+    /// The first reason given, as a number only; see `NO_CODE`.
+    code: std::sync::atomic::AtomicI64,
 }
 
 impl StreamFault {
@@ -79,7 +150,16 @@ impl StreamFault {
         Self {
             control,
             failed: AtomicBool::new(false),
+            code: std::sync::atomic::AtomicI64::new(NO_CODE),
         }
+    }
+
+    /// As `record`, keeping the first reason's code.
+    fn record_code(&self, code: i64) {
+        let _ = self
+            .code
+            .compare_exchange(NO_CODE, code, Ordering::Release, Ordering::Relaxed);
+        self.record();
     }
 
     fn record(&self) {
@@ -153,7 +233,10 @@ impl<D: Driver> Owner<D> {
             lease.control.0.cancelled.store(true, Ordering::Release);
         }
         if driver.stream_failed() && self.status.problem.is_none() {
-            self.status.problem = Some(Problem::StreamFailed);
+            let code = driver.stream_code();
+            let problem = classify(code, Problem::StreamFailed);
+            record(problem, code);
+            self.status.problem = Some(problem);
         }
         match self.status.stage {
             Stage::Starting | Stage::CancellingStart => {
@@ -185,7 +268,10 @@ impl<D: Driver> Owner<D> {
                     }
                     outcome => {
                         if outcome != SUCCEEDED && self.status.problem.is_none() {
-                            self.status.problem = Some(Problem::StartFailed);
+                            let code = driver.start_code();
+                            let problem = classify(code, Problem::StartFailed);
+                            record(problem, code);
+                            self.status.problem = Some(problem);
                         }
                         // Even start failure is conservatively stopped. Until the OS
                         // confirms cleanup this operation remains reserved.
@@ -255,6 +341,8 @@ mod tests {
         panic_on_stop: bool,
         dropped_on: Option<std::thread::ThreadId>,
         pause_stop: Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>,
+        /// macOS's code for a failed start.
+        start_code: i64,
     }
     struct Fake(Arc<Mutex<Script>>, StreamFault);
     impl Driver for Fake {
@@ -267,6 +355,12 @@ mod tests {
         }
         fn stream_failed(&self) -> bool {
             self.1.failed.load(Ordering::Acquire)
+        }
+        fn start_code(&self) -> i64 {
+            self.0.lock().unwrap().start_code
+        }
+        fn stream_code(&self) -> i64 {
+            self.1.code.load(Ordering::Acquire)
         }
         fn start(&mut self, slot: Arc<AtomicU8>) {
             self.0.lock().unwrap().starts.push(slot);
@@ -704,6 +798,61 @@ mod tests {
             .unwrap()
             .store(true, Ordering::Release);
         assert_eq!(owner.poll().stage, Stage::Released);
+    }
+
+    #[test]
+    fn a_failed_start_or_stopped_stream_is_named_by_the_code_macos_gave() {
+        let code = |known: SCStreamErrorCode| known.0 as i64;
+        for (given, expected) in [
+            (
+                code(SCStreamErrorCode::UserDeclined),
+                Problem::PermissionNeeded,
+            ),
+            (
+                code(SCStreamErrorCode::NoCaptureSource),
+                Problem::SourceGone,
+            ),
+            (
+                code(SCStreamErrorCode::FailedToStartAudioCapture),
+                Problem::AudioFailed,
+            ),
+            (code(SCStreamErrorCode::InternalError), Problem::StartFailed),
+            (OTHER_DOMAIN, Problem::StartFailed),
+            (NO_CODE, Problem::StartFailed),
+        ] {
+            let (_, _, mut owner, script) = setup();
+            script.lock().unwrap().start_code = given;
+            complete(&script.lock().unwrap().starts[0], FAILED);
+            assert_eq!(owner.poll().problem, Some(expected), "{given}");
+            finish(&mut owner, &script);
+        }
+        for (given, expected) in [
+            (
+                code(SCStreamErrorCode::UserStopped),
+                Problem::StoppedByMacOS,
+            ),
+            (
+                code(SCStreamErrorCode::FailedApplicationConnectionInterrupted),
+                Problem::SourceGone,
+            ),
+            (AUDIO_UNREADABLE, Problem::AudioUnreadable),
+            (OTHER_DOMAIN, Problem::StreamFailed),
+        ] {
+            let (_, _, mut owner, script) = setup();
+            complete(&script.lock().unwrap().starts[0], SUCCEEDED);
+            assert_eq!(owner.poll().stage, Stage::Running);
+            owner.resources.as_ref().unwrap().0 .1.record_code(given);
+            // A later fault does not replace the first reason.
+            owner
+                .resources
+                .as_ref()
+                .unwrap()
+                .0
+                 .1
+                .record_code(NO_CODE - 1);
+            assert_eq!(owner.poll().problem, Some(expected), "{given}");
+            finish(&mut owner, &script);
+        }
     }
 
     #[test]
