@@ -345,9 +345,9 @@ for (const size of ['standard', 'large'] as const) {
     page,
   }) => {
     // Native companion sizes (companion.rs, glance.spec.ts): 360 px wide on
-    // a small display, 420 otherwise; 280 px tall for a question (340 with
-    // large text), 420 with its context open (480 with large text).
-    const [collapsed, expanded] = size === 'large' ? [340, 480] : [280, 420];
+    // a small display, 420 otherwise; 280 px tall for a question (370 with
+    // large text), 420 with its context open (510 with large text).
+    const [collapsed, expanded] = size === 'large' ? [370, 510] : [280, 420];
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await nativePage(page, '/?window=cue');
     await page.waitForFunction(() => !!window.liveTest);

@@ -1,6 +1,6 @@
 // Every cue kind the companion shows, in the native window's sizes
 // (src-tauri/src/companion.rs): 360 px wide on a small display, 420
-// otherwise; 280 px tall for a question, 420 with its context open, and 60
+// otherwise; 280 px tall for a question, 420 with its context open, and 90
 // more of each with large text. Fictional cues only. Local macOS fonts wrap
 // differently from the Linux fonts in CI, so CI is the check that counts.
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -118,7 +118,7 @@ async function show(page: Page, cue: Cue) {
 }
 
 const height = (open: boolean, size: 'standard' | 'large') =>
-  (open ? 420 : 280) + (size === 'large' ? 60 : 0);
+  (open ? 420 : 280) + (size === 'large' ? 90 : 0);
 
 /** The window itself never scrolls, in either direction. */
 async function expectWindowFits(page: Page, label: string) {

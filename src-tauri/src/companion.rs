@@ -122,8 +122,9 @@ fn frame_at(
         _ => 76.0,
     } + if question && text_size == QuestionSize::Large {
         // Large text wraps more in the narrow window, and WebKit sets the
-        // font a little taller than Chromium: 60 px keeps both inside.
-        60.0
+        // font a little taller than Chromium: 90 px keeps a two-line quote
+        // inside at 360 px in both (tests/companion-fit.spec.ts).
+        90.0
     } else {
         0.0
     };
@@ -465,10 +466,10 @@ mod tests {
             )
         };
         // One compact question, 140 px more for its sources, 100 px more
-        // for an answer; large text adds 60 px to each.
+        // for an answer; large text adds 90 px to each.
         assert_eq!(at(Mode::Question, QuestionSize::Standard).height, 280);
         assert_eq!(at(Mode::Details, QuestionSize::Standard).height, 420);
-        assert_eq!(at(Mode::AnsweredDetails, QuestionSize::Large).height, 580);
+        assert_eq!(at(Mode::AnsweredDetails, QuestionSize::Large).height, 610);
         for size in [QuestionSize::Standard, QuestionSize::Large] {
             assert!(at(Mode::AnsweredDetails, size).height > at(Mode::Details, size).height);
             assert_eq!(
