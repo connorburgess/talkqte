@@ -193,7 +193,12 @@ export async function runBatch({
     }
   } catch (error) {
     // The adapters' messages never contain provider output or credentials.
-    stopped = { afterCalls: records.length, reason: error.message };
+    stopped = {
+      afterCalls: records.length,
+      reason: error.message,
+      category: error.category ?? null,
+      exitCode: error.exitCode ?? null,
+    };
     log.write('stopped', stopped);
   } finally {
     await evaluator.close();
@@ -301,7 +306,14 @@ export async function main(
   } = {},
 ) {
   const flags = parseFlags(args, {
-    values: ['--set', '--cases', '--evaluator', '--out', '--max-calls'],
+    values: [
+      '--set',
+      '--cases',
+      '--evaluator',
+      '--out',
+      '--max-calls',
+      '--prompt',
+    ],
     switches: ['--run', '--included-usage-confirmed'],
   });
   const setName = flags['--set'];
@@ -312,9 +324,14 @@ export async function main(
   const set = await loadSet(setName);
   const cases = selectCases(set.cases, flags['--cases']?.split(','));
   const rules = await loadRulesOutcomes(set.name);
+  // The batch keeps the recorded trials' prompt unless asked otherwise, so
+  // its results stay comparable with them.
+  const prompt = flags['--prompt'] ?? 'recorded';
+  if (!['recorded', 'glance'].includes(prompt))
+    throw new Error('--prompt is recorded or glance.');
   const evaluator = createEvaluator(
     flags['--evaluator'] ?? 'claude',
-    { environment, rules },
+    { environment, rules, glance: prompt === 'glance' },
     evaluators,
   );
   if (!flags['--run']) {

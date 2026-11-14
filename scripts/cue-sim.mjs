@@ -11,9 +11,11 @@
 //
 // The clock is virtual, so an offline run takes milliseconds. A hosted run
 // is one explicit invocation with a call cap and stops at the first failure.
-import { writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { GLANCE_WORDS } from './cue-lab.mjs';
 import {
   CUE_BUDGET_MS,
   MAX_CALLS_CEILING,
@@ -168,6 +170,78 @@ function systemPrompts(conversations, evaluator, input) {
   ];
 }
 
+// Names a request by everything it carries, so a decision is only ever
+// reused for the same prompt and the same input.
+const requestKey = ({ systemPrompt, input }) =>
+  createHash('sha256')
+    .update(`${systemPrompt ?? ''}\n${input ?? ''}`)
+    .digest('hex')
+    .slice(0, 24);
+
+/** The completed decisions in an earlier run's event log, by the request
+ * that produced each. Only logs of the same evaluator are accepted. */
+export function reusableDecisions(logText, evaluator) {
+  const events = logText
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  const run = events.find((event) => event.type === 'run-start');
+  if (run?.kind !== 'simulation' || run.evaluator !== evaluator.id)
+    throw new Error(
+      'That log is not from a simulation with this evaluator, so nothing in it can be reused.',
+    );
+  // Older logs name the run's prompts once; later ones name each request.
+  const only = run.systemPrompts?.length === 1 ? run.systemPrompts[0] : null;
+  const reusable = new Map();
+  let open = null;
+  for (const event of events) {
+    if (event.type === 'sim-evaluation-start') open = event;
+    else if (
+      event.type === 'sim-decision' &&
+      open &&
+      open.conversation === event.conversation &&
+      open.lineId === event.lineId
+    ) {
+      const key =
+        open.request ??
+        (only === null
+          ? null
+          : requestKey({ systemPrompt: only, input: open.input }));
+      if (key && event.latency === 'measured')
+        reusable.set(key, {
+          decision: {
+            action: event.action,
+            cue: event.cue,
+            sourceIds: event.sourceIds,
+            reason: event.reason,
+            observedUse: event.observedUse,
+          },
+          elapsedMs: event.latencyMs,
+          latency: event.latency,
+          usage: event.usage ?? undefined,
+          provider: event.provider ?? undefined,
+        });
+      open = null;
+    }
+  }
+  return reusable;
+}
+
+/** Answers from an earlier run where the request is identical, and asks
+ * the evaluator only for the rest. A reused decision is not a new request. */
+export function resumingEvaluator(evaluator, reusable) {
+  return {
+    ...evaluator,
+    cached: (testCase) => reusable.get(requestKey(evaluator.request(testCase))),
+    async decide(testCase) {
+      const earlier = reusable.get(requestKey(evaluator.request(testCase)));
+      return earlier
+        ? { ...earlier, reused: true }
+        : evaluator.decide(testCase);
+    },
+  };
+}
+
 /** Replays one conversation. Returns its timeline and its lines with the
  * time each reached the evaluator. Throws whatever the evaluator throws. */
 export async function simulate(
@@ -233,11 +307,6 @@ export async function simulate(
     const newest = heard.at(-1);
     waiting = false;
     wakeAt = null;
-    if (calls.count >= maxCalls) {
-      capped = true;
-      emit('evaluation-skipped', atMs, { lineId: newest.id, why: 'call-cap' });
-      return;
-    }
     const recent = heard.slice(-CONTEXT_LINES);
     // The cue's own lines stay in view even when older than the window.
     const cited = (cue?.sourceIds ?? [])
@@ -250,14 +319,25 @@ export async function simulate(
       input,
       newest === lines.at(-1),
     );
-    calls.count++;
+    // A decision carried over from an earlier run is not a new request and
+    // does not count against the cap.
+    const reused = Boolean(evaluator.cached?.(testCase));
+    if (!reused && calls.count >= maxCalls) {
+      capped = true;
+      emit('evaluation-skipped', atMs, { lineId: newest.id, why: 'call-cap' });
+      return;
+    }
+    if (!reused) calls.count++;
     lastStart = atMs;
+    // The adapter's own account of what this request carries.
+    const request = evaluator.request(testCase);
     emit('evaluation-start', atMs, {
       lineId: newest.id,
-      call: calls.count,
+      call: reused ? null : calls.count,
+      reused,
       existingCueId: cue?.cueId ?? null,
-      // The adapter's own account of what this request carries.
-      input: evaluator.request(testCase).input,
+      request: requestKey(request),
+      input: request.input,
     });
     const result = await evaluator.decide(testCase);
     pending = {
@@ -290,6 +370,7 @@ export async function simulate(
       latencyMs: result.elapsedMs,
       latency: result.latency,
       overtaken: superseded,
+      reused: Boolean(result.reused),
       outcome,
       action: decision.action,
       cue: decision.cue,
@@ -521,6 +602,17 @@ export function score(conversation, { lines, timeline }) {
       detail: opportunities,
     },
     cuesShown: count(shown, (e) => e.origin === 'evaluator'),
+    // The glance test: how many words each cue on screen had, and how many
+    // had more than a glance allows.
+    cueWords: shown
+      .filter((e) => e.origin === 'evaluator')
+      .map((e) => e.text.trim().split(/\s+/).length),
+    cuesOverGlance: count(
+      shown,
+      (e) =>
+        e.origin === 'evaluator' &&
+        e.text.trim().split(/\s+/).length > GLANCE_WORDS,
+    ),
     unexpectedShows: unexpected,
     duplicates,
     flips,
@@ -569,6 +661,8 @@ export function total(scores) {
       'missed',
     ]),
     cuesShown: sum((s) => s.cuesShown),
+    cuesOverGlance: sum((s) => s.cuesOverGlance),
+    longestCueWords: Math.max(0, ...scores.flatMap((s) => s.cueWords)),
     unexpectedShows: sum((s) => s.unexpectedShows),
     duplicates: sum((s) => s.duplicates),
     flips: sum((s) => s.flips),
@@ -678,7 +772,12 @@ export async function runSimulation({
     }
   } catch (error) {
     // The adapters' messages never contain provider output or credentials.
-    stopped = { afterCalls: calls.count, reason: error.message };
+    stopped = {
+      afterCalls: calls.count,
+      reason: error.message,
+      category: error.category ?? null,
+      exitCode: error.exitCode ?? null,
+    };
   } finally {
     await evaluator.close();
   }
@@ -700,6 +799,13 @@ export async function runSimulation({
     maxCalls: maxCalls ?? null,
     calls: calls.count,
     stopped,
+    // Decisions carried over from an earlier run instead of asked again.
+    reused: replays.reduce(
+      (sum, replay) =>
+        sum +
+        replay.timeline.filter((e) => e.type === 'decision' && e.reused).length,
+      0,
+    ),
     totals: replays.length
       ? {
           ...total(replays.map((r) => r.metrics)),
@@ -843,6 +949,8 @@ export async function main(
       '--transcript-delay-ms',
       '--latency-ms',
       '--input',
+      '--prompt',
+      '--resume',
     ],
     switches: [
       '--run',
@@ -871,6 +979,12 @@ export async function main(
   };
   if (!['app', 'named'].includes(options.input))
     throw new Error('--input is app or named.');
+  // A cue here goes on a card, so the simulation asks for cues that can be
+  // read at a glance unless told to use the recorded trials' prompt.
+  const prompt = flags['--prompt'] ?? 'glance';
+  if (!['recorded', 'glance'].includes(prompt))
+    throw new Error('--prompt is recorded or glance.');
+  options.prompt = prompt;
   if (flags['--set'] && flags['--conversations'])
     throw new Error('Choose --set or --conversations, not both.');
   const name = flags['--evaluator'] ?? 'claude';
@@ -903,12 +1017,28 @@ export async function main(
     );
   let evaluator = createEvaluator(
     name,
-    { environment, rules, conversations, latencyMs },
+    {
+      environment,
+      rules,
+      conversations,
+      latencyMs,
+      glance: prompt === 'glance',
+    },
     evaluators,
   );
   // The rules' record is one outcome per case, given at its last line.
   if (evaluator.kind === 'rules') evaluator = finalOutcomeEvaluator(evaluator);
   const hosted = isHosted(evaluator);
+  // Decisions already made in an earlier run are not asked for again.
+  let carried = 0;
+  if (flags['--resume']) {
+    const reusable = reusableDecisions(
+      readFileSync(flags['--resume'], 'utf8'),
+      evaluator,
+    );
+    carried = reusable.size;
+    evaluator = resumingEvaluator(evaluator, reusable);
+  }
   const most = [];
   for (const conversation of conversations)
     most.push(await maxEvaluations(conversation, options));
@@ -923,6 +1053,9 @@ export async function main(
       .filter((flag) => flags[flag] !== undefined)
       .map((flag) => `${flag} ${flags[flag]}`),
     ...(flags['--apply-stale'] ? ['--apply-stale'] : []),
+    ...['--prompt', '--resume']
+      .filter((flag) => flags[flag] !== undefined)
+      .map((flag) => `${flag} ${flags[flag]}`),
   ].join(' ');
 
   if (!flags['--run']) {
@@ -962,6 +1095,10 @@ export async function main(
     print(
       `At most ${mostTotal} evaluations in all. A slow evaluator makes fewer, because lines arriving while a request is in flight share one catch-up.`,
     );
+    if (flags['--resume'])
+      print(
+        `${carried} completed decisions from the earlier run can be reused. One is reused only where the prompt and the request are identical to the earlier ones; those are not sent again and do not count against the cap.`,
+      );
     for (const prompt of systemPrompts(conversations, evaluator, options.input))
       print(`\nSystem prompt:\n${prompt}`);
     if (!hosted)

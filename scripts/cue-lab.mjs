@@ -28,8 +28,20 @@ Possible use is not proof of usefulness or causation. An asked question is not n
 const NAME_NOTE = `
 userName is the listener's own name: the person TalkQTE is helping. Other named people are other participants.`;
 
-export function systemPromptFor(testCase) {
-  return testCase.userName ? SYSTEM_PROMPT + NAME_NOTE : SYSTEM_PROMPT;
+/** A cue is read in a glance during a conversation. Words a cue may have
+ * under the glance rule, and the sentence that asks for it. */
+export const GLANCE_WORDS = 10;
+const GLANCE_RULE = `
+A cue is read at a glance while someone is listening: at most ${GLANCE_WORDS} words, one plain question or reminder, with no preamble, list or quotation.`;
+
+/** `glance` adds the length rule. Without it the prompt is exactly the one
+ * the recorded trials used. */
+export function systemPromptFor(testCase, { glance = false } = {}) {
+  return (
+    SYSTEM_PROMPT +
+    (glance ? GLANCE_RULE : '') +
+    (testCase.userName ? NAME_NOTE : '')
+  );
 }
 
 /** Names, never values, of inherited settings that could route a request
@@ -75,6 +87,55 @@ export function subscriptionEnvironment(source) {
   };
 }
 
+/** Sorts a failed request into a kind, from the exit and the wording of
+ * the CLI's own output. Only the kind is kept: the text is never stored,
+ * logged or shown, because it can hold account details. */
+export function classifyFailure({ code, killed = false, text = '' }) {
+  if (code === 'ENOENT') return 'not-installed';
+  if (killed || code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER')
+    return 'time-or-output-limit';
+  const words = text.toLowerCase();
+  if (
+    /usage limit|rate limit|limit reached|hit your limit|quota|too many requests|\b429\b|out of (?:extra )?usage|credit balance/.test(
+      words,
+    )
+  )
+    return 'usage-limit';
+  if (
+    /not logged in|please log in|\/login|unauthori[sz]ed|authenticat|invalid api key|credential|oauth|\b401\b|\b403\b|forbidden/.test(
+      words,
+    )
+  )
+    return 'auth';
+  if (
+    /overloaded|timed out|timeout|network|econn|enotfound|socket|temporar|unavailable|connection|\b5\d\d\b/.test(
+      words,
+    )
+  )
+    return 'transient';
+  return 'other';
+}
+
+const KINDS = {
+  'usage-limit': 'a usage or rate limit',
+  auth: 'sign-in or authorization',
+  transient: 'a network or service problem',
+  'time-or-output-limit': "the lab's own time or output limit",
+  'not-installed': 'the CLI is not installed',
+  other: 'not recognized',
+};
+
+/** An error that carries the kind of failure and the exit code, never the
+ * CLI's words. */
+function failure(message, category, exitCode = null) {
+  return Object.assign(
+    new Error(
+      `${message} Kind of failure: ${KINDS[category]}${exitCode === null ? '' : ` (exit code ${exitCode})`}.`,
+    ),
+    { category, exitCode },
+  );
+}
+
 export function execute(
   command,
   args,
@@ -91,17 +152,28 @@ export function execute(
         maxBuffer: MAX_OUTPUT_BYTES,
         killSignal: 'SIGKILL',
       },
-      (error, stdout) => {
+      (error, stdout, stderr) => {
         if (error) {
-          // Never echo raw provider stderr, auth output, or account details.
+          // Never echo raw provider stderr, auth output, or account details:
+          // the output is read here once, to sort the failure, and dropped.
+          const category = classifyFailure({
+            code: error.code,
+            killed: error.killed,
+            text: `${stdout}\n${stderr}`,
+          });
           const message =
-            error.code === 'ENOENT'
+            category === 'not-installed'
               ? 'Claude Code is not installed. Install it and sign in through its official subscription flow.'
-              : error.killed ||
-                  error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+              : category === 'time-or-output-limit'
                 ? 'Claude Code exceeded the time or output limit; the lab did not retry.'
                 : 'Claude Code failed; check your subscription access in the official CLI. The lab did not retry or request an API fallback.';
-          reject(new Error(message));
+          reject(
+            failure(
+              message,
+              category,
+              Number.isInteger(error.code) ? error.code : null,
+            ),
+          );
         } else resolve(stdout);
       },
     );
@@ -138,9 +210,9 @@ export function assertSubscription(status) {
 
 /** Exactly what one request carries. The dry run prints this and the run
  * sends it, so the two cannot differ. */
-export function requestFor(testCase) {
+export function requestFor(testCase, options) {
   return {
-    systemPrompt: systemPromptFor(testCase),
+    systemPrompt: systemPromptFor(testCase, options),
     input: buildPrompt(testCase),
   };
 }
@@ -233,8 +305,13 @@ function providerCounters(result) {
   return counters;
 }
 
-async function evaluate(testCase, access, options, run) {
-  const request = requestFor(testCase);
+async function evaluate(
+  testCase,
+  access,
+  options,
+  run,
+  request = requestFor(testCase),
+) {
   const args = [
     ...BASE_ARGS,
     '--print',
@@ -283,8 +360,11 @@ async function evaluate(testCase, access, options, run) {
     result.subtype !== 'success' ||
     result.is_error !== false
   ) {
-    throw new Error(
-      'Claude did not complete the evaluation. It may be unavailable or at its usage limit; the lab did not retry or request a fallback.',
+    throw failure(
+      'Claude did not complete the evaluation; the lab did not retry or request a fallback.',
+      classifyFailure({
+        text: `${result.subtype ?? ''}\n${typeof result.result === 'string' ? result.result : ''}`,
+      }),
     );
   }
   const models = Object.keys(result.modelUsage ?? {});
@@ -353,7 +433,10 @@ export async function openLab({
     const access = await preflight(options, run);
     return {
       access,
-      evaluate: (testCase) => evaluate(testCase, access, options, run),
+      // `request` is what the adapter said this case carries; it is sent
+      // as given.
+      evaluate: (testCase, request) =>
+        evaluate(testCase, access, options, run, request),
       close,
     };
   } catch (error) {
