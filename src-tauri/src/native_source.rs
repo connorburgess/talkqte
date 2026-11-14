@@ -402,6 +402,12 @@ fn pump_paced<A: Access, S: Source>(
                     idle = false;
                     match chunker.push(block, session) {
                         Ok(Some(chunk)) => {
+                            crate::timing_log::record_audio(
+                                "application",
+                                session,
+                                chunk.audio().start_ms,
+                                &chunk.audio().samples,
+                            );
                             if worker.submit(chunk).is_err() {
                                 refused_chunks += 1;
                             }
