@@ -49,12 +49,50 @@ export const DEFAULTS = {
   // Stands in for local transcription: a line reaches the evaluator this
   // long after it was said (measured median 3.13 s; see docs/budgets.md).
   transcriptDelayMs: 3_000,
-  // 'app': what the app's bridge sends today (one speaker label, no name).
-  // 'named': speaker names and the listener's name, to see what they add.
+  // 'app': one speaker label for every line, as a live transcript has.
+  // 'named': speaker names as well, to see what they add.
   input: 'app',
   // false: a decision overtaken by newer speech is dropped, as in the app.
   applyStale: false,
+  // true: a bare acknowledgement ("Mm.", "Yeah.") neither starts an
+  // evaluation nor overtakes one in flight. The app does not do this yet.
+  ignoreBackchannels: true,
+  // true: each request lists the cues this session already showed and how
+  // each ended. The app's bridge does not send this yet.
+  cueHistory: true,
+  // true: the listener's name is sent where the conversation has one, as
+  // the app's session name. The app's bridge leaves it out today.
+  listenerName: true,
 };
+/** How many earlier cues a request lists. */
+export const HISTORY_CUES = 4;
+
+// Words that, alone, only tell a speaker they are being followed.
+const ACKNOWLEDGEMENTS = new Set(
+  'mm mhm mm-hm mm-hmm hmm hm uh-huh yeah yes yep yup right ok okay sure exactly totally true agreed cool nice great fine oh ah ha'.split(
+    ' ',
+  ),
+);
+
+/** A bare acknowledgement: one to three words, each of them one of a short
+ * list, not a question, and not said in reply to a question. "Yeah." and
+ * "Mm-hm, right." are; "Yeah, I'll do it", "Right?" and "Okay, next item"
+ * are not, and neither is "Yeah." straight after "Are we done?", which is
+ * an answer. Deliberately narrow: a line wrongly taken for one would delay
+ * a decision about real speech. */
+export function isBackchannel(text, previous = '') {
+  if (text.includes('?') || previous.trim().endsWith('?')) return false;
+  const tokens = text
+    .toLowerCase()
+    .replace(/[^a-z\s-]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  return (
+    tokens.length >= 1 &&
+    tokens.length <= 3 &&
+    tokens.every((token) => ACKNOWLEDGEMENTS.has(token))
+  );
+}
 const RULES_CUE = 'Phrase-rule cue (wording not recorded)';
 
 export const LIMITATIONS = [
@@ -138,7 +176,14 @@ export function finalOutcomeEvaluator(rules) {
 
 /** What the evaluator is given for one decision: the lines in view, the
  * cue on screen, and (in named input only) the listener's name. */
-function testCaseFor(conversation, lines, cue, input, finalLine = false) {
+function testCaseFor(
+  conversation,
+  lines,
+  cue,
+  { input, listenerName },
+  finalLine = false,
+  earlierCues = [],
+) {
   return {
     id: conversation.id,
     finalLine,
@@ -148,22 +193,39 @@ function testCaseFor(conversation, lines, cue, input, finalLine = false) {
       text: line.text,
     })),
     existingCue: cue && { text: cue.text, sourceIds: cue.sourceIds },
-    ...(input === 'named' && conversation.listener
+    // The listener's own name, as the app's session name.
+    ...(listenerName && conversation.listener
       ? { userName: conversation.listener }
       : {}),
+    // Cues this session already showed, and how each ended.
+    ...(earlierCues.length ? { earlierCues } : {}),
   };
 }
 
 /** The system prompts a run over these conversations would use, exactly
  * as the evaluator gives them for each one. */
-function systemPrompts(conversations, evaluator, input) {
+function systemPrompts(conversations, evaluator, settings) {
+  // A request that lists earlier cues carries one more sentence.
+  const histories = settings.cueHistory
+    ? [[], [{ text: 'An earlier cue.', state: 'expired' }]]
+    : [[]];
   return [
     ...new Set(
       conversations
-        .map(
-          (c) =>
-            evaluator.request(testCaseFor(c, c.lines.slice(0, 1), null, input))
-              .systemPrompt,
+        .flatMap((c) =>
+          histories.map(
+            (earlier) =>
+              evaluator.request(
+                testCaseFor(
+                  c,
+                  c.lines.slice(0, 1),
+                  null,
+                  settings,
+                  false,
+                  earlier,
+                ),
+              ).systemPrompt,
+          ),
         )
         .filter(Boolean),
     ),
@@ -252,6 +314,9 @@ export async function simulate(
     transcriptDelayMs = DEFAULTS.transcriptDelayMs,
     input = DEFAULTS.input,
     applyStale = DEFAULTS.applyStale,
+    ignoreBackchannels = DEFAULTS.ignoreBackchannels,
+    cueHistory = DEFAULTS.cueHistory,
+    listenerName = DEFAULTS.listenerName,
     maxCalls = Infinity,
     calls = { count: 0 },
     log,
@@ -293,12 +358,19 @@ export async function simulate(
     };
     emit('cue-shown', atMs, cue);
   };
+  // What this session has shown and how each cue ended, newest last.
+  const earlier = [];
   const clear = (atMs, why, lineId = null) => {
     emit('cue-cleared', atMs, {
       cueId: cue.cueId,
       why,
       lineId,
       visibleMs: atMs - cue.shownAtMs,
+    });
+    // "withdraw" is the action; "withdrawn" is how the cue ended.
+    earlier.push({
+      text: cue.text,
+      state: why === 'withdraw' ? 'withdrawn' : why,
     });
     cue = null;
   };
@@ -316,8 +388,9 @@ export async function simulate(
       conversation,
       [...cited, ...recent],
       cue,
-      input,
+      { input, listenerName },
       newest === lines.at(-1),
+      cueHistory ? earlier.slice(-HISTORY_CUES) : [],
     );
     // A decision carried over from an earlier run is not a new request and
     // does not count against the cap.
@@ -409,6 +482,16 @@ export async function simulate(
         if (!cue) show(atMs, seed.text, seed.sourceIds, line.id, 'fixture');
       } else if (capped) {
         emit('evaluation-skipped', atMs, { lineId: line.id, why: 'call-cap' });
+      } else if (
+        ignoreBackchannels &&
+        isBackchannel(line.text, heard.at(-2)?.text)
+      ) {
+        // An acknowledgement says nothing new: it starts no evaluation and
+        // leaves a decision in flight alone. Later requests still hold it.
+        emit('evaluation-skipped', atMs, {
+          lineId: line.id,
+          why: 'backchannel',
+        });
       } else if (pending) {
         // New speech overtakes the request in flight; one catch-up follows.
         pending.superseded = true;
@@ -589,6 +672,10 @@ export function score(conversation, { lines, timeline }) {
         events('evaluation-skipped'),
         (e) => e.why === 'min-gap',
       ),
+      skippedBackchannel: count(
+        events('evaluation-skipped'),
+        (e) => e.why === 'backchannel',
+      ),
       skippedCap: count(
         events('evaluation-skipped'),
         (e) => e.why === 'call-cap',
@@ -734,7 +821,7 @@ export async function runSimulation({
     conversationIds: conversations.map(({ id }) => id),
     settings,
     maxCalls: maxCalls ?? null,
-    systemPrompts: systemPrompts(conversations, evaluator, settings.input),
+    systemPrompts: systemPrompts(conversations, evaluator, settings),
     node: process.version,
     platform: `${process.platform}-${process.arch}`,
   });
@@ -818,6 +905,52 @@ export async function runSimulation({
   };
   log.write('run-end', { stopped, calls: calls.count, totals: results.totals });
   return results;
+}
+
+/** What the budget allows, worked out offline: for each transcription
+ * delay and decision time, how many of the labelled moments an evaluator
+ * that agreed with every label would cue in time, and how many of those
+ * cues would be on screen within the budget of the line being said. */
+export async function budgetTable({
+  delays = [0, 1_000, 2_000, 3_000],
+  decisions = [500, 1_000, 2_000, 3_000, 4_000],
+} = {}) {
+  const conversations = await loadConversations();
+  const rows = [];
+  for (const transcriptDelayMs of delays)
+    for (const decisionMs of decisions) {
+      const results = await runSimulation({
+        source: 'conversations',
+        conversations,
+        evaluator: labelsEvaluator(conversations, { latencyMs: decisionMs }),
+        options: { transcriptDelayMs },
+      });
+      const after = results.conversations.flatMap((c) => c.metrics.afterSaidMs);
+      rows.push({
+        transcriptDelayMs,
+        decisionMs,
+        moments: results.totals.opportunities.labelled,
+        inTime: results.totals.opportunities.inTime,
+        shown: after.length,
+        withinBudget: after.filter((ms) => ms <= CUE_BUDGET_MS).length,
+        medianMs: results.totals.triggerToCue?.medianMs ?? null,
+      });
+    }
+  return rows;
+}
+
+function describeBudget(rows, print) {
+  print(
+    `What the ${CUE_BUDGET_MS / 1000}-second budget allows, worked out offline. Nothing was started.\nAn evaluator that agreed with every label, over the ${rows[0].moments} labelled moments of the bundled conversations:\n`,
+  );
+  print('transcription  decision  cued in time  on screen within 5 s  median');
+  for (const row of rows)
+    print(
+      `${`${row.transcriptDelayMs / 1000} s`.padEnd(14)} ${`${row.decisionMs / 1000} s`.padEnd(9)} ${String(row.inTime).padStart(4)} of ${row.moments}    ${String(row.withinBudget).padStart(4)} of ${String(row.shown).padEnd(13)} ${row.medianMs === null ? '' : `${(row.medianMs / 1000).toFixed(1)} s`}`,
+    );
+  print(
+    "\nArithmetic on invented conversations and the lab lane's own labels, with assumed delays. It shows what a pair of delays cannot do; it does not show what a real evaluator would do.",
+  );
 }
 
 const words = (text) => text.split(/\s+/).filter(Boolean).length;
@@ -956,9 +1089,17 @@ export async function main(
       '--run',
       '--included-usage-confirmed',
       '--apply-stale',
+      '--overtake-backchannels',
+      '--no-cue-history',
+      '--no-listener-name',
+      '--budget',
       '--coverage',
     ],
   });
+  if (flags['--budget']) {
+    describeBudget(await budgetTable(), print);
+    return null;
+  }
   if (flags['--coverage']) {
     describeCoverage(await coverage(), print);
     return null;
@@ -976,6 +1117,9 @@ export async function main(
     ),
     input: flags['--input'] ?? DEFAULTS.input,
     applyStale: Boolean(flags['--apply-stale']),
+    ignoreBackchannels: !flags['--overtake-backchannels'],
+    cueHistory: !flags['--no-cue-history'],
+    listenerName: !flags['--no-listener-name'],
   };
   if (!['app', 'named'].includes(options.input))
     throw new Error('--input is app or named.');
@@ -1052,7 +1196,12 @@ export async function main(
     ...['--input', '--min-gap-ms', '--transcript-delay-ms']
       .filter((flag) => flags[flag] !== undefined)
       .map((flag) => `${flag} ${flags[flag]}`),
-    ...(flags['--apply-stale'] ? ['--apply-stale'] : []),
+    ...[
+      '--apply-stale',
+      '--overtake-backchannels',
+      '--no-cue-history',
+      '--no-listener-name',
+    ].filter((flag) => flags[flag]),
     ...['--prompt', '--resume']
       .filter((flag) => flags[flag] !== undefined)
       .map((flag) => `${flag} ${flags[flag]}`),
@@ -1062,7 +1211,7 @@ export async function main(
     print('Dry run. No process was started and nothing was sent.');
     print(`Evaluator: ${evaluator.label}.`);
     print(
-      `Settings: evaluate on a new line, at least ${options.minGapMs} ms apart; a line reaches the evaluator ${options.transcriptDelayMs} ms after it is said; input "${options.input}"; each request holds the newest ${CONTEXT_LINES} lines and the cue on screen.`,
+      `Settings: evaluate on a new line, at least ${options.minGapMs} ms apart; a line reaches the evaluator ${options.transcriptDelayMs} ms after it is said; input "${options.input}"; each request holds the newest ${CONTEXT_LINES} lines and the cue on screen${options.listenerName ? ", the listener's name where the conversation has one" : ''}${options.cueHistory ? `, and up to ${HISTORY_CUES} cues already shown with how each ended` : ''}. ${options.ignoreBackchannels ? 'A bare acknowledgement ("Mm.", "Yeah.") starts no evaluation and does not overtake one in flight.' : 'Every line, even a bare acknowledgement, can overtake a decision in flight.'}`,
     );
     print(
       hosted
@@ -1074,13 +1223,13 @@ export async function main(
     );
     for (const [i, conversation] of conversations.entries()) {
       print(
-        `\n${conversation.id}: ${conversation.lines.length} lines over ${Math.round(conversation.lines.at(-1).atMs / 1000)} s, at most ${most[i]} evaluations${options.input === 'named' && conversation.listener ? `; userName "${conversation.listener}"` : ''}`,
+        `\n${conversation.id}: ${conversation.lines.length} lines over ${Math.round(conversation.lines.at(-1).atMs / 1000)} s, at most ${most[i]} evaluations${options.listenerName && conversation.listener ? `; userName "${conversation.listener}"` : ''}`,
       );
       const sent = testCaseFor(
         conversation,
         conversation.lines,
         conversation.seedCue,
-        options.input,
+        options,
       );
       for (const event of sent.events)
         print(`  ${event.id}  ${event.speaker}: ${event.text}`);
@@ -1099,7 +1248,7 @@ export async function main(
       print(
         `${carried} completed decisions from the earlier run can be reused. One is reused only where the prompt and the request are identical to the earlier ones; those are not sent again and do not count against the cap.`,
       );
-    for (const prompt of systemPrompts(conversations, evaluator, options.input))
+    for (const prompt of systemPrompts(conversations, evaluator, options))
       print(`\nSystem prompt:\n${prompt}`);
     if (!hosted)
       print(
