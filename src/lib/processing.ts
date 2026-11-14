@@ -135,6 +135,50 @@ export function describeSource(source: SourceCapture | null | undefined) {
       return `Application audio from ${app} was never confirmed stopped. It may still be captured. Nothing in TalkQTE can stop it; whether quitting does has not been checked.`;
   }
 }
+/** The application-audio host's own status, from its development command.
+ * Metadata only: application names, never audio or native identifiers. */
+export interface ApplicationAudioStatus {
+  revision: number;
+  phase: SourceCapture['phase'];
+  application: string | null;
+  /** The review or operation, for Start and Stop. */
+  operation: string | null;
+  choices: { id: string; name: string }[];
+  problem: string | null;
+  scopeNotice: string;
+}
+export type ApplicationAudioAction =
+  | { kind: 'snapshot' }
+  | { kind: 'list'; acknowledged: true }
+  | { kind: 'cancelList' }
+  | { kind: 'review'; source: string }
+  | { kind: 'startSession'; review: string };
+
+/** Why the source's last attempt did not start, in words. */
+export function sourceProblem(problem: string | null | undefined) {
+  switch (problem) {
+    case null:
+    case undefined:
+    case 'stopFailed':
+    case 'removeFailed':
+      // Cleanup problems are described with the source's phase.
+      return null;
+    case 'permissionDenied':
+      return 'macOS did not allow it. Grant Screen & System Audio Recording to TalkQTE in System Settings, then list applications again.';
+    case 'listFailed':
+      return 'Applications could not be listed. Try again.';
+    case 'sourceUnavailable':
+      return 'That application is no longer available. List applications again.';
+    case 'sessionBusy':
+    case 'sessionHasSource':
+      return 'Another session or the microphone is running. Stop it, then start again.';
+    case 'unavailable':
+      return 'Application audio is unavailable. A session from an application needs the speech model installed.';
+    default:
+      return 'Application audio did not start. Try again.';
+  }
+}
+
 export interface ProcessingReview {
   id: string;
   session: string;
@@ -160,6 +204,13 @@ export const processingApi = {
     invoke<unknown>('application_audio', {
       action: { kind: 'stop', operation },
     }).then(() => {}),
+  /** Development builds only: the application-audio host's command. */
+  applicationAudio: (action: ApplicationAudioAction) =>
+    invoke<ApplicationAudioStatus>('application_audio', { action }),
+  listenApplicationAudio: (receive: (status: ApplicationAudioStatus) => void) =>
+    listen<ApplicationAudioStatus>('application-audio:changed', ({ payload }) =>
+      receive(payload),
+    ),
   listen: (receive: (snapshot: ProcessingSnapshot) => void) =>
     listen<ProcessingSnapshot>('processing:changed', ({ payload }) =>
       receive(payload),
