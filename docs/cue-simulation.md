@@ -140,14 +140,40 @@ npm run lab:sim -- --set cue-lab --evaluator rules --run --out <directory outsid
 What it does, following the app's [evaluator bridge](cue-evaluator.md#transcript-lifecycle-bridge) where one exists:
 
 - A line reaches the evaluator a fixed time after it is said (`--transcript-delay-ms`, 3,000 by default, standing in for local transcription).
-- Each request holds the newest six lines and the lines the cue on screen cites. With `--input app` (the default) every line has the one label "Speaker" and no name is sent, as the app would send today; `--input named` adds speaker names and the listener's name, to see what they change.
-- One request at a time. A line that arrives while a request is in flight overtakes it: that decision is dropped, and one catch-up request follows with the latest lines. `--apply-stale` applies overtaken decisions anyway, to see how late they would have been.
+- Each request holds the newest six lines, the lines the cue on screen cites, the listener's name where the conversation has one, and up to four cues this session has already shown with how each ended. Every line has the one label "Speaker", as a live transcript has today; `--input named` adds speaker names, to see what they change.
+- One request at a time. A line that arrives while a request is in flight overtakes it: that decision is dropped, and one catch-up request follows with the latest lines. A bare acknowledgement does not (see below). `--apply-stale` applies overtaken decisions anyway, to see how late they would have been.
 - Evaluations start only on a new line and at least `--min-gap-ms` apart (2,000 by default), so a conversation of N lines makes at most N requests. The dry run prints that bound for each conversation, and every line as a request would carry it.
 - One cue at a time. An unread cue lives 18 seconds from its newest cited line; a cue proposed later than that is refused.
 
 **Cues a glance can read.** A cue here goes on a card that someone reads while listening, so the simulation's prompt adds one rule to the lab's: a cue is at most ten words, one plain question or reminder, with no preamble, list or quotation. `--prompt recorded` uses the recorded trials' prompt unchanged instead; the batch runner keeps that prompt by default and takes `--prompt glance`. The rule is a request, not a filter: a longer cue is still shown, and counted (`cuesOverGlance`, `longestCueWords`). In the first model run, made before this rule, the three cues the model wrote were 24, 20 and 25 words. What the rule does to a model's decisions cannot be known offline; on the offline evaluators it changes nothing, because they do not read the prompt.
 
 **Resuming a stopped run.** `--resume <event log of the earlier run>` reuses the decisions that run completed, so they are not asked for again. A decision is reused only for a request with the identical prompt and input, from the same evaluator; reused decisions keep their measured times, are marked in the timeline, and do not count against the call cap. Because the simulation is deterministic, a run that stopped after N decisions resumes with those N and makes its first new request where the earlier one failed. A log made under another prompt reuses nothing.
+
+**Three changes the first model run asked for.** The review of that run found a good cue thrown away by "Mm." and "Yeah.", a cue proposed again straight after it was withdrawn, and a question to the listener by name that could not be recognised. The simulation now does three things the app's evaluator bridge does not do today. Each is a proposal being tried here, can be switched off to compare, and is recorded in the results' settings:
+
+- **A bare acknowledgement is set aside** (`--overtake-backchannels` restores the old behaviour). A line of one to three words, each from a short list ("mm", "mm-hm", "yeah", "right", "okay", "sure", "exactly", "oh", "ah", "ha" and a few more), that is not a question and does not follow one, starts no evaluation and does not overtake a decision in flight. "Yeah, I'll do it", "Right?", "Okay, next item" and "Yeah." in answer to "Are we done?" are ordinary lines. The rule is narrow on purpose: a line wrongly taken for an acknowledgement would delay a decision about real speech. Later requests still hold the acknowledgement among their lines. Five of the 168 bundled lines are set aside this way.
+- **The request lists earlier cues** (`--no-cue-history`). Beside `events` and `existingCue` it gains `earlierCues`: up to four cues this session has shown, oldest first, each as its text and how it ended (`resolved`, `withdrawn` or `expired`). The field is present only when there is something to list, and the system prompt then gains one sentence: do not show a cue that repeats or rewords one of them unless later events give a new reason. A cue that was decided but never shown is not listed.
+- **The listener's name is sent** (`--no-listener-name`) as `userName` where the conversation has a listener, the way the app's session name works, with the one sentence in the system prompt that says whose name it is. Lines keep the single "Speaker" label.
+
+What these do to a model's decisions is not known; no model was run. Offline they change only what the harness can show: with a 4-second decision, the labels evaluator cues 25 of 30 moments in time instead of 24, and five fewer requests are made.
+
+**What the budget allows.** `npm run lab:sim -- --budget` works out, offline, how many of the 30 labelled moments an evaluator that agreed with every label would cue, and how many of those cues would be on screen within 5 seconds of the line being said, for each pair of transcription delay and decision time:
+
+| Transcription delay | Decision 0.5 s | 1 s | 2 s | 3 s | 4 s |
+| --- | --- | --- | --- | --- | --- |
+| 0 s | 27 of 28 | 27 of 28 | 27 of 28 | 24 of 28 | 22 of 28 |
+| 1 s | 27 of 28 | 27 of 28 | 26 of 28 | 24 of 28 | 21 of 28 |
+| 2 s | 27 of 28 | 26 of 28 | 24 of 28 | 24 of 28 | 0 of 28 |
+| 3 s | 26 of 28 | 26 of 28 | 24 of 28 | 0 of 28 | 0 of 28 |
+
+Each cell is cues on screen within the budget, of cues shown. Read with the two numbers measured so far, a 3.1-second median transcription delay and a 4.5-second median decision in the first model run, the table says:
+
+- **The two must add up to 5 seconds or less, and neither can use the whole budget.** With today's 3 seconds of transcription the decision has 2 seconds; with a 4-second decision transcription would have 1.
+- **Halving the decision alone is enough.** At 3 seconds of transcription, a 2-second decision puts 24 of 28 cues inside the budget; a 3-second one puts none.
+- **Shortening transcription alone is not**, unless it falls to about a second: at a 4-second decision, 2 seconds of transcription still puts no cue inside the budget.
+- The handful outside the budget even at the fastest settings are cues waiting for an earlier cue to leave the single slot.
+
+This is arithmetic on invented conversations and the lane's own labels, with fixed assumed delays and nothing for drawing the card (takes so far drew a cue 0.1 to 0.5 seconds after its time). It shows what a pair of delays cannot do. It does not show what a faster model or transcriber would decide.
 
 It does not simulate cooldown, focus, hold, dismissal, note reminders or the companion window. A model run needs the same flags as a batch (`--run`, `--included-usage-confirmed`, `--max-calls`, an output directory) and the owner's go-ahead for that stated run; it is refused if it could need more requests than the cap, and stops at the first failure. Conversations that finished are written to the results file; the one in progress when a run stops is only in the event log. Each request carries up to six recent lines, the lines the cue on screen cites, and that cue's text, so a cue the model wrote is sent back to it.
 
@@ -157,7 +183,7 @@ With `--set`, each case of a set is replayed as a two-second conversation from t
 
 | Number | Meaning |
 | --- | --- |
-| Evaluations: started, applied, overtaken | Requests made; decisions that took effect; decisions dropped because a newer line arrived first |
+| Evaluations: started, applied, overtaken | Requests made; decisions that took effect; decisions dropped because a newer line arrived first. Lines skipped as bare acknowledgements are counted separately |
 | Labelled moments: in time, late, missed | Of the `show` labels: a cue was on screen before the moment closed; after it closed; or never. A cue belongs to the latest moment still open when its request was made |
 | Line said to cue on screen | From the end of the labelled line to the cue appearing: transcription delay, any wait, and the decision. This is the number the 5-second [budget](budgets.md) is about |
 | Decision time | The evaluator's own time per request |
@@ -181,11 +207,11 @@ Run offline on 14 November 2026 over all 13 conversations (30 labelled moments),
 | Decision time | Cue in time | Late | Missed | Line said to cue on screen, median | Over the 5-second budget |
 | --- | --- | --- | --- | --- | --- |
 | 0 s | 28 | 0 | 2 | 3.0 s | 2 of 28 |
-| 2 s | 28 | 0 | 2 | 5.0 s | 6 of 28 |
-| 4 s | 24 | 4 | 2 | 7.0 s | 28 of 28 |
-| 6 s | 16 | 8 | 6 | 9.7 s | 24 of 24 |
+| 2 s | 28 | 0 | 2 | 5.0 s | 4 of 28 |
+| 4 s | 25 | 3 | 2 | 7.0 s | 28 of 28 |
+| 6 s | 19 | 6 | 5 | 9.6 s | 25 of 25 |
 
-With no transcription delay and a 4-second decision, 28 are in time and 9 of 28 are over the budget.
+With no transcription delay and a 4-second decision, 28 are in time and 6 of 28 are over the budget. These figures are with the three changes below switched on; before them the same sweep gave 28, 28, 24 and 16 in time.
 
 What this does and does not say:
 
@@ -197,7 +223,7 @@ What this does and does not say:
 
 ### What an offline run shows
 
-Run offline on 14 November 2026 with the fake evaluator and default settings, all 13 conversations: 168 evaluations, 41 of them overtaken and dropped, and the two cues it showed appeared a median 6.8 seconds after their line was said. Those figures say nothing about cues: the fake matches keywords and its delay is made up. They show that the harness counts, drops, places and scores as described. One thing in them is real arithmetic, though: a 3-second transcription delay plus any decision slower than 2 seconds is over the 5-second budget before the companion draws anything.
+Run offline on 14 November 2026 with the fake evaluator and default settings, all 13 conversations: 163 evaluations, 29 of them overtaken and dropped, and the eight cues it showed appeared a median 6.7 seconds after their line was said. Those figures say nothing about cues: the fake matches keywords and its delay is made up. They show that the harness counts, drops, places and scores as described. One thing in them is real arithmetic, though: a 3-second transcription delay plus any decision slower than 2 seconds is over the 5-second budget before the companion draws anything.
 
 ## Recording a simulation
 
@@ -269,7 +295,7 @@ A recording shows timing and appearance on invented conversations. Playback runs
 
 `npm run test:cue-lab` runs the offline tests for the single-case lab, the batch runner and the simulation. For the batch runner they cover: the dry run starting nothing; every refusal above happening before any process; one sign-in check and one request per case; stopping at the first limit, error, wrong model or malformed reply without retry; the call cap; labels never reaching the evaluator; the first set's prompt being unchanged; the rules record matching the engine's tests; results being refused inside the checkout; and the fake evaluator being repeatable. CI runs them with no model, credentials or network.
 
-For the simulation they cover: a cue appearing one decision after its line and being scored against its moment; an overtaken decision being dropped with one catch-up; never two requests at once; the minimum gap and the dry-run bound; expiry after 18 seconds; the six-line window and what an app-style request contains; each count in the table above on a small scripted conversation; the labels evaluator acting only where a label says to and losing moments as its delay grows; a stopped run resuming without repeating its decisions, with the cap counting new requests only and nothing reused under another prompt; a failed request sorted into a kind without keeping the CLI's words; the glance prompt and the count of cues over it; stopping at the cap and at the first failure with the log intact; every refusal happening before any process; repeatability; and the shape of the conversation fixture.
+For the simulation they cover: a cue appearing one decision after its line and being scored against its moment; an overtaken decision being dropped with one catch-up; never two requests at once; the minimum gap and the dry-run bound; expiry after 18 seconds; the six-line window and what an app-style request contains; each count in the table above on a small scripted conversation; the labels evaluator acting only where a label says to and losing moments as its delay grows; an acknowledgement neither starting an evaluation nor overtaking one, while a real new turn and an answer to a question still do; the earlier cues each request lists and their limit; the listener's name sent with one speaker label kept; the budget table's arithmetic; a stopped run resuming without repeating its decisions, with the cap counting new requests only and nothing reused under another prompt; a failed request sorted into a kind without keeping the CLI's words; the glance prompt and the count of cues over it; stopping at the cap and at the first failure with the log intact; every refusal happening before any process; repeatability; and the shape of the conversation fixture.
 
 `scripts/cue-sim-voices.test.mjs` (part of `npm run test:cue-lab`) checks the voice step against a stand-in provider: nothing sent without `--run`; the cap, the key and a bundled conversation required; only the lines, a voice and instructions sent; each clip cached and not bought again; the key absent from every output and log; and the first failure ending the run.
 
