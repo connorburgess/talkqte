@@ -363,7 +363,9 @@ for (const size of ['standard', 'large'] as const) {
       );
     // How far the card's content runs past the card; 0 when all of it shows.
     const hidden = () =>
-      question.evaluate((card) => card.scrollHeight - card.clientHeight);
+      question
+        .locator('.cue-scroll')
+        .evaluate((words) => words.scrollHeight - words.clientHeight);
     let id = 0;
     const show = async (cue: Cue) => {
       await page.evaluate((value) => window.liveTest.setCue(value), {

@@ -1,5 +1,6 @@
 import {
   type CSSProperties,
+  type RefObject,
   useEffect,
   useId,
   useLayoutEffect,
@@ -31,6 +32,38 @@ function hasPriorNotes(sources?: CueSource[]) {
 
 const reducedMotion = () =>
   window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/**
+ * Which edges of a scrolling card have more beyond them. Text there fades
+ * into the edge, so a card of fixed height never shows a line cut in half.
+ */
+function useEdgeFades(card: RefObject<HTMLElement | null>) {
+  const [edges, setEdges] = useState({ start: false, end: false });
+  const measure = () => {
+    const element = card.current;
+    if (!element) return;
+    const start = element.scrollTop > 1;
+    const end =
+      element.scrollTop + element.clientHeight < element.scrollHeight - 1;
+    setEdges((now) =>
+      now.start === start && now.end === end ? now : { start, end },
+    );
+  };
+  // After every render: the cue, its sources or the text size may differ.
+  useLayoutEffect(measure);
+  useEffect(() => {
+    const element = card.current;
+    if (!element) return;
+    element.addEventListener('scroll', measure, { passive: true });
+    const resized = new ResizeObserver(measure);
+    resized.observe(element);
+    return () => {
+      element.removeEventListener('scroll', measure);
+      resized.disconnect();
+    };
+  }, []);
+  return edges;
+}
 
 function useReducedMotion() {
   const [reduced, setReduced] = useState(reducedMotion);
@@ -233,6 +266,9 @@ export function Question({
   const card = useRef<HTMLElement>(null);
   // A cue first seen already held was read earlier: its words do not replay.
   const [settled] = useState(cue.held);
+  // The words scroll inside the card; Dismiss and the card's edges do not.
+  const scroller = useRef<HTMLDivElement>(null);
+  const fades = useEdgeFades(scroller);
   // A leaving card takes no input, so it must not keep keyboard focus: the
   // window that dismissed it decides where focus goes next.
   useLayoutEffect(() => {
@@ -253,14 +289,17 @@ export function Question({
   const shown = reduced ? Math.ceil(left * 4) / 4 : left;
   const quote = sourceLine(cue);
   const purpose = lead(cue);
+  // A long cue is set smaller, so the whole of it stays on the card.
+  const length = purpose.length + cue.question.length;
+  const scale = length > 140 ? ' cue-longer' : length > 90 ? ' cue-long' : '';
   return (
     <section
       ref={card}
       className={`question question-${size} cue-card${
         cue.kind === 'Asked you' ? ' cue-asked' : ''
-      }${cue.held ? ' is-held' : ''}${settled ? ' is-settled' : ''}${
-        leaving ? ' is-leaving' : ''
-      }`}
+      }${scale}${cue.held ? ' is-held' : ''}${settled ? ' is-settled' : ''}${
+        fades.start ? ' fades-start' : ''
+      }${fades.end ? ' fades-end' : ''}${leaving ? ' is-leaving' : ''}`}
       aria-label={leaving ? undefined : 'Suggested question'}
       aria-hidden={leaving || undefined}
       inert={leaving || undefined}
@@ -268,124 +307,126 @@ export function Question({
         if (leaving && event.target === event.currentTarget) onLeft?.();
       }}
     >
-      <div className="cue-line">
-        <span className="cue-lead">
-          <Words text={purpose} cap={CUE_WORDS} />
-        </span>{' '}
-        <h2 aria-live={announce ? 'polite' : undefined}>
-          {said && '“'}
-          <Words
-            text={cue.question}
-            from={purpose.split(/\s+/).length}
-            cap={CUE_WORDS}
-            spoken={said}
-          />
-          {said && '”'}
-        </h2>
-      </div>
-      <button
-        className="cue-time"
-        aria-label={cue.held ? 'Held' : 'Hold'}
-        title={
-          cue.held ? 'Held until you dismiss it' : 'Hold until you dismiss it'
-        }
-        aria-disabled={cue.held || busy}
-        aria-describedby={timed || cue.held ? undefined : staysId}
-        onClick={() => {
-          if (!cue.held && !busy) onInspect(false);
-        }}
-      >
-        {timed || cue.held ? (
-          <span
-            className="cue-track"
-            style={{ '--left': cue.held ? 1 : shown } as CSSProperties}
-          >
-            <span className="cue-fill" />
-            <span className="cue-bead" />
-          </span>
-        ) : (
-          <span className="cue-stays" id={staysId}>
-            Stays longer · no countdown
-          </span>
-        )}
-        <span className="cue-hold">{cue.held ? 'Held' : 'Hold'}</span>
-      </button>
-      {cue.resolvedBy && (
-        <div className="cue-source">
-          <span className="cue-source-label">
-            {hasPriorNotes(cue.resolvedBy.sources)
-              ? 'Marked resolved from these sources'
-              : 'Answered later in the conversation'}
+      <div className="cue-scroll" ref={scroller}>
+        <div className="cue-line">
+          <span className="cue-lead">
+            <Words text={purpose} cap={CUE_WORDS} />
           </span>{' '}
-          {cue.resolvedBy.sources?.length ? (
-            <Sources
-              sources={cue.resolvedBy.sources}
-              label="Resolution sources"
+          <h2 aria-live={announce ? 'polite' : undefined}>
+            {said && '“'}
+            <Words
+              text={cue.question}
+              from={purpose.split(/\s+/).length}
+              cap={CUE_WORDS}
+              spoken={said}
             />
-          ) : (
-            <blockquote className="cue-quote">
-              “<Words text={cue.resolvedBy.evidence} spoken />”
-            </blockquote>
-          )}
+            {said && '”'}
+          </h2>
         </div>
-      )}
-      <div className="cue-source">
-        {cue.sources?.length ? (
-          <>
-            {hasPriorNotes(cue.sources) && (
-              <p>Prior notes are not from this conversation.</p>
-            )}
-            <Sources sources={cue.sources} label="Cue sources" />
-            {cue.aboutFocus && (
-              <p>
-                This suggestion cites speech with words from your focus list.
-              </p>
-            )}
-          </>
-        ) : cue.note ? (
-          <>
+        <button
+          className="cue-time"
+          aria-label={cue.held ? 'Held' : 'Hold'}
+          title={
+            cue.held ? 'Held until you dismiss it' : 'Hold until you dismiss it'
+          }
+          aria-disabled={cue.held || busy}
+          aria-describedby={timed || cue.held ? undefined : staysId}
+          onClick={() => {
+            if (!cue.held && !busy) onInspect(false);
+          }}
+        >
+          {timed || cue.held ? (
+            <span
+              className="cue-track"
+              style={{ '--left': cue.held ? 1 : shown } as CSSProperties}
+            >
+              <span className="cue-fill" />
+              <span className="cue-bead" />
+            </span>
+          ) : (
+            <span className="cue-stays" id={staysId}>
+              Stays longer · no countdown
+            </span>
+          )}
+          <span className="cue-hold">{cue.held ? 'Held' : 'Hold'}</span>
+        </button>
+        {cue.resolvedBy && (
+          <div className="cue-source">
             <span className="cue-source-label">
-              Its title came up · imported note, {cue.note.sourceDate}
+              {hasPriorNotes(cue.resolvedBy.sources)
+                ? 'Marked resolved from these sources'
+                : 'Answered later in the conversation'}
             </span>{' '}
-            {/* Present for every note reminder, so a warning that appears
+            {cue.resolvedBy.sources?.length ? (
+              <Sources
+                sources={cue.resolvedBy.sources}
+                label="Resolution sources"
+              />
+            ) : (
+              <blockquote className="cue-quote">
+                “<Words text={cue.resolvedBy.evidence} spoken />”
+              </blockquote>
+            )}
+          </div>
+        )}
+        <div className="cue-source">
+          {cue.sources?.length ? (
+            <>
+              {hasPriorNotes(cue.sources) && (
+                <p>Prior notes are not from this conversation.</p>
+              )}
+              <Sources sources={cue.sources} label="Cue sources" />
+              {cue.aboutFocus && (
+                <p>
+                  This suggestion cites speech with words from your focus list.
+                </p>
+              )}
+            </>
+          ) : cue.note ? (
+            <>
+              <span className="cue-source-label">
+                Its title came up · imported note, {cue.note.sourceDate}
+              </span>{' '}
+              {/* Present for every note reminder, so a warning that appears
                 or changes in place is announced; empty when there is none.
                 Above the excerpt, so a long one cannot push it out of view. */}
-            <span
-              className="question-warning"
-              aria-live={announce ? 'polite' : undefined}
-            >
-              {cue.note.unconfirmed && (
-                <Unconfirmed at={cue.note.unconfirmed.lastConfirmedMs} />
+              <span
+                className="question-warning"
+                aria-live={announce ? 'polite' : undefined}
+              >
+                {cue.note.unconfirmed && (
+                  <Unconfirmed at={cue.note.unconfirmed.lastConfirmedMs} />
+                )}
+              </span>
+              <blockquote className="cue-quote">
+                “<Words text={cue.evidence} cap={QUOTE_WORDS} />”
+              </blockquote>
+            </>
+          ) : (
+            <>
+              <span className="cue-source-label">{origin(cue, live)}</span>
+              {quote && (
+                <>
+                  {' '}
+                  <blockquote className="cue-quote">
+                    “
+                    <Words text={quote} cap={QUOTE_WORDS} spoken={!said} />”
+                  </blockquote>
+                </>
               )}
-            </span>
-            <blockquote className="cue-quote">
-              “<Words text={cue.evidence} cap={QUOTE_WORDS} />”
-            </blockquote>
-          </>
-        ) : (
-          <>
-            <span className="cue-source-label">{origin(cue, live)}</span>
-            {quote && (
-              <>
-                {' '}
-                <blockquote className="cue-quote">
-                  “
-                  <Words text={quote} cap={QUOTE_WORDS} spoken={!said} />”
-                </blockquote>
-              </>
-            )}
-          </>
+            </>
+          )}
+        </div>
+        {said && onKeep && (
+          <button
+            className="text-button keep-line"
+            disabled={busy}
+            onClick={onKeep}
+          >
+            Keep this line
+          </button>
         )}
       </div>
-      {said && onKeep && (
-        <button
-          className="text-button keep-line"
-          disabled={busy}
-          onClick={onKeep}
-        >
-          Keep this line
-        </button>
-      )}
       {/* Last in reading order; drawn in the corner. */}
       <button
         className="dismiss-question"

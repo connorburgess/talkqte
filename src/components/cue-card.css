@@ -12,7 +12,7 @@
   --cue-ease: cubic-bezier(0.16, 1, 0.3, 1);
   background: var(--cue-surface);
   color: var(--cue-ink);
-  padding: 16px 18px 14px;
+  padding: 0;
   border-radius: var(--cue-radius);
   transform-origin: left center;
   /* It comes in from the left, then opens to its full width. The words are
@@ -20,6 +20,9 @@
   animation:
     cue-arrive 200ms var(--cue-ease) both,
     cue-widen 520ms 70ms var(--cue-ease) both;
+}
+.cue-card .cue-scroll {
+  padding: 16px 18px 14px;
 }
 @keyframes cue-arrive {
   from {
@@ -161,6 +164,20 @@
 }
 .question-large.cue-card .cue-line {
   font-size: 28px;
+}
+/* A long cue steps down in size so it is never cut off by the card. */
+.cue-card.cue-long .cue-line {
+  font-size: 19px;
+}
+.cue-card.cue-longer .cue-line {
+  font-size: 17px;
+  letter-spacing: -0.01em;
+}
+.question-large.cue-card.cue-long .cue-line {
+  font-size: 24px;
+}
+.question-large.cue-card.cue-longer .cue-line {
+  font-size: 21px;
 }
 
 /* The time left is the rule between the cue and its source. It is also
@@ -355,7 +372,8 @@
 }
 
 /* In the companion the card fills the window under the bar, at one height
-   for every state. A long cue or source scrolls inside it. */
+   for every state. Its words scroll inside it when they do not fit; its
+   edges and Dismiss stay where they are. */
 .floating-surface .question.cue-card {
   --cue-radius: 20px;
   display: flex;
@@ -363,37 +381,62 @@
   margin: 0 6px 6px;
   border-top: 0;
   border-radius: var(--cue-radius);
-  padding-block: 10px;
-  background:
-    linear-gradient(var(--cue-surface) 30%, transparent) top / 100% 28px
-      no-repeat local,
-    linear-gradient(transparent, var(--cue-surface) 70%) bottom / 100% 28px
-      no-repeat local,
-    radial-gradient(farthest-side at 50% 0, rgb(31 48 39 / 0.28), transparent)
-      top / 100% 12px no-repeat scroll,
-    radial-gradient(
-        farthest-side at 50% 100%,
-        rgb(31 48 39 / 0.28),
-        transparent
-      )
-      bottom / 100% 12px no-repeat scroll,
-    var(--cue-surface);
+  padding: 0;
+  overflow: hidden;
+  background: var(--cue-surface);
+}
+.floating-surface .cue-card .cue-scroll {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden auto;
+  padding: 10px 18px;
 }
 .floating-surface .cue-card .cue-line::before {
   height: 38px;
 }
 /* A short cue sits in the middle of the card, with equal room above and
    below; a long one starts at the top and scrolls. */
-.floating-surface .cue-card::before,
-.floating-surface .cue-card::after {
+.floating-surface .cue-card .cue-scroll::before,
+.floating-surface .cue-card .cue-scroll::after {
   content: '';
   flex: 1 0 0;
 }
-.floating-surface .cue-card > * {
+.floating-surface .cue-card .cue-scroll > * {
   flex: none;
 }
 .floating-surface .cue-card .keep-line {
   align-self: flex-start;
+}
+/* More to read beyond an edge: the words fade into the card there, so no
+   line is ever shown cut in half, and the rest is reached by scrolling. */
+.floating-surface .cue-card::before,
+.floating-surface .cue-card::after {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  left: 0;
+  right: 0;
+  height: 48px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms ease-out;
+}
+.floating-surface .cue-card::before {
+  top: 0;
+  background: linear-gradient(var(--cue-surface) 22%, transparent);
+}
+.floating-surface .cue-card::after {
+  bottom: 0;
+  background: linear-gradient(transparent, var(--cue-surface) 78%);
+}
+.floating-surface .cue-card.fades-start::before,
+.floating-surface .cue-card.fades-end::after {
+  opacity: 1;
+}
+.floating-surface .cue-card .dismiss-question {
+  z-index: 2;
 }
 /* The 360px window of a small display: a step down in size keeps a cue of
    ordinary length inside the card with every platform's fonts. */
@@ -401,8 +444,20 @@
   .floating-surface .cue-card .cue-line {
     font-size: 20px;
   }
+  .floating-surface .cue-card.cue-long .cue-line {
+    font-size: 18px;
+  }
+  .floating-surface .cue-card.cue-longer .cue-line {
+    font-size: 16px;
+  }
   .floating-surface .question-large.cue-card .cue-line {
     font-size: 25px;
+  }
+  .floating-surface .question-large.cue-card.cue-long .cue-line {
+    font-size: 22px;
+  }
+  .floating-surface .question-large.cue-card.cue-longer .cue-line {
+    font-size: 19px;
   }
   .floating-surface .question-large.cue-card .cue-source {
     font-size: 15px;

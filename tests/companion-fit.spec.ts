@@ -168,7 +168,7 @@ async function expectWindowFits(page: Page, label: string) {
 
 /** The card shows all of its content without scrolling. */
 async function expectCardComplete(question: Locator, label: string) {
-  const card = await question.evaluate((element) => ({
+  const card = await question.locator('.cue-scroll').evaluate((element) => ({
     content: element.scrollHeight,
     shown: element.clientHeight,
   }));
@@ -318,6 +318,98 @@ test('a held question that is answered shows the answer first and every line sta
     );
   }
 });
+
+// A model's suggestion can run long and cite more than one line.
+const longSuggestion: Cue = {
+  ...base,
+  id: 'fictional-long-suggestion',
+  kind: 'Suggestion',
+  // Twenty-five words.
+  question:
+    'Who will take the first draft of the welcome guide with the map and the tool shed rules, and bring it to the next meeting?',
+  evidence: '',
+  sourceId: 'transcript:fictional-30',
+  sources: [
+    {
+      id: 'transcript:fictional-30',
+      revision: 0,
+      text: 'A short welcome guide could help, but the tool shed rules changed last week and nobody has written them down.',
+      provenance: { kind: 'transcript', atMs: 30_000, speaker: 'Speaker' },
+    },
+    {
+      id: 'transcript:fictional-37',
+      revision: 0,
+      text: 'Someone should bring a draft to the next meeting so we can try it with new visitors.',
+      provenance: { kind: 'transcript', atMs: 37_000, speaker: 'Speaker' },
+    },
+  ],
+};
+
+/** Whether the card fades its lower edge, as it must when more lies below. */
+const fadesAtEnd = (question: Locator) =>
+  question.evaluate(
+    (card) => getComputedStyle(card, '::after').opacity === '1',
+  );
+
+for (const size of ['standard', 'large'] as const)
+  test(`a long cue with two sources is never cut off in ${size} text: it is whole, and what does not fit fades and scrolls`, async ({
+    page,
+  }) => {
+    await companion(page, size);
+    for (const width of [360, 420]) {
+      await page.setViewportSize({ width, height: height(size) });
+      const question = await show(page, {
+        ...longSuggestion,
+        id: `${longSuggestion.id}-${width}`,
+      });
+      const label = `${width} px`;
+      await expectWindowFits(page, label);
+      await expectControls(page, question, false);
+      // The whole cue shows, and the first line it came from begins.
+      await expect(question.getByRole('heading')).toHaveText(
+        longSuggestion.question,
+      );
+      await expect(question.getByRole('heading')).toBeInViewport({ ratio: 1 });
+      await expect(
+        question.getByText('This conversation · 0:30 · Speaker'),
+      ).toBeInViewport({ ratio: 1 });
+      // What does not fit is not sliced by the card's edge: it fades.
+      const hidden = await question
+        .locator('.cue-scroll')
+        .evaluate((words) => words.scrollHeight - words.clientHeight);
+      await expect.poll(() => fadesAtEnd(question), label).toBe(hidden > 1);
+      // Every source stays there to read, to its last word.
+      await expect(
+        page.getByRole('list', { name: 'Cue sources' }).getByRole('listitem'),
+      ).toHaveCount(2);
+      await expectEndReachable(
+        page,
+        question,
+        question.locator('blockquote').last().getByText('visitors.'),
+      );
+      await expect
+        .poll(() => fadesAtEnd(question), `${label}, at the end`)
+        .toBe(false);
+      // Dismiss stays in its corner however far the words are scrolled.
+      await expect(
+        question.getByRole('button', { name: 'Dismiss', exact: true }),
+      ).toBeInViewport({ ratio: 1 });
+
+      // The longest cue the engine allows, 200 characters, is still whole.
+      const longest =
+        `${'Who will take the first draft of the welcome guide, the map and the tool shed rules, '.repeat(3)}and when?`
+          .slice(0, 200)
+          .trim();
+      const full = await show(page, {
+        ...cues.question,
+        id: `fictional-200-${width}`,
+        question: longest,
+      });
+      await expect(full.getByRole('heading')).toHaveText(longest);
+      await expect(full.getByRole('heading')).toBeInViewport({ ratio: 1 });
+      await expectWindowFits(page, `${label}, 200 characters`);
+    }
+  });
 
 for (const size of ['standard', 'large'] as const)
   test(`the longest cue and source stay complete and reachable in ${size} text at 360px`, async ({
