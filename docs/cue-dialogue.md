@@ -1,6 +1,6 @@
 # Dialogue lab: generated conversations that cues can change
 
-Status: development tooling, 14 November 2026. The engine, the agent interfaces, deterministic fakes for every agent, the dry run, offline runs and the model-backed agents exist. **No model call has been made.** A first pilot needs the owner's approval ([before a pilot](#before-a-pilot)).
+Status: development tooling, 14 November 2026. The batch engine, agent interfaces, deterministic fakes, dry run and model-backed agents exist. Earlier bounded fictional pilots did not complete. The [incremental streaming interface](#incremental-streamed-dialogue-interface) is offline-tested only; no streamed provider or real-app acceptance run is established. Any new run needs its own authorization and bounds ([before a pilot](#before-a-pilot)).
 
 **A simulated listener changing course is not a user outcome.** This lab can suggest which cue types and moments are worth testing with people in the [comparison study](comparison-study.md) (V5–V7). It cannot show that a cue helps anyone.
 
@@ -177,3 +177,39 @@ A first pilot of 2 generated scenarios with branches A and B and the default set
 - The briefs, moments and criteria are written by a model and have not been reviewed by people. The checks catch malformed or unjudgeable briefs, not unrealistic ones.
 - The clock is simulated, and turn durations are estimates until voiced.
 - The judge is a model. It is blind to the branch, but its verdicts are not ground truth.
+
+## Incremental streamed dialogue interface
+
+`scripts/cue-dialogue-stream.mjs` adds a provider-independent module for an external lab orchestrator. This change is **offline-tested with stand-ins only**. It does not launch an app, select a provider, generate voices, capture speech, enable a real-app evaluator, or start inference. A completed generated recording does not meet the next acceptance target: streamed speech transcribed in the real app, with an explicitly enabled AI evaluator deciding between a cue and silence. The provider, broker, actual speech/transcription path, cue observation channel and native acceptance remain separate dependencies.
+
+`openStream({ scenario, maxCalls, settings, run, gate, signal, deadlineMs, log })` opens one frozen scenario and branch. `scenario` has `file` (absolute path outside the checkout), `sha256`, `id` and `branch` (`A` or `B`). The file must be a hashed fictional `talkqte-cue-dialogue-briefs/1` artifact; it is checked before selecting the brief. Generated briefs are the default. Offline tests explicitly pass `briefSource: 'fixture'` for the hand-written fakes. Settings are `maxTurns` (14), `interjectEvery` (3), `glances` (3), and `pauseBeforeMs` (500).
+
+The caller supplies both dependencies explicitly:
+
+- `run(role, { instructions, input, schema }, { signal, deadlineMs })` returns `{ value, elapsedMs?, usage? }`. The role is cast, listener or judge. Requests use the existing participant prompts and narrow role views, and the module checks every reply against the allowed speakers, turn, card state and criteria. The adapter must enforce bounded output and a hard subprocess deadline, settle after cancellation/cleanup, and never extend its pinned deadline. No provider is constructed here. Provider/model/effort and execution mode must be pinned and recorded by the orchestrator; switching provider requires a deliberate new run, never silent fallback or retry.
+- `gate.run(task, { role, signal })` owns the shared operation gate and cumulative dispatch-attempt budget for participants **and** the real-app evaluator. It admits at most one operation and refuses rather than queues stale snapshots. It retains ownership through provider cleanup and validation/acceptance acknowledgement; a provider returning bytes is not permission to start another operation. The stream validates its reply inside this gate. The evaluator's runtime acknowledgement remains a separate integration requirement.
+
+The session also owns a nonresettable `maxCalls` limit (1–300). `calls` counts attempted runner/CLI dispatches, including failed or aborted attempts and the judge; the global gate may refuse before a role runner is dispatched. Caller `callsLeft` can narrow the remaining budget, never widen or reset it. These counters do **not** prove a bound on underlying provider requests: a CLI invocation may issue more than one. Real Codex execution remains blocked until a supported provider-request bound is established; the current stream checks use injected stand-ins, without authentication or provider calls.
+
+The returned session has `nextLines(request, { signal })`, `judgeStream(request, { signal })`, and idempotent `close()`. The compatibility exports `nextLines(request, { session, signal })` and `judgeStream(...)` delegate to an existing session only; they cannot create or reopen one. Concurrent operations are refused without queueing. A run/session Stop, revoke or replacement abort is terminal, discards late results and retains ownership until the bounded runner settles. Provider, schema and deadline failures are terminal with no retry. Ordinary new-speech evaluator supersession must remain outside this terminal signal: the proposed evaluator policy coalesces newest context and discards stale successful decisions, while actual failures still stop the run. This module implements no native supersession policy.
+
+Every request starts with schema `talkqte-dialogue-next/1` and these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `scenario` | The exact frozen binding passed to openStream |
+| `transcript` | Completed/heard lines, each `{ lineId, speaker, text, startMs, durationMs }`; empty initially |
+| `cues` | Runtime-published snapshot: `{ cueId, atMs, clearedAtMs?, text, source, decider }`; empty in branch B and for judge requests |
+| `nowMs`, `budgetMs` | Current meeting time and soft response budget, both in milliseconds |
+| `callsLeft` | Caller-side remaining dispatch attempts; cannot increase the session budget |
+| `state` | `null` initially, then the exact versioned state echo returned by the session; never authority over its state |
+
+Each reply contains `schema`, `lines`, `end`, `calls`, `elapsedMs`, `overBudget`, `state` and `nextRole` (`cast`, `listener`, `end`), plus allowlisted token `usage` when supplied. It returns one line initially, with `{ lineId, speaker, text, pauseBeforeMs }`. A silent listener returns zero lines, advances once to `nextRole: 'cast'`, and echoes a new state. The orchestrator proceeds to cast; it does not retry the listener in a busy loop. A card read also returns `read` with its cue id, meeting time and simulated `read-used` or `read-ignored` state. Branch B rejects cue input and never sends cue identities or text to its listener.
+
+Only completed speech may enter any request: `startMs + durationMs <= nowMs`. There is one pending returned line at most. The next request must append that exact line/id/speaker/text with completed playback timing, preserving all earlier lines and times. Missing, altered, duplicated, queued or still-playing acknowledgement is refused before another dispatch. State advances when a line is returned but that line is not yet heard. The conservative first version waits for playback completion before further generation; unrestricted look-ahead is outside this contract. The orchestrator records generation pauses honestly. At a listener boundary it supplies a fresh meeting time and cue snapshot; the listener can read only an uncleared card already published by that boundary and while glances remain. Its distracted windows still mask missed speech. Cue text comes from runtime publication, not generated text injected as a displayed cue; a future scoped in-memory observation channel must preserve session/revision identity without adding cue text to persistent timing logs.
+
+After normal end, the final returned line must be acknowledged before one `judgeStream` request. Its provider input is allowlisted to heard transcript and pre-registered criteria only; prompts, private cast facts, cue data, branch identity and stream state are excluded. Stop, failure and cancellation permit no judge. The judge uses the same cumulative dispatch-attempt budgets.
+
+`log` receives structured stream requests/replies, role requests with instructions/input/schema, validated role replies, and safe failure categories/counts. Keep the synthetic logs outside the repository. Raw provider output, account details and arbitrary runner error messages are excluded; only known numeric token counters are retained. `replayStream(records)` accepts successful `stream-reply` records and returns saved replies for exactly matching canonical requests and operation order, without opening a brief, gate or provider. Mismatch, exhaustion or abort terminates replay; it cannot silently switch to inference.
+
+Run the offline acceptance checks with `npm run test:cue-lab`. They cover playback continuity, silent transitions, cue freshness/clearing/glances, B cue rejection, caps across participant/evaluator attempts, first failure, cancellation and cleanup ownership, deadline/soft budget behavior, one blind judge and strict replay. Participant prompts also ask the listener to avoid repeating itself or interrupting a question addressed to someone else, and ask the cast to use relevant private facts. Tests establish these boundaries, not conversational naturalness or usefulness to people.
