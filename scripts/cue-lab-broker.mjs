@@ -161,6 +161,7 @@ export async function openLabBroker({
   signal,
   runId = randomUUID(),
   onTerminal = () => {},
+  sourceSessionMode = 'required',
 } = {}) {
   requireThat(
     provider &&
@@ -170,7 +171,8 @@ export async function openLabBroker({
       text(provider.metadata.model, 100) &&
       text(provider.metadata.effort, 20) &&
       /^[A-Za-z0-9_-]{1,64}$/.test(runId) &&
-      typeof onTerminal === 'function',
+      typeof onTerminal === 'function' &&
+      ['required', 'legacy-fixture'].includes(sourceSessionMode),
   );
   requireThat(
     Number.isSafeInteger(maxCalls) && maxCalls >= 1 && maxCalls <= 100,
@@ -193,6 +195,7 @@ export async function openLabBroker({
   const descriptorPath = join(directory, 'descriptor.json');
   const nonce = randomBytes(32).toString('hex');
   let socket = null,
+    expectedSourceSession = null,
     sessionId = null,
     authenticated = false,
     connected = false,
@@ -456,6 +459,8 @@ export async function openLabBroker({
           frame.schema === SCHEMA &&
           frame.runId === runId &&
           u64(frame.sessionId) &&
+          (sourceSessionMode === 'legacy-fixture' ||
+            frame.sessionId === expectedSourceSession) &&
           /^[a-f0-9]{64}$/.test(frame.nonce) &&
           timingSafeEqual(
             Buffer.from(frame.nonce, 'hex'),
@@ -647,8 +652,32 @@ export async function openLabBroker({
     get observation() {
       return observation === null ? null : structuredClone(observation);
     },
+    expectSourceSession(value) {
+      try {
+        requireThat(
+          sourceSessionMode === 'required' &&
+            value !== '0' &&
+            u64(value) &&
+            !expectedSourceSession &&
+            !authenticated &&
+            !closing &&
+            !gate.terminal,
+        );
+        expectedSourceSession = value;
+      } catch {
+        fail('protocol');
+        throw gateFailure('protocol');
+      }
+    },
     async calibrateClock() {
-      requireThat(authenticated && !probe && !clock && !gate.terminal);
+      requireThat(
+        authenticated &&
+          !probe &&
+          !clock &&
+          !gate.terminal &&
+          (sourceSessionMode === 'legacy-fixture' ||
+            sessionId === expectedSourceSession),
+      );
       const id = randomUUID();
       const sentMs = performance.now();
       let resolve, reject;
@@ -671,7 +700,7 @@ export async function openLabBroker({
         requireThat(
           !playback || clock.uncertaintyMs + playback.uncertaintyMs <= 100,
         );
-        return { ...clock };
+        return { ...clock, sessionId };
       } catch (error) {
         fail(error.category);
         throw gateFailure(gate.terminal ?? 'protocol');

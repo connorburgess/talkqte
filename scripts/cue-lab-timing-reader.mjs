@@ -12,6 +12,11 @@ import { TextDecoder } from 'node:util';
 import { parseUniqueLabJson } from './cue-lab-strict-json.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
 
+const canonicalSession = (value) =>
+  typeof value === 'string' &&
+  /^[1-9][0-9]{0,19}$/.test(value) &&
+  BigInt(value) <= 18446744073709551615n;
+
 export function watchLabTiming({
   path,
   runId,
@@ -19,6 +24,7 @@ export function watchLabTiming({
   expectedCommit,
   expectedFeatures,
   expectedApplication,
+  sourceObservation = 'legacy-fixture',
   maxFileBytes = 8 * 1024 * 1024,
   maxFrameBytes = 64 * 1024,
   readBatchBytes = 64 * 1024,
@@ -30,6 +36,7 @@ export function watchLabTiming({
     typeof runId !== 'string' ||
     !/^[A-Za-z0-9_-]{1,64}$/.test(runId) ||
     typeof onEvent !== 'function' ||
+    !['v1', 'legacy-fixture'].includes(sourceObservation) ||
     ![
       [maxFileBytes, 1, 16 * 1024 * 1024],
       [maxFrameBytes, 16, 64 * 1024],
@@ -106,12 +113,61 @@ export function watchLabTiming({
         )
           throw gateFailure('protocol');
       onEvent({ event: 'dev_stop', run_id: runId, step: value.step });
+    } else if (value.event === 'dev_source_observation') {
+      if (
+        sourceObservation !== 'v1' ||
+        value.version !== 1 ||
+        value.run_id !== runId ||
+        value.application !== expectedApplication ||
+        !['listening', 'retired'].includes(value.step) ||
+        !/^[a-f0-9]{32}$/.test(value.host_operation ?? '') ||
+        !/^[a-f0-9]{64}$/.test(value.live_operation ?? '') ||
+        !canonicalSession(value.session) ||
+        Object.keys(value).some(
+          (k) =>
+            ![
+              'event',
+              'version',
+              'run_id',
+              'application',
+              'step',
+              'host_operation',
+              'live_operation',
+              'session',
+              'wall_ms',
+              'mono_ms',
+            ].includes(k),
+        )
+      )
+        throw gateFailure('protocol');
+      const {
+        event,
+        version,
+        run_id,
+        application,
+        step,
+        host_operation,
+        live_operation,
+        session,
+      } = value;
+      onEvent({
+        event,
+        version,
+        run_id,
+        application,
+        step,
+        host_operation,
+        live_operation,
+        session,
+      });
     } else if (value.event === 'session') {
+      if (value.live === false) return;
       if (
         !['started', 'ended'].includes(value.state) ||
         typeof value.live !== 'boolean' ||
-        !Number.isSafeInteger(value.session) ||
-        value.session < 0
+        (sourceObservation === 'v1'
+          ? !canonicalSession(value.session)
+          : !Number.isSafeInteger(value.session) || value.session < 0)
       )
         throw gateFailure('protocol');
       if (!value.live) return;
@@ -195,7 +251,25 @@ export function watchLabTiming({
           const frame = partial.subarray(0, end);
           partial = partial.subarray(end + 1);
           partialAt = null;
-          emit(parseUniqueLabJson(decoder.decode(frame)));
+          emit(
+            parseUniqueLabJson(
+              decoder.decode(frame),
+              sourceObservation === 'v1'
+                ? function (key, value, context) {
+                    if (
+                      this?.event === 'session' &&
+                      this.live === true &&
+                      key === 'session'
+                    ) {
+                      if (!canonicalSession(context?.source))
+                        throw gateFailure('protocol');
+                      return context.source;
+                    }
+                    return value;
+                  }
+                : undefined,
+            ),
+          );
           if (stopped) return;
         }
         if (partial.length > maxFrameBytes) throw gateFailure('protocol');

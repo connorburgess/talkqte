@@ -369,6 +369,7 @@ function launcher({
         reader = watchLabTiming({
           path: timingPath,
           runId: runEnv.TALKQTE_DEV_LAB_RUN_ID,
+          sourceObservation: fixtureCase ? 'legacy-fixture' : 'v1',
           expectedCommit: build.manifest?.commit,
           expectedFeatures: build.manifest?.features,
           expectedApplication: sourceApplication,

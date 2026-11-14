@@ -44,6 +44,8 @@ export function createLabPlaybackSession({
       media.durationMs > 0 &&
       media.durationMs <= 105000 &&
       typeof source?.waitListening === 'function' &&
+      (source.mode === 'v1' || settings?.execution === 'offline-stand-in') &&
+      (source.mode !== 'v1' || typeof source.subscribe === 'function') &&
       ['prepare', 'play', 'stop', 'subscribe'].every(
         (k) => typeof player?.[k] === 'function',
       ) &&
@@ -115,13 +117,18 @@ export function createLabPlaybackSession({
   // Notifications can re-enter cleanup synchronously; close reserves its promise
   // before invoking any adapter, abort handler or unsubscribe callback.
   try {
-    for (const adapter of [player, recorder]) {
+    for (const adapter of [
+      player,
+      recorder,
+      ...(source.mode === 'v1' ? [source] : []),
+    ]) {
       const unsubscribe = adapter.subscribe(() => queueMicrotask(fail));
       required(typeof unsubscribe === 'function');
       subscriptions.push(unsubscribe);
     }
     run = createLabRun({
       settings,
+      sourceSessionMode: source.mode === 'v1' ? 'required' : 'legacy-fixture',
       native,
       signal: root.signal,
       processEvents,
@@ -157,6 +164,12 @@ export function createLabPlaybackSession({
     required(
       listening?.runId === launchInfo.runId && listening.listening === true,
     );
+    if (source.mode === 'v1') {
+      required(
+        listening.version === 1 && typeof listening.sessionId === 'string',
+      );
+      run.expectSourceSession(listening.sessionId);
+    }
     if (root.signal.aborted) throw gateFailure('cancelled');
     const recording = await recorder.start({
       media: identity,
