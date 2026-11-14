@@ -688,7 +688,7 @@ svg {
 }
 .question-large h2,
 .setting .appearance-example.question-large {
-  font-size: 30px;
+  font-size: 28px;
 }
 .question-large .evidence {
   font-size: 18px;
@@ -1068,7 +1068,7 @@ svg {
   max-width: 16rem;
 }
 .setting .appearance-example {
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 700;
   color: var(--ink);
   margin-top: 20px;

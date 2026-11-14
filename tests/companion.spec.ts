@@ -103,23 +103,24 @@ test('a question fits the narrow window used on a small display', async ({
     const bounds = await button.boundingBox();
     expect(bounds!.height).toBeGreaterThanOrEqual(44);
   }
-  await question.getByRole('button', { name: 'Why?' }).click();
-  await page.setViewportSize({ width: 360, height: 460 });
+  // The source is in view from the start, and holding the cue keeps the
+  // window at the same size.
   await expect(question.locator('blockquote')).toBeVisible();
+  await question.getByRole('button', { name: 'Hold', exact: true }).click();
+  await expect(
+    question.getByRole('button', { name: 'Held', exact: true }),
+  ).toBeVisible();
   await expectCompanionToFit(page);
   expect(await fitsSideways()).toBe(true);
-  // Large text in the same narrow window: 420 for a question, 540 with context.
+  // Large text in the same narrow window: 420 px tall.
   await page.evaluate(async () => {
     const previewPath = '/src/lib/preview.ts';
     const preview = await import(previewPath);
     preview.command('set_question_size', { value: 'large' });
   });
-  await page.setViewportSize({ width: 360, height: 540 });
-  await expectCompanionToFit(page);
-  expect(await fitsSideways()).toBe(true);
-  await question.getByRole('button', { name: 'Hide context' }).click();
   await page.setViewportSize({ width: 360, height: 420 });
   await expectCompanionToFit(page);
+  expect(await fitsSideways()).toBe(true);
 });
 
 test('the companion switches between only what matters and all questions', async ({
@@ -220,7 +221,8 @@ test('a question answered by the conversation leaves, and the words that answere
     page.getByRole('heading', { name: 'What date should we aim for?' }),
   ).toHaveCount(0);
   await expect(question).toContainText("“Let's have it ready by Friday");
-  await expect(question).toContainText('Said');
+  await expect(question).toContainText('Just said');
+  await expect(question).toContainText('a date or commitment, word for word');
   await expect(
     question.getByRole('button', { name: 'Keep this line' }),
   ).toBeVisible();
@@ -234,22 +236,23 @@ test('an answered question being read stays and shows the answer', async ({
   page,
 }) => {
   await page.clock.runFor(37_200);
-  await page.getByRole('button', { name: 'Why?' }).click();
-  // The native companion grows to 560 px for context with an answer.
-  await page.setViewportSize({ width: 420, height: 560 });
+  await page.getByRole('button', { name: 'Hold', exact: true }).click();
+  // The window keeps its size; the answer joins the source in the card.
   await page.clock.runFor(14_000);
   const question = page.getByRole('region', { name: 'Suggested question' });
   await expect(
     question.getByRole('heading', { name: 'What date should we aim for?' }),
   ).toBeVisible();
-  await expect(question).toContainText(
-    'This was answered in the conversation. Kept here until you dismiss it.',
-  );
-  await expect(question.locator('.question-context')).toContainText(
-    'Answered later',
-  );
-  await expect(question.locator('.question-context')).toContainText(
+  await expect(
+    question.getByRole('button', { name: 'Held', exact: true }),
+  ).toBeVisible();
+  await expect(question).toContainText('Answered later in the conversation');
+  await expect(question.locator('blockquote').first()).toContainText(
     'ready by Friday',
+  );
+  // The line that raised the question stays below the answer.
+  await expect(question.locator('blockquote').last()).toContainText(
+    'We should have it ready soon',
   );
   await expectCompanionToFit(page);
   await page.evaluate(async () => {
@@ -257,7 +260,7 @@ test('an answered question being read stays and shows the answer', async ({
     const preview = await import(previewPath);
     preview.command('set_question_size', { value: 'large' });
   });
-  await page.setViewportSize({ width: 420, height: 640 });
+  await page.setViewportSize({ width: 420, height: 420 });
   await expectCompanionToFit(page);
   await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
   await expect(question).toHaveCount(0);

@@ -1,43 +1,154 @@
-import { useId } from 'react';
-import { ChevronDown, ChevronUp, X } from 'lucide-react';
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { X } from 'lucide-react';
 import {
   clockTime,
   type Cue,
   type CueSnapshot,
   type CueSource,
 } from '../lib/types';
+import './cue-card.css';
 
 function hasPriorNotes(sources?: CueSource[]) {
   return sources?.some((source) => source.provenance.kind === 'priorNote');
 }
 
+const reducedMotion = () =>
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function useReducedMotion() {
+  const [reduced, setReduced] = useState(reducedMotion);
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setReduced(query.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  return reduced;
+}
+
+/**
+ * What the cue is, as the first words of its sentence. Every kind but
+ * Suggestion comes from a fixed phrase rule, so none of these claim more
+ * than the rule matched.
+ */
+function lead(cue: Cue) {
+  if (cue.note) return 'From your notes';
+  switch (cue.kind) {
+    case 'Said':
+      return cue.held && cue.remainingMs === 0 ? 'Said earlier' : 'Just said';
+    case 'Asked you':
+      return 'Asked you';
+    case 'Open question':
+      return 'Asked the group';
+    case 'Still open':
+      return 'From your focus';
+    case 'Suggestion':
+      return 'Suggested';
+    default:
+      return 'You could ask';
+  }
+}
+
+/** Where the cue came from and, in a few words, why it is here now. */
+function origin(cue: Cue, live: boolean) {
+  const conversation = live ? 'this conversation' : 'the demo conversation';
+  const from =
+    cue.held && cue.remainingMs === 0 && !cue.resolvedBy
+      ? `From earlier in ${conversation}`
+      : `From ${conversation}`;
+  const focus = cue.aboutFocus ? ' · uses words from your focus list' : '';
+  switch (cue.kind) {
+    case 'Said':
+      return `${from} · a date or commitment, word for word${focus}`;
+    case 'Asked you':
+      return `${from} · uses your name${focus}`;
+    case 'Still open':
+      return `${from} · no line has used these focus words yet`;
+    default:
+      return `${from}${focus}`;
+  }
+}
+
+/**
+ * The line a cue came from. Where the cue is itself words from that line (a
+ * Said quote, a question put to you), they are already on the card, so an
+ * ellipsis stands in for them and only the rest of the line is repeated.
+ */
+function sourceLine(cue: Cue) {
+  const line = cue.evidence.trim();
+  const own = cue.question.trim();
+  const at = own ? line.indexOf(own) : -1;
+  if (at < 0) return line;
+  const before = line.slice(0, at).trimEnd();
+  const after = line.slice(at + own.length).trimStart();
+  return before || after ? [before, '…', after].filter(Boolean).join(' ') : '';
+}
+
+/** The warning for a reminder whose copy the last update check left unconfirmed. */
+function Unconfirmed({ at }: { at: number | null }) {
+  return (
+    <>
+      Not verified ·{' '}
+      {at === null ? (
+        'never confirmed'
+      ) : (
+        <>
+          last confirmed{' '}
+          <time dateTime={new Date(at).toISOString()}>
+            {new Date(at).toLocaleString(undefined, {
+              // A session-only time: the year adds nothing.
+              day: 'numeric',
+              month: 'short',
+              hour: 'numeric',
+              minute: '2-digit',
+            })}
+          </time>
+        </>
+      )}
+    </>
+  );
+}
+
 function Sources({ sources, label }: { sources: CueSource[]; label: string }) {
   return (
-    <ul className="evidence-sources" aria-label={label} role="list">
+    <ul className="cue-sources" aria-label={label} role="list">
       {sources.map((source) => (
         <li key={source.id}>
-          {source.provenance.kind === 'priorNote' ? (
-            <>
-              <p className="source-title">{source.provenance.title}</p>
-              <p className="source-label">
-                {source.provenance.provider === 'granola'
-                  ? 'Granola'
-                  : 'Imported file'}
-                {' · '}
-                {source.provenance.date} · prior note
-              </p>
-            </>
-          ) : (
-            <p className="source-label">
-              This conversation · {clockTime(source.provenance.atMs)} ·{' '}
-              {source.provenance.speaker}
-            </p>
-          )}
-          <blockquote className="evidence">“{source.text}”</blockquote>
+          <span className="cue-source-label">
+            {source.provenance.kind === 'priorNote'
+              ? `${source.provenance.title} · ${
+                  source.provenance.provider === 'granola'
+                    ? 'Granola'
+                    : 'Imported file'
+                } · ${source.provenance.date} · prior note`
+              : `This conversation · ${clockTime(source.provenance.atMs)} · ${source.provenance.speaker}`}
+          </span>{' '}
+          <blockquote className="cue-quote">“{source.text}”</blockquote>
         </li>
       ))}
     </ul>
   );
+}
+
+interface QuestionProps {
+  cue: Cue;
+  size: CueSnapshot['questionSize'];
+  /** The question comes from local transcription, not the fictional demo. */
+  live?: boolean;
+  announce?: boolean;
+  busy: boolean;
+  onDismiss: () => void;
+  /** Holds the cue until it is dismissed; the source is always in view. */
+  onInspect: (expanded: boolean) => void;
+  /** Keeps a quoted line in the notebook; only a Said cue offers it. */
+  onKeep?: () => void;
 }
 
 export function Question({
@@ -49,156 +160,142 @@ export function Question({
   onDismiss,
   onInspect,
   onKeep,
-}: {
-  cue: Cue;
-  size: CueSnapshot['questionSize'];
-  /** The question comes from local transcription, not the fictional demo. */
-  live?: boolean;
-  announce?: boolean;
-  busy: boolean;
-  onDismiss: () => void;
-  onInspect: (expanded: boolean) => void;
-  /** Keeps a quoted line in the notebook; only a Said cue offers it. */
-  onKeep?: () => void;
+  leaving = false,
+  onLeft,
+}: QuestionProps & {
+  /** The cue has gone; the card is on its way out and takes no input. */
+  leaving?: boolean;
+  onLeft?: () => void;
 }) {
-  const contextId = useId();
+  const reduced = useReducedMotion();
+  const card = useRef<HTMLElement>(null);
+  // A leaving card takes no input, so it must not keep keyboard focus: the
+  // window that dismissed it decides where focus goes next.
+  useLayoutEffect(() => {
+    const focused = document.activeElement;
+    if (
+      leaving &&
+      focused instanceof HTMLElement &&
+      card.current?.contains(focused)
+    )
+      focused.blur();
+  }, [leaving]);
+  const staysId = useId();
+  const said = cue.kind === 'Said';
+  // An Asked you question stays without a countdown (ROADMAP U4).
+  const timed = cue.kind !== 'Asked you';
+  const left = cue.totalMs ? Math.min(1, cue.remainingMs / cue.totalMs) : 0;
+  // Reduced motion: the line moves in four steps, not continuously.
+  const shown = reduced ? Math.ceil(left * 4) / 4 : left;
+  const quote = sourceLine(cue);
   return (
     <section
-      className={`question question-${size}`}
-      aria-label="Suggested question"
+      ref={card}
+      className={`question question-${size} cue-card${
+        cue.kind === 'Asked you' ? ' cue-asked' : ''
+      }${cue.held ? ' is-held' : ''}${leaving ? ' is-leaving' : ''}`}
+      aria-label={leaving ? undefined : 'Suggested question'}
+      aria-hidden={leaving || undefined}
+      inert={leaving || undefined}
+      onAnimationEnd={(event) => {
+        if (leaving && event.target === event.currentTarget) onLeft?.();
+      }}
     >
-      <h2 aria-live={announce ? 'polite' : undefined}>
-        {cue.kind === 'Said' ? `“${cue.question}”` : cue.question}
-      </h2>
-      <p className="question-meta">
-        {cue.note ? (
-          <>
-            Reminder from your notes · {cue.note.sourceDate}
-            {/* Present for every note reminder, so a warning that appears
-                or changes in place is announced; empty when there is none.
-                Kept on the same line to leave the companion its room. */}
-            <span
-              className="question-warning"
-              aria-live={announce ? 'polite' : undefined}
-            >
-              {cue.note.unconfirmed && (
-                <>
-                  {' · '}not verified ·{' '}
-                  {cue.note.unconfirmed.lastConfirmedMs === null ? (
-                    'never confirmed'
-                  ) : (
-                    <>
-                      last confirmed{' '}
-                      <time
-                        dateTime={new Date(
-                          cue.note.unconfirmed.lastConfirmedMs,
-                        ).toISOString()}
-                      >
-                        {new Date(
-                          cue.note.unconfirmed.lastConfirmedMs,
-                        ).toLocaleString(undefined, {
-                          // A session-only time: the year adds nothing.
-                          day: 'numeric',
-                          month: 'short',
-                          hour: 'numeric',
-                          minute: '2-digit',
-                        })}
-                      </time>
-                    </>
-                  )}
-                </>
-              )}
-            </span>
-          </>
-        ) : hasPriorNotes(cue.sources) ? (
-          'Suggestion with prior context'
-        ) : (
-          `${live ? 'Live question' : 'Demo question'} · ${cue.kind}${
-            cue.aboutFocus ? ' · about what matters' : ''
-          }`
-        )}
-      </p>
+      <div className="cue-line">
+        <span className="cue-lead">{lead(cue)}</span>{' '}
+        <h2 aria-live={announce ? 'polite' : undefined}>
+          {said ? `“${cue.question}”` : cue.question}
+        </h2>
+      </div>
       <button
-        className="question-disclosure"
-        aria-expanded={cue.expanded}
-        aria-controls={contextId}
-        aria-disabled={busy}
-        aria-label={cue.expanded ? 'Hide context' : undefined}
-        title={cue.expanded ? 'Hide context' : undefined}
+        className="cue-time"
+        aria-label={cue.held ? 'Held' : 'Hold'}
+        title={
+          cue.held ? 'Held until you dismiss it' : 'Hold until you dismiss it'
+        }
+        aria-disabled={cue.held || busy}
+        aria-describedby={timed || cue.held ? undefined : staysId}
         onClick={() => {
-          if (!busy) onInspect(!cue.expanded);
+          if (!cue.held && !busy) onInspect(false);
         }}
       >
-        {cue.expanded ? <ChevronUp size={18} /> : 'Why?'}
-        {!cue.expanded && <ChevronDown size={16} />}
+        {timed || cue.held ? (
+          <span className="cue-track">
+            <span
+              className="cue-fill"
+              style={cue.held ? undefined : { transform: `scaleX(${shown})` }}
+            />
+          </span>
+        ) : (
+          <span className="cue-stays" id={staysId}>
+            Stays longer · no countdown
+          </span>
+        )}
+        <span className="cue-hold">{cue.held ? 'Held' : 'Hold'}</span>
       </button>
-      <div id={contextId} hidden={!cue.expanded} className="question-context">
+      {cue.resolvedBy && (
+        <div className="cue-source">
+          <span className="cue-source-label">
+            {hasPriorNotes(cue.resolvedBy.sources)
+              ? 'Marked resolved from these sources'
+              : 'Answered later in the conversation'}
+          </span>{' '}
+          {cue.resolvedBy.sources?.length ? (
+            <Sources
+              sources={cue.resolvedBy.sources}
+              label="Resolution sources"
+            />
+          ) : (
+            <blockquote className="cue-quote">
+              “{cue.resolvedBy.evidence}”
+            </blockquote>
+          )}
+        </div>
+      )}
+      <div className="cue-source">
         {cue.sources?.length ? (
           <>
             {hasPriorNotes(cue.sources) && (
               <p>Prior notes are not from this conversation.</p>
             )}
             <Sources sources={cue.sources} label="Cue sources" />
+            {cue.aboutFocus && (
+              <p>
+                This suggestion cites speech with words from your focus list.
+              </p>
+            )}
+          </>
+        ) : cue.note ? (
+          <>
+            <span className="cue-source-label">
+              Its title came up · imported note, {cue.note.sourceDate}
+            </span>{' '}
+            {/* Present for every note reminder, so a warning that appears
+                or changes in place is announced; empty when there is none.
+                Above the excerpt, so a long one cannot push it out of view. */}
+            <span
+              className="question-warning"
+              aria-live={announce ? 'polite' : undefined}
+            >
+              {cue.note.unconfirmed && (
+                <Unconfirmed at={cue.note.unconfirmed.lastConfirmedMs} />
+              )}
+            </span>
+            <blockquote className="cue-quote">“{cue.evidence}”</blockquote>
           </>
         ) : (
           <>
-            <p>
-              {cue.note
-                ? cue.note.unconfirmed
-                  ? // The source line above already names the note and date;
-                    // this keeps a warned reminder inside the companion.
-                    'Not from this conversation.'
-                  : `From your imported note, ${cue.note.sourceDate} · not from this conversation`
-                : live
-                  ? 'From the live transcript'
-                  : 'From the fictional transcript'}
-            </p>
-            <blockquote className="evidence">“{cue.evidence}”</blockquote>
-          </>
-        )}
-        {cue.aboutFocus && (
-          <p>
-            {cue.sources?.length
-              ? 'This suggestion cites speech with words from your focus list.'
-              : 'This line uses words from your focus list, so it came through sooner and stays longer.'}
-          </p>
-        )}
-        {cue.resolvedBy && (
-          <>
-            <p className="resolution-label">
-              {hasPriorNotes(cue.resolvedBy.sources)
-                ? 'Resolution sources'
-                : 'Answered later'}
-            </p>
-            {cue.resolvedBy.sources?.length ? (
-              <Sources
-                sources={cue.resolvedBy.sources}
-                label="Resolution sources"
-              />
-            ) : (
-              <blockquote className="evidence">
-                “{cue.resolvedBy.evidence}”
-              </blockquote>
+            <span className="cue-source-label">{origin(cue, live)}</span>
+            {quote && (
+              <>
+                {' '}
+                <blockquote className="cue-quote">“{quote}”</blockquote>
+              </>
             )}
           </>
         )}
       </div>
-      {cue.resolvedBy ? (
-        <p className="question-held">
-          {hasPriorNotes(cue.resolvedBy.sources)
-            ? 'Marked resolved from these sources. Kept here until you dismiss it.'
-            : 'This was answered in the conversation. Kept here until you dismiss it.'}
-        </p>
-      ) : (
-        cue.held && (
-          <p className="question-held">
-            {cue.remainingMs === 0
-              ? `Earlier in the ${live ? 'session' : 'demo'}. Kept here until you dismiss it.`
-              : 'Kept here until you dismiss it.'}
-          </p>
-        )
-      )}
-      {cue.kind === 'Said' && onKeep && (
+      {said && onKeep && (
         <button
           className="text-button keep-line"
           disabled={busy}
@@ -218,5 +315,52 @@ export function Question({
         <X size={18} />
       </button>
     </section>
+  );
+}
+
+/**
+ * The current cue, or the one that has just gone while it leaves. A cue
+ * that is replaced, and any cue under reduced motion, goes at once.
+ */
+export function CueCard({
+  cue,
+  empty = null,
+  ...props
+}: Omit<QuestionProps, 'cue'> & {
+  cue: Cue | null;
+  /** Shown when there is no cue and none is leaving. */
+  empty?: ReactNode;
+}) {
+  const [seen, setSeen] = useState<{ cue: Cue | null; leaving: Cue | null }>({
+    cue,
+    leaving: null,
+  });
+  if (seen.cue !== cue)
+    setSeen({
+      cue,
+      leaving: cue || !seen.cue || reducedMotion() ? null : seen.cue,
+    });
+  const left = () =>
+    setSeen((current) =>
+      current.leaving ? { ...current, leaving: null } : current,
+    );
+  // The animation's end removes the card; this covers a page that never
+  // runs it, such as a hidden window.
+  const leaving = !cue && !!seen.leaving;
+  useEffect(() => {
+    if (!leaving) return;
+    const fallback = setTimeout(left, 600);
+    return () => clearTimeout(fallback);
+  }, [leaving]);
+  const shown = cue ?? seen.leaving;
+  if (!shown) return empty;
+  return (
+    <Question
+      key={shown.id}
+      {...props}
+      cue={shown}
+      leaving={!cue}
+      onLeft={left}
+    />
   );
 }

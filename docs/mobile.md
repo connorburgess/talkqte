@@ -59,7 +59,7 @@ Evaluate Android overlays and other supported platform surfaces independently fr
 - **Setup:** two test accounts join a fictional call; one joins on the phone under test. On the same phone, open the browser preview from a development server on a trusted local network, choose **Try demo**, and switch Meet to its supported picture-in-picture mode, or use split screen where Android offers it. The preview runs its own fictional simulation; it has no access to the call, the desktop session, or any audio. Stop the server afterwards.
 - **Record for each phone, OS version, browser, and Meet mode:**
   - whether the question is readable at standard and large text;
-  - whether **Why?** and **Dismiss** remain usable touch targets;
+  - whether **Hold** and **Dismiss** remain usable touch targets;
   - whether Meet's essential controls stay visible;
   - whether Meet audio continues uninterrupted;
   - what happens to the cue when the phone switches back to full-screen Meet, locks, or backgrounds the browser.

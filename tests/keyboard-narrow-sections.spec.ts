@@ -25,7 +25,7 @@ test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width, height: 800 });
 });
 
-test('a question is explained, dismissed and its quoted line kept from the keyboard at 480px', async ({
+test('a question is held, dismissed and its quoted line kept from the keyboard at 480px', async ({
   page,
 }) => {
   await page.clock.install();
@@ -41,14 +41,15 @@ test('a question is explained, dismissed and its quoted line kept from the keybo
   await expect(
     question.getByRole('heading', { name: 'Who will take the first draft?' }),
   ).toBeVisible();
-  await question
-    .getByRole('button', { name: 'Why?', exact: true })
-    .press('Enter');
+  // The source is in view before anything is pressed.
   await expect(question.locator('blockquote')).toBeVisible();
-  const hide = question.getByRole('button', { name: 'Hide context' });
-  await expect(hide).toBeFocused();
+  await question
+    .getByRole('button', { name: 'Hold', exact: true })
+    .press('Enter');
+  const held = question.getByRole('button', { name: 'Held', exact: true });
+  await expect(held).toBeFocused();
   await expectToFit(question, 'question with its source');
-  await expectToFit(hide, 'Hide context');
+  await expectToFit(held, 'Held');
   const dismiss = question.getByRole('button', {
     name: 'Dismiss',
     exact: true,
@@ -62,7 +63,7 @@ test('a question is explained, dismissed and its quoted line kept from the keybo
   // The next cue quotes what was said; keeping it writes the line to the
   // notes and leaves focus there.
   await page.clock.runFor(46_000);
-  await expect(question).toContainText('Said');
+  await expect(question).toContainText('Just said');
   const keep = question.getByRole('button', { name: 'Keep this line' });
   await expectToFit(question, 'quoted line');
   await expectToFit(keep, 'Keep this line');

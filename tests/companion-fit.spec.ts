@@ -1,8 +1,10 @@
 // Every cue kind the companion shows, in the native window's sizes
 // (src-tauri/src/companion.rs): 360 px wide on a small display, 420
-// otherwise; 340 px tall for a question, 460 with its context open, and 80
-// more of each with large text. Fictional cues only. Local macOS fonts wrap
-// differently from the Linux fonts in CI, so CI is the check that counts.
+// otherwise; 340 px tall for a cue, and 80 more with large text. The card
+// says what the cue is and where it came from without a click, and keeps
+// one height whether or not it is held. Fictional cues only. Local macOS
+// fonts wrap differently from the Linux fonts in CI, so CI is the check
+// that counts.
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type {} from './fixtures/native-microphone';
 import type { Cue } from '../src/lib/types';
@@ -63,6 +65,36 @@ const cues = {
   },
 } satisfies Record<string, Cue>;
 
+// What each kind says at a glance: its purpose, where it came from, and
+// the quoted line or note. A cue that is itself words from its line (a Said
+// quote, a question put to you) repeats only the rest of that line.
+const glance: Record<
+  keyof typeof cues,
+  { lead: string; source: string; quote: string }
+> = {
+  question: {
+    lead: 'You could ask',
+    source: 'From this conversation',
+    quote: cues.question.evidence,
+  },
+  'Said quote': {
+    lead: 'Just said',
+    source: 'From this conversation · a date or commitment, word for word',
+    quote: 'A single page sounds right. …',
+  },
+  'Asked you': {
+    lead: 'Asked you',
+    source: 'From this conversation · uses your name',
+    quote:
+      'It should cover the tools, the seedlings and who to ask for help. …',
+  },
+  'note reminder': {
+    lead: 'From your notes',
+    source: 'Its title came up · imported note, 2026-11-02',
+    quote: cues['note reminder'].evidence,
+  },
+};
+
 // Imported notes keep up to 2,000 characters and 200 for a title; a spoken
 // line keeps up to 1,000 and a question up to 200.
 const longest: Record<string, Cue> = {
@@ -112,13 +144,11 @@ async function show(page: Page, cue: Cue) {
   await expect(question.getByRole('heading')).toContainText(
     cue.question.slice(0, 20),
   );
-  if (cue.expanded)
-    await expect(question.locator('blockquote').first()).toBeVisible();
   return question;
 }
 
-const height = (open: boolean, size: 'standard' | 'large') =>
-  (open ? 460 : 340) + (size === 'large' ? 80 : 0);
+const height = (size: 'standard' | 'large') =>
+  340 + (size === 'large' ? 80 : 0);
 
 /** The window itself never scrolls, in either direction. */
 async function expectWindowFits(page: Page, label: string) {
@@ -147,7 +177,7 @@ async function expectCardComplete(question: Locator, label: string) {
   );
 }
 
-async function expectControls(page: Page, question: Locator, open: boolean) {
+async function expectControls(page: Page, question: Locator, held: boolean) {
   await expect(
     page.getByRole('button', { name: 'Stop live session' }),
   ).toBeInViewport({ ratio: 1 });
@@ -156,25 +186,30 @@ async function expectControls(page: Page, question: Locator, open: boolean) {
   ).toBeInViewport({ ratio: 1 });
   await expect(
     question.getByRole('button', {
-      name: open ? 'Hide context' : 'Why?',
+      name: held ? 'Held' : 'Hold',
       exact: true,
     }),
   ).toBeInViewport({ ratio: 1 });
+  // Nothing is left to open: there is no disclosure on the card.
+  await expect(question.locator('[aria-expanded]')).toHaveCount(0);
 }
 
-/** Keys pressed on Hide context scroll the card to its last line. */
-async function expectEndReachable(page: Page, question: Locator) {
-  const hide = question.getByRole('button', { name: 'Hide context' });
-  await hide.focus();
+/** Keys pressed on the card's Hold control scroll it to its last line. */
+async function expectEndReachable(
+  page: Page,
+  question: Locator,
+  last: Locator,
+) {
+  const hold = question.getByRole('button', { name: /^(Hold|Held)$/ });
+  await hold.focus();
   await page.keyboard.press('End');
-  const last = question.getByText('Kept here until you dismiss it.');
   await expect(last).toBeInViewport({ ratio: 1 });
-  await expect(hide).toBeFocused();
+  await expect(hold).toBeFocused();
 }
 
-for (const [kind, cue] of Object.entries(cues))
+for (const [kind, cue] of Object.entries(cues) as [keyof typeof cues, Cue][])
   for (const size of ['standard', 'large'] as const)
-    test(`a ${kind} fits the companion in ${size} text, collapsed and open`, async ({
+    test(`a ${kind} says what it is and where it came from in ${size} text, at one height`, async ({
       page,
     }) => {
       await companion(page, size);
@@ -182,27 +217,107 @@ for (const [kind, cue] of Object.entries(cues))
         // A display's width does not change during one cue: each width
         // shows its own, as a new cue starts unscrolled.
         const shown = { ...cue, id: `${cue.id}-${width}` };
-        await page.setViewportSize({ width, height: height(false, size) });
+        await page.setViewportSize({ width, height: height(size) });
         let question = await show(page, shown);
-        let label = `${width} px, collapsed`;
+        let label = `${width} px`;
         await expectWindowFits(page, label);
         await expectCardComplete(question, label);
         await expectControls(page, question, false);
 
-        // Why? keeps the cue for reading: the native window grows and the
-        // engine holds it. A longer source scrolls inside the card, never
-        // the window, and nothing of it is cut off.
-        await page.setViewportSize({ width, height: height(true, size) });
-        question = await show(page, { ...shown, expanded: true, held: true });
-        label = `${width} px, open`;
+        // Purpose and source, in view with nothing pressed.
+        await expect(question.getByText(glance[kind].lead)).toBeInViewport({
+          ratio: 1,
+        });
+        await expect(
+          question.getByText(glance[kind].source, { exact: true }),
+        ).toBeInViewport({ ratio: 1 });
+        const quote = question.locator('blockquote');
+        await expect(quote).toHaveText(`“${glance[kind].quote}”`);
+        await expect(quote).toBeInViewport({ ratio: 1 });
+
+        // Holding the cue moves nothing: the cue and its source stay where
+        // they were being read.
+        const places = async () => [
+          await question.getByRole('heading').boundingBox(),
+          await quote.boundingBox(),
+        ];
+        const before = await places();
+        question = await show(page, { ...shown, held: true });
+        label = `${width} px, held`;
+        expect(await places(), label).toEqual(before);
         await expectWindowFits(page, label);
+        await expectCardComplete(question, label);
         await expectControls(page, question, true);
-        await expect(question.locator('blockquote')).toHaveText(
-          `“${cue.evidence}”`,
-        );
-        await expectEndReachable(page, question);
       }
     });
+
+test('an Asked you question shows no countdown, and other cues show the time they have left', async ({
+  page,
+}) => {
+  await companion(page, 'standard');
+  await page.setViewportSize({ width: 420, height: height('standard') });
+  // The share of the line still filled, as drawn.
+  const filled = (question: Locator) =>
+    question.locator('.cue-track').evaluate((track) => {
+      const fill = track.firstElementChild!.getBoundingClientRect().width;
+      return fill / track.getBoundingClientRect().width;
+    });
+  let question = await show(page, {
+    ...cues.question,
+    remainingMs: 9_000,
+    totalMs: 18_000,
+  });
+  expect(await filled(question)).toBeCloseTo(0.5, 1);
+  await expect(question).not.toContainText(/\d+\s?s\b/);
+  // Held: the line is full and no longer runs down.
+  question = await show(page, {
+    ...cues.question,
+    remainingMs: 2_000,
+    held: true,
+  });
+  expect(await filled(question)).toBeCloseTo(1, 1);
+
+  question = await show(page, {
+    ...cues['Asked you'],
+    remainingMs: 20_000,
+    totalMs: 45_000,
+  });
+  await expect(question.locator('.cue-track')).toHaveCount(0);
+  await expect(question).toContainText('Stays longer · no countdown');
+  await expect(question).not.toContainText(/\d+\s?s\b/);
+});
+
+test('a held question that is answered shows the answer first and every line stays reachable', async ({
+  page,
+}) => {
+  await companion(page, 'standard');
+  for (const width of [360, 420]) {
+    await page.setViewportSize({ width, height: height('standard') });
+    const held = { ...cues.question, id: `answered-${width}`, held: true };
+    let question = await show(page, held);
+    const answer =
+      'Sam will take the first draft and bring it to the next garden meeting.';
+    question = await show(page, {
+      ...held,
+      remainingMs: 0,
+      resolvedBy: { sourceId: 'transcript:fictional-2', evidence: answer },
+    });
+    await expect(question).toContainText('Answered later in the conversation');
+    await expect(question.locator('blockquote').first()).toHaveText(
+      `“${answer}”`,
+    );
+    await expect(question.locator('blockquote').first()).toBeInViewport({
+      ratio: 1,
+    });
+    await expectWindowFits(page, `${width} px, answered`);
+    await expectControls(page, question, true);
+    await expectEndReachable(
+      page,
+      question,
+      question.locator('blockquote').last(),
+    );
+  }
+});
 
 for (const size of ['standard', 'large'] as const)
   test(`the longest cue and source stay complete and reachable in ${size} text at 360px`, async ({
@@ -210,31 +325,27 @@ for (const size of ['standard', 'large'] as const)
   }) => {
     await companion(page, size);
     for (const [kind, cue] of Object.entries(longest)) {
-      await page.setViewportSize({ width: 360, height: height(false, size) });
-      let question = await show(page, cue);
-      await expectWindowFits(page, `${kind}, collapsed`);
+      await page.setViewportSize({ width: 360, height: height(size) });
+      const question = await show(page, cue);
+      await expectWindowFits(page, kind);
       await expect(question.getByRole('heading')).toHaveText(cue.question);
       await expect(
         page.getByRole('button', { name: 'Stop live session' }),
       ).toBeInViewport({ ratio: 1 });
-      // A question longer than the window scrolls in the card; moving
-      // focus to Why? brings it into view (allowing for subpixel rounding).
-      const why = question.getByRole('button', { name: 'Why?', exact: true });
-      await why.focus();
-      await expect(why).toBeInViewport({ ratio: 0.95 });
-
-      await page.setViewportSize({ width: 360, height: height(true, size) });
-      question = await show(page, { ...cue, expanded: true, held: true });
-      await expectWindowFits(page, `${kind}, open`);
-      await expect(
-        page.getByRole('button', { name: 'Stop live session' }),
-      ).toBeInViewport({ ratio: 1 });
+      // A cue longer than the window scrolls in the card; moving focus to
+      // Hold brings it into view (allowing for subpixel rounding).
+      const hold = question.getByRole('button', { name: 'Hold', exact: true });
+      await hold.focus();
+      await expect(hold).toBeInViewport({ ratio: 0.95 });
+      // Nothing is shortened: the whole source is there, and its last
+      // words are reached from the keyboard.
       await expect(question.locator('blockquote')).toHaveText(
         `“${cue.evidence}”`,
       );
-      await expectEndReachable(page, question);
+      await page.keyboard.press('End');
       await expect(
         question.locator('blockquote').getByText(cue.evidence.slice(-30)),
       ).toBeInViewport();
+      await expect(hold).toBeFocused();
     }
   });

@@ -268,9 +268,13 @@ test('a live session is labelled live, has no end time, and cannot be exported',
     ),
   );
   const question = page.getByRole('region', { name: 'Suggested question' });
-  await expect(question).toContainText('Live question · Owner');
-  await question.getByRole('button', { name: 'Why?' }).click();
-  await expect(question).toContainText('From the live transcript');
+  // Where it came from shows at once, and is not called the demo.
+  await expect(question).toContainText('You could ask');
+  await expect(question).toContainText('From this conversation');
+  await expect(question.locator('blockquote')).toHaveText(
+    '“Someone can take the first draft.”',
+  );
+  await expect(question).not.toContainText('demo');
   await expect(question).not.toContainText('fictional');
   await page.getByRole('tab', { name: /Transcript/ }).click();
   const transcript = page.getByRole('tabpanel');

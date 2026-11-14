@@ -68,15 +68,16 @@ for (const [name, url] of [
         unconfirmed: { lastConfirmedMs: CHECKED_AT_MS },
       },
     });
-    // Visible without opening "Why?".
+    // Visible at once, beside where the reminder came from.
+    await expect(question).toContainText('From your notes');
     await expect(question).toContainText(
-      'Reminder from your notes · 2026-11-02 · not verified · last confirmed',
+      'Its title came up · imported note, 2026-11-02',
     );
+    await expect(question).toContainText('Not verified · last confirmed');
     await expect(question.locator('time')).toHaveAttribute(
       'datetime',
       new Date(CHECKED_AT_MS).toISOString(),
     );
-    await expect(question).toContainText('Reminder from your notes');
     await expect(question).not.toContainText(/deleted/i);
 
     // A copy no check has confirmed says that instead of naming a time.
@@ -85,9 +86,7 @@ for (const [name, url] of [
       id: 'fictional-reminder-2',
       note: { ...reminder.note!, unconfirmed: { lastConfirmedMs: null } },
     } satisfies Cue);
-    await expect(question).toContainText(
-      'Reminder from your notes · 2026-11-02 · not verified · never confirmed',
-    );
+    await expect(question).toContainText('Not verified · never confirmed');
     await expect(question.locator('time')).toHaveCount(0);
 
     // A confirmed or never-checked copy carries no warning.
@@ -95,39 +94,38 @@ for (const [name, url] of [
       ...reminder,
       id: 'fictional-reminder-3',
     });
-    await expect(question).toContainText('Reminder from your notes');
-    await expect(question).not.toContainText('not verified');
+    await expect(question).toContainText('From your notes');
+    await expect(question).not.toContainText('Not verified');
   });
 }
 
-test('a reminder held open keeps its words when only its warning changes', async ({
+test('a held reminder keeps its words when only its warning changes', async ({
   page,
 }) => {
   await nativePage(page, '/');
-  const held = { ...reminder, held: true, expanded: true };
+  const held = { ...reminder, held: true };
   const question = await show(page, held);
-  await expect(question).toContainText('Kept here until you dismiss it.');
+  const heldControl = question.getByRole('button', {
+    name: 'Held',
+    exact: true,
+  });
+  await expect(heldControl).toBeVisible();
   await expect(question).toContainText('Robin will label the watering cans');
-  await expect(question).not.toContainText('not verified');
+  await expect(question).not.toContainText('Not verified');
   await expect(question).toContainText(
-    'From your imported note, 2026-11-02 · not from this conversation',
+    'Its title came up · imported note, 2026-11-02',
   );
   // The same reminder after a check that could not reach the provider.
   await page.evaluate((value) => window.liveTest.setCue(value), {
     ...held,
     note: { ...held.note!, unconfirmed: { lastConfirmedMs: CHECKED_AT_MS } },
   });
-  await expect(question).toContainText(
-    'Reminder from your notes · 2026-11-02 · not verified · last confirmed',
-  );
-  await expect(question).toContainText('Kept here until you dismiss it.');
+  await expect(question).toContainText('Not verified · last confirmed');
+  await expect(heldControl).toBeVisible();
   await expect(question).toContainText('Robin will label the watering cans');
-  // The source line already names the note and its date.
-  await expect(question).toContainText('Not from this conversation.');
-  await expect(question).not.toContainText('From your imported note');
-  await expect(
-    question.getByRole('button', { name: 'Hide context' }),
-  ).toHaveAttribute('aria-expanded', 'true');
+  await expect(question).toContainText(
+    'Its title came up · imported note, 2026-11-02',
+  );
 });
 
 test('the panel separates a copy kept out of reminders from one that reminds with a warning', async ({
@@ -328,7 +326,7 @@ test('the warning region is in place before the warning arrives, so its change c
   } satisfies Cue);
   // The same element now carries the warning: it was updated, not mounted.
   await expect(question.locator('[data-same-node]')).toContainText(
-    'not verified · last confirmed',
+    'Not verified · last confirmed',
   );
   // Other cues have no such region.
   await page.evaluate((value) => window.liveTest.setCue(value), {
@@ -345,9 +343,9 @@ for (const size of ['standard', 'large'] as const) {
     page,
   }) => {
     // Native companion sizes (companion.rs, glance.spec.ts): 360 px wide on
-    // a small display, 420 otherwise; 340 px tall for a question (420 with
-    // large text), 460 with its context open (540 with large text).
-    const [collapsed, expanded] = size === 'large' ? [420, 540] : [340, 460];
+    // a small display, 420 otherwise; 340 px tall for a cue, 420 with large
+    // text. Holding a cue does not change them.
+    const windowHeight = size === 'large' ? 420 : 340;
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await nativePage(page, '/?window=cue');
     await page.waitForFunction(() => !!window.liveTest);
@@ -363,20 +361,9 @@ for (const size of ['standard', 'large'] as const) {
           document.querySelector('main')!.scrollHeight <= innerHeight &&
           document.documentElement.scrollWidth <= innerWidth,
       );
-    // The card's own content height: the companion window no longer
-    // scrolls, and the card's scrollHeight is its full height whenever the
-    // content fits, so measure where the content ends instead.
-    const height = () =>
-      question.evaluate(
-        (card) =>
-          Math.max(
-            ...[...card.children].map(
-              (child) => child.getBoundingClientRect().bottom,
-            ),
-          ) -
-          card.getBoundingClientRect().top +
-          card.scrollTop,
-      );
+    // How far the card's content runs past the card; 0 when all of it shows.
+    const hidden = () =>
+      question.evaluate((card) => card.scrollHeight - card.clientHeight);
     let id = 0;
     const show = async (cue: Cue) => {
       await page.evaluate((value) => window.liveTest.setCue(value), {
@@ -404,23 +391,29 @@ for (const size of ['standard', 'large'] as const) {
             unconfirmed: { lastConfirmedMs: CHECKED_AT_MS },
           },
         };
-        await page.setViewportSize({ width, height: collapsed });
+        await page.setViewportSize({ width, height: windowHeight });
+        await show(plain);
+        expect(await fits(), `${width} ${title}`).toBe(true);
+        const plainHidden = await hidden();
         await show(warned);
-        await expect(question).toContainText('not verified');
-        expect(await fits(), `${width} ${title} collapsed`).toBe(true);
-        // Open for reading: the warning costs no height of its own. Whether
-        // the unwarned reminder itself fits depends on the platform's fonts
-        // (it scrolls inside the card at 360 px in CI's Linux WebKit), so
-        // compare the two.
-        await page.setViewportSize({ width, height: expanded });
-        await show({ ...plain, expanded: true, held: true });
+        await expect(question).toContainText('Not verified');
         await expect(question.locator('blockquote')).toBeVisible();
-        const plainHeight = await height();
-        await show({ ...warned, expanded: true, held: true });
-        await expect(question.locator('blockquote')).toBeVisible();
-        expect(await height(), `${width} ${title} open`).toBeLessThanOrEqual(
-          plainHeight + 2,
+        expect(await fits(), `${width} ${title} warned`).toBe(true);
+        // The warning sits above the excerpt, in view with nothing pressed
+        // or scrolled, and costs a line or two. Whether the excerpt's last
+        // line also fits under it depends on the platform's fonts; it is
+        // always reached from the keyboard.
+        await expect(question.locator('.question-warning')).toBeInViewport({
+          ratio: 1,
+        });
+        expect(await hidden(), `${width} ${title} warned`).toBeLessThanOrEqual(
+          plainHidden + (size === 'large' ? 48 : 40),
         );
+        await question.getByRole('button', { name: 'Hold' }).focus();
+        await page.keyboard.press('End');
+        await expect(
+          question.locator('blockquote').getByText('stay open until four'),
+        ).toBeInViewport();
         await expect(
           question.getByRole('button', { name: 'Dismiss' }),
         ).toBeInViewport();

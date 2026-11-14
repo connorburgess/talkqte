@@ -1,6 +1,6 @@
 # Live cue pause
 
-The notebook and companion offer **Pause cues** during a live session. It clears the current cue, including one held with Why?, and suppresses suggestions while the microphone, transcription, and elapsed clock continue. **Resume cues** permits only newly spoken lines to raise cues. It does not replay suggestions from the pause. **Stop live session** remains available and stops listening through the existing Stop path.
+The notebook and companion offer **Pause cues** during a live session. It clears the current cue, including one you held, and suppresses suggestions while the microphone, transcription, and elapsed clock continue. **Resume cues** permits only newly spoken lines to raise cues. It does not replay suggestions from the pause. **Stop live session** remains available and stops listening through the existing Stop path.
 
 This gives someone control over interruptions while continuing to follow the conversation. It does not establish that cues improve participation or listening; that remains part of the [comparison plan](research.md). Demo pause keeps its existing behavior: freezing scripted playback and preserving a held question.
 
