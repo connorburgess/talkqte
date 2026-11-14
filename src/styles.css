@@ -342,6 +342,9 @@ svg {
 .session-state .status-dot {
   transform: translateY(-3px);
 }
+.session-clock {
+  color: var(--muted);
+}
 .session-state h1 {
   font-size: 24px;
   margin: 0;

@@ -31,7 +31,7 @@ test('before a session, a build without local transcription says plainly that it
   await expect(
     page.getByRole('complementary', { name: 'Question companion' }),
   ).toContainText(
-    'No cue yet.During a live session, one cue at a time appears here.',
+    'No cue yet.During a live session, one cue at a time appears here. Cues come from simple phrase rules on what is transcribed, not from AI.',
   );
   await page.getByRole('tab', { name: /Transcript/ }).click();
   await expect(page.getByRole('tabpanel')).toContainText(
@@ -42,6 +42,7 @@ test('before a session, a build without local transcription says plainly that it
   );
   // No session clock and nothing fictional: this is the person's own notebook.
   await expect(page.locator('.session-clock')).toHaveCount(0);
+  await expect(page.locator('.session-state .status-dot')).toHaveCount(0);
   await expect(page.locator('body')).not.toContainText(/demo|fictional/i);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(page.locator('body')).not.toContainText(/demo|fictional/i);
@@ -107,7 +108,7 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
   await expect(page.getByRole('heading', { name: firstCue })).toHaveCount(0);
   await expect(
     page.getByRole('complementary', { name: 'Question companion' }),
-  ).toContainText('Session ended.');
+  ).toContainText('Cues have stopped.');
   await page.getByRole('tab', { name: /Transcript/ }).click();
   await expect(page.getByRole('tabpanel')).toContainText(firstLine);
   await expect(

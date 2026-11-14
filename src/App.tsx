@@ -1113,9 +1113,10 @@ function Notebook() {
           <div className="notebook-body">
             <section className="session-strip" aria-label="Session">
               <div className="session-state">
-                <span
-                  className={`status-dot ${state.live || simulated ? state.status : 'ready'}`}
-                />
+                {/* A dot only while something runs; idle and ended have none. */}
+                {(live || simulated || preparing || finishing) && (
+                  <span className={`status-dot ${state.status}`} />
+                )}
                 <div>
                   <h1>
                     {preparing
@@ -1167,6 +1168,7 @@ function Notebook() {
               <div className="session-actions">
                 {(state.live || simulated) && !preparing && (
                   <span className="session-clock">
+                    {state.live && !live && !finishing ? 'Length ' : ''}
                     {clockTime(state.elapsedMs)}
                   </span>
                 )}
@@ -1413,7 +1415,7 @@ function Notebook() {
                           : live || simulated
                             ? 'A little room to think.'
                             : state.live
-                              ? 'Session ended.'
+                              ? 'Cues have stopped.'
                               : 'No cue yet.'}
                       </h3>
                       <p>
@@ -1422,23 +1424,23 @@ function Notebook() {
                           : live || simulated
                             ? 'Cues pass quietly. You can keep listening without responding.'
                             : state.live
-                              ? 'No more cues until you start another session.'
-                              : 'During a live session, one cue at a time appears here.'}
+                              ? 'Start another session to see cues again.'
+                              : 'During a live session, one cue at a time appears here. Cues come from simple phrase rules on what is transcribed, not from AI.'}
                       </p>
                     </div>
                   }
                 />
-                <p className="companion-footnote">
-                  {state.live && capture.state?.processor
-                    ? capture.state.approved
-                      ? 'Cues use the sources approved for this session. Pause cues or disable processing above at any time.'
-                      : 'Evaluated cues need approval in Cue processing above. You can leave processing off.'
-                    : state.live
-                      ? 'Suggestions use simple phrase rules on what was transcribed. Use a cue in the conversation or let it pass.'
-                      : simulated
-                        ? 'This replay is fictional. Its cues were decided before it was played.'
-                        : 'Cues come from simple phrase rules on what is transcribed, not from AI.'}
-                </p>
+                {(live || simulated) && (
+                  <p className="companion-footnote">
+                    {state.live && capture.state?.processor
+                      ? capture.state.approved
+                        ? 'Cues use the sources approved for this session. Pause cues or disable processing above at any time.'
+                        : 'Evaluated cues need approval in Cue processing above. You can leave processing off.'
+                      : state.live
+                        ? 'Suggestions use simple phrase rules on what was transcribed. Use a cue in the conversation or let it pass.'
+                        : 'This replay is fictional. Its cues were decided before it was played.'}
+                  </p>
+                )}
                 <button
                   className="text-button companion-settings"
                   onClick={() => {
