@@ -14,6 +14,8 @@ use objc2_core_media::{
 use std::ptr::NonNull;
 
 const RATE: i128 = 16_000;
+/// `kCMSampleBufferError_BufferHasNoSampleSizes`: the buffer has no size table.
+const NO_SAMPLE_SIZES: i32 = -12735;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PcmError {
@@ -115,16 +117,24 @@ impl PcmReader {
                 .ok_or(PcmError::Format)?;
             validate_format(asbd)?;
             let frames = usize::try_from(sample.num_samples()).map_err(|_| PcmError::Size)?;
+            // ScreenCaptureKit's audio buffers may leave the total size at
+            // zero and carry no per-sample size table. Either, when given,
+            // must agree; the copy below checks every requested byte arrives.
+            let total = sample.total_sample_size();
             if !(1..=MAX_SAMPLES).contains(&frames)
-                || sample.total_sample_size() != frames * size_of::<f32>()
+                || (total != 0 && total != frames * size_of::<f32>())
             {
                 return Err(PcmError::Size);
             }
             let (mut size, mut entries) = (0usize, 0isize);
-            if sample.sample_size_array(1, &mut size, &mut entries) != 0
-                || entries != 1
-                || size != 4
-            {
+            let table = match sample.sample_size_array(1, &mut size, &mut entries) {
+                // One uniform four-byte size, or no table at all.
+                0 => (entries == 1 && size == 4) || entries == 0,
+                NO_SAMPLE_SIZES => true,
+                // Variable sizes, or anything else CoreMedia refuses.
+                _ => false,
+            };
+            if !table {
                 return Err(PcmError::Size);
             }
             let mut timing = CMSampleTimingInfo {
@@ -601,6 +611,42 @@ pub(crate) mod tests {
                 unsafe { reader.read(&buffer, &mut [0.0; MAX_SAMPLES]) },
                 Err(expected)
             );
+        }
+    }
+
+    #[test]
+    fn a_buffer_without_a_size_table_reads_as_its_frames() {
+        // As ScreenCaptureKit delivered QuickTime Player's audio on the device:
+        // 320 planar float frames on a nanosecond clock, with no per-sample
+        // size table, so the total sample size reads as zero.
+        let mut planar = format();
+        planar.mFormatFlags |= kAudioFormatFlagIsNonInterleaved;
+        let values: Vec<f32> = (0..320).map(|i| i as f32 / 1_000.0).collect();
+        let mut reader = PcmReader::from_first_sample();
+        let mut scratch = [0.0; MAX_SAMPLES];
+        for (index, start) in [117_083_533_724_625_i64, 117_083_553_724_625]
+            .into_iter()
+            .enumerate()
+        {
+            let buffer = sample_with_metadata(
+                planar,
+                &values,
+                time(start, 1_000_000_000),
+                time(1, 16_000),
+                true,
+                &[],
+                None,
+            );
+            let span = unsafe { reader.read(&buffer, &mut scratch) }
+                .unwrap_or_else(|error| panic!("buffer {index}: {error:?}"));
+            assert_eq!(
+                span,
+                PcmSpan {
+                    first_frame: index as u64 * 320,
+                    frames: 320
+                }
+            );
+            assert_eq!(&scratch[..320], values.as_slice());
         }
     }
 
