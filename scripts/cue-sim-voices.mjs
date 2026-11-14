@@ -25,6 +25,7 @@ import { join } from 'node:path';
 import { outputDirectory, parseFlags } from './cue-lab-output.mjs';
 import { castFor } from './cue-sim-cast.mjs';
 import { loadConversations } from './cue-sim.mjs';
+import { loadPlayable } from './lab-playable.mjs';
 import { isMain } from './is-main.mjs';
 
 export const SPEECH_MODEL = 'gpt-4o-mini-tts';
@@ -117,16 +118,26 @@ export async function main(
   } = {},
 ) {
   const flags = parseFlags(args, {
-    values: ['--conversations', '--cache', '--max-chars', '--env-file'],
+    values: [
+      '--conversations',
+      '--results',
+      '--cache',
+      '--max-chars',
+      '--env-file',
+    ],
     switches: ['--run'],
   });
-  if (!flags['--conversations'] || !flags['--cache'])
+  if (!flags['--cache'] || !(flags['--conversations'] || flags['--results']))
     throw new Error(
-      'Use --conversations <bundled ids> --cache <directory outside the repository>. Without --run nothing is sent.',
+      'Use --conversations <bundled ids>, or --results <a fictional results file> with optional --conversations <ids in it>, and --cache <directory outside the repository>. Without --run nothing is sent.',
     );
-  // Only bundled fictional conversations can be chosen, by ID.
-  const all = await loadConversations();
-  const ids = flags['--conversations'].split(',');
+  // Only fictional conversations: the bundled ones by ID, or those of a
+  // results file that passes the lab's checks (a generated run against its
+  // own brief).
+  const all = flags['--results']
+    ? (await loadPlayable(flags['--results'])).replays
+    : await loadConversations();
+  const ids = flags['--conversations']?.split(',') ?? all.map((c) => c.id);
   const unknown = ids.filter((id) => !all.some((c) => c.id === id));
   if (unknown.length)
     throw new Error(`Unknown fictional conversation: ${unknown.join(', ')}.`);
