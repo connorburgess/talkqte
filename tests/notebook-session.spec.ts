@@ -208,14 +208,11 @@ test('a cue is dismissed without any way to save it', async ({ page }) => {
   await expect(page.getByText('Question dismissed.')).toBeVisible();
 });
 
-test('keeping a quoted line puts it in the notes with its time and lets the cue go', async ({
+test('a quoted line shows as a cue and leaves the notes alone', async ({
   page,
 }) => {
   await standIn(page, '/?live');
   await startLive(page);
-  await page
-    .getByRole('textbox', { name: 'Meeting notes' })
-    .fill('Fictional note.');
   const line = "A single page sounds right. Let's have it ready by Friday.";
   await page.evaluate((text) => window.liveTest.say(text), line);
   await page.evaluate(
@@ -228,14 +225,15 @@ test('keeping a quoted line puts it in the notes with its time and lets the cue 
   );
   const question = page.getByRole('region', { name: 'Suggested question' });
   await expect(question).toContainText('Just said');
-  await question.getByRole('button', { name: 'Keep this line' }).click();
-  await expect(question).toHaveCount(0);
+  await expect(question.getByRole('heading')).toHaveText(
+    "“Let's have it ready by Friday.”",
+  );
+  // The card offers no way to save the line: the cue is for the moment.
+  await expect(question.getByRole('button')).toHaveCount(2);
+  await question.getByRole('button', { name: 'Dismiss', exact: true }).click();
   await expect(
     page.getByRole('textbox', { name: 'Meeting notes' }),
-  ).toHaveValue(
-    "Fictional note.\n[00:01] Speaker: “Let's have it ready by Friday.”\n",
-  );
-  await expect(page.getByText('Line kept in your notes.')).toBeVisible();
+  ).toHaveValue('');
 });
 
 for (const width of [320, 390, 880]) {

@@ -15,7 +15,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { GLANCE_WORDS } from './cue-lab.mjs';
+import { GLANCE_WORDS, modelFor } from './cue-lab.mjs';
 import {
   CUE_BUDGET_MS,
   MAX_CALLS_CEILING,
@@ -1083,6 +1083,7 @@ export async function main(
       '--latency-ms',
       '--input',
       '--prompt',
+      '--model',
       '--resume',
     ],
     switches: [
@@ -1167,6 +1168,7 @@ export async function main(
       conversations,
       latencyMs,
       glance: prompt === 'glance',
+      model: modelFor(flags['--model']),
     },
     evaluators,
   );
@@ -1202,7 +1204,7 @@ export async function main(
       '--no-cue-history',
       '--no-listener-name',
     ].filter((flag) => flags[flag]),
-    ...['--prompt', '--resume']
+    ...['--prompt', '--model', '--resume']
       .filter((flag) => flags[flag] !== undefined)
       .map((flag) => `${flag} ${flags[flag]}`),
   ].join(' ');

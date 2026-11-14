@@ -506,28 +506,6 @@ mockIPC(
           });
         }
         return;
-      case 'update_notes':
-        // Keep the stand-in's copy current for Keep this line.
-        if (session.revision >= 1_000)
-          session = {
-            ...session,
-            notes: (args as Commands['update_notes']).notes,
-          };
-        return preview.command(command, args as Commands['update_notes']);
-      case 'keep_line': {
-        const cue = session.cue;
-        if (cue?.id !== (args as Commands['keep_line']).id)
-          throw new Error('That line has already passed.');
-        if (cue.kind !== 'Said')
-          throw new Error('Only a quoted line can be kept.');
-        const line = session.transcript.find((s) => s.id === cue.sourceId);
-        const atMs = line?.atMs ?? session.elapsedMs;
-        const stamp = `${String(Math.floor(atMs / 60_000)).padStart(2, '0')}:${String(Math.floor(atMs / 1000) % 60).padStart(2, '0')}`;
-        const entry = `[${stamp}] ${line?.speaker ? `${line.speaker}: ` : ''}“${cue.question}”`;
-        const notes = `${session.notes}${session.notes && !session.notes.endsWith('\n') ? '\n' : ''}${entry}\n`;
-        await publish({ notes, cue: null });
-        return;
-      }
       default:
         return preview.command(
           command as keyof Commands,

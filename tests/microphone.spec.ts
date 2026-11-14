@@ -394,15 +394,15 @@ test('the compact companion can pause cues without hiding microphone state or St
     expect(box!.x + box!.width).toBeLessThanOrEqual(320);
     expect(box!.height).toBeGreaterThanOrEqual(44);
   }
-  for (const selector of [
-    '.companion-title',
-    '.companion-status > [role=status]',
-  ]) {
-    const fits = await page
-      .locator(selector)
-      .evaluate((el) => el.scrollWidth <= el.clientWidth);
-    expect(fits, selector).toBe(true);
-  }
+  // "Cues off" is not cut short, and the dot still shows the microphone on.
+  expect(
+    await page
+      .locator('.companion-title')
+      .evaluate((el) => el.scrollWidth <= el.clientWidth),
+  ).toBe(true);
+  await expect(
+    page.getByRole('img', { name: /Signal detected|Quiet input/ }),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Resume cues' }).click();
   await expect(page.getByRole('status')).toHaveText('Mic on · Local');
   await page.getByRole('button', { name: 'Stop live session' }).click();
@@ -417,7 +417,11 @@ test('the companion labels a live session and its Stop ends the session', async 
   await page.setViewportSize({ width: 320, height: 76 });
   await nativePage(page, '?window=cue&live');
   await page.evaluate(() => window.liveTest.start());
-  await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  // Capture shows as the microphone glyph's dot; its words stay for
+  // assistive technology.
+  await expect(
+    page.getByRole('img', { name: /Signal detected|Quiet input/ }),
+  ).toBeVisible();
   await expect(page.getByRole('status')).toHaveText('Mic on · Local');
   await expect(
     page.getByRole('button', { name: 'Stop microphone' }),
