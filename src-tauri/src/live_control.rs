@@ -5,7 +5,7 @@
     all(target_os = "macos", feature = "native-audio-spike"),
     test
 ))]
-use crate::{carry_over, engine, Engine};
+use crate::{carry_over, engine};
 use crate::{Live, Runtime};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -194,7 +194,7 @@ impl Runtime {
             return Err(CANCELLED.into());
         }
         self.check_live_start()?;
-        let mut engine = carry_over(&self.engine, Engine::live());
+        let mut engine = carry_over(&self.engine, crate::live_engine());
         engine.start()?;
         self.export = None;
         self.processing_reviews.clear();
@@ -376,7 +376,7 @@ mod tests {
         )
         .unwrap();
         let mut runtime = Runtime {
-            engine: Engine::live_with_evaluator(
+            engine: crate::engine::Engine::live_with_evaluator(
                 Worker::start(Fictional(calls.clone()), Duration::from_secs(1)).unwrap(),
                 processor,
             ),

@@ -3,6 +3,8 @@ pub mod application_audio;
 mod application_audio_host;
 pub mod audio_tap;
 mod capture_control;
+#[cfg(feature = "claude-cli")]
+pub mod claude_cli;
 mod companion;
 #[cfg(target_os = "macos")]
 mod companion_macos;
@@ -261,6 +263,21 @@ fn snapshot(
         serde_json::to_value(&runtime.engine.state)
     }
     .map_err(|_| "Could not read the session.".into())
+}
+
+/// The engine for a new live session: with the `claude-cli` development
+/// feature it registers the Claude Code backend, which sends nothing until
+/// the person turns it on; otherwise the plain engine with no cue backend.
+#[cfg(any(
+    feature = "local-whisper",
+    all(target_os = "macos", feature = "native-audio-spike"),
+    test
+))]
+pub(crate) fn live_engine() -> Engine {
+    #[cfg(feature = "claude-cli")]
+    return claude_cli::connected_engine();
+    #[cfg(not(feature = "claude-cli"))]
+    Engine::live()
 }
 
 /// A fresh engine that keeps the person's display choices and notes.
@@ -1542,6 +1559,9 @@ pub fn run() {
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
             ) {
                 microphone::stop_on_exit(app);
+                // End any model call still in flight, and its helpers.
+                #[cfg(feature = "claude-cli")]
+                claude_cli::end_all();
                 #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
                 application_audio_host::exit(app);
             }

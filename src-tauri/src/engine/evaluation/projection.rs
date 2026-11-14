@@ -48,6 +48,13 @@ pub enum Issue {
     ScopeChanged,
     InputLimit,
     Worker,
+    Authentication,
+    Credentials,
+    Allowance,
+    Unreachable,
+    TimedOut,
+    InvalidReply,
+    Misconfigured,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -112,6 +119,8 @@ pub struct ProcessorSummary {
     pub location: Location,
     pub destination: String,
     pub data_policy: String,
+    /// Whether the review may offer prior notes for this processor.
+    pub accepts_notes: bool,
 }
 
 impl From<&ProcessorConfiguration> for ProcessorSummary {
@@ -128,6 +137,7 @@ impl From<&ProcessorConfiguration> for ProcessorSummary {
             location,
             destination,
             data_policy: config.disclosure.data_policy.clone(),
+            accepts_notes: config.accepts_notes,
         }
     }
 }
@@ -147,6 +157,8 @@ pub struct ProcessingSnapshot {
     pub approved: Option<Scope>,
     pub issue: Option<Issue>,
     pub last_decision: Option<LastDecision>,
+    /// Conversation lines are being sent to the processor right now.
+    pub sending: bool,
     /// The microphone alone, when a selected-application source also exists.
     /// `capture` then combines the two and never understates either.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -354,6 +366,39 @@ impl ProcessingTracker {
 }
 
 impl Engine {
+    /// The plain reason processing stopped, if it did.
+    pub(crate) fn processing_issue(&self) -> Option<Issue> {
+        match self.evaluation_status() {
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::ScopeChanged)) => {
+                Some(Issue::ScopeChanged)
+            }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::InputLimit)) => {
+                Some(Issue::InputLimit)
+            }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::SignIn)) => {
+                Some(Issue::Authentication)
+            }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::Credentials)) => {
+                Some(Issue::Credentials)
+            }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::UsageLimit)) => {
+                Some(Issue::Allowance)
+            }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::Unreachable)) => {
+                Some(Issue::Unreachable)
+            }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::TimedOut)) => Some(Issue::TimedOut),
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::InvalidReply)) => {
+                Some(Issue::InvalidReply)
+            }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::Misconfigured)) => {
+                Some(Issue::Misconfigured)
+            }
+            Some(EvaluationStatus::Unavailable(_)) => Some(Issue::Worker),
+            _ => None,
+        }
+    }
+
     pub(crate) fn processing_snapshot(
         &self,
         capture: CaptureState,
@@ -368,16 +413,7 @@ impl Engine {
             (a.source.provider.id(), &a.source.source_id)
                 .cmp(&(b.source.provider.id(), &b.source.source_id))
         });
-        let issue = match self.evaluation_status() {
-            Some(EvaluationStatus::Unavailable(EvaluationIssue::ScopeChanged)) => {
-                Some(Issue::ScopeChanged)
-            }
-            Some(EvaluationStatus::Unavailable(EvaluationIssue::InputLimit)) => {
-                Some(Issue::InputLimit)
-            }
-            Some(EvaluationStatus::Unavailable(_)) => Some(Issue::Worker),
-            _ => None,
-        };
+        let issue = self.processing_issue();
         let approved = if self.has_processing_permission() {
             let grant = self
                 .evaluation
@@ -435,7 +471,10 @@ impl Engine {
         } else {
             None
         };
+        let sending =
+            phase == Phase::Active && self.evaluation_status() == Some(EvaluationStatus::Pending);
         ProcessingSnapshot {
+            sending,
             revision: 0,
             session: self.session().to_string(),
             scope_revision,
@@ -474,8 +513,7 @@ mod tests {
                 return Err(Failure::EvaluatorUnavailable);
             }
             Ok(
-                serde_json::json!({"action":"quiet","cue":null,"reason":"Fictional decision",
-                "sourceIds":[request.sources()[0].id],"observedUse":"not_observed"})
+                serde_json::json!({"action":"quiet","cue":null,"sourceIds":[request.sources()[0].id]})
                 .to_string(),
             )
         }

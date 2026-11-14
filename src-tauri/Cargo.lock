@@ -3458,6 +3458,7 @@ dependencies = [
  "objc2-screen-capture-kit",
  "open",
  "quick-xml",
+ "regex",
  "rtrb",
  "serde",
  "serde_json",

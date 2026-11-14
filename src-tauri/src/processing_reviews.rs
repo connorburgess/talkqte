@@ -101,8 +101,7 @@ mod tests {
         fn evaluate(&mut self, request: &Request, _: &Cancellation) -> Result<String, Failure> {
             self.0.send(request.clone()).unwrap();
             Ok(serde_json::json!({
-                "action":"quiet", "cue":null, "reason":"Fictional quiet decision",
-                "sourceIds":[request.sources()[0].id], "observedUse":"not_observed"
+                "action":"quiet", "cue":null, "sourceIds":[request.sources()[0].id]
             })
             .to_string())
         }
@@ -720,8 +719,7 @@ mod tests {
                 self.finished.send(cancel.is_cancelled()).unwrap();
                 Ok(serde_json::json!({
                     "action":"show", "cue":"Who will review the garden guide?",
-                    "sourceIds":[request.sources()[0].id], "reason":"Fictional delayed reply",
-                    "observedUse":"not_observed"
+                    "sourceIds":[request.sources()[0].id]
                 })
                 .to_string())
             }

@@ -75,9 +75,14 @@ const DEVELOPER_ID_REQUIREMENT =
 
 /** Cargo features for development only. A release must not compile them in:
  * `native-audio-spike` adds application-audio capture code paths that are not
- * part of the reviewed release, and `timing-log` can write transcript text to
- * a file for lab runs. */
-export const DEVELOPMENT_FEATURES = ['native-audio-spike', 'timing-log'];
+ * part of the reviewed release, `timing-log` can write transcript text to a
+ * file for lab runs, and `claude-cli` can send conversation lines to Anthropic
+ * through one person's own subscription. */
+export const DEVELOPMENT_FEATURES = [
+  'native-audio-spike',
+  'timing-log',
+  'claude-cli',
+];
 
 /** The `[features]` table of a Cargo.toml as { feature: [entries] }. */
 export function cargoFeatureTable(manifest) {
