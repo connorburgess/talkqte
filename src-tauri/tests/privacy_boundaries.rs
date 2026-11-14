@@ -280,8 +280,8 @@ fn an_export_holds_notes_and_no_transcript_name_focus_or_imported_note() {
         .unwrap();
     assert!(!engine.state.transcript.is_empty());
 
-    // The app refuses to export a live session at all; even so, the export
-    // text itself is the notes and nothing else.
+    // The app refuses to export while a live session runs; at any time the
+    // export text itself is the notes and nothing else.
     let export = engine.markdown();
     assert_eq!(
         export,
