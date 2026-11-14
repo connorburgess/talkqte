@@ -208,7 +208,7 @@ impl Engine {
         {
             return Err(ProcessingError::SessionInactive);
         }
-        if state.misconfigured {
+        if state.misconfigured || self.model_calls_exhausted() {
             return Err(ProcessingError::Unavailable);
         }
         if notes.len() > crate::context::MAX_ITEMS
@@ -292,6 +292,17 @@ impl Engine {
     /// Commit a reviewed scope under the engine lock. This never starts capture
     /// or constructs a provider; a native UI/adapter remains a separate gate.
     pub fn approve_processing(&mut self, review: ProcessingReview) -> Result<(), ProcessingError> {
+        self.approve_processing_with_origin(review, false)
+    }
+
+    pub(crate) fn approve_processing_with_origin(
+        &mut self,
+        review: ProcessingReview,
+        by_setting: bool,
+    ) -> Result<(), ProcessingError> {
+        if self.model_calls_exhausted() {
+            return Err(ProcessingError::Unavailable);
+        }
         let notes = self.reviewed_sources(&review)?;
         self.revoke_processing();
         self.evaluation.as_mut().unwrap().permission.grant = Some(Grant {
@@ -306,6 +317,7 @@ impl Engine {
         // A new grant starts afresh: no run of timeouts, and no earlier cues
         // drawn from speech the new grant may not cover.
         if let Some(state) = &mut self.evaluation {
+            state.approval_by_setting = by_setting;
             state.timeouts_in_row = 0;
             state.shown = None;
             state.earlier.clear();
@@ -330,6 +342,11 @@ impl Engine {
         crate::timing_log::record(crate::timing_log::Event::Evaluator {
             session: self.generation,
             state,
+            approval: if evaluation.approval_by_setting {
+                "launchSetting"
+            } else {
+                "review"
+            },
             backend: processor.id.clone(),
             model: processor.model.clone(),
             effort: processor.effort.clone(),

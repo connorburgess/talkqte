@@ -196,6 +196,12 @@ impl Runtime {
         self.check_live_start()?;
         let mut engine = carry_over(&self.engine, crate::live_engine());
         engine.start()?;
+        #[cfg(all(
+            debug_assertions,
+            feature = "claude-cli",
+            feature = "native-audio-spike"
+        ))]
+        crate::dev_model::apply(&mut engine);
         self.export = None;
         self.processing_reviews.clear();
         self.engine = engine;
