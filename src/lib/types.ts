@@ -66,6 +66,8 @@ export interface CueSnapshot {
   model?: 'on' | 'sending' | 'stopped';
   /** Why sending stopped, when `model` is `stopped`. */
   modelIssue?: import('./processing').ProcessingIssue;
+  modelProvider?: string;
+  modelLab?: boolean;
   /** Development builds only: the running session is fed by a selected
    * application alone, with no microphone. */
   sourceSession?: boolean;

@@ -77,11 +77,13 @@ const DEVELOPER_ID_REQUIREMENT =
  * `native-audio-spike` adds application-audio capture code paths that are not
  * part of the reviewed release, `timing-log` can write transcript text to a
  * file for lab runs, and `claude-cli` can send conversation lines to Anthropic
- * through one person's own subscription. */
+ * through one person's own subscription. `lab-evaluator` adds an explicitly
+ * selected subscription broker client for fictional development runs. */
 export const DEVELOPMENT_FEATURES = [
   'native-audio-spike',
   'timing-log',
   'claude-cli',
+  'lab-evaluator',
 ];
 
 /** The `[features]` table of a Cargo.toml as { feature: [entries] }. */

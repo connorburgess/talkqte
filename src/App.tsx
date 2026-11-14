@@ -32,7 +32,10 @@ import {
 
 const megabytes = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
 import { CueCard } from './components/Question';
-import { ProcessingControl, issueText } from './components/ProcessingControl';
+import {
+  ProcessingControl,
+  processingIssueText,
+} from './components/ProcessingControl';
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { ContextNotes } from './components/ContextNotes';
 import { SetupCard, type SetupTarget } from './components/SetupCard';
@@ -114,6 +117,7 @@ function FloatingQuestion() {
     (listening || appAudio) && !(microphoneControl && microphone.stopPending);
   // While a model connection may send lines, "Local" would be untrue.
   // Paused cues send nothing, so they say only that they are paused.
+  const modelProvider = state?.modelProvider ?? 'Claude';
   const modelLinked =
     !state?.cuesPaused && (state?.model === 'on' || state?.model === 'sending');
   const statusText = !state
@@ -123,13 +127,13 @@ function FloatingQuestion() {
         ? state.cuesPaused
           ? 'Mic still on'
           : modelLinked
-            ? 'Mic on · lines go to Claude'
+            ? `Mic on · lines go to ${modelProvider}`
             : 'Mic on · Local'
         : state.sourceSession
           ? state.cuesPaused
             ? 'App audio still on'
             : modelLinked
-              ? 'App audio · lines go to Claude'
+              ? `App audio · lines go to ${modelProvider}`
               : 'App audio · Local'
           : microphoneLabel(mic)
       : microphoneControl
@@ -207,7 +211,11 @@ function FloatingQuestion() {
                     className="companion-title"
                     title={
                       state.modelIssue
-                        ? issueText[state.modelIssue]
+                        ? processingIssueText(
+                            state.modelIssue,
+                            modelProvider,
+                            state.modelLab,
+                          )
                         : 'Cues off: sending stopped.'
                     }
                     data-tauri-drag-region
@@ -216,7 +224,11 @@ function FloatingQuestion() {
                     <span className="visually-hidden">
                       {': '}
                       {state.modelIssue
-                        ? issueText[state.modelIssue]
+                        ? processingIssueText(
+                            state.modelIssue,
+                            modelProvider,
+                            state.modelLab,
+                          )
                         : 'sending stopped.'}
                     </span>
                   </strong>
@@ -226,14 +238,14 @@ function FloatingQuestion() {
                     className={`companion-capture is-on`}
                     title={
                       state.model === 'sending'
-                        ? 'Sending recent lines to Claude'
-                        : 'Model cues on: recent lines go to Claude'
+                        ? `Sending recent lines to ${modelProvider}`
+                        : `Model cues on: recent lines go to ${modelProvider}`
                     }
                     role="img"
                     aria-label={
                       state.model === 'sending'
-                        ? 'Sending recent lines to Claude'
-                        : 'Model cues on: recent lines go to Claude'
+                        ? `Sending recent lines to ${modelProvider}`
+                        : `Model cues on: recent lines go to ${modelProvider}`
                     }
                     data-tauri-drag-region
                   >

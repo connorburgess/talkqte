@@ -42,6 +42,8 @@ export type ProcessingIssue =
   | 'misconfigured'
   | 'devSettings'
   | 'callLimit'
+  | 'labStopped'
+  | 'labUnavailable'
   | 'worker'
   | null;
 export interface StopTarget {

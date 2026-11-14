@@ -100,7 +100,12 @@ test("a bundle counts as this build's only when all of it is new", () => {
 test('every way of asking for a development feature is refused', () => {
   // timing-log can write transcript text to disk and claude-cli can send
   // conversation lines off the device; none belongs in a release.
-  for (const feature of ['native-audio-spike', 'timing-log', 'claude-cli']) {
+  for (const feature of [
+    'native-audio-spike',
+    'timing-log',
+    'claude-cli',
+    'lab-evaluator',
+  ]) {
     const refused = (args, env = {}, files = {}) =>
       requestedDevelopmentFeatures(args, env, (path) => files[path]);
     for (const args of [
@@ -179,6 +184,6 @@ test('the build script refuses before building anything', (t) => {
   assert.equal(result.status, 2, result.stdout + result.stderr);
   assert.match(
     result.stderr,
-    /refusing to build a release with a development feature \(native-audio-spike, timing-log, claude-cli\):\n {2}argument 4 names native-audio-spike/,
+    /refusing to build a release with a development feature \(native-audio-spike, timing-log, claude-cli, lab-evaluator\):\n {2}argument 4 names native-audio-spike/,
   );
 });

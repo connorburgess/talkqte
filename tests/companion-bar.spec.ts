@@ -272,3 +272,37 @@ test('a model connection shows while lines may be sent, and why it stopped', asy
   );
   await expect(bar.getByRole('status')).toHaveText('Mic on · Local');
 });
+
+test('Codex lab disclosure uses the selected provider and strict first-timeout policy', async ({
+  page,
+}) => {
+  const bar = await companion(page, true);
+  await microphone(page, {
+    status: 'listening',
+    activity: 'active',
+    canStart: false,
+  });
+  const publish = (value: Record<string, unknown>) =>
+    page.evaluate((value) => window.liveTest.publish(value as never), value);
+  await publish({ model: 'sending', modelProvider: 'Codex', modelLab: true });
+  await expect(bar.getByRole('status')).toHaveText(
+    'Mic on · lines go to Codex',
+  );
+  await expect(
+    bar.getByRole('img', { name: 'Sending recent lines to Codex' }),
+  ).toBeVisible();
+  await publish({ model: 'stopped', modelIssue: 'timedOut' });
+  await expect(bar.getByText('Cues off', { exact: false })).toContainText(
+    'the model exceeded its deadline',
+  );
+  await expect(bar.getByText('Cues off', { exact: false })).not.toContainText(
+    'twice',
+  );
+  await publish({ modelIssue: 'authentication' });
+  await expect(bar.getByText('Cues off', { exact: false })).toContainText(
+    'Codex subscription sign-in',
+  );
+  await expect(bar.getByText('Cues off', { exact: false })).not.toContainText(
+    'Claude',
+  );
+});

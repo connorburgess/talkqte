@@ -203,6 +203,23 @@ impl Request {
         Ok(self)
     }
 
+    #[cfg(any(test, feature = "lab-evaluator"))]
+    #[allow(
+        dead_code,
+        reason = "native facade activation and API usage vary by build/test configuration"
+    )]
+    pub(crate) fn session_id(&self) -> u64 {
+        self.session
+    }
+    #[cfg(any(test, feature = "lab-evaluator"))]
+    #[allow(
+        dead_code,
+        reason = "native facade activation and API usage vary by build/test configuration"
+    )]
+    pub(crate) fn context_revision(&self) -> u64 {
+        self.context_revision
+    }
+
     pub fn sources(&self) -> &[Source] {
         &self.sources
     }
@@ -359,6 +376,15 @@ pub struct Cancellation {
 }
 
 impl Cancellation {
+    #[cfg(any(test, feature = "lab-evaluator"))]
+    #[allow(
+        dead_code,
+        reason = "native facade activation and API usage vary by build/test configuration"
+    )]
+    pub(crate) fn deadline(&self) -> Instant {
+        self.deadline
+    }
+
     pub fn is_cancelled(&self) -> bool {
         self.stopped.load(Ordering::Acquire)
             || self.cancelled.load(Ordering::Acquire)
@@ -371,6 +397,21 @@ impl Cancellation {
 /// No credentials, retry loop, fallback provider, or model runtime is supplied.
 pub trait Evaluator: Send + 'static {
     fn evaluate(&mut self, request: &Request, cancel: &Cancellation) -> Result<String, Failure>;
+}
+
+/// Internal lab lifecycle: settlement keeps a broker lease held through Rust
+/// validation. It never performs I/O under the engine lock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Settlement {
+    Current,
+    StaleSuccess,
+    Failed,
+}
+
+pub(crate) trait EvaluationLifecycle: Send + Sync {
+    fn terminal(&self) -> Option<Failure>;
+    fn cancel(&self);
+    fn settle(&self, request: &Request, verdict: Settlement) -> Result<(), Failure>;
 }
 
 struct Job {
@@ -528,6 +569,14 @@ impl Worker {
     /// accidentally reuses a revision. Stop/pause/dismiss must cancel the work.
     pub fn poll(&mut self, current: &Request) -> Option<Result<Decision, Failure>> {
         self.poll_at(current, Instant::now())
+    }
+
+    /// Collect the immutable submitted ticket for the explicit lab policy.
+    /// This makes NO current-context claim. Engine must check freshness under
+    /// its lock before applying, and settle failures even when input is stale.
+    pub(crate) fn poll_submitted(&mut self) -> Option<Result<Decision, Failure>> {
+        let request = self.pending.as_ref()?.request.clone();
+        self.poll_at(&request, Instant::now())
     }
 
     fn poll_at(&mut self, current: &Request, now: Instant) -> Option<Result<Decision, Failure>> {

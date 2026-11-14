@@ -51,6 +51,8 @@ pub enum EvaluationIssue {
     Misconfigured,
     DevSettings,
     CallLimit,
+    LabStopped,
+    LabUnavailable,
 }
 
 /// The owner's rule for slow replies: one reply over the deadline is skipped
@@ -77,6 +79,9 @@ pub(super) struct State {
     // marked answered. Recorded as an earlier cue when it leaves.
     shown: Option<(String, String, bool)>,
     earlier: Vec<crate::cue_evaluator::EarlierCue>,
+    lab: Option<std::sync::Arc<dyn crate::cue_evaluator::EvaluationLifecycle>>,
+    lab_terminal: bool,
+    shown_request: Option<(String, u64, u64)>,
 }
 
 struct Pending {
@@ -109,12 +114,80 @@ impl Engine {
             misconfigured: false,
             shown: None,
             earlier: Vec::new(),
+            lab: None,
+            lab_terminal: false,
+            shown_request: None,
         });
         engine
     }
 
+    #[cfg(any(test, all(debug_assertions, feature = "lab-evaluator")))]
+    #[allow(
+        dead_code,
+        reason = "native facade activation and API usage vary by build/test configuration"
+    )]
+    pub(crate) fn with_lab_lifecycle(
+        mut self,
+        lifecycle: std::sync::Arc<dyn crate::cue_evaluator::EvaluationLifecycle>,
+    ) -> Self {
+        self.evaluation.as_mut().expect("registered evaluator").lab = Some(lifecycle);
+        self
+    }
+
+    pub(super) fn model_provider(&self) -> Option<String> {
+        self.evaluation.as_ref().map(|s| {
+            if s.permission.processor.disclosure.name.starts_with("Claude") {
+                "Claude".into()
+            } else {
+                s.permission.processor.disclosure.name.clone()
+            }
+        })
+    }
+    pub(super) fn is_lab_evaluator(&self) -> bool {
+        self.evaluation
+            .as_ref()
+            .is_some_and(|s| s.permission.processor.id == "lab-subscription")
+    }
+
+    /// Only accepted speech coalesces. All controls retain their cancellation
+    /// path; ordinary Claude constructors never opt into this policy.
+    pub(super) fn speech_changed(&mut self) {
+        if self.evaluation.as_ref().is_some_and(|s| s.lab.is_some()) {
+            self.evaluation_revision = self.evaluation_revision.wrapping_add(1);
+        } else {
+            self.invalidate_evaluation();
+        }
+    }
+
+    #[cfg(any(test, feature = "lab-evaluator"))]
+    #[allow(
+        dead_code,
+        reason = "native facade activation and API usage vary by build/test configuration"
+    )]
+    pub(crate) fn lab_cue_metadata(&self, id: &str) -> Option<(u64, u64)> {
+        self.evaluation
+            .as_ref()?
+            .shown_request
+            .as_ref()
+            .filter(|(cue, _, _)| cue == id)
+            .map(|(_, request, at)| (*request, *at))
+    }
+
     /// A backend that cannot be used as configured: the reason stays shown,
     /// and no review can be prepared, so nothing can be approved or sent.
+    #[cfg(any(test, all(debug_assertions, feature = "lab-evaluator")))]
+    #[allow(
+        dead_code,
+        reason = "native facade activation and API usage vary by build/test configuration"
+    )]
+    pub(crate) fn lab_unavailable(mut self) -> Self {
+        if let Some(state) = &mut self.evaluation {
+            state.misconfigured = true;
+            state.status = EvaluationStatus::Unavailable(EvaluationIssue::LabUnavailable);
+        }
+        self
+    }
+
     pub fn misconfigured(mut self) -> Self {
         if let Some(state) = &mut self.evaluation {
             state.misconfigured = true;
@@ -137,7 +210,7 @@ impl Engine {
         test,
         all(
             debug_assertions,
-            feature = "claude-cli",
+            any(feature = "claude-cli", feature = "lab-evaluator"),
             feature = "native-audio-spike"
         )
     ))]
@@ -157,7 +230,7 @@ impl Engine {
 
     #[cfg(all(
         debug_assertions,
-        feature = "claude-cli",
+        any(feature = "claude-cli", feature = "lab-evaluator"),
         feature = "native-audio-spike"
     ))]
     pub(crate) fn invalid_dev_model_settings(&mut self) {
@@ -207,6 +280,8 @@ impl Engine {
             // A misconfigured backend keeps saying so; nothing clears it.
             let status = if state.misconfigured {
                 state.status
+            } else if state.lab_terminal && status == EvaluationStatus::Idle {
+                EvaluationStatus::Unavailable(EvaluationIssue::LabStopped)
             } else {
                 status
             };
@@ -219,7 +294,7 @@ impl Engine {
     }
 
     fn fail_evaluation(&mut self, failure: Failure) {
-        if failure == Failure::Expired {
+        if failure == Failure::Expired && self.evaluation.as_ref().is_none_or(|s| s.lab.is_none()) {
             let state = self.evaluation.as_mut().expect("evaluation failed");
             state.timeouts_in_row = state.timeouts_in_row.saturating_add(1);
             if state.timeouts_in_row < TIMEOUTS_TO_STOP {
@@ -239,6 +314,11 @@ impl Engine {
             Failure::UsageLimit => EvaluationIssue::UsageLimit,
             Failure::Unreachable => EvaluationIssue::Unreachable,
             // Superseded work and controls are not provider outages.
+            Failure::Busy | Failure::Cancelled | Failure::Stale
+                if self.evaluation.as_ref().is_some_and(|s| s.lab.is_some()) =>
+            {
+                EvaluationIssue::WorkerUnavailable
+            }
             Failure::Busy | Failure::Cancelled | Failure::Stale => return,
         };
         self.revoke_processing();
@@ -254,6 +334,12 @@ impl Engine {
     pub(super) fn invalidate_evaluation(&mut self) {
         self.evaluation_revision = self.evaluation_revision.wrapping_add(1);
         if let Some(state) = &mut self.evaluation {
+            if let Some(lab) = &state.lab {
+                if state.pending.is_some() || state.permission.grant.is_some() {
+                    state.lab_terminal = true;
+                    lab.cancel();
+                }
+            }
             state.latest_speech_waiting = false;
             state.worker.cancel_pending();
             if let Some(pending) = state.pending.take() {
@@ -375,6 +461,19 @@ impl Engine {
     /// Clock ticks poll results and dispatch a waiting speech notification, never
     /// retry a completed/failed input or create work without new eligible speech.
     pub(super) fn poll_evaluation(&mut self) {
+        if let Some(failure) = self
+            .evaluation
+            .as_ref()
+            .and_then(|s| s.lab.as_ref())
+            .and_then(|link| link.terminal())
+        {
+            if self.evaluation.as_ref().is_some_and(|s| !s.lab_terminal) {
+                self.fail_evaluation(failure);
+                if let Some(s) = &mut self.evaluation {
+                    s.lab_terminal = true;
+                }
+            }
+        }
         self.note_ended_cue(None);
         self.reconcile_processing_permission();
         if self.evaluation.as_ref().is_some_and(|state| {
@@ -482,18 +581,42 @@ impl Engine {
         let state = self.evaluation.as_mut().expect("evaluation checked");
         let pending = state.pending.as_ref().expect("pending checked");
         let permission_current = pending.permission_generation == state.permission.generation;
-        if current.is_none() || !permission_current {
+        if (!permission_current) || (current.is_none() && state.lab.is_none()) {
             state.worker.cancel_pending();
         }
-        let Some(result) = state
-            .worker
-            .poll(current.as_ref().unwrap_or(&pending.request))
-        else {
+        let result = if state.lab.is_some() {
+            state.worker.poll_submitted()
+        } else {
+            state
+                .worker
+                .poll(current.as_ref().unwrap_or(&pending.request))
+        };
+        let Some(result) = result else {
             return;
         };
         let submitted = state.pending.take().expect("pending checked");
         self.set_evaluation_status(EvaluationStatus::Idle);
         let applies = permission_current && current.as_ref() == Some(&submitted.request);
+        if let Some(link) = self.evaluation.as_ref().and_then(|s| s.lab.clone()) {
+            use crate::cue_evaluator::Settlement;
+            let verdict = if result.is_err() {
+                Settlement::Failed
+            } else if applies {
+                Settlement::Current
+            } else {
+                Settlement::StaleSuccess
+            };
+            let settlement = link.settle(&submitted.request, verdict);
+            if let Err(failure) = result.as_ref() {
+                self.record_result(&submitted, &result, true);
+                self.fail_evaluation(*failure);
+                return;
+            }
+            if let Err(failure) = settlement {
+                self.fail_evaluation(failure);
+                return;
+            }
+        }
         self.record_result(&submitted, &result, applies);
         if let Some(current) = current {
             if applies {
@@ -639,6 +762,7 @@ impl Engine {
                         elapsed_ms: now,
                     });
                 }
+                self.evaluation.as_mut().unwrap().shown_request = Some((id.clone(), number, now));
                 self.evaluated_cue = Some((id.clone(), cited));
                 self.note_ended_cue(None);
                 if let Some(state) = &mut self.evaluation {
@@ -819,6 +943,9 @@ fn evidence(sources: &[Source]) -> String {
 }
 
 #[cfg(test)]
+mod lab_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::cue_evaluator::{Cancellation, Evaluator, Failure};
@@ -839,17 +966,17 @@ mod tests {
                 .map_err(|_| Failure::EvaluatorUnavailable)
         }
     }
-    struct Harness {
-        engine: Engine,
-        requests: mpsc::Receiver<Request>,
-        replies: mpsc::Sender<String>,
+    pub(super) struct Harness {
+        pub(super) engine: Engine,
+        pub(super) requests: mpsc::Receiver<Request>,
+        pub(super) replies: mpsc::Sender<String>,
         next_line: usize,
     }
     impl Harness {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             Self::with_budget(Duration::from_secs(5))
         }
-        fn with_budget(budget: Duration) -> Self {
+        pub(super) fn with_budget(budget: Duration) -> Self {
             let mut h = Self::unapproved(fictional_processor(), budget);
             let review = h
                 .engine
@@ -897,7 +1024,7 @@ mod tests {
                 .unwrap();
             self.engine.approve_processing(review).unwrap();
         }
-        fn line(&mut self, text: &str) {
+        pub(super) fn line(&mut self, text: &str) {
             self.engine.advance(10);
             self.next_line += 1;
             self.engine
@@ -912,7 +1039,7 @@ mod tests {
                 )
                 .unwrap();
         }
-        fn request(&self) -> Request {
+        pub(super) fn request(&self) -> Request {
             self.requests
                 .recv_timeout(Duration::from_secs(2))
                 .expect("fictional request")
