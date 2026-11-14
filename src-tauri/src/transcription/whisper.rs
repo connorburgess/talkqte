@@ -182,11 +182,12 @@ mod tests {
             .cue
             .as_ref()
             .expect("the owner line raises a question");
+        // The kind only: a cue's words can repeat what was said.
         eprintln!(
-            "lines={} first_line_ms={} stats={stats:?} cue={:?} source={}",
+            "lines={} first_line_ms={} stats={stats:?} cue_kind={:?} source={}",
             recognized.len(),
             first_line.as_millis(),
-            cue.question,
+            cue.kind,
             cue.source_id
         );
         assert_eq!(cue.kind, "Owner");

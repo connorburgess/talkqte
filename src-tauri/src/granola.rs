@@ -13,6 +13,7 @@ use crate::context::{
     Capabilities, ContextItem, NoteSource, Provider, SourceError, MAX_EXCERPT_CHARS,
     MAX_TITLE_CHARS,
 };
+use crate::context_refresh::RefreshSource;
 use crate::notes_file::{NoteSummary, MAX_NOTES};
 use quick_xml::{events::Event, Reader, XmlVersion};
 use serde_json::{json, Value};
@@ -62,6 +63,8 @@ fn agent(https_only: bool) -> ureq::Agent {
         .timeout_recv_body(Some(Duration::from_secs(30)))
         .https_only(https_only)
         .http_status_as_error(false)
+        // Every request, sign-in included, names this app to Granola.
+        .user_agent(CLIENT_NAME)
         .build()
         .into()
 }
@@ -211,11 +214,23 @@ pub fn sign_in(
     open_url: &dyn Fn(&str) -> Result<(), String>,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Tokens, String> {
+    sign_in_at(RESOURCE, true, &granola_host, open_url, cancelled)
+}
+
+/// The sign-in against any resource; tests use a local fictional server
+/// and say which hosts they trust in place of granola.ai.
+fn sign_in_at(
+    resource: &str,
+    https_only: bool,
+    granola_host: &dyn Fn(&str) -> bool,
+    open_url: &dyn Fn(&str) -> Result<(), String>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Tokens, String> {
     if cancelled() {
         return Err("Sign-in cancelled.".into());
     }
-    let agent = agent(true);
-    let origin = RESOURCE
+    let agent = agent(https_only);
+    let origin = resource
         .strip_suffix("/mcp")
         .ok_or("The Granola endpoint is not as expected.")?;
     let resource_metadata: Value = get_json(
@@ -233,8 +248,12 @@ pub fn sign_in(
     }
     let server: Value = get_json(
         &agent,
-        &well_known(&authorization_server, "oauth-authorization-server")
-            .ok_or("Granola's sign-in server address is not as expected.")?,
+        &well_known(
+            &authorization_server,
+            "oauth-authorization-server",
+            https_only,
+        )
+        .ok_or("Granola's sign-in server address is not as expected.")?,
     )?;
     if server["issuer"]
         .as_str()
@@ -311,7 +330,7 @@ pub fn sign_in(
             ("redirect_uri", &redirect_uri),
             ("client_id", &client_id),
             ("code_verifier", &verifier),
-            ("resource", RESOURCE),
+            ("resource", resource),
         ]))
         .map_err(|_| "Granola's sign-in service could not be reached.")?;
     let token =
@@ -336,14 +355,18 @@ fn granola_host(url: &str) -> bool {
 
 /// The well-known document for an issuer: after the host and before any
 /// path the issuer carries, as RFC 8414 describes.
-fn well_known(issuer: &str, suffix: &str) -> Option<String> {
-    let rest = issuer.strip_prefix("https://")?;
+fn well_known(issuer: &str, suffix: &str, https_only: bool) -> Option<String> {
+    // Plain http is for a test's loopback server only.
+    let (scheme, rest) = issuer.split_once("://")?;
+    if scheme != "https" && (https_only || scheme != "http") {
+        return None;
+    }
     let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
     let path = path.trim_matches('/');
     Some(if path.is_empty() {
-        format!("https://{host}/.well-known/{suffix}")
+        format!("{scheme}://{host}/.well-known/{suffix}")
     } else {
-        format!("https://{host}/.well-known/{suffix}/{path}")
+        format!("{scheme}://{host}/.well-known/{suffix}/{path}")
     })
 }
 
@@ -515,9 +538,11 @@ impl Connection {
         if initialized.get("protocolVersion").is_none() {
             return Err(SourceError::Unavailable);
         }
+        trace_identity("initialize", || identity_in_json(&initialized));
         connection.notify("notifications/initialized")?;
         let listed = connection.call("tools/list", json!({}))?;
         trace("tools/list", &listed);
+        trace_identity("tools/list", || identity_in_tools(&listed));
         connection.tools = listed["tools"]
             .as_array()
             .map(|tools| tools.iter().filter_map(tool_from).collect())
@@ -560,6 +585,9 @@ impl Connection {
         trace("list_meetings output", &output);
         if let Value::String(text) = &output {
             trace_text("list_meetings text", text);
+            trace_identity("list_meetings", || identity_in_markup(text));
+        } else {
+            trace_identity("list_meetings", || identity_in_json(&output));
         }
         let (notes, remaining) = if let Value::String(text) = &output {
             tagged_listing(text)?
@@ -732,6 +760,166 @@ fn trace(label: &str, value: &Value) {
         return;
     }
     eprintln!("granola trace: {label}: {}", shape(value));
+}
+
+/// For the owner's account check (docs/granola-account-acceptance.md):
+/// whether any name the provider uses, in the session, its tools or their
+/// replies, looks like a workspace or account identity the update check
+/// could bind to. Only fixed vocabulary words, counts and tool positions
+/// are printed; never a name, a value or a tool's own name.
+fn trace_identity(label: &str, summary: impl FnOnce() -> String) {
+    if std::env::var_os("TALKQTE_GRANOLA_TRACE").is_none() {
+        return;
+    }
+    eprintln!("granola trace: identity: {label}: {}", summary());
+}
+
+/// Which kind of identity a provider's field, tag, attribute or tool name
+/// suggests, judged by its words (split at punctuation and camelCase).
+fn identity_kind(name: &str) -> Option<&'static str> {
+    let mut words: Vec<String> = Vec::new();
+    let mut word = String::new();
+    let mut previous_lower = false;
+    for c in name.chars() {
+        if !c.is_ascii_alphanumeric() {
+            words.push(std::mem::take(&mut word));
+            previous_lower = false;
+            continue;
+        }
+        if c.is_ascii_uppercase() && previous_lower {
+            words.push(std::mem::take(&mut word));
+        }
+        previous_lower = c.is_ascii_lowercase();
+        word.push(c.to_ascii_lowercase());
+    }
+    words.push(word);
+    // A plural names the same kind: `users`, `workspaces`.
+    let has = |vocabulary: &[&str]| {
+        words.iter().any(|word| {
+            vocabulary.contains(&word.as_str())
+                || word
+                    .strip_suffix('s')
+                    .is_some_and(|singular| vocabulary.contains(&singular))
+        })
+    };
+    if has(&[
+        "workspace",
+        "tenant",
+        "org",
+        "organization",
+        "organisation",
+        "team",
+    ]) {
+        Some("workspace")
+    } else if has(&["account", "user", "email", "owner", "member", "profile"]) {
+        Some("account")
+    } else {
+        None
+    }
+}
+
+/// Counts by kind, printed as `workspace=1 account=2`, or `none`.
+#[derive(Default)]
+struct IdentityCounts(std::collections::BTreeMap<&'static str, usize>);
+
+impl IdentityCounts {
+    fn note(&mut self, name: &str) {
+        if let Some(kind) = identity_kind(name) {
+            *self.0.entry(kind).or_default() += 1;
+        }
+    }
+
+    fn summary(&self) -> String {
+        if self.0.is_empty() {
+            return "none".into();
+        }
+        self.0
+            .iter()
+            .map(|(kind, count)| format!("{kind}={count}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+/// Every object key in a reply, within depth and size bounds.
+fn identity_in_json(value: &Value) -> String {
+    fn visit(value: &Value, depth: usize, remaining: &mut usize, counts: &mut IdentityCounts) {
+        if depth == 0 || *remaining == 0 {
+            return;
+        }
+        *remaining -= 1;
+        match value {
+            Value::Object(map) => {
+                for (key, value) in map {
+                    counts.note(key);
+                    visit(value, depth - 1, remaining, counts);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    visit(item, depth - 1, remaining, counts);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut counts = IdentityCounts::default();
+    visit(value, 12, &mut 5_000, &mut counts);
+    counts.summary()
+}
+
+/// Every tag and attribute name in a tagged reply; text and values unread.
+fn identity_in_markup(text: &str) -> String {
+    let mut reader = Reader::from_str(text);
+    let mut counts = IdentityCounts::default();
+    for _ in 0..5_000 {
+        match reader.read_event() {
+            Ok(Event::Start(tag) | Event::Empty(tag)) => {
+                counts.note(tag.name().as_ref());
+                for attribute in tag.attributes().flatten() {
+                    counts.note(attribute.key.as_ref());
+                }
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+    counts.summary()
+}
+
+/// Per tool, by position: whether its name, any of its input arguments, or
+/// any field its declared output schema names suggests an identity. A
+/// tool's own name is never printed.
+fn identity_in_tools(listed: &Value) -> String {
+    let tools = listed["tools"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+    let mut parts = vec![format!("{} tools", tools.len())];
+    for (index, tool) in tools.iter().take(50).enumerate() {
+        let mut name = IdentityCounts::default();
+        name.note(tool["name"].as_str().unwrap_or(""));
+        let mut input = IdentityCounts::default();
+        if let Some(properties) = tool["inputSchema"]["properties"].as_object() {
+            for key in properties.keys() {
+                input.note(key);
+            }
+        }
+        let output = match tool.get("outputSchema") {
+            Some(schema) => identity_in_json(schema),
+            None => "none".into(),
+        };
+        if !name.0.is_empty() {
+            parts.push(format!("tool {} name {}", index + 1, name.summary()));
+        }
+        if !input.0.is_empty() {
+            parts.push(format!("tool {} input {}", index + 1, input.summary()));
+        }
+        if output != "none" {
+            parts.push(format!("tool {} output {output}", index + 1));
+        }
+    }
+    if parts.len() == 1 {
+        parts.push("none".into());
+    }
+    parts.join("; ")
 }
 
 /// The layout of a text reply with content masked. Only known structural
@@ -1480,6 +1668,12 @@ fn note_from(value: &Value) -> Option<Note> {
     })
 }
 
+/// The provider update time behind a Granola revision, in milliseconds since
+/// 1970, or `None` for a copy imported without a usable `updated_at`.
+pub fn updated_at_ms(revision: u64) -> Option<u64> {
+    (revision > 1).then_some(revision)
+}
+
 fn preview(text: &str) -> String {
     let trimmed = text.trim();
     let short: String = trimmed.chars().take(PREVIEW_CHARS).collect();
@@ -1591,21 +1785,30 @@ impl NoteSource for Shared {
     }
 }
 
-impl NoteSource for Connection {
-    fn provider(&self) -> Provider {
-        Provider::Granola
+/// The explicit update check (`context_refresh.rs`) needs the provider's own
+/// identifier for the workspace a request is scoped to. Granola's MCP guide
+/// describes active-workspace scope, but the tools this client has observed
+/// name no workspace, so the check fails closed: the notebook does not offer
+/// it for a real connection and no note identifier is sent. Change this only
+/// after an account check establishes a provider-supported identity.
+impl RefreshSource for Shared {
+    fn binding_supported(&self) -> bool {
+        false
     }
 
-    /// Import only. Granola's page documents no live transcript stream and
-    /// no writeback through MCP, and this client asks for neither.
-    fn capabilities(&self) -> Capabilities {
-        Capabilities {
-            import_notes: self.tool("get_meetings").is_some(),
-            ..Capabilities::default()
-        }
+    fn workspace(&mut self) -> Result<Option<String>, SourceError> {
+        Ok(None)
     }
 
-    fn fetch(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError> {
+    fn fetch_available(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError> {
+        self.with_connection(|connection| connection.fetch_available(selection))
+    }
+}
+
+impl Connection {
+    /// The selected notes the server returned, without requiring all of
+    /// them. Notes it volunteers beyond the selection are dropped.
+    fn fetch_available(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError> {
         let tool = self
             .tool("get_meetings")
             .cloned()
@@ -1626,6 +1829,11 @@ impl NoteSource for Connection {
         )?;
         trace("get_meetings result", &result);
         let output = tool_output(&result);
+        if let Value::String(text) = &output {
+            trace_identity("get_meetings", || identity_in_markup(text));
+        } else {
+            trace_identity("get_meetings", || identity_in_json(&output));
+        }
         let notes = if let Value::String(text) = &output {
             trace_text("get_meetings text", text);
             tagged_meetings(text, true)
@@ -1634,15 +1842,6 @@ impl NoteSource for Connection {
         } else {
             notes_in(&output)
         };
-        // Missing/inaccessible or size-omitted selections must not look like
-        // a successful partial import. Keep the chooser available for retry
-        // or a smaller selection; do not fetch more notes automatically.
-        if selection
-            .iter()
-            .any(|id| !notes.iter().any(|note| &note.id == id))
-        {
-            return Err(SourceError::Unavailable);
-        }
         Ok(notes
             .into_iter()
             .filter(|note| selection.iter().any(|wanted| wanted == &note.id))
@@ -1658,8 +1857,37 @@ impl NoteSource for Connection {
     }
 }
 
+impl NoteSource for Connection {
+    fn provider(&self) -> Provider {
+        Provider::Granola
+    }
+
+    /// Import only. Granola's page documents no live transcript stream and
+    /// no writeback through MCP, and this client asks for neither.
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            import_notes: self.tool("get_meetings").is_some(),
+            ..Capabilities::default()
+        }
+    }
+
+    fn fetch(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError> {
+        let items = self.fetch_available(selection)?;
+        // Missing/inaccessible or size-omitted selections must not look like
+        // a successful partial import. Keep the chooser available for retry
+        // or a smaller selection; do not fetch more notes automatically.
+        if selection
+            .iter()
+            .any(|id| !items.iter().any(|item| &item.source_id == id))
+        {
+            return Err(SourceError::Unavailable);
+        }
+        Ok(items)
+    }
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -1714,18 +1942,25 @@ mod tests {
         assert!(!granola_host("https://evil.com@mcp-auth.granola.ai/"));
         assert!(!granola_host("https://notgranola.ai/"));
         assert_eq!(
-            well_known("https://mcp-auth.granola.ai", "oauth-authorization-server").unwrap(),
+            well_known(
+                "https://mcp-auth.granola.ai",
+                "oauth-authorization-server",
+                true
+            )
+            .unwrap(),
             "https://mcp-auth.granola.ai/.well-known/oauth-authorization-server"
         );
         assert_eq!(
             well_known(
                 "https://mcp-auth.granola.ai/tenant/a/",
-                "oauth-authorization-server"
+                "oauth-authorization-server",
+                true
             )
             .unwrap(),
             "https://mcp-auth.granola.ai/.well-known/oauth-authorization-server/tenant/a"
         );
-        assert!(well_known("http://mcp-auth.granola.ai", "x").is_none());
+        assert!(well_known("http://mcp-auth.granola.ai", "x", true).is_none());
+        assert!(well_known("ftp://127.0.0.1", "x", false).is_none());
     }
 
     #[test]
@@ -1787,11 +2022,312 @@ mod tests {
             .contains("cancelled"));
     }
 
+    /// The `User-Agent` values in a request head.
+    fn user_agents(head: &str) -> Vec<&str> {
+        head.lines()
+            .filter_map(|line| line.split_once(':'))
+            .filter(|(name, _)| name.eq_ignore_ascii_case("user-agent"))
+            .map(|(_, value)| value.trim())
+            .collect()
+    }
+
+    /// A fictional sign-in service on a loopback port: resource and server
+    /// metadata, client registration and the token exchange. Returns its
+    /// origin and the requests it saw.
+    pub(crate) fn fictional_sign_in_service() -> (String, Seen) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let seen = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+        let (log, base) = (seen.clone(), origin.clone());
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { break };
+                let mut buffer = vec![0u8; 16384];
+                let mut read = 0;
+                let (head, body) = loop {
+                    let n = stream.read(&mut buffer[read..]).unwrap_or(0);
+                    read += n;
+                    let text = String::from_utf8_lossy(&buffer[..read]).into_owned();
+                    if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                        let length: usize = head
+                            .lines()
+                            .find_map(|line| {
+                                line.to_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .map(|value| value.trim().parse().unwrap_or(0))
+                            })
+                            .unwrap_or(0);
+                        if body.len() >= length || n == 0 {
+                            break (head.to_string(), body.to_string());
+                        }
+                    } else if n == 0 {
+                        break (text, String::new());
+                    }
+                };
+                let path = head.split(' ').nth(1).unwrap_or("").to_string();
+                let reply = match path.as_str() {
+                    "/.well-known/oauth-protected-resource" => {
+                        json!({"authorization_servers": [base]})
+                    }
+                    "/.well-known/oauth-authorization-server" => json!({
+                        "issuer": base,
+                        "authorization_endpoint": format!("{base}/authorize"),
+                        "token_endpoint": format!("{base}/token"),
+                        "registration_endpoint": format!("{base}/register"),
+                    }),
+                    "/register" => json!({"client_id": "fictional-client"}),
+                    "/token" => json!({"access_token": "fictional-token"}),
+                    _ => json!({}),
+                }
+                .to_string();
+                log.lock().unwrap().push((head, body));
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                        reply.len()
+                    )
+                    .as_bytes(),
+                );
+            }
+        });
+        (origin, seen)
+    }
+
+    /// A fictional browser that returns to the loopback address at once.
+    pub(crate) fn fictional_browser(url: &str) -> Result<(), String> {
+        {
+            let query = url.split_once('?').unwrap().1;
+            let value = |name: &str| {
+                query
+                    .split('&')
+                    .find_map(|pair| pair.strip_prefix(&format!("{name}=")))
+                    .map(percent_decode)
+                    .unwrap()
+            };
+            let (redirect, state) = (value("redirect_uri"), value("state"));
+            let address = redirect
+                .strip_prefix("http://")
+                .and_then(|rest| rest.strip_suffix("/callback"))
+                .unwrap()
+                .to_string();
+            std::thread::spawn(move || {
+                let mut stream = TcpStream::connect(address).unwrap();
+                stream
+                    .write_all(
+                        format!(
+                            "GET /callback?code=fictional-code&state={state} HTTP/1.1\r\nHost: x\r\n\r\n"
+                        )
+                        .as_bytes(),
+                    )
+                    .unwrap();
+                let mut page = String::new();
+                let _ = stream.read_to_string(&mut page);
+            });
+            Ok(())
+        }
+    }
+
+    /// The real sign-in against a fictional service, trusting only its origin.
+    pub(crate) fn sign_in_through(
+        origin: &str,
+        open_url: &dyn Fn(&str) -> Result<(), String>,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<Tokens, String> {
+        let trusted = |url: &str| url.starts_with(origin);
+        sign_in_at(
+            &format!("{origin}/mcp"),
+            false,
+            &trusted,
+            open_url,
+            cancelled,
+        )
+    }
+
+    #[test]
+    fn every_sign_in_request_names_talkqte_as_its_user_agent() {
+        let (origin, seen) = fictional_sign_in_service();
+        let tokens = sign_in_through(&origin, &fictional_browser, &|| false).unwrap();
+        assert_eq!(tokens.access_token, "fictional-token");
+        let seen = seen.lock().unwrap().clone();
+        let lines: Vec<&str> = seen
+            .iter()
+            .map(|(head, _)| head.lines().next().unwrap())
+            .collect();
+        assert_eq!(
+            lines,
+            [
+                "GET /.well-known/oauth-protected-resource HTTP/1.1",
+                "GET /.well-known/oauth-authorization-server HTTP/1.1",
+                "POST /register HTTP/1.1",
+                "POST /token HTTP/1.1",
+            ],
+            "discovery, registration and the token exchange, nothing else"
+        );
+        for (head, _) in &seen {
+            assert_eq!(user_agents(head), ["TalkQTE"], "{head}");
+        }
+        assert!(seen[3].1.contains("code=fictional-code"));
+    }
+
+    /// One whole session, from sign-in to disconnect. Run only in a child
+    /// process by the test below, which redirects that process's home, app
+    /// data and temporary folders and reads everything it prints.
+    #[test]
+    #[ignore = "run in a child process by the test below"]
+    fn isolated_granola_session() {
+        let (origin, _) = fictional_sign_in_service();
+        let tokens = sign_in_through(&origin, &fictional_browser, &|| false).unwrap();
+        let (endpoint, _) = fictional_server(Answer::TaggedListing);
+        let shared = Shared::new(Connection::open_at(&endpoint, &tokens, false).unwrap());
+        let (notes, _) = shared.list_recent().unwrap();
+        assert_eq!(notes.len(), 2);
+        let fetched = shared.clone().fetch(&["m2".into()]).unwrap();
+        assert_eq!(
+            fetched[0].excerpt,
+            "Visitors asked where to find watering cans."
+        );
+        assert!(!shared.suggest_focus().unwrap().is_empty());
+        // A failed request is part of a session too.
+        let (failing, _) = fictional_server(Answer::RpcError("Unauthorized: token expired"));
+        assert!(Connection::open_at(&failing, &tokens, false).is_err());
+        shared.disconnect();
+    }
+
+    #[test]
+    fn identity_names_are_classified_by_their_words_only() {
+        for (name, kind) in [
+            ("workspace_id", Some("workspace")),
+            ("activeWorkspaceId", Some("workspace")),
+            ("team-name", Some("workspace")),
+            ("connected_user_email", Some("account")),
+            ("accountId", Some("account")),
+            ("meeting_id", None),
+            ("steamboat", None),
+            ("memberships_count", None),
+            ("users", Some("account")),
+            ("organizations", Some("workspace")),
+            ("get_account_info", Some("account")),
+            ("switch_workspace", Some("workspace")),
+            ("status", None),
+            ("Robin's compost budget", None),
+        ] {
+            assert_eq!(identity_kind(name), kind, "{name}");
+        }
+    }
+
+    #[test]
+    fn the_identity_summary_names_kinds_and_positions_never_names_or_values() {
+        let listed = json!({"tools": [
+            {"name": "list_meetings", "inputSchema": {"properties": {"time_range": {}}}},
+            {"name": "get_workspace_summary", "inputSchema": {"properties": {
+                "workspace_id": {"type": "string", "description": "Robin's garden club"},
+                "Robin's compost budget": {"type": "string"}
+            }}},
+            {"name": "whoami", "inputSchema": {"properties": {"user_email": {}}}},
+            {"name": "describe", "inputSchema": {"properties": {}},
+             "outputSchema": {"type": "object", "properties": {
+                 "active_workspace": {"type": "object", "properties": {"id": {}}},
+                 "Robin's plan": {}
+             }}}
+        ]});
+        let tools = identity_in_tools(&listed);
+        assert_eq!(
+            tools,
+            "4 tools; tool 2 name workspace=1; tool 2 input workspace=1; tool 3 input account=1; tool 4 output workspace=1"
+        );
+        let reply = json!({"meetings": [{"id": "m1", "owner_email": "robin@example.com",
+            "workspace": {"teamName": "Garden club"}}]});
+        assert_eq!(identity_in_json(&reply), "account=1 workspace=2");
+        assert_eq!(identity_in_markup(TAGGED_LISTING), "account=1");
+        assert_eq!(identity_in_json(&json!({"meetings": []})), "none");
+        assert_eq!(identity_in_tools(&json!({"tools": []})), "0 tools; none");
+        for printed in [
+            tools,
+            identity_in_json(&reply),
+            identity_in_markup(TAGGED_LISTING),
+        ] {
+            for private in [
+                "Robin",
+                "compost",
+                "garden",
+                "Garden",
+                "example.com",
+                "list_meetings",
+                "get_workspace_summary",
+                "whoami",
+                "workspace_id",
+                "user_email",
+                "connected_user_email",
+                "teamName",
+                "describe",
+                "active_workspace",
+            ] {
+                assert!(!printed.contains(private), "printed {private}: {printed}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_session_writes_no_file_and_prints_nothing_unless_the_trace_is_enabled() {
+        for trace in [false, true] {
+            let variables: &[(&str, &str)] = if trace {
+                &[("TALKQTE_GRANOLA_TRACE", "1")]
+            } else {
+                &[]
+            };
+            let crate::test_isolation::Isolated { left, printed } = crate::test_isolation::run(
+                "granola::tests::isolated_granola_session",
+                variables,
+                &["TALKQTE_GRANOLA_TRACE"],
+            );
+            assert!(left.is_empty(), "the session left files: {left:?}");
+            for private in [
+                "fictional-token",
+                "fictional-code",
+                "fictional-client",
+                "gardener@example.com",
+                "robin@example.com",
+                "Garden welcome guide",
+                "Visitor questions",
+                "watering cans",
+                "launch plan",
+                "compost bins",
+                "connected_user_email",
+            ] {
+                assert!(!printed.contains(private), "printed {private}: {printed}");
+            }
+            assert_eq!(
+                printed.contains("granola trace:"),
+                trace,
+                "the trace follows TALKQTE_GRANOLA_TRACE: {printed}"
+            );
+            if trace {
+                // The identity summary answers the account check's question
+                // from the fictional listing's account attribute alone.
+                assert!(printed.contains("granola trace: identity: tools/list: 3 tools; none"));
+                assert!(printed.contains("granola trace: identity: list_meetings: account=1"));
+                for label in [
+                    "tools/list",
+                    "list_meetings result",
+                    "get_meetings result",
+                    "query_granola_meetings result",
+                    "identity: initialize",
+                    "identity: get_meetings",
+                ] {
+                    assert!(
+                        printed.contains(&format!("granola trace: {label}:")),
+                        "{label}"
+                    );
+                }
+            }
+        }
+    }
+
     /// How the fictional server answers: normally (as JSON or an event
     /// stream), with an HTTP status, with a JSON-RPC error, or with a tool
     /// result that reports failure.
     #[derive(Clone, Copy)]
-    enum Answer {
+    pub(crate) enum Answer {
         Json,
         EventStream,
         TaggedListing,
@@ -1804,9 +2340,9 @@ mod tests {
     /// A fictional MCP server on a loopback port with fixed notes; it logs
     /// each request's head and body.
     /// The requests a fictional server saw: each one's head and body.
-    type Seen = Arc<Mutex<Vec<(String, String)>>>;
+    pub(crate) type Seen = Arc<Mutex<Vec<(String, String)>>>;
 
-    fn fictional_server(answer: Answer) -> (String, Seen) {
+    pub(crate) fn fictional_server(answer: Answer) -> (String, Seen) {
         fictional_server_with_gate(answer, None)
     }
 
@@ -1961,7 +2497,7 @@ mod tests {
         (endpoint, seen)
     }
 
-    fn tokens() -> Tokens {
+    pub(crate) fn tokens() -> Tokens {
         Tokens {
             access_token: "fictional-token".into(),
         }
@@ -2008,6 +2544,10 @@ mod tests {
             assert!(seen.iter().all(|(head, _)| head
                 .to_lowercase()
                 .contains("authorization: bearer fictional-token")));
+            // Once, although both the agent and the request name it.
+            for (head, _) in &seen {
+                assert_eq!(user_agents(head), ["TalkQTE"], "{head}");
+            }
             assert!(
                 !seen[0].0.to_lowercase().contains("mcp-session-id"),
                 "none before the server issues one"
@@ -2298,6 +2838,44 @@ The default range is the last thirty days.
             seen.lock().unwrap().len(),
             4,
             "no automatic follow-up reads"
+        );
+    }
+
+    #[test]
+    fn an_update_check_fails_closed_without_asking_granola_for_any_note() {
+        use crate::context::ContextStore;
+        use crate::context_refresh::{CheckStatus, Refresh, CHECK_TIMEOUT};
+        let (endpoint, seen) = fictional_server(Answer::Json);
+        let mut shared = Shared::new(Connection::open_at(&endpoint, &tokens(), false).unwrap());
+        assert!(!shared.binding_supported());
+        let mut store = ContextStore::default();
+        let selection = ["m2".to_string()];
+        let fetched = shared.fetch(&selection).unwrap();
+        store.merge(Provider::Granola, &selection, fetched);
+        let before = seen.lock().unwrap().len();
+        let mut refresh = Refresh::default();
+        let ticket = refresh.begin(&store).unwrap();
+        let result = crate::context_refresh::run(&ticket, Box::new(shared.clone()), CHECK_TIMEOUT);
+        let report = refresh.apply(&ticket, result, &mut store, 0);
+        assert_eq!(report.status, CheckStatus::WorkspaceUnverified);
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            before,
+            "no request without a provider-supported workspace identity"
+        );
+        assert_eq!(store.items().len(), 1);
+
+        // The request a verified binding would allow returns what the server
+        // has for the selection instead of failing on an omitted note.
+        let available = shared
+            .fetch_available(&["m2".into(), "omitted-note".into()])
+            .unwrap();
+        assert_eq!(available.len(), 1);
+        assert_eq!(available[0].source_id, "m2");
+        let asked: Value = serde_json::from_str(&seen.lock().unwrap().last().unwrap().1).unwrap();
+        assert_eq!(
+            asked["params"]["arguments"]["meeting_ids"],
+            json!(["m2", "omitted-note"])
         );
     }
 

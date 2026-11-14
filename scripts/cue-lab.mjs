@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+import { isMain } from './is-main.mjs';
 
 export const MODEL = 'claude-opus-5-5';
 const MIN_VERSION = [2, 1, 318];
@@ -329,10 +329,7 @@ export async function main(args) {
   console.log(JSON.stringify(await runLab(testCase), null, 2));
 }
 
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(resolve(process.argv[1])).href
-) {
+if (isMain(import.meta.url)) {
   main(process.argv.slice(2)).catch((error) => {
     console.error(error.message);
     process.exitCode = 1;

@@ -17,6 +17,16 @@ const question = (page: Page) =>
   page.getByRole('region', { name: 'Suggested question' });
 const panel = (page: Page) =>
   page.getByRole('region', { name: 'Prior context' });
+/** Prior context is folded under a summary of how many notes are selected. */
+async function openPanel(page: Page) {
+  const summary = panel(page).locator('summary');
+  if (
+    !(await panel(page)
+      .locator('details')
+      .evaluate((d) => d.hasAttribute('open')))
+  )
+    await summary.click();
+}
 const transcript = (page: Page) =>
   page.getByRole('tabpanel', { name: /Transcript/ });
 const button = (page: Page, name: string) =>
@@ -52,6 +62,10 @@ test.beforeEach(async ({ page }) => {
 test('fictional prior notes are already selected, labeled, and removable', async ({
   page,
 }) => {
+  await expect(panel(page).locator('summary')).toContainText(
+    '2 notes selected',
+  );
+  await openPanel(page);
   const notes = panel(page).getByRole('listitem');
   await expect(notes).toHaveCount(2);
   await expect(notes.nth(0)).toContainText(committee.title);
@@ -229,6 +243,7 @@ test('Replay starts the opportunities again from the first', async ({
 test('a cue is not raised once its fictional note is removed, and a shown one is withdrawn', async ({
   page,
 }) => {
+  await openPanel(page);
   await button(page, `Remove ${schedule.title} (${schedule.date})`).click();
   await start(page);
   await runTo(page, arrival(draft.phraseId) + TICK);
@@ -257,6 +272,7 @@ test('a cue is not raised once its fictional note is removed, and a shown one is
 test('imported notes neither feed the authored cues nor raise their own reminder', async ({
   page,
 }) => {
+  await openPanel(page);
   await button(page, 'Add notes from a file').click();
   const dialog = page.getByRole('dialog', { name: /Choose notes/ });
   await dialog.getByRole('checkbox', { name: /Garden welcome guide/ }).check();

@@ -52,6 +52,48 @@ function leaving(cue: Cue) {
   );
 }
 
+/**
+ * Present for every note reminder, so a warning that appears or changes in
+ * place is announced; empty when there is none. Kept on the source line to
+ * leave the companion its room.
+ */
+function NoteWarning({ cue, announce }: { cue: Cue; announce: boolean }) {
+  const unconfirmed = cue.note?.unconfirmed;
+  return (
+    <span
+      className="question-warning"
+      aria-live={announce ? 'polite' : undefined}
+    >
+      {unconfirmed && (
+        <>
+          {' · '}not verified ·{' '}
+          {unconfirmed.lastConfirmedMs === null ? (
+            'never confirmed'
+          ) : (
+            <>
+              last confirmed{' '}
+              <time
+                dateTime={new Date(unconfirmed.lastConfirmedMs).toISOString()}
+              >
+                {new Date(unconfirmed.lastConfirmedMs).toLocaleString(
+                  undefined,
+                  {
+                    // A session-only time: the year adds nothing.
+                    day: 'numeric',
+                    month: 'short',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  },
+                )}
+              </time>
+            </>
+          )}
+        </>
+      )}
+    </span>
+  );
+}
+
 /** One quiet line naming where the cue comes from; it opens the excerpts. */
 function sourceLine(cue: Cue, live: boolean) {
   const notes = cue.sources?.filter(
@@ -113,7 +155,10 @@ export function Question({
           if (!busy) onInspect(!cue.expanded);
         }}
       >
-        <span>{sourceLine(cue, live)}</span>
+        <span>
+          {sourceLine(cue, live)}
+          {cue.note && <NoteWarning cue={cue} announce={announce} />}
+        </span>
         <ChevronRight size={16} aria-hidden="true" />
       </button>
       <div id={contextId} hidden={!cue.expanded} className="question-context">
@@ -128,8 +173,11 @@ export function Question({
           <>
             {cue.note && (
               <p>
-                From your imported note, {cue.note.sourceDate} · not from this
-                conversation
+                {cue.note.unconfirmed
+                  ? // The source line above already names the note and date;
+                    // this keeps a warned reminder inside the companion.
+                    'Not from this conversation.'
+                  : `From your imported note, ${cue.note.sourceDate} · not from this conversation`}
               </p>
             )}
             <blockquote className="evidence">“{cue.evidence}”</blockquote>

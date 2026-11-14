@@ -6,7 +6,7 @@ Everything in it is fictional and written by hand. No model chooses the cues or 
 
 ## What it does
 
-- **Prior notes are already selected.** Two fictional notes, each titled "(fictional demo)", are listed under **Prior context** when the page opens and can be removed there. They come from [`src/demo-context.json`](../src/demo-context.json), not from a file or an account.
+- **Prior notes are already selected.** Two fictional notes, each titled "(fictional demo)", are already selected when the page opens: **Prior context** reads "2 notes selected", and opening it lists them, each with its own Remove. They come from [`src/demo-context.json`](../src/demo-context.json), not from a file or an account.
 - **The transcript arrives in phrases.** Each of the script's 21 phrases appears half a second after its last word is spoken, so a long turn builds up piece by piece.
 - **A cue follows the phrase that prompts it.** Three authored cues each cite the spoken phrase and the note they draw on. The first appears while its speaker is still talking. Select the source line under a cue to read both sources; the phrase is labeled as this conversation, the note as a prior note.
 - **The phrase rules are off for this run.** There is no owner or timing question, no word-for-word quote card, and no imported-note reminder.

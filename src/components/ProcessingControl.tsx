@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Pause, Play, Square } from 'lucide-react';
 import {
+  describeSource,
   noteKey,
   processingApi,
   type ProcessingNote,
@@ -9,6 +10,16 @@ import {
   type ProcessingSnapshot,
 } from '../lib/processing';
 import './processing.css';
+
+/** Present to assistive technology, absent from the visual layout. */
+const visuallyHidden = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  overflow: 'hidden',
+  clipPath: 'inset(50%)',
+  whiteSpace: 'nowrap',
+} as const;
 
 const issues = {
   scopeChanged:
@@ -85,7 +96,7 @@ export function ProcessingControl({
       stopRequested.current = false;
     if (
       stopRequested.current &&
-      next.capture === 'off' &&
+      (next.microphone ?? next.capture) === 'off' &&
       next.startup === 'idle'
     ) {
       stopRequested.current = false;
@@ -155,7 +166,25 @@ export function ProcessingControl({
       restoreFocus.current = false;
       (launcher.current ?? statusHeading.current)?.focus();
     }
-  }, [review, editing, snapshot?.capture, snapshot?.startup]);
+  }, [
+    review,
+    editing,
+    snapshot?.capture,
+    snapshot?.microphone,
+    snapshot?.startup,
+    snapshot?.source?.phase,
+  ]);
+
+  // Disabling removes the button that was pressed. When that drops focus to
+  // the page, it goes to Review processing; focus that has moved to another
+  // control or application is left alone.
+  const disabled = useRef(false);
+  useEffect(() => {
+    if (!disabled.current || busy) return;
+    disabled.current = false;
+    if (document.hasFocus() && document.activeElement === document.body)
+      launcher.current?.focus();
+  }, [busy, snapshot]);
 
   async function closeReview() {
     const ticket = ++serial.current;
@@ -267,9 +296,21 @@ export function ProcessingControl({
     }
   }
   const capture = snapshot?.capture;
+  // The microphone alone. A development build reports it beside a combined
+  // capture that includes a selected application; otherwise they are one.
+  const microphone = snapshot?.microphone ?? capture;
+  const sourceLine = describeSource(snapshot?.source);
+  // Offered while the source is starting or capturing and Stop has not yet
+  // been asked; afterwards the line says how cleanup is going.
+  const sourceOperation =
+    snapshot?.source &&
+    (snapshot.source.phase === 'starting' ||
+      snapshot.source.phase === 'listening')
+      ? snapshot.source.operation
+      : null;
   const startup = snapshot?.startup;
   const cancelStart =
-    capture === 'off' && (startup === 'loading' || startup === 'cancelling');
+    microphone === 'off' && (startup === 'loading' || startup === 'cancelling');
   const canReview =
     capture === 'running' &&
     (snapshot?.phase === 'off' || snapshot?.phase === 'unavailable') &&
@@ -318,16 +359,54 @@ export function ProcessingControl({
       </div>
       {!status && (
         <p className="processing-capture">
-          {capture === 'running'
+          {microphone === 'running'
             ? 'Microphone is on. Stop capture to stop listening.'
-            : capture === 'stopping'
+            : microphone === 'stopping'
               ? 'Waiting for the microphone to stop…'
-              : capture === 'starting'
+              : microphone === 'starting'
                 ? 'Starting microphone… you can stop while it starts.'
-                : capture === 'off'
+                : microphone === 'off'
                   ? 'Microphone is off.'
                   : 'Microphone status is unknown. Use Stop capture to request that it stops.'}
         </p>
+      )}
+      {snapshot?.source && (
+        // Mounted whenever the snapshot reports a source, so its first line
+        // is announced as a change. Kept out of the layout while empty.
+        <p
+          className="processing-capture"
+          role="status"
+          style={sourceLine ? undefined : visuallyHidden}
+        >
+          {sourceLine}
+        </p>
+      )}
+      {sourceOperation && (
+        // The source's own Stop: it ends exactly this application source,
+        // and a session started for it alone, without touching a microphone.
+        <div className="processing-actions">
+          <button
+            className="secondary-button"
+            disabled={busy === 'source'}
+            onClick={() =>
+              void act('source', async () => {
+                // This button goes once Stop is under way, which the status
+                // event can report before the command replies. Keep focus in
+                // the panel either way; drop the intent if the request fails.
+                restoreFocus.current = true;
+                try {
+                  await processingApi.stopSource(sourceOperation);
+                } catch (error) {
+                  restoreFocus.current = false;
+                  throw error;
+                }
+              })
+            }
+          >
+            <Square size={17} />
+            {busy === 'source' ? 'Stopping…' : 'Stop application audio'}
+          </button>
+        </div>
       )}
       {!status && startup && startup !== 'idle' && (
         <p role="status" className="processing-muted">
@@ -425,19 +504,20 @@ export function ProcessingControl({
               capture === 'stopping' ||
               !!status?.failed
             }
-            onClick={() =>
-              void act('disable', () => processingApi.disable(snapshot!))
-            }
+            onClick={() => {
+              disabled.current = true;
+              void act('disable', () => processingApi.disable(snapshot!));
+            }}
           >
             Disable processing
           </button>
         )}
-        {!status && (capture !== 'off' || startup !== 'idle') && (
+        {!status && (microphone !== 'off' || startup !== 'idle') && (
           <button
             className="secondary-button"
             disabled={
               busy === 'stop' ||
-              capture === 'stopping' ||
+              microphone === 'stopping' ||
               (cancelStart && startup === 'cancelling')
             }
             onClick={() =>
@@ -452,7 +532,7 @@ export function ProcessingControl({
               ? startup === 'cancelling' || busy === 'stop'
                 ? 'Cancelling…'
                 : 'Cancel start'
-              : busy === 'stop' || capture === 'stopping'
+              : busy === 'stop' || microphone === 'stopping'
                 ? 'Stopping…'
                 : 'Stop capture'}
           </button>

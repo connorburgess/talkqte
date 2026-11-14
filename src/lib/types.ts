@@ -37,7 +37,13 @@ export interface Cue {
     sources?: CueSource[];
   } | null;
   /** Set for a context reminder: the imported note it quotes. */
-  note: { title: string; sourceDate: string; provider: string } | null;
+  note: {
+    title: string;
+    sourceDate: string;
+    provider: string;
+    /** Set when the last update check could not confirm the quoted copy. */
+    unconfirmed?: { lastConfirmedMs: number | null };
+  } | null;
   /** The line uses words from a focus line: shown sooner, kept longer. */
   aboutFocus: boolean;
 }
@@ -53,6 +59,9 @@ export interface CueSnapshot {
   companionPosition: 'bottomRight' | 'topCenter' | 'topLeft' | 'topRight';
   questionSize: 'standard' | 'large';
   sensitivity: 'balanced' | 'quiet' | 'focused';
+  /** Development builds only: the running session is fed by a selected
+   * application alone, with no microphone. */
+  sourceSession?: boolean;
 }
 export interface Snapshot extends CueSnapshot {
   title: string;
@@ -90,11 +99,58 @@ export type Commands = {
   cancel_context_import: undefined;
   remove_context_item: { provider: ContextItem['provider']; sourceId: string };
   cancel_granola_sign_in: undefined;
+  stop_granola_update_check: undefined;
 };
 /** What the notebook may know about the Granola connection; never identity. */
 export interface GranolaStatus {
   connected: boolean;
   tools: string[];
+  /** Whether this connection can verify its workspace for an update check. */
+  updateCheck?: boolean;
+  freshness?: NoteFreshness[];
+}
+/** What the last explicit update check found for one imported Granola note. */
+export interface NoteFreshness {
+  sourceId: string;
+  /** The revision of the kept copy this finding is about. */
+  revision: number;
+  state: 'current' | 'updated' | 'notVerified';
+  reason:
+    | 'missing'
+    | 'withdrawn'
+    | 'unversioned'
+    | 'older'
+    | 'unreadable'
+    | 'unavailable'
+    | 'expired'
+    | 'revoked'
+    | 'rateLimited'
+    | 'unsupportedFormat'
+    | 'workspace'
+    | 'timedOut'
+    | null;
+  /** When a check last confirmed or updated the copy, by this device's clock. */
+  verifiedAtMs: number | null;
+  /** Granola's own update time for the kept copy, if it gave one. */
+  providerUpdatedAtMs: number | null;
+}
+export interface UpdateCheckReport {
+  status:
+    | 'checked'
+    | 'cancelled'
+    | 'reimported'
+    | 'removed'
+    | 'removedOrReimported'
+    | 'timedOut'
+    | 'workspaceUnverified'
+    | 'workspaceChanged'
+    | 'unavailable'
+    | 'expired'
+    | 'revoked'
+    | 'rateLimited'
+    | 'unsupportedFormat';
+  retryAfterS: number | null;
+  notes: NoteFreshness[];
 }
 /** One prior note the user imported; never mistaken for the conversation. */
 export interface ContextItem {
@@ -108,6 +164,7 @@ export interface ContextItem {
 export interface NoteSummary {
   sourceId: string;
   title: string;
+  /** Empty when a Markdown or plain-text file gives no date. */
   sourceDate: string;
   preview: string;
 }
@@ -116,6 +173,8 @@ export interface PickedNotes {
   notes: NoteSummary[];
   /** Notes in the file not listed: beyond the limit of 200, or repeated. */
   skipped: number;
+  /** A Markdown or plain-text file: a note without a date asks for one. */
+  asksForDates?: boolean;
 }
 export interface MergeOutcome {
   added: number;

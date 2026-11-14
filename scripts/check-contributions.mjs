@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { isMain } from './is-main.mjs';
 
 function git(args, options = {}) {
   return execFileSync('git', args, { encoding: 'utf8', ...options }).trim();
@@ -46,7 +46,7 @@ export function checkRange(base, head, event = {}) {
   return { commits: commits.length, failures };
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   try {
     const event = process.env.GITHUB_EVENT_PATH
       ? JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'))
