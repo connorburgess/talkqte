@@ -347,3 +347,32 @@ test('status failure blocks permission changes until refresh without blocking St
     'Model connection on',
   );
 });
+
+test('launch consent is disclosed and a session call cap stops model cues with a plain reason', async ({
+  page,
+}) => {
+  await open(page);
+  await page.evaluate(() =>
+    window.captureTest.send({
+      phase: 'active',
+      approvalBySetting: true,
+      approved: { conversation: 'recentAndNewSpeech', notes: [] },
+    }),
+  );
+  await expect(panel(page)).toContainText(
+    'Model connection approved by the TALKQTE_DEV_MODEL_CONNECTION=on launch setting',
+  );
+  await expect(panel(page)).toContainText('no prior notes');
+  await page.evaluate(() =>
+    window.captureTest.send({
+      phase: 'unavailable',
+      approved: null,
+      issue: 'callLimit',
+    }),
+  );
+  await expect(panel(page)).toContainText(
+    'Cues stopped: the development model call limit was reached.',
+  );
+  await expect(review(page)).toHaveCount(0);
+  await expect(stop(page)).toBeEnabled();
+});

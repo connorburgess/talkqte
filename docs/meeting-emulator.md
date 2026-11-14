@@ -41,10 +41,10 @@ Open it in QuickTime Player, select **QuickTime Player** as the application sour
 
 ```sh
 npm run lab:emulator -- live [--results <results .json>] --conversation <id> \
-  --out <directory outside the repository> [--port 1445] [--open]
+  --out <directory outside the repository> [--port 1445] [--start-delay <seconds>] [--open]
 ```
 
-This serves the meeting from this Mac only (127.0.0.1) and prints the command that opens it as one plain Chrome for Testing window (`--open` runs it).
+The first line starts `--start-delay` seconds after the window opens (3 by default, up to 600), so the app's capture can start first. This serves the meeting from this Mac only (127.0.0.1) and prints the command that opens it as one plain Chrome for Testing window (`--open` runs it).
 
 - **Sound:** the window plays each line's own clip as it starts.
 - **Added lines:** while it plays, lines can be added with `POST /append` (`{ "lines": [{ "speaker", "text", "startMs"? }] }`). This is how a conversation can react to the real app's cue mid-meeting.

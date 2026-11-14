@@ -13,6 +13,12 @@ mod context_import;
 pub mod context_refresh;
 mod context_runtime;
 pub mod cue_evaluator;
+#[cfg(all(
+    debug_assertions,
+    feature = "claude-cli",
+    feature = "native-audio-spike"
+))]
+mod dev_model;
 pub mod engine;
 pub mod granola;
 pub mod live;
@@ -1468,6 +1474,12 @@ pub fn run() {
             stop_microphone
         ])
         .setup(|app| {
+            #[cfg(all(
+                debug_assertions,
+                feature = "claude-cli",
+                feature = "native-audio-spike"
+            ))]
+            dev_model::initialize();
             #[cfg(target_os = "macos")]
             companion_macos::hide_controls(app)?;
             #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
