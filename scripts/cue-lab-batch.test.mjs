@@ -1,7 +1,15 @@
 // Offline tests for the batch runner. Every "CLI" here is a fake function;
 // no process, model, account or network is used.
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  symlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -233,6 +241,11 @@ test('inherited API keys, tokens, gateways and provider switches stop a hosted r
     ['CLAUDE_CODE_OAUTH_TOKEN', 'fictional-secret-value'],
     ['CLAUDE_CODE_USE_BEDROCK', '1'],
     ['ANTHROPIC_FOUNDRY_API_KEY', 'fictional-secret-value'],
+    ['ANTHROPIC_VERTEX_PROJECT_ID', 'fictional-project'],
+    ['ANTHROPIC_UNIX_SOCKET', '/fictional/socket'],
+    ['CLAUDE_CODE_OAUTH_REFRESH_TOKEN', 'fictional-secret-value'],
+    ['CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR', '3'],
+    ['CLAUDE_CONFIG_DIR', '/fictional-config'],
   ]) {
     const environment = { ...clean, [key]: value };
     assert.deepEqual(inheritedCredentialNames(environment), [key]);
@@ -248,10 +261,24 @@ test('inherited API keys, tokens, gateways and provider switches stop a hosted r
     assert.equal(results.cases.length, 0);
     assert.match(results.stopped.reason, new RegExp(key));
     assert.ok(!results.stopped.reason.includes(value), 'names only');
+    // The single-case command refuses the same way.
+    const single = fakeCli([reply(quiet())]);
+    await assert.rejects(
+      runLab(cases[0], { environment, run: single.run }),
+      new RegExp(`${key}.*No process was started`),
+    );
+    assert.equal(single.calls.length, 0, key);
   }
-  // Ordinary variables, and an empty one, are not credentials.
+  // Ordinary variables, an empty one, and a general network proxy are not
+  // credentials; the child process is not given the proxy either.
   assert.deepEqual(
-    inheritedCredentialNames({ ...clean, ANTHROPIC_API_KEY: '', EDITOR: 'x' }),
+    inheritedCredentialNames({
+      ...clean,
+      ANTHROPIC_API_KEY: '',
+      EDITOR: 'x',
+      HTTPS_PROXY: 'http://example.invalid',
+      CLAUDE_CODE_ENTRYPOINT: 'cli',
+    }),
     [],
   );
 });
@@ -443,12 +470,35 @@ test('results cannot be written inside the checkout, to a relative path, or nowh
     () => outputDirectory(undefined, { TALKQTE_LAB_OUTPUT: repository }),
     /inside the repository/,
   );
-  const directory = join(out(), 'new', 'folder');
+  const base = realpathSync.native(out());
+  const directory = join(base, 'new', 'folder');
   assert.equal(outputDirectory(directory, {}), directory);
   assert.equal(
     outputDirectory(undefined, { TALKQTE_LAB_OUTPUT: directory }),
     directory,
   );
+  // A link into the checkout is judged by where it leads.
+  const root = join(base, 'Checkout');
+  mkdirSync(join(root, 'scripts'), { recursive: true });
+  symlinkSync(join(root, 'scripts'), join(base, 'link'));
+  assert.throws(
+    () => outputDirectory(join(base, 'link', 'results'), {}, root),
+    /inside the repository/,
+  );
+  // "link/.." names a folder beside the link. The resolved place is what
+  // gets created and returned, so nothing appears inside the checkout.
+  assert.equal(
+    outputDirectory(join(base, 'link', '..', 'results'), {}, root),
+    join(base, 'results'),
+  );
+  assert.ok(!existsSync(join(root, 'results')), 'nothing was created');
+  // On a volume that ignores letter case, another spelling is the same place.
+  if (existsSync(join(base, 'CHECKOUT')))
+    assert.throws(
+      () => outputDirectory(join(base, 'CHECKOUT', 'results'), {}, root),
+      /inside the repository/,
+    );
+  assert.ok(!existsSync(join(root, 'results')), 'nothing was created');
 });
 
 test('the fake evaluator is repeatable and always returns a decision the lab accepts', async () => {

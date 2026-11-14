@@ -33,13 +33,15 @@ export function systemPromptFor(testCase) {
 }
 
 /** Names, never values, of inherited settings that could route a request
- * to an API key, another provider or a gateway instead of the subscription. */
+ * to an API key, another provider, a gateway or another sign-in instead of
+ * the subscription. General network proxy variables are not listed: they
+ * are not credentials, and the child process never receives them. */
 export function inheritedCredentialNames(source) {
   return Object.keys(source)
     .filter(
       (key) =>
         source[key] &&
-        /^(?:ANTHROPIC_(?:API_KEY|AUTH_TOKEN|CUSTOM_HEADERS|[A-Z_]*BASE_URL|[A-Z_]*API_KEY)|CLAUDE_CODE_(?:OAUTH_TOKEN|USE_[A-Z0-9_]+|API_KEY_HELPER[A-Z_]*)|AWS_BEARER_TOKEN_BEDROCK)$/.test(
+        /^(?:ANTHROPIC_(?:API_KEY|AUTH_TOKEN|CUSTOM_HEADERS|UNIX_SOCKET|[A-Z_]*BASE_URL|[A-Z_]*API_KEY|(?:BEDROCK|VERTEX|FOUNDRY)_[A-Z_]+)|CLAUDE_CODE_(?:OAUTH_[A-Z_]+|USE_[A-Z0-9_]+|API_KEY_[A-Z_]+)|CLAUDE_CONFIG_DIR|AWS_BEARER_TOKEN_BEDROCK)$/.test(
           key,
         ),
     )
@@ -140,7 +142,12 @@ export function buildPrompt(testCase) {
   // type out of the model's input.
   const cue = testCase.existingCue ?? null;
   return JSON.stringify({
-    events: testCase.events,
+    // Only these fields of a line, whatever else a fixture may add later.
+    events: testCase.events.map((event) => ({
+      id: event.id,
+      ...(event.speaker === undefined ? {} : { speaker: event.speaker }),
+      text: event.text,
+    })),
     existingCue: cue && { text: cue.text, sourceIds: cue.sourceIds },
     ...(testCase.userName ? { userName: testCase.userName } : {}),
   });
@@ -323,6 +330,13 @@ export async function openLab({
   environment = process.env,
   run = execute,
 } = {}) {
+  // Refuse rather than quietly drop them: an inherited key, token or gateway
+  // means this shell is set up for something other than the subscription.
+  const names = inheritedCredentialNames(environment);
+  if (names.length)
+    throw new Error(
+      `This shell carries API or provider settings (${names.join(', ')}). No process was started. Run the lab from a shell without them; it uses the subscription sign-in only.`,
+    );
   const cwd = await mkdtemp(join(tmpdir(), 'talkqte-cue-lab-'));
   const options = { cwd, env: subscriptionEnvironment(environment) };
   const close = () => rm(cwd, { recursive: true, force: true });
