@@ -37,7 +37,7 @@ Start must settle on Stop/abort, including a failed startup. Stop must return
 `{released:true}` only after true source release or a proven never-started source.
 There is no default native implementation or UI fallback.
 
-`createLabNativeOwner({executable,launch})` supplies this contract around the
+`createLabNativeOwner({executable,launch,stopAfterS})` supplies this contract around the
 native owner's approved launcher. `launch({executable,environment,onTiming})`
 must synchronously return the exact owned ChildProcess and bind `onTiming` to its
 unique private timing stream before launch. It must not attach an existing PID or
@@ -47,7 +47,12 @@ The launcher remains responsible for its approved capture scope, timing-file
 permissions and forwarding parse/read/overflow failures as failed timing evidence.
 There is no generic process-control endpoint.
 
-The wrapper provides the frozen `TALKQTE_DEV_STOP_SIGNAL=usr2`,
+A positive integer `stopAfterS` is mandatory. The launcher must forward the
+frozen `TALKQTE_DEV_STOP_AFTER_S` ordinary-Stop guard, independently of USR2. Its
+exact finite duration belongs in the reviewed run plan; it starts after capture
+is confirmed and neither its expiry nor request proves source release.
+
+The wrapper also provides the frozen `TALKQTE_DEV_STOP_SIGNAL=usr2`,
 `TALKQTE_DEV_LAB_RUN_ID`, explicit lab backend/provider/model/effort and descriptor
 settings. Native must restrict the seam to the approved macOS debug features,
 refuse an existing signal handler and install its one-way Stop latch before source
@@ -65,6 +70,12 @@ fallback. After the single signal, release has a separate six-second bound, cove
 The lifecycle's twelve-second default release wait covers both bounds. Timing
 loss, process error or process exit before release fails cleanup. Transcript and
 cue text are not forwarded into lifecycle events or logs.
+
+The existing timing stream is lossy and unacknowledged. Missing `armed` permits
+no signal; missing `released` remains unconfirmed cleanup even if ordinary Stop,
+source-end or process-exit events were observed. Never infer native release or
+log delivery from signal success or elapsed time. Stand-ins cover both lost
+frames; they do not establish that a real release event will be delivered.
 
 The first native frame still cannot prove companion paint. Timed native model
 observations and window-recorded frame acceptance remain separate checks.

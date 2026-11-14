@@ -359,6 +359,7 @@ test('owned-process early Stop aborts root before arming and waits actual releas
   let timing, runId;
   const native = createLabNativeOwner({
     executable,
+    stopAfterS: 120,
     armingMs: 200,
     releaseMs: 200,
     launch({ environment, onTiming }) {

@@ -6,12 +6,15 @@ import { gateFailure } from './cue-lab-operation-gate.mjs';
 export function createLabNativeOwner({
   executable,
   launch,
+  stopAfterS,
   armingMs = 5000,
   releaseMs = 6000,
 } = {}) {
   if (
     !isAbsolute(executable ?? '') ||
     typeof launch !== 'function' ||
+    !Number.isSafeInteger(stopAfterS) ||
+    stopAfterS < 1 ||
     ![armingMs, releaseMs].every(
       (n) => Number.isSafeInteger(n) && n >= 1 && n <= 10000,
     )
@@ -133,6 +136,7 @@ export function createLabNativeOwner({
           executable,
           environment: Object.freeze({
             TALKQTE_DEV_STOP_SIGNAL: 'usr2',
+            TALKQTE_DEV_STOP_AFTER_S: String(stopAfterS),
             TALKQTE_DEV_LAB_RUN_ID: id,
             TALKQTE_DEV_CUE_BACKEND: 'lab-subscription',
             TALKQTE_DEV_LAB_DESCRIPTOR: descriptorPath,

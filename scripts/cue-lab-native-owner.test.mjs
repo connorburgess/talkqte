@@ -21,6 +21,7 @@ function setup({ armingMs = 100, releaseMs = 100, kill = true } = {}) {
   };
   const owner = createLabNativeOwner({
     executable,
+    stopAfterS: 120,
     armingMs,
     releaseMs,
     launch(options) {
@@ -74,6 +75,7 @@ test('early Stop waits exact-run armed, signals once, and needs actual released 
   assert.deepEqual(await stopped, { released: true });
   assert.equal(done, true);
   assert.equal(f.environment.TALKQTE_DEV_STOP_SIGNAL, 'usr2');
+  assert.equal(f.environment.TALKQTE_DEV_STOP_AFTER_S, '120');
   assert.equal(f.environment.TALKQTE_DEV_LAB_RUN_ID, 'fictional-run');
   assert.equal(
     f.environment.TALKQTE_DEV_LAB_DESCRIPTOR,
@@ -161,3 +163,36 @@ test('the release deadline starts after arming and signal, not at early Stop int
   f.timing('released');
   assert.deepEqual(await stopping, { released: true });
 });
+
+test('a finite ordinary-Stop launch guard is required independently of the signal seam', () => {
+  for (const stopAfterS of [undefined, 0, -1, Infinity, NaN, 0.5, '120'])
+    assert.throws(() =>
+      createLabNativeOwner({ executable, launch: () => {}, stopAfterS }),
+    );
+});
+
+for (const lost of ['armed', 'released'])
+  test(`lost ${lost} evidence remains unconfirmed even when timed Stop and process exit are observed`, async () => {
+    const f = setup({ armingMs: 50, releaseMs: 50 });
+    const starting = f.start();
+    const checkedStart = starting.catch(() => {});
+    const stopping = f.owner.stop();
+    const checkedStop = assert.rejects(stopping, { category: 'cleanup' });
+    if (lost === 'released') {
+      f.timing('armed');
+      await starting;
+      f.timing('latched');
+      f.timing('stopping');
+    }
+    // The guard's Stop request and even normal host/process observations do not
+    // recover a missing armed/released frame from a lossy timing channel.
+    f.timing('ignored', { event: 'dev_source', step: 'stopping' });
+    f.timing('ignored', { event: 'source_ended', recognized_chunks: 1 });
+    f.timing('ignored', { event: 'session', state: 'ended' });
+    f.child.exitCode = 0;
+    f.child.emit('exit', 0);
+    await Promise.all([checkedStart, checkedStop]);
+    assert.equal(f.environment.TALKQTE_DEV_STOP_AFTER_S, '120');
+    assert.equal(f.signals.length, lost === 'armed' ? 0 : 1);
+    assert.ok(f.events.includes('failed'));
+  });
