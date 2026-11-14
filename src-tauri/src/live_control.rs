@@ -83,6 +83,16 @@ impl StartGate {
         }
     }
 
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    pub(crate) fn lab_stop_settled(&self) -> bool {
+        self.0.try_lock().is_ok_and(|state| state.current.is_none())
+    }
+
     pub(crate) fn control(&self) -> Result<(Option<String>, crate::engine::StartupState), String> {
         use crate::engine::StartupState;
         let state = self.0.lock().map_err(|_| "Live startup is unavailable.")?;
@@ -168,6 +178,15 @@ impl Runtime {
         test
     ))]
     fn check_live_start(&self) -> Result<(), String> {
+        #[cfg(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        ))]
+        if crate::dev_stop::requested() {
+            return Err(CANCELLED.into());
+        }
         if self.live.is_some()
             || matches!(
                 self.engine.state.status,
@@ -230,6 +249,15 @@ impl Runtime {
         session: u64,
         generation: u64,
     ) -> bool {
+        #[cfg(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        ))]
+        if crate::dev_stop::requested() || crate::dev_stop::source_only() {
+            return false;
+        }
         if !self.live_start.accepts(guard)
             || !self.engine.state.live
             || self.engine.session() != session
@@ -261,7 +289,22 @@ impl Runtime {
         self.retire_live_source();
         self.processing_reviews.clear();
         self.engine.begin_live_stop();
-        self.live.take()
+        let live = self.live.take();
+        #[cfg(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        ))]
+        if let Some(live) = &live {
+            // Register before ownership escapes Runtime; an overlapping Stop
+            // must still see this drain after `live` becomes None.
+            self.lab_stop_drains.begin(
+                live.session,
+                live.microphone.is_none() && live.runner.is_none(),
+            );
+        }
+        live
     }
 }
 
