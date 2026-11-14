@@ -372,7 +372,6 @@ impl Engine {
                     remaining_ms: self.cue_deadline.saturating_sub(now),
                     total_ms: CUE_MS,
                     held: false,
-                    expanded: false,
                     resolved_by: None,
                     note: None,
                     about_focus,
@@ -935,7 +934,7 @@ mod tests {
             "not_observed",
         );
         let id = h.engine.state.cue.as_ref().unwrap().id.clone();
-        h.engine.inspect_cue(&id, true).unwrap();
+        h.engine.inspect_cue(&id).unwrap();
         h.engine.revoke_processing();
         assert!(h.engine.state.cue.is_none());
         assert!(h.engine.evaluated_cue.is_none());
@@ -1083,7 +1082,7 @@ mod tests {
             "not_observed",
         );
         let id = h.engine.state.cue.as_ref().unwrap().id.clone();
-        h.engine.inspect_cue(&id, true).unwrap();
+        h.engine.inspect_cue(&id).unwrap();
         for action in ["resolved", "withdraw"] {
             h.line("The review is still being discussed.");
             h.request();
@@ -1179,7 +1178,7 @@ mod tests {
                     "not_observed",
                 );
                 let id = h.engine.state.cue.as_ref().unwrap().id.clone();
-                h.engine.inspect_cue(&id, true).unwrap();
+                h.engine.inspect_cue(&id).unwrap();
                 if resolution_source {
                     h.line("Review starts Monday under the earlier plan.");
                     h.request();
@@ -1220,7 +1219,7 @@ mod tests {
                 assert!(!serde_json::to_string(&h.engine.cue_snapshot())
                     .unwrap()
                     .contains("Legal review"));
-                assert!(h.engine.inspect_cue(&id, true).is_err());
+                assert!(h.engine.inspect_cue(&id).is_err());
                 assert!(!h.engine.has_processing_permission());
                 h.line("Another garden review needs an owner.");
                 drain_without_another_request(&mut h);
@@ -1341,7 +1340,7 @@ mod tests {
         h.line("Robin asks about the checklist.");
         h.request();
         // Hold can be selected while the result is in flight; apply reads it now.
-        h.engine.inspect_cue(&id, true).unwrap();
+        h.engine.inspect_cue(&id).unwrap();
         h.reply(
             "quiet",
             None,
@@ -1368,7 +1367,7 @@ mod tests {
         );
         assert_eq!(cue.id, id);
         assert_eq!(cue.question, "Who owns the checklist?");
-        assert!(cue.held && cue.expanded);
+        assert!(cue.held);
         let resolution = cue.resolved_by.as_ref().unwrap();
         assert!(resolution.evidence.contains("Robin asks"));
         assert!(resolution.evidence.contains("Maya is responsible"));
@@ -1546,7 +1545,7 @@ mod tests {
             h.engine.set_notes(vec![note.clone()]);
             h.approve_notes();
             let id = h.show();
-            h.engine.inspect_cue(&id, true).unwrap();
+            h.engine.inspect_cue(&id).unwrap();
             h.line("The next garden handoff is not clear.");
             h.request();
             h.line("There is more to clarify about the handoff.");
@@ -1849,7 +1848,7 @@ mod tests {
     fn source_eviction_releases_held_copies_and_only_latest_speech_catches_up() {
         let mut h = Harness::new();
         let id = h.show();
-        h.engine.inspect_cue(&id, true).unwrap();
+        h.engine.inspect_cue(&id).unwrap();
         h.line("A later line.");
         h.request(); // Deliberately keep this evaluator occupied.
         for _ in 0..MAX_TRANSCRIPT_SEGMENTS {
@@ -1879,7 +1878,7 @@ mod tests {
     fn withdraw_clears_an_invalid_held_premise_without_calling_it_answered() {
         let mut h = Harness::new();
         let id = h.show();
-        h.engine.inspect_cue(&id, true).unwrap();
+        h.engine.inspect_cue(&id).unwrap();
         h.line("That checklist is no longer part of this release.");
         h.request();
         h.reply("withdraw", None, &["transcript:line-2"], "unknown");

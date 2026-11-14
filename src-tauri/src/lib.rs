@@ -297,23 +297,14 @@ fn respond_to_cue(
 ) -> Result<(), String> {
     change(&app, &state, |e| e.respond(&id, response))
 }
-/// Keeps a quoted line in the notebook; an explicit choice, from either window.
-#[tauri::command]
-fn keep_line(
-    app: tauri::AppHandle,
-    state: tauri::State<AppState>,
-    id: String,
-) -> Result<(), String> {
-    change(&app, &state, |e| e.keep_line(&id))
-}
+/// Holds the cue until it is dismissed, from either window.
 #[tauri::command]
 fn inspect_cue(
     app: tauri::AppHandle,
     state: tauri::State<AppState>,
     id: String,
-    expanded: bool,
 ) -> Result<(), String> {
-    change(&app, &state, |e| e.inspect_cue(&id, expanded))
+    change(&app, &state, |e| e.inspect_cue(&id))
 }
 #[tauri::command]
 fn set_companion_position(
@@ -1416,7 +1407,6 @@ pub fn run() {
             snapshot,
             set_live_cues_paused,
             respond_to_cue,
-            keep_line,
             inspect_cue,
             set_companion_position,
             set_question_size,

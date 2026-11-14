@@ -33,16 +33,25 @@ export function claudeEvaluator({
   glance = false,
   // The full model ID; one of the lab's allowed models.
   model = MODEL,
+  // How much the CLI is asked to think: 'low' or 'medium'.
+  effort = 'medium',
+  // true: ask for the three-field reply with no explanation.
+  compact = false,
 } = {}) {
   let lab;
-  const request = (testCase) => requestFor(testCase, { glance });
+  const request = (testCase) => requestFor(testCase, { glance, compact });
+  // Anything but the settings of the earlier runs is part of the name, so
+  // runs under different settings are never taken for one another.
+  const variant = `${effort === 'medium' ? '' : `-${effort}`}${compact ? '-compact' : ''}`;
   return {
     // The first model keeps the plain name its earlier results and logs
     // carry; any other model is named, so two models' results and logs
     // are never taken for one another, and one cannot resume the other.
-    id: model === MODEL ? 'claude' : `claude-${model.replace(/^claude-/, '')}`,
+    id: `${model === MODEL ? 'claude' : `claude-${model.replace(/^claude-/, '')}`}${variant}`,
     model,
-    label: `Claude Code, ${model}`,
+    effort,
+    reply: compact ? 'compact' : 'full',
+    label: `Claude Code, ${model}${effort === 'medium' ? '' : `, ${effort} effort`}${compact ? ', compact reply' : ''}`,
     prompt: glance ? 'glance' : 'recorded',
     kind: 'model',
     hosted: true,
@@ -52,10 +61,14 @@ export function claudeEvaluator({
       // openLab refuses, before any process, when the shell carries an API
       // key, token, gateway or provider switch.
       lab = await openLab(
-        run ? { environment, run, model } : { environment, model },
+        run
+          ? { environment, run, model, effort }
+          : { environment, model, effort },
       );
       return {
         model,
+        effort,
+        reply: compact ? 'compact' : 'full',
         cliVersion: lab.access.version,
         authentication: lab.access.authentication,
       };
@@ -284,8 +297,8 @@ export function labelsEvaluator(conversations, { latencyMs = 4_000 } = {}) {
  * made-up delay. Adding a provider
  * means adding one entry here. */
 export const EVALUATORS = {
-  claude: ({ environment, glance, model }) =>
-    claudeEvaluator({ environment, glance, model }),
+  claude: ({ environment, glance, model, effort, compact }) =>
+    claudeEvaluator({ environment, glance, model, effort, compact }),
   fake: ({ latencyMs }) => fakeEvaluator({ latencyMs }),
   rules: ({ rules }) => {
     if (!rules)

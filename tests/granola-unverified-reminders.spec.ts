@@ -19,7 +19,6 @@ const reminder: Cue = {
   remainingMs: 18_000,
   totalMs: 18_000,
   held: false,
-  expanded: false,
   resolvedBy: null,
   note: {
     title: 'Garden welcome guide',

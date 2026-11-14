@@ -54,7 +54,6 @@ export function cue(value: Partial<Cue> & Pick<Cue, 'kind' | 'question'>): Cue {
     remainingMs: 18_000,
     totalMs: 18_000,
     held: false,
-    expanded: false,
     resolvedBy: null,
     note: null,
     aboutFocus: false,

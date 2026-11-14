@@ -111,19 +111,18 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         cue.intersection(&notebook_only).collect::<Vec<_>>()
     );
 
-    // Everything the companion may do: read and dismiss the cue, keep the
-    // quoted line it shows, pause, hide, move, and stop. A new entry is a
-    // privacy decision to make here and in PRIVACY.md, not a default.
+    // Everything the companion may do: read, hold and dismiss the cue,
+    // pause, hide, move, and stop. It writes nothing to the notes. A new
+    // entry is a privacy decision to make here and in PRIVACY.md, not a
+    // default.
     let companion = set(&[
         "core:event:allow-listen",
         "core:event:allow-unlisten",
         "core:window:allow-start-dragging",
         "allow-snapshot",
         "allow-respond-to-cue",
-        "allow-keep-line",
         "allow-inspect-cue",
         "allow-set-overlay",
-        "allow-set-sensitivity",
         "allow-set-live-cues-paused",
         "allow-microphone-snapshot",
         "allow-stop-microphone",
@@ -230,7 +229,6 @@ fn the_companion_receives_the_cue_and_display_state_but_no_notebook_content() {
         "remainingMs",
         "totalMs",
         "held",
-        "expanded",
         "resolvedBy",
         "note",
         "aboutFocus",

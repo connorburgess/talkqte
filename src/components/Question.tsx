@@ -237,7 +237,7 @@ interface QuestionProps {
   busy: boolean;
   onDismiss: () => void;
   /** Holds the cue until it is dismissed; the source is always in view. */
-  onInspect: (expanded: boolean) => void;
+  onHold: () => void;
 }
 
 export function Question({
@@ -246,7 +246,7 @@ export function Question({
   announce = true,
   busy,
   onDismiss,
-  onInspect,
+  onHold,
   leaving = false,
   onLeft,
 }: QuestionProps & {
@@ -320,7 +320,7 @@ export function Question({
           aria-disabled={cue.held || busy}
           aria-describedby={timed || cue.held ? undefined : staysId}
           onClick={() => {
-            if (!cue.held && !busy) onInspect(false);
+            if (!cue.held && !busy) onHold();
           }}
         >
           {timed || cue.held ? (

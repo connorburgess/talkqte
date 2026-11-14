@@ -280,12 +280,9 @@ function FloatingQuestion() {
                 size={state.questionSize}
                 announce={false}
                 busy={busy}
-                onInspect={(expanded) =>
+                onHold={() =>
                   void run(() =>
-                    bridge.command('inspect_cue', {
-                      id: state.cue!.id,
-                      expanded,
-                    }),
+                    bridge.command('inspect_cue', { id: state.cue!.id }),
                   )
                 }
                 onDismiss={() => {
@@ -764,11 +761,9 @@ function Notebook() {
   const simulated = !!state.simulated && state.status === 'running';
   const modelNeeded =
     model?.status === 'missing' || model?.status === 'downloading';
-  const inspectCue = (expanded: boolean) => {
+  const holdCue = () => {
     if (!state.cue) return;
-    void run(() =>
-      bridge.command('inspect_cue', { id: state.cue!.id, expanded }),
-    );
+    void run(() => bridge.command('inspect_cue', { id: state.cue!.id }));
   };
   const toggleLiveCues = () =>
     void run(() =>
@@ -1404,7 +1399,7 @@ function Notebook() {
                   size={state.questionSize}
                   busy={busy}
                   onDismiss={dismiss}
-                  onInspect={inspectCue}
+                  onHold={holdCue}
                   empty={
                     <div className="question-idle">
                       <h3>

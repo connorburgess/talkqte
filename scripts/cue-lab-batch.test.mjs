@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import {
+  COMPACT_PROMPT,
   MODEL,
   MODELS,
   SYSTEM_PROMPT,
@@ -755,4 +756,100 @@ test('a run asks for the model it was told to, records it, and accepts a reply f
     }),
     /Unknown model/,
   );
+});
+
+test('a compact reply and a lower effort are asked for, checked and recorded', async () => {
+  const set = await loadSet('cue-lab');
+  const cases = set.cases.slice(0, 1);
+  // The compact prompt asks for three fields and no explanation.
+  assert.match(
+    COMPACT_PROMPT,
+    /"action":"show\|quiet\|resolved\|withdraw","cue":null,"sourceIds":\["event id"\]\}/,
+  );
+  assert.ok(!COMPACT_PROMPT.includes('"reason"'));
+  assert.ok(!COMPACT_PROMPT.includes('observedUse'));
+  assert.match(COMPACT_PROMPT, /Do not explain or justify/);
+  assert.equal(systemPromptFor(cases[0], { compact: true }), COMPACT_PROMPT);
+  assert.equal(systemPromptFor(cases[0]), SYSTEM_PROMPT);
+
+  // A three-field reply is accepted and checked as strictly as a full one.
+  const three = { action: 'quiet', cue: null, sourceIds: ['e1'] };
+  assert.deepEqual(validateDecision(three, cases[0], { compact: true }), {
+    ...three,
+    reason: null,
+    observedUse: null,
+  });
+  for (const invalid of [
+    { ...three, sourceIds: ['invented'] },
+    { ...three, cue: 'Should we ask?' },
+    { ...three, action: 'resolved' },
+    { ...three, reason: 'An explanation that was not asked for.' },
+    { action: 'quiet', cue: null },
+  ])
+    assert.throws(
+      () => validateDecision(invalid, cases[0], { compact: true }),
+      /Invalid/,
+    );
+  // And a compact reply is not accepted where a full one was asked for.
+  assert.throws(() => validateDecision(three, cases[0]), /Invalid/);
+
+  const cli = fakeCli([reply(three)]);
+  const evaluator = claudeEvaluator({
+    environment: clean,
+    run: cli.run,
+    effort: 'low',
+    compact: true,
+  });
+  // Named apart from a run at the usual settings.
+  assert.equal(evaluator.id, 'claude-low-compact');
+  assert.match(evaluator.label, /low effort, compact reply/);
+  const results = await runBatch({
+    set,
+    cases,
+    rules: {},
+    evaluator,
+    maxCalls: 1,
+  });
+  assert.equal(results.stopped, null);
+  assert.equal(results.evaluator.effort, 'low');
+  assert.equal(results.evaluator.reply, 'compact');
+  assert.equal(results.cases[0].action, 'quiet');
+  assert.equal(results.cases[0].reason, null);
+  const args = cli.calls.at(-1).args;
+  assert.equal(args[args.indexOf('--effort') + 1], 'low');
+  assert.equal(args[args.indexOf('--system-prompt') + 1], COMPACT_PROMPT);
+  // The usual settings are unchanged.
+  const usual = fakeCli([reply(quiet())]);
+  await runBatch({
+    set,
+    cases,
+    rules: {},
+    evaluator: claudeEvaluator({ environment: clean, run: usual.run }),
+    maxCalls: 1,
+  });
+  const before = usual.calls.at(-1).args;
+  assert.equal(before[before.indexOf('--effort') + 1], 'medium');
+  assert.equal(before[before.indexOf('--system-prompt') + 1], SYSTEM_PROMPT);
+
+  // The dry run shows the prompt and keeps the choices in its command.
+  const lines = [];
+  await main(['--set', 'cue-lab', '--effort', 'low', '--reply', 'compact'], {
+    print: (line) => lines.push(line),
+    environment: clean,
+  });
+  const text = lines.join('\n');
+  assert.match(text, /low effort, compact reply/);
+  assert.match(text, /Do not explain or justify/);
+  assert.match(text, /--set cue-lab --effort low --reply compact --run/);
+  for (const [flag, value, message] of [
+    ['--effort', 'high', /--effort is one of: low, medium/],
+    ['--reply', 'short', /--reply is full or compact/],
+  ])
+    await assert.rejects(
+      main(['--set', 'cue-lab', flag, value], {
+        print: () => {},
+        environment: clean,
+      }),
+      message,
+    );
 });

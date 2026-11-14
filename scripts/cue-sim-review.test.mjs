@@ -7,6 +7,8 @@ import { runSimulation } from './cue-sim.mjs';
 import {
   compareRuns,
   comparisonMarkdown,
+  outputAnalysis,
+  outputMarkdown,
   reviewMarkdown,
   reviewTake,
 } from './cue-sim-review.mjs';
@@ -377,4 +379,58 @@ test('two runs of the same conversation are set side by side, and one that stopp
     /Not compared, because not every run reached them: second\./,
   );
   assert.match(page, /One run of each model: a difference here may not repeat/);
+});
+
+test('where the output went is worked out from the run, with an estimate of what writing less would save', () => {
+  // Three requests that take 1 s plus 10 ms for every output token.
+  const decision = (output, reason) => ({
+    type: 'decision',
+    action: 'quiet',
+    cue: null,
+    sourceIds: ['l1'],
+    reason,
+    observedUse: 'not_observed',
+    usage: { output_tokens: output },
+    provider: { durationApiMs: 1_000 + output * 10 },
+  });
+  const results = {
+    evaluator: { label: 'A model' },
+    conversations: [
+      {
+        timeline: [
+          decision(200, 'x'.repeat(160)),
+          decision(300, 'x'.repeat(160)),
+          decision(400, 'x'.repeat(160)),
+          { type: 'line' },
+          // No counters: left out.
+          { type: 'decision', action: 'quiet', usage: null, provider: null },
+        ],
+      },
+    ],
+  };
+  const analysis = outputAnalysis(results);
+  assert.equal(analysis.requests, 3);
+  assert.equal(analysis.medianOutputTokens, 300);
+  assert.equal(analysis.fixedMs, 1_000);
+  assert.equal(analysis.msPerOutputToken, 10);
+  assert.equal(analysis.medianRequestMs, 4_000);
+  // The reply is about 60 tokens, most of it the explanation; the rest of
+  // the 300 was written and not shown.
+  assert.ok(analysis.medianReplyTokens > 55 && analysis.medianReplyTokens < 70);
+  assert.ok(analysis.medianExplanationTokens >= 40);
+  assert.equal(analysis.medianUnseenTokens, 300 - analysis.medianReplyTokens);
+  assert.equal(analysis.estimate.asRunMs, 4_000);
+  assert.equal(
+    analysis.estimate.withoutUnseenWorkingMs,
+    1_000 + analysis.medianReplyTokens * 10,
+  );
+  assert.ok(
+    analysis.estimate.compactReplyOnlyMs <
+      analysis.estimate.withoutUnseenWorkingMs,
+  );
+  const page = outputMarkdown([analysis]);
+  assert.match(page, /\| Output tokens a request, median \| 300 \|/);
+  assert.match(page, /\| Fixed part of a request \| 1\.0 s \|/);
+  assert.match(page, /not what a run would measure/);
+  assert.equal(outputAnalysis({ evaluator: {}, conversations: [] }), null);
 });
