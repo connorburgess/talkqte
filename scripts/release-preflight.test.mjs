@@ -811,6 +811,16 @@ test('a development feature switched on by the configuration fails', (t) => {
     /^development features: native-audio-spike is switched on/,
   );
 
+  const timingLog = fixture(t, {
+    config: (config) => {
+      config.build = { features: ['local-whisper', 'timing-log'] };
+    },
+  });
+  assert.match(
+    failures(preflight({ root: timingLog.root }))[0],
+    /^development features: timing-log is switched on/,
+  );
+
   const declaredOnly = fixture(t);
   write(
     declaredOnly.root,
