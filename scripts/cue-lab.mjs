@@ -353,15 +353,31 @@ function providerCounters(result) {
   return counters;
 }
 
-async function evaluate(
-  testCase,
-  access,
+/** One isolated, subscription-only request: the contract's arguments with
+ * this request's model, effort, settings and system prompt in their marked
+ * places, the input on stdin, no retry. The reply must report exactly the
+ * requested model, and `reply` must accept the parsed JSON it returned (it
+ * throws otherwise). The CLI's own output is read here to sort a failure
+ * and dropped; only the kind of failure is kept. */
+async function isolatedRequest(
   options,
   run,
-  request = requestFor(testCase),
-  model = MODEL,
-  effort = 'medium',
+  {
+    model,
+    effort,
+    systemPrompt,
+    input,
+    reply,
+    task = 'the evaluation',
+    acceptedAs = 'an evaluation',
+    expected = 'decision JSON',
+  },
 ) {
+  // Shapes only; each caller keeps its own list of what it may ask for.
+  if (!/^claude-[a-z0-9-]+$/.test(model ?? ''))
+    throw new Error('The request names no usable model; nothing was sent.');
+  if (!['low', 'medium', 'high'].includes(effort))
+    throw new Error('The request names no usable effort; nothing was sent.');
   // The argument list comes from the contract, with this request's model,
   // effort, settings and system prompt put in its marked places.
   const settings = JSON.stringify(CONTRACT.cli.settings).replaceAll(
@@ -372,17 +388,14 @@ async function evaluate(
     '{model}': model,
     '{effort}': effort,
     '{settings}': settings,
-    '{systemPrompt}': request.systemPrompt,
+    '{systemPrompt}': systemPrompt,
   };
   const args = [
     ...BASE_ARGS,
     ...CONTRACT.cli.evaluateArgs.map((arg) => fill[arg] ?? arg),
   ];
   const start = performance.now();
-  const raw = await run('claude', args, {
-    ...options,
-    input: request.input,
-  });
+  const raw = await run('claude', args, { ...options, input });
   const elapsedMs = Math.round(performance.now() - start);
   const result = parseObject(
     raw,
@@ -394,7 +407,7 @@ async function evaluate(
     result.is_error !== false
   ) {
     throw failure(
-      'Claude did not complete the evaluation; the lab did not retry or request a fallback.',
+      `Claude did not complete ${task}; the lab did not retry or request a fallback.`,
       classifyFailure({
         text: `${result.subtype ?? ''}\n${typeof result.result === 'string' ? result.result : ''}`,
       }),
@@ -403,16 +416,14 @@ async function evaluate(
   const models = Object.keys(result.modelUsage ?? {});
   if (models.length !== 1 || models[0] !== model) {
     throw new Error(
-      `The result did not verify the requested model (${model}); it was not accepted as an evaluation.`,
+      `The result did not verify the requested model (${model}); it was not accepted as ${acceptedAs}.`,
     );
   }
-  const decision = validateDecision(
+  const value = reply(
     parseObject(
       result.result,
-      'Claude did not return the expected decision JSON; the lab did not retry.',
+      `Claude did not return the expected ${expected}; the lab did not retry.`,
     ),
-    testCase,
-    { compact: request.compact },
   );
   const usage = Object.fromEntries(
     [
@@ -427,6 +438,31 @@ async function evaluate(
       )
       .map((key) => [key, result.usage[key]]),
   );
+  return { value, elapsedMs, usage, provider: providerCounters(result) };
+}
+
+async function evaluate(
+  testCase,
+  access,
+  options,
+  run,
+  request = requestFor(testCase),
+  model = MODEL,
+  effort = 'medium',
+) {
+  const {
+    value: decision,
+    elapsedMs,
+    usage,
+    provider,
+  } = await isolatedRequest(options, run, {
+    model,
+    effort,
+    systemPrompt: request.systemPrompt,
+    input: request.input,
+    reply: (value) =>
+      validateDecision(value, testCase, { compact: request.compact }),
+  });
   const expected = testCase.expected ?? {};
   return {
     caseId: testCase.id,
@@ -434,7 +470,7 @@ async function evaluate(
     ...access,
     elapsedMs,
     usage,
-    provider: providerCounters(result),
+    provider,
     decision,
     expected: testCase.expected,
     // Only the two labelled judgments; a set's written reason is not one.
@@ -446,14 +482,14 @@ async function evaluate(
   };
 }
 
-/** Checks the CLI version and subscription sign-in once, then evaluates any
- * number of cases, one request at a time. `close` removes the temporary
- * directory; call it even after a failure. */
-export async function openLab({
+/** The lab's isolation, for any caller: refuses a shell that carries API,
+ * provider or proxy settings before any process starts, checks the CLI
+ * version and subscription sign-in once, then sends isolated requests one
+ * at a time with `request({ model, effort, systemPrompt, input, reply })`.
+ * `close` removes the temporary directory; call it even after a failure. */
+export async function openIsolatedCli({
   environment = process.env,
   run = execute,
-  model = MODEL,
-  effort = 'medium',
 } = {}) {
   // Refuse rather than quietly drop them: an inherited key, token or gateway
   // means this shell is set up for something other than the subscription.
@@ -469,16 +505,34 @@ export async function openLab({
     const access = await preflight(options, run);
     return {
       access,
-      // `request` is what the adapter said this case carries; it is sent
-      // as given.
-      evaluate: (testCase, request) =>
-        evaluate(testCase, access, options, run, request, model, effort),
+      options,
+      request: (params) => isolatedRequest(options, run, params),
       close,
     };
   } catch (error) {
     await close();
     throw error;
   }
+}
+
+/** Checks the CLI version and subscription sign-in once, then evaluates any
+ * number of cases, one request at a time. `close` removes the temporary
+ * directory; call it even after a failure. */
+export async function openLab({
+  environment = process.env,
+  run = execute,
+  model = MODEL,
+  effort = 'medium',
+} = {}) {
+  const cli = await openIsolatedCli({ environment, run });
+  return {
+    access: cli.access,
+    // `request` is what the adapter said this case carries; it is sent
+    // as given.
+    evaluate: (testCase, request) =>
+      evaluate(testCase, cli.access, cli.options, run, request, model, effort),
+    close: cli.close,
+  };
 }
 
 export async function runLab(
