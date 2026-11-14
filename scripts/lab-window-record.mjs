@@ -30,7 +30,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { outputDirectory, parseFlags, stamp } from './cue-lab-output.mjs';
 import { safe } from './cue-sim-record.mjs';
@@ -266,6 +266,118 @@ export async function burnLabels(raw, bar, target, { width, height }) {
   return `${target}.mp4`;
 }
 
+/** Goes through everything a recording needs, except recording: the
+ * meeting record and its video, where the take would go and for how long,
+ * which app commit and cues it would be labelled with, the capture program,
+ * the permission, and (with the permission) whether the two windows can be
+ * found. Nothing is captured. Resolves to the steps and whether all are
+ * ready. */
+async function dryRun({ flags, meeting, appCommit, seconds, helper, print }) {
+  const steps = [];
+  const step = (ok, text) => steps.push({ ok, text });
+  const emulatorApp =
+    flags['--emulator-app'] ??
+    (meeting.mode === 'live'
+      ? 'Google Chrome for Testing'
+      : 'QuickTime Player');
+  const video = meeting.video
+    ? join(dirname(flags['--meeting']), meeting.video)
+    : null;
+  step(
+    meeting.mode === 'live' || (video && existsSync(video)),
+    meeting.mode === 'live'
+      ? `Meeting: live "${meeting.source.conversation}"; open its window before recording.`
+      : `Meeting: "${meeting.source.conversation}", ${video && existsSync(video) ? video : 'its video is missing beside the record'}. Open it in ${emulatorApp}, paused at the start.`,
+  );
+  step(true, `Recording length: ${seconds} s.`);
+  let directory = null;
+  try {
+    directory = outputDirectory(flags['--out'], {});
+    step(true, `Takes go to ${directory}.`);
+  } catch (error) {
+    step(false, error.message);
+  }
+  if (/^[0-9a-f]{7,40}$/.test(appCommit ?? ''))
+    step(
+      true,
+      `TalkQTE commit: ${appCommit.slice(0, 7)} (${flags['--app-commit'] ? 'given' : 'from the timing log'}).`,
+    );
+  else if (flags['--timing-log'])
+    step(
+      false,
+      existsSync(flags['--timing-log'])
+        ? 'TalkQTE commit: the timing log has no session line with a commit yet. Start the session from QuickTime Player first, from a build made with TALKQTE_COMMIT set.'
+        : 'TalkQTE commit: the timing log does not exist yet. Launch TalkQTE with TALKQTE_TIMING_LOG set to that file.',
+    );
+  else
+    step(
+      false,
+      'TalkQTE commit: give --timing-log <file> or --app-commit <sha>.',
+    );
+  const log =
+    flags['--timing-log'] && existsSync(flags['--timing-log'])
+      ? readFileSync(flags['--timing-log'], 'utf8')
+      : undefined;
+  step(
+    true,
+    `Cues label so far: "${cuesFromLog(log).label}" (read again from the log when the take ends).`,
+  );
+  let binary = null;
+  try {
+    binary = await helper();
+    step(true, 'Window capture program: built.');
+  } catch (error) {
+    step(false, `Window capture program: ${error.message}`);
+  }
+  if (binary) {
+    const check = events((await run(binary, ['--check'])).stdout)[0];
+    step(
+      Boolean(check?.screenRecording),
+      check?.screenRecording
+        ? 'Screen & System Audio Recording: allowed for the app this runs in.'
+        : 'Screen & System Audio Recording: not allowed for the app this runs in (for example Terminal). Allow it in System Settings, Privacy & Security, then restart that app. TalkQTE needs the same permission separately for its own capture.',
+    );
+    if (check?.screenRecording) {
+      const windows = events(
+        (await run(binary, ['--list', '--apps', `${emulatorApp},TalkQTE`]))
+          .stdout,
+      ).filter((event) => event.event === 'window' && event.onScreen);
+      const emulator = windows.filter((window) => window.app === emulatorApp);
+      const talkqte = windows.filter((window) => window.app === 'TalkQTE');
+      step(
+        emulator.length > 0,
+        emulator.length
+          ? `${emulatorApp}: ${emulator.length} window on screen.`
+          : `${emulatorApp}: no window on screen. Open the meeting in it.`,
+      );
+      const byTitle = talkqte.some(
+        (window) => window.title === 'TalkQTE companion',
+      );
+      step(
+        talkqte.length > 0,
+        byTitle
+          ? 'TalkQTE companion: found by its title.'
+          : talkqte.length
+            ? 'TalkQTE companion: its title is not visible; the smallest TalkQTE window would be used. Check that is the companion.'
+            : 'TalkQTE companion: no TalkQTE window on screen. Open TalkQTE and show the companion.',
+      );
+    } else
+      step(
+        false,
+        'Windows: not checked, because the permission is not allowed yet.',
+      );
+  }
+  const ready = steps.every((item) => item.ok);
+  for (const item of steps)
+    print(`${item.ok ? 'ready' : 'to do'}  ${item.text}`);
+  print(
+    ready
+      ? 'Everything a recording needs is in place. Nothing was recorded.'
+      : 'Not ready yet. Nothing was recorded.',
+  );
+  return { dryRun: true, ready, steps };
+}
+
 export async function main(
   args,
   { print = console.log, helper = ensureHelper } = {},
@@ -280,16 +392,13 @@ export async function main(
       '--emulator-app',
       '--emulator-title',
     ],
-    switches: ['--keep-silent'],
+    switches: ['--keep-silent', '--dry-run'],
   });
   // Everything that can refuse does so before anything is built or run.
-  if (!flags['--meeting'] || !flags['--seconds'] || !flags['--out'])
+  if (!flags['--meeting'] || !flags['--out'])
     throw new Error(
-      'Use --meeting <emulator record .json> --seconds <n> --out <directory outside the repository>, with --app-commit <sha> or --timing-log <file>.',
+      'Use --meeting <emulator record .json> --out <directory outside the repository>, with --app-commit <sha> or --timing-log <file>.',
     );
-  const seconds = Number(flags['--seconds']);
-  if (!Number.isInteger(seconds) || seconds < 1 || seconds > MAX_SECONDS)
-    throw new Error(`--seconds is a whole number from 1 to ${MAX_SECONDS}.`);
   let meeting;
   try {
     meeting = JSON.parse(readFileSync(flags['--meeting'], 'utf8'));
@@ -303,11 +412,29 @@ export async function main(
     throw new Error(
       'Only a fictional meeting from the lab emulator can be recorded.',
     );
+  // How long to record: as asked, or the pre-rendered meeting's length with
+  // a little room either side.
+  const lastLine = meeting.timing?.lines?.at(-1)?.endsAtMs;
+  const seconds = flags['--seconds']
+    ? Number(flags['--seconds'])
+    : Number.isFinite(lastLine)
+      ? Math.ceil(lastLine / 1000) + 15
+      : NaN;
+  if (!flags['--seconds'] && !Number.isFinite(seconds))
+    throw new Error(
+      'Use --seconds <n>: this meeting record does not say how long it lasts.',
+    );
+  if (!Number.isInteger(seconds) || seconds < 1 || seconds > MAX_SECONDS)
+    throw new Error(`--seconds is a whole number from 1 to ${MAX_SECONDS}.`);
   const appCommit =
     flags['--app-commit'] ??
     (flags['--timing-log']
-      ? commitFromLog(readFileSync(flags['--timing-log'], 'utf8'))
+      ? existsSync(flags['--timing-log'])
+        ? commitFromLog(readFileSync(flags['--timing-log'], 'utf8'))
+        : null
       : null);
+  if (flags['--dry-run'])
+    return dryRun({ flags, meeting, appCommit, seconds, helper, print });
   if (!/^[0-9a-f]{7,40}$/.test(appCommit ?? ''))
     throw new Error(
       "Say which TalkQTE the recording shows: --app-commit <sha>, or --timing-log <file> from a build that records its commit. The recording's label names it.",

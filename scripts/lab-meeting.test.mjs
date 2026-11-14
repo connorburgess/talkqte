@@ -288,7 +288,8 @@ test('the recorder refuses before building or running anything', async () => {
   const repository = new URL('..', import.meta.url).pathname;
   for (const [args, message] of [
     [['--seconds', '60'], /Use --meeting/],
-    [[...base], /Use --meeting/],
+    // No length given and none in the record.
+    [[...base], /Use --seconds <n>/],
     [[...base, '--seconds', '0'], /whole number from 1/],
     [[...base, '--seconds', String(MAX_SECONDS + 1)], /whole number from 1/],
     [[...base, '--seconds', 'ten'], /whole number from 1/],
@@ -345,7 +346,7 @@ test('the emulator refuses unknown modes, missing choices and conversations not 
   const { file } = generatedRun();
   for (const [args, message] of [
     [['play'], /Use render or live/],
-    [['render', '--results', file], /Use --results/],
+    [['render', '--results', file], /Use --conversation/],
     [
       [
         'render',
@@ -443,5 +444,162 @@ test("where the cues came from is read from the app's timing log, never assumed"
       log({ event: 'evaluator', model: 'claude-opus-5-5', effort: 'low' }),
     ).label,
     'cues: model, claude-opus-5-5, low effort, none shown',
+  );
+});
+
+/** A stand-in capture program: answers --check and --list from a script,
+ * and fails if it is ever asked to --capture. */
+function fakeHelper({ allowed, windows = [] }) {
+  const file = join(outside(), 'capture');
+  const list = windows.map((window) =>
+    JSON.stringify({ event: 'window', onScreen: true, ...window }),
+  );
+  writeFileSync(
+    file,
+    `#!/bin/sh
+case "$1" in
+  --check) echo '${JSON.stringify({ event: 'check', screenRecording: allowed })}' ;;
+  --list) printf '%s\\n' ${list.map((line) => `'${line}'`).join(' ')} ;;
+  *) echo '{"event":"error","message":"a dry run must not capture"}'; exit 9 ;;
+esac
+`,
+    { mode: 0o755 },
+  );
+  return async () => file;
+}
+
+test('the dry run reports every step without recording, and the length comes from the meeting', async () => {
+  const directory = outside();
+  writeFileSync(join(directory, 'meeting.mp4'), 'fictional');
+  const meetingFile = join(directory, 'meeting.json');
+  writeFileSync(
+    meetingFile,
+    JSON.stringify({
+      schema: 'talkqte-meeting-emulator/1',
+      fictional: true,
+      mode: 'prerendered',
+      video: 'meeting.mp4',
+      labels: ['Simulated meeting', 'Fictional'],
+      source: { conversation: 'workshop-a', sha256: 'x' },
+      timing: { lines: [{ lineId: 't1', endsAtMs: 70_200 }] },
+    }),
+  );
+  const log = join(outside(), 'run.jsonl');
+  const out = outside();
+  const dry = (helper, extra = []) =>
+    recorder(
+      [
+        '--meeting',
+        meetingFile,
+        '--out',
+        out,
+        '--timing-log',
+        log,
+        '--dry-run',
+        ...extra,
+      ],
+      { print: () => {}, helper },
+    );
+
+  // Before TalkQTE has written its log, and without the permission.
+  const before = await dry(fakeHelper({ allowed: false }));
+  assert.equal(before.ready, false);
+  const text = (result) =>
+    result.steps
+      .map((item) => `${item.ok ? 'ready' : 'to do'} ${item.text}`)
+      .join('\n');
+  assert.match(text(before), /ready Recording length: 86 s\./);
+  assert.match(
+    text(before),
+    /to do TalkQTE commit: the timing log does not exist yet/,
+  );
+  assert.match(text(before), /ready Cues label so far: "cues: unknown"/);
+  assert.match(
+    text(before),
+    /to do Screen & System Audio Recording: not allowed/,
+  );
+  assert.match(text(before), /to do Windows: not checked/);
+
+  // With the session started, the permission, and both windows open.
+  writeFileSync(
+    log,
+    [
+      { event: 'session', state: 'started', commit: '12ed6ba0', elapsed_ms: 0 },
+      { event: 'cue_decision', source: 'line', cue: 'c1' },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join('\n'),
+  );
+  const after = await dry(
+    fakeHelper({
+      allowed: true,
+      windows: [
+        { app: 'QuickTime Player', title: 'meeting.mp4' },
+        { app: 'TalkQTE', title: 'TalkQTE companion' },
+        { app: 'TalkQTE', title: 'TalkQTE' },
+      ],
+    }),
+    ['--seconds', '120'],
+  );
+  assert.equal(after.ready, true, text(after));
+  assert.match(text(after), /ready Recording length: 120 s\./);
+  assert.match(
+    text(after),
+    /ready TalkQTE commit: 12ed6ba \(from the timing log\)/,
+  );
+  assert.match(text(after), /ready Cues label so far: "cues: phrase rules"/);
+  assert.match(text(after), /ready QuickTime Player: 1 window on screen/);
+  assert.match(text(after), /ready TalkQTE companion: found by its title/);
+
+  // A companion whose title cannot be read is pointed out, not assumed.
+  const untitled = await dry(
+    fakeHelper({
+      allowed: true,
+      windows: [
+        { app: 'QuickTime Player', title: 'm' },
+        { app: 'TalkQTE', title: '' },
+      ],
+    }),
+  );
+  assert.match(
+    text(untitled),
+    /its title is not visible; the smallest TalkQTE window would be used/,
+  );
+
+  // A live meeting has no known length, so it must be given.
+  const live = join(outside(), 'live.json');
+  writeFileSync(
+    live,
+    JSON.stringify({
+      schema: 'talkqte-meeting-emulator/1',
+      fictional: true,
+      mode: 'live',
+      labels: [],
+      source: { conversation: 'w' },
+    }),
+  );
+  await assert.rejects(
+    recorder(
+      ['--meeting', live, '--out', outside(), '--app-commit', 'abc1234'],
+      {
+        print: () => {},
+        helper: fakeHelper({ allowed: true }),
+      },
+    ),
+    /Use --seconds <n>/,
+  );
+});
+
+test('a bundled conversation needs no results file, and an unknown one is refused before a browser starts', async () => {
+  await assert.rejects(
+    emulator(
+      ['render', '--conversation', 'no-such-meeting', '--out', outside()],
+      { print: () => {} },
+    ),
+    /No conversation "no-such-meeting" among the bundled ones\. It has: standup-flaky-test/,
+  );
+  await assert.rejects(
+    emulator(['render', '--out', outside()], { print: () => {} }),
+    /Use --conversation/,
   );
 });

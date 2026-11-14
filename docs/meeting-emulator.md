@@ -1,6 +1,6 @@
 # Meeting emulator and window-only recording
 
-Status: development tooling, 14 November 2026. Built and checked offline. **No real-app run has been made**: that needs the owner at the Mac, a build of TalkQTE with local transcription, and the recording permission described below. The [real-app lab runbook](real-app-lab.md) covers the app side: the build, the permissions, the application source and the timing log.
+Status: development tooling, 14 November 2026. Built and checked offline. **No real-app run has been made**: that needs the owner at the Mac, a build of TalkQTE with local transcription, and the recording permission described below. The [real-app lab runbook](real-app-lab.md) covers the app side: the build, the permissions, the application source and the timing log. The [checklist](real-app-checklist.md) is the one page to follow at the Mac.
 
 The [cue simulation](cue-simulation.md) replays a conversation inside the browser preview with a stand-in for the app. This page is for the other kind of run: the real TalkQTE desktop app hearing a fictional meeting through its application source, and recording what it does.
 
@@ -8,7 +8,7 @@ The [cue simulation](cue-simulation.md) replays a conversation inside the browse
 
 `scripts/lab-emulator.mjs` plays a fictional conversation as a mock video call: invented portraits in a gallery of tiles, a ring on the current speaker, optional captions, and the lines spoken aloud. **TalkQTE is not in it**: the real app makes its own cues from what it hears.
 
-It plays only conversations the lab may play (the loader is `scripts/lab-playable.mjs`):
+Without `--results` it plays one of the bundled conversations. It plays only conversations the lab may play (the loader is `scripts/lab-playable.mjs`):
 
 - **Bundled conversations**, checked word for word against their fixture.
 - **Generated runs** from the dialogue lane (schema `talkqte-cue-dialogue/1`), checked against the brief file saved beside the results:
@@ -25,7 +25,7 @@ Every emulated meeting is labelled on screen and in its record: "Simulated meeti
 ### Pre-rendered: one meeting video for QuickTime Player
 
 ```sh
-npm run lab:emulator -- render --results <results .json> --conversation <id> \
+npm run lab:emulator -- render [--results <results .json>] --conversation <id> \
   --out <directory outside the repository> [--voices-cache <dir>] [--portraits-cache <dir>] [--no-captions]
 ```
 
@@ -40,7 +40,7 @@ Open it in QuickTime Player, select **QuickTime Player** as the application sour
 ### Live: a meeting window that can change while it plays
 
 ```sh
-npm run lab:emulator -- live --results <results .json> --conversation <id> \
+npm run lab:emulator -- live [--results <results .json>] --conversation <id> \
   --out <directory outside the repository> [--port 1445] [--open]
 ```
 
@@ -58,10 +58,21 @@ Select **Google Chrome for Testing** as the application source. Whether the app'
 ## Recording the real app, window by window
 
 ```sh
-npm run lab:window-record -- --meeting <emulator record .json> --seconds 120 \
-  --out <directory outside the repository> (--app-commit <sha> | --timing-log <file>) \
-  [--emulator-app "QuickTime Player"] [--keep-silent]
+npm run lab:window-record -- --meeting <emulator record .json> \
+  --out <directory outside the repository> (--timing-log <file> | --app-commit <sha>) \
+  [--seconds <n>] [--emulator-app "QuickTime Player"] [--keep-silent] [--dry-run]
 ```
+
+Without `--seconds` it records a pre-rendered meeting's length plus 15 seconds. **`--dry-run` goes through every step except recording**, and prints each as ready or to do:
+
+- the meeting record and its video;
+- the output folder and the recording length;
+- the app's commit from the timing log;
+- the cues label so far;
+- the capture program and the permission;
+- with the permission, whether QuickTime Player and the TalkQTE companion each have a window on screen.
+
+It lists the windows of those two apps only, and captures nothing.
 
 ### What it records
 
