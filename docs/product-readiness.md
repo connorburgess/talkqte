@@ -149,6 +149,17 @@ Nothing real was lost with it: every real row and control on that page showed st
 
 The notebook is now the live-session interface, and V4's acceptance applies to it. Still open: a check of the notebook in each of idle, starting, listening, cue shown, paused, stopped and failed as one designed sequence; the notebook against an actual microphone and local transcription; native keyboard and VoiceOver behavior; the desktop window beside a meeting on a real Mac; and whether a person understands it without explanation.
 
+### Native companion checks need a cue source — 14 November 2026
+
+Readiness blocker. Until 14 November 2026 the pending native checks of the companion (cross-app focus, placement, Spaces, full-screen meetings, screen sharing, VoiceOver: **R2**, **T3**, **U7**, **V9**) and the first phone experiment (**M1**) all began with "start the demo", because the in-app demo was the only way to put a cue on screen without a live session. The demo was removed at the owner's decision, and an ordinary build now shows no cue at all.
+
+What each check needs now:
+
+- **Desktop companion checks** need a `local-whisper` build with its speech model installed, a live session, and a spoken fictional line that a phrase rule matches. That adds a build with CMake, a 78 MB model download and microphone permission to every such check, and it makes the cue depend on local transcription recognising the line.
+- **The phone experiment** needs a page that shows the companion with a fictional cue. The browser preview alone no longer provides one.
+
+What would unblock them without a microphone: a development-only way to feed the built app or a served page a fictional, clearly labelled simulated session, as the lab's recording stage already does for the companion in a desktop browser through the browser tests' stand-in. That state must never ship as reachable in an ordinary build, never say Live or claim a microphone, and never read real content. Acceptance: one fictional cue appears in the native companion of a development build with no microphone permission requested, labelled as simulated in the app's own words, and the same build's ordinary configuration cannot reach it. Not built; no decision has been made to build it.
+
 ### Voiced practice demo
 
 **Retired in the app on 14 November 2026.** The voiced demo described below was built and bundled, then removed from the notebook together with its voices at the owner's decision; fictional demonstrations now come from the lab's simulations and recordings ([batches and simulations](cue-simulation.md)). The requirements below are kept as what a fictional demonstration must do. The roadmap items stay open.

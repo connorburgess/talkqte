@@ -29,7 +29,7 @@ Rust tests cover question expiry, pause, stale responses, saved-question replay,
 
 Pull-request checks also require an author-matching sign-off trailer on each contribution commit and reject common tool-attribution credits in commit messages and PR text. These automated checks complement human review; they do not establish a contributor's legal identity, verify contributor-agreement acceptance, or catch every possible credit format.
 
-Use only the bundled fictional demo for public evidence. Test data and notes are memory-only; restarting the app clears them. The local export is the only implemented way to keep notebook content.
+Use only fictional material for public evidence: the browser tests' fictional fixtures and stand-in, and the lab's fictional simulations and recordings ([batches and simulations](docs/cue-simulation.md)). The app has no bundled demo. Test data and notes are memory-only; restarting the app clears them. The local export is the only implemented way to keep notebook content.
 
 ## Branch and review workflow
 
