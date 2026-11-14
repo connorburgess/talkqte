@@ -46,8 +46,9 @@ same opaque run ID (1–64 ASCII letters, digits, hyphens or underscores). Setti
 are frozen at setup, together with the exact `TALKQTE_DEV_APPLICATION_SOURCE`
 value `QuickTime Player` and a required finite positive `TALKQTE_DEV_STOP_AFTER_S`.
 Other sources or a missing/invalid guard refuse arming. The microphone must be
-pristine and unused in this process before arming (generation/revision zero, Off,
-no cleanup pending). This mode blocks standalone microphone admission and live
+unused in this process before arming (no admitted start, capture or cleanup
+pending, and Off). Idle ordinary Stop may advance control generation/revision
+without admitting a microphone start; that alone does not invalidate release. This mode blocks standalone microphone admission and live
 microphone reservation before any native request. Any unexpected microphone
 history remains unsupported even after teardown; it cannot become release proof.
 Ordinary builds and controls outside this opt-in retain their behavior.

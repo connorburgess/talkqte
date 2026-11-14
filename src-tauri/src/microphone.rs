@@ -149,6 +149,13 @@ struct State {
     generation: u64,
     capture: Option<Capture>,
     cleanup_pending: bool,
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    start_admitted: bool,
 }
 
 impl State {
@@ -227,6 +234,25 @@ impl Controller {
         }
     }
 
+    // Stop also advances generation/revision when no microphone was started.
+    // Actual start admission is permanent history, including canceled starts
+    // whose permission/device result can still arrive after Stop.
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    pub(crate) fn try_unused_for_lab_stop(&self) -> bool {
+        self.0.try_lock().is_ok_and(|state| {
+            !state.start_admitted
+                && state.capture.is_none()
+                && !state.cleanup_pending
+                && state.snapshot.status == Status::Off
+                && state.snapshot.can_start
+        })
+    }
+
     #[cfg(test)]
     pub(crate) fn try_snapshot(&self) -> Option<Snapshot> {
         self.0.try_lock().ok().map(|state| state.snapshot.clone())
@@ -251,6 +277,15 @@ impl Controller {
         }
         if matches!(state.snapshot.status, Status::Starting | Status::Listening) {
             return Err("Microphone monitoring is already starting or running.".into());
+        }
+        #[cfg(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        ))]
+        {
+            state.start_admitted = true;
         }
         state.generation += 1;
         self.1.store(state.generation, Ordering::Release);
@@ -1429,6 +1464,55 @@ mod tests {
             Instant::now(),
         );
         assert!(controller.is_starting(new));
+    }
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    #[test]
+    fn idle_notebook_stop_preserves_unused_microphone_without_settling_another_drain() {
+        let controller = Controller::default();
+        let mut runtime = crate::Runtime::default();
+        let ticket = runtime.begin_live_start().unwrap();
+        let session = runtime.install_live_start(&ticket).unwrap();
+        drop(ticket);
+        let target = crate::engine::StopTarget {
+            operation: runtime.live_start.control().unwrap().0,
+            microphone: "0".into(),
+        };
+        // Ordinary notebook Stop owns the extracted application-only Live.
+        let plan = runtime.prepare_capture_stop(&target).unwrap();
+        let live = plan.live.unwrap();
+        assert_eq!(live.session, session);
+        finish(
+            &controller,
+            controller
+                .request_stop_of(Some(plan.microphone))
+                .unwrap()
+                .unwrap(),
+        );
+        let (generation, snapshot) = controller.control_snapshot();
+        assert!(generation > 0);
+        assert!(snapshot.unwrap().revision > 0);
+        assert!(crate::dev_stop::microphone_is_pristine(&controller));
+
+        // A subsequent signal/ordinary Stop cannot settle that earlier drain,
+        // even though an unused microphone remains eligible after idle Stop.
+        assert!(runtime.take_live_for_stop().is_none());
+        assert!(!runtime.lab_stop_drains.settled());
+        finish(&controller, controller.request_stop().unwrap());
+        assert!(crate::dev_stop::microphone_is_pristine(&controller));
+        assert!(!runtime.lab_stop_drains.settled());
+        runtime.lab_stop_drains.acknowledge(live.session, true);
+        assert!(runtime.lab_stop_drains.settled());
+        assert!(crate::dev_stop::microphone_is_pristine(&controller));
+
+        let locked = controller.0.lock().unwrap();
+        assert!(!crate::dev_stop::microphone_is_pristine(&controller));
+        drop(locked);
+        assert!(crate::dev_stop::microphone_is_pristine(&controller));
     }
     #[cfg(all(
         debug_assertions,

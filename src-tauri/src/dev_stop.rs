@@ -54,15 +54,8 @@ impl Drains {
     }
 }
 
-fn pristine_microphone(generation: u64, snapshot: Option<&crate::microphone::Snapshot>) -> bool {
-    generation == 0
-        && snapshot.is_some_and(|s| {
-            s.revision == 0 && s.status == crate::microphone::Status::Off && s.can_start
-        })
-}
 pub(crate) fn microphone_is_pristine(controller: &crate::microphone::Controller) -> bool {
-    let (generation, snapshot) = controller.control_snapshot();
-    pristine_microphone(generation, snapshot.as_ref())
+    controller.try_unused_for_lab_stop()
 }
 
 pub(crate) fn requested() -> bool {
