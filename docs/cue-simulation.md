@@ -142,10 +142,10 @@ What it does, following the app's [evaluator bridge](cue-evaluator.md#transcript
 - A line reaches the evaluator a fixed time after it is said (`--transcript-delay-ms`, 3,000 by default, standing in for local transcription).
 - Each request holds the newest six lines and the lines the cue on screen cites. With `--input app` (the default) every line has the one label "Speaker" and no name is sent, as the app would send today; `--input named` adds speaker names and the listener's name, to see what they change.
 - One request at a time. A line that arrives while a request is in flight overtakes it: that decision is dropped, and one catch-up request follows with the latest lines. `--apply-stale` applies overtaken decisions anyway, to see how late they would have been.
-- Evaluations start only on a new line and at least `--min-gap-ms` apart (2,000 by default), so a conversation of N lines makes at most N requests. The dry run prints that bound for each conversation.
+- Evaluations start only on a new line and at least `--min-gap-ms` apart (2,000 by default), so a conversation of N lines makes at most N requests. The dry run prints that bound for each conversation, and every line as a request would carry it.
 - One cue at a time. An unread cue lives 18 seconds from its newest cited line; a cue proposed later than that is refused.
 
-It does not simulate cooldown, focus, hold, dismissal, note reminders or the companion window. A model run needs the same flags as a batch (`--run`, `--included-usage-confirmed`, `--max-calls`, an output directory) and the owner's go-ahead for that stated run; it is refused if it could need more requests than the cap, and stops at the first failure.
+It does not simulate cooldown, focus, hold, dismissal, note reminders or the companion window. A model run needs the same flags as a batch (`--run`, `--included-usage-confirmed`, `--max-calls`, an output directory) and the owner's go-ahead for that stated run; it is refused if it could need more requests than the cap, and stops at the first failure. Conversations that finished are written to the results file; the one in progress when a run stops is only in the event log. Each request carries up to six recent lines, the lines the cue on screen cites, and that cue's text, so a cue the model wrote is sent back to it.
 
 With `--set`, each case of a set is replayed as a two-second conversation from the fixture's own cue. The phrase rules can be used there (`--evaluator rules`), but only as their recorded final outcome applied at the last line. **The rules have not been replayed on the timed conversations**: they run in Rust, and that needs an engine replay that records each line.
 
@@ -154,13 +154,13 @@ With `--set`, each case of a set is replayed as a two-second conversation from t
 | Number | Meaning |
 | --- | --- |
 | Evaluations: started, applied, overtaken | Requests made; decisions that took effect; decisions dropped because a newer line arrived first |
-| Labelled moments: in time, late, missed | Of the `show` labels: a cue was on screen before the moment closed; after it closed; or never |
+| Labelled moments: in time, late, missed | Of the `show` labels: a cue was on screen before the moment closed; after it closed; or never. A cue belongs to the latest moment still open when its request was made |
 | Line said to cue on screen | From the end of the labelled line to the cue appearing: transcription delay, any wait, and the decision. This is the number the 5-second [budget](budgets.md) is about |
 | Decision time | The evaluator's own time per request |
 | Unexpected cues | Cues shown that belong to no open labelled moment |
-| Flips | Cues the evaluator showed and then withdrew at a line not labelled as a reason to withdraw |
+| Flips | Cues the evaluator showed and then withdrew when no line heard by then was labelled as a reason to withdraw that cue |
 | Duplicates | A second cue for a moment already cued, or the same words shown again |
-| Quiet kept | Of the evaluated lines labelled quiet, those where the decision was quiet. A cue that arrives a line late for a moment still open is not counted against quiet |
+| Quiet kept | Of the evaluated lines labelled quiet, those where the decision was quiet, whether or not that decision was later dropped. A decision that is only catching up (a cue for a moment still open, or clearing a cue after the line labelled as ending it) is not counted against quiet |
 | Endings: as labelled, otherwise, lingered | When a line answers or removes the basis of a cue on screen: cleared with the labelled action, cleared with the other one, or left until it expired, with how long it stayed |
 
 ### What replaying the labels shows
