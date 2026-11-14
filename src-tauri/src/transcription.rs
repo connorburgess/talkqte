@@ -34,6 +34,46 @@ pub struct AudioChunk {
     pub samples: Vec<f32>,
 }
 
+/// What the worker needs from queued audio. A plain `AudioChunk` uses its
+/// nominal 16 kHz timing; a source with its own clock keeps that mapping with
+/// the samples, so it survives queueing and a slow recognizer.
+pub trait Timed: Send + 'static {
+    /// Samples for the recognizer.
+    fn audio(&self) -> &AudioChunk;
+    /// Session time for a recognizer offset, or `None` when the offset falls
+    /// outside the audio. Must not decrease as the offset grows.
+    fn session_ms(&self, offset_ms: u64) -> Option<u64>;
+    /// False once the source that produced this audio has stopped or been
+    /// replaced, or when the audio was made for a session other than the
+    /// worker's. The worker asks again before each delivery, because a stop
+    /// cannot retract audio already handed to the recognizer. Whether the
+    /// worker's session is still the engine's is the sink's check.
+    fn current(&self, session: u64) -> bool;
+}
+
+impl Timed for AudioChunk {
+    fn audio(&self) -> &AudioChunk {
+        self
+    }
+
+    fn session_ms(&self, offset_ms: u64) -> Option<u64> {
+        let length_ms = (self.samples.len() * 1_000 / SAMPLE_RATE) as u64;
+        (offset_ms <= length_ms).then(|| self.start_ms.saturating_add(offset_ms))
+    }
+
+    // Microphone chunks carry no source identity; the worker's own cancel
+    // flag and the engine's session check cover them.
+    fn current(&self, _: u64) -> bool {
+        true
+    }
+}
+
+impl<T: Transcriber + ?Sized> Transcriber for Box<T> {
+    fn transcribe(&mut self, chunk: &AudioChunk) -> Result<Vec<Recognized>, String> {
+        (**self).transcribe(chunk)
+    }
+}
+
 /// Text recognized within a chunk, offset from the chunk's start.
 pub struct Recognized {
     pub offset_ms: u64,
@@ -58,6 +98,9 @@ pub struct Stats {
     /// Recognized lines discarded before delivery because their offset fell
     /// outside the chunk.
     pub out_of_range: u64,
+    /// Chunks whose source had stopped or been replaced: skipped before
+    /// recognition, or recognized with the undelivered lines discarded.
+    pub stale: u64,
     /// Chunks refused at submit because the queue was full, the worker had
     /// stopped, or the chunk was too long.
     pub dropped: u64,
@@ -77,8 +120,8 @@ impl CancelHandle {
     }
 }
 
-pub struct Worker {
-    sender: Option<SyncSender<AudioChunk>>,
+pub struct Worker<C = AudioChunk> {
+    sender: Option<SyncSender<C>>,
     cancelled: Arc<AtomicBool>,
     dropped: AtomicU64,
     queued: AtomicU64,
@@ -86,7 +129,7 @@ pub struct Worker {
     finished: Option<Receiver<Stats>>,
 }
 
-impl Worker {
+impl<C: Timed> Worker<C> {
     /// Starts a worker for `session` (from `Engine::session()`) with room for
     /// `capacity` waiting chunks. `sink` delivers each segment, normally by
     /// locking the engine and calling `Engine::ingest`. Because the sink takes
@@ -132,8 +175,8 @@ impl Worker {
     /// `MAX_CHUNK_SECONDS`, the chunk is counted as dropped and handed back,
     /// so a capture callback can reuse the buffer instead of freeing it.
     /// Dropped audio is not retried; the transcript simply has a gap.
-    pub fn submit(&self, chunk: AudioChunk) -> Result<(), AudioChunk> {
-        let refused = if chunk.samples.len() > SAMPLE_RATE * MAX_CHUNK_SECONDS
+    pub fn submit(&self, chunk: C) -> Result<(), C> {
+        let refused = if chunk.audio().samples.len() > SAMPLE_RATE * MAX_CHUNK_SECONDS
             || self.cancelled.load(Ordering::Acquire)
         {
             Some(chunk)
@@ -167,16 +210,17 @@ impl Worker {
             .saturating_sub(self.completed.load(Ordering::Acquire))
     }
 
+    /// False once the worker thread has ended, including after a panic in
+    /// the recognizer or the sink. Audio submitted afterwards is never
+    /// recognized, so a caller that keeps capturing should stop.
+    pub fn is_running(&self) -> bool {
+        // The thread holds the only other reference to this counter.
+        Arc::strong_count(&self.completed) > 1
+    }
+
     /// A handle that cancels this worker from another thread, like `cancel`.
     pub fn cancel_handle(&self) -> CancelHandle {
         CancelHandle(self.cancelled.clone())
-    }
-
-    /// Cancels without waiting: no further results are delivered, and
-    /// queued chunks are discarded. Safe to call while holding the engine
-    /// lock, unlike `stop`.
-    pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
     }
 
     /// Cancels, then waits up to `STOP_WAIT` for a recognizer call in
@@ -211,6 +255,15 @@ impl Worker {
         stats.dropped = self.dropped.load(Ordering::Relaxed);
         stats
     }
+}
+
+impl<C> Worker<C> {
+    /// Cancels without waiting: no further results are delivered, and
+    /// queued chunks are discarded. Safe to call while holding the engine
+    /// lock, unlike `stop`.
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
 
     fn shutdown(&mut self) -> Stats {
         self.cancel();
@@ -231,7 +284,7 @@ impl Worker {
     }
 }
 
-impl Drop for Worker {
+impl<C> Drop for Worker<C> {
     fn drop(&mut self) {
         if self.finished.is_some() {
             self.shutdown();
@@ -239,10 +292,10 @@ impl Drop for Worker {
     }
 }
 
-fn run<T: Transcriber, S: FnMut(u64, Segment) -> Result<(), String>>(
+fn run<C: Timed, T: Transcriber, S: FnMut(u64, Segment) -> Result<(), String>>(
     session: u64,
     worker: u64,
-    receiver: Receiver<AudioChunk>,
+    receiver: Receiver<C>,
     cancelled: Arc<AtomicBool>,
     completed: Arc<AtomicU64>,
     mut transcriber: T,
@@ -255,7 +308,13 @@ fn run<T: Transcriber, S: FnMut(u64, Segment) -> Result<(), String>>(
         if stopped() {
             break;
         }
-        let recognized = transcriber.transcribe(&chunk);
+        // Audio from a stopped or replaced source is not recognized at all.
+        if !chunk.current(session) {
+            stats.stale += 1;
+            completed.fetch_add(1, Ordering::Release);
+            continue;
+        }
+        let recognized = transcriber.transcribe(chunk.audio());
         stats.chunks += 1;
         let mut items = match recognized {
             Ok(items) => items,
@@ -267,20 +326,31 @@ fn run<T: Transcriber, S: FnMut(u64, Segment) -> Result<(), String>>(
         };
         // The engine refuses out-of-order lines, so deliver in time order.
         items.sort_by_key(|item| item.offset_ms);
-        // Count lines outside the chunk before delivery, so the count does
-        // not depend on whether a stop arrives mid-delivery.
-        let length_ms = (chunk.samples.len() * 1_000 / SAMPLE_RATE) as u64;
+        // Map every line through the chunk's own timing before delivery, so
+        // the out-of-range count does not depend on whether a stop arrives
+        // mid-delivery. Offsets outside the audio are skipped, never clamped.
         let recognized_lines = items.len();
-        items.retain(|item| item.offset_ms <= length_ms);
-        stats.out_of_range += (recognized_lines - items.len()) as u64;
-        for item in items {
+        let timed: Vec<_> = items
+            .into_iter()
+            .filter_map(|item| Some((chunk.session_ms(item.offset_ms)?, item)))
+            .collect();
+        stats.out_of_range += (recognized_lines - timed.len()) as u64;
+        // The source may have ended during recognition, even though the
+        // session and this worker carry on. Checked once here, so a chunk
+        // with no deliverable lines is still counted, and again per line.
+        let mut withheld = !chunk.current(session);
+        for (at_ms, item) in timed {
             // A stop during inference or delivery discards what is left.
             if stopped() {
                 return stats;
             }
+            if withheld || !chunk.current(session) {
+                withheld = true;
+                break;
+            }
             let segment = Segment {
                 id: format!("t{session}-{worker}-{next_id}"),
-                at_ms: chunk.start_ms.saturating_add(item.offset_ms),
+                at_ms,
                 speaker: item.speaker,
                 text: item.text,
             };
@@ -289,6 +359,9 @@ fn run<T: Transcriber, S: FnMut(u64, Segment) -> Result<(), String>>(
                 Ok(()) => stats.accepted += 1,
                 Err(_) => stats.rejected += 1,
             }
+        }
+        if withheld {
+            stats.stale += 1;
         }
         completed.fetch_add(1, Ordering::Release);
     }
@@ -700,5 +773,158 @@ mod tests {
         assert!(outcomes.recv().unwrap());
         let stats = worker.stop();
         assert_eq!((stats.chunks, stats.failures, stats.accepted), (2, 1, 1));
+    }
+
+    /// Audio for session 3 whose source clock runs at half the nominal rate
+    /// and can stop independently of the worker.
+    struct Slow {
+        audio: AudioChunk,
+        live: Arc<AtomicBool>,
+    }
+
+    impl Timed for Slow {
+        fn audio(&self) -> &AudioChunk {
+            &self.audio
+        }
+
+        fn session_ms(&self, offset_ms: u64) -> Option<u64> {
+            let nominal = self.audio.session_ms(offset_ms)?;
+            Some(nominal + offset_ms)
+        }
+
+        fn current(&self, session: u64) -> bool {
+            session == 3 && self.live.load(Ordering::Acquire)
+        }
+    }
+
+    fn collected() -> (
+        impl FnMut(u64, Segment) -> Result<(), String>,
+        mpsc::Receiver<u64>,
+    ) {
+        let (report, delivered) = mpsc::channel();
+        let sink = move |_, segment: Segment| {
+            let _ = report.send(segment.at_ms);
+            Ok(())
+        };
+        (sink, delivered)
+    }
+
+    #[test]
+    fn a_chunk_with_its_own_clock_times_lines_after_waiting_in_the_queue() {
+        let live = Arc::new(AtomicBool::new(true));
+        let slow = |start_ms| Slow {
+            audio: chunk(start_ms),
+            live: live.clone(),
+        };
+        let lines = vec![
+            Ok(vec![(500, "Later."), (0, "First."), (1_001, "Beyond.")]),
+            Ok(vec![(250, "Next.")]),
+        ];
+        let (sink, delivered) = collected();
+        let worker = Worker::start(3, 4, script(lines), sink);
+        assert!(worker.submit(slow(10_000)).is_ok());
+        assert!(worker.submit(slow(12_000)).is_ok());
+        let stats = worker.finish(Duration::from_secs(5));
+        assert_eq!((stats.accepted, stats.out_of_range), (3, 1));
+        let times: Vec<u64> = delivered.try_iter().collect();
+        assert_eq!(times, [10_000, 11_000, 12_500]);
+    }
+
+    #[test]
+    fn a_source_that_stops_mid_recognition_delivers_nothing_more() {
+        let live = Arc::new(AtomicBool::new(true));
+        let slow = |start_ms| Slow {
+            audio: chunk(start_ms),
+            live: live.clone(),
+        };
+        let (started, recognizing) = mpsc::channel();
+        let (open, gate) = mpsc::channel();
+        let calls = Arc::new(AtomicU64::new(0));
+        let script = Script {
+            lines: vec![
+                Ok(vec![(0, "One."), (100, "Two.")]),
+                Ok(vec![(0, "Three.")]),
+            ],
+            started: Some(started),
+            gate: Some(gate),
+            calls: calls.clone(),
+        };
+        let (sink, delivered) = collected();
+        let worker = Worker::start(3, 4, script, sink);
+        assert!(worker.submit(slow(10_000)).is_ok());
+        assert!(worker.submit(slow(11_000)).is_ok());
+        recognizing.recv().unwrap();
+        live.store(false, Ordering::Release); // The source stops; the worker does not.
+        open.send(()).unwrap();
+        let stats = worker.finish(Duration::from_secs(5));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "queued audio not recognized"
+        );
+        assert_eq!((stats.chunks, stats.accepted, stats.stale), (1, 0, 2));
+        assert!(delivered.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_source_that_stops_between_two_lines_withholds_the_second() {
+        let live = Arc::new(AtomicBool::new(true));
+        let stop = live.clone();
+        let (report, delivered) = mpsc::channel();
+        // The source stops as the first line is delivered.
+        let sink = move |_, segment: Segment| {
+            stop.store(false, Ordering::Release);
+            let _ = report.send(segment.at_ms);
+            Ok(())
+        };
+        let lines = vec![Ok(vec![(0, "One."), (100, "Two.")])];
+        let worker = Worker::start(3, 2, script(lines), sink);
+        let audio = chunk(10_000);
+        assert!(worker.submit(Slow { audio, live }).is_ok());
+        let stats = worker.finish(Duration::from_secs(5));
+        assert_eq!((stats.accepted, stats.stale), (1, 1));
+        assert_eq!(delivered.try_iter().collect::<Vec<_>>(), [10_000]);
+    }
+
+    #[test]
+    fn stale_audio_is_counted_even_when_nothing_was_recognized() {
+        let live = Arc::new(AtomicBool::new(true));
+        let (started, recognizing) = mpsc::channel();
+        let (open, gate) = mpsc::channel();
+        let script = Script {
+            started: Some(started),
+            gate: Some(gate),
+            ..script(vec![Ok(vec![])])
+        };
+        let (sink, _delivered) = collected();
+        let worker = Worker::start(3, 2, script, sink);
+        let audio = chunk(10_000);
+        assert!(worker
+            .submit(Slow {
+                audio,
+                live: live.clone()
+            })
+            .is_ok());
+        recognizing.recv().unwrap();
+        live.store(false, Ordering::Release);
+        open.send(()).unwrap();
+        assert_eq!(worker.finish(Duration::from_secs(5)).stale, 1);
+    }
+
+    #[test]
+    fn audio_made_for_another_session_is_never_recognized() {
+        let calls = Arc::new(AtomicU64::new(0));
+        let script = Script {
+            calls: calls.clone(),
+            ..script(vec![Ok(vec![(0, "Hello.")])])
+        };
+        let (sink, delivered) = collected();
+        let worker = Worker::start(4, 2, script, sink);
+        let live = Arc::new(AtomicBool::new(true));
+        let audio = chunk(10_000);
+        assert!(worker.submit(Slow { audio, live }).is_ok());
+        let stats = worker.finish(Duration::from_secs(5));
+        assert_eq!((calls.load(Ordering::SeqCst), stats.stale), (0, 1));
+        assert!(delivered.try_recv().is_err());
     }
 }

@@ -1,7 +1,8 @@
 //! Development-only ownership for selected-application audio. The default build
 //! has no OS API, enumeration, permission request or app command. The handoff
 //! submodule accepts synthetic buffers without activating any capture.
-//! The optional native-audio-spike owner is unconnected to app commands.
+//! With the optional native-audio-spike feature, one development command
+//! reaches the native owner through `application_audio_host`.
 //! Native selection, sample handling and release still require acceptance.
 
 pub mod chunks;
@@ -98,6 +99,20 @@ pub struct Control(Arc<Operation>);
 impl Control {
     pub fn is_cancelled(&self) -> bool {
         self.0.cancelled.load(Ordering::Acquire)
+    }
+
+    /// Close this operation with one atomic store and no gate lock, so a
+    /// caller may hold another lock. Delivery, readers and returned work
+    /// refuse from here on. The gate keeps reporting its earlier phase until
+    /// the operation's owner observes this and stops or releases its resource.
+    pub(crate) fn cancel(&self) {
+        self.0.cancelled.store(true, Ordering::Release);
+    }
+
+    /// Identity of the reviewed operation, not of its application or name.
+    #[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
+    pub(crate) fn same_operation(&self, other: &Control) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
     }
 }
 
@@ -265,6 +280,11 @@ pub struct Start {
 }
 
 impl Start {
+    /// The approved operation's identity, for scoped Stop and source checks.
+    pub fn control(&self) -> Control {
+        self.lease.control.clone()
+    }
+
     /// Run on a worker, never the UI thread or audio callback. The adapter
     /// receives only the reviewed selection and cancellation token. It must
     /// clean up before returning Err, and release its stream in a non-panicking

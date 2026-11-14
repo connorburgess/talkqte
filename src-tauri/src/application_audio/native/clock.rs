@@ -63,8 +63,12 @@ pub struct ClockBinding {
 impl ClockBinding {
     /// host_origin must describe the host clock, not the stream clock. The host
     /// must pair it with session_time for this session before invoking begin.
-    /// Rust Instant alone does not establish that correspondence.
-    pub fn new(
+    /// Rust Instant alone does not establish that correspondence. Outside
+    /// tests only the runtime's clock measurement constructs one, and it
+    /// leaves the runtime only through acceptance, which attaches a source.
+    /// The binding names a session, not that source: the caller must begin
+    /// the same operation it accepted, and the transcript sink checks it.
+    pub(crate) fn new(
         session: u64,
         host_origin: CMTime,
         session_time: Duration,
@@ -162,6 +166,11 @@ impl NativeBlock {
     /// Rounded envelope, exact source frames, samples and source/session guard.
     pub fn timing(&self) -> &TimedBlock {
         &self.block
+    }
+
+    /// Converted session times of the first frame and the exclusive end.
+    pub(super) fn bounds(&self) -> (Position, Position) {
+        (self.start, self.end)
     }
 
     /// Project an absolute source-frame boundary, including the exclusive end.
@@ -371,7 +380,7 @@ impl Delivery {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::super::pcm::tests::time;
     use super::*;
     use crate::application_audio::{
@@ -438,6 +447,53 @@ mod tests {
                 &*((base as *const CMTimebase).cast::<CMClockOrTimebase>()),
                 &*((&*host as *const CMClock).cast::<CMClockOrTimebase>()),
             ))
+        }
+    }
+
+    /// Real blocks from memory-only packets through the delivery path, read
+    /// one at a time. Each packet is (first source frame, frame count). The
+    /// returned guards keep the fictional operation approved and running.
+    pub(in crate::application_audio::native) fn native_blocks(
+        rate: f64,
+        packets: &[(u64, usize)],
+    ) -> (Gate, Control, Capture<()>, Vec<NativeBlock>) {
+        let (gate, control, start, mut input, mut delivery) = setup();
+        let capture = accept(start);
+        let base = timebase(rate);
+        let blocks = packets
+            .iter()
+            .map(|&(first, frames)| {
+                input.push(&control, first, &vec![0.25; frames]).unwrap();
+                delivery
+                    .try_next(7, |o, f| convert(&base, o, f))
+                    .unwrap()
+                    .unwrap()
+            })
+            .collect();
+        (gate, control, capture, blocks)
+    }
+
+    /// The same delivery path for a test that supplies its own reader and
+    /// clock binding, such as one accepted by the runtime. Source time 10 s
+    /// corresponds to host time 7 s; the first sample is 1 µs after that.
+    pub(crate) struct Feed {
+        delivery: Delivery,
+        base: CFRetained<CMTimebase>,
+    }
+
+    impl Feed {
+        pub(crate) fn new(reader: Reader, binding: ClockBinding, rate: f64) -> Self {
+            let origin = Arc::new(SourceOrigin::default());
+            origin.publish(time(10_000_001, 1_000_000));
+            Self {
+                delivery: Delivery::new(reader, origin, binding),
+                base: timebase(rate),
+            }
+        }
+
+        pub(crate) fn next(&mut self, session: u64) -> Result<Option<NativeBlock>, TimingError> {
+            let base = &self.base;
+            self.delivery.try_next(session, |o, f| convert(base, o, f))
         }
     }
 

@@ -10,6 +10,7 @@ import type {
   ModelStatus,
   PickedNotes,
   Snapshot,
+  UpdateCheckReport,
 } from './types';
 
 export const desktop = isTauri();
@@ -99,14 +100,24 @@ export async function suggestGranolaFocus() {
   return invoke<string[]>('suggest_granola_focus');
 }
 
+/** Asks Granola once whether the imported notes changed; desktop only. */
+export async function checkGranolaUpdates() {
+  if (preview) return (await preview).checkGranolaUpdates();
+  return invoke<UpdateCheckReport>('check_granola_updates');
+}
+
 export async function disconnectGranola() {
   if (preview) return (await preview).disconnectGranola();
   return invoke<GranolaStatus>('disconnect_granola');
 }
 
-export async function importContextNotes(ids: string[]) {
-  if (preview) return (await preview).importContextNotes(ids);
-  return invoke<MergeOutcome>('import_context_notes', { ids });
+/** Imports the chosen notes; `dates` fills file notes that have no date. */
+export async function importContextNotes(
+  ids: string[],
+  dates?: Record<string, string>,
+) {
+  if (preview) return (await preview).importContextNotes(ids, dates);
+  return invoke<MergeOutcome>('import_context_notes', { ids, dates });
 }
 
 /** Removes every imported note; returns how many were removed. */

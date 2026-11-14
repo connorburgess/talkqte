@@ -827,6 +827,21 @@ svg {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.context-disclosure > summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding: 10px 4px;
+}
+.context-disclosure > summary span {
+  margin-left: 12px;
+}
+.context-disclosure > summary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+.context-disclosure[open] > summary {
+  margin-bottom: 12px;
+}
 .context-heading {
   display: flex;
   flex-wrap: wrap;
@@ -875,6 +890,22 @@ svg {
   font-size: 14px;
   color: var(--muted);
   white-space: pre-wrap;
+}
+.context-updates {
+  margin-top: 12px;
+}
+.context-updates p {
+  margin: 6px 0 0;
+}
+.context-updates .secondary-button {
+  min-height: 44px;
+}
+.context-updates [role='alert'] {
+  color: #843b2e;
+}
+.context-freshness {
+  display: block;
+  margin-top: 4px;
 }
 .context-dialog[open] {
   display: flex;
@@ -1169,7 +1200,10 @@ svg {
 .companion-shell {
   background: var(--forest);
   border-radius: 24px;
-  flex: 1 0 auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 .companion-bar {
@@ -1244,9 +1278,32 @@ svg {
 .floating-surface .question {
   border-radius: 0 0 24px 24px;
   border-top: 1px solid #476357;
-  min-height: calc(100vh - 76px);
-  display: flex;
-  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  /* A long cue or source scrolls inside the card, so the bar, Stop and the
+     cue's actions stay in the window; keys scroll it from a focused action. */
+  overflow: hidden auto;
+  padding-block: 16px 12px;
+  /* A shade marks an edge with more to scroll; it lifts at either end. */
+  background:
+    linear-gradient(var(--forest) 30%, transparent) top / 100% 28px no-repeat
+      local,
+    linear-gradient(transparent, var(--forest) 70%) bottom / 100% 28px no-repeat
+      local,
+    radial-gradient(farthest-side at 50% 0, #0b1712b3, transparent) top / 100%
+      12px no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, #0b1712b3, transparent) bottom /
+      100% 12px no-repeat scroll,
+    var(--forest);
+}
+.floating-surface .question h2 {
+  line-height: 1.25;
+}
+.floating-surface .question-meta {
+  margin-top: 6px;
+}
+.floating-surface .question-disclosure {
+  margin-top: 4px;
 }
 .floating-error,
 .floating-empty {

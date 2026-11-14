@@ -32,6 +32,7 @@ import { Question } from './components/Question';
 import { ProcessingControl } from './components/ProcessingControl';
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { ContextNotes } from './components/ContextNotes';
+import { LayoutSwitch, LiveSessionMock } from './components/LiveSessionMock';
 import { SetupCard, type SetupTarget } from './components/SetupCard';
 import {
   PanelDivider,
@@ -41,6 +42,10 @@ import {
 import { microphoneLabel, useMicrophone } from './lib/microphone';
 import { useCaptureControl } from './lib/useCaptureControl';
 import { useDemoVoices } from './lib/useDemoVoices';
+import {
+  microphoneNotCapturing,
+  sourceOnlyApplication,
+} from './lib/processing';
 
 const floating = new URLSearchParams(location.search).get('window') === 'cue';
 
@@ -102,6 +107,23 @@ function FloatingQuestion() {
   const paused = state?.status === 'paused';
   // The switch returns to the setting it left, so Quiet is not lost.
   const beforeFocused = useRef<'balanced' | 'quiet'>('balanced');
+  // A dismissal made here removes the focused control. Once the companion's
+  // other controls are enabled again, focus goes to the first of them, but
+  // only if it was dropped; never from another control or application.
+  const dismissed = useRef(false);
+  const cueId = state?.cue?.id;
+  useEffect(() => {
+    if (!dismissed.current || busy) return;
+    dismissed.current = false;
+    if (
+      !cueId &&
+      document.hasFocus() &&
+      document.activeElement === document.body
+    )
+      document
+        .querySelector<HTMLElement>('.companion-bar button:not(:disabled)')
+        ?.focus();
+  }, [busy, cueId]);
   return (
     <main className="floating-surface" aria-label="Meeting companion">
       <div className="companion-shell">
@@ -141,7 +163,11 @@ function FloatingQuestion() {
                       ? state.cuesPaused
                         ? 'Mic still on'
                         : 'Mic on · Local'
-                      : microphoneLabel(mic)
+                      : state.sourceSession
+                        ? state.cuesPaused
+                          ? 'App audio still on'
+                          : 'App audio · Local'
+                        : microphoneLabel(mic)
                     : microphoneControl
                       ? microphone.stopPending && mic?.status !== 'stopping'
                         ? 'Stop requested…'
@@ -165,7 +191,9 @@ function FloatingQuestion() {
                     title={
                       state.cuesPaused
                         ? 'Resume cues'
-                        : 'Pause cues; microphone and transcript continue'
+                        : state.sourceSession && mic?.status !== 'listening'
+                          ? 'Pause cues; application audio and transcript continue'
+                          : 'Pause cues; microphone and transcript continue'
                     }
                     disabled={busy}
                     onClick={() =>
@@ -284,14 +312,15 @@ function FloatingQuestion() {
                     }),
                   )
                 }
-                onDismiss={() =>
+                onDismiss={() => {
+                  dismissed.current = true;
                   void run(() =>
                     bridge.command('respond_to_cue', {
                       id: state.cue!.id,
                       response: 'dismiss',
                     }),
-                  )
-                }
+                  );
+                }}
                 onKeep={() =>
                   void run(() =>
                     bridge.command('keep_line', { id: state.cue!.id }),
@@ -338,6 +367,9 @@ function Notebook() {
   const voices = useDemoVoices(state);
   const microphone = useMicrophone();
   const capture = useCaptureControl();
+  // A session fed by a selected application alone, with the microphone off
+  // (development builds only); null otherwise.
+  const sourceApp = sourceOnlyApplication(capture.state, microphone.state);
   const [startPending, setStartPending] = useState(false);
   const [startInstalled, setStartInstalled] = useState(false);
   useEffect(() => {
@@ -380,7 +412,9 @@ function Notebook() {
       }
     });
   };
-  const [view, setView] = useState<'notebook' | 'settings'>('notebook');
+  const [view, setView] = useState<'notebook' | 'settings' | 'live-mock'>(
+    'notebook',
+  );
   useEffect(() => {
     if (
       !preparing ||
@@ -588,7 +622,7 @@ function Notebook() {
   useEffect(() => {
     if (focusError || suggestionError) setFocusExpanded(true);
   }, [focusError, suggestionError]);
-  const pendingFocus = useRef<SetupTarget | null>(null);
+  const pendingFocus = useRef<SetupTarget | 'appearance' | null>(null);
   const goToSetup = (target: SetupTarget) => {
     if (target === 'focus') {
       setFocusExpanded(true);
@@ -603,8 +637,12 @@ function Notebook() {
       // The card only shows in the notebook, so the panel is already here.
       setTab('notes');
       setTimeout(() => {
-        const add = document.querySelector<HTMLElement>(
-          '[aria-label="Prior context"] button',
+        const panel = document.querySelector<HTMLDetailsElement>(
+          '[aria-label="Prior context"] details',
+        );
+        if (panel) panel.open = true;
+        const add = panel?.querySelector<HTMLElement>(
+          'button.secondary-button',
         );
         add?.scrollIntoView({ block: 'center' });
         add?.focus();
@@ -619,7 +657,11 @@ function Notebook() {
     if (!target) return;
     pendingFocus.current = null;
     const element = document.getElementById(
-      target === 'name' ? 'user-name' : 'live-transcription',
+      target === 'name'
+        ? 'user-name'
+        : target === 'appearance'
+          ? 'question-size'
+          : 'live-transcription',
     );
     element?.scrollIntoView({ block: 'center' });
     element?.focus();
@@ -719,13 +761,35 @@ function Notebook() {
       stop?.();
     };
   }, []);
+  // Starting the demo replaces the button that was pressed. When that drops
+  // focus to the page, it goes to Pause; focus that has moved to another
+  // control or application is left alone.
+  const demoPause = useRef<HTMLButtonElement>(null);
+  const demoStarted = useRef(false);
+  useEffect(() => {
+    if (!demoStarted.current || busy) return;
+    if (error) demoStarted.current = false;
+    if (!demoStarted.current || !demoPause.current) return;
+    demoStarted.current = false;
+    if (document.hasFocus() && document.activeElement === document.body)
+      demoPause.current.focus();
+  }, [busy, error, state?.status]);
+  const returnToExport = useRef(false);
   useEffect(() => {
     if (preview !== null) modal.current?.showModal();
     else if (modal.current?.open) {
       modal.current.close();
       exportButton.current?.focus();
+      // Saving closes the preview while Export is still disabled, so the
+      // return waits for it, unless focus has gone somewhere else meanwhile.
+      returnToExport.current = document.activeElement !== exportButton.current;
+    } else if (returnToExport.current && !busy) {
+      returnToExport.current = false;
+      const focused = document.activeElement;
+      if (focused === document.body || modal.current?.contains(focused))
+        exportButton.current?.focus();
     }
-  }, [preview]);
+  }, [preview, busy]);
 
   if (!state)
     return (
@@ -752,6 +816,18 @@ function Notebook() {
       notesEditor.current?.focus();
     });
   };
+  // Shared by the notebook card and the live layout, so both send the same
+  // commands the same way.
+  const inspectCue = (expanded: boolean) => {
+    if (!state.cue) return;
+    void run(() =>
+      bridge.command('inspect_cue', { id: state.cue!.id, expanded }),
+    );
+  };
+  const toggleLiveCues = () =>
+    void run(() =>
+      bridge.command('set_live_cues_paused', { paused: !state.cuesPaused }),
+    );
   const dismiss = () => {
     if (!state.cue) return;
     const actionFocus = document.activeElement;
@@ -856,6 +932,14 @@ function Notebook() {
           >
             <BookOpen size={19} />
             Notebook
+          </button>
+          <button
+            className={view === 'live-mock' ? 'nav-item selected' : 'nav-item'}
+            aria-current={view === 'live-mock' ? 'page' : undefined}
+            onClick={() => setView('live-mock')}
+          >
+            <Play size={19} />
+            Live layout preview
           </button>
         </nav>
         {view === 'notebook' && (
@@ -968,7 +1052,13 @@ function Notebook() {
         <header className="toolbar">
           <div className="breadcrumb">
             <BookOpen size={16} />
-            <span>{view === 'notebook' ? 'Notebook' : 'Settings'}</span>
+            <span>
+              {view === 'notebook'
+                ? 'Notebook'
+                : view === 'settings'
+                  ? 'Settings'
+                  : 'Live layout preview'}
+            </span>
             {view === 'notebook' && (
               <>
                 <ChevronRight size={14} />
@@ -976,6 +1066,9 @@ function Notebook() {
               </>
             )}
           </div>
+          {view !== 'settings' && (
+            <LayoutSwitch view={view} live={state.live} onChange={setView} />
+          )}
           {view === 'notebook' && (listResizable || splitContent) && (
             <details
               className="layout-controls"
@@ -1045,6 +1138,8 @@ function Notebook() {
           preparing={preparing}
           cancelling={cancelling}
           processingConfigured={!!capture.state?.processor}
+          sourceMayBeCapturing={!!capture.state?.source?.mayBeCapturing}
+          sourceSession={sourceApp}
           action={
             preparing ? (
               <button
@@ -1095,7 +1190,11 @@ function Notebook() {
         {bridge.desktop && (
           <div
             className="notebook-processing"
-            hidden={view !== 'settings' && !state.live}
+            hidden={
+              view !== 'settings' &&
+              !state.live &&
+              !capture.state?.source?.mayBeCapturing
+            }
           >
             <ProcessingControl
               status={{
@@ -1119,6 +1218,52 @@ function Notebook() {
           </div>
         )}
 
+        {view === 'live-mock' && (
+          <LiveSessionMock
+            real={{
+              microphone: { state: microphone.state, error: microphone.error },
+              preparing,
+              cancelling,
+              live,
+              finishing,
+              session: {
+                live: state.live,
+                status: state.status,
+                transcript: state.transcript,
+              },
+              source: capture.state?.source,
+            }}
+            realContext={contextItems}
+            realCue={{
+              live: state.live,
+              status: state.status,
+              cuesPaused: state.cuesPaused,
+              cue: state.cue,
+              processor: capture.state?.processor ?? null,
+              processingPhase: capture.state?.phase ?? null,
+              preparing,
+              finishing,
+              sourceSession: !!sourceApp,
+            }}
+            realStop={{
+              preparing,
+              cancelling,
+              live,
+              finishing,
+              busy: capture.busy,
+              snapshot: capture.state ?? null,
+              stop: () => void capture.stop(),
+              failed: !!capture.error,
+              refresh: capture.refresh,
+            }}
+            realCueControls={{
+              busy,
+              inspect: inspectCue,
+              dismiss,
+              toggleCues: toggleLiveCues,
+            }}
+          />
+        )}
         {view === 'notebook' && (
           <div className="notebook-body">
             <div className="meeting-header">
@@ -1191,11 +1336,18 @@ function Notebook() {
                     {preparing
                       ? 'Local speech model · capture status shown above'
                       : finishing
-                        ? 'Waiting for microphone release and remaining transcription.'
+                        ? capture.state?.source?.mayBeCapturing &&
+                          microphoneNotCapturing(microphone.state)
+                          ? 'Ending the live session. Application audio is shown under Cue processing.'
+                          : 'Waiting for microphone release and remaining transcription.'
                         : state.live
                           ? state.cuesPaused && live
-                            ? 'Microphone and transcript continue. Stop live session to stop listening.'
-                            : 'Your microphone · transcribed on this device · not saved'
+                            ? sourceApp
+                              ? 'Application audio and transcript continue. Stop live session to stop listening.'
+                              : 'Microphone and transcript continue. Stop live session to stop listening.'
+                            : sourceApp
+                              ? `Audio from ${sourceApp} · transcribed on this device · not saved`
+                              : 'Your microphone · transcribed on this device · not saved'
                           : 'Fictional conversation · synthetic voices'}
                   </span>
                 </div>
@@ -1227,15 +1379,11 @@ function Notebook() {
                         title={
                           state.cuesPaused
                             ? 'Only new speech can raise a cue after resuming.'
-                            : 'Clear the current cue; microphone and transcript continue.'
+                            : sourceApp
+                              ? 'Clear the current cue; application audio and transcript continue.'
+                              : 'Clear the current cue; microphone and transcript continue.'
                         }
-                        onClick={() =>
-                          void run(() =>
-                            bridge.command('set_live_cues_paused', {
-                              paused: !state.cuesPaused,
-                            }),
-                          )
-                        }
+                        onClick={toggleLiveCues}
                       >
                         {state.cuesPaused ? (
                           <Play size={15} />
@@ -1249,6 +1397,7 @@ function Notebook() {
                 ) : active ? (
                   <>
                     <button
+                      ref={demoPause}
                       className="secondary-button"
                       disabled={busy}
                       onClick={() =>
@@ -1317,6 +1466,7 @@ function Notebook() {
                         void run(async () => {
                           setNotice('');
                           voices.start();
+                          demoStarted.current = true;
                           try {
                             await bridge.command('start_demo');
                           } catch (error) {
@@ -1365,6 +1515,22 @@ function Notebook() {
                   className="tabs"
                   role="tablist"
                   aria-label="Meeting content"
+                  onKeyDown={(e) => {
+                    const next =
+                      e.key === 'Home'
+                        ? 'notes'
+                        : e.key === 'End'
+                          ? 'transcript'
+                          : e.key === 'ArrowRight' || e.key === 'ArrowLeft'
+                            ? tab === 'notes'
+                              ? 'transcript'
+                              : 'notes'
+                            : null;
+                    if (!next) return;
+                    e.preventDefault();
+                    setTab(next);
+                    document.getElementById(`${next}-tab`)?.focus();
+                  }}
                 >
                   <button
                     role="tab"
@@ -1372,13 +1538,6 @@ function Notebook() {
                     aria-controls="notes-panel"
                     id="notes-tab"
                     tabIndex={tab === 'notes' ? 0 : -1}
-                    onKeyDown={(e) => {
-                      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-                        e.preventDefault();
-                        setTab('transcript');
-                        document.getElementById('transcript-tab')?.focus();
-                      }
-                    }}
                     onClick={() => setTab('notes')}
                   >
                     <FileText size={16} />
@@ -1391,13 +1550,6 @@ function Notebook() {
                     aria-controls="transcript-panel"
                     id="transcript-tab"
                     tabIndex={tab === 'transcript' ? 0 : -1}
-                    onKeyDown={(e) => {
-                      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-                        e.preventDefault();
-                        setTab('notes');
-                        document.getElementById('notes-tab')?.focus();
-                      }
-                    }}
                     onClick={() => setTab('transcript')}
                   >
                     <MessageCircle size={16} />
@@ -1443,7 +1595,9 @@ function Notebook() {
                   >
                     <p className="muted small">
                       {state.live
-                        ? 'Your microphone · transcribed on this device'
+                        ? sourceApp
+                          ? `Audio from ${sourceApp} · transcribed on this device`
+                          : 'Your microphone · transcribed on this device'
                         : 'Scripted conversation · not from microphone audio'}
                     </p>
                     {state.transcript.length ? (
@@ -1465,7 +1619,9 @@ function Notebook() {
                         <h2>A conversation starts here.</h2>
                         <p>
                           {state.live
-                            ? 'Lines from your microphone appear here a few seconds after they are spoken.'
+                            ? sourceApp
+                              ? 'Lines from the application appear here a few seconds after they are heard.'
+                              : 'Lines from your microphone appear here a few seconds after they are spoken.'
                             : 'Try the demo to watch the fictional transcript arrive.'}
                         </p>
                       </div>
@@ -1499,14 +1655,7 @@ function Notebook() {
                     busy={busy}
                     onDismiss={dismiss}
                     onKeep={keepLine}
-                    onInspect={(expanded) =>
-                      void run(() =>
-                        bridge.command('inspect_cue', {
-                          id: state.cue!.id,
-                          expanded,
-                        }),
-                      )
-                    }
+                    onInspect={inspectCue}
                   />
                 ) : (
                   <div className="question-idle">
@@ -1543,7 +1692,10 @@ function Notebook() {
                 </p>
                 <button
                   className="text-button companion-settings"
-                  onClick={() => setView('settings')}
+                  onClick={() => {
+                    pendingFocus.current = 'appearance';
+                    setView('settings');
+                  }}
                 >
                   <Settings size={14} />
                   Question appearance & timing

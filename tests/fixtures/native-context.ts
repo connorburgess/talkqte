@@ -24,7 +24,16 @@ let items = new URLSearchParams(location.search).has('empty-context')
   ? []
   : structuredClone(notes);
 const replies: Array<(fail: boolean) => void> = [];
+const removals: Array<(fail: boolean) => void> = [];
 const publish = () => emit('context:changed', structuredClone(items));
+const waitForRemoval = async () => {
+  if (!new URLSearchParams(location.search).has('hold-removal')) return;
+  await new Promise<void>((resolve, reject) =>
+    removals.push((fail) =>
+      fail ? reject(new Error('Removal unavailable.')) : resolve(),
+    ),
+  );
+};
 
 export const commands = [
   'context_items',
@@ -44,6 +53,7 @@ export async function command(name: string, args: unknown) {
       );
     }
     case 'remove_context_item': {
+      await waitForRemoval();
       const { provider, sourceId } = args as ContextItem;
       items = items.filter(
         (item) => item.provider !== provider || item.sourceId !== sourceId,
@@ -52,6 +62,7 @@ export async function command(name: string, args: unknown) {
       return;
     }
     case 'remove_context_from': {
+      await waitForRemoval();
       const removed = items.length;
       items = [];
       await publish();
@@ -65,6 +76,8 @@ declare global {
     contextTest: {
       pending: () => number;
       release: (fail?: boolean) => void;
+      releaseRemoval: (fail?: boolean) => void;
+      pendingRemovals: () => number;
       publish: typeof publish;
       importNotes: () => Promise<void>;
       items: () => ContextItem[];
@@ -74,6 +87,9 @@ declare global {
 window.contextTest = {
   pending: () => replies.length,
   release: (fail = false) => replies.splice(0).forEach((reply) => reply(fail)),
+  releaseRemoval: (fail = false) =>
+    removals.splice(0).forEach((reply) => reply(fail)),
+  pendingRemovals: () => removals.length,
   publish,
   importNotes: async () => {
     items = structuredClone(notes);

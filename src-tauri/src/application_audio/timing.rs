@@ -13,6 +13,9 @@ pub enum TimingError {
     SessionChanged,
     Overflow,
     Clock,
+    /// The live session already has a source, or this source already has its
+    /// accepted binding. The session itself has not changed.
+    Occupied,
 }
 
 /// A missing frame range. Millisecond endpoints are floored independently, so

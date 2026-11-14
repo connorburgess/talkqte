@@ -16,6 +16,7 @@ async function open(page: Page) {
     });
   });
   await page.goto('/?granola');
+  await page.locator('.context-disclosure > summary').press('Enter');
   await page.locator('.focus-disclosure > summary').press('Enter');
   await expect(field(page)).toBeVisible();
 }

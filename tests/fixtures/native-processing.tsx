@@ -187,6 +187,15 @@ mockIPC(
         });
         return;
       }
+      case 'application_audio':
+        // Development builds only; recorded in calls, answered with nothing.
+        // A test can have the status event arrive before the reply.
+        if (sourceStopEvent) {
+          const event = sourceStopEvent;
+          sourceStopEvent = null;
+          await send(event);
+        }
+        return null;
       default:
         throw `Unexpected fictional command: ${command}`;
     }
@@ -194,9 +203,14 @@ mockIPC(
   { shouldMockEvents: true },
 );
 
+let sourceStopEvent: Partial<ProcessingSnapshot> | null = null;
 const control = {
   calls,
   send,
+  /** The next application_audio command publishes this before replying. */
+  publishBeforeSourceReply: (value: Partial<ProcessingSnapshot>) => {
+    sourceStopEvent = value;
+  },
   replaceSources: () =>
     boundary({
       notes: state.notes.map((note) => ({

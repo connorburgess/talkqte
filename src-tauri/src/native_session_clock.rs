@@ -1,11 +1,12 @@
 //! Private preparation for the disconnected native audio experiment. Snapshot
 //! under Runtime, measure on its owning worker, then validate under Runtime.
-//! No command calls this yet; it neither starts capture nor grants permission.
-#![allow(dead_code)]
+//! Acceptance attaches the source to the live session, so that session's Stop
+//! or replacement cancels it. Called by the source worker; it neither starts
+//! capture nor grants permission.
 
 use crate::{
     application_audio::{native::ClockBinding, timing::TimingError, Control},
-    engine::{StartupState, Status},
+    live_source::Refused,
     Runtime,
 };
 use objc2_core_media::{CMClock, CMTime};
@@ -31,6 +32,8 @@ pub(crate) struct Measurement {
 /// The host must retain it with its acceptance evidence. This correspondence
 /// does not authorize capture or replace ongoing source/session guards.
 pub(crate) struct MeasuredBinding {
+    /// The live session the source is now attached to.
+    pub session: u64,
     pub binding: ClockBinding,
     pub bracket_width: Duration,
 }
@@ -70,39 +73,26 @@ impl Runtime {
     }
 
     fn native_clock_operation(&self) -> Result<&str, TimingError> {
-        let live = self.live.as_ref().ok_or(TimingError::SessionChanged)?;
-        let operation = live
-            .operation
-            .as_deref()
-            .ok_or(TimingError::SessionChanged)?;
-        let (current, phase) = self
-            .live_start
-            .control()
-            .map_err(|_| TimingError::SessionChanged)?;
-        if !self.engine.state.live
-            || self.engine.state.status != Status::Running
-            || self.engine.is_live_stopping()
-            || live.session != self.engine.session()
-            || current.as_deref() != Some(operation)
-            || phase == StartupState::Cancelling
-        {
-            return Err(TimingError::SessionChanged);
-        }
-        Ok(operation)
+        self.live_source_operation()
+            .ok_or(TimingError::SessionChanged)
     }
 
     /// Reacquire Runtime after measurement; no native work occurs here. Consume
-    /// the measurement once. Stop can still occur after acceptance: the native
-    /// owner and every delivered block must keep their existing control checks.
+    /// the measurement once. Success attaches the source to this live session:
+    /// from then on the session's Stop or replacement cancels the source under
+    /// this lock. One binding per source operation and one source at a time;
+    /// a second acceptance is refused as Occupied, which is not a reason to
+    /// stop the attached source, and leaves it running.
+    /// The native owner and every delivered block keep their control checks.
     pub(crate) fn accept_native_clock(
-        &self,
+        &mut self,
         measurement: Measurement,
     ) -> Result<MeasuredBinding, TimingError> {
         self.accept_native_clock_at(measurement, Instant::now())
     }
 
     fn accept_native_clock_at(
-        &self,
+        &mut self,
         measurement: Measurement,
         now: Instant,
     ) -> Result<MeasuredBinding, TimingError> {
@@ -120,7 +110,14 @@ impl Runtime {
         now.checked_duration_since(self.last_tick)
             .ok_or(TimingError::Clock)?;
         snapshot.check_age(now, measurement.max_age)?;
+        // Last, so a rejected measurement never occupies the session.
+        self.attach_live_source(&snapshot.control)
+            .map_err(|refused| match refused {
+                Refused::SessionChanged => TimingError::SessionChanged,
+                Refused::Occupied => TimingError::Occupied,
+            })?;
         Ok(MeasuredBinding {
+            session: snapshot.session,
             binding: measurement.binding,
             bracket_width: measurement.width,
         })
@@ -197,10 +194,20 @@ impl Snapshot {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use crate::application_audio::{Application, Gate, Review};
+    use crate::application_audio::{
+        chunks::ChunkError,
+        handoff::{Format, Rejected},
+        native::{Feed, NativeChunker},
+        Application, Gate, Review,
+    };
+    use crate::transcription::{AudioChunk, Recognized, Transcriber, Worker};
     use objc2_core_media::CMTimeFlags;
+    use std::sync::{
+        atomic::{AtomicU64, Ordering},
+        mpsc, Arc,
+    };
 
     fn setup() -> (Runtime, Gate, Review, Control) {
         let mut runtime = Runtime::default();
@@ -434,6 +441,173 @@ mod tests {
                 assert!(matches!(result, Err(TimingError::Clock)), "case {case}");
             }
         }
+    }
+
+    /// The measuring step alone, for a caller that snapshots and accepts
+    /// through the runtime itself. Same fictional host time as `accepted`.
+    pub(crate) fn measure_fictional(snapshot: Snapshot) -> Result<Measurement, TimingError> {
+        snapshot.measure_with(
+            Duration::from_secs(1),
+            Duration::from_secs(5),
+            Instant::now,
+            || CMTime { value: 7, ..host() },
+        )
+    }
+
+    /// Host time 7 s is where the memory-only test timebase places source
+    /// time 10 s, so an accepted binding maps the fictional feed's samples.
+    pub(crate) fn accepted(
+        runtime: &mut Runtime,
+        control: &Control,
+    ) -> Result<MeasuredBinding, TimingError> {
+        let at = runtime.last_tick;
+        let snapshot = runtime.native_clock_snapshot_at(control, at)?;
+        let measurement = snapshot.measure_with(
+            Duration::ZERO,
+            Duration::from_secs(1),
+            || at,
+            || CMTime { value: 7, ..host() },
+        )?;
+        runtime.accept_native_clock_at(measurement, at)
+    }
+
+    #[test]
+    fn acceptance_attaches_one_source_once_and_a_rejected_measurement_attaches_none() {
+        let (mut runtime, gate, _review, control) = setup();
+        let at = runtime.last_tick;
+        let snapshot = runtime.native_clock_snapshot_at(&control, at).unwrap();
+        let expired = snapshot
+            .measure_with(Duration::ZERO, Duration::from_millis(10), || at, host)
+            .unwrap();
+        assert!(matches!(
+            runtime.accept_native_clock_at(expired, at + Duration::from_millis(11)),
+            Err(TimingError::Clock)
+        ));
+        assert!(runtime.live_source.is_none() && !control.is_cancelled());
+
+        assert!(accepted(&mut runtime, &control).is_ok());
+        // Neither a second binding for this source nor another source's
+        // binding is accepted, and the attached source keeps running.
+        let other_gate = Gate::default();
+        let other = other_gate
+            .review(Application::new("other".into(), "Fictional player".into()).unwrap())
+            .unwrap();
+        for candidate in [control.clone(), other.control()] {
+            assert!(matches!(
+                accepted(&mut runtime, &candidate),
+                Err(TimingError::Occupied)
+            ));
+        }
+        assert!(!control.is_cancelled() && !other.control().is_cancelled());
+
+        // The source stops by itself; the session then takes the other one.
+        gate.stop(&control).unwrap();
+        assert!(accepted(&mut runtime, &other.control()).is_ok());
+        runtime.take_live_for_stop().unwrap();
+        assert!(other.control().is_cancelled());
+    }
+
+    struct Recognizer {
+        calls: Arc<AtomicU64>,
+        started: mpsc::Sender<()>,
+        open: mpsc::Receiver<()>,
+    }
+
+    impl Transcriber for Recognizer {
+        fn transcribe(&mut self, _: &AudioChunk) -> Result<Vec<Recognized>, String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let _ = self.started.send(());
+            let _ = self.open.recv();
+            Ok(vec![Recognized {
+                offset_ms: 100,
+                speaker: "Speaker 1".into(),
+                text: "A fictional line.".into(),
+            }])
+        }
+    }
+
+    #[test]
+    fn live_stop_after_acceptance_stops_delivery_chunks_and_recognition_in_progress() {
+        let (mut runtime, gate, mut review, control) = setup();
+        let session = runtime.engine.session();
+        let mut start = gate.approve(&mut review).unwrap();
+        let (mut input, reader) = start.handoff(Format::new(16_000, 1).unwrap(), 2).unwrap();
+        let binding = accepted(&mut runtime, &control).unwrap().binding;
+        let _capture = start.run(|_, _| Ok(())).unwrap();
+        let mut feed = Feed::new(reader, binding, 1.0);
+        let mut chunker = NativeChunker::new(control.clone(), session);
+
+        // 24 fictional blocks fill one three-second chunk and leave a
+        // remainder pending in the chunker.
+        let mut ready = Vec::new();
+        for i in 0..24 {
+            input.push(&control, i * 2_048, &[0.25; 2_048]).unwrap();
+            let block = feed.next(session).unwrap().unwrap();
+            ready.extend(chunker.push(block, session).unwrap());
+        }
+        assert_eq!(ready.len(), 1);
+        let chunk = ready.remove(0);
+        // The accepted binding placed the first sample 1 µs into the session.
+        assert_eq!(chunk.session_ms(1_000), Ok(1_000));
+        assert!(chunk.belongs_to(session, &control));
+
+        let calls = Arc::new(AtomicU64::new(0));
+        let (started, recognizing) = mpsc::channel();
+        let (open, opened) = mpsc::channel();
+        let (report, delivered) = mpsc::channel();
+        let worker = Worker::start(
+            session,
+            4,
+            Recognizer {
+                calls: calls.clone(),
+                started,
+                open: opened,
+            },
+            move |_, segment: crate::engine::Segment| {
+                let _ = report.send(segment.at_ms);
+                Ok(())
+            },
+        );
+        assert!(worker.submit(chunk).is_ok());
+        // The recognizer holds the first chunk.
+        recognizing.recv_timeout(Duration::from_secs(5)).unwrap();
+        // One more block is with the worker and one packet is still queued.
+        input.push(&control, 24 * 2_048, &[0.25; 2_048]).unwrap();
+        let returned = feed.next(session).unwrap().unwrap();
+        input.push(&control, 25 * 2_048, &[0.25; 2_048]).unwrap();
+
+        // The live session's own Stop, not the source's gate.
+        runtime.take_live_for_stop().unwrap();
+
+        assert_eq!(
+            input.push(&control, 26 * 2_048, &[0.25; 2_048]),
+            Err(Rejected::Cancelled)
+        );
+        let cancelled = TimingError::Handoff(Rejected::Cancelled);
+        assert_eq!(feed.next(session).err(), Some(cancelled));
+        assert!(!returned.timing().belongs_to(session, &control));
+        assert_eq!(
+            chunker.push(returned, session).err(),
+            Some(ChunkError::Timing(cancelled))
+        );
+        assert_eq!(
+            chunker.finish(session).err(),
+            Some(ChunkError::Timing(cancelled)),
+            "the pending remainder is discarded, not flushed"
+        );
+        open.send(()).unwrap();
+        let stats = worker.finish(Duration::from_secs(5));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!((stats.chunks, stats.accepted, stats.stale), (1, 0, 1));
+        assert!(delivered.try_recv().is_err());
+        // The engine session id is unchanged while Stop drains, which is why
+        // the session number alone could not have refused this work.
+        assert_eq!(runtime.engine.session(), session);
+        assert!(!runtime.live_source_accepts(session, &control));
+        assert!(matches!(
+            accepted(&mut runtime, &control),
+            Err(TimingError::SessionChanged)
+        ));
     }
 
     #[test]
