@@ -371,13 +371,27 @@ async function isolatedRequest(
     task = 'the evaluation',
     acceptedAs = 'an evaluation',
     expected = 'decision JSON',
+    // Leave unset for the contract's own limit, which the evaluator uses.
+    maxOutputTokens,
   },
 ) {
   // Shapes only; each caller keeps its own list of what it may ask for.
   if (!/^claude-[a-z0-9-]+$/.test(model ?? ''))
     throw new Error('The request names no usable model; nothing was sent.');
-  if (!['low', 'medium', 'high'].includes(effort))
+  // Only the efforts the shared contract lists.
+  if (!EFFORTS.includes(effort))
     throw new Error('The request names no usable effort; nothing was sent.');
+  if (
+    maxOutputTokens !== undefined &&
+    !(
+      Number.isSafeInteger(maxOutputTokens) &&
+      maxOutputTokens >= 1 &&
+      maxOutputTokens <= CONTRACT.cli.maxOutputTokensCeiling
+    )
+  )
+    throw new Error(
+      `The request asks for an output limit outside 1 to ${CONTRACT.cli.maxOutputTokensCeiling} tokens; nothing was sent.`,
+    );
   // The argument list comes from the contract, with this request's model,
   // effort, settings and system prompt put in its marked places.
   const settings = JSON.stringify(CONTRACT.cli.settings).replaceAll(
@@ -395,7 +409,16 @@ async function isolatedRequest(
     ...CONTRACT.cli.evaluateArgs.map((arg) => fill[arg] ?? arg),
   ];
   const start = performance.now();
-  const raw = await run('claude', args, { ...options, input });
+  // The checked environment is frozen; a request may change only its own
+  // output limit, on a copy.
+  const env =
+    maxOutputTokens === undefined
+      ? options.env
+      : {
+          ...options.env,
+          CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(maxOutputTokens),
+        };
+  const raw = await run('claude', args, { ...options, env, input });
   const elapsedMs = Math.round(performance.now() - start);
   const result = parseObject(
     raw,
@@ -499,7 +522,12 @@ export async function openIsolatedCli({
       `This shell carries API, provider or proxy settings (${names.join(', ')}). No process was started. Run the lab from a shell without them; it uses the subscription sign-in only.`,
     );
   const cwd = await mkdtemp(join(tmpdir(), 'talkqte-cue-lab-'));
-  const options = { cwd, env: subscriptionEnvironment(environment) };
+  // Frozen, so nothing can change the child's environment or directory
+  // after the credential check.
+  const options = Object.freeze({
+    cwd,
+    env: Object.freeze(subscriptionEnvironment(environment)),
+  });
   const close = () => rm(cwd, { recursive: true, force: true });
   try {
     const access = await preflight(options, run);

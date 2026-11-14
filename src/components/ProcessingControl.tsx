@@ -9,6 +9,7 @@ import {
   type ProcessingScope,
   type ProcessingSnapshot,
 } from '../lib/processing';
+import { ApplicationAudioStart } from './ApplicationAudioStart';
 import './processing.css';
 
 /** Present to assistive technology, absent from the visual layout. */
@@ -391,6 +392,11 @@ export function ProcessingControl({
           {sourceLine}
         </p>
       )}
+      {snapshot?.source &&
+        ['off', 'listing', 'reviewing'].includes(snapshot.source.phase) && (
+          // Only a native-audio-spike build reports a source at all.
+          <ApplicationAudioStart />
+        )}
       {sourceOperation && (
         // The source's own Stop: it ends exactly this application source,
         // and a session started for it alone, without touching a microphone.

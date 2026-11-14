@@ -257,6 +257,8 @@ What this does and does not say:
 
 Run offline on 14 November 2026 with the fake evaluator and default settings, all 13 conversations: 163 evaluations, 29 of them overtaken and dropped, and the eight cues it showed appeared a median 6.7 seconds after their line was said. Those figures say nothing about cues: the fake matches keywords and its delay is made up. They show that the harness counts, drops, places and scores as described. One thing in them is real arithmetic, though: a 3-second transcription delay plus any decision slower than 2 seconds is over the 5-second budget before the companion draws anything.
 
+For runs where the real TalkQTE app hears a fictional meeting, see the [meeting emulator and window-only recording](meeting-emulator.md).
+
 ## Recording a simulation
 
 A results file from the simulation can be played back as a video, to watch how and when cue cards appear. The recorder asks no evaluator anything: every decision comes from the file, whether that was written by the fake, the labels, the rules, or an approved model run.

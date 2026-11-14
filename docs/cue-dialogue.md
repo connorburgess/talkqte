@@ -1,6 +1,6 @@
 # Dialogue lab: generated conversations that cues can change
 
-Status: development tooling, 14 November 2026. The engine, the agent interfaces, deterministic fakes for every agent, the dry run and offline runs exist. **No model call has been made.** The model-backed generator, participants and judge are not built yet, and a first pilot needs the owner's approval ([before a pilot](#before-a-pilot)).
+Status: development tooling, 14 November 2026. The engine, the agent interfaces, deterministic fakes for every agent, the dry run, offline runs and the model-backed agents exist. **No model call has been made.** A first pilot needs the owner's approval ([before a pilot](#before-a-pilot)).
 
 **A simulated listener changing course is not a user outcome.** This lab can suggest which cue types and moments are worth testing with people in the [comparison study](comparison-study.md) (V5–V7). It cannot show that a cue helps anyone.
 
@@ -50,13 +50,13 @@ The three hand-written briefs in `scripts/fixtures/cue-dialogue-briefs.json` (a 
 
 ## Agents
 
-| Role          | Sees                                                                                                                                                                                          | Planned model |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
-| Generator     | the generation plan only; it is asked for realistic meetings with naturally occurring moments, including some that settle themselves and decoys, and is never told that cues are being tested | Sonnet 5.5    |
-| Cast          | the meeting, everyone else's goals and private facts, the listener's name and role, and the transcript                                                                                        | Haiku 5.5     |
-| Listener      | the meeting, its own goal and facts, the others' names and roles, the transcript as it heard it (lines said while it was distracted arrive only as missed), and the card if one is offered    | Haiku 5.5     |
-| Cue evaluator | the lab's own adapter from `scripts/cue-evaluators.mjs`, unchanged: recent lines under one speaker label, the listener's name, the cue on screen and earlier cues                             | Opus 5.5      |
-| Judge         | the meeting, names and roles, the criteria's ids and words, and one transcript                                                                                                                | Sonnet 5.5    |
+| Role          | Sees                                                                                                                                                                                          | Planned model                                                       |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Generator     | the generation plan only; it is asked for realistic meetings with naturally occurring moments, including some that settle themselves and decoys, and is never told that cues are being tested | Sonnet 5.5                                                          |
+| Cast          | the meeting, everyone else's goals and private facts, the listener's name and role, and the transcript                                                                                        | Haiku 5.5                                                           |
+| Listener      | the meeting, its own goal and facts, the others' names and roles, the transcript as it heard it (lines said while it was distracted arrive only as missed), and the card if one is offered    | Haiku 5.5                                                           |
+| Cue evaluator | the lab's own adapter from `scripts/cue-evaluators.mjs`, unchanged: recent lines under one speaker label, the listener's name, the cue on screen and earlier cues                             | Opus 5.5, low effort, compact reply (the cue lab's working default) |
+| Judge         | the meeting, names and roles, the criteria's ids and words, and one transcript                                                                                                                | Sonnet 5.5                                                          |
 
 The participants, the cue evaluator and the judge must each use a different model; a run that names the same model for two of them is refused. Each agent's prompt is in `scripts/cue-dialogue-agents.mjs`, and the dry run prints them. The listener's prompt says only that a small card may show a line of context that may or may not be relevant, and that it may use or ignore it. It must never mention the card. The system prompt is the same in every branch; only the card differs.
 
@@ -105,7 +105,12 @@ npm run test:cue-lab                     # includes scripts/cue-dialogue.test.mj
 
 The dry run prints the plan, the planned models and where a model run would send its requests, the worst-case call count, and every system prompt. It then rehearses the whole run with the offline fakes and prints the exact input of every request each role makes. With models the replies differ, and so do the requests that follow; what each role is given stays the same.
 
-Plan options: `--domains software,hiring`, `--scenarios`, `--open`, `--settled`, `--decoys`, `--seed`, `--branches AB|ABC`, `--max-turns`, `--interject-every`, `--glances`, and `--participant-model`, `--evaluator-model`, `--judge-model`, `--generator-model`. `--latency-ms` fixes the fake evaluator's delay. `--agents claude` is refused until the model-backed agents exist.
+Plan options: `--domains software,hiring`, `--scenarios`, `--open`, `--settled`, `--decoys`, `--seed`, `--branches AB|ABC`, `--max-turns`, `--interject-every`, `--glances`, and `--participant-model`, `--evaluator-model`, `--judge-model`, `--generator-model`. Efforts: `--generator-effort`, `--participant-effort`, `--judge-effort` and `--evaluator-effort`, each low or medium, the efforts the shared contract lists. `--evaluator-reply full|compact` picks the evaluator's reply, compact by default. `--latency-ms` fixes the fake evaluator's delay. A model run is `--agents claude`, the default. It needs the owner's go-ahead for that run and `--included-usage-confirmed`, after checking that paid extra usage is off in the Claude account:
+
+```sh
+npm run lab:claude -- --check
+npm run lab:dialogue -- --run --scenarios 2 --max-calls 110 --out <directory outside the repository> --included-usage-confirmed
+```
 
 ## What a run writes
 
@@ -151,7 +156,15 @@ The same generated conversation is meant to be played to the real desktop app by
 
 ## Before a pilot
 
-The model-backed generator, cast, listener and judge still have to be built. They must reuse cue-lab's isolation: subscription sign-in only, refusing inherited API, provider or proxy settings, an allowlisted environment, and no tools, MCP, hooks or session persistence. Each call must name its model and effort, and a reply from any other model must be refused. The isolated call in `scripts/cue-lab.mjs` is tied to the evaluator's decision format and a fixed effort. Reusing it means a small separate change to that file, coordinated with the lab lane, rather than a copy.
+The model-backed generator, cast, listener and judge (`claudeAgents` in `scripts/cue-dialogue-agents.mjs`) use the cue lab's own isolated request (`openIsolatedCli` in `scripts/cue-lab.mjs`), not a copy:
+
+- **Refused before any process:** a shell that carries API, provider or proxy settings.
+- **Checked once:** the CLI version and the subscription sign-in, shared by all four agents. The cue evaluator, the lab's own adapter, makes its own check.
+- **Each call:** the role's model and effort, the cue lab's isolation flags (no tools, MCP, hooks, slash commands or session persistence) and its allowlisted environment.
+- **Refused after a call:** a reply reported from any other model. Each reply is then checked against the role's view; an unusable one stops the run.
+- **No retry,** and the cue lab's failure kinds.
+
+Offline tests drive the agents through a stand-in CLI. No real request has been made.
 
 A first pilot of 2 generated scenarios with branches A and B and the default settings could make at most 106 calls: 2 generator, up to 72 participant, up to 28 evaluator and up to 4 judge calls. Offline fake runs of two scenarios made 34–44 calls. Generated conversations will probably run longer, so expect 60–100. A pilot is an engine shake-down: one run per branch cannot separate a card's effect from sampling variation.
 
