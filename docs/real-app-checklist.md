@@ -36,11 +36,13 @@ One page to follow at the Mac for a recorded run of the real TalkQTE app hearing
      --env TALKQTE_TIMING_LOG="$HOME/talkqte-lab-runs/run-01.jsonl"
    ```
 
-7. **Check the log is on:** `run-01.stderr` has a line `TalkQTE timing log: on`.
+   Only one copy of TalkQTE may be running: a preview build has the same name, and the recorder refuses when two copies have windows on screen.
+
+7. **Check the log is on** once the session starts (step 9): `run-01.stderr` then has a line `TalkQTE timing log: on`. The file is opened at the first session, so the line is not there before.
 8. **Open the meeting video in QuickTime Player**, paused at the start. Nothing else plays in QuickTime Player. Keep its window and the TalkQTE companion both visible.
 9. **Start the session.** In the notebook's Cue processing panel, under "Application audio · development build":
    - press **List applications**;
-   - choose **QuickTime Player**;
+   - choose **QuickTime Player** (TalkQTE lists itself too; choosing it starts a session that hears nothing);
    - press **Start session from QuickTime Player**;
    - wait for "Application audio from QuickTime Player is being captured". Do not press play yet.
 10. **Dry-run the recorder.** Every line should read `ready`:
@@ -58,9 +60,13 @@ One page to follow at the Mac for a recorded run of the real TalkQTE app hearing
 - **Recording:** the video, with a label bar above it ("Simulated meeting", "Fictional", the synthetic voices and portraits, "Pre-rendered meeting", "Real TalkQTE app" with its commit, and where the cues came from, read from the log), and its record beside it.
 - **Timing log:** `run-01.jsonl` holds when each chunk of sound was heard, each line recognised, and each cue decided and shown. It contains the meeting's fictional lines and nothing else.
 
+## Known on 14 November 2026
+
+- `open --env` and `--stderr` work: the log recorded the build's commit and features.
+- Starting from QuickTime Player failed four times with "Application audio did not start", while starting from TalkQTE itself worked. The native lane is investigating; until that is fixed, this checklist cannot be completed.
+
 ## Note down on the first run
 
-- whether `open --env` and `--stderr` worked;
 - whether TalkQTE needed reopening after the permission;
 - whether the recorder found the companion by its title;
 - whether the take has sound.

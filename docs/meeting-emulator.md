@@ -82,6 +82,7 @@ Exactly two windows, the emulator's and the real TalkQTE companion's ("TalkQTE c
 - **The picture:** a display filtered to those two windows only, cropped to them.
 - **The sound:** a second stream that takes only the emulator app's sound.
 - **If a window is missing:** if either window cannot be found, nothing is recorded.
+- **If two copies of TalkQTE are running:** a preview build has the same app name, so if windows of more than one TalkQTE process are on screen, nothing is recorded, and the dry run says so.
 - **If the companion's title is hidden:** if its panel does not expose its title, the companion is the TalkQTE app's smallest on-screen window. The record says which rule matched.
 
 ### Permission
