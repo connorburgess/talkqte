@@ -136,6 +136,47 @@ A session for one application starts only while the microphone is not
 capturing, no other live session or demo is running, and the speech model is
 installed. A refusal is shown under the panel's Start in words.
 
+## Start and stop without clicks
+
+For a run nobody is at the Mac for, two development launch settings take the
+same steps. Only a `native-audio-spike` build reads them, once, at launch.
+Use them for fictional runs only.
+
+```sh
+open -a ./src-tauri/target/debug/bundle/macos/TalkQTE.app \
+  --stderr "$HOME/talkqte-lab/run-01.stderr" \
+  --env TALKQTE_TIMING_LOG="$HOME/talkqte-lab/run-01.jsonl" \
+  --env TALKQTE_DEV_APPLICATION_SOURCE="QuickTime Player" \
+  --env TALKQTE_DEV_STOP_AFTER_S=600
+```
+
+- **`TALKQTE_DEV_APPLICATION_SOURCE`** names the application exactly, as the
+  panel lists it. Setting it is your acknowledgement of the scope notice:
+  audio from all windows of that application may be included. The app then
+  lists applications once, reviews the one with exactly that name, and starts
+  a session from it alone. It never starts the microphone. The panel says
+  that the setting acknowledged the notice, and the capture line ends
+  "Started by the TALKQTE_DEV_APPLICATION_SOURCE launch setting."
+- **`TALKQTE_DEV_STOP_AFTER_S`**, a whole number of seconds from 1, asks the
+  ordinary Stop that long after capture is confirmed. Release then follows
+  as in [Stop cleanly](#stop-cleanly). Any other value starts nothing.
+- **One attempt, no retry.** Nothing is started, and the reason is shown under
+  the panel's Start, when:
+  - no running application, or more than one, has that exact name;
+  - macOS refuses or never answers within 2 minutes;
+  - the microphone or another session is running;
+  - the speech model is missing.
+
+  macOS is asked at most once per launch. The **one-time Screen Recording
+  grant still needs a person**: grant it once, as in
+  [Start capture](#start-capture), and relaunch.
+
+- Each step is one stderr line starting `TalkQTE development source:`, and a
+  `dev_source` line in the timing log.
+
+Press play in QuickTime Player only once `dev_source` reads `started`. For an
+unattended run, start the video with the lab's own tooling.
+
 ## During the run
 
 - The notebook and the companion credit "Audio from QuickTime Player" and say
@@ -197,6 +238,7 @@ session clock.
 | `cue_decision`   | `session`, `cue`, `kind`, `source`, `question`, `source_id`, `elapsed_ms`              | The engine first holds a cue. `source` is `line`, `note`, `focus` or `evaluated`. Only `line` has `question` and `source_id`, the segment it came from. |
 | `cue_published`  | `session`, `cue`, `elapsed_ms`                                                         | The cue is in the snapshot sent to the companion window.                                                                                                |
 | `cue_cleared`    | `session`, `cue`, `elapsed_ms`                                                         | That cue has left the snapshot sent to the companion window.                                                                                            |
+| `dev_source`     | `step`, `application`, `reason`                                                        | The launch setting acted: `acknowledged`, `started`, `refused` with a `reason`, or `stopping` when the stop setting asked the ordinary Stop.            |
 | `dropped`        | `count`                                                                                | Lines were lost since the last line written, because the queue was full or a write failed. Written before the next line.                                |
 
 What it can and cannot tell you:

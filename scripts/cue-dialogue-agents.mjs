@@ -28,6 +28,7 @@
 // Every request is built from the role's view alone (see the views in
 // cue-dialogue-briefs.mjs), so what a role cannot see it is never sent.
 import { validateBrief } from './cue-dialogue-briefs.mjs';
+import { EFFORTS, openIsolatedCli } from './cue-lab.mjs';
 
 export const ROLES = ['generator', 'cast', 'listener', 'judge'];
 
@@ -44,14 +45,15 @@ export const PLANNED = {
   generator: { model: 'sonnet-5.5', effort: 'medium' },
   cast: { model: 'haiku-5.5', effort: 'low' },
   listener: { model: 'haiku-5.5', effort: 'low' },
-  evaluator: { model: 'opus-5.5', effort: 'medium' },
+  // The cue lab's working default: the best of its four-way comparison.
+  evaluator: { model: 'opus-5.5', effort: 'low', reply: 'compact' },
   judge: { model: 'sonnet-5.5', effort: 'medium' },
 };
 
 export const GENERATOR_PROMPT = `You write the brief for one realistic, entirely fictional work meeting, used to simulate a conversation.
 Invent everything. People have first names only. Name no real person, company, product, place of business, website or contact detail; invent any team or product a meeting needs and describe it generically.
 Make it ordinary and believable for the given domain: people with their own goals, partial knowledge and small frictions, not a puzzle.
-One person is the focus person: we follow the meeting from their side. They may be half-listening at times (distracted windows, in milliseconds from the start of the call, with what they are doing).
+One person is the focus person: we follow the meeting from their side. They may be half-listening at times (distracted windows, in milliseconds from the start of the call, with what they are doing). The call lasts about callLengthMs milliseconds; every distracted window must end within it.
 Moments are things that naturally happen in such meetings, planted through someone's private facts:
 - open moments, of these kinds: unowned-task (something needs doing and nobody takes it), question-to-focus (someone asks the focus person something by name), wrong-figure (someone states a number or fact that another person's private facts contradict), date-slip (a date moves and its consequence is left unsaid);
 - settled moments: a loose end that the conversation resolves by itself;
@@ -315,6 +317,113 @@ export function fakeAgents(briefs) {
     cast: fakeCast(briefs),
     listener: fakeListener(briefs),
     judge: fakeJudge(briefs),
+  };
+}
+
+/** Output-token limits by role. The generator writes a whole brief and the
+ * judge a verdict per criterion; the cast and listener write a turn and
+ * keep the contract's own limit, as the cue evaluator does. */
+export const OUTPUT_LIMITS = { generator: 4_000, judge: 1_500 };
+
+/** Efforts a role may ask the CLI for: those the shared contract lists. */
+export const ROLE_EFFORTS = EFFORTS;
+
+/** The four roles through Claude Code with the subscription sign-in, using
+ * the cue lab's own isolated request (scripts/cue-lab.mjs): it refuses a
+ * shell with API, provider or proxy settings before any process starts,
+ * checks the CLI version and sign-in once for all four, sends each call
+ * with its role's model and effort, rejects a reply reported from any
+ * other model, and never retries. Each reply is then checked by the
+ * engine; an unusable one stops the run. `models` and `efforts` are keyed
+ * by role, with the names in ROLE_MODELS and ROLE_EFFORTS. */
+export function claudeAgents({
+  models,
+  efforts,
+  environment = process.env,
+  run,
+}) {
+  let session = null;
+  let users = 0;
+  const shared = {
+    async open() {
+      users++;
+      session ??= openIsolatedCli(run ? { environment, run } : { environment });
+      return session;
+    },
+    async close() {
+      if (--users > 0 || !session) return;
+      const done = session;
+      session = null;
+      await (await done.catch(() => null))?.close();
+    },
+  };
+  const agent = (role) => {
+    const name = models[role];
+    const effort = efforts[role];
+    if (!Object.hasOwn(ROLE_MODELS, name))
+      throw new Error(
+        `Unknown ${role} model. Choose one of: ${Object.keys(ROLE_MODELS).join(', ')}.`,
+      );
+    if (!ROLE_EFFORTS.includes(effort))
+      throw new Error(
+        `The ${role} effort is one of: ${ROLE_EFFORTS.join(', ')}.`,
+      );
+    const model = ROLE_MODELS[name];
+    let cli = null;
+    return {
+      id: `claude-${role}`,
+      role,
+      label: `Claude Code, ${model}, ${effort} effort`,
+      kind: 'model',
+      model,
+      effort,
+      hosted: true,
+      destination:
+        'Anthropic, through the Claude Code subscription sign-in on this device',
+      async open() {
+        cli = await shared.open();
+        return {
+          model,
+          effort,
+          cliVersion: cli.access.version,
+          authentication: cli.access.authentication,
+        };
+      },
+      request: REQUESTS[role],
+      async reply(view, request) {
+        const answer = await cli.request({
+          model,
+          effort,
+          systemPrompt: request.systemPrompt,
+          input: request.input,
+          // The engine checks the reply against the role's view.
+          reply: (value) => value,
+          task: `the ${role} turn`,
+          ...(OUTPUT_LIMITS[role]
+            ? { maxOutputTokens: OUTPUT_LIMITS[role] }
+            : {}),
+          acceptedAs: `a ${role} reply`,
+          expected: `${role} JSON`,
+        });
+        return {
+          value: answer.value,
+          elapsedMs: answer.elapsedMs,
+          latency: 'measured',
+          usage: answer.usage,
+        };
+      },
+      async close() {
+        if (!cli) return;
+        cli = null;
+        await shared.close();
+      },
+    };
+  };
+  return {
+    generator: agent('generator'),
+    cast: agent('cast'),
+    listener: agent('listener'),
+    judge: agent('judge'),
   };
 }
 

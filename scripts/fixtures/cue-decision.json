@@ -53,7 +53,8 @@
       "availableModels": ["{model}"]
     },
     "timeoutMs": 60000,
-    "maxOutputBytes": 131072
+    "maxOutputBytes": 131072,
+    "maxOutputTokensCeiling": 4000
   },
   "childEnvironment": {
     "allow": [
