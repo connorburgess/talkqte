@@ -140,6 +140,25 @@ pub enum Event {
         cue: String,
         elapsed_ms: u64,
     },
+    /// An application source failed to start, or stopped on its own.
+    /// `os_code` is ScreenCaptureKit's error code when it gave one.
+    SourceProblem {
+        problem: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        os_code: Option<i64>,
+        /// For audio TalkQTE refused: which check, and the buffer's
+        /// format and timing numbers. No audio.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    /// An application source's run ended: why, if anything went wrong, and
+    /// how many chunks of its audio were transcribed.
+    SourceEnded {
+        application: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        problem: Option<String>,
+        recognized_chunks: Option<u64>,
+    },
     /// Development builds only: the launch setting naming an application
     /// source acted. `step` is `acknowledged` (the setting stands for the
     /// scope notice), `started`, `refused` with a `reason`, or `stopping`
@@ -203,8 +222,9 @@ fn allowed(path: &Path, checkout: &Path) -> Result<(), String> {
 }
 
 /// Open `path` for appending, readable by its owner only. Runs on the writer
-/// thread. Refuses a folder inside `checkout` once links are resolved, a link,
-/// and anything that is not a regular file, so a pipe cannot be opened.
+/// thread. Refuses a folder inside `checkout` or any other git checkout once
+/// links are resolved, a link, and anything that is not a regular file, so a
+/// pipe cannot be opened.
 #[cfg(feature = "timing-log")]
 fn open_file(path: &Path, checkout: &Path) -> io::Result<std::fs::File> {
     let refuse = |why: &str| io::Error::other(why.to_string());
@@ -216,6 +236,13 @@ fn open_file(path: &Path, checkout: &Path) -> io::Result<std::fs::File> {
         if folder.starts_with(checkout) {
             return Err(refuse("inside the repository"));
         }
+    }
+    // Nor inside any other git checkout, where a log could be committed.
+    if folder
+        .ancestors()
+        .any(|ancestor| ancestor.join(".git").exists())
+    {
+        return Err(refuse("inside a git checkout"));
     }
     match std::fs::symlink_metadata(path) {
         Ok(existing) if !existing.file_type().is_file() => {
@@ -937,6 +964,19 @@ mod tests {
             drop(again);
             assert_eq!(lines(&path).len(), 3);
             let _ = std::fs::remove_file(&path);
+        }
+
+        #[test]
+        fn a_folder_inside_any_git_checkout_is_refused() {
+            let mut fictional = std::env::temp_dir();
+            fictional.push(format!("talkqte-fictional-checkout-{}", std::process::id()));
+            let nested = fictional.join("notes").join("lab");
+            std::fs::create_dir_all(&nested).unwrap();
+            std::fs::create_dir_all(fictional.join(".git")).unwrap();
+            let path = nested.join("timing.jsonl");
+            assert!(open_file(&path, checkout()).is_err());
+            assert!(!path.exists(), "nothing is created there");
+            let _ = std::fs::remove_dir_all(&fictional);
         }
 
         #[cfg(unix)]

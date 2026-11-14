@@ -42,6 +42,10 @@ struct Script {
     microphone_open: AtomicBool,
     /// No local recognizer could be loaded.
     recognizer_missing: AtomicBool,
+    /// Listing returns what macOS lists, agents and helpers included.
+    list_everything: AtomicBool,
+    /// macOS refuses the start, as before TalkQTE is reopened after the grant.
+    start_needs_reopen: AtomicBool,
     runs: AtomicU64,
     lists: AtomicU64,
     begins: AtomicU64,
@@ -71,7 +75,10 @@ impl Source for Scripted {
         let cancelled = self.control.is_cancelled();
         self.stage = match self.stage {
             Stage::Starting | Stage::CancellingStart => {
-                if self.script.start_pending.load(Ordering::SeqCst) {
+                if self.script.start_needs_reopen.load(Ordering::SeqCst) {
+                    self.problem = Some(NativeProblem::PermissionNeeded);
+                    Stage::Stopping
+                } else if self.script.start_pending.load(Ordering::SeqCst) {
                     if cancelled {
                         Stage::CancellingStart
                     } else {
@@ -146,7 +153,7 @@ struct Fake {
 }
 
 fn applications() -> Vec<Application> {
-    ["Fictional player", "Fictional browser"]
+    ["Fictional player", "Fictional viewer"]
         .into_iter()
         .enumerate()
         .map(|(index, name)| Application::new(format!("fictional-{index}"), name.into()).unwrap())
@@ -196,6 +203,9 @@ impl Backend for Fake {
         if self.script.list_denied.load(Ordering::SeqCst) {
             return Err(Failure::PermissionDenied);
         }
+        if self.script.list_everything.load(Ordering::SeqCst) {
+            return Ok(everything());
+        }
         Ok(applications())
     }
 
@@ -232,6 +242,43 @@ impl Backend for Fake {
             monitor,
         )
     }
+}
+
+/// A fictional version of what macOS lists, with what it knows of each.
+fn everything() -> Vec<Application> {
+    use crate::application_audio::listing::Traits;
+    [
+        ("Dock", "com.apple.dock", false, true),
+        ("talagentd", "com.apple.talagent", false, false),
+        (
+            "Energy Saver",
+            "com.apple.EnergySaverSettings",
+            false,
+            false,
+        ),
+        ("Atlas", "org.example.atlas", true, true),
+        (
+            "ThemeWidgetControlViewService (Google Chrome)",
+            "com.google.Chrome.helper",
+            false,
+            false,
+        ),
+        ("QuickTime Player", "com.apple.QuickTimePlayerX", true, true),
+        ("Google Chrome", "com.google.Chrome", true, true),
+        ("Calendar", "com.apple.iCal", true, false),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, (name, bundle, regular, on_screen))| {
+        Application::new(format!("listed-{index}"), name.into())
+            .unwrap()
+            .with_traits(Traits {
+                bundle_id: bundle.into(),
+                regular,
+                on_screen,
+            })
+    })
+    .collect()
 }
 
 struct Fixture {
@@ -376,7 +423,7 @@ fn nothing_is_listed_before_acknowledgement_and_only_the_reviewed_application_st
     let first = fixture.view();
     assert_eq!(
         (first.phase, first.application.as_deref()),
-        (Phase::Reviewing, Some("Fictional browser"))
+        (Phase::Reviewing, Some("Fictional viewer"))
     );
     assert!(!first.may_be_capturing);
     // Choosing again replaces the review; the old approval is worthless.
@@ -1314,6 +1361,32 @@ fn a_failed_microphone_blocks_a_source_session_only_while_it_may_still_capture()
         session_preflight(Some(true), false),
         Err(Failure::Unavailable)
     );
+}
+
+#[test]
+fn only_applications_a_person_would_recognise_are_offered_meeting_and_playback_first() {
+    let f = fixture(false);
+    f.script.list_everything.store(true, Ordering::SeqCst);
+    f.host.list(true).unwrap();
+    let view = f.wait("choices", |view| !view.choices.is_empty());
+    let names: Vec<_> = view
+        .choices
+        .iter()
+        .map(|choice| choice.name.as_str())
+        .collect();
+    assert_eq!(names, ["Google Chrome", "QuickTime Player", "Atlas"]);
+    // A hidden helper cannot be reviewed by its id either.
+    assert_eq!(f.host.review("listed-4"), Err(Error::UnknownSource));
+}
+
+#[test]
+fn a_start_macos_refuses_before_the_app_is_reopened_says_so_rather_than_try_again() {
+    let f = fixture(false);
+    f.script.start_needs_reopen.store(true, Ordering::SeqCst);
+    f.start_session();
+    let view = f.wait_phase(Phase::Off);
+    assert_eq!(view.problem, Some(Problem::PermissionNeedsReopen));
+    assert_eq!(f.script.captures.load(Ordering::SeqCst), 0);
 }
 
 mod by_setting {
