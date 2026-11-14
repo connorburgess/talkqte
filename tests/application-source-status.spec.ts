@@ -1,6 +1,5 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import type { ProcessingSnapshot, SourceCapture } from '../src/lib/processing';
-import type { MicrophoneSnapshot } from '../src/lib/microphone';
 import type {} from './fixtures/native-processing';
 import type {} from './fixtures/native-microphone';
 
@@ -13,7 +12,7 @@ type Mic = 'off' | 'starting' | 'running';
 type PanelMic = Mic | 'unknown';
 type Stuck = 'stopping' | 'stalled' | 'cleanupFailed' | 'abandoned';
 const microphones: Mic[] = ['off', 'starting', 'running'];
-// The panel also sees an unknown microphone, which the live layout does not.
+// The panel also sees an unknown microphone.
 const panelMicrophones: PanelMic[] = [...microphones, 'unknown'];
 const stuck: Stuck[] = ['stopping', 'stalled', 'cleanupFailed', 'abandoned'];
 
@@ -208,146 +207,6 @@ test('a snapshot without the development fields renders as before', async ({
     panel.getByText('Microphone is off.', { exact: true }),
   ).toBeVisible();
   await expect(panel.getByText(/Application audio/)).toHaveCount(0);
-});
-
-// The live layout preview's Real rows come from the notebook's microphone and
-// processing snapshots.
-
-async function livePreview(page: Page) {
-  await page.route('**/*', async (route) => {
-    if (route.request().resourceType() !== 'document') return route.continue();
-    const response = await route.fetch();
-    await route.fulfill({
-      response,
-      body: (await response.text()).replace(
-        '/src/main.tsx',
-        '/tests/fixtures/native-microphone.ts',
-      ),
-    });
-  });
-  await page.goto('/');
-  await page
-    .getByRole('group', { name: 'Layout', exact: true })
-    .getByRole('button', { name: 'Layout preview', exact: true })
-    .press('Enter');
-  const preview = page.getByRole('region', {
-    name: 'Live session layout preview',
-  });
-  const frame = preview.getByRole('group', { name: 'Session layout preview' });
-  const row = (name: string) =>
-    frame.locator('dt', { hasText: name }).locator('+ dd');
-  return {
-    preview,
-    source: row('Source'),
-    capture: row('Capture'),
-    application: row('Application audio'),
-  };
-}
-
-const microphoneStates: Record<Mic, Partial<MicrophoneSnapshot>> = {
-  off: { status: 'off', canStart: true, message: null, deviceName: null },
-  starting: {
-    status: 'starting',
-    canStart: false,
-    message: 'Checking microphone access…',
-    deviceName: null,
-  },
-  running: {
-    status: 'listening',
-    canStart: false,
-    message: null,
-    deviceName: 'Fictional USB microphone',
-  },
-};
-
-async function realText(preview: Locator) {
-  // Sentences of the Real rows only; the simulated example is not about the app.
-  const rows = await preview
-    .locator('dd', {
-      has: preview.page().locator('.mock-tag', { hasText: 'Real' }),
-    })
-    .allInnerTexts();
-  return rows.join(' ');
-}
-
-test('the live layout never says nothing is captured while a source may be', async ({
-  page,
-}) => {
-  const {
-    preview,
-    source: sourceRow,
-    capture,
-    application,
-  } = await livePreview(page);
-  await expect(capture).toHaveText('Real Off. Nothing is being captured.');
-  await expect(application).toHaveCount(0);
-  for (const mic of microphones)
-    for (const state of stuck) {
-      await page.evaluate(
-        (value) => window.microphoneTest.send(value),
-        microphoneStates[mic],
-      );
-      await page.evaluate((value) => window.captureTest.send(value), {
-        capture: combined[mic] as ProcessingSnapshot['capture'],
-        microphone: mic,
-        source: source(state),
-      } satisfies Partial<ProcessingSnapshot>);
-      const label = `${state} with microphone ${mic}`;
-      // The source has a row of its own, so the layout never shows capture
-      // state without it.
-      await expect(application, label).toHaveText(`Real ${sourceWords[state]}`);
-      if (mic === 'off') {
-        await expect(capture, label).toHaveText('Real The microphone is off.');
-        await expect(sourceRow, label).toHaveText('Real No microphone open.');
-      }
-      // Sentence by sentence, as in the live layout's own checks: "not
-      // confirmed … stopped" followed by "may still be captured" is true.
-      const sentences = (await realText(preview))
-        .split(/(?<=[.!?…])\s+|\n+/)
-        .filter((sentence) => sentence && sentence !== 'Real');
-      expect(sentences.length, label).toBeGreaterThan(2);
-      for (const sentence of sentences)
-        expect(sentence, label).not.toMatch(
-          /\bnothing\b.*captur|captur\w*\s+nothing|\bnot\b.*captur/i,
-        );
-    }
-});
-
-test('the live layout reads as before without the development fields', async ({
-  page,
-}) => {
-  const { source: sourceRow, capture, application } = await livePreview(page);
-  await page.evaluate((value) => window.captureTest.send(value), {
-    capture: 'off',
-  } satisfies Partial<ProcessingSnapshot>);
-  await expect(sourceRow).toHaveText('Real None open.');
-  await expect(capture).toHaveText('Real Off. Nothing is being captured.');
-  await expect(application).toHaveCount(0);
-});
-
-test('the live layout names Application audio among its real parts only with a source', async ({
-  page,
-}) => {
-  const { preview } = await livePreview(page);
-  const banner = preview.locator('.mock-banner');
-  // Without the development fields, the text is as before.
-  await expect(preview).toContainText(
-    'Source, Capture, Transcript, Cue and Prior context show the app’s real state, read-only. Everything else is a fictional example.',
-  );
-  await expect(banner).toContainText(
-    'Source, Capture, Transcript, Cue and Prior context are real and read-only',
-  );
-  await page.evaluate((value) => window.captureTest.send(value), {
-    capture: 'stopping',
-    microphone: 'off',
-    source: source('abandoned'),
-  } satisfies Partial<ProcessingSnapshot>);
-  await expect(preview).toContainText(
-    'Source, Capture, Application audio, Transcript, Cue and Prior context show the app’s real state, read-only. Everything else is a fictional example.',
-  );
-  await expect(banner).toContainText(
-    'Source, Capture, Application audio, Transcript, Cue and Prior context are real and read-only',
-  );
 });
 
 // The notebook itself, with the full app on the fictional native side.

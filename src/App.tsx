@@ -32,7 +32,6 @@ import { Question } from './components/Question';
 import { ProcessingControl } from './components/ProcessingControl';
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { ContextNotes } from './components/ContextNotes';
-import { LayoutSwitch, LiveSessionMock } from './components/LiveSessionMock';
 import { SetupCard, type SetupTarget } from './components/SetupCard';
 import {
   PanelDivider,
@@ -412,9 +411,7 @@ function Notebook() {
       }
     });
   };
-  const [view, setView] = useState<'notebook' | 'settings' | 'live-mock'>(
-    'notebook',
-  );
+  const [view, setView] = useState<'notebook' | 'settings'>('notebook');
   useEffect(() => {
     if (
       !preparing ||
@@ -816,8 +813,6 @@ function Notebook() {
       notesEditor.current?.focus();
     });
   };
-  // Shared by the notebook card and the live layout, so both send the same
-  // commands the same way.
   const inspectCue = (expanded: boolean) => {
     if (!state.cue) return;
     void run(() =>
@@ -933,14 +928,6 @@ function Notebook() {
             <BookOpen size={19} />
             Notebook
           </button>
-          <button
-            className={view === 'live-mock' ? 'nav-item selected' : 'nav-item'}
-            aria-current={view === 'live-mock' ? 'page' : undefined}
-            onClick={() => setView('live-mock')}
-          >
-            <Play size={19} />
-            Live layout preview
-          </button>
         </nav>
         {view === 'notebook' && (
           <div className="meeting-list-content">
@@ -1052,13 +1039,7 @@ function Notebook() {
         <header className="toolbar">
           <div className="breadcrumb">
             <BookOpen size={16} />
-            <span>
-              {view === 'notebook'
-                ? 'Notebook'
-                : view === 'settings'
-                  ? 'Settings'
-                  : 'Live layout preview'}
-            </span>
+            <span>{view === 'notebook' ? 'Notebook' : 'Settings'}</span>
             {view === 'notebook' && (
               <>
                 <ChevronRight size={14} />
@@ -1066,9 +1047,6 @@ function Notebook() {
               </>
             )}
           </div>
-          {view !== 'settings' && (
-            <LayoutSwitch view={view} live={state.live} onChange={setView} />
-          )}
           {view === 'notebook' && (listResizable || splitContent) && (
             <details
               className="layout-controls"
@@ -1218,52 +1196,6 @@ function Notebook() {
           </div>
         )}
 
-        {view === 'live-mock' && (
-          <LiveSessionMock
-            real={{
-              microphone: { state: microphone.state, error: microphone.error },
-              preparing,
-              cancelling,
-              live,
-              finishing,
-              session: {
-                live: state.live,
-                status: state.status,
-                transcript: state.transcript,
-              },
-              source: capture.state?.source,
-            }}
-            realContext={contextItems}
-            realCue={{
-              live: state.live,
-              status: state.status,
-              cuesPaused: state.cuesPaused,
-              cue: state.cue,
-              processor: capture.state?.processor ?? null,
-              processingPhase: capture.state?.phase ?? null,
-              preparing,
-              finishing,
-              sourceSession: !!sourceApp,
-            }}
-            realStop={{
-              preparing,
-              cancelling,
-              live,
-              finishing,
-              busy: capture.busy,
-              snapshot: capture.state ?? null,
-              stop: () => void capture.stop(),
-              failed: !!capture.error,
-              refresh: capture.refresh,
-            }}
-            realCueControls={{
-              busy,
-              inspect: inspectCue,
-              dismiss,
-              toggleCues: toggleLiveCues,
-            }}
-          />
-        )}
         {view === 'notebook' && (
           <div className="notebook-body">
             <div className="meeting-header">
