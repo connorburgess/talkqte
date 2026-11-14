@@ -424,7 +424,7 @@ mod tests {
 
     #[test]
     fn companion_follows_session_and_question_lifecycle() {
-        let mut engine = Engine::default();
+        let mut engine = Engine::fictional();
         assert_eq!(
             Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
             Mode::Hidden
@@ -573,12 +573,12 @@ mod tests {
 
     #[test]
     fn an_answered_question_being_read_gets_room_for_the_answer() {
-        let mut engine = Engine::default();
+        let mut engine = Engine::fictional();
         engine.start().unwrap();
         engine.advance(37_000);
         let id = engine.state.cue.as_ref().unwrap().id.clone();
         engine.inspect_cue(&id, true).unwrap();
-        engine.advance(14_000); // The demo agrees on Friday at 51 s.
+        engine.advance(14_000); // The scenario agrees on Friday at 51 s.
         let mode = Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off);
         assert_eq!(mode, Mode::AnsweredDetails);
         let at = |mode, size| {
@@ -611,8 +611,8 @@ mod tests {
     }
 
     #[test]
-    fn microphone_keeps_companion_available_without_demo_and_respects_hide() {
-        let mut engine = Engine::default();
+    fn microphone_keeps_companion_available_without_a_session_and_respects_hide() {
+        let mut engine = Engine::fictional();
         for status in [
             MicrophoneStatus::Starting,
             MicrophoneStatus::Listening,
@@ -764,7 +764,7 @@ mod tests {
 
     #[test]
     fn reading_mode_stays_visible_after_playback_finishes() {
-        let mut engine = Engine::default();
+        let mut engine = Engine::fictional();
         engine.start().unwrap();
         engine.advance(8_000);
         engine.inspect_cue("1:s2", true).unwrap();

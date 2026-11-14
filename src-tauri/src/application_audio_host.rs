@@ -510,7 +510,7 @@ impl Host {
 
     /// As `start`, in a live session started for this source alone: no model
     /// is loaded for it and no microphone is opened. Refused, with nothing
-    /// started, while another session or the demo runs.
+    /// started, while another session runs.
     pub(crate) fn start_session(&self, review: &str) -> Result<(), Error> {
         self.start_with(review, true)
     }

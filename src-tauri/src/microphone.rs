@@ -391,7 +391,7 @@ impl Controller {
     }
 
     fn poll(&self, now: Instant) -> Option<Update> {
-        // A device operation must not hold up the demo's timer or window updates.
+        // A device operation must not hold up the session timer or window updates.
         let Ok(mut state) = self.0.try_lock() else {
             return None;
         };

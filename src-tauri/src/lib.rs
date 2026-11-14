@@ -41,7 +41,7 @@ use tauri_plugin_dialog::DialogExt;
 struct Runtime {
     engine: Engine,
     last_tick: Instant,
-    /// Active time below one millisecond, retained across syncs and demo pause.
+    /// Active time below one millisecond, retained across syncs.
     tick_remainder: Duration,
     tick_session: u64,
     export: Option<String>,
@@ -226,7 +226,7 @@ fn change(
     let mut runtime = state
         .0
         .lock()
-        .map_err(|_| "The demo is unavailable. Please restart TalkQTE.")?;
+        .map_err(|_| "The session is unavailable. Please restart TalkQTE.")?;
     runtime.sync();
     let result = action(&mut runtime.engine);
     let Runtime {
@@ -246,16 +246,21 @@ fn snapshot(
     window: tauri::WebviewWindow,
     state: tauri::State<AppState>,
 ) -> Result<serde_json::Value, String> {
-    let runtime = state.0.lock().map_err(|_| "The demo is unavailable.")?;
+    let runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
     if window.label() == "cue" {
         serde_json::to_value(runtime.cue_snapshot())
     } else {
         serde_json::to_value(&runtime.engine.state)
     }
-    .map_err(|_| "Could not read the demo.".into())
+    .map_err(|_| "Could not read the session.".into())
 }
 
 /// A fresh engine that keeps the person's display choices and notes.
+#[cfg(any(
+    feature = "local-whisper",
+    all(target_os = "macos", feature = "native-audio-spike"),
+    test
+))]
 fn carry_over(previous: &Engine, mut next: Engine) -> Engine {
     let state = &previous.state;
     // Both windows ignore a snapshot older than the last one they saw, so
@@ -276,58 +281,12 @@ fn carry_over(previous: &Engine, mut next: Engine) -> Engine {
 }
 
 #[tauri::command]
-fn start_demo(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
-    change(&app, &state, |e| {
-        // After a live session, the demo starts from its script again.
-        if e.state.live && !matches!(e.state.status, engine::Status::Running) {
-            *e = carry_over(e, Engine::default());
-        }
-        e.start()
-    })
-}
-#[tauri::command]
-fn pause_demo(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
-    change(&app, &state, |e| {
-        if e.state.live {
-            return Err("A live session cannot be paused. Stop it instead.".into());
-        }
-        e.pause()
-    })
-}
-#[tauri::command]
-fn resume_demo(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
-    change(&app, &state, |e| {
-        if e.state.live {
-            return Err("A live session cannot be resumed. Start a new one.".into());
-        }
-        e.resume()
-    })
-}
-#[tauri::command]
 fn set_live_cues_paused(
     app: tauri::AppHandle,
     state: tauri::State<AppState>,
     paused: bool,
 ) -> Result<(), String> {
     change(&app, &state, |e| e.set_live_cues_paused(paused))
-}
-#[tauri::command]
-fn end_demo(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
-    let live = state
-        .0
-        .lock()
-        .ok()
-        .and_then(|mut runtime| runtime.take_live_for_stop());
-    let result = change(&app, &state, |e| {
-        e.end();
-        Ok(())
-    });
-    // End during a live session releases the microphone and discards
-    // transcription in progress; nothing more reaches the ended session.
-    if let Some(live) = live {
-        tauri::async_runtime::spawn_blocking(move || finish_live(&app, live, false));
-    }
-    result
 }
 #[tauri::command]
 fn respond_to_cue(
@@ -453,7 +412,7 @@ async fn export_markdown(
             .dialog()
             .file()
             .add_filter("Markdown", &["md"])
-            .set_file_name("talkqte-demo.md")
+            .set_file_name("talkqte-notes.md")
             .blocking_save_file()
         else {
             return Ok(false);
@@ -1455,11 +1414,7 @@ pub fn run() {
             processing_commands::set_processing_paused,
             processing_snapshot,
             snapshot,
-            start_demo,
-            pause_demo,
-            resume_demo,
             set_live_cues_paused,
-            end_demo,
             respond_to_cue,
             keep_line,
             inspect_cue,
@@ -1607,7 +1562,7 @@ mod carry_over_tests {
 
     #[test]
     fn a_replacement_engine_continues_the_revision_count() {
-        let mut previous = Engine::default();
+        let mut previous = Engine::fictional();
         previous.start().unwrap();
         previous.advance(5_200);
         previous.pause().unwrap();
@@ -1637,7 +1592,7 @@ mod export_tests {
         assert!(reviewed.contains("A fictional notebook line."));
         assert_eq!(runtime.export.as_deref(), Some(reviewed.as_str()));
 
-        // Starting a live session forgets the demo preview, so the save
+        // Starting a live session forgets the earlier preview, so the save
         // dialog has nothing to write while the microphone is in use.
         let ticket = runtime.begin_live_start().unwrap();
         let (ticket, ()) = ticket.load(|| Ok(())).unwrap(); // No model or device.
@@ -1669,13 +1624,6 @@ mod export_tests {
         assert_eq!(runtime.engine.state.transcript.len(), 1);
         assert!(runtime.prepare_export().is_err());
         assert!(runtime.export.is_none());
-
-        // The demo that follows starts from its script: notes carry over, the
-        // live transcript does not, and export works again.
-        runtime.engine = carry_over(&runtime.engine, Engine::default());
-        let after = runtime.prepare_export().unwrap();
-        assert!(after.contains("A fictional notebook line."));
-        assert!(!after.contains("blue tin"));
     }
 }
 
@@ -1713,12 +1661,20 @@ mod session_clock_tests {
     use super::*;
     use std::time::Duration;
 
+    /// A runtime replaying the engine's fictional test scenario.
+    fn scripted() -> Runtime {
+        Runtime {
+            engine: Engine::fictional(),
+            ..Runtime::default()
+        }
+    }
+
     #[test]
-    fn frequent_syncs_preserve_elapsed_time_and_demo_cue_timing() {
-        let mut runtime = Runtime::default();
+    fn frequent_syncs_preserve_elapsed_time_and_scripted_cue_timing() {
+        let mut runtime = scripted();
         runtime.engine.start().unwrap();
         let origin = runtime.last_tick;
-        let mut expected = Engine::default();
+        let mut expected = Engine::fictional();
         expected.start().unwrap();
         // The same duration must have the same effect regardless of how often
         // commands, transcript delivery and the timer synchronize the clock.
@@ -1747,7 +1703,7 @@ mod session_clock_tests {
 
     #[test]
     fn pause_excludes_idle_time_but_keeps_the_same_sessions_fraction() {
-        let mut runtime = Runtime::default();
+        let mut runtime = scripted();
         let origin = runtime.last_tick;
         runtime.sync_at(origin + Duration::from_micros(10_750));
         runtime.engine.start().unwrap();
@@ -1763,7 +1719,7 @@ mod session_clock_tests {
     #[test]
     fn replay_and_engine_replacement_do_not_inherit_a_fraction() {
         for replace in [false, true] {
-            let mut runtime = Runtime::default();
+            let mut runtime = scripted();
             let origin = runtime.last_tick;
             runtime.engine.start().unwrap();
             runtime.sync_at(origin + Duration::from_micros(900));

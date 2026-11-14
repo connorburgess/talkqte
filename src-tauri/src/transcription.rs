@@ -417,7 +417,7 @@ mod tests {
         }
     }
 
-    // Worker tests use a live session, independent of demo pacing and its end.
+    // Worker tests use a live session, which has no scripted pacing or end.
     fn running_engine() -> Arc<Mutex<Engine>> {
         let mut engine = Engine::live();
         engine.start().unwrap();

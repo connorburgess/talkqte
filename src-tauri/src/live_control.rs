@@ -177,7 +177,7 @@ impl Runtime {
             return Err(if self.engine.state.live || self.live.is_some() {
                 "A live session is already running."
             } else {
-                "End the demo before starting a live session."
+                "End the current session before starting a live session."
             }
             .into());
         }
