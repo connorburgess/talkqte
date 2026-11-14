@@ -11,6 +11,7 @@
 // explicit invocation with a call cap, and stops at the first failure.
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { modelFor } from './cue-lab.mjs';
 import { EVALUATORS, createEvaluator, isHosted } from './cue-evaluators.mjs';
 import {
   createRunLog,
@@ -226,7 +227,7 @@ export async function runBatch({
   return results;
 }
 
-function describePlan(set, cases, evaluator, plan, selection, print) {
+function describePlan(set, cases, evaluator, plan, selection, model, print) {
   print('Dry run. No process was started and nothing was sent.');
   print(
     `Set: ${set.name} (${set.file}), ${cases.length} of ${set.cases.length} cases.`,
@@ -254,7 +255,7 @@ function describePlan(set, cases, evaluator, plan, selection, print) {
     print(
       `[${index + 1}] ${request.caseId}\n    ${request.input ?? '(nothing: the recorded outcome for this case is read)'}`,
     );
-  const chosen = `--set ${set.name}${selection ? ` --cases ${selection}` : ''}`;
+  const chosen = `--set ${set.name}${selection ? ` --cases ${selection}` : ''}${model ? ` --model ${model}` : ''}`;
   if (!isHosted(evaluator))
     print(
       `\nTo run it:\n  npm run lab:batch -- ${chosen} --evaluator ${evaluator.id} --run --out <directory outside the repository>`,
@@ -313,6 +314,7 @@ export async function main(
       '--out',
       '--max-calls',
       '--prompt',
+      '--model',
     ],
     switches: ['--run', '--included-usage-confirmed'],
   });
@@ -331,7 +333,12 @@ export async function main(
     throw new Error('--prompt is recorded or glance.');
   const evaluator = createEvaluator(
     flags['--evaluator'] ?? 'claude',
-    { environment, rules, glance: prompt === 'glance' },
+    {
+      environment,
+      rules,
+      glance: prompt === 'glance',
+      model: modelFor(flags['--model']),
+    },
     evaluators,
   );
   if (!flags['--run']) {
@@ -341,6 +348,7 @@ export async function main(
       evaluator,
       planBatch(cases, evaluator),
       flags['--cases'],
+      flags['--model'],
       print,
     );
     return null;

@@ -31,12 +31,18 @@ export function claudeEvaluator({
   environment = process.env,
   run,
   glance = false,
+  // The full model ID; one of the lab's allowed models.
+  model = MODEL,
 } = {}) {
   let lab;
   const request = (testCase) => requestFor(testCase, { glance });
   return {
-    id: 'claude',
-    label: `Claude Code, ${MODEL}`,
+    // The first model keeps the plain name its earlier results and logs
+    // carry; any other model is named, so two models' results and logs
+    // are never taken for one another, and one cannot resume the other.
+    id: model === MODEL ? 'claude' : `claude-${model.replace(/^claude-/, '')}`,
+    model,
+    label: `Claude Code, ${model}`,
     prompt: glance ? 'glance' : 'recorded',
     kind: 'model',
     hosted: true,
@@ -45,9 +51,11 @@ export function claudeEvaluator({
     async open() {
       // openLab refuses, before any process, when the shell carries an API
       // key, token, gateway or provider switch.
-      lab = await openLab(run ? { environment, run } : { environment });
+      lab = await openLab(
+        run ? { environment, run, model } : { environment, model },
+      );
       return {
-        model: MODEL,
+        model,
         cliVersion: lab.access.version,
         authentication: lab.access.authentication,
       };
@@ -276,7 +284,8 @@ export function labelsEvaluator(conversations, { latencyMs = 4_000 } = {}) {
  * made-up delay. Adding a provider
  * means adding one entry here. */
 export const EVALUATORS = {
-  claude: ({ environment, glance }) => claudeEvaluator({ environment, glance }),
+  claude: ({ environment, glance, model }) =>
+    claudeEvaluator({ environment, glance, model }),
   fake: ({ latencyMs }) => fakeEvaluator({ latencyMs }),
   rules: ({ rules }) => {
     if (!rules)

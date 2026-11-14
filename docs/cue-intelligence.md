@@ -8,7 +8,7 @@ Rust's `suggest` function in `src-tauri/src/engine.rs` matches a few phrases in 
 
 A focus list (9 November 2026; first as a single goal line in Settings, then up to five lines the same day, moved into the notebook beside the session controls on 10 November because it changes with every meeting) lets a question through the pause that follows another cue, under any timing setting, and keeps it for 45 seconds, the length given to a question asked of the user by name (a topic change or correction still withdraws it, and a question being read is never replaced), when the line uses at least two of a focus line's identifying words (five letters or more, not common meeting words; three when the line has more than six). The Focused timing setting, also a switch on the companion, is the relevance filter the person sets for the meeting: only questions about a focus line, questions asked of them by name, and reminders of selected notes appear, so a conversation that drifts leaves the companion quiet rather than guessing. When a line sounds like the meeting ending ("before we finish", "to wrap up", "anything else", and a few more), the focus lines never touched are listed once as a Still open cue, for 45 seconds. A session shows at most three note reminders. The focus is the first thing besides the user's name that changes a lifecycle decision; every part of it is a word match on the person's own words, not a judgment about the meeting, and the companion is told only that a question is about the focus, apart from the Still open list, which names the untouched lines. In Focused mode the usual pause between questions applies; outside it a focus question skips the pause an unrelated cue left. The Still open list ignores the pause in every setting, waits for a clear companion, and a later wrap-up line retries until it has shown once. Fictional stress tests in `engine.rs` cover a meeting that stays on its focus, one that derails and wraps up, a question asked by name during Focused mode, and five selected notes. The focus list is also where a model first enters the product, deliberately at the edge: with Granola connected and its assistant available, Suggest from Granola (10 November 2026) asks that assistant one fixed question about the person's recent meetings and shows the answer as suggestions to tick. The model is Granola's, on Granola's side, before the meeting; its output never becomes a cue by itself; during the meeting everything stays rule-based and local.
 
-A Said cue (10 November 2026) quotes a spoken date or commitment word for word: a sentence with a time word (a weekday, tomorrow, next week, a month and day, a count of days, including since 13 November 2026 "two working days" or "three full business days") and a commitment word (by, before, ready, starting, takes, due, send, and a few more), not a question and not hedged. It appears in place of a timing question the sentence just answered, or on its own after the fixed questions, for 18 seconds, and the same words are not quoted again within two minutes; in Focused mode only a line about the focus is quoted. Keep this line puts the quote, its time, and its speaker in the notes, an explicit action, after which the cue goes.
+A Said cue (10 November 2026) quotes a spoken date or commitment word for word: a sentence with a time word (a weekday, tomorrow, next week, a month and day, a count of days, including since 13 November 2026 "two working days" or "three full business days") and a commitment word (by, before, ready, starting, takes, due, send, and a few more), not a question and not hedged. It appears in place of a timing question the sentence just answered, or on its own after the fixed questions, for 18 seconds, and the same words are not quoted again within two minutes; in Focused mode only a line about the focus is quoted. Until 14 November 2026 the card offered Keep this line, which put the quote, its time, and its speaker in the notes; that button is removed, and the engine's command for it is no longer reached from the interface.
 
 The product hypothesis behind the current cue set, in our own words: the valued moments in a meeting are a question put to the person, a spoken date or commitment, and a reminder from their own notes; prompting beyond those risks feeling like hand-holding. That is a claim for the pilot comparison to test, not a finding.
 
@@ -110,31 +110,31 @@ Recorded 13 November 2026. `scripts/fixtures/cue-rules-held-out.json` holds 23 n
 
 `rules_on_the_held_out_fictional_cases` in `engine.rs` replays them offline: lines two seconds apart with one speaker label, the fixture's cue on screen where a case lists one (with the rule type the fixture names), and the session name where a case gives one.
 
-| Case                              | Group               | Expected | Rules    |
-| --------------------------------- | ------------------- | -------- | -------- |
-| deferral-next-month               | deferral            | withdraw | quiet    |
-| deferral-look-alike               | deferral            | quiet    | quiet    |
-| deferral-of-something-else        | deferral            | quiet    | withdraw |
-| correction-cancelled              | correction          | withdraw | withdraw |
-| correction-of-something-else      | correction          | quiet    | quiet    |
-| correction-without-a-phrase       | correction          | withdraw | quiet    |
-| answered-at-once                  | already answered    | quiet    | quiet    |
-| answered-in-the-same-line         | already answered    | quiet    | show     |
-| answered-in-other-words           | already answered    | resolved | quiet    |
-| asked-of-someone-else             | another addressee   | quiet    | quiet    |
-| handed-to-someone-else            | another addressee   | quiet    | quiet    |
-| asked-of-the-user                 | another addressee   | show     | show     |
-| asked-of-the-user-without-a-comma | another addressee   | show     | quiet    |
-| you-could-be-either               | uncertain addressee | quiet    | quiet    |
-| name-mentioned-not-addressed      | uncertain addressee | quiet    | quiet    |
-| repeat-in-other-words             | repeat              | quiet    | quiet    |
-| repeat-of-a-group-question        | repeat              | show     | show     |
-| topic-change-in-other-words       | topic change        | withdraw | quiet    |
-| topic-change-look-alike           | topic change        | quiet    | quiet    |
-| plain-idiom                       | plain               | quiet    | show     |
-| plain-goodbye                     | plain               | quiet    | show     |
-| plain-approval                    | plain               | quiet    | quiet    |
-| missing-owner-in-other-words      | plain               | show     | quiet    |
+| Case                              | Group               | Expected | Rules        |
+| --------------------------------- | ------------------- | -------- | ------------ |
+| deferral-next-month               | deferral            | withdraw | quiet        |
+| deferral-look-alike               | deferral            | quiet    | quiet        |
+| deferral-of-something-else        | deferral            | quiet    | withdraw     |
+| correction-cancelled              | correction          | withdraw | withdraw     |
+| correction-of-something-else      | correction          | quiet    | quiet        |
+| correction-without-a-phrase       | correction          | withdraw | quiet        |
+| answered-at-once                  | already answered    | quiet    | quiet        |
+| answered-in-the-same-line         | already answered    | quiet    | show         |
+| answered-in-other-words           | already answered    | resolved | quiet        |
+| asked-of-someone-else             | another addressee   | quiet    | quiet        |
+| handed-to-someone-else            | another addressee   | quiet    | quiet        |
+| asked-of-the-user                 | another addressee   | show     | show         |
+| asked-of-the-user-without-a-comma | another addressee   | show     | quiet        |
+| you-could-be-either               | uncertain addressee | quiet    | quiet        |
+| name-mentioned-not-addressed      | uncertain addressee | quiet    | quiet        |
+| repeat-in-other-words             | repeat              | quiet    | quiet        |
+| repeat-of-a-group-question        | repeat              | show     | show         |
+| topic-change-in-other-words       | topic change        | withdraw | quiet        |
+| topic-change-look-alike           | topic change        | quiet    | quiet        |
+| plain-idiom                       | plain               | quiet    | show         |
+| plain-goodbye                     | plain               | quiet    | show         |
+| plain-approval                    | plain               | quiet    | quiet        |
+| missing-owner-in-other-words      | plain               | show     | quiet        |
 | **Matches**                       |                     |          | **13 of 23** |
 
 The rules match 13 of 23. This is reported separately from the original eleven and should not be added to them. Read it with these limits:
@@ -146,27 +146,27 @@ The rules match 13 of 23. This is reported separately from the original eleven a
 
 The ten misses, and whether a phrase rule could fix each without guessing meaning. None is implemented here.
 
-| Miss | What happened | A phrase rule could fix it? |
-| --- | --- | --- |
-| deferral-next-month | "We'll pick that up at the committee meeting next month. On to the raffle." is not recognized | Yes: "pick … up" as a putting-off verb with "at the … meeting" or "next month" as the occasion, or "On to …" as a topic opening |
-| deferral-of-something-else | "Let's leave the poster design for another meeting" withdraws a question about the welcome letter | Yes, by a word check: withdraw only when what is put off is "that", "it", or "this", or shares a distinctive word with the line the question came from |
-| answered-in-other-words | "Leave the compost with me, I'll get it ordered today" does not resolve the owner question | Yes: "leave … with me" and "I'll get it/that …" as volunteer phrases |
-| asked-of-the-user-without-a-comma | "What about you Robin, can you cover Saturday morning?" is not seen as asked of the user | Yes: the session name directly after "you" at the end of the opening clause |
-| topic-change-in-other-words | "Anyway, that's enough about the social. Treasurer's report next." is not a topic opening | Yes for "that's enough about …" as an opening; "… next." alone is too loose |
-| plain-idiom | "Someone can always tell when the bread is fresh" raises the owner question | Yes: do not count "someone can" before "always", "never", or a verb of noticing ("tell", "see", "hear") |
-| plain-goodbye | "We'll see you all soon" raises the vague-deadline question | Yes: do not count "soon" in "see you … soon", "talk soon", or "speak soon" |
-| missing-owner-in-other-words | "Nobody has picked up the banner printing yet" raises nothing | Only narrowly: "nobody has" or "no one has" with "picked up", "taken", or "claimed" and "yet". A wider form ("nobody has complained yet") would guess, and every new trigger adds interruptions |
-| answered-in-the-same-line | "Someone should water the seedlings…, and Priya has already said she'll do it" still raises the owner question | No: "has already said she'll do it" names the owner through "she", which the rules cannot tie to Priya without judging meaning |
-| correction-without-a-phrase | "Oh, hang on, the marquee went back to the hire company last week, so it's the hall" leaves the choice question up | No: knowing that one option is gone needs judgment of meaning |
+| Miss                              | What happened                                                                                                      | A phrase rule could fix it?                                                                                                                                                                     |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| deferral-next-month               | "We'll pick that up at the committee meeting next month. On to the raffle." is not recognized                      | Yes: "pick … up" as a putting-off verb with "at the … meeting" or "next month" as the occasion, or "On to …" as a topic opening                                                                 |
+| deferral-of-something-else        | "Let's leave the poster design for another meeting" withdraws a question about the welcome letter                  | Yes, by a word check: withdraw only when what is put off is "that", "it", or "this", or shares a distinctive word with the line the question came from                                          |
+| answered-in-other-words           | "Leave the compost with me, I'll get it ordered today" does not resolve the owner question                         | Yes: "leave … with me" and "I'll get it/that …" as volunteer phrases                                                                                                                            |
+| asked-of-the-user-without-a-comma | "What about you Robin, can you cover Saturday morning?" is not seen as asked of the user                           | Yes: the session name directly after "you" at the end of the opening clause                                                                                                                     |
+| topic-change-in-other-words       | "Anyway, that's enough about the social. Treasurer's report next." is not a topic opening                          | Yes for "that's enough about …" as an opening; "… next." alone is too loose                                                                                                                     |
+| plain-idiom                       | "Someone can always tell when the bread is fresh" raises the owner question                                        | Yes: do not count "someone can" before "always", "never", or a verb of noticing ("tell", "see", "hear")                                                                                         |
+| plain-goodbye                     | "We'll see you all soon" raises the vague-deadline question                                                        | Yes: do not count "soon" in "see you … soon", "talk soon", or "speak soon"                                                                                                                      |
+| missing-owner-in-other-words      | "Nobody has picked up the banner printing yet" raises nothing                                                      | Only narrowly: "nobody has" or "no one has" with "picked up", "taken", or "claimed" and "yet". A wider form ("nobody has complained yet") would guess, and every new trigger adds interruptions |
+| answered-in-the-same-line         | "Someone should water the seedlings…, and Priya has already said she'll do it" still raises the owner question     | No: "has already said she'll do it" names the owner through "she", which the rules cannot tie to Priya without judging meaning                                                                  |
+| correction-without-a-phrase       | "Oh, hang on, the marquee went back to the hire company last week, so it's the hall" leaves the choice question up | No: knowing that one option is gone needs judgment of meaning                                                                                                                                   |
 
 #### After rule changes written against these cases
 
 The 13 of 23 above is the only held-out measurement. Each change below was written with these cases in view, so **the set is no longer held out for the rules listed here**, and the later scores show only that the named cases changed and no other case did. A fresh set written without reading the rules is needed to measure them. At 16 of 23 the rules still take a wrong action on one of the fourteen quiet cases (`answered-in-the-same-line`, which needs judgment of meaning) and miss six of the nine cases that need an action; those seven misses are not addressed.
 
-| Date | Rule change | Cases that changed | Held-out set | Original eleven (replay / from the fixture's cue) |
-| --- | --- | --- | --- | --- |
-| 14 November 2026 | A deferral withdraws a question only when what is put off is "that", "it", or "this", or shares a distinctive word with the question's line | `deferral-of-something-else`: withdraw, now quiet as labeled | 14 of 23 | 7 of 11 (6 counting strictly) / 9 of 11, unchanged; `topic-moved-on` still withdraws because "the cover choice" shares "cover" with its line |
-| 14 November 2026 | "Someone can/should/could" before "always" or "never", or "can/could" before a verb of noticing, raises no owner question; "soon" in a goodbye or good wish raises no deadline question | `plain-idiom` and `plain-goodbye`: show, now quiet as labeled | 16 of 23 | 7 of 11 (6 counting strictly) / 9 of 11, unchanged |
+| Date             | Rule change                                                                                                                                                                             | Cases that changed                                            | Held-out set | Original eleven (replay / from the fixture's cue)                                                                                            |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| 14 November 2026 | A deferral withdraws a question only when what is put off is "that", "it", or "this", or shares a distinctive word with the question's line                                             | `deferral-of-something-else`: withdraw, now quiet as labeled  | 14 of 23     | 7 of 11 (6 counting strictly) / 9 of 11, unchanged; `topic-moved-on` still withdraws because "the cover choice" shares "cover" with its line |
+| 14 November 2026 | "Someone can/should/could" before "always" or "never", or "can/could" before a verb of noticing, raises no owner question; "soon" in a goodbye or good wish raises no deadline question | `plain-idiom` and `plain-goodbye`: show, now quiet as labeled | 16 of 23     | 7 of 11 (6 counting strictly) / 9 of 11, unchanged                                                                                           |
 
 The owner has decided that `already-answered` in the original suite is not to be fixed by delaying every question, so no timing change is proposed for the answered cases here.
 
@@ -182,43 +182,43 @@ The fixture records what its author had read, and that limits how independent th
 
 `rules_on_the_independent_fictional_cases` in `engine.rs` replays the cases exactly as the held-out ones (same helper): lines two seconds apart with one speaker label, the fixture's cue on screen where a case lists one, and the session name where a case gives one.
 
-| Case                      | Group               | Expected | Rules                  |
-| ------------------------- | ------------------- | -------- | ---------------------- |
-| storeroom-chairs          | no owner            | show     | show (a Said quote)    |
-| server-cupboard           | no owner            | show     | quiet                  |
-| tombola-owner-lost        | correction          | show     | quiet                  |
-| gate-shift-taken          | answered later      | resolved | quiet                  |
-| compost-bins-later        | answered later      | resolved | quiet                  |
-| permit-form-sometime      | vague deadline      | show     | show                   |
-| floor-plan-when-free      | vague deadline      | show     | quiet                  |
-| stall-list-thursday       | answered later      | resolved | quiet                  |
-| seed-order-twentieth      | answered later      | resolved | quiet                  |
-| cake-stall-tables         | asked by name       | show     | show (Asked you)       |
-| lift-name-at-end          | asked by name       | show     | show (Asked you)       |
-| posters-praise            | plain               | quiet    | quiet                  |
-| as-maren-said             | plain               | quiet    | quiet                  |
-| urn-for-idris             | another addressee   | quiet    | quiet                  |
-| desks-via-hana            | another addressee   | quiet    | quiet                  |
-| anyone-seen-gazebo        | uncertain addressee | quiet    | show (Open question)   |
-| you-grab-the-float        | uncertain addressee | quiet    | quiet                  |
-| caretaker-keys-again      | repeat              | quiet    | quiet                  |
-| risk-form-again           | repeat              | quiet    | quiet                  |
-| bouncy-castle-to-parking  | topic change        | withdraw | withdraw               |
-| carpet-tiles-same-subject | topic change        | quiet    | quiet                  |
-| skip-or-trailer-settled   | answered later      | resolved | resolved               |
-| work-party-parked         | deferral            | withdraw | quiet                  |
-| shed-colour-not-tonight   | deferral            | withdraw | quiet                  |
-| floor-not-moving          | correction          | withdraw | quiet                  |
-| minibus-already-booked    | correction          | resolved | quiet                  |
-| tomato-glut               | plain               | quiet    | quiet                  |
-| lead-and-urn-covered      | plain               | quiet    | quiet                  |
-| thanks-and-tea            | plain               | quiet    | quiet                  |
-| rhetorical-cake-stall     | plain               | quiet    | quiet                  |
-| t-shirts-arrived          | plain               | quiet    | quiet                  |
-| hall-already-swept        | plain               | quiet    | quiet                  |
-| skip-date-on-sheet        | plain               | quiet    | quiet                  |
-| new-office-windows        | plain               | quiet    | quiet                  |
-| **Matches**               |                     |          | **22 of 34**           |
+| Case                      | Group               | Expected | Rules                |
+| ------------------------- | ------------------- | -------- | -------------------- |
+| storeroom-chairs          | no owner            | show     | show (a Said quote)  |
+| server-cupboard           | no owner            | show     | quiet                |
+| tombola-owner-lost        | correction          | show     | quiet                |
+| gate-shift-taken          | answered later      | resolved | quiet                |
+| compost-bins-later        | answered later      | resolved | quiet                |
+| permit-form-sometime      | vague deadline      | show     | show                 |
+| floor-plan-when-free      | vague deadline      | show     | quiet                |
+| stall-list-thursday       | answered later      | resolved | quiet                |
+| seed-order-twentieth      | answered later      | resolved | quiet                |
+| cake-stall-tables         | asked by name       | show     | show (Asked you)     |
+| lift-name-at-end          | asked by name       | show     | show (Asked you)     |
+| posters-praise            | plain               | quiet    | quiet                |
+| as-maren-said             | plain               | quiet    | quiet                |
+| urn-for-idris             | another addressee   | quiet    | quiet                |
+| desks-via-hana            | another addressee   | quiet    | quiet                |
+| anyone-seen-gazebo        | uncertain addressee | quiet    | show (Open question) |
+| you-grab-the-float        | uncertain addressee | quiet    | quiet                |
+| caretaker-keys-again      | repeat              | quiet    | quiet                |
+| risk-form-again           | repeat              | quiet    | quiet                |
+| bouncy-castle-to-parking  | topic change        | withdraw | withdraw             |
+| carpet-tiles-same-subject | topic change        | quiet    | quiet                |
+| skip-or-trailer-settled   | answered later      | resolved | resolved             |
+| work-party-parked         | deferral            | withdraw | quiet                |
+| shed-colour-not-tonight   | deferral            | withdraw | quiet                |
+| floor-not-moving          | correction          | withdraw | quiet                |
+| minibus-already-booked    | correction          | resolved | quiet                |
+| tomato-glut               | plain               | quiet    | quiet                |
+| lead-and-urn-covered      | plain               | quiet    | quiet                |
+| thanks-and-tea            | plain               | quiet    | quiet                |
+| rhetorical-cake-stall     | plain               | quiet    | quiet                |
+| t-shirts-arrived          | plain               | quiet    | quiet                |
+| hall-already-swept        | plain               | quiet    | quiet                |
+| skip-date-on-sheet        | plain               | quiet    | quiet                |
+| new-office-windows        | plain               | quiet    | quiet                |
+| **Matches**               |                     |          | **22 of 34**         |
 
 The rules match 22 of 34 by action. Read it with these limits:
 
@@ -230,22 +230,23 @@ The rules match 22 of 34 by action. Read it with these limits:
 
 The twelve misses, and whether a phrase rule could fix each without guessing meaning. None is implemented here. Every miss below has a phrase that would fix that one case. Fitting eleven phrases to eleven sentences would make this score meaningless, so the misses are grouped by whether the same family of phrase also failed on the held-out set.
 
-| Miss | What happened | A phrase rule could fix it? | Also missed on the held-out set |
-| --- | --- | --- | --- |
-| compost-bins-later | "Leave that with me. I can do it Sunday morning." does not resolve the owner question | Yes: "leave … with me" as a volunteer phrase | Yes, `answered-in-other-words` |
-| server-cupboard | "The server cupboard still has to be emptied before the movers turn up" raises nothing | Only narrowly: a passive "has to be / needs to be …" with no one named. Many such lines name an owner later, and every new trigger adds interruptions | Yes, `missing-owner-in-other-words` (missing owner without "someone can/should/could") |
-| tombola-owner-lost | "So the tombola hasn't got anybody" raises nothing | Only narrowly: "hasn't got anybody/anyone" as a no-owner trigger; the rules exclude negations elsewhere, so this would be a deliberate exception | Yes, same family |
-| work-party-parked | "Let's park that until we've seen what the weather does, and come back to it in September" is not a deferral: "and" marks a second clause, and neither occasion is in the list | Yes, narrowly: "until we've …" and "in <month>" as occasions, and a second clause that is itself a deferral of "it" or "that" | Yes, `deferral-next-month` |
-| shed-colour-not-tonight | "Let's not get into that tonight" is excluded as a negation | Yes, narrowly: "let's not get into that/it" as a deferral of "that", an exception to the negation exclusion | Yes, same family |
-| floor-not-moving | "Sorry, scrap that." is not a correction phrase; "scratch that" is | Yes: add "scrap that" | No; the held-out correction miss needed meaning |
-| gate-shift-taken | "I'll do the gate" does not resolve the owner question; "do" was left out of the volunteer verbs because "I'll do Tuesday" is about availability | Yes, narrowly: "I'll do the …" only when what follows shares a distinctive word with the question's line, as the deferral check does | No |
-| stall-list-thursday | "by early I mean Thursday at noon" does not resolve the timing question; only "by/before/until" directly before a day counts | Yes: a weekday followed by "at" and a time | No |
-| seed-order-twentieth | "Then let's order on the twentieth." does not resolve the timing question | Yes: "on the" with an ordinal as a date | No |
-| minibus-already-booked | "Farah booked it last week" does not resolve the owner question; only "will" or "can" with a volunteer verb counts | Yes, narrowly: a capitalized name with a past-tense volunteer verb ("booked", "sent", "took") and "it" or "that". "I'm wrong" as a correction phrase would withdraw the question, not resolve it as labeled | No |
-| floor-plan-when-free | "once I get a minute" raises no deadline question; only "soon" counts | Yes: a short list such as "once I get a minute/chance", "when I get a chance", "at some point" | No |
-| anyone-seen-gazebo | "Does anyone know if we still have the gazebo…?" raises an Open question cue; the label says a question to the whole room is not clearly for the listener | Not a phrase gap. The open-question rule exists to show such questions, so the label and the rule disagree on purpose. An exclusion for "does anyone know if/whether…" is possible if the owner agrees with the label | No |
+| Miss                    | What happened                                                                                                                                                                  | A phrase rule could fix it?                                                                                                                                                                                           | Also missed on the held-out set                                                        |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| compost-bins-later      | "Leave that with me. I can do it Sunday morning." does not resolve the owner question                                                                                          | Yes: "leave … with me" as a volunteer phrase                                                                                                                                                                          | Yes, `answered-in-other-words`                                                         |
+| server-cupboard         | "The server cupboard still has to be emptied before the movers turn up" raises nothing                                                                                         | Only narrowly: a passive "has to be / needs to be …" with no one named. Many such lines name an owner later, and every new trigger adds interruptions                                                                 | Yes, `missing-owner-in-other-words` (missing owner without "someone can/should/could") |
+| tombola-owner-lost      | "So the tombola hasn't got anybody" raises nothing                                                                                                                             | Only narrowly: "hasn't got anybody/anyone" as a no-owner trigger; the rules exclude negations elsewhere, so this would be a deliberate exception                                                                      | Yes, same family                                                                       |
+| work-party-parked       | "Let's park that until we've seen what the weather does, and come back to it in September" is not a deferral: "and" marks a second clause, and neither occasion is in the list | Yes, narrowly: "until we've …" and "in <month>" as occasions, and a second clause that is itself a deferral of "it" or "that"                                                                                         | Yes, `deferral-next-month`                                                             |
+| shed-colour-not-tonight | "Let's not get into that tonight" is excluded as a negation                                                                                                                    | Yes, narrowly: "let's not get into that/it" as a deferral of "that", an exception to the negation exclusion                                                                                                           | Yes, same family                                                                       |
+| floor-not-moving        | "Sorry, scrap that." is not a correction phrase; "scratch that" is                                                                                                             | Yes: add "scrap that"                                                                                                                                                                                                 | No; the held-out correction miss needed meaning                                        |
+| gate-shift-taken        | "I'll do the gate" does not resolve the owner question; "do" was left out of the volunteer verbs because "I'll do Tuesday" is about availability                               | Yes, narrowly: "I'll do the …" only when what follows shares a distinctive word with the question's line, as the deferral check does                                                                                  | No                                                                                     |
+| stall-list-thursday     | "by early I mean Thursday at noon" does not resolve the timing question; only "by/before/until" directly before a day counts                                                   | Yes: a weekday followed by "at" and a time                                                                                                                                                                            | No                                                                                     |
+| seed-order-twentieth    | "Then let's order on the twentieth." does not resolve the timing question                                                                                                      | Yes: "on the" with an ordinal as a date                                                                                                                                                                               | No                                                                                     |
+| minibus-already-booked  | "Farah booked it last week" does not resolve the owner question; only "will" or "can" with a volunteer verb counts                                                             | Yes, narrowly: a capitalized name with a past-tense volunteer verb ("booked", "sent", "took") and "it" or "that". "I'm wrong" as a correction phrase would withdraw the question, not resolve it as labeled           | No                                                                                     |
+| floor-plan-when-free    | "once I get a minute" raises no deadline question; only "soon" counts                                                                                                          | Yes: a short list such as "once I get a minute/chance", "when I get a chance", "at some point"                                                                                                                        | No                                                                                     |
+| anyone-seen-gazebo      | "Does anyone know if we still have the gazebo…?" raises an Open question cue; the label says a question to the whole room is not clearly for the listener                      | Not a phrase gap. The open-question rule exists to show such questions, so the label and the rule disagree on purpose. An exclusion for "does anyone know if/whether…" is possible if the owner agrees with the label | No                                                                                     |
 
 Families that missed on both sets:
+
 - volunteering in other words ("leave … with me");
 - a missing owner said without "someone can/should/could";
 - deferrals said in other words.
@@ -256,11 +257,11 @@ Those families are the better candidates, though a fix to any of them must then 
 
 Two phrase families missed on both the held-out and the independent cases. Each was then changed in its own pull request, written with those cases in view. **Neither the held-out set nor the independent set is held out for these rules any more.** The later scores show only which cases changed and that no other case did; they are not new measurements of how the rules generalize. The first measurements remain the comparable ones: 13 of 23 held-out, 22 of 34 independent.
 
-| Date | Rule change | Cases that changed | Original eleven (replay / from the fixture's cue) | Held-out set | Independent set |
-| --- | --- | --- | --- | --- | --- |
-| 14 November 2026 | Before this section's changes | | 7 of 11 (6 strictly) / 9 of 11 | 16 of 23 | 22 of 34 (21 strictly) |
-| 14 November 2026 | A sentence that opens "Leave … with me" answers an owner question | `answered-in-other-words`, `compost-bins-later`: quiet, now resolved as labeled | unchanged | 17 of 23 | 23 of 34 (22 strictly) |
-| 14 November 2026 | Deferrals in other words: more verbs and occasions, a joined second clause, and "Let's not get into that" | `deferral-next-month`, `work-party-parked`, `shed-colour-not-tonight`: quiet, now withdraw as labeled | unchanged | 18 of 23 | 25 of 34 (24 strictly) |
+| Date             | Rule change                                                                                               | Cases that changed                                                                                    | Original eleven (replay / from the fixture's cue) | Held-out set | Independent set        |
+| ---------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------- | ------------ | ---------------------- |
+| 14 November 2026 | Before this section's changes                                                                             |                                                                                                       | 7 of 11 (6 strictly) / 9 of 11                    | 16 of 23     | 22 of 34 (21 strictly) |
+| 14 November 2026 | A sentence that opens "Leave … with me" answers an owner question                                         | `answered-in-other-words`, `compost-bins-later`: quiet, now resolved as labeled                       | unchanged                                         | 17 of 23     | 23 of 34 (22 strictly) |
+| 14 November 2026 | Deferrals in other words: more verbs and occasions, a joined second clause, and "Let's not get into that" | `deferral-next-month`, `work-party-parked`, `shed-colour-not-tonight`: quiet, now withdraw as labeled | unchanged                                         | 18 of 23     | 25 of 34 (24 strictly) |
 
 "Leave … with me" must open the sentence, after at most a few short words such as "Oh" or "Just", with one to four words before "with me". It answers only an owner question or a question put to the group, not a timing or choice question, and not one asked of the user by name. Questions, negations, and hedges do not count. "Leave it with Maya" and "Leave it with us" do not count either, because nobody named has said yes. "No, leave it with me" and "If nobody minds, leave it with me" are missed, because any negation rules a sentence out, and "If it helps, leave it with me" is missed because "leave" does not open the sentence.
 
