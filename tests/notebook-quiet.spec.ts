@@ -28,7 +28,7 @@ test('the notebook starts with the editor visible and optional setup folded away
   ).toBeVisible();
   await page.getByRole('button', { name: 'Not now' }).press('Enter');
   await expect(
-    page.getByRole('button', { name: /A better welcome Demo meeting/ }),
+    page.getByRole('button', { name: 'Notebook', exact: true }),
   ).toBeFocused();
   await expect(notes).toHaveValue(
     'Fictional note: confirm the garden welcome date.',

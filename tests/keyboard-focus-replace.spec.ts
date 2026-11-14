@@ -70,12 +70,12 @@ test('a delayed Disable processing does not take focus back from another control
   const { review, disable } = await liveWithProcessor(page);
   await page.evaluate(() => window.permissionTest.hold('revoke_processing'));
   await disable.press('Enter');
-  const search = page.getByRole('textbox', { name: 'Search meetings' });
-  await search.focus();
+  const other = page.getByRole('button', { name: 'Settings', exact: true });
+  await other.focus();
   await page.evaluate(() => window.permissionTest.release('revoke_processing'));
   await expect(disable).toHaveCount(0);
   await expect(review).toBeEnabled();
-  await expect(search).toBeFocused();
+  await expect(other).toBeFocused();
 });
 
 for (const width of [1320, 480]) {
