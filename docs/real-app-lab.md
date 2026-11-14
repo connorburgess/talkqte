@@ -44,10 +44,7 @@ TALKQTE_COMMIT="$(git rev-parse HEAD)" \
 - `TALKQTE_COMMIT` puts the commit into the timing log's session events. If
   you leave it out they say `unknown`.
 - `tauri build` builds the interface first and loads it from the app bundle.
-  It starts no development server. Do not use `tauri dev` for a lab run: it
-  serves the interface on port 1420, which is the owner's own development
-  server. If a lab tool needs a local server of its own, the native lane's
-  port is 1438.
+  It starts no development server. Do not use `tauri dev` for a lab run.
 - The bundle is written to `src-tauri/target/debug/bundle/macos/TalkQTE.app`,
   or under `$CARGO_TARGET_DIR` if that is set.
 
@@ -70,18 +67,36 @@ nothing is cleared.
 ## Launch with the timing log
 
 Make a folder for lab output outside the repository, then launch the app with
-the log's path:
+the log's path. Use a new file for each run, and never point two running
+copies of the app at the same file: one process writes one file.
 
 ```sh
 mkdir -p ~/talkqte-lab
 open -a ./src-tauri/target/debug/bundle/macos/TalkQTE.app \
+  --stderr "$HOME/talkqte-lab/run-01.stderr" \
   --env TALKQTE_TIMING_LOG="$HOME/talkqte-lab/run-01.jsonl"
 ```
 
-_To confirm:_ that `open --env` passes the variable on the owner's macOS. The
-alternative is running `TalkQTE.app/Contents/MacOS/talkqte`
-from Terminal with the variable set. macOS may then attribute the Screen
-Recording permission to Terminal rather than TalkQTE.
+**Confirm the log is on** before starting capture. Once the main window has
+opened (_to confirm_ how soon), `run-01.stderr` has one line starting
+`TalkQTE timing log:`
+
+- `on`: the log file now exists, readable by your account only.
+- `off`, with the reason: the path is relative, contains `..`, or is inside
+  the repository.
+- `could not open`: the folder does not exist or is inside the repository
+  once links are resolved, or the path is a link, a folder or a pipe. Nothing
+  will be written.
+
+No such line by the time a session starts means the variable did not reach
+the app, or the build lacks `timing-log`. The first `session` line is written
+when a session starts.
+
+_To confirm:_ that `open --env` and `--stderr` work this way on the owner's
+macOS. The alternative is running `TalkQTE.app/Contents/MacOS/talkqte` from
+Terminal with the variable set, which prints the line in Terminal. macOS may
+then attribute the Screen Recording permission to Terminal rather than
+TalkQTE.
 
 ## The meeting
 
@@ -163,26 +178,35 @@ installed. A refusal is shown in the status as `problem`.
 
 ## Timing log
 
-Only a build with the `timing-log` feature writes it, and only while
-`TALKQTE_TIMING_LOG` names an absolute path in a folder that already exists.
-The app appends one JSON object per line to that file and sends nothing
-anywhere. The log contains fictional transcript text, so keep it with the
-lab's other fictional material and delete it when it is no longer needed.
+Only a build with the `timing-log` feature contains the code that writes it,
+and it writes only while `TALKQTE_TIMING_LOG` names an absolute path outside
+the repository, in a folder that already exists. The app appends one JSON
+object per line to that file, created readable by your account only, and
+sends nothing anywhere. One app process writes one file; appends from two
+processes to the same file are not supported.
+
+The log records **every session the app runs until it quits**, microphone
+sessions included, with each recognized line's full text. Run only fictional
+conversations in a build launched with the log on, keep the file with the
+lab's other fictional material, and delete it when it is no longer needed. A
+cue's question is written only for a phrase cue raised by a transcript line:
+a cue that quotes an imported or Granola note, lists the focus lines or
+concerns them is logged without its question, note or focus text.
 
 Every line has `event`, `wall_ms` (milliseconds since the Unix epoch, for
 lining up with the lab's clock) and `mono_ms` (milliseconds since the log
 opened). Times named `*_ms` without `wall` or `mono` are on the engine's
 session clock.
 
-| `event`          | Other fields                                                                           | Written when                                                                                                                                 |
-| ---------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `session`        | `session`, `live`, `state` (`started`/`ended`), `elapsed_ms`, `commit`, `features`     | A session starts or stops running, as seen in the snapshot sent to the companion.                                                            |
-| `audio_received` | `source` (`microphone`/`application`), `session`, `start_ms`, `duration_ms`, `audible` | A chunk is handed to transcription. `start_ms` is its first sample on the session clock. `audible` means some sample reaches about −60 dBFS. |
-| `segment`        | `session`, `id`, `at_ms`, `speaker`, `text`, `accepted`                                | A recognized line reaches the engine.                                                                                                        |
-| `cue_decision`   | `session`, `cue`, `kind`, `question`, `source_id`, `elapsed_ms`                        | The engine first holds a cue. `source_id` is the segment it came from.                                                                       |
-| `cue_published`  | `session`, `cue`, `elapsed_ms`                                                         | The cue is in the snapshot sent to the companion window.                                                                                     |
-| `cue_cleared`    | `session`, `cue`, `elapsed_ms`                                                         | That cue has left the snapshot sent to the companion window.                                                                                 |
-| `dropped`        | `count`                                                                                | Lines were lost because the writer fell behind, before the next line written.                                                                |
+| `event`          | Other fields                                                                           | Written when                                                                                                                                            |
+| ---------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `session`        | `session`, `live`, `state` (`started`/`ended`), `elapsed_ms`, `commit`, `features`     | A session starts or stops running, as seen in the snapshot sent to the companion.                                                                       |
+| `audio_received` | `source` (`microphone`/`application`), `session`, `start_ms`, `duration_ms`, `audible` | A chunk is handed to transcription. `start_ms` is its first sample on the session clock. `audible` means some sample reaches about −60 dBFS.            |
+| `segment`        | `session`, `id`, `at_ms`, `speaker`, `text`, `accepted`                                | A recognized line reaches the engine.                                                                                                                   |
+| `cue_decision`   | `session`, `cue`, `kind`, `source`, `question`, `source_id`, `elapsed_ms`              | The engine first holds a cue. `source` is `line`, `note`, `focus` or `evaluated`. Only `line` has `question` and `source_id`, the segment it came from. |
+| `cue_published`  | `session`, `cue`, `elapsed_ms`                                                         | The cue is in the snapshot sent to the companion window.                                                                                                |
+| `cue_cleared`    | `session`, `cue`, `elapsed_ms`                                                         | That cue has left the snapshot sent to the companion window.                                                                                            |
+| `dropped`        | `count`                                                                                | Lines were lost since the last line written, because the queue was full or a write failed. Written before the next line.                                |
 
 What it can and cannot tell you:
 
@@ -193,11 +217,18 @@ What it can and cannot tell you:
   recording shows that.
 - `cue_published` is written whether or not the companion window is visible.
   Keep the companion shown during a run.
-- **Alignment without transcription.** The first `audio_received` from
-  `application` with `audible: true` marks when sound first reached TalkQTE.
+- **Alignment without transcription.** Audio is handed over in chunks of
+  about 3 seconds, so an `audio_received` line is written up to 3 seconds
+  after the sound in it. Do not use that line's `wall_ms`. Instead, take the
+  `session` `started` event's `wall_ms − elapsed_ms`, the wall time of
+  session time zero, and add the `start_ms` of the first `application` chunk
+  with `audible: true`. That is the wall time at which that chunk began; the
+  first sound reached TalkQTE within its `duration_ms` after that. The same
+  offset converts any `*_ms` session time to wall time.
 - The microphone's last chunks, which Stop hands over after reading ends, are
   not logged. A lab run uses the application source, where every chunk is.
-- Lines lost from a full queue at the very end of a run are not reported.
+- Lines lost after the last line written are not reported until another
+  line is written, so a loss at the very end of a run can go unreported.
 
 ## What stays open
 

@@ -1,23 +1,27 @@
 //! Development-only timing log for lab runs with fictional audio.
 //!
-//! Off unless the build has the `timing-log` Cargo feature and the
-//! `TALKQTE_TIMING_LOG` environment variable names an absolute file path.
-//! Then one JSON object per line is appended to that file, and nothing is
-//! sent anywhere. A default build cannot turn it on.
+//! Only a build with the `timing-log` Cargo feature contains the code that
+//! opens and writes the log; in any other build `enabled` is false and every
+//! entry point does nothing. With the feature, the log is written only while
+//! `TALKQTE_TIMING_LOG` names an absolute file path outside this checkout.
+//! One JSON object per line is then appended to that file, and nothing is
+//! sent anywhere. One process writes one file: two app instances must not
+//! share a path.
 //!
 //! Recording never runs in an audio callback. Events come from the
 //! transcription runner, the application-source worker and the runtime, and
 //! recording only formats a line and hands it to a writer thread without
-//! waiting. A full queue drops the line and counts it; the writer reports the
-//! count before its next line.
+//! waiting. The writer thread opens the file, so a slow or stalled volume
+//! cannot hold up the caller. A full queue or a failed write drops the line
+//! and counts it; the writer reports the count before its next line.
 
-use crate::engine::{Cue, Engine, Segment, Status};
+use crate::engine::{Cue, Engine, Segment, Status, CONTEXT, STILL_OPEN};
 use crate::Runtime;
 use serde::Serialize;
+#[cfg(feature = "timing-log")]
 use std::{
-    fs::OpenOptions,
-    io::Write,
-    path::Path,
+    io::{self, Write},
+    path::{Component, Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         mpsc::{sync_channel, SyncSender},
@@ -29,6 +33,7 @@ use std::{
 
 /// The environment variable naming the log file.
 pub const ENV: &str = "TALKQTE_TIMING_LOG";
+#[cfg(feature = "timing-log")]
 const QUEUE: usize = 1024;
 
 /// One timed event. Times named `*_ms` without `wall` or `mono` are on the
@@ -68,13 +73,21 @@ pub enum Event {
         text: String,
         accepted: bool,
     },
-    /// The engine first holds a cue, and the line it came from.
+    /// The engine first holds a cue. `question` and `source_id` are written
+    /// only for a phrase cue raised by a transcript line, where `source_id`
+    /// is that line. A cue that quotes a note, lists focus lines, concerns
+    /// the focus or comes from an evaluator has `source` `note`, `focus` or
+    /// `evaluated` and no question, so neither note titles nor focus lines
+    /// reach the log.
     CueDecision {
         session: u64,
         cue: String,
         kind: String,
-        question: String,
-        source_id: String,
+        source: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        question: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_id: Option<String>,
         elapsed_ms: u64,
     },
     /// A cue is in the snapshot sent to the companion window. The log cannot
@@ -90,6 +103,9 @@ pub enum Event {
         cue: String,
         elapsed_ms: u64,
     },
+    /// Lines lost since the last line written, because the queue was full
+    /// or a write failed.
+    Dropped { count: u64 },
 }
 
 /// The line written for `event`: its fields plus wall and monotonic times.
@@ -102,6 +118,7 @@ pub fn line(event: &Event, wall_ms: u64, mono_ms: u64) -> String {
     value.to_string()
 }
 
+#[cfg(feature = "timing-log")]
 fn wall_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -110,7 +127,70 @@ fn wall_ms() -> u64 {
         })
 }
 
-/// An open log file and its writer thread.
+#[cfg(feature = "timing-log")]
+fn since(opened: Instant) -> u64 {
+    u64::try_from(opened.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+/// The repository this build came from. Lab output stays outside it.
+#[cfg(feature = "timing-log")]
+fn checkout() -> &'static Path {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    manifest.parent().unwrap_or(manifest)
+}
+
+/// Refuse a path that is relative, climbs with `..`, or names somewhere in
+/// `checkout`, by its text. The writer checks again once links are resolved.
+#[cfg(feature = "timing-log")]
+fn allowed(path: &Path, checkout: &Path) -> Result<(), String> {
+    if !path.is_absolute() {
+        return Err("The timing log path must be absolute.".into());
+    }
+    if path.components().any(|part| part == Component::ParentDir) {
+        return Err("The timing log path must not contain \"..\".".into());
+    }
+    if path.starts_with(checkout) {
+        return Err("The timing log path is inside the repository.".into());
+    }
+    Ok(())
+}
+
+/// Open `path` for appending, readable by its owner only. Runs on the writer
+/// thread. Refuses a folder inside `checkout` once links are resolved, a link,
+/// and anything that is not a regular file, so a pipe cannot be opened.
+#[cfg(feature = "timing-log")]
+fn open_file(path: &Path, checkout: &Path) -> io::Result<std::fs::File> {
+    let refuse = |why: &str| io::Error::other(why.to_string());
+    let folder = path
+        .parent()
+        .ok_or_else(|| refuse("no folder"))?
+        .canonicalize()?;
+    if let Ok(checkout) = checkout.canonicalize() {
+        if folder.starts_with(checkout) {
+            return Err(refuse("inside the repository"));
+        }
+    }
+    match std::fs::symlink_metadata(path) {
+        Ok(existing) if !existing.file_type().is_file() => {
+            return Err(refuse("not a regular file"));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // O_NOFOLLOW: a link swapped in after the check is not followed.
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    options.open(path)
+}
+
+/// A log and its writer thread.
+#[cfg(feature = "timing-log")]
 pub struct Log {
     sender: Option<SyncSender<String>>,
     dropped: Arc<AtomicU64>,
@@ -118,56 +198,83 @@ pub struct Log {
     writer: Option<JoinHandle<()>>,
 }
 
+#[cfg(feature = "timing-log")]
 impl Log {
-    /// Append to `path`, which must be absolute. Its directory must exist:
-    /// nothing else is created.
+    /// Append to `path`, which must be absolute and outside this repository.
+    /// Its folder must exist: nothing else is created. The file is opened on
+    /// the writer thread, which says on stderr whether it opened.
     pub fn open(path: &Path, capacity: usize) -> Result<Self, String> {
-        if !path.is_absolute() {
-            return Err("The timing log path must be absolute.".into());
-        }
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .map_err(|_| "Could not open the timing log.".to_string())?;
+        allowed(path, checkout())?;
+        let path: PathBuf = path.to_path_buf();
+        Self::start(capacity, move || open_file(&path, checkout()))
+    }
+
+    /// Start a writer that gets its output from `opener`, on its own thread.
+    fn start<W, F>(capacity: usize, opener: F) -> Result<Self, String>
+    where
+        W: Write,
+        F: FnOnce() -> io::Result<W> + Send + 'static,
+    {
+        let opened = Instant::now();
         let (sender, receiver) = sync_channel::<String>(capacity.max(1));
         let dropped = Arc::new(AtomicU64::new(0));
         let lost = dropped.clone();
         let writer = std::thread::Builder::new()
             .name("talkqte-timing-log".into())
             .spawn(move || {
-                for line in receiver {
+                let Ok(mut out) = opener() else {
+                    eprintln!("TalkQTE timing log: could not open the file named by {ENV}; nothing will be written.");
+                    return;
+                };
+                eprintln!("TalkQTE timing log: on, appending to the file named by {ENV}.");
+                // One write per line, newline included, so a line is never
+                // split by a failure between its text and its newline.
+                let mut put = |text: String| {
+                    let mut entry = text.into_bytes();
+                    entry.push(b'\n');
+                    out.write_all(&entry).and_then(|()| out.flush()).is_ok()
+                };
+                let report = |lost: &AtomicU64, put: &mut dyn FnMut(String) -> bool| {
                     let missed = lost.swap(0, Ordering::AcqRel);
                     if missed > 0 {
-                        let _ = writeln!(file, "{{\"event\":\"dropped\",\"count\":{missed}}}");
+                        let marker = line(&Event::Dropped { count: missed }, wall_ms(), since(opened));
+                        if !put(marker) {
+                            lost.fetch_add(missed, Ordering::AcqRel);
+                        }
                     }
-                    let _ = writeln!(file, "{line}");
-                    let _ = file.flush();
+                };
+                for entry in receiver {
+                    report(&lost, &mut put);
+                    if !put(entry) {
+                        lost.fetch_add(1, Ordering::AcqRel);
+                    }
                 }
+                // The queue closed: report anything lost after the last line.
+                report(&lost, &mut put);
             })
             .map_err(|_| "Could not start the timing log.".to_string())?;
         Ok(Self {
             sender: Some(sender),
             dropped,
-            opened: Instant::now(),
+            opened,
             writer: Some(writer),
         })
     }
 
     /// Stamp and queue one event without waiting.
     pub fn record(&self, event: &Event) {
-        let mono_ms = u64::try_from(self.opened.elapsed().as_millis()).unwrap_or(u64::MAX);
-        let line = line(event, wall_ms(), mono_ms);
+        let line = line(event, wall_ms(), since(self.opened));
         let sent = self
             .sender
             .as_ref()
             .is_some_and(|sender| sender.try_send(line).is_ok());
         if !sent {
-            self.dropped.fetch_add(1, Ordering::Relaxed);
+            self.dropped.fetch_add(1, Ordering::AcqRel);
         }
     }
 }
 
+#[cfg(feature = "timing-log")]
 impl Drop for Log {
     fn drop(&mut self) {
         // Close the queue, then let the writer finish what it holds.
@@ -178,27 +285,40 @@ impl Drop for Log {
     }
 }
 
+#[cfg(feature = "timing-log")]
 fn global() -> Option<&'static Log> {
     static LOG: OnceLock<Option<Log>> = OnceLock::new();
     LOG.get_or_init(|| {
-        if !cfg!(feature = "timing-log") {
-            return None;
-        }
         let path = std::env::var_os(ENV)?;
-        Log::open(Path::new(&path), QUEUE).ok()
+        match Log::open(Path::new(&path), QUEUE) {
+            Ok(log) => Some(log),
+            Err(why) => {
+                eprintln!("TalkQTE timing log: off. {why}");
+                None
+            }
+        }
     })
     .as_ref()
 }
 
-/// Whether events are being written. Always false in a default build.
+/// Whether events are being recorded. Always false without the
+/// `timing-log` feature.
 pub fn enabled() -> bool {
-    global().is_some()
+    #[cfg(feature = "timing-log")]
+    return global().is_some();
+    #[cfg(not(feature = "timing-log"))]
+    false
 }
 
+/// Record one event, if the log is on. Check `enabled` first to avoid
+/// building an event that would be thrown away.
 pub fn record(event: Event) {
+    #[cfg(feature = "timing-log")]
     if let Some(log) = global() {
         log.record(&event);
     }
+    #[cfg(not(feature = "timing-log"))]
+    drop(event);
 }
 
 /// Peak level, as a fraction of full scale, above which a chunk counts as
@@ -242,6 +362,33 @@ pub fn features() -> Vec<&'static str> {
     .collect()
 }
 
+/// The decision event for `cue`. Only a phrase cue raised by a transcript
+/// line, and not about the focus, keeps its question and source line: its
+/// question is a fixed phrase or quotes the line, which the log already has.
+pub fn decision(session: u64, cue: &Cue, elapsed_ms: u64) -> Event {
+    // Phrase rules ask fixed questions or quote the line itself. A cue
+    // from a note, the focus lines or an evaluator is left out.
+    let source = if cue.note.is_some() || cue.kind == CONTEXT {
+        "note"
+    } else if cue.about_focus || cue.kind == STILL_OPEN {
+        "focus"
+    } else if !cue.sources.is_empty() {
+        "evaluated"
+    } else {
+        "line"
+    };
+    let line = source == "line";
+    Event::CueDecision {
+        session,
+        cue: cue.id.clone(),
+        kind: cue.kind.clone(),
+        source,
+        question: line.then(|| cue.question.clone()),
+        source_id: line.then(|| cue.source_id.clone()),
+        elapsed_ms,
+    }
+}
+
 /// The events for one line reaching the engine: the line itself and, if the
 /// engine now holds a cue it did not hold before, that decision.
 pub fn ingest_events(
@@ -261,14 +408,7 @@ pub fn ingest_events(
         accepted,
     }];
     if let Some(cue) = after.filter(|cue| Some(cue.id.as_str()) != before) {
-        events.push(Event::CueDecision {
-            session,
-            cue: cue.id.clone(),
-            kind: cue.kind.clone(),
-            question: cue.question.clone(),
-            source_id: cue.source_id.clone(),
-            elapsed_ms,
-        });
+        events.push(decision(session, cue, elapsed_ms));
     }
     events
 }
@@ -334,17 +474,19 @@ pub fn shown_events(before: &Shown, after: &Shown, live: bool, elapsed_ms: u64) 
 
 /// Called each time the companion is sent a snapshot.
 pub fn observe_published(engine: &Engine) {
-    if !enabled() {
-        return;
+    #[cfg(feature = "timing-log")]
+    if let Some(log) = global() {
+        static LAST: Mutex<Option<Shown>> = Mutex::new(None);
+        let now = Shown::of(engine);
+        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        let before = last.clone().unwrap_or_default();
+        for event in shown_events(&before, &now, engine.state.live, engine.state.elapsed_ms) {
+            log.record(&event);
+        }
+        *last = Some(now);
     }
-    static LAST: Mutex<Option<Shown>> = Mutex::new(None);
-    let now = Shown::of(engine);
-    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-    let before = last.clone().unwrap_or_default();
-    for event in shown_events(&before, &now, engine.state.live, engine.state.elapsed_ms) {
-        record(event);
-    }
-    *last = Some(now);
+    #[cfg(not(feature = "timing-log"))]
+    let _ = engine;
 }
 
 impl Runtime {
@@ -360,9 +502,22 @@ impl Runtime {
         allow(dead_code)
     )]
     pub(crate) fn ingest_timed(&mut self, session: u64, segment: Segment) -> Result<(), String> {
-        if !enabled() {
+        #[cfg(feature = "timing-log")]
+        return self.ingest_into(global(), session, segment);
+        #[cfg(not(feature = "timing-log"))]
+        self.engine.ingest(session, segment)
+    }
+
+    #[cfg(feature = "timing-log")]
+    fn ingest_into(
+        &mut self,
+        log: Option<&Log>,
+        session: u64,
+        segment: Segment,
+    ) -> Result<(), String> {
+        let Some(log) = log else {
             return self.engine.ingest(session, segment);
-        }
+        };
         let line = segment.clone();
         let before = self.engine.state.cue.as_ref().map(|cue| cue.id.clone());
         let result = self.engine.ingest(session, segment);
@@ -374,7 +529,7 @@ impl Runtime {
             self.engine.state.cue.as_ref(),
             self.engine.state.elapsed_ms,
         ) {
-            record(event);
+            log.record(&event);
         }
         result
     }
@@ -385,29 +540,10 @@ mod tests {
     use super::*;
     use serde_json::Value;
 
-    fn scratch(name: &str) -> std::path::PathBuf {
-        let mut path = std::env::temp_dir();
-        path.push(format!(
-            "talkqte-timing-{}-{name}.jsonl",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_file(&path);
-        path
-    }
-
-    fn lines(path: &Path) -> Vec<Value> {
-        std::fs::read_to_string(path)
-            .unwrap()
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .collect()
-    }
-
     #[test]
     fn a_default_build_never_turns_the_log_on() {
         if !cfg!(feature = "timing-log") {
             assert!(!enabled());
-            // Nothing is formatted or queued either.
             record(Event::CueCleared {
                 session: 1,
                 cue: "fictional".into(),
@@ -419,52 +555,6 @@ mod tests {
             features().contains(&"timing-log"),
             cfg!(feature = "timing-log")
         );
-    }
-
-    #[test]
-    fn the_log_is_written_only_to_an_absolute_path_in_an_existing_folder() {
-        assert!(Log::open(Path::new("relative-timing.jsonl"), 4).is_err());
-        let mut missing = std::env::temp_dir();
-        missing.push(format!("talkqte-no-such-folder-{}", std::process::id()));
-        missing.push("timing.jsonl");
-        assert!(Log::open(&missing, 4).is_err());
-        assert!(!missing.parent().unwrap().exists(), "no folder is created");
-    }
-
-    #[test]
-    fn each_event_is_one_json_line_with_wall_and_monotonic_times_in_order() {
-        let path = scratch("order");
-        let log = Log::open(&path, 16).unwrap();
-        log.record(&audio_event("application", 7, 1_000, &[0.0; 16_000]));
-        log.record(&Event::CuePublished {
-            session: 7,
-            cue: "c1".into(),
-            elapsed_ms: 2_500,
-        });
-        drop(log); // Closes the queue and waits for the writer.
-        let written = lines(&path);
-        assert_eq!(written.len(), 2);
-        assert_eq!(written[0]["event"], "audio_received");
-        assert_eq!(written[0]["source"], "application");
-        assert_eq!(written[0]["duration_ms"], 1_000);
-        assert_eq!(written[0]["audible"], false);
-        assert_eq!(written[1]["event"], "cue_published");
-        assert_eq!(written[1]["cue"], "c1");
-        for line in &written {
-            assert!(line["wall_ms"].as_u64().unwrap() > 1_600_000_000_000);
-            assert!(line["mono_ms"].is_u64());
-        }
-        assert!(written[0]["mono_ms"].as_u64() <= written[1]["mono_ms"].as_u64());
-        // Appending, not replacing: a second log adds to the file.
-        let again = Log::open(&path, 4).unwrap();
-        again.record(&Event::CueCleared {
-            session: 7,
-            cue: "c1".into(),
-            elapsed_ms: 3_000,
-        });
-        drop(again);
-        assert_eq!(lines(&path).len(), 3);
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -558,61 +648,305 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_line_that_raises_a_cue_records_the_decision_with_its_source_line() {
-        let mut engine = Engine::live();
-        engine.start().unwrap();
-        engine.advance(3_000);
-        let session = engine.session();
-        let mut decisions = Vec::new();
-        for line in [
-            segment("l1", 1_000, "The greenhouse keys are in the blue tin."),
-            segment("l2", 2_000, "Someone should send the checklist."),
-        ] {
-            let before = engine.state.cue.as_ref().map(|cue| cue.id.clone());
-            let accepted = engine.ingest(session, line.clone()).is_ok();
-            let events = ingest_events(
-                session,
-                &line,
-                accepted,
-                before.as_deref(),
-                engine.state.cue.as_ref(),
-                engine.state.elapsed_ms,
-            );
-            assert!(matches!(&events[0], Event::Segment { accepted: true, .. }));
-            decisions.extend(events.into_iter().skip(1));
-        }
-        // The missing-owner rule fires on the second line, once.
-        assert_eq!(decisions.len(), 1);
-        let Event::CueDecision {
-            source_id,
-            question,
-            ..
-        } = &decisions[0]
-        else {
-            panic!("not a decision: {decisions:?}");
+    fn live_runtime() -> (Runtime, u64) {
+        let mut runtime = Runtime {
+            engine: Engine::live(),
+            ..Runtime::default()
         };
-        assert_eq!(source_id, "l2");
-        assert!(!question.is_empty());
-        // A line the engine refuses is recorded as refused, with no decision.
-        let late = segment("l0", 500, "An earlier fictional line.");
-        let before = engine.state.cue.as_ref().map(|cue| cue.id.clone());
-        let accepted = engine.ingest(session, late.clone()).is_ok();
-        let events = ingest_events(
-            session,
-            &late,
-            accepted,
-            before.as_deref(),
-            engine.state.cue.as_ref(),
-            engine.state.elapsed_ms,
-        );
-        assert_eq!(events.len(), 1);
-        assert!(matches!(
-            &events[0],
-            Event::Segment {
-                accepted: false,
-                ..
+        runtime.engine.start().unwrap();
+        runtime.engine.advance(3_000);
+        let session = runtime.engine.session();
+        (runtime, session)
+    }
+
+    #[test]
+    fn timed_ingest_behaves_like_the_engine_while_the_log_is_off() {
+        // The test process never sets TALKQTE_TIMING_LOG.
+        let (mut runtime, session) = live_runtime();
+        runtime
+            .ingest_timed(
+                session,
+                segment("l1", 1_000, "Someone should send the checklist."),
+            )
+            .unwrap();
+        assert_eq!(runtime.engine.state.cue.as_ref().unwrap().source_id, "l1");
+        assert!(runtime
+            .ingest_timed(session, segment("l0", 500, "An earlier fictional line."))
+            .is_err());
+    }
+
+    fn a_phrase_cue() -> Cue {
+        let (mut runtime, session) = live_runtime();
+        runtime
+            .ingest_timed(
+                session,
+                segment("l2", 2_000, "Someone should send the checklist."),
+            )
+            .unwrap();
+        runtime.engine.state.cue.clone().unwrap()
+    }
+
+    #[test]
+    fn decisions_keep_the_question_only_for_a_phrase_cue_from_a_line() {
+        let cue = a_phrase_cue();
+        let value = serde_json::to_value(decision(3, &cue, 2_100)).unwrap();
+        assert_eq!(value["source"], "line");
+        assert_eq!(value["source_id"], "l2");
+        assert_eq!(value["question"], cue.question.as_str());
+
+        let mut note = cue.clone();
+        note.kind = CONTEXT.into();
+        note.question = "Fictional orchard budget note".into();
+        note.source_id = "fictional-note-key".into();
+        let mut still_open = cue.clone();
+        still_open.kind = STILL_OPEN.into();
+        still_open.question = "Not covered: fictional focus line".into();
+        let mut focus = cue.clone();
+        focus.about_focus = true;
+        focus.question = "Who owns the fictional focus line?".into();
+        for (cue, source) in [(note, "note"), (still_open, "focus"), (focus, "focus")] {
+            let text = line(&decision(3, &cue, 2_100), 0, 0);
+            let value: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(value["source"], source, "{text}");
+            assert!(value.get("question").is_none(), "{text}");
+            assert!(value.get("source_id").is_none(), "{text}");
+            assert!(!text.contains("fictional"), "{text}");
+        }
+    }
+
+    #[cfg(feature = "timing-log")]
+    mod writing {
+        use super::*;
+        use std::sync::mpsc;
+
+        fn scratch(name: &str) -> PathBuf {
+            let mut path = std::env::temp_dir();
+            path.push(format!(
+                "talkqte-timing-{}-{name}.jsonl",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_file(&path);
+            path
+        }
+
+        fn lines(path: &Path) -> Vec<Value> {
+            std::fs::read_to_string(path)
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect()
+        }
+
+        /// Collects each write call; fails the first `fail` of them.
+        #[derive(Clone, Default)]
+        struct Sink {
+            writes: Arc<Mutex<Vec<Vec<u8>>>>,
+            fail: Arc<AtomicU64>,
+        }
+
+        impl Write for Sink {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                if self.fail.load(Ordering::Acquire) > 0 {
+                    self.fail.fetch_sub(1, Ordering::AcqRel);
+                    return Err(io::Error::other("fictional full volume"));
+                }
+                self.writes.lock().unwrap().push(buf.to_vec());
+                Ok(buf.len())
             }
-        ));
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        impl Sink {
+            /// The lines written, checking each was one write ending in a newline.
+            fn lines(&self) -> Vec<Value> {
+                self.writes
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|write| {
+                        let text = std::str::from_utf8(write).unwrap();
+                        assert_eq!(text.matches('\n').count(), 1, "{text:?}");
+                        assert!(text.ends_with('\n'), "{text:?}");
+                        serde_json::from_str(text).unwrap()
+                    })
+                    .collect()
+            }
+        }
+
+        fn cleared(cue: &str) -> Event {
+            Event::CueCleared {
+                session: 7,
+                cue: cue.into(),
+                elapsed_ms: 0,
+            }
+        }
+
+        fn timed(line: &Value) {
+            assert!(
+                line["wall_ms"].as_u64().unwrap() > 1_600_000_000_000,
+                "{line}"
+            );
+            assert!(line["mono_ms"].is_u64(), "{line}");
+        }
+
+        #[test]
+        fn the_log_is_written_only_to_an_absolute_path_outside_the_repository() {
+            assert!(Log::open(Path::new("relative-timing.jsonl"), 4).is_err());
+            assert!(Log::open(&checkout().join("timing.jsonl"), 4).is_err());
+            assert!(Log::open(&checkout().join("docs/new/timing.jsonl"), 4).is_err());
+            let climbing = std::env::temp_dir().join("..").join("timing.jsonl");
+            assert!(Log::open(&climbing, 4).is_err());
+
+            // A folder that does not exist is not created, and nothing is written.
+            let mut missing = std::env::temp_dir();
+            missing.push(format!("talkqte-no-such-folder-{}", std::process::id()));
+            missing.push("timing.jsonl");
+            let log = Log::open(&missing, 4).unwrap();
+            log.record(&cleared("c1"));
+            drop(log);
+            assert!(!missing.parent().unwrap().exists(), "no folder is created");
+        }
+
+        #[test]
+        fn each_event_is_one_json_line_with_wall_and_monotonic_times_in_order() {
+            let path = scratch("order");
+            let log = Log::open(&path, 16).unwrap();
+            log.record(&audio_event("application", 7, 1_000, &[0.0; 16_000]));
+            log.record(&Event::CuePublished {
+                session: 7,
+                cue: "c1".into(),
+                elapsed_ms: 2_500,
+            });
+            drop(log); // Closes the queue and waits for the writer.
+            let written = lines(&path);
+            assert_eq!(written.len(), 2);
+            assert_eq!(written[0]["event"], "audio_received");
+            assert_eq!(written[0]["source"], "application");
+            assert_eq!(written[0]["duration_ms"], 1_000);
+            assert_eq!(written[0]["audible"], false);
+            assert_eq!(written[1]["event"], "cue_published");
+            assert_eq!(written[1]["cue"], "c1");
+            written.iter().for_each(timed);
+            assert!(written[0]["mono_ms"].as_u64() <= written[1]["mono_ms"].as_u64());
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+                assert_eq!(mode & 0o777, 0o600, "readable by its owner only");
+            }
+            // Appending, not replacing: a second log adds to the file.
+            let again = Log::open(&path, 4).unwrap();
+            again.record(&cleared("c1"));
+            drop(again);
+            assert_eq!(lines(&path).len(), 3);
+            let _ = std::fs::remove_file(&path);
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn a_link_or_a_pipe_is_never_opened() {
+            let target = scratch("target");
+            std::fs::write(&target, "").unwrap();
+            let link = scratch("link");
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            let log = Log::open(&link, 4).unwrap();
+            log.record(&cleared("c1"));
+            drop(log);
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), "");
+            let folder = std::env::temp_dir();
+            assert!(
+                open_file(&folder, checkout()).is_err(),
+                "a folder is refused"
+            );
+            let _ = std::fs::remove_file(&link);
+            let _ = std::fs::remove_file(&target);
+        }
+
+        #[test]
+        fn lines_lost_to_a_full_queue_are_counted_and_reported_with_times() {
+            let sink = Sink::default();
+            let output = sink.clone();
+            let (open, opened) = mpsc::channel::<()>();
+            // The writer cannot take anything until the test lets it open.
+            let log = Log::start(1, move || {
+                opened.recv().ok();
+                Ok(output)
+            })
+            .unwrap();
+            log.record(&cleared("kept"));
+            log.record(&cleared("lost-1"));
+            log.record(&cleared("lost-2"));
+            open.send(()).unwrap();
+            drop(log);
+            let written = sink.lines();
+            assert_eq!(written.len(), 2, "{written:?}");
+            assert_eq!(written[0]["event"], "dropped");
+            assert_eq!(written[0]["count"], 2);
+            assert_eq!(written[1]["cue"], "kept");
+            written.iter().for_each(timed);
+        }
+
+        #[test]
+        fn a_failed_write_is_counted_as_dropped() {
+            let sink = Sink::default();
+            sink.fail.store(1, Ordering::Release);
+            let output = sink.clone();
+            let log = Log::start(4, move || Ok(output)).unwrap();
+            log.record(&cleared("failed"));
+            log.record(&cleared("next"));
+            drop(log);
+            let written = sink.lines();
+            assert_eq!(written.len(), 2, "{written:?}");
+            assert_eq!(written[0]["event"], "dropped");
+            assert_eq!(written[0]["count"], 1);
+            assert_eq!(written[1]["cue"], "next");
+        }
+
+        #[test]
+        fn a_line_that_raises_a_cue_records_the_decision_with_its_source_line() {
+            let sink = Sink::default();
+            let output = sink.clone();
+            let log = Log::start(16, move || Ok(output)).unwrap();
+            let (mut runtime, session) = live_runtime();
+            for line in [
+                segment("l1", 1_000, "The greenhouse keys are in the blue tin."),
+                segment("l2", 2_000, "Someone should send the checklist."),
+            ] {
+                runtime.ingest_into(Some(&log), session, line).unwrap();
+            }
+            // A line the engine refuses is recorded as refused.
+            let late = segment("l0", 500, "An earlier fictional line.");
+            assert!(runtime.ingest_into(Some(&log), session, late).is_err());
+            drop(log);
+            let written = sink.lines();
+            let events: Vec<_> = written
+                .iter()
+                .map(|line| {
+                    format!(
+                        "{}:{}:{}",
+                        line["event"].as_str().unwrap(),
+                        line["id"]
+                            .as_str()
+                            .or(line["source_id"].as_str())
+                            .unwrap_or(""),
+                        line["accepted"]
+                    )
+                })
+                .collect();
+            // The missing-owner rule fires on the second line, once.
+            assert_eq!(
+                events,
+                [
+                    "segment:l1:true",
+                    "segment:l2:true",
+                    "cue_decision:l2:null",
+                    "segment:l0:false"
+                ]
+            );
+            assert_eq!(written[2]["source"], "line");
+            assert!(!written[2]["question"].as_str().unwrap().is_empty());
+        }
     }
 }
