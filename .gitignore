@@ -42,6 +42,7 @@ models/
 *.flac
 *.ogg
 *.mp4
+*.webm
 *.mov
 *.gguf
 *.ggml
