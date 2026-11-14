@@ -177,12 +177,59 @@ open -a ./src-tauri/target/debug/bundle/macos/TalkQTE.app \
 Press play in QuickTime Player only once `dev_source` reads `started`. For an
 unattended run, start the video with the lab's own tooling.
 
+### Model connection without clicks
+
+Only a **debug** build with **both** `claude-cli` and `native-audio-spike`
+reads `TALKQTE_DEV_MODEL_CONNECTION` and `TALKQTE_DEV_MODEL_CALLS`, once at
+launch before auto-start. Release compilation excludes this setting code;
+the release scripts also refuse these development features.
+
+Setting `TALKQTE_DEV_MODEL_CONNECTION=on` is your explicit consent to send
+recent and new conversation lines to Anthropic through your signed-in Claude
+subscription for each live session started in that launch. Use fictional
+content only. It approves no prior notes and starts no audio source itself.
+Read [the full data policy](cue-model.md#what-leaves-the-device-and-when) before
+using it: over a session nearly every transcript line is sent, a few at a time,
+plus the session name if set and current/earlier cues. Nothing is sent until
+eligible transcript input arrives. The existing CLI version, sign-in and
+credential checks still run; no fallback or retry is added.
+
+Add these arguments to the launch command above when that build is used:
+
+```sh
+--env TALKQTE_DEV_MODEL_CONNECTION=on \
+--env TALKQTE_DEV_MODEL_CALLS=100 \
+--env TALKQTE_CUE_MODEL=opus-5.5 \
+--env TALKQTE_CUE_EFFORT=low
+```
+
+- Missing connection setting leaves consent off; use the ordinary review.
+  Any value other than exactly `on` (including empty), or an invalid call cap,
+  leaves cues off with a launch-settings reason. Correct it and relaunch.
+- The call cap defaults to **100**, even when approval comes from review.
+  An explicit cap must be a whole number **1–100**. Before any request beyond
+  that count, cues stop with a plain reason. There is no retry. Off/On and
+  Pause/Resume cannot reset the count; Stop and a new session begin a new run.
+- The panel says approval came from the launch setting. The companion retains
+  the cloud and sending indicator; while paused it shows only the paused state.
+  Off and Stop revoke permission, Pause cancels pending work, and none of these
+  controls reapply launch consent within the session.
+- The timing log's `evaluator` event records `approval: "launchSetting"`
+  (or `"review"` for clicks), alongside model and effort. A cap stop records
+  `evaluation_stopped` with `failure: "call_limit"` and no prompt or reply.
+
+Offline tests cover parsing, permission scope/controls and cap exhaustion.
+No real model call or native run was performed for this setting. Native panel
+visibility, process environment delivery and a bounded fictional end-to-end
+run remain acceptance checks before relying on unattended runs.
+
 ## During the run
 
 - The notebook and the companion credit "Audio from QuickTime Player" and say
-  the microphone is not used. The companion shows "App audio · Local".
-- Cues come from the engine's phrase rules, which is the product path. No
-  model evaluator is connected to this build.
+  the microphone is not used. With the model connection off, the companion shows "App audio · Local". With it on, its status says that lines go to Claude.
+- A build with `claude-cli` can use model cues after explicit review or the
+  launch consent above; without that feature the existing phrase rules remain.
+  This development connection is not a selected production provider.
 - Leave the run alone until the conversation ends. Pausing QuickTime Player
   pauses the audio, not the session clock.
 

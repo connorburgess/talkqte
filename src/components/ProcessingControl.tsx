@@ -23,6 +23,10 @@ const visuallyHidden = {
 } as const;
 
 export const issueText = {
+  devSettings:
+    'Cues are off: TALKQTE_DEV_MODEL_CONNECTION must be on or absent, and TALKQTE_DEV_MODEL_CALLS must be a whole number from 1 to 100. Correct the launch settings and relaunch.',
+  callLimit:
+    'Cues stopped: the development model call limit was reached. Nothing more will be sent in this session. Stop the session before starting another run.',
   scopeChanged:
     'Cues stopped: an approved note changed. Turn the model connection on again to continue.',
   inputLimit:
@@ -326,6 +330,8 @@ export function ProcessingControl({
     capture === 'running' &&
     (snapshot?.phase === 'off' || snapshot?.phase === 'unavailable') &&
     !status?.failed &&
+    snapshot?.issue !== 'callLimit' &&
+    snapshot?.issue !== 'devSettings' &&
     !!snapshot.processor &&
     !snapshot.approved;
   const approved = snapshot?.approved;
@@ -466,6 +472,14 @@ export function ProcessingControl({
       )}
       {active && snapshot?.lastDecision === 'quiet' && (
         <p className="processing-muted">No cue needed for the latest lines.</p>
+      )}
+      {snapshot?.approvalBySetting && (
+        <p className="processing-muted">
+          Model connection approved by the TALKQTE_DEV_MODEL_CONNECTION=on
+          launch setting for this session. Only recent and new conversation
+          lines are approved; no prior notes. Off, Pause cues and Stop remain
+          available.
+        </p>
       )}
       {approved && (
         <details className="processing-approved">

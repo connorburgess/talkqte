@@ -98,12 +98,19 @@ pub enum Event {
     },
     /// The model connection was turned on or off.
     Evaluator {
+        approval: &'static str,
         session: u64,
         state: &'static str,
         backend: String,
         model: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         effort: Option<String>,
+        elapsed_ms: u64,
+    },
+    /// Processing stopped before another request could be sent.
+    EvaluationStopped {
+        session: u64,
+        failure: &'static str,
         elapsed_ms: u64,
     },
     /// A request was sent to the evaluator. Ids and counts only.
@@ -595,6 +602,7 @@ mod tests {
     fn model_events_carry_ids_and_codes_but_no_prompt_or_reply() {
         let lines: Vec<serde_json::Value> = [
             Event::Evaluator {
+                approval: "launchSetting",
                 session: 3,
                 state: "on",
                 backend: "claude-cli".into(),
@@ -623,6 +631,7 @@ mod tests {
         .map(|event| serde_json::from_str(&line(event, 1, 2)).unwrap())
         .collect();
         assert_eq!(lines[0]["event"], "evaluator");
+        assert_eq!(lines[0]["approval"], "launchSetting");
         assert_eq!(lines[1]["event"], "evaluation_requested");
         assert_eq!(lines[1]["through_segment"], "w4");
         assert_eq!(lines[2]["event"], "evaluation_result");

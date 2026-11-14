@@ -40,6 +40,8 @@ export type ProcessingIssue =
   | 'timedOut'
   | 'invalidReply'
   | 'misconfigured'
+  | 'devSettings'
+  | 'callLimit'
   | 'worker'
   | null;
 export interface StopTarget {
@@ -63,6 +65,7 @@ export interface ProcessingSnapshot {
   lastDecision: 'quiet' | 'cue' | null;
   /** Conversation lines are being sent to the processor right now. */
   sending?: boolean;
+  approvalBySetting?: boolean;
   /** Development builds only: the microphone alone, beside a combined capture. */
   microphone?: ProcessingSnapshot['capture'];
   /** Development builds only: the selected-application source. */
