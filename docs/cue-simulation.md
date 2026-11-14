@@ -37,7 +37,7 @@ npm run lab:batch -- --set independent --evaluator fake --run --out <directory o
 npm run lab:batch -- --set cue-lab --evaluator rules --run --out <directory outside the repository>
 ```
 
-`--out` (or the `TALKQTE_LAB_OUTPUT` environment variable) must be an absolute path outside the checkout. The runner refuses a path inside the repository, including through a link, so results, logs and recordings cannot be committed by accident.
+`--out` (or the `TALKQTE_LAB_OUTPUT` environment variable) must be an absolute path outside the checkout. The runner refuses a path inside the repository, including through a link or another letter case of the same folder, and writes to the resolved location, so results, logs and recordings cannot be committed by accident.
 
 ## A bounded model run
 
@@ -51,7 +51,7 @@ npm run lab:batch -- --set held-out --run --out <directory outside the repositor
 What the runner enforces:
 
 - **A call cap.** `--max-calls` is required, from 1 to 100. A run that would need more requests than the cap is refused before anything starts, and the loop stops at the cap regardless.
-- **No API key, ever.** If the shell carries an API key, auth token, base-URL override or provider switch (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_…` and similar), the run is refused before any process starts and the message names the variables, never their values. The existing checks still apply after that: the child process gets an allowlisted environment, and an API-key, routed or unknown sign-in is rejected before any model request.
+- **No API key, ever.** If the shell carries an API key, auth token, base-URL override or provider switch (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_…` and similar), the run is refused before any process starts and the message names the variables, never their values. The single-case command refuses the same way. General network proxy variables are not treated as credentials; they are simply not passed on. The existing checks still apply after that: the child process gets an allowlisted environment, and an API-key, routed or unknown sign-in is rejected before any model request.
 - **One sign-in check, then one request per case, one at a time.** No retry, no alternate model, no fallback.
 - **Stop at the first failure.** A usage limit, an error, a reply from another model, or a malformed decision ends the batch. Whatever completed is written, with the reason.
 - **Nothing recurring.** There is no schedule and no loop that starts by itself; CI never runs a model.

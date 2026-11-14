@@ -20,7 +20,9 @@ function real(path) {
   const rest = [];
   for (;;) {
     try {
-      return join(realpathSync(existing), ...rest);
+      // The native call also returns the stored spelling, so a path that
+      // differs from the checkout only by letter case is still recognized.
+      return join(realpathSync.native(existing), ...rest);
     } catch {
       const parent = dirname(existing);
       if (parent === existing) return resolve(path);
@@ -44,13 +46,16 @@ export function outputDirectory(
     );
   if (!isAbsolute(value))
     throw new Error('The output directory must be an absolute path.');
-  const inside = relative(real(root), real(value));
+  // Everything after this uses the resolved location, never the text given,
+  // so a link or "link/.." cannot lead somewhere other than what was checked.
+  const directory = real(value);
+  const inside = relative(real(root), directory);
   if (inside === '' || (!inside.startsWith('..') && !isAbsolute(inside)))
     throw new Error(
       'The output directory is inside the repository. Lab results, logs and recordings stay outside it.',
     );
-  mkdirSync(value, { recursive: true });
-  return value;
+  mkdirSync(directory, { recursive: true });
+  return directory;
 }
 
 /** 20261114-093005, in UTC, for file names that sort by time. */

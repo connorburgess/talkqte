@@ -12,13 +12,7 @@
 //
 // `latency` says what elapsedMs is: 'measured' wall time of a real request,
 // 'simulated' for the fake, or 'none' for recorded rule outcomes.
-import {
-  MODEL,
-  buildPrompt,
-  inheritedCredentialNames,
-  openLab,
-  validateDecision,
-} from './cue-lab.mjs';
+import { MODEL, buildPrompt, openLab, validateDecision } from './cue-lab.mjs';
 
 /** Claude Code through the subscription sign-in. Hosted inference. */
 export function claudeEvaluator({ environment = process.env, run } = {}) {
@@ -31,13 +25,8 @@ export function claudeEvaluator({ environment = process.env, run } = {}) {
     destination:
       'Anthropic, through the Claude Code subscription sign-in on this device',
     async open() {
-      // Refuse rather than quietly drop them: an inherited key or gateway
-      // means this shell is set up for something other than the subscription.
-      const names = inheritedCredentialNames(environment);
-      if (names.length)
-        throw new Error(
-          `This shell carries API or provider settings (${names.join(', ')}). No process was started. Run the lab from a shell without them; it uses the subscription sign-in only.`,
-        );
+      // openLab refuses, before any process, when the shell carries an API
+      // key, token, gateway or provider switch.
       lab = await openLab(run ? { environment, run } : { environment });
       return {
         model: MODEL,
