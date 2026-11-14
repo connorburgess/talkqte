@@ -7,12 +7,24 @@
 //   hosted             true when case text leaves the device
 //   destination        where it goes, in plain words (hosted only)
 //   open()             one-time checks; returns facts for the results file
+//   request(testCase)  { systemPrompt, input }: exactly what deciding this
+//                      case reads or sends; null where there is nothing.
+//                      The dry run prints it and the log records it.
 //   decide(testCase)   { decision, elapsedMs, latency, usage?, provider? }
 //   close()
 //
+// `hosted` must be exactly false for an evaluator to run without the usage
+// acknowledgement and a call cap: anything else is treated as hosted.
+//
 // `latency` says what elapsedMs is: 'measured' wall time of a real request,
 // 'simulated' for the fake, or 'none' for recorded rule outcomes.
-import { MODEL, buildPrompt, openLab, validateDecision } from './cue-lab.mjs';
+import {
+  MODEL,
+  buildPrompt,
+  openLab,
+  requestFor,
+  validateDecision,
+} from './cue-lab.mjs';
 
 /** Claude Code through the subscription sign-in. Hosted inference. */
 export function claudeEvaluator({ environment = process.env, run } = {}) {
@@ -34,6 +46,7 @@ export function claudeEvaluator({ environment = process.env, run } = {}) {
         authentication: lab.access.authentication,
       };
     },
+    request: requestFor,
     async decide(testCase) {
       const report = await lab.evaluate(testCase);
       return {
@@ -81,6 +94,11 @@ export function fakeEvaluator({ latencyMs } = {}) {
     async open() {
       return { model: null };
     },
+    // It reads the same input a model would be sent, and no system prompt.
+    request: (testCase) => ({
+      systemPrompt: null,
+      input: buildPrompt(testCase),
+    }),
     async decide(testCase) {
       const input = buildPrompt(testCase);
       const newest = testCase.events.at(-1);
@@ -146,8 +164,10 @@ export function rulesEvaluator(outcomes) {
     async open() {
       return { model: null };
     },
+    // Nothing is read but the recorded outcome for the case.
+    request: () => ({ systemPrompt: null, input: null }),
     async decide(testCase) {
-      const action = outcomes[testCase.id];
+      const action = outcomes?.[testCase.id];
       if (!action)
         throw new Error(`No recorded rule outcome for ${testCase.id}.`);
       return {
@@ -165,3 +185,25 @@ export function rulesEvaluator(outcomes) {
     async close() {},
   };
 }
+
+/** Every evaluator the lab can use, by the name given to --evaluator. Each
+ * takes what the runner knows: the environment, the recorded rule outcomes
+ * for the chosen set, and an optional made-up delay. Adding a provider
+ * means adding one entry here. */
+export const EVALUATORS = {
+  claude: ({ environment }) => claudeEvaluator({ environment }),
+  fake: ({ latencyMs }) => fakeEvaluator({ latencyMs }),
+  rules: ({ rules }) => rulesEvaluator(rules),
+};
+
+export function createEvaluator(name, context, evaluators = EVALUATORS) {
+  if (!Object.hasOwn(evaluators, name))
+    throw new Error(
+      `Unknown evaluator. Choose one of: ${Object.keys(evaluators).join(', ')}.`,
+    );
+  return evaluators[name](context);
+}
+
+/** Whether an evaluator must be treated as sending text off the device.
+ * Only an explicit false says it does not. */
+export const isHosted = (evaluator) => evaluator.hosted !== false;

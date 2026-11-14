@@ -246,6 +246,11 @@ test('inherited API keys, tokens, gateways and provider switches stop a hosted r
     ['CLAUDE_CODE_OAUTH_REFRESH_TOKEN', 'fictional-secret-value'],
     ['CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR', '3'],
     ['CLAUDE_CONFIG_DIR', '/fictional-config'],
+    ['CLAUDE_CODE_SKIP_BEDROCK_AUTH', '1'],
+    ['CLOUD_ML_REGION', 'fictional-region'],
+    ['HTTPS_PROXY', 'http://example.invalid:8080'],
+    ['https_proxy', 'http://example.invalid:8080'],
+    ['ALL_PROXY', 'http://example.invalid:8080'],
   ]) {
     const environment = { ...clean, [key]: value };
     assert.deepEqual(inheritedCredentialNames(environment), [key]);
@@ -259,24 +264,24 @@ test('inherited API keys, tokens, gateways and provider switches stop a hosted r
     });
     assert.equal(cli.calls.length, 0, key);
     assert.equal(results.cases.length, 0);
-    assert.match(results.stopped.reason, new RegExp(key));
+    assert.ok(results.stopped.reason.includes(key), key);
     assert.ok(!results.stopped.reason.includes(value), 'names only');
     // The single-case command refuses the same way.
     const single = fakeCli([reply(quiet())]);
     await assert.rejects(
       runLab(cases[0], { environment, run: single.run }),
-      new RegExp(`${key}.*No process was started`),
+      (error) =>
+        error.message.includes(key) &&
+        /No process was started/.test(error.message),
     );
     assert.equal(single.calls.length, 0, key);
   }
-  // Ordinary variables, an empty one, and a general network proxy are not
-  // credentials; the child process is not given the proxy either.
+  // Ordinary variables and an empty one are not refused.
   assert.deepEqual(
     inheritedCredentialNames({
       ...clean,
       ANTHROPIC_API_KEY: '',
       EDITOR: 'x',
-      HTTPS_PROXY: 'http://example.invalid',
       CLAUDE_CODE_ENTRYPOINT: 'cli',
     }),
     [],
@@ -581,4 +586,87 @@ test('summaries count quiet separately and use nearest-rank percentiles', () => 
   });
   assert.equal(percentile([], 0.5), null);
   assert.equal(percentile([5, 1, 3], 0.5), 3);
+});
+
+test('an adapter that does not say it is on-device is held to the confirmation and the cap', async () => {
+  const set = await loadSet('cue-lab');
+  // A new adapter that forgot to declare `hosted` at all.
+  let opened = 0;
+  const { hosted: _omitted, ...undeclared } = {
+    ...fakeEvaluator(),
+    id: 'undeclared',
+    open: async () => {
+      opened++;
+      return { model: 'fictional' };
+    },
+  };
+  for (const args of [
+    ['--run', '--out', out()],
+    ['--run', '--out', out(), '--included-usage-confirmed'],
+  ])
+    await assert.rejects(
+      main(['--set', 'cue-lab', '--evaluator', 'undeclared', ...args], {
+        print: () => {},
+        environment: clean,
+        evaluators: { undeclared: () => undeclared },
+      }),
+      /--included-usage-confirmed|call cap/,
+    );
+  // Called directly, without the command line's checks, it still refuses.
+  for (const maxCalls of [undefined, Infinity, 0, 1.5, MAX_CALLS_CEILING + 1])
+    await assert.rejects(
+      runBatch({
+        set,
+        cases: set.cases,
+        rules: {},
+        evaluator: undeclared,
+        maxCalls,
+      }),
+      /needs a call cap/,
+    );
+  assert.equal(opened, 0);
+  // An explicit on-device evaluator needs neither.
+  const results = await runBatch({
+    set,
+    cases: set.cases,
+    rules: {},
+    evaluator: fakeEvaluator(),
+  });
+  assert.equal(results.cases.length, 11);
+});
+
+test('the dry run prints what the adapter says it would send, and a command that keeps the selection', async () => {
+  const lines = [];
+  await main(
+    ['--set', 'held-out', '--cases', 'plain-idiom,asked-of-the-user'],
+    {
+      print: (line) => lines.push(line),
+      environment: clean,
+    },
+  );
+  const text = lines.join('\n');
+  assert.match(
+    text,
+    /--set held-out --cases plain-idiom,asked-of-the-user --run .* --max-calls 2 --included-usage-confirmed/,
+  );
+  assert.match(
+    text,
+    /2 CLI checks \(version and sign-in\) that send no case text/,
+  );
+  // The plan is the adapter's own description of each request.
+  const { cases } = await loadSet('held-out');
+  const adapter = claudeEvaluator({ environment: clean });
+  for (const id of ['plain-idiom', 'asked-of-the-user']) {
+    const request = adapter.request(cases.find((item) => item.id === id));
+    assert.ok(text.includes(request.input));
+    assert.ok(text.includes(request.systemPrompt));
+  }
+  // Recorded rule outcomes read nothing, and say so.
+  const rules = [];
+  await main(['--set', 'cue-lab', '--evaluator', 'rules'], {
+    print: (line) => rules.push(line),
+    environment: clean,
+  });
+  assert.match(rules.join('\n'), /the recorded outcome for this case is read/);
+  assert.doesNotMatch(rules.join('\n'), /System prompt/);
 });
