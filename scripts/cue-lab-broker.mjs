@@ -226,6 +226,7 @@ export async function openLabBroker({
     maxCalls,
     signal,
     onTerminal: (category) => {
+      observation = null;
       readyReject(gateFailure(category));
       probe?.reject(gateFailure(category));
       evaluation?.rejectAck(gateFailure(category));
@@ -688,7 +689,7 @@ export async function openLabBroker({
       playback = { monotonicMs, uncertaintyMs };
     },
     cuesAt(nowMs) {
-      requireThat(clock && playback && ms(nowMs));
+      requireThat(!gate.terminal && !closing && clock && playback && ms(nowMs));
       const cue = observation?.currentCue;
       if (!cue || cue.resolved) return [];
       const atMs =

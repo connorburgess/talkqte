@@ -206,3 +206,62 @@ test('provider failure cannot be swallowed by a task or leak raw text', async ()
   await assert.rejects(call('listener'), stopped('provider'));
   await gate.close();
 });
+
+for (const variant of ['deadline', 'stop'])
+  test(`a never-settled acknowledgement is bounded on ${variant}, with cleanup owning the lease`, async () => {
+    let began, finishCleanup;
+    const entered = new Promise((resolve) => {
+      began = resolve;
+    });
+    const cleanup = new Promise((resolve) => {
+      finishCleanup = resolve;
+    });
+    const gate = createLabOperationGate({
+      provider: {
+        request: async () => ({ value: {} }),
+        close: () => cleanup,
+      },
+      maxCalls: 2,
+    });
+    let completed = false;
+    const operation = gate.run(
+      async () => {
+        await gate.request(req('cue-evaluator'));
+        await gate.settle(
+          () => {
+            began();
+            return new Promise(() => {});
+          },
+          { deadlineMs: variant === 'deadline' ? 10 : 1000 },
+        );
+      },
+      { role: 'cue-evaluator' },
+    );
+    const checked = assert.rejects(
+      operation,
+      stopped(variant === 'deadline' ? 'deadline' : 'closed'),
+    );
+    operation
+      .finally(() => {
+        completed = true;
+      })
+      .catch(() => {});
+    await entered;
+    if (variant === 'deadline') await delay(30);
+    const closing = gate.close();
+    assert.equal(gate.terminal, variant === 'deadline' ? 'deadline' : 'closed');
+    assert.equal(completed, false);
+    await assert.rejects(
+      gate.run(() => gate.request(req()), { role: 'cast' }),
+      stopped(gate.terminal),
+    );
+    assert.equal(gate.dispatchesUsed, 1);
+    finishCleanup();
+    await Promise.race([
+      Promise.all([checked, closing]),
+      delay(500).then(() => {
+        throw new Error('settlement cleanup did not finish');
+      }),
+    ]);
+    assert.equal(completed, true);
+  });

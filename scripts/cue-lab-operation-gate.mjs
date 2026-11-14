@@ -215,7 +215,19 @@ export function createLabOperationGate({
     lease.settlement = true;
     clearTimeout(lease.timer);
     lease.timer = setTimeout(() => stop('deadline'), deadlineMs);
-    return task();
+    // Settlement is a bounded acknowledgement, not another provider operation.
+    // A missing acknowledgement must not prevent terminal cleanup/close.
+    let rejectAbort;
+    const cancelled = new Promise((_, reject) => {
+      rejectAbort = reject;
+    });
+    const abort = () => rejectAbort(gateFailure(terminal ?? 'cancelled'));
+    lease.controller.signal.addEventListener('abort', abort, { once: true });
+    try {
+      return await Promise.race([Promise.resolve().then(task), cancelled]);
+    } finally {
+      lease.controller.signal.removeEventListener('abort', abort);
+    }
   };
   const waitIdle = async ({ signal: waiterSignal } = {}) => {
     if (terminal) throw gateFailure(terminal);

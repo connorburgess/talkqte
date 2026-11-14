@@ -625,3 +625,117 @@ test('invalid source reply, failed emission and receive overflow are terminal wi
     }
   }
 });
+
+for (const variant of ['stop', 'revoke', 'disconnect', 'close', 'failure'])
+  test(`a published cue cannot remain actionable after ${variant}`, async () => {
+    const ctx = await setup();
+    try {
+      ctx.evaluate();
+      await ctx.next('result');
+      ctx.settle();
+      await ctx.broker.gate.waitIdle();
+      ctx.send('cue_state', {
+        observation: {
+          snapshotRevision: '1',
+          nativeSessionElapsedMs: 1200,
+          publicationSucceeded: true,
+          cleared: [],
+          currentCue: {
+            cueId: 'c1',
+            text: 'Who owns the review?',
+            kind: 'question',
+            held: false,
+            resolved: false,
+            decider: 'model',
+            requestId: '1',
+            decisionAtNativeMs: 1050,
+            publishedAtNativeMs: 1100,
+          },
+        },
+      });
+      for (let n = 0; n < 100 && !ctx.broker.observation; n++) await delay(2);
+      assert.equal(ctx.broker.cuesAt(1000).length, 1);
+      if (variant === 'disconnect') ctx.socket.destroy();
+      else if (variant === 'close') await ctx.broker.close();
+      else if (variant === 'failure') ctx.send('unknown');
+      else ctx.send('cancel', { reason: variant });
+      await terminal(ctx.broker);
+      assert.equal(ctx.broker.observation, null);
+      assert.throws(() => ctx.broker.cuesAt(1000));
+    } finally {
+      await ctx.close();
+    }
+  });
+
+for (const connect of [false, true])
+  test(`independent pre-auth Stop awaits participant cleanup with ${connect ? 'an unauthenticated client' : 'no client'}`, async () => {
+    const root = new AbortController();
+    let began,
+      release,
+      cleaned = false;
+    const entered = new Promise((resolve) => {
+      began = resolve;
+    });
+    const cleanup = new Promise((resolve) => {
+      release = resolve;
+    });
+    const broker = await openLabBroker({
+      provider: {
+        metadata: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' },
+        request: ({ signal }) =>
+          new Promise((_, reject) => {
+            signal.addEventListener(
+              'abort',
+              async () => {
+                await cleanup;
+                cleaned = true;
+                reject(new Error('fictional cancelled work'));
+              },
+              { once: true },
+            );
+            began();
+          }),
+        close: async () => {},
+      },
+      maxCalls: 2,
+      signal: root.signal,
+    });
+    let socket;
+    if (connect) {
+      const descriptor = JSON.parse(
+        await readFile(broker.descriptorPath, 'utf8'),
+      );
+      socket = createConnection({ path: descriptor.socketPath });
+      await new Promise((resolve, reject) => {
+        socket.once('connect', resolve);
+        socket.once('error', reject);
+      });
+    }
+    let completed = false;
+    const operation = broker.gate.run(
+      () => broker.gate.request({ role: 'cast' }),
+      { role: 'cast' },
+    );
+    const checked = assert.rejects(operation);
+    operation
+      .finally(() => {
+        completed = true;
+      })
+      .catch(() => {});
+    await entered;
+    root.abort();
+    const closing = broker.close();
+    assert.equal(completed, false);
+    assert.equal(cleaned, false);
+    assert.equal(broker.gate.dispatchesUsed, 1);
+    release();
+    await Promise.all([checked, closing]);
+    assert.equal(completed, true);
+    assert.equal(cleaned, true);
+    socket?.destroy();
+    await assert.rejects(
+      broker.gate.run(() => broker.gate.request({ role: 'judge' }), {
+        role: 'judge',
+      }),
+    );
+  });

@@ -67,7 +67,7 @@ are finite safe JSON numbers.
 | App → broker | `settled`      | same request identity, `verdict` (`current`, `staleSuccess`, `failed`), optional fixed `code` only on failure      |
 | App → broker | `cancel`       | fixed control `reason`, optional active request identity                                                           |
 | Broker → app | `failed`       | request identity and fixed `code`                                                                                  |
-| Broker → app | `terminal`     | fixed `code` and `reason`, including while no evaluation is pending                                                |
+| Broker → app | `terminal`     | fixed `reason`, including while no evaluation is pending                                                           |
 | Broker → app | `clock_probe`  | `probeId`                                                                                                          |
 | App → broker | `clock_sample` | same `probeId`, `nativeSessionElapsedMs`                                                                           |
 | App → broker | `cue_state`    | `observation` described below                                                                                      |
