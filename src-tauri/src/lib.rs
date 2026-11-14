@@ -19,6 +19,13 @@ pub mod cue_evaluator;
     feature = "native-audio-spike"
 ))]
 mod dev_model;
+#[cfg(all(
+    debug_assertions,
+    target_os = "macos",
+    feature = "native-audio-spike",
+    feature = "lab-evaluator"
+))]
+mod dev_stop;
 pub mod engine;
 pub mod granola;
 #[cfg(all(

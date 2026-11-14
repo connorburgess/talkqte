@@ -41,6 +41,8 @@ const QUEUE: usize = 1024;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
+    /// Owned development process Stop handshake. Receipt is not release.
+    DevStop { run_id: String, step: &'static str },
     /// A session started or ended, with its clock at that moment. Anchors
     /// session time to wall time.
     Session {
