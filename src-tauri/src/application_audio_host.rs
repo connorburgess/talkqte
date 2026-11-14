@@ -235,7 +235,9 @@ impl Listed {
         }
         state.listing = None;
         match result {
-            Ok(applications) => state.listed = applications,
+            Ok(applications) => {
+                state.listed = crate::application_audio::listing::shown(applications)
+            }
             Err(Failure::Cancelled) => {}
             Err(Failure::PermissionDenied) => state.problem = Some(Problem::PermissionDenied),
             Err(_) => state.problem = Some(Problem::ListFailed),
@@ -662,6 +664,21 @@ impl Host {
             Some(Ended::Refused(refused)) => refusal_problem(*refused),
             Some(Ended::Unwound) | None => return,
         };
+        if crate::timing_log::enabled() {
+            let recognized_chunks = match &*active.ended.lock().unwrap_or_else(|e| e.into_inner()) {
+                Some(Ended::Released(report)) => Some(report.worker.chunks),
+                _ => None,
+            };
+            crate::timing_log::record(crate::timing_log::Event::SourceEnded {
+                application: active.application.name().to_owned(),
+                problem: problem.and_then(|problem| {
+                    serde_json::to_value(problem)
+                        .ok()
+                        .and_then(|value| value.as_str().map(str::to_owned))
+                }),
+                recognized_chunks,
+            });
+        }
         state.problem = problem;
         state.active = None;
     }
@@ -866,6 +883,11 @@ fn native_problem(problem: NativeProblem) -> Problem {
         NativeProblem::StartFailed => Problem::StartFailed,
         NativeProblem::StopFailed => Problem::StopFailed,
         NativeProblem::RemoveFailed => Problem::RemoveFailed,
+        NativeProblem::PermissionNeeded => Problem::PermissionNeedsReopen,
+        NativeProblem::SourceGone => Problem::ApplicationEnded,
+        NativeProblem::AudioFailed => Problem::AudioCaptureFailed,
+        NativeProblem::StoppedByMacOS => Problem::StoppedByMacOS,
+        NativeProblem::AudioUnreadable => Problem::AudioUnreadable,
     }
 }
 

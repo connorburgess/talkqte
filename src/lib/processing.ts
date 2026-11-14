@@ -188,6 +188,24 @@ export function sourceProblem(problem: string | null | undefined) {
     case 'sessionBusy':
     case 'sessionHasSource':
       return 'Another session or the microphone is running. Stop it, then start again.';
+    case 'permissionNeedsReopen':
+      return 'macOS has not given this copy of TalkQTE Screen & System Audio Recording yet. If you just granted it, quit and reopen TalkQTE, then start again.';
+    case 'applicationEnded':
+      return 'That application quit or can no longer be captured. Open it, then list applications again.';
+    case 'audioCaptureFailed':
+      return 'macOS could not capture audio from that application.';
+    case 'audioUnreadable':
+      return 'Audio from that application arrived in a form TalkQTE cannot read.';
+    case 'stoppedByMacOS':
+      return 'Capture was stopped outside TalkQTE, for example from the menu bar.';
+    case 'startFailed':
+      return 'macOS did not start capturing that application.';
+    case 'streamFailed':
+      return 'macOS stopped capturing that application soon after it started.';
+    case 'noLiveSession':
+      return "The session ended before the application's audio began. Start again.";
+    case 'clockRefused':
+      return "TalkQTE could not line up the application's audio with the session's clock. Start again.";
     case 'noMatchingApplication':
       return 'No single running application has the exact name TALKQTE_DEV_APPLICATION_SOURCE gives. Nothing was started.';
     case 'devSettingInvalid':

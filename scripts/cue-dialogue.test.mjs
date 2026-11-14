@@ -275,6 +275,7 @@ test('the first failure stops the run, with its kind, and nothing is retried', a
       {
         category: 'usage-limit',
         exitCode: 1,
+        signals: ['rate limit'],
       },
     );
   };
@@ -286,6 +287,7 @@ test('the first failure stops the run, with its kind, and nothing is retried', a
     };
   }
   const { results } = await rehearse({ agents });
+  assert.deepEqual(results.stopped.signals, ['rate limit']);
   assert.equal(listenerCalls, 1);
   assert.equal(after, 0);
   assert.equal(results.stopped.category, 'usage-limit');
@@ -1149,4 +1151,47 @@ test('the generator is told how long the call runs, and a distraction outside it
     /must end within the call's 84000 ms/,
   );
   assert.match(GENERATOR_PROMPT, /callLengthMs/);
+});
+
+test('all dialogue roles remain sequential across scenarios and branches', async () => {
+  const chosen = [byId('release-handoff'), byId('renewal-seat-count')];
+  const agents = fakeAgents(chosen);
+  const evaluator = fakeEvaluator({ latencyMs: 1_500 });
+  let active = 0;
+  let peak = 0;
+  const roles = new Set();
+  for (const [role, agent] of [
+    ...Object.entries(agents),
+    ['evaluator', evaluator],
+  ]) {
+    const method = role === 'evaluator' ? 'decide' : 'reply';
+    const original = agent[method].bind(agent);
+    agent[method] = async (...args) => {
+      roles.add(role);
+      active++;
+      peak = Math.max(peak, active);
+      try {
+        await new Promise((resolve) => setImmediate(resolve));
+        return await original(...args);
+      } finally {
+        active--;
+      }
+    };
+  }
+  const results = await runDialogue({
+    agents,
+    evaluator,
+    plan: { ...DEFAULT_PLAN, scenarios: chosen.length },
+    maxCalls: 300,
+  });
+  assert.equal(results.stopped, null);
+  assert.equal(peak, 1);
+  assert.equal(active, 0);
+  assert.deepEqual([...roles].sort(), [
+    'cast',
+    'evaluator',
+    'generator',
+    'judge',
+    'listener',
+  ]);
 });

@@ -7,6 +7,7 @@
 
 pub mod chunks;
 pub mod handoff;
+pub mod listing;
 #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
 pub mod native;
 pub mod timing;
@@ -25,6 +26,8 @@ pub const SCOPE_NOTICE: &str = "Audio from all windows of this application may b
 pub struct Application {
     selection_id: String,
     name: String,
+    /// What the native listing knows about it; absent in fixtures.
+    traits: Option<listing::Traits>,
 }
 
 impl Application {
@@ -44,7 +47,20 @@ impl Application {
         {
             return Err(Failure::InvalidSource);
         }
-        Ok(Self { selection_id, name })
+        Ok(Self {
+            selection_id,
+            name,
+            traits: None,
+        })
+    }
+
+    pub fn with_traits(mut self, traits: listing::Traits) -> Self {
+        self.traits = Some(traits);
+        self
+    }
+
+    pub fn traits(&self) -> Option<&listing::Traits> {
+        self.traits.as_ref()
     }
 
     pub fn selection_id(&self) -> &str {

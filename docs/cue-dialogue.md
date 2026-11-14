@@ -92,7 +92,7 @@ Rendering comes afterwards. Today's recorder, voices and portraits play only the
 
 - **Manual, with a cap.** Every run is started by hand with `--max-calls` (1 to 300). The cap covers generator, participant, evaluator and judge calls together.
 - **Refused before it starts** if its worst case exceeds the cap. Per scenario the worst case is one generator call, plus `branches × (maxTurns + ⌊maxTurns ÷ interjectEvery⌋)` participant calls, plus `maxTurns` evaluator calls, plus one judge call per branch. With the defaults (14 turns, a chance to speak up every 3, branches A and B) that is 53 per scenario. The shared prefix and early endings make the real number smaller, and the loop still stops at the cap regardless.
-- **Stop at the first failure.** A failed call, an unusable reply (a cast reply that speaks as the listener, a judge reply that skips a criterion), or the cap ends the run. The results keep everything completed, with the reason, the CLI's exit code where there is one, and the kind of failure, using cue-lab's kinds plus `invalid-reply` and `call-cap`. Nothing is retried, and no other model is asked.
+- **Stop at the first failure.** A failed call, an unusable reply (a cast reply that speaks as the listener, a judge reply that skips a criterion), or the cap ends the run. The results keep everything completed, with the reason, the CLI's exit code where there is one, the kind of failure, and fixed labels for matching CLI failure patterns (for example `oauth` or `401`), using cue-lab's kinds plus `invalid-reply` and `call-cap`. Nothing is retried, and no other model is asked.
 - **Nothing recurring.** There is no schedule, no loop that starts by itself, and CI never makes a model call.
 
 ## Run it
