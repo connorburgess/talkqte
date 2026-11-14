@@ -14,20 +14,18 @@ meeting, a real person's voice, or any audio you would not publish.
 
 ## Disk
 
-Do not build below the project's disk floor. A development build with local
-transcription and application audio needs, on top of what a debug build of
-the app already uses:
+Do not build below the project's disk floor. Measured on 14 November 2026,
+building into a folder that already held the project's debug test builds:
 
-- about 0.3–0.5 GiB for whisper.cpp, built from source by CMake;
-- about 1–2 GiB of Rust debug build output for the app binary and the crates
-  that the extra features and the app build profile recompile;
-- about 0.05 GiB for the debug app bundle;
-- 0.08 GiB for the speech model, plus the 0.5 GiB the app keeps free whenever
-  it downloads one.
+- 0.98 GiB for the first build with `local-whisper` and `native-audio-spike`,
+  including whisper.cpp built from source (about 0.09 GiB of that) and the
+  56.5 MiB app bundle;
+- 0.34 GiB more to add `timing-log`, which recompiles only TalkQTE's own code;
+- 0.08 GiB for the speech model, not yet downloaded, plus the 0.5 GiB the app
+  keeps free whenever it downloads one.
 
-Plan on 4–6 GiB free above the floor before starting, and more if the build
-folder starts empty. These are estimates from earlier builds of this project,
-not a measurement of this configuration.
+That is about 1.3 GiB for the build. A build into an empty folder compiles
+every dependency and needs more; allow several GiB above the floor.
 
 ## Build
 
@@ -81,7 +79,7 @@ open -a ./src-tauri/target/debug/bundle/macos/TalkQTE.app \
 ```
 
 _To confirm:_ that `open --env` passes the variable on the owner's macOS. The
-alternative is running the executable inside `TalkQTE.app/Contents/MacOS/`
+alternative is running `TalkQTE.app/Contents/MacOS/talkqte`
 from Terminal with the variable set. macOS may then attribute the Screen
 Recording permission to Terminal rather than TalkQTE.
 
