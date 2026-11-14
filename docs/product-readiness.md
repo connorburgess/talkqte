@@ -160,6 +160,28 @@ What each check needs now:
 
 What would unblock them without a microphone: a development-only way to feed the built app or a served page a fictional, clearly labelled simulated session, as the lab's recording stage already does for the companion in a desktop browser through the browser tests' stand-in. That state must never ship as reachable in an ordinary build, never say Live or claim a microphone, and never read real content. Acceptance: one fictional cue appears in the native companion of a development build with no microphone permission requested, labelled as simulated in the app's own words, and the same build's ordinary configuration cannot reach it. Not built; no decision has been made to build it.
 
+### Model provider for a shipped product
+
+Release blocker, recorded 14 November 2026. At the owner's decision, the real app's cues will come from a model, and the on-device phrase rules will be removed ([design](cue-model.md)). The only backend planned so far calls the Claude Code CLI with the owner's own subscription. It is for the owner's own use and the lab, not for a product:
+- A shipped product cannot share one person's subscription among its users.
+- No production provider is chosen.
+
+Until one is chosen and verified, a shipped build has no model connection, so it shows no cues at all. No option is chosen here.
+
+| Option | What it would need |
+| --- | --- |
+| **Each person signs in with their own Claude subscription**, through an unmodified Claude Code CLI on their Mac | **Terms.** A review of Anthropic's [product integration conditions](https://code.claude.com/docs/en/legal-and-compliance), including any commercial agreement, unmodified binaries, users authenticating for themselves, and not restricting built-in sign-in. **The person's setup.** Each person needs a paid plan and the CLI, and cues use their allowance alongside their other work. **Onboarding and support.** Installation, sign-in and allowance messages, plus support for CLI updates. **Data.** Meeting lines go to Anthropic under each person's consumer account settings and retention, which must be disclosed. |
+| **A TalkQTE-operated service with a commercial API account** (Anthropic's API or a cloud provider) | **The owner's decisions.** Billing and pricing, because each request costs money, and leaving the current no-paid-API preference. **Infrastructure.** A server, so no key ships in the app, with key custody and rate limits; accounts or another way to attribute use; uptime and support. **Data.** Commercial data terms such as retention controls, a privacy review, and disclosure that lines pass through TalkQTE's service. |
+| **Each person supplies their own API key** | **Key handling.** Keychain storage and never logging the key. **Cost.** Plain disclosure, because each person pays per request; no TalkQTE server is needed. **Setup.** Key creation and onboarding are harder than a sign-in. **Data.** The provider's API terms for that person. |
+| **A model on the Mac** | **Quality.** A model that matches the lab's quality and the [latency budget](budgets.md) on the lowest supported Mac, alongside local transcription. **Delivery.** Its size, memory, energy use, download and licence. Whether any such model exists is unknown, and none has been tried. |
+| **Another provider's CLI or API** | The same questions for that provider: terms, allowance or billing, isolation, retention, and a comparison on the lab's cases. No TalkQTE test exists. |
+
+Acceptance for this blocker:
+- the owner chooses an option;
+- its terms and data handling are reviewed and disclosed;
+- a fresh build signs in or connects as that option requires, on a clean Mac;
+- cue latency and quality are measured on the lab's cases before any real conversation.
+
 ### Voiced practice demo
 
 **Retired in the app on 14 November 2026.** The voiced demo described below was built and bundled, then removed from the notebook together with its voices at the owner's decision; fictional demonstrations now come from the lab's simulations and recordings ([batches and simulations](cue-simulation.md)). The requirements below are kept as what a fictional demonstration must do. The roadmap items stay open.
