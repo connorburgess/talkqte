@@ -53,7 +53,7 @@ export const PLANNED = {
 export const GENERATOR_PROMPT = `You write the brief for one realistic, entirely fictional work meeting, used to simulate a conversation.
 Invent everything. People have first names only. Name no real person, company, product, place of business, website or contact detail; invent any team or product a meeting needs and describe it generically.
 Make it ordinary and believable for the given domain: people with their own goals, partial knowledge and small frictions, not a puzzle.
-One person is the focus person: we follow the meeting from their side. They may be half-listening at times (distracted windows, in milliseconds from the start of the call, with what they are doing).
+One person is the focus person: we follow the meeting from their side. They may be half-listening at times (distracted windows, in milliseconds from the start of the call, with what they are doing). The call lasts about callLengthMs milliseconds; every distracted window must end within it.
 Moments are things that naturally happen in such meetings, planted through someone's private facts:
 - open moments, of these kinds: unowned-task (something needs doing and nobody takes it), question-to-focus (someone asks the focus person something by name), wrong-figure (someone states a number or fact that another person's private facts contradict), date-slip (a date moves and its consequence is left unsaid);
 - settled moments: a loose end that the conversation resolves by itself;
@@ -320,6 +320,11 @@ export function fakeAgents(briefs) {
   };
 }
 
+/** Output-token limits by role. The generator writes a whole brief and the
+ * judge a verdict per criterion; the cast and listener write a turn and
+ * keep the contract's own limit, as the cue evaluator does. */
+export const OUTPUT_LIMITS = { generator: 4_000, judge: 1_500 };
+
 /** Efforts a role may ask the CLI for: those the shared contract lists. */
 export const ROLE_EFFORTS = EFFORTS;
 
@@ -394,6 +399,9 @@ export function claudeAgents({
           // The engine checks the reply against the role's view.
           reply: (value) => value,
           task: `the ${role} turn`,
+          ...(OUTPUT_LIMITS[role]
+            ? { maxOutputTokens: OUTPUT_LIMITS[role] }
+            : {}),
           acceptedAs: `a ${role} reply`,
           expected: `${role} JSON`,
         });

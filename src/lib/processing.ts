@@ -89,6 +89,9 @@ export interface SourceCapture {
   operation: string | null;
   /** The live session was started for this source alone; no microphone. */
   sourceSession: boolean;
+  /** Development builds only: started by the launch setting, which stands
+   * for the acknowledged scope notice. */
+  bySetting?: boolean;
 }
 /** The microphone is off, or failed with its device released so a start may
  * follow. A failure still being cleaned up, or any open state, may capture.
@@ -133,7 +136,9 @@ export function describeSource(source: SourceCapture | null | undefined) {
     case 'starting':
       return `Application audio from ${app} is starting.`;
     case 'listening':
-      return `Application audio from ${app} is being captured, including all of its windows.`;
+      return source.bySetting
+        ? `Application audio from ${app} is being captured, including all of its windows. Started by the TALKQTE_DEV_APPLICATION_SOURCE launch setting.`
+        : `Application audio from ${app} is being captured, including all of its windows.`;
     case 'stopping':
       return source.stalled
         ? `macOS has not confirmed that application audio from ${app} stopped. It may still be captured.`
@@ -154,6 +159,8 @@ export interface ApplicationAudioStatus {
   operation: string | null;
   choices: { id: string; name: string }[];
   problem: string | null;
+  /** The last attempt came from the development launch setting. */
+  bySetting?: boolean;
   scopeNotice: string;
 }
 export type ApplicationAudioAction =
@@ -181,6 +188,10 @@ export function sourceProblem(problem: string | null | undefined) {
     case 'sessionBusy':
     case 'sessionHasSource':
       return 'Another session or the microphone is running. Stop it, then start again.';
+    case 'noMatchingApplication':
+      return 'No single running application has the exact name TALKQTE_DEV_APPLICATION_SOURCE gives. Nothing was started.';
+    case 'devSettingInvalid':
+      return 'TALKQTE_DEV_STOP_AFTER_S must be a whole number of seconds, so the launch setting started nothing.';
     case 'unavailable':
       return 'Application audio is unavailable. A session from an application needs the speech model installed.';
     default:

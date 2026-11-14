@@ -140,6 +140,16 @@ pub enum Event {
         cue: String,
         elapsed_ms: u64,
     },
+    /// Development builds only: the launch setting naming an application
+    /// source acted. `step` is `acknowledged` (the setting stands for the
+    /// scope notice), `started`, `refused` with a `reason`, or `stopping`
+    /// (the stop setting asked the ordinary Stop).
+    DevSource {
+        step: &'static str,
+        application: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
     /// Lines lost since the last line written, because the queue was full
     /// or a write failed.
     Dropped { count: u64 },

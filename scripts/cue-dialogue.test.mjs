@@ -26,6 +26,7 @@ import {
   DEFAULT_PLAN,
   DEFAULTS,
   PLACEBO_CUES,
+  TURN_MS_ESTIMATE,
   createBudget,
   main,
   random,
@@ -390,6 +391,7 @@ test('moments, criteria and the plan never reach the participants or the evaluat
   for (const request of requests.filter((r) => r.role === 'generator')) {
     const plan = JSON.parse(request.input);
     assert.deepEqual(Object.keys(plan).sort(), [
+      'callLengthMs',
       'decoys',
       'domain',
       'open',
@@ -397,6 +399,7 @@ test('moments, criteria and the plan never reach the participants or the evaluat
       'settled',
       'variation',
     ]);
+    assert.equal(plan.callLengthMs, DEFAULTS.maxTurns * TURN_MS_ESTIMATE);
   }
 });
 
@@ -822,7 +825,7 @@ function fakeCli(brief, { fail = null } = {}) {
   return {
     calls,
     async run(command, args, options) {
-      calls.push({ args, input: options.input });
+      calls.push({ args, input: options.input, env: options.env });
       if (args.includes('--version')) return '2.1.318 (Claude Code)';
       if (args.includes('auth'))
         return JSON.stringify({
@@ -1092,4 +1095,58 @@ test('a model run’s cue evaluator defaults to the lab’s working setting: Opu
   } finally {
     rmSync(out, { recursive: true, force: true });
   }
+});
+
+test('each role gets its own output limit: the generator 4,000, the judge 1,500, everyone else the contract’s 800', async () => {
+  const cli = fakeCli(byId('release-handoff'));
+  const results = await modelRun(cli);
+  assert.equal(results.stopped, null);
+  const at = (c, flag) => c.args[c.args.indexOf(flag) + 1];
+  const limits = {};
+  for (const c of cli.calls.filter((c) => c.args.includes('--print'))) {
+    const prompt = at(c, '--system-prompt');
+    const role =
+      prompt === GENERATOR_PROMPT
+        ? 'generator'
+        : prompt === CAST_PROMPT
+          ? 'cast'
+          : prompt === JUDGE_PROMPT
+            ? 'judge'
+            : prompt.startsWith('You are ')
+              ? 'listener'
+              : 'evaluator';
+    (limits[role] ??= new Set()).add(c.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS);
+  }
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(limits).map(([k, v]) => [k, [...v]])),
+    {
+      generator: ['4000'],
+      cast: ['800'],
+      listener: ['800'],
+      evaluator: ['800'],
+      judge: ['1500'],
+    },
+  );
+});
+
+test('the generator is told how long the call runs, and a distraction outside it is rejected', () => {
+  const brief = structuredClone(byId('renewal-seat-count'));
+  delete brief.offline;
+  for (const c of brief.criteria) delete c.offline;
+  const plan = {
+    domain: 'customer',
+    open: 2,
+    settled: 0,
+    decoys: 1,
+    callLengthMs: 84_000,
+  };
+  assert.deepEqual(briefProblems(brief, { plan }), []);
+  brief.focus.distracted = [
+    { fromMs: 180_000, toMs: 230_000, doing: 'reading' },
+  ];
+  assert.match(
+    briefProblems(brief, { plan }).join(' '),
+    /must end within the call's 84000 ms/,
+  );
+  assert.match(GENERATOR_PROMPT, /callLengthMs/);
 });
