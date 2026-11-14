@@ -48,8 +48,43 @@ TALKQTE_COMMIT="$(git rev-parse HEAD)" \
 - The bundle is written to `src-tauri/target/debug/bundle/macos/TalkQTE.app`,
   or under `$CARGO_TARGET_DIR` if that is set.
 
-A debug build is unsigned. macOS ties permissions to the exact binary, so
-rebuilding can mean granting Screen Recording again (_to confirm_).
+A debug build is only ad-hoc signed, with a code-signing identifier such as
+`talkqte-55cecaafd599c0f5`, not the bundle identifier. macOS ties Screen &
+System Audio Recording to that signature. **Every rebuild is a new app to
+macOS and needs the permission granted again.** On 14 November 2026 a fresh
+build with no grant was refused at once, with no prompt, and the setting
+below reported `permission_denied`. System Settings can then list several
+TalkQTE entries. Turn on only the one for the build you are running.
+
+### A stable development signature
+
+A self-signed code-signing certificate, `TalkQTE Development`, makes every
+development build the same app to macOS, so one grant survives rebuilds. It
+lives only in the developer's login keychain, never in the repository, and
+signs nothing for distribution. **Sign TalkQTE with this identity only**,
+never with another code-signing identity the keychain may hold, such as an
+employer's Developer ID.
+
+1. Once: Keychain Access → Certificate Assistant → Create a Certificate. Name
+   it `TalkQTE Development`, identity type Self Signed Root, certificate type
+   Code Signing. macOS reports it as not trusted, but `codesign` accepts it.
+2. After each build, sign the bundle with it under the app's identifier:
+
+   ```sh
+   codesign --force --deep -s "TalkQTE Development" -i com.talkqte.desktop \
+     src-tauri/target/debug/bundle/macos/TalkQTE.app
+   codesign -dr - src-tauri/target/debug/bundle/macos/TalkQTE.app
+   ```
+
+   The second line should print `identifier "com.talkqte.desktop" and
+certificate leaf = H"…"`. Whether `APPLE_SIGNING_IDENTITY` does this
+   during the build has not been tried.
+
+3. Grant Screen & System Audio Recording once. Remove any older TalkQTE
+   entries first: an entry for another signature makes macOS deny the new
+   build without asking.
+
+On 14 November 2026 a rebuild signed this way kept the grant.
 
 ## Speech model
 
@@ -66,15 +101,16 @@ nothing is cleared.
 
 ## Launch with the timing log
 
-Make a folder for lab output outside the repository, then launch the app with
+Make a folder for lab output outside the repository and any other git checkout,
+then launch the app with
 the log's path. Use a new file for each run, and never point two running
 copies of the app at the same file: one process writes one file.
 
 ```sh
-mkdir -p ~/talkqte-lab
+mkdir -p ~/talkqte-lab-runs
 open -a ./src-tauri/target/debug/bundle/macos/TalkQTE.app \
-  --stderr "$HOME/talkqte-lab/run-01.stderr" \
-  --env TALKQTE_TIMING_LOG="$HOME/talkqte-lab/run-01.jsonl"
+  --stderr "$HOME/talkqte-lab-runs/run-01.stderr" \
+  --env TALKQTE_TIMING_LOG="$HOME/talkqte-lab-runs/run-01.jsonl"
 ```
 
 **Confirm the log is on** before starting capture. Once the main window has
@@ -84,8 +120,8 @@ opened (_to confirm_ how soon), `run-01.stderr` has one line starting
 - `on`: the log file now exists, readable by your account only.
 - `off`, with the reason: the path is relative, contains `..`, or is inside
   the repository.
-- `could not open`: the folder does not exist or is inside the repository
-  once links are resolved, or the path is a link, a folder or a pipe. Nothing
+- `could not open`: the folder does not exist or is inside the repository or
+  another git checkout once links are resolved, or the path is a link, a folder or a pipe. Nothing
   will be written.
 
 No such line by the time a session starts means the variable did not reach
@@ -125,7 +161,7 @@ development build":
    TalkQTE in System Settings → Privacy & Security, then quit and reopen the
    app if macOS asks (_to confirm_), and list again. The permission is granted
    once per build.
-3. Choose **QuickTime Player** and press **Start session from QuickTime
+3. Choose **QuickTime Player**, which is listed near the top, and press **Start session from QuickTime
    Player**. That starts a session for QuickTime Player alone, with no
    microphone.
 
@@ -134,7 +170,23 @@ QuickTime Player is being captured", then press play in QuickTime Player.
 
 A session for one application starts only while the microphone is not
 capturing, no other live session or demo is running, and the speech model is
-installed. A refusal is shown under the panel's Start in words.
+installed. A refusal is shown under the panel's Start in words. Only open
+applications with a window are listed, on any desktop. If QuickTime Player is
+missing, open the MP4, then press **List again**.
+
+If the start fails, the panel names the reason where macOS or TalkQTE gave
+one:
+
+- macOS refused capture to this copy of TalkQTE. Right after the Screen
+  Recording grant, that should mean TalkQTE must be quit and reopened (_to
+  confirm_);
+- the application quit;
+- macOS could not capture its audio;
+- capture was stopped from macOS;
+- the audio arrived in a form TalkQTE cannot read.
+
+The timing log's `source_problem` line has the reason and ScreenCaptureKit's
+error code, and its `source_ended` line says how many chunks were transcribed.
 
 ## Start and stop without clicks
 
@@ -144,8 +196,8 @@ Use them for fictional runs only.
 
 ```sh
 open -a ./src-tauri/target/debug/bundle/macos/TalkQTE.app \
-  --stderr "$HOME/talkqte-lab/run-01.stderr" \
-  --env TALKQTE_TIMING_LOG="$HOME/talkqte-lab/run-01.jsonl" \
+  --stderr "$HOME/talkqte-lab-runs/run-01.stderr" \
+  --env TALKQTE_TIMING_LOG="$HOME/talkqte-lab-runs/run-01.jsonl" \
   --env TALKQTE_DEV_APPLICATION_SOURCE="QuickTime Player" \
   --env TALKQTE_DEV_STOP_AFTER_S=600
 ```
@@ -238,6 +290,8 @@ session clock.
 | `cue_decision`   | `session`, `cue`, `kind`, `source`, `question`, `source_id`, `elapsed_ms`              | The engine first holds a cue. `source` is `line`, `note`, `focus` or `evaluated`. Only `line` has `question` and `source_id`, the segment it came from. |
 | `cue_published`  | `session`, `cue`, `elapsed_ms`                                                         | The cue is in the snapshot sent to the companion window.                                                                                                |
 | `cue_cleared`    | `session`, `cue`, `elapsed_ms`                                                         | That cue has left the snapshot sent to the companion window.                                                                                            |
+| `source_problem` | `problem`, `os_code`                                                                   | An application source failed to start or stopped on its own. `os_code` is ScreenCaptureKit's error code, when it gave one.                              |
+| `source_ended`   | `application`, `problem`, `recognized_chunks`                                          | An application source's run ended, with its reason if it failed and how many chunks of its audio were transcribed.                                      |
 | `dev_source`     | `step`, `application`, `reason`                                                        | The launch setting acted: `acknowledged`, `started`, `refused` with a `reason`, or `stopping` when the stop setting asked the ordinary Stop.            |
 | `dropped`        | `count`                                                                                | Lines were lost since the last line written, because the queue was full or a write failed. Written before the next line.                                |
 

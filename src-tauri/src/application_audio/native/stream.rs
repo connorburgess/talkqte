@@ -15,7 +15,7 @@ use objc2_screen_capture_kit::{
     SCStreamDelegate, SCStreamErrorCode, SCStreamErrorDomain, SCStreamOutput, SCStreamOutputType,
     SCWindow,
 };
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicI64, AtomicU64};
 
 /// A retained native application instance, not a name used to find another app.
 /// Construct only after an explicitly authorized selection/enumeration flow.
@@ -24,12 +24,16 @@ pub struct Selection {
     source: Application,
     display: Retained<SCDisplay>,
     application: Retained<SCRunningApplication>,
+    /// Its helper processes, captured with it and never listed on their own.
+    helpers: Vec<Retained<SCRunningApplication>>,
 }
 
 impl Selection {
     pub fn new(
         display: Retained<SCDisplay>,
         application: Retained<SCRunningApplication>,
+        traits: crate::application_audio::listing::Traits,
+        helpers: Vec<Retained<SCRunningApplication>>,
     ) -> Result<Self, Failure> {
         if !objc2::available!(macos = 14.0) {
             return Err(Failure::Unavailable);
@@ -41,11 +45,13 @@ impl Selection {
         // SAFETY: retained native application on its owner thread, API available
         // before our explicitly checked feature floor. No enumeration is called.
         let name = unsafe { application.applicationName() }.to_string();
-        let source = Application::new(format!("native-application-{id}"), name)?;
+        let source =
+            Application::new(format!("native-application-{id}"), name)?.with_traits(traits);
         Ok(Self {
             source,
             display,
             application,
+            helpers,
         })
     }
 
@@ -101,7 +107,11 @@ impl NativeOwner {
         let output = ProtocolObject::from_retained(output);
         let delegate = StreamDelegate::new(fault);
         let queue = DispatchQueue::new("talkqte.application-audio", None);
-        let applications = NSArray::from_slice(&[&*selection.application]);
+        // The application and its helpers, which a browser plays sound from.
+        let included: Vec<&SCRunningApplication> = std::iter::once(&*selection.application)
+            .chain(selection.helpers.iter().map(|helper| &**helper))
+            .collect();
+        let applications = NSArray::from_slice(&included);
         let exceptions = NSArray::<SCWindow>::new();
         // SAFETY: native objects remain on this thread; Selection checked the
         // OS floor. Positive application inclusion cannot turn into all-app
@@ -145,6 +155,7 @@ impl NativeOwner {
             _selection: selection,
             start: None,
             stop: None,
+            start_code: Arc::new(AtomicI64::new(NO_CODE)),
         };
         Owner::begin(start, driver).map(|owner| (Self(owner), reader))
     }
@@ -201,8 +212,9 @@ define_class!(
 
     unsafe impl SCStreamDelegate for StreamDelegate {
         #[unsafe(method(stream:didStopWithError:))]
-        fn stopped(&self, _stream: &SCStream, _error: &NSError) {
-            self.ivars().record();
+        fn stopped(&self, _stream: &SCStream, error: &NSError) {
+            // Only the error's domain and code are read; no text is kept.
+            self.ivars().record_code(error_code(error));
         }
     }
 );
@@ -225,17 +237,41 @@ struct Stream {
     _selection: Selection,
     start: Option<RcBlock<dyn Fn(*mut NSError)>>,
     stop: Option<RcBlock<dyn Fn(*mut NSError)>>,
+    /// macOS's code for a failed start.
+    start_code: Arc<AtomicI64>,
 }
 
-fn completion(slot: Arc<AtomicU8>) -> RcBlock<dyn Fn(*mut NSError)> {
+/// The ScreenCaptureKit code of `error`, or `OTHER_DOMAIN` for any other
+/// framework's. Reads only the domain and code.
+fn error_code(error: &NSError) -> i64 {
+    // SAFETY: the framework domain constant exists since macOS 12.3.
+    if error
+        .domain()
+        .isEqualToString(unsafe { SCStreamErrorDomain })
+    {
+        error.code() as i64
+    } else {
+        OTHER_DOMAIN
+    }
+}
+
+fn completion(slot: Arc<AtomicU8>, code: Arc<AtomicI64>) -> RcBlock<dyn Fn(*mut NSError)> {
     RcBlock::new(move |error: *mut NSError| {
         // No native object crosses the callback boundary. Ignore duplicates.
-        let _ = slot.compare_exchange(
-            PENDING,
-            if error.is_null() { SUCCEEDED } else { FAILED },
-            Ordering::Release,
-            Ordering::Relaxed,
-        );
+        // SAFETY: ScreenCaptureKit supplies a valid NSError, or null on success.
+        let outcome = match unsafe { error.as_ref() } {
+            None => SUCCEEDED,
+            Some(error) => {
+                let _ = code.compare_exchange(
+                    NO_CODE,
+                    error_code(error),
+                    Ordering::Release,
+                    Ordering::Relaxed,
+                );
+                FAILED
+            }
+        };
+        let _ = slot.compare_exchange(PENDING, outcome, Ordering::Release, Ordering::Relaxed);
     })
 }
 
@@ -268,8 +304,17 @@ impl Driver for Stream {
     fn stream_failed(&self) -> bool {
         self.delegate.ivars().failed.load(Ordering::Acquire)
     }
+    fn start_code(&self) -> i64 {
+        self.start_code.load(Ordering::Acquire)
+    }
+    fn stream_code(&self) -> i64 {
+        self.delegate.ivars().code.load(Ordering::Acquire)
+    }
+    fn stream_detail(&self) -> Option<String> {
+        self.delegate.ivars().refused_detail()
+    }
     fn start(&mut self, slot: Arc<AtomicU8>) {
-        self.start = Some(completion(slot));
+        self.start = Some(completion(slot, self.start_code.clone()));
         // SAFETY: stream and block are retained until native cleanup; callback
         // only publishes an atomic result, irrespective of its calling thread.
         unsafe {
@@ -305,18 +350,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn native_completion_records_only_first_result_without_reading_error_object() {
+    fn a_start_completion_records_only_its_first_result_and_the_first_error_code() {
+        // A memory-only NSError fixture; no capture, stream or permission API.
+        let domain = unsafe { SCStreamErrorDomain };
+        let error = unsafe {
+            NSError::errorWithDomain_code_userInfo(domain, SCStreamErrorCode::UserDeclined.0, None)
+        };
         let slot = Arc::new(AtomicU8::new(PENDING));
-        let block = completion(slot.clone());
-        // This sentinel is only compared with null; no NSError is constructed,
-        // retained or dereferenced, and no ScreenCaptureKit API is invoked.
-        block.call((std::ptr::NonNull::<NSError>::dangling().as_ptr(),));
+        let code = Arc::new(AtomicI64::new(NO_CODE));
+        let block = completion(slot.clone(), code.clone());
+        block.call((Retained::as_ptr(&error).cast_mut(),));
         block.call((std::ptr::null_mut(),));
         assert_eq!(slot.load(Ordering::Acquire), FAILED);
-        let fresh = Arc::new(AtomicU8::new(PENDING));
-        completion(fresh.clone()).call((std::ptr::null_mut(),));
+        assert_eq!(
+            code.load(Ordering::Acquire),
+            SCStreamErrorCode::UserDeclined.0 as i64
+        );
+        let (fresh, none) = (
+            Arc::new(AtomicU8::new(PENDING)),
+            Arc::new(AtomicI64::new(NO_CODE)),
+        );
+        completion(fresh.clone(), none.clone()).call((std::ptr::null_mut(),));
         assert_eq!(fresh.load(Ordering::Acquire), SUCCEEDED);
-        assert_eq!(slot.load(Ordering::Acquire), FAILED);
+        assert_eq!(none.load(Ordering::Acquire), NO_CODE);
     }
 
     #[test]
@@ -351,8 +407,16 @@ mod tests {
             assert_eq!(slot.load(Ordering::Acquire), expected);
             // This error must not turn a failed start into successful capture.
             let start = Arc::new(AtomicU8::new(PENDING));
-            completion(start.clone()).call((ptr,));
+            let start_code = Arc::new(AtomicI64::new(NO_CODE));
+            completion(start.clone(), start_code.clone()).call((ptr,));
             assert_eq!(start.load(Ordering::Acquire), FAILED);
+            // Another framework's code is never mistaken for one of these.
+            let kept = if domain.isEqualToString(unsafe { SCStreamErrorDomain }) {
+                code as i64
+            } else {
+                OTHER_DOMAIN
+            };
+            assert_eq!(start_code.load(Ordering::Acquire), kept);
         }
         let slot = Arc::new(AtomicU8::new(PENDING));
         stop_completion(slot.clone()).call((std::ptr::null_mut(),));
