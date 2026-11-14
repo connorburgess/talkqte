@@ -6,7 +6,7 @@ Status: developer check, 8 November 2026; live session added 9 November 2026. In
 
 The optional `local-whisper` Cargo feature adds `LocalWhisper`, a [Transcriber](architecture.md) that runs whisper.cpp in-process on the transcription worker thread through the `whisper-rs` crate. It reads only the model file it is given: it downloads nothing, opens no network connection, and writes no audio to disk. Whisper does not separate speakers, so every recognized line is labelled `Speaker`. The feature is off by default, so ordinary builds and CI do not compile whisper.cpp. Building it needs CMake and a C++ toolchain.
 
-`Engine::live()` creates a session with no scripted demo lines, for transcript input through `Engine::ingest`.
+`Engine::live()` creates a session with no scripted lines, for transcript input through `Engine::ingest`.
 
 The app looks for the model at `TALKQTE_WHISPER_MODEL`, or at `models/ggml-tiny.en.bin` in its data folder, where **Download speech model** in Settings puts it after checking its SHA-256. **Start live session** loads it before opening the microphone, so a missing or unreadable model is reported without starting capture. The capture callback feeds the [audio tap](architecture.md); a runner thread moves chunks of 1–3 seconds, cut at pauses where possible, to the worker every 250 ms and the worker's lines go to `Engine::ingest`. Stop releases the microphone first, then transcribes what was queued, waiting up to 10 seconds. If the microphone is refused or fails, the session ends.
 
