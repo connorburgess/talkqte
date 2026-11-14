@@ -17,6 +17,8 @@ Everything that decides about a cue sits behind one adapter in `scripts/cue-eval
 
 The phrase rules run in Rust. The lab does not run them: it reads the outcomes that the engine's replay tests assert, and an offline test fails if that record and the arrays in `engine.rs` ever differ. The record holds one final action per case, with no cited sources, wording or delay. Its `cue-lab` entry is the "from the fixture's cue" measurement in the [rules baseline](cue-intelligence.md#rules-baseline-on-the-shared-suite); the other two are the scores after the rule changes written against those sets.
 
+**One copy of the decision contract.** The prompt texts (the recorded full prompt, the compact prompt, the glance rule and the notes about the listener's name and earlier cues), the CLI's argument list and settings, the child process's environment, the credential pattern, the models and the efforts are all in `scripts/fixtures/cue-decision.json`. The lab reads them from there and keeps no copy in its code, so the app's evaluator can load the same file and the two cannot drift apart. The full prompt in it is the one the recorded trials were sent; a test pins it by hash.
+
 ## Dry run first
 
 Without `--run`, nothing is started and nothing is sent. The dry run prints the set, the number of model requests a run would make, where the text would go, each system prompt, and the exact input of every request:

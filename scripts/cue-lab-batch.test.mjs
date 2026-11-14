@@ -10,11 +10,15 @@ import {
   realpathSync,
   symlinkSync,
 } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import {
   COMPACT_PROMPT,
+  CONTRACT,
+  EFFORTS,
+  GLANCE_WORDS,
   MODEL,
   MODELS,
   SYSTEM_PROMPT,
@@ -852,4 +856,106 @@ test('a compact reply and a lower effort are asked for, checked and recorded', a
       }),
       message,
     );
+});
+
+test('the lab takes its prompts, arguments and settings from the shared decision file, and the recorded prompt has not changed', async () => {
+  const file = JSON.parse(
+    readFileSync(
+      new URL('./fixtures/cue-decision.json', import.meta.url),
+      'utf8',
+    ),
+  );
+  assert.deepEqual(CONTRACT, file);
+  const hash = (text) => createHash('sha256').update(text).digest('hex');
+  // The prompt the recorded trials of 8 to 10 November 2026 were sent.
+  assert.equal(
+    hash(file.prompts.full),
+    '8f4d788c0504b2f4be08fa2a6311ce6bb419c77e382c02107a85df29c5ed3dcf',
+  );
+  assert.equal(SYSTEM_PROMPT, file.prompts.full);
+  assert.equal(COMPACT_PROMPT, file.prompts.compact);
+  assert.equal(GLANCE_WORDS, file.glanceWords);
+  assert.match(
+    file.prompts.glanceRule,
+    new RegExp(`at most ${file.glanceWords} words`),
+  );
+  assert.deepEqual(EFFORTS, file.efforts);
+  assert.deepEqual(MODELS, file.models);
+  assert.equal(MODEL, file.models[file.defaultModel]);
+  // A prompt is the file's texts joined, with nothing added by the lab.
+  const everything = {
+    userName: 'Robin',
+    earlierCues: [{ text: 'An earlier cue.', state: 'expired' }],
+  };
+  assert.equal(
+    systemPromptFor(everything, { glance: true, compact: true }),
+    file.prompts.compact +
+      file.prompts.glanceRule +
+      file.prompts.nameNote +
+      file.prompts.historyNote,
+  );
+  // The lab's own source holds none of the prompt text, model IDs or
+  // credential names: there is one copy, in the file.
+  const source = readFileSync(
+    new URL('./cue-lab.mjs', import.meta.url),
+    'utf8',
+  );
+  for (const text of [
+    'You evaluate one fictional conversation',
+    'claude-opus-5-5',
+    'ANTHROPIC_API_KEY',
+    '--no-session-persistence',
+    'CLAUDE_CODE_MAX_RETRIES',
+  ])
+    assert.ok(!source.includes(text), text);
+
+  // What is run is exactly the file's argument list, filled in.
+  const set = await loadSet('cue-lab');
+  const cli = fakeCli([
+    reply({ action: 'quiet', cue: null, sourceIds: ['e1'] }),
+  ]);
+  await runBatch({
+    set,
+    cases: set.cases.slice(0, 1),
+    rules: {},
+    evaluator: claudeEvaluator({
+      environment: clean,
+      run: cli.run,
+      effort: 'low',
+      compact: true,
+    }),
+    maxCalls: 1,
+  });
+  const call = cli.calls.at(-1);
+  assert.equal(call.command, file.cli.command);
+  const settings = JSON.stringify(file.cli.settings).replaceAll(
+    '{model}',
+    MODEL,
+  );
+  assert.deepEqual(call.args, [
+    ...file.cli.baseArgs,
+    ...file.cli.evaluateArgs.map(
+      (arg) =>
+        ({
+          '{model}': MODEL,
+          '{effort}': 'low',
+          '{settings}': settings,
+          '{systemPrompt}': COMPACT_PROMPT,
+        })[arg] ?? arg,
+    ),
+  ]);
+  assert.deepEqual(JSON.parse(settings).availableModels, [MODEL]);
+  // The child process is given the file's allowed names and fixed values.
+  assert.deepEqual(
+    Object.keys(call.options.env).sort(),
+    [...Object.keys(clean), ...Object.keys(file.childEnvironment.set)].sort(),
+  );
+  // The credential pattern is the file's, case-insensitively.
+  const pattern = new RegExp(
+    file.credentialPattern.source,
+    file.credentialPattern.flags,
+  );
+  for (const name of ['ANTHROPIC_API_KEY', 'https_proxy', 'CLAUDE_CONFIG_DIR'])
+    assert.ok(pattern.test(name), name);
+  assert.ok(!pattern.test('EDITOR'));
 });
