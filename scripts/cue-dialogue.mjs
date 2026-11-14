@@ -18,8 +18,9 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { modelFor } from './cue-lab.mjs';
+import { EFFORTS, modelFor } from './cue-lab.mjs';
 import {
+  claudeEvaluator,
   createEvaluator,
   isHosted as evaluatorHosted,
 } from './cue-evaluators.mjs';
@@ -48,8 +49,10 @@ import {
 import {
   PLANNED,
   REQUESTS,
+  ROLE_EFFORTS,
   ROLE_MODELS,
   VALIDATE,
+  claudeAgents,
   fakeAgents,
   isHosted,
 } from './cue-dialogue-agents.mjs';
@@ -765,6 +768,8 @@ export async function runScenario(brief, context, { prefix = null } = {}) {
       : null,
     prefix: {
       steps: prefixSteps,
+      // So a replay can tell that the saved opening is the one this run had.
+      sha256: sha(JSON.stringify(prefixSteps)),
       turns: trunk.lines.length,
       savedStepsUsed: savedPrefixUsed,
       savedStepsDropped: prefix ? script.length : 0,
@@ -1048,6 +1053,14 @@ export function savedRun(results, briefsText, file) {
       'The saved briefs file does not match the hash in the results file, so the run cannot be replayed.',
     );
   const { briefs } = JSON.parse(briefsText);
+  for (const scenario of results.scenarios)
+    if (
+      !scenario.prefix?.sha256 ||
+      sha(JSON.stringify(scenario.prefix.steps)) !== scenario.prefix.sha256
+    )
+      throw new Error(
+        `The saved opening of ${scenario.id} does not match its hash, so the run cannot be replayed.`,
+      );
   return {
     of: { file, sha256: results.brief.sha256, seed: results.seed },
     // Hand-written briefs carry the fakes' offline block; generated ones
@@ -1136,13 +1149,21 @@ export function reviewText(results, summary) {
   return `${out.join('\n')}\n`;
 }
 
-function agentsFor(name, briefs) {
+function agentsFor(name, briefs, { models, efforts, environment, run } = {}) {
   if (name === 'fake') return fakeAgents(briefs);
   if (name === 'claude')
-    throw new Error(
-      'Model-backed participants, generator and judge are not built yet. A pilot needs the owner’s approval first; see docs/cue-dialogue.md#before-a-pilot. Nothing was started.',
-    );
-  throw new Error('Unknown --agents. Choose fake.');
+    return claudeAgents({
+      models: {
+        generator: models.generator,
+        cast: models.participants,
+        listener: models.participants,
+        judge: models.judge,
+      },
+      efforts,
+      environment,
+      run,
+    });
+  throw new Error('Unknown --agents. Choose claude or fake.');
 }
 
 const whole = (flag, value, fallback, min = 1, max = 1_000) => {
@@ -1155,7 +1176,12 @@ const whole = (flag, value, fallback, min = 1, max = 1_000) => {
 
 export async function main(
   args,
-  { environment = process.env, print = console.log } = {},
+  {
+    environment = process.env,
+    print = console.log,
+    // What starts the Claude Code CLI; tests pass a stand-in.
+    run,
+  } = {},
 ) {
   const flags = parseFlags(args, {
     values: [
@@ -1178,8 +1204,12 @@ export async function main(
       '--evaluator-model',
       '--judge-model',
       '--generator-model',
+      '--generator-effort',
+      '--participant-effort',
+      '--evaluator-effort',
+      '--judge-effort',
     ],
-    switches: ['--run'],
+    switches: ['--run', '--included-usage-confirmed'],
   });
   const fixtures = await loadFixtureBriefs();
   const domains = flags['--domains']?.split(',') ?? DOMAINS;
@@ -1228,6 +1258,32 @@ export async function main(
     evaluator: flags['--evaluator-model'] ?? PLANNED.evaluator.model,
     judge: flags['--judge-model'] ?? PLANNED.judge.model,
   });
+  const effortFlag = (flag, fallback, allowed) => {
+    const effort = flags[flag] ?? fallback;
+    if (!allowed.includes(effort))
+      throw new Error(`${flag} is one of: ${allowed.join(', ')}.`);
+    return effort;
+  };
+  const participantEffort = effortFlag(
+    '--participant-effort',
+    PLANNED.cast.effort,
+    ROLE_EFFORTS,
+  );
+  const efforts = {
+    generator: effortFlag(
+      '--generator-effort',
+      PLANNED.generator.effort,
+      ROLE_EFFORTS,
+    ),
+    cast: participantEffort,
+    listener: participantEffort,
+    judge: effortFlag('--judge-effort', PLANNED.judge.effort, ROLE_EFFORTS),
+    evaluator: effortFlag(
+      '--evaluator-effort',
+      PLANNED.evaluator.effort,
+      EFFORTS,
+    ),
+  };
   const seed = flags['--seed'] ?? stamp();
   const latencyMs =
     flags['--latency-ms'] === undefined
@@ -1259,7 +1315,7 @@ export async function main(
       `Branches: ${branches.map((b) => `${b} (${BRANCHES[b]})`).join('; ')}.`,
     );
     print(
-      `Planned models (not yet callable): generator ${models.generator}, participants ${models.participants}, cue evaluator ${models.evaluator} through the lab's own adapter, judge ${models.judge}. A model run would send every request below to Anthropic through the Claude Code subscription sign-in.`,
+      `Models for a run: generator ${models.generator} (${efforts.generator} effort), participants ${models.participants} (${efforts.cast}), cue evaluator ${models.evaluator} (${efforts.evaluator}) through the lab's own adapter, judge ${models.judge} (${efforts.judge}). A model run sends every request below to Anthropic through the Claude Code subscription sign-in, and needs the owner's go-ahead and --included-usage-confirmed.`,
     );
     if (worst > MAX_CALLS_CEILING) {
       print(
@@ -1321,10 +1377,17 @@ export async function main(
     return rehearsal;
   }
 
-  const agents = agentsFor(
-    flags['--agents'] ?? 'claude',
-    replay?.briefs ?? fixtures,
-  );
+  const mode = flags['--agents'] ?? 'claude';
+  if (mode === 'claude' && !flags['--included-usage-confirmed'])
+    throw new Error(
+      'A model run needs --included-usage-confirmed, after checking in the Claude account that paid extra usage is off, and the owner’s go-ahead for this run. Nothing was started.',
+    );
+  const agents = agentsFor(mode, replay?.briefs ?? fixtures, {
+    models,
+    efforts,
+    environment,
+    run,
+  });
   const maxCalls = whole(
     '--max-calls',
     flags['--max-calls'],
@@ -1339,10 +1402,22 @@ export async function main(
   const log = createRunLog(join(directory, `${name}.log.jsonl`));
   const results = await runDialogue({
     agents,
-    evaluator: createEvaluator('fake', { latencyMs }),
+    evaluator:
+      mode === 'claude'
+        ? claudeEvaluator({
+            environment,
+            ...(run ? { run } : {}),
+            model: modelFor(models.evaluator),
+            effort: efforts.evaluator,
+          })
+        : createEvaluator('fake', { latencyMs }),
     plan: {
       ...plan,
-      scenarios: Math.min(scenarios, (replay?.briefs ?? fixtures).length),
+      // The fakes have only the hand-written briefs to hand out.
+      scenarios:
+        mode === 'fake'
+          ? Math.min(scenarios, (replay?.briefs ?? fixtures).length)
+          : scenarios,
     },
     settings,
     seed,
