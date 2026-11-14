@@ -12,7 +12,7 @@ const features = [
   'timing-log',
 ];
 const commit = 'a'.repeat(40);
-function fixture() {
+function fixture(application = 'QuickTime Player') {
   let handler;
   const identity = {
     pid: 44001,
@@ -31,13 +31,14 @@ function fixture() {
     commit,
     features,
     deadlineMs: 50,
+    application,
   });
   const emit = (e) => handler(e);
   const bootstrap = () => {
     emit({ event: 'dev_stop', run_id: identity.runId, step: 'armed' });
     emit({
       event: 'dev_source',
-      application: 'QuickTime Player',
+      application,
       step: 'acknowledged',
     });
     emit({
@@ -52,7 +53,7 @@ function fixture() {
     event: 'dev_source_observation',
     version: 1,
     run_id: identity.runId,
-    application: 'QuickTime Player',
+    application,
     step: 'listening',
     host_operation: 'b'.repeat(32),
     live_operation: 'c'.repeat(64),
@@ -217,4 +218,14 @@ test('throwing and reentrant observers cannot suppress exactly-once root Stop af
   assert.equal(rootStops, 1);
   assert.equal(notifications, 1);
   await assert.rejects(f.source.waitListening({ runId: f.identity.runId }));
+});
+
+test('fixed owned-player source kind retains exact same tuple/session guard', async () => {
+  const f = fixture('TalkQTE Lab Player');
+  f.bootstrap();
+  const ready = f.source.waitListening({ runId: f.identity.runId });
+  f.emit(f.tuple);
+  const result = await ready;
+  assert.equal(result.source.application, 'TalkQTE Lab Player');
+  f.source.close();
 });

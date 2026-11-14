@@ -634,3 +634,28 @@ test('temporary output under a two-dot checkout descendant or its alias is refus
     rmSync(external, { recursive: true, force: true });
   }
 });
+
+test('actual harmless capture-only launch receives no provider/model/backend/descriptor environment', async () => {
+  const launcher = prepareLabFixtureLauncher({
+    fixtureCase: 'capture-only',
+    mode: 'capture-only',
+    stopAfterS: 110,
+  });
+  const owner = createLabNativeOwner({
+    executable: launcher.executable,
+    launch: launcher.launch,
+    mode: 'capture-only',
+    stopAfterS: 110,
+    armingMs: 1000,
+    releaseMs: 1000,
+  });
+  try {
+    await owner.start({ runId: 'capture-only-fixture' });
+    assert.equal(launcher.mode, 'capture-only');
+    assert.deepEqual(await owner.stop(), { released: true });
+  } finally {
+    launcher.close();
+    for (let i = 0; i < 100 && !launcher.processEnded; i++) await delay(10);
+    rmSync(launcher.directory, { recursive: true, force: true });
+  }
+});

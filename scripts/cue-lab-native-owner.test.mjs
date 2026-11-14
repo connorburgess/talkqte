@@ -196,3 +196,43 @@ for (const lost of ['armed', 'released'])
     assert.equal(f.signals.length, lost === 'armed' ? 0 : 1);
     assert.ok(f.events.includes('failed'));
   });
+
+test('capture-only rejects model metadata and launches with only Stop/run settings', async () => {
+  const child = Object.assign(new EventEmitter(), {
+    pid: 4242,
+    spawnfile: executable,
+    exitCode: null,
+    signalCode: null,
+    kill: () => true,
+  });
+  let options;
+  const owner = createLabNativeOwner({
+    executable,
+    mode: 'capture-only',
+    stopAfterS: 110,
+    launch(o) {
+      options = o;
+      queueMicrotask(() =>
+        o.onTiming({ event: 'dev_stop', run_id: 'capture-run', step: 'armed' }),
+      );
+      return child;
+    },
+  });
+  await assert.rejects(
+    owner.start({ runId: 'capture-run', metadata: { provider: 'codex' } }),
+  );
+  await owner.start({ runId: 'capture-run' });
+  assert.equal(options.metadata, undefined);
+  assert.deepEqual(Object.keys(options.environment).sort(), [
+    'TALKQTE_DEV_LAB_RUN_ID',
+    'TALKQTE_DEV_STOP_AFTER_S',
+    'TALKQTE_DEV_STOP_SIGNAL',
+  ]);
+  const stopping = owner.stop();
+  options.onTiming({
+    event: 'dev_stop',
+    run_id: 'capture-run',
+    step: 'released',
+  });
+  assert.deepEqual(await stopping, { released: true });
+});

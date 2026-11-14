@@ -17,6 +17,7 @@ import { join, relative, isAbsolute, sep } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { parseUniqueLabJson } from './cue-lab-strict-json.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
+import { checkLabPlayerSource } from './cue-lab-player.mjs';
 
 const root = realpathSync(fileURLToPath(new URL('../', import.meta.url)));
 const requireThat = (x) => {
@@ -61,6 +62,7 @@ function recorder({
   startupMs = 5000,
   stopMs = 6000,
   fixtureCase,
+  playerSource,
 }) {
   requireThat(
     isAbsolute(binary ?? '') &&
@@ -77,6 +79,7 @@ function recorder({
         (n) => Number.isSafeInteger(n) && n > 0 && n <= 10000,
       ),
   );
+  if (playerSource) checkLabPlayerSource(playerSource);
   const parent = realpathSync(directory);
   requireThat(
     outside(parent) &&
@@ -296,7 +299,13 @@ function recorder({
               windows[key].app.length <= 100,
           );
         requireThat(
-          windows.emulator.app === 'QuickTime Player' &&
+          (playerSource
+            ? (checkLabPlayerSource(playerSource),
+              playerSource.runId === runId &&
+                windows.emulator.app === 'TalkQTE Lab Player' &&
+                windows.emulator.pid === playerSource.pid &&
+                windows.emulator.windowId === playerSource.windowId)
+            : windows.emulator.app === 'QuickTime Player') &&
             windows.companion.pid === identity.pid &&
             windows.emulator.pid !== windows.companion.pid &&
             windows.emulator.windowId !== windows.companion.windowId,

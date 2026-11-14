@@ -176,8 +176,17 @@ struct Capture {
       // owner's appears.
       let apps = Set((options["apps"] ?? "").split(separator: ",").map(String.init))
       guard !apps.isEmpty else { fail("--list needs --apps.", code: 64) }
+      let strictList = options["strict-windows"] != nil
+      var ownedPids = Set<Int32>()
+      if strictList {
+        guard let playerPid = Int32(options["emulator-pid"] ?? ""), playerPid > 0,
+          let nativePid = Int32(options["companion-pid"] ?? ""), nativePid > 0, playerPid != nativePid
+        else { fail("Strict listing needs two exact owned process identities.", code: 64) }
+        ownedPids = [playerPid, nativePid]
+      }
       for window in content.windows
-      where apps.contains(window.owningApplication?.applicationName ?? "") {
+      where apps.contains(window.owningApplication?.applicationName ?? "")
+        && (!strictList || ownedPids.contains(window.owningApplication?.processID ?? 0)) {
         emit([
           "event": "window", "app": window.owningApplication?.applicationName ?? "",
           "title": window.title ?? "", "windowId": Int(window.windowID),

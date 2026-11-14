@@ -40,6 +40,10 @@ function fixture({
   sourceCloseFails = false,
   initialSignal,
   strictSource = false,
+  preallocatedRunId,
+  playerRetirement = false,
+  playerRetirementFails = false,
+  playerRetirementUnconfirmed = false,
 } = {}) {
   const selectedMedia = body
     ? {
@@ -80,6 +84,7 @@ function fixture({
       trace.push('native-stop');
       Promise.resolve(releaseWait).then(() => {
         if (!release) return;
+        trace.push('native-released');
         for (const step of ['latched', 'stopping', 'released'])
           launchOptions.onTiming({
             event: 'dev_stop',
@@ -203,6 +208,15 @@ function fixture({
       return { stopped: true };
     },
   };
+  if (playerRetirement)
+    player.close = async ({ nativeReleased }) => {
+      assert.equal(nativeReleased, true);
+      trace.push('player-retired');
+      assert.ok(trace.includes('native-released'));
+      assert.ok(trace.includes('recorder-stop'));
+      if (playerRetirementFails) throw Error('fictional retirement failure');
+      return { closed: !playerRetirementUnconfirmed };
+    };
   let recorderRunId, sourceRunId;
   const recorder = {
     subscribe(handler) {
@@ -236,7 +250,8 @@ function fixture({
           );
           assert.equal(options.runId, sourceRunId);
           assert.equal(options.runId, recorderRunId);
-          assert.match(options.runId, /^[a-f0-9-]{36}$/);
+          if (preallocatedRunId) assert.equal(options.runId, preallocatedRunId);
+          else assert.match(options.runId, /^[a-f0-9-]{36}$/);
           if (bodyFails) throw Error('private body failure');
           return body(options);
         },
@@ -249,6 +264,7 @@ function fixture({
       )
     : undefined;
   const options = {
+    ...(preallocatedRunId ? { runId: preallocatedRunId } : {}),
     launcher,
     stopAfterS: 110,
     media: selectedMedia,
@@ -575,4 +591,47 @@ test('strict prepared source allows saved playback before hello/calibration with
   assert.ok(f.trace.indexOf('record-ready') < f.trace.indexOf('play'));
   assert.equal(f.counts.nativeStop, 1);
   assert.equal(f.counts.providerClose, 1);
+});
+
+test('prepared model path preserves preallocated player run identity and retires only after native release/recorder', async () => {
+  const f = fixture({
+    preallocatedRunId: 'owned-shared-run',
+    strictSource: true,
+    playerRetirement: true,
+    body: async () => {},
+  });
+  await f.take.done;
+  assert.ok(
+    f.trace.indexOf('native-released') < f.trace.indexOf('player-retired'),
+  );
+  assert.ok(
+    f.trace.indexOf('recorder-stop') < f.trace.indexOf('player-retired'),
+  );
+});
+test('prepared model path cannot retire player without confirmed native release', async () => {
+  const f = fixture({
+    strictSource: true,
+    playerRetirement: true,
+    release: false,
+  });
+  await assert.rejects(f.take.done, { category: 'cleanup' });
+  assert.equal(f.trace.includes('player-retired'), false);
+});
+test('prepared model path preserves player retirement failure as failed cleanup', async () => {
+  const f = fixture({
+    strictSource: true,
+    playerRetirement: true,
+    playerRetirementFails: true,
+  });
+  await assert.rejects(f.take.done, { category: 'cleanup' });
+  assert.equal(f.take.phase, 'failed-cleanup');
+});
+
+test('prepared player retirement without explicit closed proof remains failed cleanup', async () => {
+  const f = fixture({
+    strictSource: true,
+    playerRetirement: true,
+    playerRetirementUnconfirmed: true,
+  });
+  await assert.rejects(f.take.done, { category: 'cleanup' });
 });
