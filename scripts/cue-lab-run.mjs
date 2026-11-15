@@ -274,6 +274,13 @@ export function createLabRun({
     get clockCalibration() {
       return clockCalibration;
     },
+    // Content-free counts and per-call timing receipts for private evidence.
+    get evaluationSummary() {
+      return broker?.evaluationSummary ?? null;
+    },
+    get providerReceipts() {
+      return provider?.receipts ?? null;
+    },
     get startupDiagnostics() {
       return Object.freeze({
         stage: startupStage,

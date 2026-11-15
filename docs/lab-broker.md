@@ -13,8 +13,9 @@ methods, in-memory observation access and `close()`. It starts no inference unti
 an admitted role requests it. Before the lazy native connection exists, the
 orchestrator must independently abort/close this shared run on coordinated Stop;
 it cannot rely on an unauthenticated native socket to notify it.
-Every control, first failure or disconnect terminates
-that run; reconnect, fallback and budget reset are unavailable.
+Every control, first failure or disconnect terminates that run, except a
+[per-request evaluator deadline](#per-request-deadline); reconnect, fallback and
+budget reset are unavailable.
 
 ## Shared ownership
 
@@ -68,19 +69,19 @@ Session, request, context and snapshot revisions are canonical decimal strings
 within `u64`, preserving exact values in JavaScript. Native elapsed milliseconds
 are finite safe JSON numbers.
 
-| Direction    | Type           | Additional fields                                                                                                  |
-| ------------ | -------------- | ------------------------------------------------------------------------------------------------------------------ |
-| App → broker | `hello`        | `nonce`, `expectedProvider`, `expectedModel`, `expectedEffort`                                                     |
-| Broker → app | `ready`        | exact `provider`, `model`, `effort`, `dispatchBudgetKind:"cliDispatchAttempts"`, `dispatchLimit`, `dispatchesUsed` |
-| App → broker | `evaluate`     | `requestId`, `contextRevision`, `budgetMs` (1–10,000), `input` object                                              |
-| Broker → app | `result`       | same request identity, validated `value`, `elapsedMs`, numeric `usage`                                             |
-| App → broker | `settled`      | same request identity, `verdict` (`current`, `staleSuccess`, `failed`), optional fixed `code` only on failure      |
-| App → broker | `cancel`       | fixed control `reason`, optional active request identity                                                           |
-| Broker → app | `failed`       | request identity and fixed `code`                                                                                  |
-| Broker → app | `terminal`     | fixed `reason`, including while no evaluation is pending                                                           |
-| Broker → app | `clock_probe`  | `probeId`                                                                                                          |
-| App → broker | `clock_sample` | same `probeId`, `nativeSessionElapsedMs`                                                                           |
-| App → broker | `cue_state`    | `observation` described below                                                                                      |
+| Direction    | Type           | Additional fields                                                                                                        |
+| ------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| App → broker | `hello`        | `nonce`, `expectedProvider`, `expectedModel`, `expectedEffort`                                                           |
+| Broker → app | `ready`        | exact `provider`, `model`, `effort`, `dispatchBudgetKind:"cliDispatchAttempts"`, `dispatchLimit`, `dispatchesUsed`       |
+| App → broker | `evaluate`     | `requestId`, `contextRevision`, `budgetMs` (1–10,000), `input` object                                                    |
+| Broker → app | `result`       | same request identity, validated `value`, `elapsedMs`, numeric `usage`                                                   |
+| App → broker | `settled`      | same request identity, `verdict` (`current`, `staleSuccess`, `expired`, `failed`), optional fixed `code` only on failure |
+| App → broker | `cancel`       | fixed control `reason`, optional active request identity; `deadline` always carries it                                   |
+| Broker → app | `failed`       | request identity and fixed `code`                                                                                        |
+| Broker → app | `terminal`     | fixed `reason`, including while no evaluation is pending                                                                 |
+| Broker → app | `clock_probe`  | `probeId`                                                                                                                |
+| App → broker | `clock_sample` | same `probeId`, `nativeSessionElapsedMs`                                                                                 |
+| App → broker | `cue_state`    | `observation` described below                                                                                            |
 
 The evaluator input is the JSON **object** parsed from Rust's
 `Request::prompt_input()`: bounded transcript `events`, `existingCue`, optional
@@ -97,6 +98,24 @@ the matching `settled` verdict arrives within one second. A failure, mismatch,
 duplicate or lost acknowledgement stops every role. `current` is a Rust validation
 verdict, not proof that a cue was painted. Same-chunk settlement followed by the
 next request preserves that ownership ordering.
+
+### Per-request deadline
+
+An evaluator deadline retires one request, not the run. The evaluator lease is
+scoped: when its `budgetMs` passes, the broker aborts that provider call, sends
+`failed` with code `deadline` for that request and keeps the gate, provider and
+run. A native `cancel` with reason `deadline` and the request identity does the
+same without a reply. A `settled` verdict of `expired` (a result read after the
+native deadline, never applied) is also not terminal. Late `cancel` frames for a
+request already retired this way are ignored; any other unknown request is a
+protocol failure. Each retired request has spent its dispatch, so repeated
+deadlines end the run at the dispatch cap. An unconfirmed provider process-group
+retirement, every other `cancel` reason and every other `failed` code stay
+terminal.
+
+`evaluationSummary` reports content-free counts: requests, results and their
+fixed actions, deadlines retired by the broker or by native, and settlement
+verdicts.
 
 ## Observed cues and clocks
 

@@ -67,6 +67,7 @@ function fixture({
   observe,
   helloSession = '1',
   lateBeforeStart = false,
+  firstRequestTimesOut = false,
 } = {}) {
   if (fixedModel) {
     strictSource = true;
@@ -186,7 +187,7 @@ function fixture({
                 frame('evaluate', {
                   requestId: '1',
                   contextRevision: '1',
-                  budgetMs: 1000,
+                  budgetMs: firstRequestTimesOut ? 40 : 1000,
                   input: {
                     events: [
                       {
@@ -200,6 +201,32 @@ function fixture({
                 }),
               ) + '\n',
             );
+        } else if (
+          value.type === 'failed' &&
+          value.code === 'deadline' &&
+          firstRequestTimesOut
+        ) {
+          // Request-scoped: the run continues with the next request.
+          trace.push('deadline-' + value.requestId);
+          socket.write(
+            JSON.stringify(
+              frame('evaluate', {
+                requestId: '2',
+                contextRevision: '2',
+                budgetMs: 1000,
+                input: {
+                  events: [
+                    {
+                      id: 's1',
+                      speaker: 'Speaker',
+                      text: 'The fictional delivery date is Friday.',
+                    },
+                  ],
+                  existingCue: null,
+                },
+              }),
+            ) + '\n',
+          );
         } else if (value.type === 'result' && fixedModel) {
           trace.push('validated-quiet');
           socket.write(
@@ -410,8 +437,21 @@ function fixture({
       environment: {},
       openers: {
         codex: async () => ({
-          async request() {
+          async request({ signal }) {
             counts.requests++;
+            if (firstRequestTimesOut && counts.requests === 1)
+              return new Promise((_, reject) =>
+                signal.addEventListener(
+                  'abort',
+                  () =>
+                    reject(
+                      Object.assign(new Error('fictional'), {
+                        category: 'cancelled',
+                      }),
+                    ),
+                  { once: true },
+                ),
+              );
             return {
               value: fixedModel
                 ? { action: 'quiet', cue: null, sourceIds: ['s1'] }
@@ -934,6 +974,36 @@ test('host cancellation during actual playback ends stopped, not failed cleanup,
     assert.equal(player.diagnostics.transport.lastCommand, 'retire');
     assert.deepEqual(player.diagnostics.process, { exitCode: 0, signal: null });
     assert.equal(player.diagnostics.audioCompleted, false);
+  } finally {
+    await player.close({ nativeReleased: true }).catch(() => {});
+  }
+});
+
+test('a request deadline during the fixed model take is recorded and the take completes on the next decision', async () => {
+  const player = createLabPlayerFixture({
+    runId: 'fictional-run',
+    prepareMs: 2000,
+    startMs: 100,
+    stopMs: 100,
+  });
+  try {
+    await player.prepare({ media });
+    const f = fixture({
+      fixedModel: true,
+      ownedPlayer: player,
+      recordDelayMs: 25,
+      firstRequestTimesOut: true,
+    });
+    const result = await f.take.done;
+    assert.equal(result.completed, true);
+    assert.equal(result.dispatchesUsed, 2);
+    assert.ok(f.trace.includes('deadline-1'));
+    assert.ok(f.trace.includes('validated-quiet'));
+    const summary = f.take.evaluationSummary;
+    assert.equal(summary.deadlineByBroker, 1);
+    assert.equal(summary.results, 1);
+    assert.equal(summary.resultActions.quiet, 1);
+    assert.equal(f.counts.providerClose, 1);
   } finally {
     await player.close({ nativeReleased: true }).catch(() => {});
   }

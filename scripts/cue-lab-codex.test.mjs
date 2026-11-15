@@ -764,3 +764,102 @@ test(
     }
   },
 );
+
+test('a request-scoped abort retires only that call; the session answers the next call', async () => {
+  let n = 0;
+  const session = await openCodexLab(
+    options({
+      deadlineMs: 1000,
+      run: (_r, { signal }) => {
+        n++;
+        if (n > 1) return Promise.resolve({ stdout: events() });
+        return new Promise((_resolve, reject) =>
+          signal.addEventListener(
+            'abort',
+            () =>
+              reject(Object.assign(new Error('x'), { category: 'cancelled' })),
+            { once: true },
+          ),
+        );
+      },
+    }),
+  );
+  const controller = new AbortController();
+  const first = session.request(request({ signal: controller.signal }));
+  await delay(5);
+  controller.abort();
+  await rejects(first, 'cancelled', 1);
+  const second = await session.request(request());
+  assert.deepEqual(second.value, value);
+  assert.deepEqual(
+    session.receipts.map((r) => [r.call, r.outcome]),
+    [
+      [1, 'cancelled'],
+      [2, 'result'],
+    ],
+  );
+  await session.close();
+});
+
+test('unconfirmed process cleanup after a scoped abort ends the session', async () => {
+  const session = await openCodexLab(
+    options({
+      deadlineMs: 1000,
+      run: (_r, { signal }) =>
+        new Promise((_resolve, reject) =>
+          signal.addEventListener(
+            'abort',
+            () =>
+              reject(Object.assign(new Error('x'), { category: 'cleanup' })),
+            { once: true },
+          ),
+        ),
+    }),
+  );
+  const controller = new AbortController();
+  const first = session.request(request({ signal: controller.signal }));
+  await delay(5);
+  controller.abort();
+  await rejects(first, 'cleanup', 1);
+  await rejects(session.request(request()), 'terminal', 1);
+  await session.close();
+});
+
+test('process receipts record only fixed lifecycle stages and millisecond offsets', async () => {
+  const stages = [];
+  const result = await runBoundedCodexProcess(
+    process.execPath,
+    ['-e', "process.stdout.write('fictional\\n')"],
+    { env: {}, deadlineMs: 2000, onStage: (s) => stages.push(s) },
+  );
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(stages, [
+    'spawned',
+    'first-output',
+    'exited',
+    'group-retired',
+  ]);
+});
+
+test('a late reply after a scoped abort is discarded without ending the session', async () => {
+  let release;
+  let n = 0;
+  const session = await openCodexLab(
+    options({
+      deadlineMs: 1000,
+      run: () => {
+        n++;
+        if (n > 1) return Promise.resolve({ stdout: events() });
+        return new Promise((resolve) => (release = resolve));
+      },
+    }),
+  );
+  const controller = new AbortController();
+  const first = session.request(request({ signal: controller.signal }));
+  await delay(5);
+  controller.abort();
+  release({ stdout: events() });
+  await rejects(first, 'cancelled', 1);
+  assert.deepEqual((await session.request(request())).value, value);
+  await session.close();
+});

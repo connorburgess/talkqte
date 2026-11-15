@@ -431,8 +431,15 @@ export function runBoundedCodexProcess(
     deadlineMs = 30000,
     maxOutputBytes = MAX_BYTES,
     onStdoutLine,
+    onStage,
   } = {},
 ) {
+  // Content-free lifecycle receipts only: a fixed stage name, never output.
+  const stage = (name) => {
+    try {
+      onStage?.(name);
+    } catch {}
+  };
   return new Promise((resolve, reject) => {
     if (
       typeof command !== 'string' ||
@@ -454,6 +461,8 @@ export function runBoundedCodexProcess(
       detached: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    stage('spawned');
+    let firstOutput = false;
     const stdoutDecoder = new StringDecoder('utf8');
     const stderrDecoder = new StringDecoder('utf8');
     let stdout = '',
@@ -487,6 +496,10 @@ export function runBoundedCodexProcess(
     const read = (chunk, channel) => {
       bytes += chunk.length;
       if (bytes > maxOutputBytes) return stop('output-limit');
+      if (channel === 'stdout' && !firstOutput) {
+        firstOutput = true;
+        stage('first-output');
+      }
       if (channel === 'stdout') {
         const decoded = stdoutDecoder.write(chunk);
         stdout += decoded;
@@ -510,6 +523,7 @@ export function runBoundedCodexProcess(
     child.stdin.on('error', () => {});
     child.stdin.end(input);
     child.on('close', async (code) => {
+      stage('exited');
       stdout += stdoutDecoder.end();
       stderr += stderrDecoder.end();
       if (onStdoutLine && partialLine && !problem) {
@@ -536,6 +550,7 @@ export function runBoundedCodexProcess(
           await delay(10);
         }
         if (present) problem = codexFailure('cleanup');
+        else stage('group-retired');
       }
       if (problem) return reject(problem);
       if (code !== 0) return reject(codexFailure('process'));
@@ -571,7 +586,7 @@ async function subscriptionRunner(environment, maxOutputBytes, signal) {
   const directory = await mkdtemp(join(tmpdir(), 'talkqte-codex-lab-'));
   const schemaFile = join(directory, 'reply.schema.json');
   return {
-    async run(request, { signal: operationSignal }) {
+    async run(request, { signal: operationSignal, onStage }) {
       await writeFile(schemaFile, JSON.stringify(request.schema), {
         mode: 0o600,
       });
@@ -590,6 +605,7 @@ async function subscriptionRunner(environment, maxOutputBytes, signal) {
         deadlineMs: request.deadlineMs,
         maxOutputBytes,
         onStdoutLine: reader.accept,
+        onStage,
         input: JSON.stringify({
           instructions: request.instructions,
           input: request.input,
@@ -660,6 +676,9 @@ export async function openCodexLab({
   let calls = 0,
     terminal = false,
     active = null;
+  // Bounded, content-free per-call timing receipts (milliseconds from the
+  // adapter's own request start); no prompt, output, path or error text.
+  const receipts = [];
   const fail = (category) => {
     terminal = true;
     active?.controller.abort();
@@ -701,9 +720,10 @@ export async function openCodexLab({
     const started = performance.now();
     let cancelled = false,
       timedOut = false;
+    // A caller's request-scoped abort retires only this call; the session
+    // stays usable unless its process group cannot be confirmed retired.
     const abort = () => {
       cancelled = true;
-      terminal = true;
       controller.abort();
     };
     requestSignal?.addEventListener('abort', abort, { once: true });
@@ -713,22 +733,35 @@ export async function openCodexLab({
       controller.abort();
     }, deadlineMs);
     calls++;
+    const receipt = { call: calls, outcome: null };
+    if (receipts.length < 100) receipts.push(receipt);
+    const onStage = (name) => {
+      const key = {
+        spawned: 'spawnedMs',
+        'first-output': 'firstOutputMs',
+        exited: 'exitedMs',
+        'group-retired': 'groupRetiredMs',
+      }[name];
+      if (key && receipt[key] === undefined)
+        receipt[key] = Math.round(performance.now() - started);
+    };
     // Assign the operation before invoking a runner, including synchronous throws.
     const operation = { controller, done: null };
     active = operation;
     operation.done = Promise.resolve().then(() =>
       run(
         { ...snapshot, model, effort, deadlineMs },
-        { signal: controller.signal },
+        { signal: controller.signal, onStage },
       ),
     );
     try {
       const result = await operation.done;
       if (timedOut) throw fail('deadline');
       if (cancelled || terminal || signal?.aborted || requestSignal?.aborted)
-        throw fail('cancelled');
+        throw codexFailure('cancelled', calls);
       const parsed = parseCodexEvents(result.stdout);
       validateCodexSchema(snapshot.schema, parsed.value);
+      receipt.outcome = 'result';
       return { ...parsed, elapsedMs: Math.round(performance.now() - started) };
     } catch (error) {
       const known = [
@@ -741,16 +774,28 @@ export async function openCodexLab({
         'process',
         'cleanup',
       ];
-      throw fail(
-        timedOut
-          ? 'deadline'
-          : cancelled || controller.signal.aborted || signal?.aborted
-            ? 'cancelled'
-            : known.includes(error?.category)
-              ? error.category
-              : 'provider',
-      );
+      // An unconfirmed process-group retirement always ends the session.
+      const category =
+        error?.category === 'cleanup'
+          ? 'cleanup'
+          : timedOut
+            ? 'deadline'
+            : cancelled || controller.signal.aborted || signal?.aborted
+              ? 'cancelled'
+              : known.includes(error?.category)
+                ? error.category
+                : 'provider';
+      receipt.outcome = category;
+      if (
+        category === 'cancelled' &&
+        cancelled &&
+        !terminal &&
+        !signal?.aborted
+      )
+        throw codexFailure('cancelled', calls);
+      throw fail(category);
     } finally {
+      receipt.settledMs = Math.round(performance.now() - started);
       clearTimeout(timer);
       requestSignal?.removeEventListener('abort', abort);
       active = null;
@@ -761,6 +806,9 @@ export async function openCodexLab({
     request,
     get calls() {
       return calls;
+    },
+    get receipts() {
+      return Object.freeze(receipts.map((r) => Object.freeze({ ...r })));
     },
     async close() {
       stop();
