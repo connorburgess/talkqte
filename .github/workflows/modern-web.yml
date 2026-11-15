@@ -1,0 +1,65 @@
+name: Modern Web Guidance (advisory)
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'index.html'
+      - 'tools/modern-web/**'
+      - '.github/workflows/modern-web.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'index.html'
+      - 'tools/modern-web/**'
+      - '.github/workflows/modern-web.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  legacy-scan:
+    name: Frontend legacy patterns (advisory)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - name: Install the isolated pinned scanner (no lifecycle scripts)
+        run: npm ci --prefix tools/modern-web --ignore-scripts --no-audit --no-fund
+      - name: Verify scanner failure classification
+        run: npm test --prefix tools/modern-web
+      - name: Scan existing frontend sources
+        run: node tools/modern-web/scan.mjs > modern-web-report.json 2> modern-web-stderr.txt
+      - name: Summarize findings separately from scanner errors
+        if: always()
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          let status = 'error';
+          try { status = JSON.parse(readFileSync('modern-web-report.json', 'utf8')).status; } catch {}
+          const descriptions = {
+            'no-findings': 'No matched legacy patterns in the limited static scan; not a compatibility or accessibility pass.',
+            findings: 'Provisional findings: review Keep/Drop criteria before choosing a focused regression.',
+            error: 'Scanner error or unavailable report. No clean scan is established; inspect the failed step and artifact.',
+          };
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Modern Web Guidance: ${status}\n\n${descriptions[status] ?? descriptions.error}\n`);
+          if (status === 'error') console.log('::error::Modern Web Guidance scanner error; not a clean scan. Advisory only.');
+          JS
+      - name: Save the report and wrapper diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: modern-web-report
+          path: |
+            modern-web-report.json
+            modern-web-stderr.txt
+          if-no-files-found: warn
+          retention-days: 7
