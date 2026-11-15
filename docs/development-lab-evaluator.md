@@ -162,10 +162,13 @@ and has no supported hard count.** A dispatch cap does not revoke remote work.
 A broker result arrives only after provider cleanup. Rust independently validates
 its immutable input/schema/source references and responds with identity-bound
 `settled` (`current`, `staleSuccess`, `failed`, or `expired` for a result read
-after the deadline). The global lease remains held
-through that acknowledgement, with a fixed one-second validation grace after an
-on-time provider result. It permits no second provider call and does not extend
-the provider deadline. Missing/mismatched acknowledgement ends every role.
+after the deadline). The evaluator lease is held until the request is settled
+or retired. Native settles a result within one second of receiving it, and
+confirms a request it retired at its deadline within one second of that
+deadline; the broker accepts either until one second after the request's
+deadline (plus a transit allowance). Neither permits a second provider call or
+extends the provider deadline. A missing acknowledgement after that, a `failed`
+verdict, or a mismatched or duplicate settlement ends the run.
 
 ## Publication and clock evidence
 
