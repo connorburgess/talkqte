@@ -53,13 +53,29 @@ output overflow and the adapter deadline are terminal; no retry is attempted. An
 abort of one request's own signal (the broker's per-request evaluator deadline)
 retires only that call once its process group is confirmed gone; an unconfirmed
 retirement is terminal. Codex calls keep content-free `receipts`: per call, the
-millisecond offsets of spawn, first output, exit and process-group retirement,
-and a fixed outcome. Output bytes are bounded while
+millisecond offsets of spawn, first output, decision ready, retirement
+requested, exit and process-group retirement, and a fixed outcome. Output bytes are bounded while
 streaming, including stderr. Cancellation terminates the owned process group,
 escalates to KILL and checks group retirement before returning; unresolved cleanup
 fails closed. Late results are rejected. `close()` awaits runner settlement and
 removes the owned temporary directory. Injected offline runners must honor their
 abort/deadline contract and settle after cleanup.
+
+A Codex call is complete once its event stream has exactly one agent message
+followed by the single `turn.completed`. The adapter then stops the CLI's process
+group (TERM, then KILL after 100 ms) instead of waiting for the CLI's own
+shutdown, and still confirms the group is gone before returning; a group that
+survives is a terminal `cleanup` failure. Any event after `turn.completed`, a
+second message, or `turn.completed` without a message remains a failure. The CLI
+spends about 3.3 s after `turn.completed` before it exits by itself (about 2.3 s
+against an offline local endpoint), which alone pushed every measured call past
+the 8 s evaluator deadline. Cutting it short skips the CLI's own shutdown work: in
+an offline probe with a fresh Codex home it leaves SQLite state databases with
+uncheckpointed write-ahead logs (recovered on the next open) and one per-run
+`tmp/arg0-macos` directory holding a lock file and two symlinks (removed by the
+next Codex start). What the remaining shutdown time does with a signed-in profile
+is not observable from the event stream. The lab runs the CLI with the user's
+own Codex home, not an isolated profile.
 
 The orchestrator must still supply **one shared operation gate and nonresettable
 budget** across participants, judge and real-app evaluator. Do not count gate
