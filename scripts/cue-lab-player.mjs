@@ -67,7 +67,22 @@ export function validateLabPlayerDurations({
     videoOnlyTailMs: Math.max(0, assetDurationMs - totalFrames / 48),
   });
 }
+const PREPARATION_STAGES = Object.freeze([
+  'launch',
+  'media-identity',
+  'track-timeline',
+  'audio-decode',
+  'audio-duration',
+  'pcm-buffer',
+  'video-composition',
+  'engine-connect',
+  'engine-prepare',
+  'window-prepare',
+  'video-seek',
+  'window-visible',
+]);
 const FAILURE_STAGES = new Set([
+  ...PREPARATION_STAGES,
   'prepare',
   'media-identity',
   'track-timeline',
@@ -449,6 +464,8 @@ function playerController({
     firstDiagnostic = null,
     childExit = null,
     stderrBytes = 0,
+    preparationProgress = null,
+    preparationProgressCount = 0,
     partial = Buffer.alloc(0),
     bytes = 0,
     partialTimer,
@@ -552,9 +569,39 @@ function playerController({
       return;
     }
     required(!failed && !stopRequested);
+    if (frame.type === 'preparation_progress') {
+      required(
+        !prepared &&
+          !playing &&
+          preparationProgressCount < PREPARATION_STAGES.length &&
+          exact(frame, [
+            ...BASE,
+            'stage',
+            'decodedFrames',
+            'audioTrackDurationMs',
+            'assetDurationMs',
+          ]) &&
+          frame.stage === PREPARATION_STAGES[preparationProgressCount] &&
+          integer(frame.decodedFrames, 0, 105 * 48000) &&
+          [frame.audioTrackDurationMs, frame.assetDurationMs].every(
+            (v) => Number.isFinite(v) && v >= 0 && v <= 105000,
+          ),
+      );
+      preparationProgressCount++;
+      preparationProgress = Object.freeze({
+        stage: frame.stage,
+        decodedFrames: frame.decodedFrames,
+        audioTrackDurationMs: frame.audioTrackDurationMs,
+        assetDurationMs: frame.assetDurationMs,
+        receivedMonotonicMs: performance.now(),
+        basis: 'receipt',
+      });
+      return;
+    }
     if (frame.type === 'prepared') {
       required(
         !prepared &&
+          preparationProgressCount === PREPARATION_STAGES.length &&
           exact(frame, [
             ...BASE,
             'pid',
@@ -569,6 +616,7 @@ function playerController({
             'audioTrackDurationMs',
             'assetDurationMs',
             'videoOnly',
+            'pcmFormat',
           ]) &&
           frame.pid === child.pid &&
           integer(frame.windowId, 1, 0x7fffffff) &&
@@ -582,7 +630,8 @@ function playerController({
           integer(frame.totalFrames, 1, 105 * 48000) &&
           frame.durationMs === frame.totalFrames / 48 &&
           Math.abs(frame.assetDurationMs - media.durationMs) <= 100 &&
-          frame.videoOnly === true,
+          frame.videoOnly === true &&
+          frame.pcmFormat === 'float32-planar',
       );
       durations = validateLabPlayerDurations(frame);
       totalFrames = frame.totalFrames;
@@ -778,6 +827,8 @@ function playerController({
         failure: firstDiagnostic,
         process: childExit,
         stderrBytes: Math.min(stderrBytes, 128 * 1024),
+        preparationProgress,
+        preparationProgressCount,
         prepared,
         started,
         audioCompleted: !!audioCompletion,
@@ -1005,6 +1056,10 @@ export function createLabPlayerFixture({
       'prepare-failed',
       'exit-prepare',
       'signal-prepare',
+      'progress-deadline',
+      'progress-duplicate',
+      'progress-unknown',
+      'wrong-pcm-format',
       'missing-video',
       'wrong-pid',
       'wrong-run',

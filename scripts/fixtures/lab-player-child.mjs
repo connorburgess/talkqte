@@ -11,7 +11,39 @@ const base = {
 const emit = (type, fields = {}) =>
   process.stdout.write(JSON.stringify({ ...base, type, ...fields }) + '\n');
 const frames = mode === 'video-tail' ? 4848912 : 4919040;
-const prepared = () =>
+const progress = (stage) =>
+  emit('preparation_progress', {
+    stage,
+    decodedFrames: 0,
+    audioTrackDurationMs: 0,
+    assetDurationMs: 0,
+  });
+const prepared = () => {
+  for (const stage of [
+    'launch',
+    'media-identity',
+    'track-timeline',
+    'audio-decode',
+    'audio-duration',
+    'pcm-buffer',
+    'video-composition',
+    'engine-connect',
+    'engine-prepare',
+    'window-prepare',
+    'video-seek',
+    'window-visible',
+  ]) {
+    progress(stage);
+    if (mode === 'progress-deadline' && stage === 'engine-connect') return;
+    if (mode === 'progress-duplicate') {
+      progress(stage);
+      return;
+    }
+    if (mode === 'progress-unknown') {
+      progress('arbitrary-untrusted-text');
+      return;
+    }
+  }
   emit('prepared', {
     pid: process.pid + (mode === 'wrong-pid' ? 1 : 0),
     windowId: 123,
@@ -25,10 +57,14 @@ const prepared = () =>
     audioTrackDurationMs: frames / 48,
     assetDurationMs: 102480,
     videoOnly: true,
+    pcmFormat:
+      mode === 'wrong-pcm-format' ? 'float32-interleaved' : 'float32-planar',
   });
+};
 if (mode === 'exit-prepare') process.exit(7);
 if (mode === 'signal-prepare') process.kill(process.pid, 'SIGTERM');
-if (mode === 'prepare-failed')
+if (mode === 'prepare-failed') {
+  progress('launch');
   emit('failed', {
     code: 'player_failed',
     stage: 'audio-duration',
@@ -36,7 +72,7 @@ if (mode === 'prepare-failed')
     audioTrackDurationMs: 101019,
     assetDurationMs: 102480,
   });
-else prepared();
+} else prepared();
 if (mode === 'duplicate') prepared();
 let partial = '';
 process.stdin.setEncoding('utf8');

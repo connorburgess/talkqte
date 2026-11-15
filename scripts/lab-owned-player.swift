@@ -17,6 +17,17 @@ private struct PreparationFailure: Error {
 }
 private func require(_ condition: Bool) throws { if !condition { throw PlayerError.invalid } }
 
+// Bit-preserving layout conversion only: no mixing, resampling or padding.
+private func copyStereoPlanar(_ source: UnsafeRawBufferPointer, _ planes: [UnsafeMutableRawBufferPointer], _ frames: Int) throws {
+    try require(frames > 0 && frames <= 105 * 48000 && source.count == frames * 8 &&
+                planes.count == 2 && planes.allSatisfy { $0.count == frames * 4 })
+    guard let input = source.baseAddress, let left = planes[0].baseAddress, let right = planes[1].baseAddress else { throw PlayerError.invalid }
+    for frame in 0..<frames {
+        left.advanced(by: frame * 4).copyMemory(from: input.advanced(by: frame * 8), byteCount: 4)
+        right.advanced(by: frame * 4).copyMemory(from: input.advanced(by: frame * 8 + 4), byteCount: 4)
+    }
+}
+
 // One-way handoff: decoder never touches these objects after returning them;
 // only the main owner queue may use/mutate them after the handoff.
 private final class DecodedMedia: @unchecked Sendable {
@@ -82,6 +93,7 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        publishPreparationProgress("launch")
         installInput()
         let preparation = DispatchWorkItem { [weak self] in self?.stop(failure: true) }
         watchdog = preparation
@@ -102,12 +114,23 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }
     }
+    func publishPreparationProgress(_ stage: String, _ decodedFrames: Int64 = 0, _ audioMs: Double = 0, _ assetMs: Double = 0) {
+        guard phase == "preparing", lab_player_stopped(state) == 0 else { return }
+        diagnosticStage = stage; diagnosticFrames = decodedFrames
+        audioTrackDurationMs = audioMs; assetDurationMs = assetMs
+        emit("preparation_progress", ["stage": stage, "decodedFrames": decodedFrames,
+             "audioTrackDurationMs": audioMs, "assetDurationMs": assetMs])
+    }
+    func preparationProgress(_ stage: String, _ decodedFrames: Int64 = 0, _ audioMs: Double = 0, _ assetMs: Double = 0) async {
+        await MainActor.run { self.publishPreparationProgress(stage, decodedFrames, audioMs, assetMs) }
+    }
     fileprivate func decode() async throws -> DecodedMedia {
         var stage = "media-identity"
         var count: Int64 = 0
         var audioMs: Double = 0
         var assetMs: Double = 0
         do {
+        await preparationProgress(stage)
         let values = try mediaURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .isSymbolicLinkKey])
         try require(values.isRegularFile == true && values.isSymbolicLink != true && (values.fileSize ?? 0) > 0 && values.fileSize! <= 256 * 1024 * 1024)
         let handle = try FileHandle(forReadingFrom: mediaURL)
@@ -119,6 +142,7 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         try require(hasher.finalize().map { String(format: "%02x", $0) }.joined() == approvedHash)
         stage = "track-timeline"
+        await preparationProgress(stage, count, audioMs, assetMs)
         let asset = AVURLAsset(url: mediaURL)
         let assetDuration = try await asset.load(.duration)
         let duration = assetDuration.seconds
@@ -133,6 +157,7 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     audioDuration.isFinite && audioDuration > 0 && audioDuration <= duration + 0.1)
         audioMs = audioDuration * 1000
         stage = "audio-decode"
+        await preparationProgress(stage, count, audioMs, assetMs)
         let reader = try AVAssetReader(asset: asset)
         reader.timeRange = audioRange
         let output = AVAssetReaderTrackOutput(track: audio[0], outputSettings: [
@@ -162,15 +187,21 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
             try require(count <= 105 * 48000)
         }
         stage = "audio-duration"
+        await preparationProgress(stage, count, audioMs, assetMs)
         try require(reader.status == .completed && count > 0 && abs(Double(count) / 48000 - audioDuration) <= 0.1)
         stage = "pcm-buffer"
-        guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 2, interleaved: true),
+        await preparationProgress(stage, count, audioMs, assetMs)
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2),
+              format.isStandard, !format.isInterleaved,
               let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)) else { throw PlayerError.invalid }
         buffer.frameLength = AVAudioFrameCount(count)
-        let list = buffer.mutableAudioBufferList
-        try require(list.pointee.mNumberBuffers == 1 && Int(list.pointee.mBuffers.mDataByteSize) == bytes.count)
-        _ = bytes.withUnsafeBytes { raw in memcpy(list.pointee.mBuffers.mData!, raw.baseAddress!, bytes.count) }
+        let buffers = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+        try require(buffers.count == 2 && buffers.allSatisfy { $0.mNumberChannels == 1 && Int($0.mDataByteSize) == Int(count) * 4 && $0.mData != nil })
+        try bytes.withUnsafeBytes { raw in
+            try copyStereoPlanar(raw, buffers.map { UnsafeMutableRawBufferPointer(start: $0.mData, count: Int($0.mDataByteSize)) }, Int(count))
+        }
         stage = "video-composition"
+        await preparationProgress(stage, count, audioMs, assetMs)
         let composition = AVMutableComposition()
         guard let track = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else { throw PlayerError.invalid }
         try track.insertTimeRange(CMTimeRange(start: .zero, duration: assetDuration), of: videos[0], at: .zero)
@@ -183,10 +214,13 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     fileprivate func prepared(_ decoded: DecodedMedia) {
         guard phase == "preparing", lab_player_stopped(state) == 0 else { return }
-        diagnosticStage = "engine-prepare"
         pcm = decoded.pcm; format = decoded.pcm.format; frames = Int64(decoded.pcm.frameLength)
         diagnosticFrames = frames; audioTrackDurationMs = decoded.audioTrackDurationMs; assetDurationMs = decoded.assetDurationMs
+        guard decoded.pcm.format.isStandard, !decoded.pcm.format.isInterleaved,
+              decoded.pcm.format.sampleRate == 48000, decoded.pcm.format.channelCount == 2 else { return stop(failure: true) }
+        publishPreparationProgress("engine-connect", frames, audioTrackDurationMs, assetDurationMs)
         engine.attach(node); engine.connect(node, to: engine.mainMixerNode, format: format)
+        publishPreparationProgress("engine-prepare", frames, audioTrackDurationMs, assetDurationMs)
         engine.prepare() // Not started; no scheduled acknowledgement.
         let video = AVPlayer(playerItem: AVPlayerItem(asset: decoded.video))
         // Required by setRate(_:time:atHostTime:), including a past host anchor.
@@ -195,13 +229,14 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
         videoObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: video.currentItem, queue: .main) { [weak self] _ in
             self?.observeVideoCompletion()
         }
-        diagnosticStage = "window-prepare"
+        publishPreparationProgress("window-prepare", frames, audioTrackDurationMs, assetDurationMs)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 540), styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Fictional generated meeting — TalkQTE Lab Player"
         window.delegate = self; window.center()
         let view = NSView(frame: window.contentView!.bounds); view.wantsLayer = true
         let layer = AVPlayerLayer(player: video); layer.frame = view.bounds; layer.videoGravity = .resizeAspect
         view.layer = layer; window.contentView = view; self.window = window
+        publishPreparationProgress("video-seek", frames, audioTrackDurationMs, assetDurationMs)
         video.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { success in
             DispatchQueue.main.async {
                 guard self.phase == "preparing", lab_player_stopped(self.state) == 0 else { return }
@@ -213,13 +248,14 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     guard lab_player_process_start(getpid(), &seconds, &microseconds) == 1,
                           window.windowNumber > 0, window.isVisible,
                           Bundle.main.bundleIdentifier == "com.talkqte.lab-player" else { return self.stop(failure: true) }
+                    self.publishPreparationProgress("window-visible", self.frames, self.audioTrackDurationMs, self.assetDurationMs)
                     self.watchdog?.cancel(); self.phase = "prepared"; self.diagnosticStage = "prepared"
                     self.emit("prepared", ["pid": getpid(), "windowId": window.windowNumber,
                         "application": "TalkQTE Lab Player", "bundleId": "com.talkqte.lab-player",
                         "processStart": ["seconds": String(seconds), "microseconds": microseconds],
                         "sampleRate": 48000, "channels": 2, "totalFrames": self.frames,
                         "durationMs": Double(self.frames) / 48, "audioTrackDurationMs": self.audioTrackDurationMs,
-                        "assetDurationMs": self.assetDurationMs, "videoOnly": true])
+                        "assetDurationMs": self.assetDurationMs, "videoOnly": true, "pcmFormat": "float32-planar"])
                 }
             }
         }
@@ -411,6 +447,32 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Callback context/PCM stay alive until that owned process exit.
     }
 }
+#if LAB_PLAYER_PCM_TESTS
+// Compiled during offline validation, not executed by the lab workflow.
+func testStereoPlanarPreservation() throws {
+    let words: [UInt32] = [0x3f800000, 0xbf800000, 0x00000000, 0x80000000, 0x7fc12345, 0x00000001]
+    var left = [UInt32](repeating: 0xdeadbeef, count: 3)
+    var right = left
+    try words.withUnsafeBytes { input in
+        try left.withUnsafeMutableBytes { l in
+            try right.withUnsafeMutableBytes { r in try copyStereoPlanar(input, [l, r], 3) }
+        }
+    }
+    precondition(left == [words[0], words[2], words[4]] && right == [words[1], words[3], words[5]])
+    precondition(left.count == 3 && right.count == 3) // Exact frame count and channel order.
+    var rejected = false
+    do { try words.withUnsafeBytes { try copyStereoPlanar($0, [], 3) } } catch { rejected = true }
+    precondition(rejected)
+    rejected = false
+    do { try words.withUnsafeBytes { input in
+        try left.withUnsafeMutableBytes { l in
+            try right.withUnsafeMutableBytes { r in try copyStereoPlanar(input, [l, r], 2) }
+        }
+    } } catch { rejected = true }
+    precondition(rejected) // Never silently truncate/pad a mismatching frame shape.
+}
+try testStereoPlanarPreservation()
+#else
 let arguments = CommandLine.arguments
 if arguments.count != 3 { exit(1) }
 do {
@@ -418,3 +480,5 @@ do {
     let app = NSApplication.shared; app.delegate = delegate
     withExtendedLifetime(delegate) { app.run() }
 } catch { exit(1) }
+
+#endif

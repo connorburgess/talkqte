@@ -474,6 +474,8 @@ test('fixed failed preparation stage and numeric diagnostics survive Stop/cleanu
     assetDurationMs: 102480,
   });
   assert.equal(player.diagnostics.process.exitCode, 0);
+  assert.equal(player.diagnostics.preparationProgress.stage, 'launch');
+  assert.equal(player.diagnostics.failure.stage, 'audio-duration');
   assert.equal(player.diagnostics.stderrBytes, 0);
 });
 test('unexpected prepare exit retains only bounded exit/signal/category, never raw stderr', async () => {
@@ -527,3 +529,40 @@ test('caller abort from genuine started observation retains cancelled diagnostic
     await player.close({ nativeReleased: true }).catch(() => {});
   }
 });
+
+test('preparation deadline retains fixed last progress independently of terminal first failure', async () => {
+  const player = createLabPlayerFixture({
+    ...fixtureOptions,
+    fixtureCase: 'progress-deadline',
+  });
+  const controller = new AbortController();
+  try {
+    await assert.rejects(player.prepare({ media, signal: controller.signal }));
+    controller.abort();
+    await assert.rejects(player.close({ nativeReleased: true }));
+    assert.deepEqual(player.diagnostics.failure, { category: 'deadline' });
+    assert.equal(
+      player.diagnostics.preparationProgress.stage,
+      'engine-connect',
+    );
+    assert.equal(player.diagnostics.preparationProgress.basis, 'receipt');
+    assert.equal(player.diagnostics.preparationProgressCount, 8);
+    assert.equal(player.diagnostics.prepared, false);
+  } finally {
+    await player.close({ nativeReleased: true }).catch(() => {});
+  }
+});
+for (const fixtureCase of [
+  'progress-duplicate',
+  'progress-unknown',
+  'wrong-pcm-format',
+]) {
+  test(`preparation rejects ${fixtureCase} without promoting progress to readiness`, async () => {
+    const player = createLabPlayerFixture({ ...fixtureOptions, fixtureCase });
+    await assert.rejects(player.prepare({ media }));
+    await assert.rejects(player.close({ nativeReleased: true }));
+    assert.equal(player.diagnostics.failure.category, 'protocol');
+    assert.equal(player.diagnostics.prepared, false);
+    assert.ok(player.diagnostics.preparationProgressCount <= 12);
+  });
+}
