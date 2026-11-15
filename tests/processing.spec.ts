@@ -717,17 +717,19 @@ test('strict subscription lab names Codex and discloses terminal controls in the
       .filter({ hasText: 'Sending recent lines to Codex' }),
   ).toBeVisible();
   await expect(
-    page.getByText(/Pause, Dismiss, Off and Stop end this strict run/),
+    page.getByText(
+      /A cue reflects speech up to 8 s before it appears; newer speech is checked next\. A reply later than 8 s shows no cue and the run continues\. Pause, Dismiss, Off, Stop and any other failure end the run/,
+    ),
   ).toBeVisible();
   await send(page, { phase: 'unavailable', sending: false, issue: 'timedOut' });
   await expect(
     page
       .getByRole('status')
-      .filter({ hasText: 'the model exceeded its deadline' }),
+      .filter({ hasText: 'a deadline ended the lab connection' }),
   ).toBeVisible();
   await expect(
     page
       .getByRole('status')
-      .filter({ hasText: 'the model exceeded its deadline' }),
+      .filter({ hasText: 'a deadline ended the lab connection' }),
   ).not.toContainText('twice');
 });

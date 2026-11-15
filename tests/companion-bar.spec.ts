@@ -293,7 +293,7 @@ test('Codex lab disclosure uses the selected provider and strict first-timeout p
   ).toBeVisible();
   await publish({ model: 'stopped', modelIssue: 'timedOut' });
   await expect(bar.getByText('Cues off', { exact: false })).toContainText(
-    'the model exceeded its deadline',
+    'a deadline ended the lab connection',
   );
   await expect(bar.getByText('Cues off', { exact: false })).not.toContainText(
     'twice',
