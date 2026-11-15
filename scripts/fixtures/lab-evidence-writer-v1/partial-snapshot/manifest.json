@@ -1,0 +1,85 @@
+{
+  "schema": "talkqte.lab.evidence.manifest.v1",
+  "runId": "fictional-snapshot-fixture",
+  "mode": "prepared",
+  "fictional": true,
+  "contentMode": "fictional-content",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "expiresAt": "2026-01-08T00:00:00.000Z",
+  "limits": {
+    "maxFileBytes": 4194304,
+    "maxTotalBytes": 16777216,
+    "maxEvents": 10000
+  },
+  "clocks": [
+    {
+      "id": "node",
+      "kind": "monotonic"
+    },
+    {
+      "id": "native-logger",
+      "kind": "monotonic"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "events",
+      "kind": "events",
+      "path": "events.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "id": "native",
+      "kind": "native-timing",
+      "path": "native.jsonl",
+      "sha256": "12acf3cf13ad018705fd8fb9686a4643aaf741b821f211f62a24d701d19c1d08",
+      "bytes": 173,
+      "snapshotCoverage": {
+        "schema": "talkqte.lab.timing-snapshot.v1",
+        "runId": "fictional-snapshot-fixture",
+        "sourcePath": "/fictional/native-timing.jsonl",
+        "sourceIdentity": {
+          "dev": "1",
+          "ino": "2"
+        },
+        "sourceReleaseObserved": true,
+        "recorderFinalizationObserved": true,
+        "nativeWriterMayRemainOpen": true,
+        "cutoffReceipt": {
+          "clockId": "node",
+          "atMs": 42,
+          "basis": "receipt"
+        },
+        "observedBytesAtOpen": 346,
+        "observedBytesAtEnd": 346,
+        "cutoffBytes": 178,
+        "readBytes": 178,
+        "copiedBytes": 173,
+        "rows": 1,
+        "trailingPartialBytes": 5,
+        "omittedBytesAtCutoff": 5,
+        "unobservedBytesAtOpen": 168,
+        "grewDuringCopy": false,
+        "rowLimitReached": false,
+        "completeRunCoverage": false,
+        "unknownLateRecords": true,
+        "sha256": "12acf3cf13ad018705fd8fb9686a4643aaf741b821f211f62a24d701d19c1d08"
+      },
+      "clockId": "native-logger"
+    }
+  ],
+  "guards": [],
+  "runtime": {
+    "node": "v22.23.2",
+    "libuv": "1.51.0",
+    "platform": "darwin"
+  },
+  "writer": {
+    "failed": false,
+    "dropped": 0,
+    "events": 0,
+    "nativeRows": 1,
+    "retentionEnforced": false
+  }
+}

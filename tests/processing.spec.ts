@@ -692,3 +692,42 @@ test('Cancel start still stops its own capture if startup finishes before delive
   ).toBeVisible();
   expect(await calls(page, 'stop_capture')).toHaveLength(1);
 });
+
+test('strict subscription lab names Codex and discloses terminal controls in the panel', async ({
+  page,
+}) => {
+  await open(page);
+  await send(page, {
+    processor: {
+      id: 'lab-subscription',
+      revision: 1,
+      name: 'Codex',
+      model: 'gpt-6.1-sol',
+      location: 'hosted',
+      destination: 'OpenAI through the lab subscription',
+      dataPolicy: 'Fictional conversation-only processing.',
+      acceptsNotes: false,
+    },
+    phase: 'active',
+    sending: true,
+  });
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'Sending recent lines to Codex' }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Pause, Dismiss, Off and Stop end this strict run/),
+  ).toBeVisible();
+  await send(page, { phase: 'unavailable', sending: false, issue: 'timedOut' });
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'the model exceeded its deadline' }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'the model exceeded its deadline' }),
+  ).not.toContainText('twice');
+});
