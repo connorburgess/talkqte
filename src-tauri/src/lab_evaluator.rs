@@ -334,7 +334,12 @@ impl Link {
             if cancel.is_cancelled() {
                 if !cancel.is_withdrawn() && self.terminal().is_none() {
                     // Past the deadline only: the request is retired, not the
-                    // run. The engine settles it as Expired.
+                    // run. The engine settles it as Expired. A result already
+                    // delivered is returned so its action can be logged; the
+                    // engine never applies a reply read after the deadline.
+                    if let Ok(result) = rx.try_recv() {
+                        return result;
+                    }
                     return Err(Failure::Expired);
                 }
                 self.cancel_reason(ControlReason::TransportFailed);
