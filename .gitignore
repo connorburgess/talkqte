@@ -46,3 +46,7 @@ models/
 *.gguf
 *.ggml
 ggml-*.bin
+
+# Local advisory frontend scan output
+modern-web-report.json
+modern-web-stderr.txt
