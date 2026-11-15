@@ -106,9 +106,18 @@ lock. Valid stale success is discarded; only the newest eligible context can be
 submitted next. An error is terminal even when its original speech is stale.
 There is no queue of old contexts, unchanged-context retry or freshness extension.
 
-The first timeout, invalid response, provider failure, lost settlement or transport
-failure ends the strict lab run. Stop, revoke, replacement, Pause and Dismiss also
-end it. Resume does not restart it; a new run/session is required. This policy is
+A request with no result inside the 8 s deadline is recorded as no decision in
+time, and the run continues. Native retires only that request: it sends a
+request-scoped `cancel` with reason `deadline`, or settles a result it read too
+late as `expired`, and a broker `failed` with code `deadline` retires it the same
+way. Late frames for a retired request are ignored. The session call limit and the
+broker's dispatch cap still bound the run, and each timed-out request spends a
+dispatch. The timing log keeps the action code of a decision that arrived but was
+not applied, whether stale or read after the deadline; it is never shown.
+
+An invalid response, provider failure, lost settlement, an expiry native cannot
+retire, or a transport failure ends the strict lab run. Stop, revoke, replacement,
+Pause and Dismiss also end it. Resume does not restart it; a new run/session is required. This policy is
 specific to the lab backend. Continuous speech can produce stale-result silence
 or starvation, and global serialization can increase latency. Those are measured
 acceptance risks, not grounds to publish a stale cue.
@@ -133,7 +142,8 @@ and has no supported hard count.** A dispatch cap does not revoke remote work.
 
 A broker result arrives only after provider cleanup. Rust independently validates
 its immutable input/schema/source references and responds with identity-bound
-`settled` (`current`, `staleSuccess` or `failed`). The global lease remains held
+`settled` (`current`, `staleSuccess`, `failed`, or `expired` for a result read
+after the deadline). The global lease remains held
 through that acknowledgement, with a fixed one-second validation grace after an
 on-time provider result. It permits no second provider call and does not extend
 the provider deadline. Missing/mismatched acknowledgement ends every role.
