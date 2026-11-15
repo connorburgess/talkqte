@@ -454,6 +454,10 @@ pub struct Worker {
     // A reply that completed before the deadline but was read after it.
     // Never applied; kept only so its action can be logged.
     late: Option<Decision>,
+    // The cancel flag of a request already read as Expired whose adapter may
+    // still be running. Expiry does not set it, so the lab link can retire
+    // the request without ending the run; a later Stop or withdrawal does.
+    expired: Option<Arc<AtomicBool>>,
 }
 
 impl Worker {
@@ -499,6 +503,12 @@ impl Worker {
                                 }
                             })
                     };
+                    // A job withdrawn while it was validating sends no decision.
+                    let result = if job.cancel.is_withdrawn() && result.is_ok() {
+                        Err(Failure::Cancelled)
+                    } else {
+                        result
+                    };
                     // A bounded mailbox never blocks cancellation or caller teardown.
                     let _ = output.try_send((job.id, result));
                     finished.store(false, Ordering::Release);
@@ -514,6 +524,7 @@ impl Worker {
             next_id: 0,
             budget,
             late: None,
+            expired: None,
         })
     }
 
@@ -534,6 +545,7 @@ impl Worker {
         // Discard a cancelled/expired attempt's late completion before reuse.
         while self.replies.try_recv().is_ok() {}
         self.late = None;
+        self.expired = None;
         let id = self
             .next_id
             .checked_add(1)
@@ -573,6 +585,13 @@ impl Worker {
     pub fn cancel_pending(&mut self) {
         if let Some(pending) = &self.pending {
             pending.cancelled.store(true, Ordering::Release);
+        } else if let Some(expired) = self.expired.take() {
+            // Stop after an expiry: the adapter still running can no longer
+            // hand back a decision, and one it already delivered is dropped,
+            // so no reply text is kept after Stop.
+            expired.store(true, Ordering::Release);
+            while self.replies.try_recv().is_ok() {}
+            self.late = None;
         }
     }
 
@@ -612,6 +631,7 @@ impl Worker {
         if let Some(error) = invalid {
             if error == Failure::Expired {
                 let id = pending.id;
+                self.expired = Some(pending.cancelled.clone());
                 if let Ok((reply, Ok(decision))) = self.replies.try_recv() {
                     self.late = (reply == id).then_some(decision);
                 }
@@ -790,6 +810,42 @@ mod tests {
                 worker.take_late_decision().map(|d| d.action),
                 (!withdrawn).then_some(Action::Quiet)
             );
+        }
+    }
+
+    #[test]
+    fn stop_after_an_expiry_keeps_no_late_reply() {
+        let input = request(false);
+        for finished_before_stop in [false, true] {
+            let (started, receipt) = mpsc::channel();
+            let (release, wait) = mpsc::channel();
+            let mut worker = Worker::start(
+                Held {
+                    started,
+                    release: wait,
+                    calls: Arc::new(AtomicUsize::new(0)),
+                },
+                Duration::from_millis(50),
+            )
+            .unwrap();
+            worker.submit(input.clone()).unwrap();
+            receipt.recv_timeout(Duration::from_secs(2)).unwrap();
+            std::thread::sleep(Duration::from_millis(80));
+            // Read as Expired while the adapter is still running.
+            assert_eq!(worker.poll(&input), Some(Err(Failure::Expired)));
+            assert!(worker.take_late_decision().is_none());
+            if finished_before_stop {
+                release.send(()).unwrap();
+                wait_idle(&worker);
+            }
+            worker.cancel_pending();
+            if !finished_before_stop {
+                release.send(()).unwrap();
+                wait_idle(&worker);
+            }
+            // No decision, and so no cue text, is left after Stop.
+            assert!(!matches!(worker.replies.try_recv(), Ok((_, Ok(_)))));
+            assert!(worker.take_late_decision().is_none());
         }
     }
 
