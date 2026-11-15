@@ -108,11 +108,12 @@ After both validated track completions, playback releases its caller's abort
 listener before resolving. The capture owner can then abort the shared run to
 begin ordinary Stop and retirement without creating a new playback cancellation.
 Cancellation before that boundary remains a failed (incomplete) playback with
-first failure `cancelled`. It is not a cleanup failure: once the player
+first failure `cancelled`. It is not by itself a cleanup failure: once the player
 acknowledges Stop, `stop()` resolves, and retirement still requires a clean exit
-of the owned process group. Any other first failure, and independent Stop or
-retirement failures, remain cleanup failures; completed playback does not prove
-cleanup.
+of the owned process group. A failure after the cancellation is kept as
+`laterFailure` without replacing the first, and makes cleanup fail. Any other
+first failure, and independent Stop or retirement failures, remain cleanup
+failures; completed playback does not prove cleanup.
 
 `play()` returns separate frozen `audioCompletion`, `videoCompletion` and duration
 metadata. Read-only `diagnostics` retains these even across later cleanup failure,
