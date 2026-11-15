@@ -368,11 +368,40 @@ export function importNativeRows(rows, { runId, artifactId, clockId }) {
         if (r.through_segment !== undefined)
           identity.segmentId = String(r.through_segment);
         break;
-      case 'evaluation_result':
+      case 'evaluation_result': {
         stage = 'evaluator.result';
         outcome = r.outcome === 'failed' ? 'failure' : r.outcome;
         payload = { nativeReportedLatencyMs: r.latency_ms };
+        // Lab-only native fields: `action` on a decision that was not applied
+        // (stale or a late timeout), or the bounded-staleness trio on an
+        // applied decision. Never both; the trio is all-or-nothing.
+        const lag = ['through_segment', 'lag_lines', 'lag_ms'].filter(
+          (k) => r[k] !== undefined,
+        );
+        if (r.action !== undefined) {
+          if (!DECISION_ACTIONS.has(r.action) || lag.length)
+            fail('invalid native decision action');
+          payload.decisionAction = r.action;
+        }
+        if (lag.length) {
+          if (
+            lag.length !== 3 ||
+            !DECISION_ACTIONS.has(r.outcome) ||
+            !text(String(r.through_segment), 160) ||
+            typeof r.through_segment !== 'string' ||
+            !Number.isSafeInteger(r.lag_lines) ||
+            r.lag_lines < 0 ||
+            !Number.isSafeInteger(r.lag_ms) ||
+            r.lag_ms < 0 ||
+            (r.lag_lines === 0 && r.lag_ms !== 0)
+          )
+            fail('invalid native decision staleness');
+          payload.throughSegment = r.through_segment;
+          payload.lagLines = r.lag_lines;
+          payload.lagMs = r.lag_ms;
+        }
         break;
+      }
       case 'cue_decision':
         stage = 'cue.decided';
         if (r.decider !== undefined) payload = { decider: r.decider };
@@ -477,6 +506,20 @@ const key = (e, kind) =>
   e.ids?.sessionId && e.ids?.[kind]
     ? `${e.ids.sessionId}/${e.ids[kind]}`
     : null;
+const DECISION_ACTIONS = new Set(['show', 'quiet', 'resolved', 'withdraw']);
+// How far behind the current transcript an applied lab decision was.
+const staleness = (result) =>
+  result?.payload?.lagLines === undefined
+    ? null
+    : {
+        throughSegment: result.payload.throughSegment,
+        lagLines: result.payload.lagLines,
+        lagMs: result.payload.lagMs,
+      };
+const lagText = (s) =>
+  s
+    ? `${escape(s.throughSegment)} / ${s.lagLines} / ${s.lagMs} ms`
+    : 'not reported';
 const pick = (events, stage) => {
   const found = events.filter((e) => e.stage === stage);
   return found.length === 1 ? found[0] : null;
@@ -484,6 +527,17 @@ const pick = (events, stage) => {
 function safePayload(payload, includeContent) {
   if (!object(payload)) return undefined;
   const result = {};
+  if (DECISION_ACTIONS.has(payload.decisionAction))
+    result.decisionAction = payload.decisionAction;
+  if (
+    text(payload.throughSegment, 160) &&
+    Number.isSafeInteger(payload.lagLines) &&
+    Number.isSafeInteger(payload.lagMs)
+  ) {
+    result.throughSegment = payload.throughSegment;
+    result.lagLines = payload.lagLines;
+    result.lagMs = payload.lagMs;
+  }
   if (Number.isSafeInteger(payload.dropped)) result.dropped = payload.dropped;
   if (['phrase_rule', 'model'].includes(payload.decider))
     result.decider = payload.decider;
@@ -622,6 +676,8 @@ export function buildEvidenceReport(
       ),
       nativeReportedLatencyMs:
         one('evaluator.result')?.payload?.nativeReportedLatencyMs ?? null,
+      unappliedAction: one('evaluator.result')?.payload?.decisionAction ?? null,
+      staleness: staleness(one('evaluator.result')),
     };
   });
   const cueRows = [...cues].map(([id, group]) => {
@@ -674,6 +730,7 @@ export function buildEvidenceReport(
         m,
       ),
       publicationToPaint: duration(published, painted, m),
+      staleness: staleness(pick(request, 'evaluator.result')),
       visibleDuration: duration(painted, pick(group, 'video.cue-cleared'), m),
       endToEnd: duration(heard, painted, m),
     };
@@ -891,18 +948,22 @@ export function renderEvidenceMarkdown(r, { recordingHref } = {}) {
     '',
     '## Technical measurements',
     '',
-    '| Evaluation | Outcome | Gate wait | Model dispatch → response | Dispatch → returned (includes adapter cleanup) |',
-    '| --- | --- | --- | --- | --- |',
+    '| Evaluation | Outcome | Gate wait | Model dispatch → response | Dispatch → returned (includes adapter cleanup) | Unapplied decision action | Evaluated through / lines behind / ms behind |',
+    '| --- | --- | --- | --- | --- | --- | --- |',
     ...r.evaluations.map(
       (e) =>
-        `| ${escape(e.id)}${e.ambiguous ? ' (ambiguous context)' : ''} | ${e.outcome} | ${metric(e.gateWait)} | ${metric(e.modelDuration)} | ${metric(e.returnedAfterDispatch)} |`,
+        `| ${escape(e.id)}${e.ambiguous ? ' (ambiguous context)' : ''} | ${e.outcome} | ${metric(e.gateWait)} | ${metric(e.modelDuration)} | ${metric(e.returnedAfterDispatch)} | ${e.unappliedAction ?? 'none'} | ${lagText(e.staleness)} |`,
     ),
     '',
-    '| Cue / declared decider | Publication / paint | Validated → published | Visible duration | Heard end → paint |',
-    '| --- | --- | --- | --- | --- |',
+    r.evaluations.some((e) => e.staleness)
+      ? 'Lab decisions may be applied to a transcript that grew while the model replied (bounded staleness, within the 8 s deadline). Lines and ms behind show how far each applied decision lagged the newest speech; a cue can reflect speech that newer lines already answered.'
+      : 'No applied decision reported staleness fields.',
+    '',
+    '| Cue / declared decider | Publication / paint | Validated → published | Visible duration | Heard end → paint | Evaluated through / lines behind / ms behind |',
+    '| --- | --- | --- | --- | --- | --- |',
     ...r.cues.map(
       (c) =>
-        `| ${escape(c.id)} / ${c.decider} | ${c.publication} / ${c.paint} | ${metric(c.publicationDelay)} | ${metric(c.visibleDuration)} | ${metric(c.endToEnd)} |`,
+        `| ${escape(c.id)} / ${c.decider} | ${c.publication} / ${c.paint} | ${metric(c.publicationDelay)} | ${metric(c.visibleDuration)} | ${metric(c.endToEnd)} | ${lagText(c.staleness)} |`,
     ),
     '',
     '| Transcript event | Heard end → arrival |',

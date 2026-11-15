@@ -228,8 +228,13 @@ quantization uncertainty; it does not infer playback or session clock anchors.
 Segments become transcript arrival, including their `accepted` flag. Native
 requested becomes requested, not shared-gate admission. Native result becomes
 result; its `latency_ms` is retained separately as native-reported latency, never
-as model duration. There is no separate dispatch/response/validation/finalization
-instant in those native rows. Queued `audio_received` and its amplitude flag do
+as model duration. In lab mode a result may also carry `action` (the decision on
+a `stale` or late-timeout result that was not applied) or, on an applied decision,
+`through_segment`, `lag_lines` and `lag_ms`. The report shows the unapplied action
+and, per evaluation and per cue, how many lines and milliseconds the applied
+decision lagged the newest speech. Malformed or mixed fields are refused. There
+is no separate dispatch/response/validation/finalization instant in those native
+rows. Queued `audio_received` and its amplitude flag do
 not establish rendered speech. Cue publication does not establish video paint.
 Unknown or unsupported stages are listed as missing; explicit dropped rows remain
 evidence-loss markers. The original artifact remains the source for other rows.
