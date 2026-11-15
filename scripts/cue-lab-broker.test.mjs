@@ -1,9 +1,19 @@
 import assert from 'node:assert/strict';
 import { createConnection } from 'node:net';
 import { readFile, stat, access } from 'node:fs/promises';
-import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import fsPromises from 'node:fs/promises';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { openLabBroker, evaluatorRequest } from './cue-lab-broker.mjs';
@@ -1006,4 +1016,78 @@ test('a calibration rejected for combined uncertainty is not reported as calibra
   assert.equal(diagnostics.calibrated, false);
   assert.equal(diagnostics.cause, 'clock-rejected');
   assert.equal(ctx.calls.length, 0);
+});
+
+const fictionalProvider = () => ({
+  metadata: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' },
+  request: async () => ({ value }),
+  close: async () => {},
+});
+// Runs one broker opening with a substitute temporary root and working
+// directory, restoring both before the caller inspects leftovers.
+async function openWithRoot(root, cwd) {
+  const original = process.env.TMPDIR;
+  const previous = process.cwd();
+  try {
+    process.chdir(cwd);
+    process.env.TMPDIR = root;
+    return await openLabBroker({ provider: fictionalProvider(), maxCalls: 1 });
+  } finally {
+    process.chdir(previous);
+    if (original === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = original;
+  }
+}
+
+test('a relative temporary root is refused and leaves no run directory', async () => {
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), 'tq-rel-')));
+  try {
+    // Short names keep the socket path within the platform limit, so only the
+    // relative-root rule can refuse this opening.
+    mkdirSync(join(outside, 'r'));
+    mkdirSync(join(outside, 'w'));
+    // Relative to the working directory, this root is outside it.
+    await assert.rejects(openWithRoot('../r', join(outside, 'w')), {
+      category: 'protocol',
+    });
+    assert.deepEqual(readdirSync(join(outside, 'r')), []);
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('a temporary root inside the checkout named like ..cache is refused', async () => {
+  const checkout = realpathSync(fileURLToPath(new URL('../', import.meta.url)));
+  const inside = mkdtempSync(join(checkout, '..tq-cache-'));
+  try {
+    await assert.rejects(openWithRoot(inside, checkout), {
+      category: 'protocol',
+    });
+    assert.deepEqual(readdirSync(inside), []);
+  } finally {
+    rmSync(inside, { recursive: true, force: true });
+  }
+});
+
+test('a failed run-directory permission change removes the canonical directory', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'tq-chmod-')));
+  const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'tq-chmod-cwd-')));
+  const original = fsPromises.chmod;
+  fsPromises.chmod = async (path, mode) => {
+    if (basename(String(path)).startsWith('tq-lab-'))
+      throw Object.assign(new Error('fictional chmod failure'), {
+        code: 'EPERM',
+      });
+    return original(path, mode);
+  };
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(openWithRoot(root, cwd), { category: 'protocol' });
+    assert.deepEqual(readdirSync(root), []);
+  } finally {
+    fsPromises.chmod = original;
+    syncBuiltinESMExports();
+    rmSync(root, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });

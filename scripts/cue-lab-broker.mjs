@@ -4,7 +4,7 @@ import { createServer } from 'node:net';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { chmod, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, relative } from 'node:path';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import { TextDecoder } from 'node:util';
 import {
   createLabOperationGate,
@@ -185,17 +185,21 @@ export async function openLabBroker({
   const created = await mkdtemp(join(tmpdir(), 'tq-lab-'));
   let directory;
   try {
+    // A relative temporary root is refused before canonicalization makes it
+    // look absolute. A sibling named like `..cache` is not outside the checkout.
+    requireThat(isAbsolute(created));
     directory = await realpath(created);
     const checkoutRelation = relative(await realpath(process.cwd()), directory);
     requireThat(
-      isAbsolute(directory) &&
-        (checkoutRelation.startsWith('..') || isAbsolute(checkoutRelation)),
+      checkoutRelation === '..' ||
+        checkoutRelation.startsWith('..' + sep) ||
+        isAbsolute(checkoutRelation),
     );
+    await chmod(directory, 0o700);
   } catch {
     await rm(created, { recursive: true, force: true });
     throw gateFailure('protocol');
   }
-  await chmod(directory, 0o700);
   const socketPath = join(directory, 'broker.sock');
   const descriptorPath = join(directory, 'descriptor.json');
   const nonce = randomBytes(32).toString('hex');
