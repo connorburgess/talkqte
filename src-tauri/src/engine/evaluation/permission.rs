@@ -208,7 +208,7 @@ impl Engine {
         {
             return Err(ProcessingError::SessionInactive);
         }
-        if state.misconfigured || self.model_calls_exhausted() {
+        if state.misconfigured || state.lab_terminal || self.model_calls_exhausted() {
             return Err(ProcessingError::Unavailable);
         }
         if notes.len() > crate::context::MAX_ITEMS
@@ -305,6 +305,9 @@ impl Engine {
         }
         let notes = self.reviewed_sources(&review)?;
         self.revoke_processing();
+        if self.evaluation.as_ref().is_some_and(|s| s.lab_terminal) {
+            return Err(ProcessingError::Unavailable);
+        }
         self.evaluation.as_mut().unwrap().permission.grant = Some(Grant {
             session: review.session,
             processor: review.processor,
@@ -379,10 +382,9 @@ impl Engine {
     pub fn has_processing_permission(&self) -> bool {
         !self.live_stopping
             && self.state.status == Status::Running
-            && self
-                .evaluation
-                .as_ref()
-                .is_some_and(|state| state.permission.valid(self.generation, &self.notes))
+            && self.evaluation.as_ref().is_some_and(|state| {
+                !state.lab_terminal && state.permission.valid(self.generation, &self.notes)
+            })
     }
 
     pub(in crate::engine) fn reconcile_processing_permission(&mut self) {
