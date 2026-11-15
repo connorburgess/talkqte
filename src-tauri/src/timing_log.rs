@@ -127,6 +127,8 @@ pub enum Event {
     },
     /// What came back: `show`, `quiet`, `resolved`, `withdraw`, `failed`,
     /// `stale` or `cancelled`, with a fixed failure code when it failed.
+    /// `action` is the reply's action code when a decision arrived but was
+    /// not applied: on `stale`, and on a `timeout` read after the deadline.
     EvaluationResult {
         session: u64,
         request: u64,
@@ -134,6 +136,8 @@ pub enum Event {
         latency_ms: u64,
         #[serde(skip_serializing_if = "Option::is_none")]
         failure: Option<&'static str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        action: Option<&'static str>,
         elapsed_ms: u64,
     },
     /// A cue is in the snapshot sent to the companion window. The log cannot
@@ -669,6 +673,7 @@ mod tests {
                 outcome: "failed",
                 latency_ms: 8_000,
                 failure: Some("timeout"),
+                action: Some("quiet"),
                 elapsed_ms: 8_200,
             },
         ]
@@ -681,6 +686,7 @@ mod tests {
         assert_eq!(lines[1]["through_segment"], "w4");
         assert_eq!(lines[2]["event"], "evaluation_result");
         assert_eq!(lines[2]["failure"], "timeout");
+        assert_eq!(lines[2]["action"], "quiet");
         for value in &lines {
             assert_eq!(value["wall_ms"], 1);
             assert_eq!(value["mono_ms"], 2);

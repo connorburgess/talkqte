@@ -18,6 +18,15 @@ pub use projection::{
 
 const RECENT_LINES: usize = 6;
 
+fn action_code(decision: &Decision) -> &'static str {
+    match decision.action {
+        Action::Show => "show",
+        Action::Quiet => "quiet",
+        Action::Resolved => "resolved",
+        Action::Withdraw => "withdraw",
+    }
+}
+
 /// Content-free operational state for a future native controller. An absent
 /// cue is not evidence that an evaluator chose quiet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -294,6 +303,13 @@ impl Engine {
     }
 
     fn fail_evaluation(&mut self, failure: Failure) {
+        // Lab: a reply past the deadline is a recorded "no decision in time"
+        // and the run continues. The session's call limit and the broker's
+        // dispatch cap still bound how many requests a run can spend.
+        if failure == Failure::Expired && self.evaluation.as_ref().is_some_and(|s| s.lab.is_some())
+        {
+            return;
+        }
         if failure == Failure::Expired && self.evaluation.as_ref().is_none_or(|s| s.lab.is_none()) {
             let state = self.evaluation.as_mut().expect("evaluation failed");
             state.timeouts_in_row = state.timeouts_in_row.saturating_add(1);
@@ -357,6 +373,7 @@ impl Engine {
                         latency_ms: u64::try_from(pending.sent.elapsed().as_millis())
                             .unwrap_or(u64::MAX),
                         failure: None,
+                        action: None,
                         elapsed_ms: self.state.elapsed_ms,
                     });
                 }
@@ -595,21 +612,33 @@ impl Engine {
             return;
         };
         let submitted = state.pending.take().expect("pending checked");
+        // A reply that completed before the deadline but was read after it is
+        // never applied; only its action is logged.
+        let late = if result == Err(Failure::Expired) {
+            state.worker.take_late_decision()
+        } else {
+            None
+        };
         self.set_evaluation_status(EvaluationStatus::Idle);
         let applies = permission_current && current.as_ref() == Some(&submitted.request);
         if let Some(link) = self.evaluation.as_ref().and_then(|s| s.lab.clone()) {
             use crate::cue_evaluator::Settlement;
-            let verdict = if result.is_err() {
-                Settlement::Failed
-            } else if applies {
-                Settlement::Current
-            } else {
-                Settlement::StaleSuccess
+            let verdict = match &result {
+                Err(Failure::Expired) => Settlement::Expired,
+                Err(_) => Settlement::Failed,
+                Ok(_) if applies => Settlement::Current,
+                Ok(_) => Settlement::StaleSuccess,
             };
             let settlement = link.settle(&submitted.request, verdict);
             if let Err(failure) = result.as_ref() {
-                self.record_result(&submitted, &result, true);
-                self.fail_evaluation(*failure);
+                self.record_result(&submitted, &result, true, late.as_ref());
+                match settlement {
+                    // An expiry the link could not retire ends the run.
+                    Err(link_failure) if *failure == Failure::Expired => {
+                        self.fail_evaluation(link_failure)
+                    }
+                    _ => self.fail_evaluation(*failure),
+                }
                 return;
             }
             if let Err(failure) = settlement {
@@ -617,7 +646,7 @@ impl Engine {
                 return;
             }
         }
-        self.record_result(&submitted, &result, applies);
+        self.record_result(&submitted, &result, applies, late.as_ref());
         if let Some(current) = current {
             if applies {
                 match result {
@@ -629,26 +658,26 @@ impl Engine {
     }
 
     /// The development timing log's record of a reply. Ids and codes only.
+    /// A stale reply, or one read after the deadline, keeps its action code
+    /// so the decision is not lost; it is never applied.
     fn record_result(
         &self,
         submitted: &Pending,
         result: &Result<Decision, Failure>,
         applies: bool,
+        late: Option<&Decision>,
     ) {
         if !crate::timing_log::enabled() {
             return;
         }
+        let action = match result {
+            Ok(decision) if !applies => Some(action_code(decision)),
+            Err(Failure::Expired) => late.map(action_code),
+            _ => None,
+        };
         let (outcome, failure) = match result {
             _ if !applies => ("stale", None),
-            Ok(decision) => (
-                match decision.action {
-                    Action::Show => "show",
-                    Action::Quiet => "quiet",
-                    Action::Resolved => "resolved",
-                    Action::Withdraw => "withdraw",
-                },
-                None,
-            ),
+            Ok(decision) => (action_code(decision), None),
             Err(Failure::Cancelled | Failure::Busy) => ("cancelled", None),
             Err(Failure::Stale) => ("stale", None),
             Err(failure) => (
@@ -670,6 +699,7 @@ impl Engine {
             outcome,
             latency_ms: u64::try_from(submitted.sent.elapsed().as_millis()).unwrap_or(u64::MAX),
             failure,
+            action,
             elapsed_ms: self.state.elapsed_ms,
         });
     }
