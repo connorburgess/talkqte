@@ -142,24 +142,91 @@ fn malformed_stale_reply_is_terminal_before_latest_dispatch() {
     assert!(h.requests.try_recv().is_err());
     assert_eq!(h.engine.evaluation.as_ref().unwrap().requests_sent, 1);
 }
+// Times out the pending request, then frees the fictional evaluator so the
+// worker can accept the next one. Its late reply is never applied.
+fn expire(h: &mut Harness, link: &Lifecycle) {
+    let before = link.verdicts.lock().unwrap().len();
+    until(h, |_| link.verdicts.lock().unwrap().len() > before);
+    assert_eq!(
+        link.verdicts.lock().unwrap().last(),
+        Some(&Settlement::Expired)
+    );
+    reply(h, "show", Some("Who owns the checklist?"));
+    until(h, |e| !e.evaluation.as_ref().unwrap().worker.is_busy());
+}
 #[test]
-fn first_lab_timeout_stops_even_after_new_speech() {
-    let mut h = Harness::with_budget(Duration::from_millis(5));
-    lab(&mut h);
+fn lab_timeout_is_no_decision_in_time_and_the_run_continues() {
+    let mut h = Harness::with_budget(Duration::from_millis(200));
+    let link = lab(&mut h);
     h.line("Who owns the fictional checklist?");
     h.request();
     h.line("The meeting continues.");
+    expire(&mut h, &link);
+    // Skipped, not ended: permission survives and no cue appears.
+    assert!(h.engine.has_processing_permission());
+    assert!(!matches!(
+        h.engine.evaluation_status(),
+        Some(EvaluationStatus::Unavailable(_))
+    ));
+    assert!(h.engine.state.cue.is_none());
+    assert_eq!(link.cancelled.load(Ordering::Acquire), 0);
+    // The waiting speech is dispatched and a reply in time is applied.
     until(&mut h, |e| {
-        matches!(
-            e.evaluation_status(),
-            Some(EvaluationStatus::Unavailable(_))
-        )
+        e.evaluation.as_ref().unwrap().requests_sent == 2
     });
+    let latest = h.request();
+    assert!(latest.sources().iter().any(|s| s.id == "transcript:line-2"));
+    h.replies.send(serde_json::json!({"action":"show","cue":"Who owns the checklist?","sourceIds":["transcript:line-2"]}).to_string()).unwrap();
+    until(&mut h, |e| e.state.cue.is_some());
+    assert_eq!(
+        *link.verdicts.lock().unwrap(),
+        vec![Settlement::Expired, Settlement::Current]
+    );
+    // Stop still ends the strict run after a skipped timeout.
+    h.line("Another fictional line.");
+    h.engine.begin_live_stop();
+    assert!(link.cancelled.load(Ordering::Acquire) > 0);
+    assert!(!h.engine.has_processing_permission());
+}
+#[test]
+fn repeated_lab_timeouts_end_at_the_call_limit() {
+    let mut h = Harness::with_budget(Duration::from_millis(100));
+    let link = lab(&mut h);
+    h.engine.set_model_call_limit(2);
+    h.line("Who owns the fictional checklist?");
+    h.request();
+    h.line("Still discussing it.");
+    expire(&mut h, &link);
+    until(&mut h, |e| {
+        e.evaluation.as_ref().unwrap().requests_sent == 2
+    });
+    h.request();
+    h.line("Nobody has said yes yet.");
+    expire(&mut h, &link);
+    until(&mut h, |e| !e.has_processing_permission());
     assert_eq!(
         h.engine.evaluation_status(),
-        Some(EvaluationStatus::Unavailable(EvaluationIssue::TimedOut))
+        Some(EvaluationStatus::Unavailable(EvaluationIssue::CallLimit))
     );
+    assert_eq!(h.engine.evaluation.as_ref().unwrap().requests_sent, 2);
     assert!(h.requests.try_recv().is_err());
+    assert!(h.engine.state.cue.is_none());
+}
+#[test]
+fn an_expiry_the_link_cannot_retire_ends_the_run() {
+    let mut h = Harness::with_budget(Duration::from_millis(50));
+    let link = lab(&mut h);
+    link.reject_ack.store(true, Ordering::Release);
+    h.line("Who owns the fictional checklist?");
+    h.request();
+    until(&mut h, |e| !e.has_processing_permission());
+    assert_eq!(*link.verdicts.lock().unwrap(), vec![Settlement::Expired]);
+    assert_eq!(
+        h.engine.evaluation_status(),
+        Some(EvaluationStatus::Unavailable(
+            EvaluationIssue::WorkerUnavailable
+        ))
+    );
     reply(&h, "quiet", None);
 }
 #[test]

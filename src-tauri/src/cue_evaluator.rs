@@ -621,8 +621,11 @@ impl Worker {
                 if let Ok((reply, Ok(decision))) = self.replies.try_recv() {
                     self.late = (reply == id).then_some(decision);
                 }
+            } else {
+                // Expiry is not a withdrawal: the adapter already sees its
+                // deadline, and the lab link retires only that request.
+                self.cancel_pending();
             }
-            self.cancel_pending();
             self.pending = None;
             return Some(Err(error));
         }
@@ -962,11 +965,19 @@ mod tests {
                 worker.poll_at(&input, deadline),
                 Some(Err(Failure::Expired))
             );
+            // A reply that completed in time but was read late is kept only
+            // for the timing log; one that finished after the deadline is not.
+            assert_eq!(
+                worker.take_late_decision().map(|d| d.action),
+                complete_first.then_some(Action::Quiet)
+            );
+            assert!(worker.take_late_decision().is_none());
             if !complete_first {
                 release.send(()).unwrap();
                 wait_idle(&worker);
             }
             assert!(worker.poll(&input).is_none());
+            assert!(worker.take_late_decision().is_none());
             assert_eq!(calls.load(Ordering::Relaxed), 1);
         }
     }
