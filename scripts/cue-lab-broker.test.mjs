@@ -1367,3 +1367,18 @@ test('repeated request deadlines still end the run at the dispatch cap', async (
     await ctx.close();
   }
 });
+
+test('a temporary root inside the checkout is refused even when started from another directory', async () => {
+  const checkout = realpathSync(fileURLToPath(new URL('../', import.meta.url)));
+  const inside = mkdtempSync(join(checkout, 'tq-inside-'));
+  const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), 'tq-cwd-')));
+  try {
+    await assert.rejects(openWithRoot(inside, elsewhere), {
+      category: 'protocol',
+    });
+    assert.deepEqual(readdirSync(inside), []);
+  } finally {
+    rmSync(inside, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
+  }
+});

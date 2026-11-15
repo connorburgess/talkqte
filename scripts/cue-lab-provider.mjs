@@ -25,7 +25,7 @@ const failure = (category, calls = 0) =>
     exitCode: null,
     signals: [],
   });
-const SAFE = new Set([
+export const PROVIDER_FAILURE_CATEGORIES = new Set([
   'configuration',
   'provider-unavailable',
   'unsupported-cli-version',
@@ -47,7 +47,12 @@ const SAFE = new Set([
   'not-installed',
 ]);
 const normalizeFailure = (error, calls) =>
-  failure(SAFE.has(error?.category) ? error.category : 'provider', calls);
+  failure(
+    PROVIDER_FAILURE_CATEGORIES.has(error?.category)
+      ? error.category
+      : 'provider',
+    calls,
+  );
 
 export function requestClaudeRole(
   cli,

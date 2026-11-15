@@ -3,6 +3,9 @@ import { test } from 'node:test';
 import { EventEmitter } from 'node:events';
 import { createConnection } from 'node:net';
 import { readFile, access } from 'node:fs/promises';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createLabRun } from './cue-lab-run.mjs';
 import { createLabNativeOwner } from './cue-lab-native-owner.mjs';
@@ -531,3 +534,67 @@ for (const mode of ['missing', 'mismatch', 'duplicate']) {
     assert.equal(f.closed, f.opened);
   });
 }
+
+// A run whose native owner is never reached; only startup diagnostics matter.
+function startupOnlyRun(environment = {}) {
+  return createLabRun({
+    native: {
+      subscribe: () => () => {},
+      start: async () => {},
+      stop: async () => ({ released: true }),
+    },
+    processEvents: new EventEmitter(),
+    sourceSessionMode: 'legacy-fixture',
+    settings: {
+      provider: 'codex',
+      model: 'gpt-6.1-sol',
+      effort: 'medium',
+      maxCalls: 1,
+      deadlineMs: 30000,
+      execution: 'offline-stand-in',
+      environment,
+      openers: {
+        codex: async () => ({
+          request: async () => ({ value: {} }),
+          close: async () => {},
+        }),
+      },
+    },
+  });
+}
+
+test('a provider preflight failure keeps its own fixed category in startup diagnostics', async () => {
+  const run = startupOnlyRun({ OPENAI_API_KEY: 'fictional-not-a-key' });
+  await assert.rejects(run.ready);
+  await run.close().catch(() => {});
+  assert.deepEqual(run.startupDiagnostics.failure, {
+    stage: 'provider-preflight',
+    reason: 'ambient-credentials',
+  });
+  assert.equal(
+    JSON.stringify(run.startupDiagnostics).includes('fictional'),
+    false,
+  );
+});
+
+test('a broker setup failure is recorded as a protocol failure, not a normal close', async () => {
+  // A temporary root deep enough that the socket path exceeds the platform limit.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'tq-deep-')));
+  const deep = join(root, 'd'.repeat(60), 'e'.repeat(60));
+  mkdirSync(deep, { recursive: true });
+  const original = process.env.TMPDIR;
+  try {
+    process.env.TMPDIR = deep;
+    const run = startupOnlyRun();
+    await assert.rejects(run.ready);
+    await run.close().catch(() => {});
+    assert.deepEqual(run.startupDiagnostics.failure, {
+      stage: 'broker-preparation',
+      reason: 'protocol',
+    });
+  } finally {
+    if (original === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = original;
+    rmSync(root, { recursive: true, force: true });
+  }
+});

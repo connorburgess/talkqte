@@ -43,7 +43,8 @@ establish a hard count of underlying HTTP/model requests or revoke remote work.
 
 ## Local wire v1
 
-One per-run directory outside the checkout is mode `0700`; its Unix socket and
+One per-run directory outside the checkout (anchored to the module's checkout
+root, not the caller's working directory) is mode `0700`; its Unix socket and
 descriptor are `0600`. The descriptor schema is `talkqte.lab.descriptor.v1`, with
 `runId`, absolute `socketPath` and a random 32-byte hexadecimal `nonce`. Pass only
 the descriptor path to the development app, never the nonce in arguments or logs.

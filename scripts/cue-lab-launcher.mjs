@@ -13,7 +13,7 @@ import {
   fstatSync,
   constants,
 } from 'node:fs';
-import { join, relative, isAbsolute, sep } from 'node:path';
+import { join, isAbsolute } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -22,6 +22,7 @@ import { parseUniqueLabJson } from './cue-lab-strict-json.mjs';
 import { watchLabTiming } from './cue-lab-timing-reader.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
 import { checkLabPlayerSource } from './cue-lab-player.mjs';
+import { outsideCheckout } from './cue-lab-checkout.mjs';
 
 const FEATURES = [
   'lab-evaluator',
@@ -40,13 +41,7 @@ const hex = (value, n) =>
 const requireThat = (condition) => {
   if (!condition) throw gateFailure('protocol');
 };
-const CHECKOUT = realpathSync(fileURLToPath(new URL('../', import.meta.url)));
-const outside = (path) => {
-  const relation = relative(CHECKOUT, realpathSync(path));
-  return (
-    relation === '..' || relation.startsWith('..' + sep) || isAbsolute(relation)
-  );
-};
+const outside = outsideCheckout;
 const stamp = (s) =>
   [s.dev, s.ino, s.size, s.mtimeMs, s.ctimeMs, s.mode].join(':');
 function digest(path) {

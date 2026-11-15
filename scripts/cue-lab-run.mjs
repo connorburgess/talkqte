@@ -1,7 +1,10 @@
 // Run ownership only: native launch/control is an explicit injected dependency.
 // No daemon, desktop controls, provider fallback or implicit native launch.
 import { randomUUID } from 'node:crypto';
-import { openLabProvider } from './cue-lab-provider.mjs';
+import {
+  openLabProvider,
+  PROVIDER_FAILURE_CATEGORIES,
+} from './cue-lab-provider.mjs';
 import { openLabBroker } from './cue-lab-broker.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
 
@@ -11,8 +14,11 @@ const EVENTS = new Set([
   'process-ended',
   'failed',
 ]);
+// Fixed codes only. Provider-preflight categories keep their own code so a
+// startup failure says why (for example ambient credentials or a missing CLI).
 const STARTUP_REASONS = new Set([
   ...EVENTS,
+  ...PROVIDER_FAILURE_CATEGORIES,
   'cancelled',
   'closed',
   'cleanup',
