@@ -64,7 +64,7 @@ are finite safe JSON numbers.
 | Broker → app | `ready`        | exact `provider`, `model`, `effort`, `dispatchBudgetKind:"cliDispatchAttempts"`, `dispatchLimit`, `dispatchesUsed` |
 | App → broker | `evaluate`     | `requestId`, `contextRevision`, `budgetMs` (1–10,000), `input` object                                              |
 | Broker → app | `result`       | same request identity, validated `value`, `elapsedMs`, numeric `usage`                                             |
-| App → broker | `settled`      | same request identity, `verdict` (`current`, `staleSuccess`, `failed`), optional fixed `code` only on failure      |
+| App → broker | `settled`      | same request identity, `verdict` (`current`, `staleSuccess`, `failed`, `expired`), optional fixed `code` only on failure |
 | App → broker | `cancel`       | fixed control `reason`, optional active request identity                                                           |
 | Broker → app | `failed`       | request identity and fixed `code`                                                                                  |
 | Broker → app | `terminal`     | fixed `reason`, including while no evaluation is pending                                                           |
@@ -78,8 +78,10 @@ The evaluator input is the JSON **object** parsed from Rust's
 tools or executable names. The broker constructs the shared compact/glance prompt
 and source-ID response schema. It validates action/cue/source membership and the
 10-word cue bound. Rust independently validates its immutable request, source
-references, processing permission, current session/revision, cue identity and
-freshness before applying a decision. A valid stale result is discarded and
+references, processing permission, session, cue identity and freshness before
+applying a decision. A reply to a transcript that has only grown is applied and
+acknowledged `current`, so a lab cue reflects speech up to 8 s before it appears
+and newer speech is checked next. Any other stale result is discarded and
 acknowledged `staleSuccess`; provider/schema errors remain terminal first.
 
 `result` is sent only after provider cleanup. The global lease remains held until

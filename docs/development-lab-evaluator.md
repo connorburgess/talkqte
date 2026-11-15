@@ -102,14 +102,37 @@ native release. The versioned JavaScript consumer/session join remains separate.
 
 New validated speech coalesces while one immutable evaluation completes. It does
 not cancel that evaluation. Rust validates its result and checks permission,
-session, revision, cue identity and unchanged freshness deadlines under the engine
-lock. Valid stale success is discarded; only the newest eligible context can be
-submitted next. An error is terminal even when its original speech is stale.
-There is no queue of old contexts, unchanged-context retry or freshness extension.
+session, cue identity and freshness deadlines under the engine lock.
 
-The first timeout, invalid response, provider failure, lost settlement or transport
-failure ends the strict lab run. Stop, revoke, replacement, Pause and Dismiss also
-end it. Resume does not restart it; a new run/session is required. This policy is
+**A lab cue reflects speech up to 8 s before it appears; newer speech is checked
+next.** A reply in time is applied when the transcript it was evaluated on has
+only grown since: same session and permission, the same existing cue, listener
+name and earlier cues, and every submitted line still present with identical id,
+text and time. A cue it shows can therefore concern something the newer speech
+already answered; the next request carries that cue as the existing cue so the
+model can resolve or withdraw it. Each applied decision logs the line it was
+evaluated through and how many lines and how much session time arrived after it
+(`through_segment`, `lag_lines`, `lag_ms`).
+
+Any edited or removed line, cue change or permission change makes the reply
+stale: it is discarded and logged with its action, and only the newest eligible
+context can be submitted next. An error is terminal even when its original
+speech is stale. There is no queue of old contexts, unchanged-context retry or
+freshness extension. Ordinary (non-lab) evaluation is unchanged: new speech
+cancels the pending request and only an exact match applies.
+
+A request with no result inside the 8 s deadline is recorded as no decision in
+time, and the run continues. Native retires only that request: it sends a
+request-scoped `cancel` with reason `deadline`, or settles a result it read too
+late as `expired`, and a broker `failed` with code `deadline` retires it the same
+way. Late frames for a retired request are ignored. The session call limit and the
+broker's dispatch cap still bound the run, and each timed-out request spends a
+dispatch. The timing log keeps the action code of a decision that arrived but was
+not applied, whether stale or read after the deadline; it is never shown.
+
+An invalid response, provider failure, lost settlement, an expiry native cannot
+retire, or a transport failure ends the strict lab run. Stop, revoke, replacement,
+Pause and Dismiss also end it. Resume does not restart it; a new run/session is required. This policy is
 specific to the lab backend. Continuous speech can produce stale-result silence
 or starvation, and global serialization can increase latency. Those are measured
 acceptance risks, not grounds to publish a stale cue.
@@ -134,7 +157,8 @@ and has no supported hard count.** A dispatch cap does not revoke remote work.
 
 A broker result arrives only after provider cleanup. Rust independently validates
 its immutable input/schema/source references and responds with identity-bound
-`settled` (`current`, `staleSuccess` or `failed`). The global lease remains held
+`settled` (`current`, `staleSuccess`, `failed`, or `expired` for a result read
+after the deadline). The global lease remains held
 through that acknowledgement, with a fixed one-second validation grace after an
 on-time provider result. It permits no second provider call and does not extend
 the provider deadline. Missing/mismatched acknowledgement ends every role.

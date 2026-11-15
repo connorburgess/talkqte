@@ -43,7 +43,8 @@ must synchronously return the exact owned ChildProcess and bind `onTiming` to it
 unique private timing stream before launch. It must not attach an existing PID or
 substitute another executable. The owner retains that handle and immutable PID;
 Stop uses only its `kill('SIGUSR2')` method after checking identity and live state.
-The launcher remains responsible for its approved capture scope, timing-file
+The concrete [owned launcher](lab-owned-launcher.md) binds the approved build,
+child and private stream. It remains responsible for its approved capture scope, timing-file
 permissions and forwarding parse/read/overflow failures as failed timing evidence.
 There is no generic process-control endpoint.
 

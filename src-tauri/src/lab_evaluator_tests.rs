@@ -552,3 +552,170 @@ fn identities_require_canonical_decimal_strings_without_js_precision_loss() {
     }
     assert!(decimal_id(&json!("18446744073709551615"), u64::MAX));
 }
+
+fn id(request: u64, context: u64) -> Identity {
+    Identity {
+        session: 7,
+        request,
+        context,
+    }
+}
+fn result_for(request: u64, context: u64) -> Value {
+    let mut v = result();
+    id(request, context).add(&mut v);
+    v
+}
+fn failed_for(request: u64, context: u64, code: &str) -> Value {
+    let mut v = frame("failed", "fictional-run", 7);
+    id(request, context).add(&mut v);
+    v["code"] = json!(code);
+    v
+}
+fn evaluate(
+    tx: &SyncSender<Event>,
+    request: u64,
+    context: u64,
+) -> Receiver<Result<String, Failure>> {
+    let (reply, replies) = mpsc::sync_channel(1);
+    tx.send(Event::Evaluate {
+        identity: id(request, context),
+        input: json!({"events":[]}),
+        until: Instant::now() + Duration::from_secs(2),
+        reply,
+    })
+    .unwrap();
+    replies
+}
+fn opened(budget: Duration) -> (Fixture, Arc<Link>, Started, UnixStream, Reader) {
+    let f = Fixture::new();
+    let link = f.link(Some(sample()));
+    let started = start(link.clone(), budget);
+    let mut s = f.accept();
+    let mut r = Reader::default();
+    handshake(&mut s, &mut r);
+    assert_eq!(read(&mut r, &mut s)["type"], "clock_sample");
+    assert_eq!(read(&mut r, &mut s)["requestId"], "1");
+    (f, link, started, s, r)
+}
+#[test]
+fn native_deadline_retires_one_request_and_the_run_continues() {
+    let (_f, link, (tx, replies, job), mut s, mut r) = opened(Duration::from_millis(300));
+    // No reply in time: a request-scoped cancel, not a terminal one.
+    let cancel = read(&mut r, &mut s);
+    assert_eq!(cancel["type"], "cancel");
+    assert_eq!(cancel["requestId"], "1");
+    assert_eq!(cancel["contextRevision"], "3");
+    assert_eq!(cancel["reason"], "deadline");
+    assert!(replies.recv_timeout(Duration::from_secs(1)).is_err());
+    tx.send(Event::Settled(id(1, 3), Settlement::Expired))
+        .unwrap();
+    // Late frames for the retired request are ignored.
+    write_frame(&mut s, &result_for(1, 3)).unwrap();
+    write_frame(&mut s, &failed_for(1, 3, "deadline")).unwrap();
+    let replies = evaluate(&tx, 2, 4);
+    assert_eq!(read(&mut r, &mut s)["requestId"], "2");
+    write_frame(&mut s, &result_for(2, 4)).unwrap();
+    assert!(replies
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap()
+        .is_ok());
+    tx.send(Event::Settled(id(2, 4), Settlement::Current))
+        .unwrap();
+    assert_eq!(read(&mut r, &mut s)["verdict"], "current");
+    assert!(link.terminal().is_none());
+    // Stop still ends the strict run.
+    link.cancel_reason(ControlReason::Stop);
+    let stop = read(&mut r, &mut s);
+    assert_eq!(stop["type"], "cancel");
+    assert_eq!(stop["reason"], "stop");
+    assert!(job.join().unwrap().is_err());
+}
+#[test]
+fn broker_deadline_retires_the_request_and_other_failures_still_end_the_run() {
+    let (_f, link, (tx, _replies, job), mut s, mut r) = opened(Duration::from_millis(400));
+    write_frame(&mut s, &failed_for(1, 3, "deadline")).unwrap();
+    // Native's own expiry settles it later; nothing more is sent for it.
+    thread::sleep(Duration::from_millis(450));
+    tx.send(Event::Settled(id(1, 3), Settlement::Expired))
+        .unwrap();
+    let _replies = evaluate(&tx, 2, 4);
+    let next = read(&mut r, &mut s);
+    assert_eq!(next["type"], "evaluate");
+    assert_eq!(next["requestId"], "2");
+    assert!(link.terminal().is_none());
+    write_frame(&mut s, &failed_for(2, 4, "unavailable")).unwrap();
+    assert_eq!(job.join().unwrap(), Err(Failure::Unreachable));
+}
+#[test]
+fn an_expiry_the_engine_never_confirms_is_terminal() {
+    let (_f, _link, (_tx, _replies, job), mut s, mut r) = opened(Duration::from_millis(100));
+    assert_eq!(read(&mut r, &mut s)["reason"], "deadline");
+    assert_eq!(job.join().unwrap(), Err(Failure::Expired));
+}
+#[test]
+fn a_result_read_too_late_settles_as_expired_and_the_run_continues() {
+    let (_f, link, (tx, replies, job), mut s, mut r) = opened(Duration::from_secs(2));
+    write_frame(&mut s, &result_for(1, 3)).unwrap();
+    assert!(replies
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap()
+        .is_ok());
+    tx.send(Event::Settled(id(1, 3), Settlement::Expired))
+        .unwrap();
+    let settled = read(&mut r, &mut s);
+    assert_eq!(settled["type"], "settled");
+    assert_eq!(settled["requestId"], "1");
+    assert_eq!(settled["verdict"], "expired");
+    let _replies = evaluate(&tx, 2, 4);
+    assert_eq!(read(&mut r, &mut s)["requestId"], "2");
+    assert!(link.terminal().is_none());
+    // A frame for a request that was never retired is still a fault.
+    write_frame(&mut s, &result_for(5, 9)).unwrap();
+    assert_eq!(job.join().unwrap(), Err(Failure::InvalidDecision));
+}
+#[test]
+fn worker_deadline_retires_the_link_request_without_ending_the_link() {
+    let f = Fixture::new();
+    let link = f.link(Some(sample()));
+    let mut worker = Worker::start(Adapter(link.clone()), Duration::from_millis(300)).unwrap();
+    let request = Request::new(
+        7,
+        3,
+        vec![crate::cue_evaluator::Source {
+            id: "transcript:fictional-1".into(),
+            revision: 1,
+            provenance: crate::cue_evaluator::Provenance::Transcript {
+                at_ms: 10,
+                speaker: "Maya".into(),
+            },
+            text: "Who owns the fictional checklist?".into(),
+        }],
+        None,
+    )
+    .unwrap();
+    worker.submit(request.clone()).unwrap();
+    let mut s = f.accept();
+    let mut r = Reader::default();
+    handshake(&mut s, &mut r);
+    read(&mut r, &mut s);
+    assert_eq!(read(&mut r, &mut s)["type"], "evaluate");
+    let end = Instant::now() + Duration::from_secs(2);
+    let result = loop {
+        if let Some(result) = worker.poll_submitted() {
+            break result;
+        }
+        assert!(Instant::now() < end, "worker did not expire");
+        thread::sleep(Duration::from_millis(5));
+    };
+    assert!(matches!(result, Err(Failure::Expired)));
+    link.settle(&request, Settlement::Expired).unwrap();
+    assert_eq!(read(&mut r, &mut s)["reason"], "deadline");
+    while worker.is_busy() {
+        assert!(Instant::now() < end, "adapter did not return");
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(link.terminal().is_none());
+    // Leaving the session still ends the link.
+    drop(worker);
+    assert_eq!(read(&mut r, &mut s)["reason"], "exit");
+}

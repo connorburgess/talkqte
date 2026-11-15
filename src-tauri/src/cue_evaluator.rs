@@ -203,11 +203,6 @@ impl Request {
         Ok(self)
     }
 
-    #[cfg(any(test, feature = "lab-evaluator"))]
-    #[allow(
-        dead_code,
-        reason = "native facade activation and API usage vary by build/test configuration"
-    )]
     pub(crate) fn session_id(&self) -> u64 {
         self.session
     }
@@ -385,6 +380,18 @@ impl Cancellation {
         self.deadline
     }
 
+    /// Stopped or cancelled by the caller, as opposed to only past the
+    /// deadline. The lab link retires an expired request but ends the run on
+    /// a withdrawal.
+    #[cfg(any(test, feature = "lab-evaluator"))]
+    #[allow(
+        dead_code,
+        reason = "native facade activation and API usage vary by build/test configuration"
+    )]
+    pub(crate) fn is_withdrawn(&self) -> bool {
+        self.stopped.load(Ordering::Acquire) || self.cancelled.load(Ordering::Acquire)
+    }
+
     pub fn is_cancelled(&self) -> bool {
         self.stopped.load(Ordering::Acquire)
             || self.cancelled.load(Ordering::Acquire)
@@ -406,6 +413,8 @@ pub(crate) enum Settlement {
     Current,
     StaleSuccess,
     Failed,
+    /// Past the per-request deadline: no decision in time. The run continues.
+    Expired,
 }
 
 pub(crate) trait EvaluationLifecycle: Send + Sync {
@@ -447,6 +456,9 @@ pub struct Worker {
     pending: Option<Pending>,
     next_id: u64,
     budget: Duration,
+    // A reply that completed before the deadline but was read after it.
+    // Never applied; kept only so its action can be logged.
+    late: Option<Decision>,
 }
 
 impl Worker {
@@ -502,6 +514,7 @@ impl Worker {
             pending: None,
             next_id: 0,
             budget,
+            late: None,
         })
     }
 
@@ -521,6 +534,7 @@ impl Worker {
         }
         // Discard a cancelled/expired attempt's late completion before reuse.
         while self.replies.try_recv().is_ok() {}
+        self.late = None;
         let id = self
             .next_id
             .checked_add(1)
@@ -579,6 +593,12 @@ impl Worker {
         self.poll_at(&request, Instant::now())
     }
 
+    /// The decision of the request that just expired, if it had completed
+    /// but was read too late. For the timing log only; never applied.
+    pub(crate) fn take_late_decision(&mut self) -> Option<Decision> {
+        self.late.take()
+    }
+
     fn poll_at(&mut self, current: &Request, now: Instant) -> Option<Result<Decision, Failure>> {
         let pending = self.pending.as_ref()?;
         let invalid = if pending.cancelled.load(Ordering::Acquire) {
@@ -591,7 +611,16 @@ impl Worker {
             None
         };
         if let Some(error) = invalid {
-            self.cancel_pending();
+            if error == Failure::Expired {
+                let id = pending.id;
+                if let Ok((reply, Ok(decision))) = self.replies.try_recv() {
+                    self.late = (reply == id).then_some(decision);
+                }
+            } else {
+                // Expiry is not a withdrawal: the adapter already sees its
+                // deadline, and the lab link retires only that request.
+                self.cancel_pending();
+            }
             self.pending = None;
             return Some(Err(error));
         }
@@ -931,11 +960,19 @@ mod tests {
                 worker.poll_at(&input, deadline),
                 Some(Err(Failure::Expired))
             );
+            // A reply that completed in time but was read late is kept only
+            // for the timing log; one that finished after the deadline is not.
+            assert_eq!(
+                worker.take_late_decision().map(|d| d.action),
+                complete_first.then_some(Action::Quiet)
+            );
+            assert!(worker.take_late_decision().is_none());
             if !complete_first {
                 release.send(()).unwrap();
                 wait_idle(&worker);
             }
             assert!(worker.poll(&input).is_none());
+            assert!(worker.take_late_decision().is_none());
             assert_eq!(calls.load(Ordering::Relaxed), 1);
         }
     }

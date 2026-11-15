@@ -18,6 +18,24 @@ pub use projection::{
 
 const RECENT_LINES: usize = 6;
 
+/// What a lab decision had not seen when it was applied.
+struct Lag {
+    /// The newest transcript line the decision was evaluated through.
+    through_segment: String,
+    /// Lines that arrived after it, and the session time they span.
+    lines: u64,
+    ms: u64,
+}
+
+fn action_code(decision: &Decision) -> &'static str {
+    match decision.action {
+        Action::Show => "show",
+        Action::Quiet => "quiet",
+        Action::Resolved => "resolved",
+        Action::Withdraw => "withdraw",
+    }
+}
+
 /// Content-free operational state for a future native controller. An absent
 /// cue is not evidence that an evaluator chose quiet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -294,6 +312,13 @@ impl Engine {
     }
 
     fn fail_evaluation(&mut self, failure: Failure) {
+        // Lab: a reply past the deadline is a recorded "no decision in time"
+        // and the run continues. The session's call limit and the broker's
+        // dispatch cap still bound how many requests a run can spend.
+        if failure == Failure::Expired && self.evaluation.as_ref().is_some_and(|s| s.lab.is_some())
+        {
+            return;
+        }
         if failure == Failure::Expired && self.evaluation.as_ref().is_none_or(|s| s.lab.is_none()) {
             let state = self.evaluation.as_mut().expect("evaluation failed");
             state.timeouts_in_row = state.timeouts_in_row.saturating_add(1);
@@ -357,6 +382,10 @@ impl Engine {
                         latency_ms: u64::try_from(pending.sent.elapsed().as_millis())
                             .unwrap_or(u64::MAX),
                         failure: None,
+                        action: None,
+                        through_segment: None,
+                        lag_lines: None,
+                        lag_ms: None,
                         elapsed_ms: self.state.elapsed_ms,
                     });
                 }
@@ -595,21 +624,46 @@ impl Engine {
             return;
         };
         let submitted = state.pending.take().expect("pending checked");
+        // A reply that completed before the deadline but was read after it is
+        // never applied; only its action is logged.
+        let late = if result == Err(Failure::Expired) {
+            state.worker.take_late_decision()
+        } else {
+            None
+        };
         self.set_evaluation_status(EvaluationStatus::Idle);
-        let applies = permission_current && current.as_ref() == Some(&submitted.request);
+        // Lab only: a reply to a transcript that has since only grown is
+        // still applied, with its lag logged. Ordinary mode cancels on new
+        // speech and applies only an exact match.
+        let lag = match (
+            &current,
+            self.evaluation.as_ref().is_some_and(|s| s.lab.is_some()),
+        ) {
+            (Some(current), true) if permission_current => {
+                self.lab_lag(&submitted.request, current)
+            }
+            _ => None,
+        };
+        let applies =
+            permission_current && (current.as_ref() == Some(&submitted.request) || lag.is_some());
         if let Some(link) = self.evaluation.as_ref().and_then(|s| s.lab.clone()) {
             use crate::cue_evaluator::Settlement;
-            let verdict = if result.is_err() {
-                Settlement::Failed
-            } else if applies {
-                Settlement::Current
-            } else {
-                Settlement::StaleSuccess
+            let verdict = match &result {
+                Err(Failure::Expired) => Settlement::Expired,
+                Err(_) => Settlement::Failed,
+                Ok(_) if applies => Settlement::Current,
+                Ok(_) => Settlement::StaleSuccess,
             };
             let settlement = link.settle(&submitted.request, verdict);
             if let Err(failure) = result.as_ref() {
-                self.record_result(&submitted, &result, true);
-                self.fail_evaluation(*failure);
+                self.record_result(&submitted, &result, true, late.as_ref(), None);
+                match settlement {
+                    // An expiry the link could not retire ends the run.
+                    Err(link_failure) if *failure == Failure::Expired => {
+                        self.fail_evaluation(link_failure)
+                    }
+                    _ => self.fail_evaluation(*failure),
+                }
                 return;
             }
             if let Err(failure) = settlement {
@@ -617,38 +671,84 @@ impl Engine {
                 return;
             }
         }
-        self.record_result(&submitted, &result, applies);
-        if let Some(current) = current {
-            if applies {
-                match result {
-                    Ok(decision) => self.apply_evaluation(&current, decision, submitted.number),
-                    Err(error) => self.fail_evaluation(error),
+        self.record_result(&submitted, &result, applies, late.as_ref(), lag.as_ref());
+        if current.is_some() && applies {
+            // Cited sources resolve against the input the reply was made from;
+            // the guards above keep every one of them in the transcript.
+            match result {
+                Ok(decision) => {
+                    self.apply_evaluation(&submitted.request, decision, submitted.number)
                 }
+                Err(error) => self.fail_evaluation(error),
             }
         }
     }
 
+    /// How far the transcript moved on while a lab reply was pending, if the
+    /// submitted input is still an append-only prefix of the current one:
+    /// same session, existing cue, listener and earlier cues, and every
+    /// submitted line still present with identical id, text and time. Any
+    /// edit, removal or cue change makes the reply stale.
+    fn lab_lag(&self, submitted: &Request, current: &Request) -> Option<Lag> {
+        if submitted.session_id() != current.session_id()
+            || submitted.existing_cue() != current.existing_cue()
+            || submitted.user_name() != current.user_name()
+            || submitted.earlier_cues() != current.earlier_cues()
+            || submitted
+                .sources()
+                .iter()
+                .any(|s| source_time(s).is_none() && !current.sources().contains(s))
+        {
+            return None;
+        }
+        let transcript = &self.state.transcript;
+        let lines: Vec<_> = submitted
+            .sources()
+            .iter()
+            .filter(|s| source_time(s).is_some())
+            .collect();
+        if !lines
+            .iter()
+            .all(|s| transcript.iter().any(|line| matches_source(line, s)))
+        {
+            return None;
+        }
+        let newest = lines.iter().max_by_key(|s| source_time(s))?;
+        let at = transcript
+            .iter()
+            .position(|line| matches_source(line, newest))?;
+        let newer = &transcript[at + 1..];
+        Some(Lag {
+            through_segment: transcript[at].id.clone(),
+            lines: newer.len() as u64,
+            ms: newer
+                .last()
+                .map_or(0, |line| line.at_ms.saturating_sub(transcript[at].at_ms)),
+        })
+    }
+
     /// The development timing log's record of a reply. Ids and codes only.
+    /// A stale reply, or one read after the deadline, keeps its action code
+    /// so the decision is not lost; it is never applied.
     fn record_result(
         &self,
         submitted: &Pending,
         result: &Result<Decision, Failure>,
         applies: bool,
+        late: Option<&Decision>,
+        lag: Option<&Lag>,
     ) {
         if !crate::timing_log::enabled() {
             return;
         }
+        let action = match result {
+            Ok(decision) if !applies => Some(action_code(decision)),
+            Err(Failure::Expired) => late.map(action_code),
+            _ => None,
+        };
         let (outcome, failure) = match result {
             _ if !applies => ("stale", None),
-            Ok(decision) => (
-                match decision.action {
-                    Action::Show => "show",
-                    Action::Quiet => "quiet",
-                    Action::Resolved => "resolved",
-                    Action::Withdraw => "withdraw",
-                },
-                None,
-            ),
+            Ok(decision) => (action_code(decision), None),
             Err(Failure::Cancelled | Failure::Busy) => ("cancelled", None),
             Err(Failure::Stale) => ("stale", None),
             Err(failure) => (
@@ -670,6 +770,10 @@ impl Engine {
             outcome,
             latency_ms: u64::try_from(submitted.sent.elapsed().as_millis()).unwrap_or(u64::MAX),
             failure,
+            action,
+            through_segment: lag.map(|lag| lag.through_segment.clone()),
+            lag_lines: lag.map(|lag| lag.lines),
+            lag_ms: lag.map(|lag| lag.ms),
             elapsed_ms: self.state.elapsed_ms,
         });
     }
@@ -2069,19 +2173,13 @@ mod tests {
     }
 
     #[test]
-    fn a_single_timeout_is_skipped_and_two_in_a_row_stop_cues() {
-        let mut h = Harness::with_budget(Duration::from_millis(20));
-        let time_out = |h: &mut Harness| {
-            std::thread::sleep(Duration::from_millis(30));
-            h.engine.advance(1);
-        };
-        h.line("The garden checklist needs an owner.");
+    fn ordinary_mode_still_drops_a_reply_to_an_older_transcript() {
+        // The lab's append-only prefix rule does not apply here: new speech
+        // cancels the pending request and its reply is never shown.
+        let mut h = Harness::new();
+        h.line("Who owns the garden checklist?");
         h.request();
-        time_out(&mut h);
-        // Skipped: permission and status survive, and no cue appears.
-        assert!(h.engine.has_processing_permission());
-        assert_eq!(h.engine.evaluation_status(), Some(EvaluationStatus::Idle));
-        // The late reply is dropped when it finally arrives.
+        h.line("Maya owns it; that is settled.");
         h.replies
             .send(
                 serde_json::json!({"action": "show", "cue": "Who owns the checklist?",
@@ -2089,31 +2187,56 @@ mod tests {
                 .to_string(),
             )
             .unwrap();
-        drain_without_another_request(&mut h);
+        // Only the newest transcript is evaluated next; the old reply is gone.
+        let until = Instant::now() + Duration::from_secs(2);
+        let latest = loop {
+            h.engine.advance(1);
+            if let Ok(request) = h.requests.try_recv() {
+                break request;
+            }
+            assert!(Instant::now() < until, "latest speech was not evaluated");
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        assert!(latest.sources().iter().any(|s| s.id == "transcript:line-2"));
         assert!(h.engine.state.cue.is_none());
-        // A reply in time resets the run of timeouts.
-        h.line("Maya might take it.");
-        h.request();
         h.reply("quiet", None, &["transcript:line-2"]);
-        h.line("Or perhaps Sam.");
-        h.request();
-        time_out(&mut h);
+        assert!(h.engine.state.cue.is_none());
+    }
+
+    #[test]
+    fn a_single_timeout_is_skipped_and_two_in_a_row_stop_cues() {
+        let mut h = Harness::new();
+        // Exercise policy outcomes without racing worker startup against a
+        // 20 ms wall-clock deadline. The worker's exact deadline boundary and
+        // late-result rejection are covered by
+        // expired_or_completed_but_unread_results_never_display.
+        h.engine.fail_evaluation(Failure::Expired);
+        // Skipped: permission and status survive, and no cue appears.
         assert!(h.engine.has_processing_permission());
-        h.replies.send("{}".into()).unwrap();
-        drain_without_another_request(&mut h);
-        // Two in a row stop cues for the session, with the plain reason.
-        h.line("Nobody has said yes yet.");
+        assert_eq!(h.engine.evaluation_status(), Some(EvaluationStatus::Idle));
+        assert!(h.engine.state.cue.is_none());
+
+        // A real validated reply resets the run of timeouts.
+        h.line("Maya might take the garden checklist.");
         h.request();
-        time_out(&mut h);
+        h.reply("quiet", None, &["transcript:line-1"]);
+        assert_eq!(
+            h.engine.evaluation_status(),
+            Some(EvaluationStatus::Decided(EvaluationOutcome::Quiet))
+        );
+        h.engine.fail_evaluation(Failure::Expired);
+        assert!(h.engine.has_processing_permission());
+        assert!(h.engine.state.cue.is_none());
+
+        // Two consecutive timeout outcomes stop cues with the plain reason.
+        h.engine.fail_evaluation(Failure::Expired);
         assert_eq!(
             h.engine.evaluation_status(),
             Some(EvaluationStatus::Unavailable(EvaluationIssue::TimedOut))
         );
         assert!(!h.engine.has_processing_permission());
-        h.replies.send("{}".into()).unwrap();
-        drain_without_another_request(&mut h);
-        h.line("Still nobody.");
-        drain_without_another_request(&mut h);
+        h.line("Still nobody has said yes.");
+        assert!(h.requests.try_recv().is_err(), "no work after cues stop");
         assert!(h.engine.state.cue.is_none());
     }
 
