@@ -462,6 +462,9 @@ function playerController({
     audioCompletion = null,
     videoCompletion = null,
     firstDiagnostic = null,
+    // First fixed category of any failure after the first one; it never
+    // replaces the first, but a cancellation cannot hide it.
+    laterFailure = null,
     childExit = null,
     stderrBytes = 0,
     preparationProgress = null,
@@ -497,23 +500,25 @@ function playerController({
         listener({ type: 'failed' });
       } catch {}
   };
+  const fixedCategory = (category) =>
+    typeof category === 'string' &&
+    [
+      'protocol',
+      'deadline',
+      'process-exit',
+      'spawn',
+      'cancelled',
+      'output-limit',
+    ].includes(category)
+      ? category
+      : 'protocol';
   const fail = (category = 'protocol') => {
-    if (failed) return;
+    if (failed) {
+      laterFailure ??= fixedCategory(category);
+      return;
+    }
     if (!firstDiagnostic)
-      firstDiagnostic = Object.freeze({
-        category:
-          typeof category === 'string' &&
-          [
-            'protocol',
-            'deadline',
-            'process-exit',
-            'spawn',
-            'cancelled',
-            'output-limit',
-          ].includes(category)
-            ? category
-            : 'protocol',
-      });
+      firstDiagnostic = Object.freeze({ category: fixedCategory(category) });
     failed = true;
     for (const p of [ready, clock, play]) p.reject(gateFailure('protocol'));
     notify();
@@ -627,7 +632,8 @@ function playerController({
             (v) => Number.isFinite(v) && v >= 0 && v <= 105000,
           ),
       );
-      if (!firstDiagnostic)
+      if (firstDiagnostic) laterFailure ??= 'player-failure';
+      else
         firstDiagnostic = Object.freeze({
           category: 'player-failure',
           stage: frame.stage,
@@ -894,8 +900,12 @@ function playerController({
         ]);
 
         // A caller cancellation is not a cleanup failure once the player has
-        // acknowledged Stop; any other first failure still is.
-        if (failed && firstDiagnostic?.category !== 'cancelled')
+        // acknowledged Stop; any other first failure, or any failure after the
+        // cancellation, still is.
+        if (
+          failed &&
+          (firstDiagnostic?.category !== 'cancelled' || laterFailure !== null)
+        )
           throw gateFailure('cleanup');
         return { stopped: true };
       } catch {
@@ -914,6 +924,7 @@ function playerController({
     get diagnostics() {
       return Object.freeze({
         failure: firstDiagnostic,
+        laterFailure,
         process: childExit,
         stderrBytes: Math.min(stderrBytes, 128 * 1024),
         preparationProgress,
@@ -1160,6 +1171,8 @@ export function createLabPlayerFixture({
       'duplicate',
       'oversize',
       'held-pipes',
+      'stop-silent',
+      'fail-after-cancel',
     ].includes(fixtureCase),
   );
   const expected = digest(FIXTURE);
