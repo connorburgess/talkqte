@@ -75,12 +75,51 @@ impl StartGate {
         })
     }
 
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    pub(crate) fn try_control(&self) -> Option<(Option<String>, crate::engine::StartupState)> {
+        use crate::engine::StartupState;
+        let state = self.0.try_lock().ok()?;
+        let phase = match &state.current {
+            None => StartupState::Idle,
+            Some(flag) if flag.load(Ordering::Acquire) => StartupState::Cancelling,
+            Some(_) => StartupState::Loading,
+        };
+        Some((state.operation.clone(), phase))
+    }
+
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    #[cfg(test)]
+    pub(crate) fn with_test_control_lock<R>(&self, action: impl FnOnce() -> R) -> R {
+        let _held = self.0.lock().unwrap();
+        action()
+    }
+
     pub(crate) fn cancel(&self) {
         if let Ok(current) = self.0.lock() {
             if let Some(flag) = current.current.as_ref() {
                 flag.store(true, Ordering::Release);
             }
         }
+    }
+
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    pub(crate) fn lab_stop_settled(&self) -> bool {
+        self.0.try_lock().is_ok_and(|state| state.current.is_none())
     }
 
     pub(crate) fn control(&self) -> Result<(Option<String>, crate::engine::StartupState), String> {
@@ -168,6 +207,15 @@ impl Runtime {
         test
     ))]
     fn check_live_start(&self) -> Result<(), String> {
+        #[cfg(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        ))]
+        if crate::dev_stop::requested() {
+            return Err(CANCELLED.into());
+        }
         if self.live.is_some()
             || matches!(
                 self.engine.state.status,
@@ -194,11 +242,18 @@ impl Runtime {
             return Err(CANCELLED.into());
         }
         self.check_live_start()?;
+        #[cfg(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        ))]
+        crate::lab_evaluator::cancel_active(crate::lab_evaluator::ControlReason::Replace);
         let mut engine = carry_over(&self.engine, crate::live_engine());
         engine.start()?;
         #[cfg(all(
             debug_assertions,
-            feature = "claude-cli",
+            any(feature = "claude-cli", feature = "lab-evaluator"),
             feature = "native-audio-spike"
         ))]
         crate::dev_model::apply(&mut engine);
@@ -223,6 +278,15 @@ impl Runtime {
         session: u64,
         generation: u64,
     ) -> bool {
+        #[cfg(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        ))]
+        if crate::dev_stop::requested() || crate::dev_stop::source_only() {
+            return false;
+        }
         if !self.live_start.accepts(guard)
             || !self.engine.state.live
             || self.engine.session() != session
@@ -243,11 +307,33 @@ impl Runtime {
 
     /// Call under the runtime lock BEFORE draining queued transcription.
     pub(crate) fn take_live_for_stop(&mut self) -> Option<Live> {
+        #[cfg(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        ))]
+        crate::lab_evaluator::cancel_active(crate::lab_evaluator::ControlReason::Stop);
         self.live_start.cancel();
         self.retire_live_source();
         self.processing_reviews.clear();
         self.engine.begin_live_stop();
-        self.live.take()
+        let live = self.live.take();
+        #[cfg(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        ))]
+        if let Some(live) = &live {
+            // Register before ownership escapes Runtime; an overlapping Stop
+            // must still see this drain after `live` becomes None.
+            self.lab_stop_drains.begin(
+                live.session,
+                live.microphone.is_none() && live.runner.is_none(),
+            );
+        }
+        live
     }
 }
 
