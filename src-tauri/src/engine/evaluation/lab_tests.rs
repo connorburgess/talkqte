@@ -425,3 +425,20 @@ fn a_link_ended_by_a_deadline_shows_a_timed_out_stop() {
         }
     }
 }
+#[test]
+fn a_prefix_reply_completed_in_time_but_read_after_the_deadline_is_not_applied() {
+    let budget = Duration::from_millis(300);
+    let mut h = Harness::with_budget(budget);
+    let link = lab(&mut h);
+    h.line("Who owns the fictional checklist?");
+    h.request();
+    h.line("The meeting continues.");
+    // A valid reply to a transcript that has only grown is queued well before
+    // the deadline, but the engine does not poll until after it.
+    reply(&h, "show", Some("Who owns the checklist?"));
+    std::thread::sleep(budget + Duration::from_millis(100));
+    h.engine.advance(1);
+    assert_eq!(*link.verdicts.lock().unwrap(), vec![Settlement::Expired]);
+    assert!(h.engine.state.cue.is_none());
+    assert!(h.engine.has_processing_permission());
+}
