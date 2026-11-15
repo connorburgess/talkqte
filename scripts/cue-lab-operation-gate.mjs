@@ -179,6 +179,7 @@ export function createLabOperationGate({
       timer: null,
       finished: null,
       retired: null,
+      scoped,
     };
     // A scoped lease's deadline or caller abort retires only this lease: its
     // provider work is aborted and must settle, and the gate stays usable.
@@ -271,7 +272,14 @@ export function createLabOperationGate({
     }
     lease.settlement = true;
     clearTimeout(lease.timer);
-    lease.timer = setTimeout(() => stop('deadline'), deadlineMs);
+    // A scoped request may be settled, or retired by native, until one second
+    // after its own deadline, plus a small transit margin because native's
+    // deadline anchor precedes this lease's; only silence after that is
+    // terminal.
+    const window = lease.scoped
+      ? Math.max(deadlineMs, lease.deadlineAt + 1250 - performance.now())
+      : deadlineMs;
+    lease.timer = setTimeout(() => stop('deadline'), window);
     // Settlement is a bounded acknowledgement, not another provider operation.
     // A missing acknowledgement must not prevent terminal cleanup/close.
     let rejectAbort;

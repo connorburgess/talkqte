@@ -14,6 +14,8 @@ import { systemPromptFor, validateDecision } from './cue-lab.mjs';
 
 const SCHEMA = 'talkqte.lab.v1';
 const FRAME = 65536;
+const MAX_BUDGET_MS = 10000;
+const SETTLEMENT_MS = 1000;
 const BASE = ['schema', 'type', 'runId', 'sessionId'];
 const CODES = new Set([
   'authentication',
@@ -170,6 +172,11 @@ export async function openLabBroker({
       ['codex', 'claude-code'].includes(provider.metadata?.provider) &&
       text(provider.metadata.model, 100) &&
       text(provider.metadata.effort, 20) &&
+      // The adapter's own deadline is terminal, so it must outlast the largest
+      // per-request budget plus its settlement window; otherwise one slow call
+      // would end the run instead of retiring that request.
+      Number.isSafeInteger(provider.metadata.deadlineMs) &&
+      provider.metadata.deadlineMs > MAX_BUDGET_MS + SETTLEMENT_MS &&
       /^[A-Za-z0-9_-]{1,64}$/.test(runId) &&
       typeof onTerminal === 'function' &&
       ['required', 'legacy-fixture'].includes(sourceSessionMode),
@@ -234,6 +241,8 @@ export async function openLabBroker({
   const retiredRequests = new Set();
   const evaluations = {
     requested: 0,
+    dispatched: 0,
+    retiredBeforeDispatch: 0,
     resultsSent: 0,
     deadlineByBroker: 0,
     deadlineByNative: 0,
@@ -311,7 +320,7 @@ export async function openLabBroker({
         seenRequests.size < 100 &&
         Number.isSafeInteger(frame.budgetMs) &&
         frame.budgetMs >= 1 &&
-        frame.budgetMs <= 10000,
+        frame.budgetMs <= MAX_BUDGET_MS,
     );
     const request = evaluatorRequest(frame.input);
     seenRequests.add(key);
@@ -334,6 +343,7 @@ export async function openLabBroker({
       controller: new AbortController(),
       retired: null,
       nativeCancelled: false,
+      dispatched: false,
     };
     evaluation = operation;
     evaluations.requested++;
@@ -341,7 +351,15 @@ export async function openLabBroker({
     operation.done = gate
       .run(
         async () => {
-          const result = await gate.request(request);
+          // The gate counts a dispatch synchronously when the provider call
+          // starts; a request retired before that spends none.
+          const before = gate.dispatchesUsed;
+          const requested = gate.request(request);
+          if (gate.dispatchesUsed > before) {
+            operation.dispatched = true;
+            evaluations.dispatched++;
+          }
+          const result = await requested;
           try {
             validateDecision(result.value, frame.input, { compact: true });
             requireThat(
@@ -421,6 +439,7 @@ export async function openLabBroker({
     if (operation.retired) return;
     operation.retired = reason;
     retiredRequests.add(operation.key);
+    if (!operation.dispatched) evaluations.retiredBeforeDispatch++;
     if (evaluation === operation) evaluation = null;
     operation.rejectAck(gateFailure(reason));
     if (operation.nativeCancelled) {

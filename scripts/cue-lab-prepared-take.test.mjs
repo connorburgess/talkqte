@@ -432,7 +432,7 @@ function fixture({
       model: 'gpt-6.1-sol',
       effort: 'medium',
       maxCalls: fixedModel ? 20 : 3,
-      deadlineMs: 100,
+      deadlineMs: 30000,
       execution: 'offline-stand-in',
       environment: {},
       openers: {

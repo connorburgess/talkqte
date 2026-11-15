@@ -379,7 +379,15 @@ export function importNativeRows(rows, { runId, artifactId, clockId }) {
           (k) => r[k] !== undefined,
         );
         if (r.action !== undefined) {
-          if (!DECISION_ACTIONS.has(r.action) || lag.length)
+          // Only a decision that was not applied: stale, or read after timeout.
+          if (
+            !DECISION_ACTIONS.has(r.action) ||
+            lag.length ||
+            !(
+              r.outcome === 'stale' ||
+              (r.outcome === 'failed' && r.failure === 'timeout')
+            )
+          )
             fail('invalid native decision action');
           payload.decisionAction = r.action;
         }
@@ -387,7 +395,7 @@ export function importNativeRows(rows, { runId, artifactId, clockId }) {
           if (
             lag.length !== 3 ||
             !DECISION_ACTIONS.has(r.outcome) ||
-            !text(r.through_segment, 160) ||
+            !SEGMENT_ID.test(r.through_segment ?? '') ||
             !Number.isSafeInteger(r.lag_lines) ||
             r.lag_lines < 0 ||
             !Number.isSafeInteger(r.lag_ms) ||
@@ -506,6 +514,8 @@ const key = (e, kind) =>
     ? `${e.ids.sessionId}/${e.ids[kind]}`
     : null;
 const DECISION_ACTIONS = new Set(['show', 'quiet', 'resolved', 'withdraw']);
+// Native segment identities such as `t1-0-4`; never free text.
+const SEGMENT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 // How far behind the current transcript an applied lab decision was.
 const staleness = (result) =>
   result?.payload?.lagLines === undefined
@@ -529,7 +539,7 @@ function safePayload(payload, includeContent) {
   if (DECISION_ACTIONS.has(payload.decisionAction))
     result.decisionAction = payload.decisionAction;
   if (
-    text(payload.throughSegment, 160) &&
+    SEGMENT_ID.test(payload.throughSegment ?? '') &&
     Number.isSafeInteger(payload.lagLines) &&
     Number.isSafeInteger(payload.lagMs)
   ) {

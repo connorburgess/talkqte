@@ -14,7 +14,7 @@ an admitted role requests it. Before the lazy native connection exists, the
 orchestrator must independently abort/close this shared run on coordinated Stop;
 it cannot rely on an unauthenticated native socket to notify it.
 Every control, first failure or disconnect terminates that run, except a
-[per-request evaluator deadline](#per-request-deadline); reconnect, fallback and
+[per-request evaluator deadline or late result](#request-outcomes-and-what-stays-terminal); reconnect, fallback and
 budget reset are unavailable.
 
 ## Shared ownership
@@ -89,35 +89,69 @@ The evaluator input is the JSON **object** parsed from Rust's
 tools or executable names. The broker constructs the shared compact/glance prompt
 and source-ID response schema. It validates action/cue/source membership and the
 10-word cue bound. Rust independently validates its immutable request, source
-references, processing permission, current session/revision, cue identity and
-freshness before applying a decision. A valid stale result is discarded and
-acknowledged `staleSuccess`; provider/schema errors remain terminal first.
+references, processing permission, current session, cue identity and freshness
+before applying a decision. In the lab arm, freshness is bounded: a decision is
+still applied when the transcript has only grown since the request (every
+submitted line unchanged, newer lines appended, same existing cue, inside the
+native deadline). Such a cue can reflect speech up to the deadline before it
+appears. Any other change makes the result stale: it is discarded and
+acknowledged `staleSuccess`. Provider and schema errors remain terminal.
 
-`result` is sent only after provider cleanup. The global lease remains held until
-the matching `settled` verdict arrives within one second. A failure, mismatch,
-duplicate or lost acknowledgement stops every role. `current` is a Rust validation
-verdict, not proof that a cue was painted. Same-chunk settlement followed by the
-next request preserves that ownership ordering.
+`result` is sent only after provider cleanup. The evaluator lease stays held
+until the request is settled or retired. `current` is a Rust validation verdict,
+not proof that a cue was painted. Same-chunk settlement followed by the next
+request preserves that ownership ordering.
 
-### Per-request deadline
+### Request outcomes and what stays terminal
 
-An evaluator deadline retires one request, not the run. The evaluator lease is
-scoped: when its `budgetMs` passes, the broker aborts that provider call, sends
-`failed` with code `deadline` for that request and keeps the gate, provider and
-run. A native `cancel` with reason `deadline` and the request identity does the
-same without a reply. A `settled` verdict of `expired` (a result read after the
-native deadline, never applied) is also not terminal. Late `cancel` frames for a
-request already retired this way are ignored; any other unknown request is a
-protocol failure. A request retired after dispatch has spent its dispatch, so
-repeated timeouts end the run at the dispatch cap; one retired while still
-queued spends none. A missing settlement within one second of a sent result
-stays terminal. An unconfirmed provider process-group
-retirement, every other `cancel` reason and every other `failed` code stay
-terminal.
+Each `evaluate` ends in exactly one of these ways. The first four retire only
+that request; the run, provider and dispatch budget continue.
+
+- **Settled `current` or `staleSuccess`:** native validated the result in time.
+- **Settled `expired`:** the result reached native in time but was read after
+  its deadline; it is never applied.
+- **Broker deadline:** the request's `budgetMs` passed before a result. The
+  broker aborts that provider call, waits for its process group to be confirmed
+  gone and sends `failed` with code `deadline` for that request only.
+- **Native deadline:** native sends `cancel` with reason `deadline` and the
+  request identity, while the provider runs or while a sent result awaits
+  settlement. The broker retires the request without a reply.
+
+After a `result` is sent, native may settle or retire the request until one
+second after the request's deadline (the broker allows a further 250 ms for
+transit). Silence after that is terminal.
+
+Late frames are ignored for a request already retired by a deadline: a deadline
+`cancel` that crosses the broker's own `failed`. A frame for any other unknown
+request is a protocol failure. These stay terminal for the whole run: a
+`settled` verdict of `failed`, a mismatched or duplicate settlement, every other
+`cancel` reason (`stop`, `pause`, `revoke`, `replace`, `dismiss`, `exit`,
+`eligibility_change`, `publication_failed`, `transport_failed`), every other
+broker `failed` code, `terminal`, an unconfirmed provider process-group
+retirement, a disconnect, and the dispatch cap.
+
+The provider adapter's own deadline is terminal, so the broker refuses a
+provider whose adapter deadline does not exceed the largest request budget plus
+settlement (11,000 ms).
+
+**Dispatch counting.** The broker counts a dispatch only when a provider call
+actually starts (`cliDispatchAttempts`). A request retired while it was still
+queued behind a settling one spends no dispatch, although native counted the
+`evaluate`. Repeated timeouts after dispatch end the run at the dispatch cap;
+native's own session call limit bounds the rest.
 
 `evaluationSummary` reports content-free event counts, not a partition:
-requests, results sent and their fixed actions, deadlines retired by the broker
-or by native (a sent result can later be retired), and settlement verdicts.
+`requested` (evaluates seen), `dispatched` (provider calls started),
+`retiredBeforeDispatch`, `resultsSent` with their fixed actions,
+`deadlineByBroker`, `deadlineByNative` (a sent result can later be retired by
+native) and settlement `verdicts`.
+
+**Native timing fields.** In lab mode, native's `evaluation_result` log row
+carries an optional `action` only on a `stale` result or a `failed` timeout whose
+decision was not applied, and the trio `through_segment` (segment id),
+`lag_lines` and `lag_ms` (unsigned integers, `lag_ms` 0 when `lag_lines` is 0)
+on every applied decision. They never appear together. The
+[evidence report](lab-evidence-report.md) shows them per evaluation and per cue.
 
 ## Observed cues and clocks
 

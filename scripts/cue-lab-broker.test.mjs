@@ -41,7 +41,12 @@ async function setup({
   const broker = await openLabBroker({
     sourceSessionMode,
     provider: {
-      metadata: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' },
+      metadata: {
+        provider: 'codex',
+        model: 'gpt-6.1-sol',
+        effort: 'medium',
+        deadlineMs: 30000,
+      },
       request: async (req) => {
         calls.push(req);
         return request(req);
@@ -276,16 +281,100 @@ test('failed or mismatched settlement stops all roles and never retries', async 
   }
 });
 
-test('missing settlement acknowledgement is terminal under the fixed grace', async () => {
+test('missing settlement acknowledgement is terminal one second after the request deadline', async () => {
   const ctx = await setup();
   try {
-    ctx.evaluate();
+    ctx.evaluate('1', { budgetMs: 300 });
     await ctx.next('result');
-    await delay(1050);
+    await delay(900);
+    // Still inside deadline + 1 s: native may yet settle or retire it.
+    assert.equal(ctx.broker.gate.terminal, null);
+    await delay(700);
     await terminal(ctx.broker);
+    assert.equal(ctx.broker.gate.terminal, 'deadline');
     assert.equal(ctx.calls.length, 1);
   } finally {
     await ctx.close();
+  }
+});
+
+test('an expired settlement up to one second after the request deadline continues the run', async () => {
+  // Reviewer's probe: budget 300 ms, result at about 250 ms, `expired` 1050 ms later.
+  const ctx = await setup({
+    request: async () => {
+      await delay(250);
+      return { value, elapsedMs: 250 };
+    },
+  });
+  try {
+    ctx.evaluate('1', { budgetMs: 300 });
+    await ctx.next('result');
+    await delay(1050);
+    ctx.settle('1', 'expired');
+    await ctx.broker.gate.waitIdle();
+    assert.equal(ctx.broker.gate.terminal, null);
+    assert.equal(ctx.broker.evaluationSummary.verdicts.expired, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('evaluation summary distinguishes evaluates seen, dispatches spent and retirement before dispatch', async () => {
+  let release;
+  let n = 0;
+  const ctx = await setup({
+    request: (req) => {
+      n++;
+      if (n > 1) return Promise.resolve({ value, elapsedMs: 1, usage: {} });
+      // The first call settles only after an explicit release, after abort.
+      return new Promise((_, reject) =>
+        req.signal.addEventListener('abort', () => {
+          release = () =>
+            reject(Object.assign(new Error('f'), { category: 'cancelled' }));
+        }),
+      );
+    },
+  });
+  try {
+    ctx.evaluate('1', { budgetMs: 30 });
+    assert.equal((await ctx.next('failed')).requestId, '1');
+    // Queued behind the settling first request; retired before dispatch.
+    ctx.evaluate('2', { budgetMs: 30 });
+    assert.equal((await ctx.next('failed')).requestId, '2');
+    release();
+    ctx.evaluate('3');
+    assert.equal((await ctx.next('result')).requestId, '3');
+    ctx.settle('3');
+    await ctx.broker.gate.waitIdle();
+    const s = ctx.broker.evaluationSummary;
+    assert.equal(s.requested, 3);
+    assert.equal(s.dispatched, 2);
+    assert.equal(s.retiredBeforeDispatch, 1);
+    assert.equal(ctx.broker.gate.dispatchesUsed, 2);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('an adapter deadline that cannot outlast a request budget and its settlement is refused', async () => {
+  for (const deadlineMs of [undefined, 100, 11000]) {
+    await assert.rejects(
+      openLabBroker({
+        sourceSessionMode: 'legacy-fixture',
+        provider: {
+          metadata: {
+            provider: 'codex',
+            model: 'gpt-6.1-sol',
+            effort: 'medium',
+            deadlineMs,
+          },
+          request: async () => ({ value }),
+          close: async () => {},
+        },
+        maxCalls: 1,
+      }),
+      { category: 'protocol' },
+    );
   }
 });
 
@@ -697,7 +786,12 @@ for (const connect of [false, true])
     const broker = await openLabBroker({
       sourceSessionMode: 'legacy-fixture',
       provider: {
-        metadata: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' },
+        metadata: {
+          provider: 'codex',
+          model: 'gpt-6.1-sol',
+          effort: 'medium',
+          deadlineMs: 30000,
+        },
         request: ({ signal }) =>
           new Promise((_, reject) => {
             signal.addEventListener(
@@ -884,7 +978,12 @@ test('startup diagnostics stay empty until a peer connects and report a normal c
   const broker = await openLabBroker({
     sourceSessionMode: 'legacy-fixture',
     provider: {
-      metadata: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' },
+      metadata: {
+        provider: 'codex',
+        model: 'gpt-6.1-sol',
+        effort: 'medium',
+        deadlineMs: 30000,
+      },
       request: async () => ({ value }),
       close: async () => {},
     },
@@ -1019,7 +1118,12 @@ test('a calibration rejected for combined uncertainty is not reported as calibra
 });
 
 const fictionalProvider = () => ({
-  metadata: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' },
+  metadata: {
+    provider: 'codex',
+    model: 'gpt-6.1-sol',
+    effort: 'medium',
+    deadlineMs: 30000,
+  },
   request: async () => ({ value }),
   close: async () => {},
 });

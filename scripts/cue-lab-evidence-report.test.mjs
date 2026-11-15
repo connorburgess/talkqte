@@ -899,3 +899,37 @@ test('malformed lab decision fields are refused, never guessed', () => {
       }),
     );
 });
+test('an unapplied action is accepted only on stale or timeout results, and segment ids are id-shaped', () => {
+  const load = (row) =>
+    importNativeRows(
+      [
+        {
+          event: 'evaluation_result',
+          mono_ms: 1,
+          session: sid,
+          request: 1,
+          latency_ms: 1,
+          ...row,
+        },
+      ],
+      { runId: 'fictional-cedar', artifactId: 'native', clockId: 'audio' },
+    );
+  assert.equal(
+    load({ outcome: 'failed', failure: 'timeout', action: 'show' })[0].payload
+      .decisionAction,
+    'show',
+  );
+  for (const row of [
+    { outcome: 'show', action: 'show' },
+    { outcome: 'cancelled', action: 'quiet' },
+    { outcome: 'failed', failure: 'unavailable', action: 'quiet' },
+    {
+      outcome: 'show',
+      through_segment: 'a fictional sentence',
+      lag_lines: 0,
+      lag_ms: 0,
+    },
+    { outcome: 'show', through_segment: '', lag_lines: 0, lag_ms: 0 },
+  ])
+    assert.throws(() => load(row));
+});
