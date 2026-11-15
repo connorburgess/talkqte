@@ -834,6 +834,11 @@ function playerController({
       );
       completed = true;
       clearTimeout(operationTimer);
+      // Playback no longer owns cancellation after both validated track ends.
+      // The caller may now abort its run to begin independent Stop/retire cleanup.
+      abortSignal?.removeEventListener('abort', abortListener);
+      abortSignal = undefined;
+      abortListener = undefined;
       play.resolve({
         completed: true,
         sha256: media.sha256,

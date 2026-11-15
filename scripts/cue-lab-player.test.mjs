@@ -457,6 +457,53 @@ test('missing video completion stays pending and Stop cannot invent final comple
     await player.close({ nativeReleased: true }).catch(() => {});
   }
 });
+test('abort after audio end but before final video remains cancellation, not completed playback', async () => {
+  const player = createLabPlayerFixture({
+    ...fixtureOptions,
+    fixtureCase: 'video-tail',
+  });
+  const controller = new AbortController();
+  try {
+    await player.prepare({ media });
+    const pending = player.play({
+      media,
+      signal: controller.signal,
+      onStarted() {},
+    });
+    const rejected = assert.rejects(pending);
+    await waitForAudio(player);
+    controller.abort();
+    await rejected;
+    assert.equal(player.diagnostics.failure.category, 'cancelled');
+    await assert.rejects(player.close({ nativeReleased: true }));
+    assert.equal(player.diagnostics.failure.category, 'cancelled');
+  } finally {
+    await player.close({ nativeReleased: true }).catch(() => {});
+  }
+});
+test('completed playback releases caller abort ownership but does not forgive failed retirement', async () => {
+  const player = createLabPlayerFixture({
+    ...fixtureOptions,
+    fixtureCase: 'held-pipes',
+  });
+  const controller = new AbortController();
+  try {
+    await player.prepare({ media, signal: controller.signal });
+    const result = await player.play({
+      media,
+      signal: controller.signal,
+      onStarted() {},
+    });
+    assert.equal(result.completed, true);
+    controller.abort();
+    assert.equal(player.diagnostics.failure, null);
+    assert.deepEqual(await player.stop(), { stopped: true });
+    // A descendant holding pipes remains a genuine cleanup failure after audio/video end.
+    await assert.rejects(player.close({ nativeReleased: true }));
+  } finally {
+    await player.close({ nativeReleased: true }).catch(() => {});
+  }
+});
 test('fixed failed preparation stage and numeric diagnostics survive Stop/cleanup failure', async () => {
   const player = createLabPlayerFixture({
     ...fixtureOptions,

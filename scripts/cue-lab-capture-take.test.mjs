@@ -3,7 +3,10 @@ import { test, mock } from 'node:test';
 import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { createLabCaptureTake } from './cue-lab-capture-take.mjs';
-import { LAB_PLAYER_MEDIA_SHA256 } from './cue-lab-player.mjs';
+import {
+  createLabPlayerFixture,
+  LAB_PLAYER_MEDIA_SHA256,
+} from './cue-lab-player.mjs';
 const media = {
   fictional: true,
   path: '/fictional/prepared.mp4',
@@ -29,6 +32,8 @@ function fixture({
   playerFails = false,
   signal,
   takeMs,
+  ownedPlayer,
+  recorderDelayMs = 0,
 } = {}) {
   const trace = [],
     counts = {
@@ -117,7 +122,7 @@ function fixture({
       trace.push('source-close');
     },
   };
-  const player = {
+  const player = ownedPlayer ?? {
     startDeadlineMs: playerDeadline,
     identity: { runId: 'fictional-run' },
     subscribe(fn) {
@@ -169,6 +174,8 @@ function fixture({
       return () => (recorderHandler = () => {});
     },
     async start() {
+      if (recorderDelayMs)
+        await new Promise((resolve) => setTimeout(resolve, recorderDelayMs));
       trace.push('recorder-frame');
       if (recorderFails) throw Error('fictional failure');
       if (lateBeforeStart) delta = 6000;
@@ -229,6 +236,43 @@ function fixture({
     failSource: () => sourceHandler({ type: 'failed' }),
   };
 }
+test('natural protocol playback composes with capture root abort and independently completes cleanup', async () => {
+  // Real controller and harmless subprocess; no app, audio, capture or provider.
+  const player = createLabPlayerFixture({
+    runId: 'fictional-run',
+    prepareMs: 2000,
+    startMs: 100,
+    stopMs: 100,
+  });
+  try {
+    await player.prepare({ media });
+    const events = [];
+    const f = fixture({
+      ownedPlayer: player,
+      // The protocol stand-in extrapolates its first sample 10ms before receipt.
+      // Give the simulated recorder a setup interval after native admission.
+      recorderDelayMs: 25,
+      observe: (e) => events.push(e),
+    });
+    const result = await f.take.done;
+    assert.equal(result.completed, true);
+    assert.equal(result.nativeReleased, true);
+    assert.equal(f.take.phase, 'completed');
+    assert.equal(f.counts.nativeStop, 1);
+    assert.equal(f.counts.recordStop, 1);
+    assert.equal(player.diagnostics.failure, null);
+    assert.equal(player.diagnostics.audioCompleted, true);
+    assert.equal(player.diagnostics.videoCompleted, true);
+    assert.equal(player.diagnostics.transport.stoppedAcknowledged, true);
+    assert.equal(player.diagnostics.transport.lastCommand, 'retire');
+    assert.deepEqual(player.diagnostics.process, { exitCode: 0, signal: null });
+    assert.equal(events.at(-1).outcome, 'observed');
+    assert.ok(f.trace.includes('source-close'));
+    assert.ok(f.trace.includes('launcher-close'));
+  } finally {
+    await player.close({ nativeReleased: true }).catch(() => {});
+  }
+});
 test('capture-only proves no provider/backend/descriptor and final retirement after native release plus recorder finish', async () => {
   const f = fixture();
   const result = await f.take.done;
