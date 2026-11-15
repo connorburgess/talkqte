@@ -475,8 +475,14 @@ test('abort after audio end but before final video remains cancellation, not com
     controller.abort();
     await rejected;
     assert.equal(player.diagnostics.failure.category, 'cancelled');
-    await assert.rejects(player.close({ nativeReleased: true }));
+    // Acknowledged Stop plus applied retire is a stopped player, not a cleanup
+    // failure; the cancellation itself stays the recorded first failure.
+    assert.deepEqual(await player.close({ nativeReleased: true }), {
+      closed: true,
+    });
     assert.equal(player.diagnostics.failure.category, 'cancelled');
+    assert.equal(player.diagnostics.transport.stoppedAcknowledged, true);
+    assert.equal(player.diagnostics.videoCompleted, false);
   } finally {
     await player.close({ nativeReleased: true }).catch(() => {});
   }
@@ -568,8 +574,12 @@ test('caller abort from genuine started observation retains cancelled diagnostic
       }),
     );
     assert.equal(starts, 1);
-    await assert.rejects(player.close({ nativeReleased: true }));
+    assert.deepEqual(await player.stop(), { stopped: true });
+    assert.deepEqual(await player.close({ nativeReleased: true }), {
+      closed: true,
+    });
     assert.deepEqual(player.diagnostics.failure, { category: 'cancelled' });
+    assert.deepEqual(player.diagnostics.process, { exitCode: 0, signal: null });
     assert.equal(player.diagnostics.audioCompleted, false);
     assert.equal(player.diagnostics.videoCompleted, false);
   } finally {

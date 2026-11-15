@@ -906,3 +906,35 @@ test('prepared player retirement without explicit closed proof remains failed cl
   });
   await assert.rejects(f.take.done, { category: 'cleanup' });
 });
+
+test('host cancellation during actual playback ends stopped, not failed cleanup, with the player retired', async () => {
+  const player = createLabPlayerFixture({
+    runId: 'fictional-run',
+    prepareMs: 2000,
+    startMs: 100,
+    stopMs: 100,
+  });
+  try {
+    await player.prepare({ media });
+    let f;
+    f = fixture({
+      fixedModel: true,
+      ownedPlayer: player,
+      recordDelayMs: 25,
+      observe: (e) => {
+        // Cancel while the owned player is still rendering fictional media.
+        if (e.stage === 'speech.render-start')
+          setImmediate(() => f.events.emit('SIGINT'));
+      },
+    });
+    await assert.rejects(f.take.done, { category: 'cancelled' });
+    assert.equal(f.take.phase, 'stopped');
+    assert.deepEqual(player.diagnostics.failure, { category: 'cancelled' });
+    assert.equal(player.diagnostics.transport.stoppedAcknowledged, true);
+    assert.equal(player.diagnostics.transport.lastCommand, 'retire');
+    assert.deepEqual(player.diagnostics.process, { exitCode: 0, signal: null });
+    assert.equal(player.diagnostics.audioCompleted, false);
+  } finally {
+    await player.close({ nativeReleased: true }).catch(() => {});
+  }
+});

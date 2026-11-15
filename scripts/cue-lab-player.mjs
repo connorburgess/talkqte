@@ -893,7 +893,10 @@ function playerController({
           ),
         ]);
 
-        if (failed) throw gateFailure('cleanup');
+        // A caller cancellation is not a cleanup failure once the player has
+        // acknowledged Stop; any other first failure still is.
+        if (failed && firstDiagnostic?.category !== 'cancelled')
+          throw gateFailure('cleanup');
         return { stopped: true };
       } catch {
         // Preserve the selected process until actual native release. A timeout

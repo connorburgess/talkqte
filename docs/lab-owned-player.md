@@ -107,8 +107,12 @@ received audio completion remain receipt evidence, not physical sound or paint.
 After both validated track completions, playback releases its caller's abort
 listener before resolving. The capture owner can then abort the shared run to
 begin ordinary Stop and retirement without creating a new playback cancellation.
-Cancellation before that boundary and independent Stop or retirement failures
-remain failures; completed playback does not prove cleanup.
+Cancellation before that boundary remains a failed (incomplete) playback with
+first failure `cancelled`. It is not a cleanup failure: once the player
+acknowledges Stop, `stop()` resolves, and retirement still requires a clean exit
+of the owned process group. Any other first failure, and independent Stop or
+retirement failures, remain cleanup failures; completed playback does not prove
+cleanup.
 
 `play()` returns separate frozen `audioCompletion`, `videoCompletion` and duration
 metadata. Read-only `diagnostics` retains these even across later cleanup failure,
@@ -148,7 +152,6 @@ player, establish a signed bundle, verify a device route, prove visible video or
 confirm live capture/transcription/model cues. Those remain separately coordinated
 runtime acceptance using the saved media, with no regeneration or forced cue.
 
-
 ## Standard PCM and preparation progress
 
 The engine connection uses standard noninterleaved native-endian Float32 at
@@ -175,7 +178,6 @@ The native pure-memory channel/frame/bit-preservation regression is compiled via
 compile-only correction it was not executed. Node protocol regressions verify
 progress/deadline/first-failure ownership and refuse interleaved prepared metadata.
 None of these establishes live device playback. All existing timeouts are unchanged.
-
 
 ## Bounded stdin exchange
 
