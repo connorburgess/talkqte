@@ -334,7 +334,12 @@ impl Link {
             if cancel.is_cancelled() {
                 if !cancel.is_withdrawn() && self.terminal().is_none() {
                     // Past the deadline only: the request is retired, not the
-                    // run. The engine settles it as Expired.
+                    // run. The engine settles it as Expired. A result already
+                    // delivered is returned so its action can be logged; the
+                    // engine never applies a reply read after the deadline.
+                    if let Ok(result) = rx.try_recv() {
+                        return result;
+                    }
                     return Err(Failure::Expired);
                 }
                 self.cancel_reason(ControlReason::TransportFailed);
@@ -1052,7 +1057,7 @@ pub(crate) fn connected_engine() -> Engine {
     } else {
         "Anthropic through the lab's Claude subscription CLI"
     };
-    let policy=format!("Fictional development lab only. Sends recent and new conversation, the optional Your name setting and current/earlier cues to {service}. Never sends audio, prior notes, imported notes or focus lines. Near every transcript line may be sent, a few at a time. Uses an explicitly chosen subscription; no API fallback. The lab shares a CLI-dispatch cap across all roles; underlying provider request count is unobserved. A cue reflects speech up to 8 s before it appears; newer speech is checked next. A reply later than 8 s shows nothing and the run continues. Pause, Dismiss, Off and Stop terminate this strict lab run; Resume does not restart it. Provider retention follows that account's terms. No model cue text is persisted by this client.");
+    let policy=format!("Fictional development lab only. Sends recent and new conversation, the optional Your name setting and current/earlier cues to {service}. Never sends audio, prior notes, imported notes or focus lines. Near every transcript line may be sent, a few at a time. Uses an explicitly chosen subscription; no API fallback. The lab shares a CLI-dispatch cap across all roles; underlying provider request count is unobserved. A cue reflects speech up to 8 s before it appears; newer speech is checked next. A reply later than 8 s shows nothing and the run continues. Pause, Dismiss, Off, Stop and any other failure end the run; Resume does not restart it. Provider retention follows that account's terms. No model cue text is persisted by this client.");
     let processor = ProcessorConfiguration::new(
         "lab-subscription".into(),
         1,

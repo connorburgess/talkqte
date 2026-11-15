@@ -69,7 +69,7 @@ export function processingIssueText(
     return issueText[issue];
   const reason =
     issue === 'timedOut'
-      ? 'the model exceeded its deadline'
+      ? 'a deadline ended the lab connection'
       : issue === 'authentication'
         ? `${provider} subscription sign-in or CLI setup is unavailable`
         : issue === 'credentials'
@@ -79,7 +79,7 @@ export function processingIssueText(
             : issue === 'invalidReply'
               ? 'the model reply failed validation'
               : 'the development model connection failed';
-  return `Cues stopped: ${reason}. Nothing more will be sent in this strict lab run. Start a new lab run and session to continue.`;
+  return `Cues stopped: ${reason}. Nothing more will be sent in this lab run. Start a new lab run and session to continue.`;
 }
 function NoteLabel({ note }: { note: ProcessingNote }) {
   return (
@@ -495,9 +495,12 @@ export function ProcessingControl({
       )}
       {snapshot?.processor?.id === 'lab-subscription' && (
         <p className="processing-muted">
-          Fictional development lab. Pause, Dismiss, Off and Stop end this
-          strict run; Resume does not restart it. The lab shares a CLI-dispatch
-          budget across roles; underlying provider request count is unobserved.
+          Fictional development lab. A cue reflects speech up to 8 s before it
+          appears; newer speech is checked next. A reply later than 8 s shows no
+          cue and the run continues. Pause, Dismiss, Off, Stop and any other
+          failure end the run; Resume does not restart it. The lab shares a
+          CLI-dispatch budget across roles; underlying provider request count is
+          unobserved.
         </p>
       )}
       {snapshot?.phase === 'off' && snapshot.processor && !snapshot.issue && (

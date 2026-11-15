@@ -110,9 +110,12 @@ only grown since: same session and permission, the same existing cue, listener
 name and earlier cues, and every submitted line still present with identical id,
 text and time. A cue it shows can therefore concern something the newer speech
 already answered; the next request carries that cue as the existing cue so the
-model can resolve or withdraw it. Each applied decision logs the line it was
-evaluated through and how many lines and how much session time arrived after it
-(`through_segment`, `lag_lines`, `lag_ms`).
+model can resolve or withdraw it. Each applied decision's `evaluation_result`
+logs `through_segment` (the `segment.id` of the newest line it was evaluated
+through), `lag_lines` (lines that arrived after that line before it was applied)
+and `lag_ms` (the newest of those lines' `at_ms` minus the through line's
+`at_ms`, on the session clock; 0 when `lag_lines` is 0). `lag_ms` measures how
+much speech the decision had not seen, not how late the reply was.
 
 Any edited or removed line, cue change or permission change makes the reply
 stale: it is discarded and logged with its action, and only the newest eligible
@@ -126,8 +129,10 @@ time, and the run continues. Native retires only that request: it sends a
 request-scoped `cancel` with reason `deadline`, or settles a result it read too
 late as `expired`, and a broker `failed` with code `deadline` retires it the same
 way. Late frames for a retired request are ignored. The session call limit and the
-broker's dispatch cap still bound the run, and each timed-out request spends a
-dispatch. The timing log keeps the action code of a decision that arrived but was
+broker's dispatch cap still bound the run. A request retired after its provider
+call started has spent its broker dispatch; one retired while still queued has
+not, though native counted it. Repeated timeouts after dispatch end the run at
+the dispatch limit; native's session call limit bounds the rest. The timing log keeps the action code of a decision that arrived but was
 not applied, whether stale or read after the deadline; it is never shown.
 
 An invalid response, provider failure, lost settlement, an expiry native cannot

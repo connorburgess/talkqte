@@ -383,11 +383,6 @@ impl Cancellation {
     /// Stopped or cancelled by the caller, as opposed to only past the
     /// deadline. The lab link retires an expired request but ends the run on
     /// a withdrawal.
-    #[cfg(any(test, feature = "lab-evaluator"))]
-    #[allow(
-        dead_code,
-        reason = "native facade activation and API usage vary by build/test configuration"
-    )]
     pub(crate) fn is_withdrawn(&self) -> bool {
         self.stopped.load(Ordering::Acquire) || self.cancelled.load(Ordering::Acquire)
     }
@@ -493,7 +488,11 @@ impl Worker {
                                 _ => Failure::EvaluatorUnavailable,
                             })
                             .and_then(|text| {
-                                if job.cancel.is_cancelled() {
+                                // A reply past only the deadline is still
+                                // validated so the expiry can log its action;
+                                // poll checks the deadline before reading it,
+                                // so it is never applied.
+                                if job.cancel.is_withdrawn() {
                                     Err(Failure::Cancelled)
                                 } else {
                                     validate(&text, &job.request)
@@ -753,6 +752,44 @@ mod tests {
         while worker.active.load(Ordering::Acquire) {
             assert!(Instant::now() < deadline);
             std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn a_reply_finished_past_the_deadline_is_kept_for_the_log_unless_withdrawn() {
+        let input = request(false);
+        for withdrawn in [false, true] {
+            let (started, receipt) = mpsc::channel();
+            let (release, wait) = mpsc::channel();
+            let calls = Arc::new(AtomicUsize::new(0));
+            let mut worker = Worker::start(
+                Held {
+                    started,
+                    release: wait,
+                    calls,
+                },
+                Duration::from_millis(50),
+            )
+            .unwrap();
+            worker.submit(input.clone()).unwrap();
+            receipt.recv_timeout(Duration::from_secs(2)).unwrap();
+            if withdrawn {
+                worker.cancel_pending();
+            }
+            // The adapter finishes after its deadline but before any poll.
+            std::thread::sleep(Duration::from_millis(80));
+            release.send(()).unwrap();
+            wait_idle(&worker);
+            let polled = worker.poll(&input);
+            if withdrawn {
+                assert_eq!(polled, Some(Err(Failure::Cancelled)));
+            } else {
+                assert_eq!(polled, Some(Err(Failure::Expired)));
+            }
+            assert_eq!(
+                worker.take_late_decision().map(|d| d.action),
+                (!withdrawn).then_some(Action::Quiet)
+            );
         }
     }
 

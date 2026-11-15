@@ -11,11 +11,16 @@ use std::time::{Duration, Instant};
 struct Lifecycle {
     cancelled: AtomicUsize,
     terminal: AtomicBool,
+    // The link itself ended on a deadline, not one request.
+    expired: AtomicBool,
     reject_ack: AtomicBool,
     verdicts: Mutex<Vec<Settlement>>,
 }
 impl EvaluationLifecycle for Lifecycle {
     fn terminal(&self) -> Option<Failure> {
+        if self.expired.load(Ordering::Acquire) {
+            return Some(Failure::Expired);
+        }
         self.terminal
             .load(Ordering::Acquire)
             .then_some(Failure::WorkerUnavailable)
@@ -384,4 +389,56 @@ fn stop_and_revoke_terminate_pending_lab_without_a_tick_or_restart() {
         assert!(h.engine.state.cue.is_none());
         assert!(h.requests.try_recv().is_err());
     }
+}
+#[test]
+fn a_link_ended_by_a_deadline_shows_a_timed_out_stop() {
+    // An unconfirmed expiry, a lost settlement, a broker terminal "deadline"
+    // or an expiry during the handshake all end the link with Expired. That
+    // is a stopped run with a reason, not one request's skipped timeout.
+    for pending in [true, false] {
+        let mut h = Harness::new();
+        let link = lab(&mut h);
+        h.line("Who owns the fictional checklist?");
+        if pending {
+            h.request();
+        } else {
+            reply(&h, "quiet", None);
+            h.request();
+            until(&mut h, |e| e.evaluation.as_ref().unwrap().pending.is_none());
+        }
+        link.expired.store(true, Ordering::Release);
+        h.engine.advance(1);
+        assert_eq!(
+            h.engine.evaluation_status(),
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::TimedOut))
+        );
+        assert!(!h.engine.has_processing_permission());
+        h.line("The meeting continues.");
+        h.engine.advance(100);
+        assert_eq!(
+            h.engine.evaluation_status(),
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::TimedOut))
+        );
+        assert!(h.requests.try_recv().is_err());
+        if pending {
+            reply(&h, "quiet", None);
+        }
+    }
+}
+#[test]
+fn a_prefix_reply_completed_in_time_but_read_after_the_deadline_is_not_applied() {
+    let budget = Duration::from_millis(300);
+    let mut h = Harness::with_budget(budget);
+    let link = lab(&mut h);
+    h.line("Who owns the fictional checklist?");
+    h.request();
+    h.line("The meeting continues.");
+    // A valid reply to a transcript that has only grown is queued well before
+    // the deadline, but the engine does not poll until after it.
+    reply(&h, "show", Some("Who owns the checklist?"));
+    std::thread::sleep(budget + Duration::from_millis(100));
+    h.engine.advance(1);
+    assert_eq!(*link.verdicts.lock().unwrap(), vec![Settlement::Expired]);
+    assert!(h.engine.state.cue.is_none());
+    assert!(h.engine.has_processing_permission());
 }
