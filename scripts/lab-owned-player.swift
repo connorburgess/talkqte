@@ -9,6 +9,12 @@ import Darwin
 private let schema = "talkqte.lab.player.v1"
 private let approvedHash = "1faf1c404249bed069065f51262abfce6956fa8a31f237e68bb6e9d06cb893e2"
 private enum PlayerError: Error { case invalid }
+private struct PreparationFailure: Error {
+    let stage: String
+    let decodedFrames: Int64
+    let audioTrackDurationMs: Double
+    let assetDurationMs: Double
+}
 private func require(_ condition: Bool) throws { if !condition { throw PlayerError.invalid } }
 
 // One-way handoff: decoder never touches these objects after returning them;
@@ -16,7 +22,11 @@ private func require(_ condition: Bool) throws { if !condition { throw PlayerErr
 private final class DecodedMedia: @unchecked Sendable {
     let pcm: AVAudioPCMBuffer
     let video: AVMutableComposition
-    init(_ pcm: AVAudioPCMBuffer, _ video: AVMutableComposition) { self.pcm = pcm; self.video = video }
+    let audioTrackDurationMs: Double
+    let assetDurationMs: Double
+    init(_ pcm: AVAudioPCMBuffer, _ video: AVMutableComposition, _ audioMs: Double, _ assetMs: Double) {
+        self.pcm = pcm; self.video = video; self.audioTrackDurationMs = audioMs; self.assetDurationMs = assetMs
+    }
 }
 final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let runId: String
@@ -42,6 +52,13 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var topology: (Double, AVAudioChannelCount, AudioDeviceID)?
     var failed = false
     var startRequested = false
+    var audioTrackDurationMs: Double = 0
+    var assetDurationMs: Double = 0
+    var diagnosticStage = "prepare"
+    var diagnosticFrames: Int64 = 0
+    var audioCompleted = false
+    var videoCompleted = false
+    var videoObserver: NSObjectProtocol?
 
     init(runId: String, path: String) throws {
         try require(runId.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil)
@@ -73,10 +90,24 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
             do {
                 let decoded = try await self.decode()
                 await MainActor.run { self.prepared(decoded) }
-            } catch { await MainActor.run { self.stop(failure: true) } }
+            } catch {
+                let failure = error as? PreparationFailure
+                await MainActor.run {
+                    if let failure = failure {
+                        self.diagnosticStage = failure.stage; self.diagnosticFrames = failure.decodedFrames
+                        self.audioTrackDurationMs = failure.audioTrackDurationMs; self.assetDurationMs = failure.assetDurationMs
+                    }
+                    self.stop(failure: true)
+                }
+            }
         }
     }
     fileprivate func decode() async throws -> DecodedMedia {
+        var stage = "media-identity"
+        var count: Int64 = 0
+        var audioMs: Double = 0
+        var assetMs: Double = 0
+        do {
         let values = try mediaURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .isSymbolicLinkKey])
         try require(values.isRegularFile == true && values.isSymbolicLink != true && (values.fileSize ?? 0) > 0 && values.fileSize! <= 256 * 1024 * 1024)
         let handle = try FileHandle(forReadingFrom: mediaURL)
@@ -87,14 +118,23 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
             hasher.update(data: chunk)
         }
         try require(hasher.finalize().map { String(format: "%02x", $0) }.joined() == approvedHash)
+        stage = "track-timeline"
         let asset = AVURLAsset(url: mediaURL)
         let assetDuration = try await asset.load(.duration)
         let duration = assetDuration.seconds
         try require(duration.isFinite && duration > 0 && duration <= 105)
+        assetMs = duration * 1000
         let audio = try await asset.loadTracks(withMediaType: .audio)
         let videos = try await asset.loadTracks(withMediaType: .video)
         try require(audio.count == 1 && videos.count == 1)
+        let audioRange = try await audio[0].load(.timeRange)
+        let audioDuration = audioRange.duration.seconds
+        try require(audioRange.start.seconds.isFinite && abs(audioRange.start.seconds) <= 1.0 / 48000 &&
+                    audioDuration.isFinite && audioDuration > 0 && audioDuration <= duration + 0.1)
+        audioMs = audioDuration * 1000
+        stage = "audio-decode"
         let reader = try AVAssetReader(asset: asset)
+        reader.timeRange = audioRange
         let output = AVAssetReaderTrackOutput(track: audio[0], outputSettings: [
             AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 48000,
             AVNumberOfChannelsKey: 2, AVLinearPCMBitDepthKey: 32,
@@ -105,7 +145,6 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
         try require(reader.canAdd(output)); reader.add(output)
         try require(reader.startReading())
         var bytes = Data()
-        var count: Int64 = 0
         while let sample = output.copyNextSampleBuffer() {
             try require(lab_player_stopped(state) == 0)
             let pts = CMSampleBufferGetPresentationTimeStamp(sample).seconds
@@ -122,29 +161,41 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
             count += Int64(samples)
             try require(count <= 105 * 48000)
         }
-        try require(reader.status == .completed && count > 0 && abs(Double(count) / 48000 - duration) <= 0.1)
+        stage = "audio-duration"
+        try require(reader.status == .completed && count > 0 && abs(Double(count) / 48000 - audioDuration) <= 0.1)
+        stage = "pcm-buffer"
         guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 2, interleaved: true),
               let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)) else { throw PlayerError.invalid }
         buffer.frameLength = AVAudioFrameCount(count)
         let list = buffer.mutableAudioBufferList
         try require(list.pointee.mNumberBuffers == 1 && Int(list.pointee.mBuffers.mDataByteSize) == bytes.count)
         _ = bytes.withUnsafeBytes { raw in memcpy(list.pointee.mBuffers.mData!, raw.baseAddress!, bytes.count) }
+        stage = "video-composition"
         let composition = AVMutableComposition()
         guard let track = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else { throw PlayerError.invalid }
         try track.insertTimeRange(CMTimeRange(start: .zero, duration: assetDuration), of: videos[0], at: .zero)
         track.preferredTransform = try await videos[0].load(.preferredTransform)
         try require(lab_player_stopped(state) == 0)
-        return DecodedMedia(buffer, composition)
+        return DecodedMedia(buffer, composition, audioMs, assetMs)
+        } catch {
+            throw PreparationFailure(stage: stage, decodedFrames: count, audioTrackDurationMs: audioMs, assetDurationMs: assetMs)
+        }
     }
     fileprivate func prepared(_ decoded: DecodedMedia) {
         guard phase == "preparing", lab_player_stopped(state) == 0 else { return }
+        diagnosticStage = "engine-prepare"
         pcm = decoded.pcm; format = decoded.pcm.format; frames = Int64(decoded.pcm.frameLength)
+        diagnosticFrames = frames; audioTrackDurationMs = decoded.audioTrackDurationMs; assetDurationMs = decoded.assetDurationMs
         engine.attach(node); engine.connect(node, to: engine.mainMixerNode, format: format)
         engine.prepare() // Not started; no scheduled acknowledgement.
         let video = AVPlayer(playerItem: AVPlayerItem(asset: decoded.video))
         // Required by setRate(_:time:atHostTime:), including a past host anchor.
         video.automaticallyWaitsToMinimizeStalling = false
         video.isMuted = true; self.video = video
+        videoObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: video.currentItem, queue: .main) { [weak self] _ in
+            self?.observeVideoCompletion()
+        }
+        diagnosticStage = "window-prepare"
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 540), styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Fictional generated meeting — TalkQTE Lab Player"
         window.delegate = self; window.center()
@@ -162,12 +213,13 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     guard lab_player_process_start(getpid(), &seconds, &microseconds) == 1,
                           window.windowNumber > 0, window.isVisible,
                           Bundle.main.bundleIdentifier == "com.talkqte.lab-player" else { return self.stop(failure: true) }
-                    self.watchdog?.cancel(); self.phase = "prepared"
+                    self.watchdog?.cancel(); self.phase = "prepared"; self.diagnosticStage = "prepared"
                     self.emit("prepared", ["pid": getpid(), "windowId": window.windowNumber,
                         "application": "TalkQTE Lab Player", "bundleId": "com.talkqte.lab-player",
                         "processStart": ["seconds": String(seconds), "microseconds": microseconds],
                         "sampleRate": 48000, "channels": 2, "totalFrames": self.frames,
-                        "durationMs": Double(self.frames) / 48, "videoOnly": true])
+                        "durationMs": Double(self.frames) / 48, "audioTrackDurationMs": self.audioTrackDurationMs,
+                        "assetDurationMs": self.assetDurationMs, "videoOnly": true])
                 }
             }
         }
@@ -249,6 +301,7 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return device
     }
     func start() throws {
+        diagnosticStage = "start"
         try require(lab_player_stopped(state) == 0)
         guard let pcm = pcm else { throw PlayerError.invalid }
         let output = engine.outputNode.outputFormat(forBus: 0)
@@ -268,6 +321,12 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
         self.timer = timer; timer.resume()
     }
     func observeRender() {
+        if phase == "video-tail" {
+            // C state 2 is the natural audio-completion claim; state 1 is Stop.
+            guard lab_player_stopped(state) == 2 else { return stop(failure: false) }
+            do { _ = try clockPair() } catch { stop(failure: true) }
+            return
+        }
         guard phase == "starting" || phase == "playing" else { return }
         guard lab_player_stopped(state) == 0 else { return stop(failure: false) }
         let pair: (before: UInt64, continuous: UInt64, after: UInt64)
@@ -290,7 +349,7 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 let zeroA = first.ticks - a, zeroB = render.hostTime - b
                 let spread = AVAudioTime.seconds(forHostTime: max(zeroA, zeroB) - min(zeroA, zeroB)) * 1000
                 guard spread.isFinite, spread <= 5 else { return stop(failure: true) }
-                anchor = zeroB; phase = "playing"
+                anchor = zeroB; phase = "playing"; diagnosticStage = "render"
                 video?.setRate(1, time: .zero, atHostTime: CMClockMakeHostTimeFromSystemUnits(zeroB))
                 emit("started", ["sampleRate": 48000, "totalFrames": frames,
                     "observations": [["hostTicks": String(first.ticks), "sampleTime": String(first.sample), "hostTimeValid": true, "sampleTimeValid": true],
@@ -308,12 +367,30 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard completion == Int32(AVAudioPlayerNodeCompletionCallbackType.dataPlayedBack.rawValue),
                   phase == "playing", anchor != nil, maximumSample >= frames,
                   lab_player_claim_completion(state) == 1 else { return stop(failure: true) }
-            phase = "completed"; timer?.cancel(); watchdog?.cancel()
-            video?.pause(); node.stop(); engine.stop()
+            audioCompleted = true; phase = "video-tail"; diagnosticStage = "video-tail"
+            node.stop(); engine.stop()
             guard !engine.isRunning else { return stop(failure: true) }
-            emit("completed", ["framesPlayed": frames, "observedSampleTime": String(maximumSample),
+            emit("audio_completed", ["framesPlayed": frames, "observedSampleTime": String(maximumSample),
                                 "callbackType": "dataPlayedBack", "engineRunning": false])
+            finishIfCompleted()
         }
+    }
+    func observeVideoCompletion() {
+        guard lab_player_stopped(state) != 1 else { return stop(failure: false) }
+        guard !failed, lab_player_stopped(state) == (audioCompleted ? 2 : 0), anchor != nil,
+              !videoCompleted, phase == "playing" || phase == "video-tail",
+              let video = video else { return stop(failure: true) }
+        do { _ = try clockPair() } catch { return stop(failure: true) }
+        let timeMs = video.currentTime().seconds * 1000
+        guard timeMs.isFinite, abs(timeMs - assetDurationMs) <= 100 else { return stop(failure: true) }
+        videoCompleted = true
+        emit("video_completed", ["videoTimeMs": timeMs, "assetDurationMs": assetDurationMs])
+        finishIfCompleted()
+    }
+    func finishIfCompleted() {
+        guard audioCompleted && videoCompleted && !failed && lab_player_stopped(state) == 2 else { return }
+        phase = "completed"; diagnosticStage = "completed"; timer?.cancel(); watchdog?.cancel(); video?.pause()
+        emit("completed", ["audioCompleted": true, "videoCompleted": true, "engineRunning": false])
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool { stop(failure: false); return false }
     func stop(failure: Bool) {
@@ -324,8 +401,10 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
         timer?.cancel(); watchdog?.cancel(); video?.pause(); video?.replaceCurrentItem(with: nil)
         node.stop(); engine.stop()
         if let observer = configObserver { NotificationCenter.default.removeObserver(observer); configObserver = nil }
+        if let observer = videoObserver { NotificationCenter.default.removeObserver(observer); videoObserver = nil }
         phase = "stopped"
-        if failed || engine.isRunning { emit("failed", ["code": "player_failed"]) }
+        if failed || engine.isRunning { emit("failed", ["code": "player_failed", "stage": diagnosticStage,
+            "decodedFrames": min(max(diagnosticFrames, 0), 105 * 48000), "audioTrackDurationMs": audioTrackDurationMs, "assetDurationMs": assetDurationMs]) }
         emit("stopped", ["engineRunning": engine.isRunning, "completed": !failed && wasCompleted])
         // Keep process/window identity alive until the JS owner has independently
         // established native release and recording finalization, then retire.

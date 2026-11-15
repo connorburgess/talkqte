@@ -44,6 +44,45 @@ const uint = (v, max = 18446744073709551615n) =>
 const positive = (v) => uint(v) && v !== '0';
 const integer = (v, min, max) =>
   Number.isSafeInteger(v) && v >= min && v <= max;
+// Decode against the edited audio track, not the longer visual/container tail.
+export function validateLabPlayerDurations({
+  totalFrames,
+  audioTrackDurationMs,
+  assetDurationMs,
+}) {
+  required(
+    integer(totalFrames, 1, 105 * 48000) &&
+      Number.isFinite(audioTrackDurationMs) &&
+      audioTrackDurationMs > 0 &&
+      Number.isFinite(assetDurationMs) &&
+      assetDurationMs > 0 &&
+      assetDurationMs <= 105000 &&
+      audioTrackDurationMs <= assetDurationMs + 100 &&
+      Math.abs(totalFrames / 48 - audioTrackDurationMs) <= 100,
+  );
+  return Object.freeze({
+    audioDurationMs: totalFrames / 48,
+    audioTrackDurationMs,
+    assetDurationMs,
+    videoOnlyTailMs: Math.max(0, assetDurationMs - totalFrames / 48),
+  });
+}
+const FAILURE_STAGES = new Set([
+  'prepare',
+  'media-identity',
+  'track-timeline',
+  'audio-decode',
+  'audio-duration',
+  'pcm-buffer',
+  'video-composition',
+  'engine-prepare',
+  'window-prepare',
+  'prepared',
+  'start',
+  'render',
+  'video-tail',
+  'completed',
+]);
 const outside = (path) => {
   const r = relative(CHECKOUT, realpathSync(path));
   return r === '..' || r.startsWith('..' + sep) || isAbsolute(r);
@@ -404,6 +443,12 @@ function playerController({
     probeId = null,
     sentMs = null,
     totalFrames = null,
+    durations = null,
+    audioCompletion = null,
+    videoCompletion = null,
+    firstDiagnostic = null,
+    childExit = null,
+    stderrBytes = 0,
     partial = Buffer.alloc(0),
     bytes = 0,
     partialTimer,
@@ -422,8 +467,23 @@ function playerController({
         listener({ type: 'failed' });
       } catch {}
   };
-  const fail = () => {
+  const fail = (category = 'protocol') => {
     if (failed) return;
+    if (!firstDiagnostic)
+      firstDiagnostic = Object.freeze({
+        category:
+          typeof category === 'string' &&
+          [
+            'protocol',
+            'deadline',
+            'process-exit',
+            'spawn',
+            'cancelled',
+            'output-limit',
+          ].includes(category)
+            ? category
+            : 'protocol',
+      });
     failed = true;
     for (const p of [ready, clock, play]) p.reject(gateFailure('protocol'));
     notify();
@@ -456,8 +516,29 @@ function playerController({
     );
     if (frame.type === 'failed') {
       required(
-        exact(frame, [...BASE, 'code']) && frame.code === 'player_failed',
+        exact(frame, [
+          ...BASE,
+          'code',
+          'stage',
+          'decodedFrames',
+          'audioTrackDurationMs',
+          'assetDurationMs',
+        ]) &&
+          frame.code === 'player_failed' &&
+          FAILURE_STAGES.has(frame.stage) &&
+          integer(frame.decodedFrames, 0, 105 * 48000) &&
+          [frame.audioTrackDurationMs, frame.assetDurationMs].every(
+            (v) => Number.isFinite(v) && v >= 0 && v <= 105000,
+          ),
       );
+      if (!firstDiagnostic)
+        firstDiagnostic = Object.freeze({
+          category: 'player-failure',
+          stage: frame.stage,
+          decodedFrames: frame.decodedFrames,
+          audioTrackDurationMs: frame.audioTrackDurationMs,
+          assetDurationMs: frame.assetDurationMs,
+        });
       return fail();
     }
     if (frame.type === 'stopped') {
@@ -485,6 +566,8 @@ function playerController({
             'channels',
             'totalFrames',
             'durationMs',
+            'audioTrackDurationMs',
+            'assetDurationMs',
             'videoOnly',
           ]) &&
           frame.pid === child.pid &&
@@ -498,9 +581,10 @@ function playerController({
           frame.channels === 2 &&
           integer(frame.totalFrames, 1, 105 * 48000) &&
           frame.durationMs === frame.totalFrames / 48 &&
-          Math.abs(frame.durationMs - media.durationMs) <= 100 &&
+          Math.abs(frame.assetDurationMs - media.durationMs) <= 100 &&
           frame.videoOnly === true,
       );
+      durations = validateLabPlayerDurations(frame);
       totalFrames = frame.totalFrames;
       prepared = true;
       identity = Object.freeze({
@@ -562,10 +646,10 @@ function playerController({
       started = true;
       clearTimeout(operationTimer);
       playing.onStarted(anchor);
-    } else if (frame.type === 'completed') {
+    } else if (frame.type === 'audio_completed') {
       required(
         started &&
-          !completed &&
+          !audioCompletion &&
           exact(frame, [
             ...BASE,
             'framesPlayed',
@@ -579,9 +663,54 @@ function playerController({
           frame.callbackType === 'dataPlayedBack' &&
           frame.engineRunning === false,
       );
+      audioCompletion = Object.freeze({
+        framesPlayed: frame.framesPlayed,
+        observedSampleTime: frame.observedSampleTime,
+        callbackType: frame.callbackType,
+        engineRunning: false,
+        receivedMonotonicMs: performance.now(),
+        basis: 'receipt',
+      });
+    } else if (frame.type === 'video_completed') {
+      required(
+        started &&
+          !videoCompletion &&
+          exact(frame, [...BASE, 'videoTimeMs', 'assetDurationMs']) &&
+          frame.assetDurationMs === durations.assetDurationMs &&
+          Number.isFinite(frame.videoTimeMs) &&
+          Math.abs(frame.videoTimeMs - durations.assetDurationMs) <= 100,
+      );
+      videoCompletion = Object.freeze({
+        videoTimeMs: frame.videoTimeMs,
+        assetDurationMs: frame.assetDurationMs,
+        receivedMonotonicMs: performance.now(),
+        basis: 'receipt',
+      });
+    } else if (frame.type === 'completed') {
+      required(
+        started &&
+          !completed &&
+          audioCompletion &&
+          videoCompletion &&
+          exact(frame, [
+            ...BASE,
+            'audioCompleted',
+            'videoCompleted',
+            'engineRunning',
+          ]) &&
+          frame.audioCompleted === true &&
+          frame.videoCompleted === true &&
+          frame.engineRunning === false,
+      );
       completed = true;
       clearTimeout(operationTimer);
-      play.resolve({ completed: true, sha256: media.sha256 });
+      play.resolve({
+        completed: true,
+        sha256: media.sha256,
+        durations,
+        audioCompletion,
+        videoCompletion,
+      });
     } else throw gateFailure('protocol');
   };
   const armAbort = (signal) => {
@@ -644,6 +773,20 @@ function playerController({
   }
   return Object.freeze({
     startDeadlineMs: startMs,
+    get diagnostics() {
+      return Object.freeze({
+        failure: firstDiagnostic,
+        process: childExit,
+        stderrBytes: Math.min(stderrBytes, 128 * 1024),
+        prepared,
+        started,
+        audioCompleted: !!audioCompletion,
+        videoCompleted: !!videoCompletion,
+        durations,
+        audioCompletion,
+        videoCompletion,
+      });
+    },
     get identity() {
       return identity;
     },
@@ -693,16 +836,37 @@ function playerController({
           },
         );
         required(integer(child.pid, 1, 0x7fffffff));
-        child.once('error', fail);
+        child.once('error', () => fail('spawn'));
+        child.once('exit', (code, signal) => {
+          childExit = Object.freeze({
+            exitCode:
+              Number.isInteger(code) && code >= 0 && code <= 255 ? code : null,
+            signal: [
+              'SIGABRT',
+              'SIGBUS',
+              'SIGILL',
+              'SIGSEGV',
+              'SIGKILL',
+              'SIGTERM',
+              'SIGINT',
+              'SIGPIPE',
+              'SIGTRAP',
+              'SIGHUP',
+            ].includes(signal)
+              ? signal
+              : signal === null
+                ? null
+                : 'other',
+          });
+        });
         child.once('close', () => {
           ended.resolve();
-          if (!stopRequested) fail();
+          if (!stopRequested) fail('process-exit');
         });
         child.stdin.on('error', fail);
-        let stderrBytes = 0;
         child.stderr.on('data', (chunk) => {
           stderrBytes += chunk.length;
-          if (stderrBytes > 8192) fail();
+          if (stderrBytes > 8192) fail('output-limit');
         });
         const decoder = new TextDecoder('utf-8', { fatal: true });
         child.stdout.on('data', (chunk) => {
@@ -724,13 +888,13 @@ function playerController({
             fail();
           }
         });
-        operationTimer = setTimeout(fail, prepareMs);
+        operationTimer = setTimeout(() => fail('deadline'), prepareMs);
         await ready.promise;
         clearTimeout(operationTimer);
         probeId = randomUUID();
         sentMs = performance.now();
         send('clock_probe', { probeId });
-        operationTimer = setTimeout(fail, 100);
+        operationTimer = setTimeout(() => fail('deadline'), 100);
         await clock.promise;
         clearTimeout(operationTimer);
         return Object.freeze({ ...media });
@@ -754,10 +918,10 @@ function playerController({
       );
       armAbort(signal);
       playing = { onStarted };
-      operationTimer = setTimeout(fail, startMs);
+      operationTimer = setTimeout(() => fail('deadline'), startMs);
       send('start');
       // Start acknowledgement deadline is replaced by an independent duration bound.
-      const durationTimer = setTimeout(fail, 110000);
+      const durationTimer = setTimeout(() => fail('deadline'), 110000);
       return play.promise.finally(() => clearTimeout(durationTimer));
     },
     stop,
@@ -837,6 +1001,11 @@ export function createLabPlayerFixture({
   required(
     [
       'normal',
+      'video-tail',
+      'prepare-failed',
+      'exit-prepare',
+      'signal-prepare',
+      'missing-video',
       'wrong-pid',
       'wrong-run',
       'no-start',

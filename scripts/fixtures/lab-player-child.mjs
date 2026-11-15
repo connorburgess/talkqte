@@ -10,7 +10,7 @@ const base = {
 };
 const emit = (type, fields = {}) =>
   process.stdout.write(JSON.stringify({ ...base, type, ...fields }) + '\n');
-const frames = 4919040;
+const frames = mode === 'video-tail' ? 4848912 : 4919040;
 const prepared = () =>
   emit('prepared', {
     pid: process.pid + (mode === 'wrong-pid' ? 1 : 0),
@@ -21,10 +21,22 @@ const prepared = () =>
     sampleRate: 48000,
     channels: 2,
     totalFrames: frames,
-    durationMs: 102480,
+    durationMs: frames / 48,
+    audioTrackDurationMs: frames / 48,
+    assetDurationMs: 102480,
     videoOnly: true,
   });
-prepared();
+if (mode === 'exit-prepare') process.exit(7);
+if (mode === 'signal-prepare') process.kill(process.pid, 'SIGTERM');
+if (mode === 'prepare-failed')
+  emit('failed', {
+    code: 'player_failed',
+    stage: 'audio-duration',
+    decodedFrames: 4848912,
+    audioTrackDurationMs: 101019,
+    assetDurationMs: 102480,
+  });
+else prepared();
 if (mode === 'duplicate') prepared();
 let partial = '';
 process.stdin.setEncoding('utf8');
@@ -86,13 +98,28 @@ process.stdin.on('data', (chunk) => {
       }
       setTimeout(
         () =>
-          emit('completed', {
+          emit('audio_completed', {
             framesPlayed: frames,
             observedSampleTime: String(frames),
             callbackType: 'dataPlayedBack',
             engineRunning: false,
           }),
         5,
+      );
+      setTimeout(
+        () => {
+          if (mode === 'missing-video') return;
+          emit('video_completed', {
+            videoTimeMs: 102480,
+            assetDurationMs: 102480,
+          });
+          emit('completed', {
+            audioCompleted: true,
+            videoCompleted: true,
+            engineRunning: false,
+          });
+        },
+        mode === 'video-tail' ? 60 : 10,
       );
     }
     if (f.type === 'stop')
