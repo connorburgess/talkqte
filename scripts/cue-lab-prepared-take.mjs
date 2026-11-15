@@ -21,7 +21,8 @@ export function createFixedModelTake(options) {
     options?.body === undefined &&
       options?.settings?.provider === 'codex' &&
       options.settings.model === 'gpt-6.1-sol' &&
-      options.settings.effort === 'medium' &&
+      // Exactly the efforts the signed native lab build accepts.
+      ['low', 'medium'].includes(options.settings.effort) &&
       options.settings.maxCalls === 20 &&
       options.stopAfterS === 110 &&
       options.media?.sha256 === LAB_PLAYER_MEDIA_SHA256 &&

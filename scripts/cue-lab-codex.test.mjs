@@ -965,3 +965,36 @@ test('a process group that survives early retirement is cleanup and ends the ses
     mock.restoreAll();
   }
 });
+
+test('an event arriving in a later chunk during the retire wait is still a failure', async () => {
+  // On TERM, this fake CLI writes one more event before exiting, as a real
+  // CLI might during shutdown; the reader must reject it.
+  const lines = fakeEvents();
+  const run = (_request, { signal, onStage }) => {
+    const reader = createCodexEventReader();
+    return runBoundedCodexProcess(
+      process.execPath,
+      [
+        '-e',
+        `for (const l of ${JSON.stringify(lines)}) process.stdout.write(l + '\\n');` +
+          `process.on('SIGTERM', () => process.stdout.write(${JSON.stringify(
+            JSON.stringify({ type: 'turn.started' }) + '\n',
+          )}, () => process.exit(0)));` +
+          'setInterval(() => {}, 1000);',
+      ],
+      {
+        env: {},
+        signal,
+        deadlineMs: 20000,
+        onStdoutLine: reader.accept,
+        isComplete: () => reader.complete,
+        onStage,
+      },
+    );
+  };
+  const session = await openCodexLab(options({ deadlineMs: 20000, run }));
+  await rejects(session.request(request()), 'unexpected-event', 1);
+  assert.ok(Number.isSafeInteger(session.receipts[0].decisionReadyMs));
+  await rejects(session.request(request()), 'terminal', 1);
+  await session.close();
+});

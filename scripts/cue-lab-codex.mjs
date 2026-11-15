@@ -498,6 +498,8 @@ export function runBoundedCodexProcess(
         } catch {
           /* already gone */
         }
+      // A failure during an early finish's retire wait replaces its timer.
+      clearTimeout(killTimer);
       killTimer = setTimeout(killGroup, 100);
     };
     // The decision is complete: retire the process group now instead of
@@ -513,6 +515,7 @@ export function runBoundedCodexProcess(
           /* already gone */
         }
       stage('retire-requested');
+      clearTimeout(killTimer);
       killTimer = setTimeout(killGroup, 100);
     };
     const abort = () => stop('cancelled');
