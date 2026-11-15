@@ -22,8 +22,10 @@ const RECENT_LINES: usize = 6;
 struct Lag {
     /// The newest transcript line the decision was evaluated through.
     through_segment: String,
-    /// Lines that arrived after it, and the session time they span.
+    /// Lines that arrived after it before the decision was applied.
     lines: u64,
+    /// The newest of those lines' `at_ms` minus the through line's `at_ms`:
+    /// unseen speech on the session clock, not the reply's latency.
     ms: u64,
 }
 

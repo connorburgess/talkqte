@@ -138,9 +138,12 @@ pub enum Event {
         failure: Option<&'static str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         action: Option<&'static str>,
-        /// Lab only, on an applied decision: the newest transcript line it
-        /// was evaluated through (`segment.id`), and how many lines and how
-        /// much session time had arrived after that line when it was applied.
+        /// Lab only, on every applied decision (all three together, never
+        /// with `action`): the newest transcript line it was evaluated through
+        /// (`segment.id`); how many lines had arrived after that line when it
+        /// was applied; and the newest of those lines' `at_ms` minus the
+        /// through line's `at_ms` (0 when none). `lag_ms` is unseen speech on
+        /// the session clock, not the reply's latency.
         #[serde(skip_serializing_if = "Option::is_none")]
         through_segment: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
