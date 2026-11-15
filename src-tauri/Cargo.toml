@@ -18,6 +18,8 @@ required-features = ["local-whisper"]
 tauri-build = { version = "2", features = [] }
 
 [features]
+# Development-only lab transport; native selection is wired separately.
+lab-evaluator = []
 # Development-only application audio: one main-window command can list, review
 # and start a selected application. Never part of a default build.
 native-audio-spike = ["dep:objc2-screen-capture-kit", "dep:objc2-foundation", "dep:dispatch2", "dep:objc2-core-media", "dep:objc2-core-audio-types"]

@@ -44,6 +44,8 @@ struct Script {
     recognizer_missing: AtomicBool,
     /// Listing returns what macOS lists, agents and helpers included.
     list_everything: AtomicBool,
+    /// Fictional metadata for the strictly named source observation tests.
+    quicktime_fixture: AtomicBool,
     /// macOS refuses the start, as before TalkQTE is reopened after the grant.
     start_needs_reopen: AtomicBool,
     runs: AtomicU64,
@@ -205,6 +207,13 @@ impl Backend for Fake {
         }
         if self.script.list_everything.load(Ordering::SeqCst) {
             return Ok(everything());
+        }
+        if self.script.quicktime_fixture.load(Ordering::SeqCst) {
+            return Ok(vec![Application::new(
+                "fictional-0".into(),
+                "QuickTime Player".into(),
+            )
+            .unwrap()]);
         }
         Ok(applications())
     }
@@ -1545,5 +1554,179 @@ mod by_setting {
         assert_eq!(outcome, Outcome::Refused("stop_after_invalid"));
         assert_eq!(g.view().problem, Some(Problem::DevSettingInvalid));
         assert_eq!(g.script.lists.load(Ordering::SeqCst), 0, "nothing is asked");
+    }
+}
+
+#[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+mod owned_lab_stop {
+    use super::*;
+    use std::sync::mpsc::TryRecvError;
+
+    #[test]
+    fn never_started_stop_closes_all_future_admission_without_loading_backend() {
+        let fixture = fixture(false);
+        fixture
+            .host
+            .close_for_lab_stop()
+            .unwrap()
+            .recv_timeout(WAIT)
+            .unwrap();
+        assert!(fixture.host.lab_stop_released());
+        assert_eq!(fixture.host.list(true), Err(Error::Busy));
+        assert_eq!(fixture.host.review("fictional"), Err(Error::Busy));
+        assert_eq!(fixture.host.start_session("fictional"), Err(Error::Busy));
+        fixture
+            .host
+            .close_for_lab_stop()
+            .unwrap()
+            .recv_timeout(WAIT)
+            .unwrap();
+        assert!(fixture.host.lab_stop_released());
+        assert_eq!(fixture.script.lists.load(Ordering::SeqCst), 0);
+        assert_eq!(fixture.script.begins.load(Ordering::SeqCst), 0);
+        assert_eq!(fixture.script.captures.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn cancelled_listing_must_finish_before_its_fence_can_confirm_settlement() {
+        let fixture = fixture(false);
+        fixture.script.list_waits.store(true, Ordering::SeqCst);
+        fixture.script.list_deaf.store(true, Ordering::SeqCst);
+        fixture.host.list(true).unwrap();
+        fixture.wait("listing entered", |_| {
+            fixture.script.lists.load(Ordering::SeqCst) == 1
+        });
+        let fence = fixture.host.close_for_lab_stop().unwrap();
+        assert_eq!(fence.try_recv(), Err(TryRecvError::Empty));
+        assert_eq!(fixture.host.list(true), Err(Error::Busy));
+        fixture.script.list_waits.store(false, Ordering::SeqCst);
+        fence.recv_timeout(WAIT).unwrap();
+        assert!(fixture.host.lab_stop_released());
+        assert!(
+            fixture.view().choices.is_empty(),
+            "late listing cannot reopen admission"
+        );
+        assert_eq!(fixture.script.captures.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn queued_session_start_cannot_acquire_after_stop_or_its_release_fence() {
+        let fixture = fixture(false);
+        fixture.script.session_waits.store(true, Ordering::SeqCst);
+        fixture.start_session();
+        let fence = fixture.host.close_for_lab_stop().unwrap();
+        assert_eq!(fence.try_recv(), Err(TryRecvError::Empty));
+        assert!(!fixture.host.lab_stop_released());
+        fixture.script.session_waits.store(false, Ordering::SeqCst);
+        fence.recv_timeout(WAIT).unwrap();
+        assert!(fixture.host.lab_stop_released());
+        assert_eq!(fixture.script.captures.load(Ordering::SeqCst), 0);
+        assert!(!fixture.runtime.lock().unwrap().source_session_running());
+        assert_eq!(fixture.host.list(true), Err(Error::Busy));
+    }
+
+    #[test]
+    fn running_stop_and_repeated_stop_wait_for_actual_native_release() {
+        let fixture = fixture(true);
+        fixture.listening();
+        fixture.script.stop_hangs.store(true, Ordering::SeqCst);
+        let first = fixture.host.close_for_lab_stop().unwrap();
+        let second = fixture.host.close_for_lab_stop().unwrap();
+        assert!(!fixture.host.lab_stop_released());
+        assert_eq!(first.try_recv(), Err(TryRecvError::Empty));
+        assert_eq!(second.try_recv(), Err(TryRecvError::Empty));
+        fixture.script.stop_hangs.store(false, Ordering::SeqCst);
+        first.recv_timeout(WAIT).unwrap();
+        second.recv_timeout(WAIT).unwrap();
+        assert!(fixture.host.lab_stop_released());
+        assert_eq!(fixture.view().phase, Phase::Off);
+        assert_eq!(fixture.script.runs.load(Ordering::SeqCst), 1);
+        assert_eq!(fixture.host.list(true), Err(Error::Busy));
+    }
+
+    #[test]
+    fn an_abandoned_worker_never_produces_a_release_fence() {
+        let fixture = fixture(true);
+        fixture.listening();
+        fixture.script.panics.store(true, Ordering::SeqCst);
+        fixture.wait_phase(Phase::Abandoned);
+        let fence = fixture.host.close_for_lab_stop();
+        if let Ok(fence) = fence {
+            assert!(fence.recv_timeout(WAIT).is_err());
+        }
+        assert!(!fixture.host.lab_stop_released());
+    }
+}
+
+#[cfg(all(
+    debug_assertions,
+    target_os = "macos",
+    feature = "native-audio-spike",
+    feature = "lab-evaluator"
+))]
+mod observation_start {
+    use super::*;
+    use dev_start::{Outcome, Settings};
+    fn settings() -> Settings {
+        Settings {
+            application: "QuickTime Player".into(),
+            stop_after: Ok(None),
+        }
+    }
+    fn waits() -> DevWaits {
+        DevWaits {
+            list: WAIT,
+            start: WAIT,
+            poll: Duration::from_millis(2),
+        }
+    }
+
+    #[test]
+    fn setting_candidate_is_exact_and_runtime_observer_runs_without_host_lock() {
+        let f = fixture(false);
+        f.script.quicktime_fixture.store(true, Ordering::SeqCst);
+        let outcome = f
+            .host
+            .start_by_setting_observed(&settings(), waits(), |operation| {
+                assert!(
+                    f.host.0.state.try_lock().is_ok(),
+                    "host released before Runtime acquisition"
+                );
+                assert!(f.host.lab_listening_candidate(&"f".repeat(32)).is_none());
+                let candidate = f.host.lab_listening_candidate(operation).unwrap();
+                assert_eq!(candidate.host_operation, operation);
+                assert!(crate::dev_source_observation::observe(
+                    &f.runtime,
+                    &candidate,
+                    "fictional-run",
+                    || false
+                )
+                .is_some());
+                true
+            });
+        assert_eq!(outcome, Outcome::Started { stopped: false });
+        let operation = f.view().operation.unwrap();
+        {
+            let _held = f.host.0.state.lock().unwrap();
+            assert!(f.host.lab_listening_candidate(&operation).is_none());
+        }
+        f.host.stop(&operation).unwrap();
+        assert!(f.host.lab_listening_candidate(&operation).is_none());
+        f.wait_phase(Phase::Off);
+    }
+
+    #[test]
+    fn refused_observation_stops_selected_source_without_rearming_or_starting_again() {
+        let f = fixture(false);
+        f.script.quicktime_fixture.store(true, Ordering::SeqCst);
+        let mut settings = settings();
+        settings.stop_after = Ok(Some(Duration::from_millis(30)));
+        let outcome = f
+            .host
+            .start_by_setting_observed(&settings, waits(), |_| false);
+        assert_eq!(outcome, Outcome::Refused("source_observation_unavailable"));
+        f.wait_phase(Phase::Off);
+        assert_eq!(f.script.lists.load(Ordering::SeqCst), 1);
+        assert_eq!(f.script.runs.load(Ordering::SeqCst), 1);
     }
 }
