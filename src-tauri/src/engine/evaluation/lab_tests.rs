@@ -433,10 +433,35 @@ fn a_prefix_reply_completed_in_time_but_read_after_the_deadline_is_not_applied()
     h.line("Who owns the fictional checklist?");
     h.request();
     h.line("The meeting continues.");
-    // A valid reply to a transcript that has only grown is queued well before
-    // the deadline, but the engine does not poll until after it.
+    // A valid reply to a transcript that has only grown reaches the worker's
+    // channel before the deadline, but the engine does not poll until after.
+    let deadline = h
+        .engine
+        .evaluation
+        .as_ref()
+        .unwrap()
+        .worker
+        .pending_deadline()
+        .unwrap();
     reply(&h, "show", Some("Who owns the checklist?"));
-    std::thread::sleep(budget + Duration::from_millis(100));
+    while !h
+        .engine
+        .evaluation
+        .as_ref()
+        .unwrap()
+        .worker
+        .adapter_finished()
+    {
+        assert!(Instant::now() < deadline, "reply did not arrive in time");
+        std::thread::yield_now();
+    }
+    assert!(
+        Instant::now() < deadline,
+        "reply arrived after the deadline"
+    );
+    std::thread::sleep(
+        deadline.saturating_duration_since(Instant::now()) + Duration::from_millis(50),
+    );
     h.engine.advance(1);
     assert_eq!(*link.verdicts.lock().unwrap(), vec![Settlement::Expired]);
     assert!(h.engine.state.cue.is_none());

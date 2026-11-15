@@ -611,6 +611,18 @@ impl Worker {
         self.poll_at(&request, Instant::now())
     }
 
+    /// Tests only: the adapter has returned and its reply is in the channel.
+    #[cfg(test)]
+    pub(crate) fn adapter_finished(&self) -> bool {
+        !self.active.load(Ordering::Acquire)
+    }
+
+    /// Tests only: the deadline of the request in flight.
+    #[cfg(test)]
+    pub(crate) fn pending_deadline(&self) -> Option<Instant> {
+        self.pending.as_ref().map(|pending| pending.deadline)
+    }
+
     /// The decision of the request that just expired, if it had completed
     /// but was read too late. For the timing log only; never applied.
     pub(crate) fn take_late_decision(&mut self) -> Option<Decision> {
