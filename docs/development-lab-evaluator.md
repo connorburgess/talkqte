@@ -101,10 +101,24 @@ native release. The versioned JavaScript consumer/session join remains separate.
 
 New validated speech coalesces while one immutable evaluation completes. It does
 not cancel that evaluation. Rust validates its result and checks permission,
-session, revision, cue identity and unchanged freshness deadlines under the engine
-lock. Valid stale success is discarded; only the newest eligible context can be
-submitted next. An error is terminal even when its original speech is stale.
-There is no queue of old contexts, unchanged-context retry or freshness extension.
+session, cue identity and freshness deadlines under the engine lock.
+
+**A lab cue reflects speech up to 8 s before it appears; newer speech is checked
+next.** A reply in time is applied when the transcript it was evaluated on has
+only grown since: same session and permission, the same existing cue, listener
+name and earlier cues, and every submitted line still present with identical id,
+text and time. A cue it shows can therefore concern something the newer speech
+already answered; the next request carries that cue as the existing cue so the
+model can resolve or withdraw it. Each applied decision logs the line it was
+evaluated through and how many lines and how much session time arrived after it
+(`through_segment`, `lag_lines`, `lag_ms`).
+
+Any edited or removed line, cue change or permission change makes the reply
+stale: it is discarded and logged with its action, and only the newest eligible
+context can be submitted next. An error is terminal even when its original
+speech is stale. There is no queue of old contexts, unchanged-context retry or
+freshness extension. Ordinary (non-lab) evaluation is unchanged: new speech
+cancels the pending request and only an exact match applies.
 
 A request with no result inside the 8 s deadline is recorded as no decision in
 time, and the run continues. Native retires only that request: it sends a
