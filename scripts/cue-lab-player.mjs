@@ -718,7 +718,7 @@ function playerController({
     abortSignal?.removeEventListener('abort', abortListener);
     abortSignal = signal;
     abortListener = () => {
-      fail();
+      fail('cancelled');
     };
     signal?.addEventListener('abort', abortListener, { once: true });
   };

@@ -462,7 +462,9 @@ test('fixed failed preparation stage and numeric diagnostics survive Stop/cleanu
     ...fixtureOptions,
     fixtureCase: 'prepare-failed',
   });
-  await assert.rejects(player.prepare({ media }));
+  const controller = new AbortController();
+  await assert.rejects(player.prepare({ media, signal: controller.signal }));
+  controller.abort(); // Later cancellation cannot replace the earlier fixed failed stage.
   await assert.rejects(player.close({ nativeReleased: true }));
   assert.deepEqual(player.diagnostics.failure, {
     category: 'player-failure',
@@ -498,4 +500,30 @@ test('unexpected prepare signal is retained independently of fixed protocol fail
     exitCode: null,
     signal: 'SIGTERM',
   });
+});
+
+test('caller abort from genuine started observation retains cancelled diagnostics through cleanup', async () => {
+  const player = createLabPlayerFixture(fixtureOptions);
+  const controller = new AbortController();
+  try {
+    await player.prepare({ media, signal: controller.signal });
+    let starts = 0;
+    await assert.rejects(
+      player.play({
+        media,
+        signal: controller.signal,
+        onStarted() {
+          starts++;
+          controller.abort();
+        },
+      }),
+    );
+    assert.equal(starts, 1);
+    await assert.rejects(player.close({ nativeReleased: true }));
+    assert.deepEqual(player.diagnostics.failure, { category: 'cancelled' });
+    assert.equal(player.diagnostics.audioCompleted, false);
+    assert.equal(player.diagnostics.videoCompleted, false);
+  } finally {
+    await player.close({ nativeReleased: true }).catch(() => {});
+  }
 });
