@@ -9,7 +9,11 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { testFolder } from './lab-test-folders.mjs';
 import { castFor } from './cue-sim-cast.mjs';
-import { main as emulator, meetingLabels } from './lab-emulator.mjs';
+import {
+  main as emulator,
+  meetingLabels,
+  prepareMeeting,
+} from './lab-emulator.mjs';
 import { assertBrief, loadPlayable } from './lab-playable.mjs';
 import {
   MAX_SECONDS,
@@ -620,4 +624,35 @@ test('a live meeting refuses a start delay outside 0 to 600 seconds before anyth
       ),
       /--start-delay is a whole number of seconds from 0 to 600/,
     );
+});
+
+// The generated recording shape permits casting without a display role.
+test('preparing validated generated participants without roles keeps title-card labels usable', async () => {
+  const { file, directory } = generatedRun((run) => {
+    delete run.branches[0].participants[0].role;
+    return run;
+  });
+  await loadPlayable(file);
+  const prepared = await prepareMeeting(file, 'workshop-a', {
+    speech: false,
+    workDir: directory,
+    origin: 'http://emulator.invalid',
+  });
+  assert.equal(prepared.engine, false);
+  assert.equal(prepared.audio, null);
+  assert.equal(prepared.portraits, null);
+  assert.deepEqual(
+    prepared.data.participants.map(({ name, role }) => ({
+      name,
+      label: role.replace(/ \(listener\)$/, ''),
+    })),
+    [
+      { name: 'Maya', label: '' },
+      { name: 'Robin', label: 'Fictional role' },
+    ],
+  );
+  assert.deepEqual(
+    prepared.data.lines.map(({ text }) => text),
+    ['Someone needs to book the room.', 'I will book it today.'],
+  );
 });
