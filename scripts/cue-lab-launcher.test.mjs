@@ -667,3 +667,130 @@ test('actual harmless capture-only launch receives no provider/model/backend/des
     rmSync(launcher.directory, { recursive: true, force: true });
   }
 });
+
+// Shared offline stack: real broker, real owned launcher and harmless child.
+function offlineRun(fixtureCase, startupMs = 4000) {
+  const launcher = prepareLabFixtureLauncher({ fixtureCase, selection });
+  const native = createLabNativeOwner({
+    executable: launcher.executable,
+    launch: launcher.launch,
+    stopAfterS: 120,
+    armingMs: 1200,
+    releaseMs: 600,
+  });
+  let calls = 0;
+  const run = createLabRun({
+    native,
+    sourceSessionMode: 'legacy-fixture',
+    settings: {
+      ...selection,
+      deadlineMs: 100,
+      execution: 'offline-stand-in',
+      environment: {},
+      openers: {
+        codex: async () => ({
+          request: async () => {
+            calls++;
+            return { value: {} };
+          },
+          close: async () => {},
+        }),
+      },
+    },
+    startupMs,
+    releaseMs: 1800,
+  });
+  return {
+    launcher,
+    run,
+    get calls() {
+      return calls;
+    },
+    async close() {
+      await run.close().catch(() => {});
+      launcher.close();
+      for (let n = 0; n < 200 && !launcher.processEnded; n++) await delay(10);
+      rmSync(launcher.directory, { recursive: true, force: true });
+    },
+  };
+}
+
+test('under a symlinked temporary root the launched peer accepts the broker descriptor and calibrates', async () => {
+  const real = realpathSync(mkdtempSync(join(tmpdir(), 'tq-root-')));
+  const holder = realpathSync(mkdtempSync(join(tmpdir(), 'tq-alias-')));
+  const alias = join(holder, 'root');
+  symlinkSync(real, alias);
+  const original = process.env.TMPDIR;
+  let f;
+  try {
+    process.env.TMPDIR = alias;
+    assert.notEqual(tmpdir(), realpathSync(tmpdir()));
+    f = offlineRun('descriptor-peer');
+    f.run.acknowledgePlaybackStart({
+      monotonicMs: performance.now(),
+      uncertaintyMs: 0,
+    });
+    // The child exits before HELLO unless the socket in the descriptor is a
+    // lexical sibling of the canonical descriptor path the launcher passes.
+    await f.run.ready;
+    assert.equal(f.launcher.directory.startsWith(real + '/'), true);
+    assert.deepEqual(JSON.parse(JSON.stringify(f.run.startupDiagnostics)), {
+      stage: 'ready',
+      failure: null,
+      broker: {
+        connectionAccepted: true,
+        helloAuthenticated: true,
+        clockProbeSent: true,
+        clockSampleReceived: true,
+        calibrated: true,
+        cause: null,
+        terminal: null,
+      },
+    });
+    await f.run.stop();
+    assert.equal(f.run.phase, 'closed');
+    assert.equal(f.launcher.sourceReleased, true);
+    assert.equal(f.run.startupDiagnostics.failure, null);
+    assert.equal(f.calls, 0);
+    assert.equal(f.run.dispatchesUsed, 0);
+  } finally {
+    if (original === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = original;
+    await f?.close();
+    rmSync(holder, { recursive: true, force: true });
+    rmSync(real, { recursive: true, force: true });
+  }
+});
+
+test('a launched peer that never connects is reported at the HELLO stage with its first native cause', async () => {
+  const f = offlineRun('normal');
+  try {
+    await assert.rejects(f.run.ready);
+    const diagnostics = f.run.startupDiagnostics;
+    assert.deepEqual(diagnostics.failure, {
+      stage: 'awaiting-hello',
+      reason: 'process-ended',
+    });
+    assert.equal(diagnostics.broker.connectionAccepted, false);
+    assert.equal(diagnostics.broker.helloAuthenticated, false);
+    assert.equal(diagnostics.broker.cause, null);
+    // Teardown records later reasons elsewhere; the first cause is retained.
+    await f.run.close().catch(() => {});
+    assert.deepEqual(f.run.startupDiagnostics.failure, diagnostics.failure);
+    assert.equal(f.calls, 0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a startup deadline before any peer connection is retained as the first cause', async () => {
+  const f = offlineRun('descriptor-peer', 50);
+  try {
+    await assert.rejects(f.run.ready);
+    assert.equal(f.run.startupDiagnostics.failure.reason, 'deadline');
+    assert.notEqual(f.run.startupDiagnostics.failure.stage, 'ready');
+    assert.equal(f.calls, 0);
+  } finally {
+    await f.close();
+  }
+});

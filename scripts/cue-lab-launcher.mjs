@@ -552,6 +552,7 @@ export function prepareLabFixtureLauncher({
       'duplicate-fields',
       'frame-oversize',
       'listening',
+      'descriptor-peer',
     ].includes(fixtureCase),
   );
   const before = digest(process.execPath),

@@ -11,6 +11,17 @@ const EVENTS = new Set([
   'process-ended',
   'failed',
 ]);
+const STARTUP_REASONS = new Set([
+  ...EVENTS,
+  'cancelled',
+  'closed',
+  'cleanup',
+  'deadline',
+  'dispatch-limit',
+  'invalid-reply',
+  'protocol',
+  'provider',
+]);
 
 export function createLabRun({
   settings,
@@ -65,11 +76,23 @@ export function createLabRun({
     unsubscribe = () => {},
     initialized = false;
   let controlCancelled = false;
+  // Content-free startup diagnostics: a fixed stage and the first fixed failure
+  // reason before readiness. Later teardown reasons never replace the first.
+  let startupStage = 'provider-preflight',
+    startupFailure = null;
+  const recordStartupFailure = (reason) => {
+    if (startupStage === 'ready' || startupFailure) return;
+    startupFailure = Object.freeze({
+      stage: startupStage,
+      reason: STARTUP_REASONS.has(reason) ? reason : 'protocol',
+    });
+  };
   const played = new Promise((resolve) => (playbackResolve = resolve));
   let rejectStopped;
   const stopped = new Promise((_, reject) => (rejectStopped = reject));
   stopped.catch(() => {});
   const stop = (reason = 'cancelled') => {
+    recordStartupFailure(reason);
     if (!terminal) terminal = reason === 'cleanup' ? 'cleanup' : 'cancelled';
     return close();
   };
@@ -100,13 +123,17 @@ export function createLabRun({
     if (root.signal.aborted) throw gateFailure('cancelled');
     provider = await openLabProvider({ ...config, signal: root.signal });
     if (root.signal.aborted) throw gateFailure('cancelled');
+    startupStage = 'broker-preparation';
     broker = await openLabBroker({
       provider,
       sourceSessionMode,
       runId,
       maxCalls: config.maxCalls,
       signal: root.signal,
-      onTerminal: () => queueMicrotask(() => fail('cancelled')),
+      onTerminal: (category) => {
+        recordStartupFailure(category);
+        queueMicrotask(() => fail('cancelled'));
+      },
     });
     if (root.signal.aborted) throw gateFailure('cancelled');
     if (expectedSourceSession)
@@ -115,6 +142,7 @@ export function createLabRun({
     // The native owner gets only the descriptor path and pinned metadata.
     // start must be abort-aware and must retain ownership until stop/release.
     nativeStarted = true;
+    startupStage = 'native-start';
     await native.start({
       descriptorPath: broker.descriptorPath,
       runId,
@@ -123,7 +151,9 @@ export function createLabRun({
     });
     if (root.signal.aborted) throw gateFailure('cancelled');
     phase = 'waiting-for-anchors';
+    startupStage = 'awaiting-hello';
     await Promise.race([broker.ready, stopped]);
+    startupStage = 'clock-calibration';
     const calibrated = await broker.calibrateClock();
     if (
       sourceSessionMode === 'required' &&
@@ -131,16 +161,21 @@ export function createLabRun({
     )
       throw gateFailure('protocol');
     clockCalibration = Object.freeze({ ...calibrated });
+    startupStage = 'playback-anchor';
     await Promise.race([played, stopped]);
     if (root.signal.aborted || broker.gate.terminal)
       throw gateFailure('cancelled');
     phase = 'ready';
+    startupStage = 'ready';
   });
   const timer = setTimeout(() => fail('deadline'), startupMs);
   const ready = Promise.race([startup, stopped]).finally(() =>
     clearTimeout(timer),
   );
-  ready.catch(() => fail('cancelled'));
+  ready.catch((error) => {
+    recordStartupFailure(error?.category);
+    fail('cancelled');
+  });
 
   function close() {
     if (closing) return closing;
@@ -152,6 +187,7 @@ export function createLabRun({
     });
     closing.catch(() => {});
     terminal ??= 'cancelled';
+    recordStartupFailure(controlCancelled ? 'cancelled' : terminal);
     phase = 'stopping';
     // This does not depend on native authentication or signal delivery.
     // A fixed reason crosses the owner boundary without conflating provider or
@@ -237,6 +273,13 @@ export function createLabRun({
     },
     get clockCalibration() {
       return clockCalibration;
+    },
+    get startupDiagnostics() {
+      return Object.freeze({
+        stage: startupStage,
+        failure: startupFailure,
+        broker: broker?.startupDiagnostics ?? null,
+      });
     },
     expectSourceSession(value) {
       if (

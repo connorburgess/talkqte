@@ -527,6 +527,9 @@ test('fixed saved meeting composes actual player controller, one model gate, sam
     assert.equal(result.clockCalibration.sessionId, '1');
     assert.equal(result.clockCalibration, f.take.clockCalibration);
     assert.equal(Object.isFrozen(result.clockCalibration), true);
+    assert.equal(f.take.startupDiagnostics.stage, 'ready');
+    assert.equal(f.take.startupDiagnostics.failure, null);
+    assert.equal(f.take.startupDiagnostics.broker.calibrated, true);
     assert.ok(
       result.clockCalibration.uncertaintyMs + guards[1].actualUncertaintyMs <=
         100,
@@ -651,6 +654,9 @@ for (const [name, options] of Object.entries({
     await assert.rejects(f.take.done);
     assert.notEqual(f.take.phase, 'completed');
     assert.equal(f.counts.requests, 0);
+    // The take keeps a fixed, content-free startup stage for the failure.
+    assert.notEqual(f.take.startupDiagnostics.failure, null);
+    assert.notEqual(f.take.startupDiagnostics.failure.stage, 'ready');
     for (const k of [
       'playerStop',
       'recorderStop',

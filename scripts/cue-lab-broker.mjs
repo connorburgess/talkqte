@@ -178,16 +178,21 @@ export async function openLabBroker({
     Number.isSafeInteger(maxCalls) && maxCalls >= 1 && maxCalls <= 100,
   );
   requireThat(!signal?.aborted);
-  const directory = await mkdtemp(join(tmpdir(), 'tq-lab-'));
-  const checkoutRelation = relative(
-    await realpath(process.cwd()),
-    await realpath(directory),
-  );
-  if (
-    !isAbsolute(directory) ||
-    (!checkoutRelation.startsWith('..') && !isAbsolute(checkoutRelation))
-  ) {
-    await rm(directory, { recursive: true, force: true });
+  // The native descriptor reader requires the socket to be a lexical sibling of
+  // the descriptor path it receives, and the launcher passes that path
+  // canonicalized. Derive both paths from the canonical owned directory, not a
+  // temporary-root alias such as macOS /var -> /private/var.
+  const created = await mkdtemp(join(tmpdir(), 'tq-lab-'));
+  let directory;
+  try {
+    directory = await realpath(created);
+    const checkoutRelation = relative(await realpath(process.cwd()), directory);
+    requireThat(
+      isAbsolute(directory) &&
+        (checkoutRelation.startsWith('..') || isAbsolute(checkoutRelation)),
+    );
+  } catch {
+    await rm(created, { recursive: true, force: true });
     throw gateFailure('protocol');
   }
   await chmod(directory, 0o700);
@@ -212,6 +217,12 @@ export async function openLabBroker({
     playback = null,
     observation = null,
     snapshotRevision = null;
+  // Content-free startup diagnostics: fixed booleans and codes only, never a
+  // path, nonce, frame, provider output or raw error.
+  let clockProbeSent = false,
+    clockSampleReceived = false,
+    firstTerminal = null,
+    startupCause = null;
   const seenRequests = new Set();
   const seenRequestIds = new Set();
   const clearedCueIds = new Set();
@@ -231,6 +242,7 @@ export async function openLabBroker({
     maxCalls,
     signal,
     onTerminal: (category) => {
+      firstTerminal ??= category;
       observation = null;
       onTerminal(category);
       readyReject(gateFailure(category));
@@ -245,6 +257,11 @@ export async function openLabBroker({
       }
     },
   });
+  // Records only the first broker-observed startup failure, before calibration
+  // and before any other terminal reason; later teardown noise is ignored.
+  const noteStartupCause = (code) => {
+    if (clock === null && !gate.terminal && !closing) startupCause ??= code;
+  };
   const fail = (category = 'protocol') => {
     gate.stop(category);
     if (!authenticated) socket?.destroy();
@@ -541,6 +558,7 @@ export async function openLabBroker({
           frame.probeId === probe.id &&
           ms(frame.nativeSessionElapsedMs),
       );
+      clockSampleReceived = true;
       probe.resolve({
         nativeMs: frame.nativeSessionElapsedMs,
         receivedMs: performance.now(),
@@ -552,6 +570,7 @@ export async function openLabBroker({
   const server = createServer((client) => {
     if (connected || gate.terminal) {
       client.destroy();
+      noteStartupCause('second-connection');
       fail();
       return;
     }
@@ -569,6 +588,7 @@ export async function openLabBroker({
           await receive(frames.shift());
         }
       } catch (error) {
+        noteStartupCause(authenticated ? 'frame-rejected' : 'hello-rejected');
         fail(error.category);
         client.destroy();
       } finally {
@@ -601,27 +621,37 @@ export async function openLabBroker({
         partial = Buffer.concat([partial, chunk.subarray(offset)]);
         if (partial.length && !partialTimer)
           partialTimer = setTimeout(() => {
+            noteStartupCause('frame-invalid');
             fail();
             client.destroy();
           }, 1000);
       } catch {
+        noteStartupCause('frame-invalid');
         fail();
         client.destroy();
       }
     });
-    client.once('error', () => fail());
+    client.once('error', () => {
+      noteStartupCause('peer-error');
+      fail();
+    });
     client.once('close', () => {
       clearTimeout(partialTimer);
+      noteStartupCause(authenticated ? 'peer-closed' : 'closed-before-hello');
       if (!closing) fail();
     });
     client.setTimeout(5000, () => {
       if (!authenticated) {
+        noteStartupCause('hello-timeout');
         fail();
         client.destroy();
       }
     });
   });
-  server.on('error', () => fail());
+  server.on('error', () => {
+    noteStartupCause('listener-error');
+    fail();
+  });
   try {
     await new Promise((resolve, reject) => {
       server.once('error', reject);
@@ -648,6 +678,17 @@ export async function openLabBroker({
   return Object.freeze({
     descriptorPath,
     ready,
+    get startupDiagnostics() {
+      return Object.freeze({
+        connectionAccepted: connected,
+        helloAuthenticated: authenticated,
+        clockProbeSent,
+        clockSampleReceived,
+        calibrated: clock !== null,
+        cause: startupCause,
+        terminal: firstTerminal,
+      });
+    },
     gate,
     get observation() {
       return observation === null ? null : structuredClone(observation);
@@ -689,19 +730,25 @@ export async function openLabBroker({
       const timer = setTimeout(() => reject(gateFailure('deadline')), 100);
       try {
         send('clock_probe', { probeId: id });
+        clockProbeSent = true;
         const sample = await done;
         const rttMs = sample.receivedMs - sentMs;
         requireThat(rttMs <= 100);
-        clock = {
+        const measured = {
           nativeMs: sample.nativeMs,
           monotonicMs: (sentMs + sample.receivedMs) / 2,
           uncertaintyMs: rttMs / 2,
         };
         requireThat(
-          !playback || clock.uncertaintyMs + playback.uncertaintyMs <= 100,
+          !playback || measured.uncertaintyMs + playback.uncertaintyMs <= 100,
         );
+        // Only an accepted measurement becomes the run clock.
+        clock = measured;
         return { ...clock, sessionId };
       } catch (error) {
+        noteStartupCause(
+          error.category === 'deadline' ? 'clock-deadline' : 'clock-rejected',
+        );
         fail(error.category);
         throw gateFailure(gate.terminal ?? 'protocol');
       } finally {

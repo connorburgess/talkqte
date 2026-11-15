@@ -47,6 +47,16 @@ descriptor are `0600`. The descriptor schema is `talkqte.lab.descriptor.v1`, wit
 `runId`, absolute `socketPath` and a random 32-byte hexadecimal `nonce`. Pass only
 the descriptor path to the development app, never the nonce in arguments or logs.
 No provider credential passes through this protocol. No TCP listener exists.
+The broker canonicalizes its new directory before deriving both paths. Native
+requires the socket to be a lexical sibling of the canonical descriptor path the
+launcher forwards, so a temporary-root alias such as macOS `/var` would otherwise
+be refused before HELLO.
+
+`startupDiagnostics` reports fixed booleans for connection, authenticated HELLO,
+clock probe, clock sample and calibration, plus the first broker-observed
+pre-calibration `cause` (for example `hello-rejected`, `closed-before-hello` or
+`clock-deadline`) and the first gate `terminal` category. It never contains a
+path, nonce, frame, provider output or raw error.
 
 Frames are strict UTF-8 newline-delimited JSON, at most 64 KiB, with a bounded
 16-frame processing queue and a one-second partial-frame deadline. Output is also

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { createConnection } from 'node:net';
 import { readFile, stat, access } from 'node:fs/promises';
+import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { openLabBroker, evaluatorRequest } from './cue-lab-broker.mjs';
@@ -813,4 +816,194 @@ test('clock sample from a replacement session is terminal before inference', asy
   } finally {
     await ctx.close();
   }
+});
+
+const DIAGNOSTIC_KEYS = [
+  'connectionAccepted',
+  'helloAuthenticated',
+  'clockProbeSent',
+  'clockSampleReceived',
+  'calibrated',
+  'cause',
+  'terminal',
+];
+function assertContentFree(ctx, diagnostics) {
+  assert.deepEqual(Object.keys(diagnostics), DIAGNOSTIC_KEYS);
+  const serialized = JSON.stringify(diagnostics);
+  for (const secret of [
+    ctx.descriptor.nonce,
+    ctx.descriptor.socketPath,
+    ctx.broker.descriptorPath,
+    dirname(ctx.broker.descriptorPath),
+  ])
+    assert.equal(serialized.includes(secret), false);
+}
+
+test('a symlinked temporary root yields a canonical descriptor whose socket is its lexical sibling', async () => {
+  const real = realpathSync(mkdtempSync(join(tmpdir(), 'tq-root-')));
+  const holder = realpathSync(mkdtempSync(join(tmpdir(), 'tq-alias-')));
+  const alias = join(holder, 'root');
+  symlinkSync(real, alias);
+  const original = process.env.TMPDIR;
+  let ctx;
+  try {
+    process.env.TMPDIR = alias;
+    assert.equal(tmpdir(), alias);
+    assert.notEqual(alias, real);
+    ctx = await setup();
+    const { descriptorPath } = ctx.broker;
+    // The launcher hands native this canonical path; native then requires the
+    // socket's parent to equal the descriptor's parent without resolving links.
+    assert.equal(realpathSync(descriptorPath), descriptorPath);
+    assert.equal(dirname(descriptorPath).startsWith(real + '/'), true);
+    assert.equal(
+      dirname(ctx.descriptor.socketPath),
+      dirname(realpathSync(descriptorPath)),
+    );
+    assert.equal(ctx.broker.startupDiagnostics.calibrated, true);
+  } finally {
+    if (original === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = original;
+    await ctx?.close();
+    rmSync(holder, { recursive: true, force: true });
+    rmSync(real, { recursive: true, force: true });
+  }
+});
+
+test('startup diagnostics stay empty until a peer connects and report a normal close as closed', async () => {
+  const broker = await openLabBroker({
+    sourceSessionMode: 'legacy-fixture',
+    provider: {
+      metadata: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' },
+      request: async () => ({ value }),
+      close: async () => {},
+    },
+    maxCalls: 1,
+  });
+  assert.deepEqual(
+    { ...broker.startupDiagnostics },
+    {
+      connectionAccepted: false,
+      helloAuthenticated: false,
+      clockProbeSent: false,
+      clockSampleReceived: false,
+      calibrated: false,
+      cause: null,
+      terminal: null,
+    },
+  );
+  await broker.close();
+  assert.equal(broker.startupDiagnostics.cause, null);
+  assert.equal(broker.startupDiagnostics.terminal, 'closed');
+  assert.equal(broker.startupDiagnostics.connectionAccepted, false);
+});
+
+test('a rejected hello keeps its first cause through later close with zero dispatches', async () => {
+  const ctx = await setup({ hello: false });
+  try {
+    ctx.greet({ nonce: 'f'.repeat(64) });
+    await terminal(ctx.broker);
+    await assert.rejects(ctx.broker.ready);
+  } finally {
+    await ctx.close();
+  }
+  const diagnostics = ctx.broker.startupDiagnostics;
+  assert.equal(diagnostics.connectionAccepted, true);
+  assert.equal(diagnostics.helloAuthenticated, false);
+  assert.equal(diagnostics.cause, 'hello-rejected');
+  assert.equal(diagnostics.terminal, 'protocol');
+  assert.equal(ctx.calls.length, 0);
+  assertContentFree(ctx, diagnostics);
+});
+
+test('a peer that disconnects before hello is distinguished from a rejected hello', async () => {
+  const ctx = await setup({ hello: false });
+  try {
+    ctx.socket.end();
+    await terminal(ctx.broker);
+  } finally {
+    await ctx.close();
+  }
+  assert.equal(ctx.broker.startupDiagnostics.cause, 'closed-before-hello');
+  assert.equal(ctx.broker.startupDiagnostics.helloAuthenticated, false);
+  assertContentFree(ctx, ctx.broker.startupDiagnostics);
+});
+
+test('an unanswered clock probe reports a calibration deadline after authentication', async () => {
+  const ctx = await setup({ armed: false });
+  try {
+    const calibration = ctx.broker.calibrateClock();
+    await ctx.next('clock_probe');
+    await assert.rejects(calibration, { category: 'deadline' });
+    await terminal(ctx.broker);
+  } finally {
+    await ctx.close();
+  }
+  const diagnostics = ctx.broker.startupDiagnostics;
+  assert.equal(diagnostics.helloAuthenticated, true);
+  assert.equal(diagnostics.clockProbeSent, true);
+  assert.equal(diagnostics.clockSampleReceived, false);
+  assert.equal(diagnostics.calibrated, false);
+  assert.equal(diagnostics.cause, 'clock-deadline');
+  assert.equal(diagnostics.terminal, 'deadline');
+  assert.equal(ctx.calls.length, 0);
+  assertContentFree(ctx, diagnostics);
+});
+
+test('an invalid clock sample is a rejected frame, not a timeout', async () => {
+  const ctx = await setup({ armed: false });
+  try {
+    const calibration = ctx.broker.calibrateClock();
+    const probe = await ctx.next('clock_probe');
+    ctx.send('clock_sample', {
+      probeId: probe.probeId,
+      nativeSessionElapsedMs: -1,
+    });
+    await assert.rejects(calibration);
+    await terminal(ctx.broker);
+  } finally {
+    await ctx.close();
+  }
+  assert.equal(ctx.broker.startupDiagnostics.cause, 'frame-rejected');
+  assert.equal(ctx.broker.startupDiagnostics.terminal, 'protocol');
+  assert.equal(ctx.broker.startupDiagnostics.calibrated, false);
+});
+
+test('failures after calibration do not appear as startup causes', async () => {
+  const ctx = await setup();
+  try {
+    ctx.socket.end();
+    await terminal(ctx.broker);
+  } finally {
+    await ctx.close();
+  }
+  assert.equal(ctx.broker.startupDiagnostics.calibrated, true);
+  assert.equal(ctx.broker.startupDiagnostics.cause, null);
+  assert.equal(ctx.broker.startupDiagnostics.terminal, 'protocol');
+});
+
+test('a calibration rejected for combined uncertainty is not reported as calibrated', async () => {
+  const ctx = await setup({ armed: false });
+  try {
+    ctx.broker.acknowledgePlaybackStart({
+      monotonicMs: performance.now(),
+      uncertaintyMs: 100,
+    });
+    const calibration = ctx.broker.calibrateClock();
+    const probe = await ctx.next('clock_probe');
+    await delay(2);
+    ctx.send('clock_sample', {
+      probeId: probe.probeId,
+      nativeSessionElapsedMs: 1000,
+    });
+    await assert.rejects(calibration);
+    await terminal(ctx.broker);
+  } finally {
+    await ctx.close();
+  }
+  const diagnostics = ctx.broker.startupDiagnostics;
+  assert.equal(diagnostics.clockSampleReceived, true);
+  assert.equal(diagnostics.calibrated, false);
+  assert.equal(diagnostics.cause, 'clock-rejected');
+  assert.equal(ctx.calls.length, 0);
 });
