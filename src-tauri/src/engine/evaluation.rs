@@ -312,13 +312,9 @@ impl Engine {
     }
 
     fn fail_evaluation(&mut self, failure: Failure) {
-        // Lab: a reply past the deadline is a recorded "no decision in time"
-        // and the run continues. The session's call limit and the broker's
-        // dispatch cap still bound how many requests a run can spend.
-        if failure == Failure::Expired && self.evaluation.as_ref().is_some_and(|s| s.lab.is_some())
-        {
-            return;
-        }
+        // A lab request's own expiry is skipped before this point, once the
+        // link has retired it. A lab link that ended with Expired reaches here
+        // and stops the run as timed out.
         if failure == Failure::Expired && self.evaluation.as_ref().is_none_or(|s| s.lab.is_none()) {
             let state = self.evaluation.as_mut().expect("evaluation failed");
             state.timeouts_in_row = state.timeouts_in_row.saturating_add(1);
@@ -658,6 +654,10 @@ impl Engine {
             if let Err(failure) = result.as_ref() {
                 self.record_result(&submitted, &result, true, late.as_ref(), None);
                 match settlement {
+                    // The link retired only this request: a recorded "no
+                    // decision in time", and the run continues. The session
+                    // call limit and the broker's dispatch cap still bound it.
+                    Ok(()) if *failure == Failure::Expired => {}
                     // An expiry the link could not retire ends the run.
                     Err(link_failure) if *failure == Failure::Expired => {
                         self.fail_evaluation(link_failure)
