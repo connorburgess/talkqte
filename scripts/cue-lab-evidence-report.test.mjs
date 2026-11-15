@@ -700,3 +700,82 @@ for (const kind of ['receipt-end', 'failed-gap']) {
     assert.ok(await stat(join(root, 'manifest.json')));
   });
 }
+
+// Snapshot->writer fixture emitted by 745b3d6; path/inode/times fictionalized.
+async function snapshotFixture(t) {
+  const root = await mkdtemp(join(tmpdir(), 'fictional-snapshot-compat-'));
+  await chmod(root, 0o700);
+  t.after(() => rm(root, { recursive: true, force: true }));
+  for (const file of ['manifest.json', 'events.jsonl', 'native.jsonl']) {
+    const data = await readFile(
+      new URL(
+        `./fixtures/lab-evidence-writer-v1/partial-snapshot/${file}`,
+        import.meta.url,
+      ),
+    );
+    await writeFile(join(root, file), data, { mode: 0o600 });
+  }
+  return { root, manifestPath: join(root, 'manifest.json') };
+}
+test('actual snapshot to writer to report retains bounded incomplete coverage separately from event gaps', async (t) => {
+  const f = await snapshotFixture(t);
+  const { report } = await writeEvidenceReport({
+    manifestPath: f.manifestPath,
+    outDir: join(f.root, 'report'),
+  });
+  const c = report.evidence.find((a) => a.id === 'native').snapshotCoverage;
+  assert.equal(c.completeRunCoverage, false);
+  assert.equal(c.unknownLateRecords, true);
+  assert.equal(c.nativeWriterMayRemainOpen, true);
+  assert.equal(c.rows, 1);
+  assert.equal(c.trailingPartialBytes, 5);
+  assert.equal(c.omittedBytesAtCutoff, 5);
+  assert.ok(c.unobservedBytesAtOpen > 0);
+  assert.equal(c.cutoffReceipt.basis, 'receipt');
+  assert.equal(c.cutoffReceipt.clockId, 'node');
+  assert.equal(report.gaps.length, 0);
+  assert.equal(c.sourcePath, undefined);
+  assert.equal(c.sourceIdentity, undefined);
+  assert.ok(!JSON.stringify(report).includes('/fictional/native-timing.jsonl'));
+  const md = await readFile(join(f.root, 'report/report.md'), 'utf8');
+  assert.ok(
+    md.includes('completeRunCoverage=false and unknownLateRecords=true'),
+  );
+  assert.ok(md.includes('the timeline is incomplete'));
+  assert.ok(md.includes(`5 / ${c.unobservedBytesAtOpen}`));
+  assert.equal(
+    report.evaluations[0].id,
+    '18446744073709551615/9007199254740993',
+  );
+  assert.equal(report.evaluations[0].modelDuration.status, 'unknown');
+  assert.ok(report.timeline.every((e) => e.recording === null));
+  assert.ok(await stat(join(f.root, 'native.jsonl')));
+});
+test('snapshot coverage cannot claim completeness, mismatch its artifact or conceal omitted bytes', async (t) => {
+  const f = await snapshotFixture(t);
+  const raw = JSON.parse(await readFile(f.manifestPath, 'utf8'));
+  for (const mutate of [
+    (c) => (c.completeRunCoverage = true),
+    (c) => (c.unknownLateRecords = false),
+    (c) => c.copiedBytes++,
+    (c) => (c.sha256 = '0'.repeat(64)),
+    (c) => (c.omittedBytesAtCutoff = 0),
+    (c) => (c.cutoffReceipt.basis = 'event'),
+  ]) {
+    const m = structuredClone(raw);
+    mutate(m.artifacts.find((a) => a.id === 'native').snapshotCoverage);
+    assert.throws(() => buildEvidenceReport(m, []), /snapshot coverage/);
+  }
+});
+test('snapshot row limit keeps unparsed partial count unknown and row count is checked on file load', async (t) => {
+  const f = await snapshotFixture(t);
+  const raw = JSON.parse(await readFile(f.manifestPath, 'utf8'));
+  const native = raw.artifacts.find((a) => a.id === 'native');
+  native.snapshotCoverage.rowLimitReached = true;
+  native.snapshotCoverage.trailingPartialBytes = null;
+  const r = buildEvidenceReport(raw, []);
+  assert.ok(renderEvidenceMarkdown(r).includes('1 / unknown'));
+  native.snapshotCoverage.rows = 2;
+  await writeFile(f.manifestPath, JSON.stringify(raw), { mode: 0o600 });
+  await assert.rejects(loadEvidence(f.manifestPath), /snapshot row count/);
+});

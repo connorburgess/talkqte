@@ -203,6 +203,16 @@ rows: when writing the gap itself fails, a sealed manifest can still retain the
 failure. Do not add writer and event-gap counts, which may describe the same loss.
 Other writer metadata is not copied.
 
+Native artifacts may carry `snapshotCoverage` from a bounded post-release snapshot.
+The report validates its run, copied hash/bytes/rows, cutoff/omitted/unobserved byte
+counters, receipt clock and explicit `completeRunCoverage: false`,
+`unknownLateRecords: true`, `nativeWriterMayRemainOpen: true`. It retains and
+displays these limits separately from emitted event gaps. A zero gap count does
+not establish a complete timeline. Row-limited unparsed tails remain unknown.
+Coverage never establishes a native flush, app exit or recording clock bridge.
+The report omits absolute source paths and inode details; original private
+manifests retain that provenance.
+
 ## Existing native timing import
 
 The importer reads existing `segment`, `evaluation_requested`, `evaluation_result`,
@@ -257,7 +267,11 @@ lab cue-text redaction are unchanged. No new native content logging is required.
 Metadata-only synthetic writer-file snapshots in `scripts/fixtures/lab-evidence-writer-v1`
 were emitted by writer commit `994a280` with creation/expiry dates normalized. They
 exercise actual sealed manifest/event loading, including receipt-only completion
-and a manifest-only failed gap write; they contain no meeting content or recording.
+and a manifest-only failed gap write. The partial-snapshot fixture was emitted by
+snapshot/writer commit `745b3d6`; its source path/inode and timestamps were
+fictionalized. It verifies complete-prefix bytes and missing late coverage through
+the actual sealed-file loader. These snapshots contain no meeting content or
+recording.
 
 Deterministic synthetic fixtures exercise complete and partial timelines, exact
 u64 identities, missing/invalid bridges, stale/failure/quiet separation, dropped

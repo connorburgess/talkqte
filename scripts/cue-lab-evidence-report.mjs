@@ -112,6 +112,75 @@ function unique(items, key) {
     seen.add(item[key]);
   }
 }
+// Snapshot coverage describes an incomplete prefix, never native flush/exit.
+// Keep private source paths/inode details in the original manifest only.
+function snapshotCoverage(artifact, manifest) {
+  const c = artifact.snapshotCoverage;
+  if (c === undefined) return null;
+  const counters = [
+    'observedBytesAtOpen',
+    'observedBytesAtEnd',
+    'cutoffBytes',
+    'readBytes',
+    'copiedBytes',
+    'rows',
+    'omittedBytesAtCutoff',
+    'unobservedBytesAtOpen',
+  ];
+  if (
+    !object(c) ||
+    artifact.kind !== 'native-timing' ||
+    c.schema !== 'talkqte.lab.timing-snapshot.v1' ||
+    c.runId !== manifest.runId ||
+    c.sourceReleaseObserved !== true ||
+    c.recorderFinalizationObserved !== true ||
+    c.nativeWriterMayRemainOpen !== true ||
+    c.completeRunCoverage !== false ||
+    c.unknownLateRecords !== true ||
+    !counters.every((k) => Number.isSafeInteger(c[k]) && c[k] >= 0) ||
+    c.rows > manifest.limits.maxEvents ||
+    typeof c.grewDuringCopy !== 'boolean' ||
+    typeof c.rowLimitReached !== 'boolean' ||
+    (c.rowLimitReached
+      ? c.trailingPartialBytes !== null
+      : !Number.isSafeInteger(c.trailingPartialBytes) ||
+        c.trailingPartialBytes < 0) ||
+    c.observedBytesAtEnd < c.observedBytesAtOpen ||
+    c.copiedBytes > c.readBytes ||
+    c.readBytes > c.cutoffBytes ||
+    c.cutoffBytes > c.observedBytesAtOpen ||
+    c.omittedBytesAtCutoff !== c.cutoffBytes - c.copiedBytes ||
+    c.unobservedBytesAtOpen !== c.observedBytesAtOpen - c.cutoffBytes ||
+    c.sha256 !== artifact.sha256 ||
+    c.copiedBytes !== artifact.bytes ||
+    !object(c.cutoffReceipt) ||
+    !manifest.clocks.some(
+      (clock) =>
+        clock.id === c.cutoffReceipt.clockId && clock.kind === 'monotonic',
+    ) ||
+    !number(c.cutoffReceipt.atMs) ||
+    c.cutoffReceipt.basis !== 'receipt'
+  )
+    fail('invalid snapshot coverage');
+  return {
+    schema: c.schema,
+    ...Object.fromEntries(counters.map((k) => [k, c[k]])),
+    sourceReleaseObserved: true,
+    recorderFinalizationObserved: true,
+    nativeWriterMayRemainOpen: true,
+    completeRunCoverage: false,
+    unknownLateRecords: true,
+    grewDuringCopy: c.grewDuringCopy,
+    rowLimitReached: c.rowLimitReached,
+    trailingPartialBytes: c.trailingPartialBytes,
+    cutoffReceipt: {
+      clockId: c.cutoffReceipt.clockId,
+      atMs: c.cutoffReceipt.atMs,
+      basis: 'receipt',
+    },
+    sha256: c.sha256,
+  };
+}
 export function validateManifest(m) {
   if (
     !object(m) ||
@@ -186,6 +255,7 @@ export function validateManifest(m) {
       fail('unknown artifact clock');
     if (a.kind === 'native-timing' && !a.clockId)
       fail('native timing needs logger clock');
+    snapshotCoverage(a, m);
   }
   if (
     m.recording &&
@@ -712,6 +782,9 @@ export function buildEvidenceReport(
       kind: a.kind,
       sha256: a.sha256,
       bytes: a.bytes,
+      ...(a.snapshotCoverage
+        ? { snapshotCoverage: snapshotCoverage(a, m) }
+        : {}),
     })),
     gaps,
     writerStatus: m.writer
@@ -791,6 +864,21 @@ export function renderEvidenceMarkdown(r, { recordingHref } = {}) {
       (s) =>
         `| ${escape(s.artifactId)} | ${s.rows} | ${s.normalizedEvents} | ${s.unmappedNativeRows} |`,
     ),
+    '',
+    '### Native snapshot limits',
+    '',
+    r.evidence.some((a) => a.snapshotCoverage)
+      ? 'Snapshot coverage is independent of emitted event gaps. Each snapshot has completeRunCoverage=false and unknownLateRecords=true; the timeline is incomplete and the native writer may remain open.'
+      : 'No snapshot coverage supplied; complete timeline coverage is not established.',
+    '',
+    '| Artifact | Copied / cutoff / observed at open (bytes) | Omitted at cutoff / unobserved at open (bytes) | Rows / trailing partial bytes | Row limit / grew during copy |',
+    '| --- | --- | --- | --- | --- |',
+    ...r.evidence
+      .filter((a) => a.snapshotCoverage)
+      .map((a) => {
+        const c = a.snapshotCoverage;
+        return `| ${escape(a.id)} | ${c.copiedBytes} / ${c.cutoffBytes} / ${c.observedBytesAtOpen} | ${c.omittedBytesAtCutoff} / ${c.unobservedBytesAtOpen} | ${c.rows} / ${c.trailingPartialBytes ?? 'unknown'} | ${c.rowLimitReached} / ${c.grewDuringCopy} |`;
+      }),
     '',
     '## Per-take timeline',
     '',
@@ -964,6 +1052,8 @@ export async function loadEvidence(manifestPath) {
       .toString('utf8')
       .split('\n')
       .filter((l) => l.trim());
+    if (a.snapshotCoverage && lines.length !== a.snapshotCoverage.rows)
+      fail('snapshot row count mismatch');
     rawRows += lines.length;
     if (rawRows > m.limits.maxEvents) fail('event limit exceeded');
     const previousCount = events.length;
