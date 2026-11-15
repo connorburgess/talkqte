@@ -207,3 +207,23 @@ snapshotTest('snapshot coverage cannot be attached to different bytes', (t) => {
   );
   assert.equal(writer.close().failed, true);
 });
+
+for (const tail of [
+  'x'.repeat(70000),
+  'not-json\n',
+  '{"event":"' + 'x'.repeat(70000),
+])
+  snapshotTest(
+    'accepted row cap excludes oversized or malformed tails without inspecting them',
+    (t) => {
+      const f = fixture(t, row + tail);
+      const s = snapshotLabTiming({ ...f.options, maxRows: 1 });
+      assert.equal(fs.readFileSync(s.path, 'utf8'), row);
+      assert.equal(fs.readFileSync(f.path, 'utf8'), row + tail);
+      assert.equal(s.coverage.rowLimitReached, true);
+      assert.equal(s.coverage.trailingPartialBytes, null);
+      assert.equal(s.coverage.rows, 1);
+      assert.equal(s.coverage.omittedBytesAtCutoff, Buffer.byteLength(tail));
+      assert.ok(s.coverage.readBytes <= 65536);
+    },
+  );

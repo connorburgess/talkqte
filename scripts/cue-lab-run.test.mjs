@@ -401,8 +401,11 @@ test('owned-process early Stop aborts root before arming and waits actual releas
   assert.equal(f.run.dispatchesUsed, 0);
 });
 
-test('startup deadline without native authentication stops with zero dispatches', async () => {
+test('startup deadline without native authentication stops with zero dispatches', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = fixture({ authenticate: false, startupMs: 15 });
+  await f.started();
+  t.mock.timers.tick(15);
   await assert.rejects(bounded(f.run.ready));
   await bounded(f.run.close());
   assert.equal(f.run.dispatchesUsed, 0);

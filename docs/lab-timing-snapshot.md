@@ -24,8 +24,10 @@ snapshot supplies coverage metadata, not a usable native event artifact.
 
 Coverage explicitly retains initial/end observed size, cutoff, read/copied bytes,
 row count, omitted/unobserved bytes, growth, row-limit status and trailing partial
-bytes. When row-limited, trailing-partial count is unknown because remaining bytes
-were not parsed. The cutoff time is a local receipt, not native event/flush time.
+bytes. The row cap latches at the accepted row boundary when cutoff bytes remain;
+excluded oversized, malformed or unterminated tails are not inspected. When
+row-limited, trailing-partial count is unknown because remaining bytes were not
+parsed. The cutoff time is a local receipt, not native event/flush time.
 `nativeWriterMayRemainOpen`, `unknownLateRecords` are true and
 `completeRunCoverage` is false even when every observed byte ends at a newline.
 Missing late/lossy records stay unknown. A snapshot never proves native app exit.

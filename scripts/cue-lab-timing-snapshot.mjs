@@ -142,6 +142,12 @@ export function snapshotLabTiming({
         copiedBytes += complete.length;
         rows++;
         partial = partial.subarray(end + 1);
+        // The accepted row boundary, not another newline, closes inspection.
+        // Excluded tails may be large, malformed or unterminated.
+        if (rows === maxRows && copiedBytes < cutoffBytes) {
+          rowLimit = true;
+          break;
+        }
       }
       if (!rowLimit) required(partial.length <= maxFrameBytes);
     }
