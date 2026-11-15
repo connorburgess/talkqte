@@ -180,8 +180,20 @@ process.stdin.on('data', (chunk) => {
         mode === 'video-tail' ? 60 : 10,
       );
     }
-    if (f.type === 'stop')
-      emit('stopped', { engineRunning: false, completed: true });
+    if (f.type === 'stop') {
+      // A failure reported after the caller's cancellation, before Stop.
+      if (mode === 'fail-after-cancel')
+        emit('failed', {
+          code: 'player_failed',
+          stage: 'engine-connect',
+          decodedFrames: 0,
+          audioTrackDurationMs: 0,
+          assetDurationMs: 0,
+        });
+      // Never acknowledges Stop.
+      if (mode !== 'stop-silent')
+        emit('stopped', { engineRunning: false, completed: true });
+    }
     if (f.type === 'retire') {
       if (mode === 'held-pipes')
         spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
