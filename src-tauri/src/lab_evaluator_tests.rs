@@ -552,3 +552,67 @@ fn identities_require_canonical_decimal_strings_without_js_precision_loss() {
     }
     assert!(decimal_id(&json!("18446744073709551615"), u64::MAX));
 }
+#[test]
+fn descriptor_accepts_canonical_paths_under_a_symlinked_root_and_rejects_mixed_spellings() {
+    // Mirrors macOS /var -> /private/var: one real run directory reached
+    // through a symlinked root. The broker now writes canonical paths.
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let base = std::env::temp_dir().canonicalize().unwrap().join(format!(
+        "tq-root-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let _cleanup = Cleanup(base.clone());
+    let real = base.join("real");
+    let alias = base.join("alias");
+    fs::create_dir_all(&real).unwrap();
+    std::os::unix::fs::symlink(&real, &alias).unwrap();
+    let run = real.join("run");
+    fs::create_dir(&run).unwrap();
+    fs::set_permissions(&run, fs::Permissions::from_mode(0o700)).unwrap();
+    let canonical_run = run.canonicalize().unwrap();
+    let aliased_run = alias.join("run");
+    assert_eq!(canonical_run, run);
+    assert_ne!(aliased_run, canonical_run);
+    assert_eq!(aliased_run.canonicalize().unwrap(), canonical_run);
+
+    let socket = canonical_run.join("s");
+    let listener = UnixListener::bind(&socket).unwrap();
+    fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).unwrap();
+    let write = |socket_path: &PathBuf| {
+        let path = canonical_run.join("d");
+        let _ = fs::remove_file(&path);
+        fs::write(&path, json!({"schema":"talkqte.lab.descriptor.v1","runId":"fictional-run","socketPath":socket_path,"nonce":"a".repeat(64)}).to_string()).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    };
+    let settings = |descriptor: PathBuf| Settings {
+        descriptor,
+        provider: "codex".into(),
+        model: "gpt-6.1-sol".into(),
+        effort: "medium".into(),
+    };
+    let canonical = settings(canonical_run.join("d"));
+    let aliased = settings(aliased_run.join("d"));
+
+    // Canonical descriptor and canonical socket: accepted, and the
+    // listener is reachable at the accepted path.
+    write(&socket);
+    let d = descriptor(&canonical).expect("canonical pair accepted");
+    assert_eq!(d.socket_path, socket);
+    let _client = UnixStream::connect(&d.socket_path).unwrap();
+    listener.accept().unwrap();
+
+    // RunB01 shape: launcher-canonical socket, noncanonical descriptor.
+    assert_eq!(descriptor(&aliased).err(), Some(Failure::InvalidInput));
+    // The reverse mismatch is rejected too.
+    write(&aliased_run.join("s"));
+    assert_eq!(descriptor(&canonical).err(), Some(Failure::InvalidInput));
+    // The invariant is lexical: one consistent spelling is still accepted.
+    assert!(descriptor(&aliased).is_ok());
+}
