@@ -364,6 +364,17 @@ What it can and cannot tell you:
 - Lines lost after the last line written are not reported until another
   line is written, so a loss at the very end of a run can go unreported.
 
+## Subscription broker preparation
+
+The [development lab evaluator client](development-lab-evaluator.md) adds the
+bounded Rust transport, separate coalescing policy and provider disclosure for a
+fictional subscription-broker experiment. Development-only native selection,
+consent, publication, clock and Stop hooks are implemented and tested offline; the
+coordinated streamed run remains pending. The build/launch commands above do not
+select that backend. Preserve explicit processing consent, session call cap,
+Stop/revoke and release guards; offline tests do not establish clock accuracy,
+companion paint, provider readiness or runtime cleanup.
+
 ## What stays open
 
 Everything here waits for the owner's first run, with these questions first:

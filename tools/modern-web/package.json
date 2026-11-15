@@ -1,0 +1,12 @@
+{
+  "name": "talkqte-modern-web-check",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "scan": "node scan.mjs",
+    "test": "node --test scan.test.mjs"
+  },
+  "devDependencies": {
+    "modern-web-guidance": "1.0.0"
+  }
+}

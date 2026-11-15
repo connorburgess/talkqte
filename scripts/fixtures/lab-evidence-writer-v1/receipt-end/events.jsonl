@@ -1,0 +1,2 @@
+{"schema":"talkqte.lab.evidence.event.v1","eventId":"event:1","runId":"fictional-writer-fixture","stage":"speech.render-end","outcome":"observed","ids":{"sessionId":"1","lineId":"L1","segmentId":"s1"},"timing":{"clockId":"node","atMs":500,"uncertaintyMs":0,"basis":"receipt"}}
+{"schema":"talkqte.lab.evidence.event.v1","eventId":"event:2","runId":"fictional-writer-fixture","stage":"transcript.arrived","outcome":"observed","ids":{"sessionId":"1","lineId":"L1","segmentId":"s1"},"timing":{"clockId":"node","atMs":700,"uncertaintyMs":0,"basis":"receipt"}}
