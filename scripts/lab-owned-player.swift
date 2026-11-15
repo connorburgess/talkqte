@@ -28,6 +28,51 @@ private func copyStereoPlanar(_ source: UnsafeRawBufferPointer, _ planes: [Unsaf
     }
 }
 
+// Dedicated bounded stdin reader; a short read is consumed immediately, never filled to 4096.
+private func readLabPlayerCommands(_ fd: Int32, _ runId: String,
+    readBytes: (Int32, UnsafeMutableRawPointer, Int) -> Int = { Darwin.read($0, $1, $2) },
+    progress: (String, String, Int, Int) -> Void,
+    stopReceived: () -> Void = {},
+    command: (String, [String: Any], Int, Int) -> Void) {
+    var buffer = [UInt8](repeating: 0, count: 4096), partial = Data()
+    var total = 0, commands = 0, reportedRead = false
+    do {
+        while true {
+            let n = buffer.withUnsafeMutableBytes { readBytes(fd, $0.baseAddress!, $0.count) }
+            if n < 0 {
+                if errno == EINTR { continue }
+                progress("read-error", "none", commands, total); return
+            }
+            if n == 0 { progress(partial.isEmpty ? "eof" : "protocol-error", "none", commands, total); return }
+            try require(n <= buffer.count && total + n <= 4 * 16384)
+            total += n
+            if !reportedRead { progress("read", "none", 0, total); reportedRead = true }
+            partial.append(contentsOf: buffer.prefix(n))
+            while let end = partial.firstIndex(of: 10) {
+                try require(end + 1 <= 16384 && commands < 4)
+                let line = partial.subdata(in: 0..<end); partial.removeSubrange(0...end)
+                let raw = try JSONSerialization.jsonObject(with: line)
+                guard let value = raw as? [String: Any], let type = value["type"] as? String,
+                      ["clock_probe", "start", "stop", "retire"].contains(type) else { throw PlayerError.invalid }
+                let keys = type == "clock_probe" ? ["schema","type","runId","generation","mediaSha256","probeId"] : ["schema","type","runId","generation","mediaSha256"]
+                guard let text = String(data: line, encoding: .utf8) else { throw PlayerError.invalid }
+                let matcher = try NSRegularExpression(pattern: "\"[^\"\\\\]*\"\\s*:")
+                try require(matcher.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text)) == value.count)
+                try require(Set(value.keys) == Set(keys) && value["schema"] as? String == schema && value["runId"] as? String == runId && value["generation"] as? String == "1" && value["mediaSha256"] as? String == approvedHash)
+                if type == "clock_probe" {
+                    guard let probe = value["probeId"] as? String,
+                          probe.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil else { throw PlayerError.invalid }
+                }
+                commands += 1
+                if type == "stop" { stopReceived() } // Latch before diagnostics or owner-queue dispatch.
+                progress("parsed", type, commands, total)
+                command(type, value, commands, total)
+            }
+            try require(partial.count < 16384)
+        }
+    } catch { progress("protocol-error", "none", commands, total) }
+}
+
 // One-way handoff: decoder never touches these objects after returning them;
 // only the main owner queue may use/mutate them after the handoff.
 private final class DecodedMedia: @unchecked Sendable {
@@ -70,6 +115,7 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var audioCompleted = false
     var videoCompleted = false
     var videoObserver: NSObjectProtocol?
+    let outputLock = NSLock()
 
     init(runId: String, path: String) throws {
         try require(runId.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil)
@@ -88,8 +134,10 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), data.count < 16384 else {
             exit(1)
         }
-        // Owner main queue only, never an audio completion/render callback.
-        FileHandle.standardOutput.write(data); FileHandle.standardOutput.write(Data([10]))
+        // Owner/control worker only; never an audio callback. Keep JSON lines atomic.
+        var packet = data; packet.append(10)
+        outputLock.lock(); defer { outputLock.unlock() }
+        FileHandle.standardOutput.write(packet)
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -260,28 +308,19 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }
     }
+    func transportProgress(_ step: String, _ type: String, _ index: Int, _ bytes: Int) {
+        emit("transport_progress", ["step": step, "command": type, "commandIndex": index, "bytesRead": bytes])
+    }
     func installInput() {
         DispatchQueue.global(qos: .userInitiated).async {
-            var partial = Data()
-            do {
-                while let bytes = try FileHandle.standardInput.read(upToCount: 4096), !bytes.isEmpty {
-                    partial.append(bytes)
-                    if partial.count > 16384 { throw PlayerError.invalid }
-                    while let end = partial.firstIndex(of: 10) {
-                        let line = partial.subdata(in: 0..<end); partial.removeSubrange(0...end)
-                        let raw = try JSONSerialization.jsonObject(with: line)
-                        guard let value = raw as? [String: Any], let type = value["type"] as? String else { throw PlayerError.invalid }
-                        let keys = type == "clock_probe" ? ["schema","type","runId","generation","mediaSha256","probeId"] : ["schema","type","runId","generation","mediaSha256"]
-                        // Keys are fixed ASCII; lexical count also rejects duplicate keys.
-                        let text = String(data: line, encoding: .utf8) ?? ""
-                        let matcher = try NSRegularExpression(pattern: "\"[^\"\\\\]*\"\\s*:")
-                        try require(matcher.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text)) == value.count)
-                        try require(Set(value.keys) == Set(keys) && value["schema"] as? String == schema && value["runId"] as? String == self.runId && value["generation"] as? String == "1" && value["mediaSha256"] as? String == approvedHash)
-                        if type == "stop" { lab_player_latch_stop(self.state) }
-                        DispatchQueue.main.async { self.control(type, value) }
-                    }
+            readLabPlayerCommands(STDIN_FILENO, self.runId, progress: { step, type, index, bytes in
+                self.transportProgress(step, type, index, bytes)
+            }, stopReceived: { lab_player_latch_stop(self.state) }, command: { type, value, index, bytes in
+                DispatchQueue.main.async {
+                    self.transportProgress("applied", type, index, bytes)
+                    self.control(type, value)
                 }
-            } catch {}
+            })
             lab_player_latch_stop(self.state)
             DispatchQueue.main.async { self.stop(failure: true) }
         }
@@ -472,6 +511,25 @@ func testStereoPlanarPreservation() throws {
     precondition(rejected) // Never silently truncate/pad a mismatching frame shape.
 }
 try testStereoPlanarPreservation()
+#elseif LAB_PLAYER_INPUT_TESTS
+let mode = CommandLine.arguments.count == 2 ? CommandLine.arguments[1] : "normal"
+if !["normal", "read-error", "eintr"].contains(mode) { exit(2) }
+func fixtureEmit(_ type: String, _ fields: [String: Any] = [:]) {
+    var value = fields; value["type"] = type
+    let data = try! JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
+    FileHandle.standardOutput.write(data); FileHandle.standardOutput.write(Data([10]))
+}
+fixtureEmit("fixture_ready")
+if mode == "read-error" { Darwin.close(STDIN_FILENO) }
+var interrupted = false
+readLabPlayerCommands(STDIN_FILENO, "fictional-transport", readBytes: { fd, bytes, count in
+    if mode == "eintr" && !interrupted { interrupted = true; errno = EINTR; return -1 }
+    return Darwin.read(fd, bytes, count)
+}, progress: { step, type, index, bytes in
+    fixtureEmit("transport_progress", ["step": step, "command": type, "commandIndex": index, "bytesRead": bytes])
+}, command: { type, _, index, _ in
+    fixtureEmit("fixture_reply", ["command": type, "commandIndex": index])
+})
 #else
 let arguments = CommandLine.arguments
 if arguments.count != 3 { exit(1) }

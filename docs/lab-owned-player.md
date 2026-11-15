@@ -169,3 +169,34 @@ The native pure-memory channel/frame/bit-preservation regression is compiled via
 compile-only correction it was not executed. Node protocol regressions verify
 progress/deadline/first-failure ownership and refuse interleaved prepared metadata.
 None of these establishes live device playback. All existing timeouts are unchanged.
+
+
+## Bounded stdin exchange
+
+The control worker uses one `Darwin.read` into a fixed 4096-byte buffer and
+processes every short read immediately. Only EINTR is retried; EOF, other read
+errors, malformed/duplicate/wrong-identity JSON and unterminated/oversized frames
+terminate input. Existing 16 KiB frame and 100 ms clock-probe limits remain.
+At most four commands (probe, Start, Stop, retire) and 64 KiB total ingress are
+accepted; no arbitrary command or retry channel is introduced. A validated Stop
+latches the existing atomic flag before parsed diagnostics/owner-queue dispatch.
+All state mutation/framework control remains on the owner queue.
+
+At most ten fixed transport diagnostic records distinguish first read, parsed
+command, owner application and EOF/error. Output JSON lines are serialized
+between control/owner threads; no audio callback writes or locks. Snapshot
+counters and clock-probe queued/parsed/applied/sample flags remain separate from
+the first terminal failure. Queued means the JS writable accepted a write, not
+peer receipt. Stop acknowledgements and bounded transport diagnostics remain
+readable after failure; that never converts failed cleanup into successful run
+acceptance or proves native source release.
+
+The prior attempt reached `prepared` but did not complete the subsequent 100 ms
+clock probe. Length-filling FileHandle stdin behavior is a source-supported
+suspect, not an observed syscall-level cause on that macOS run. The new
+compile-time `LAB_PLAYER_INPUT_TESTS` subprocess invokes only the same reader,
+with no LabPlayer/NSApplication/engine creation. On macOS, deterministic tests
+actually execute that non-audio fixture with open stdin, short/fragmented/
+coalesced commands, EINTR, EOF/error and frame overflow. The actual application
+and PCM-memory harness remain unexecuted by this transport change. Other
+platforms explicitly skip this native fixture; protocol tests remain portable.

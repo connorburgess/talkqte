@@ -74,14 +74,36 @@ if (mode === 'prepare-failed') {
   });
 } else prepared();
 if (mode === 'duplicate') prepared();
-let partial = '';
+let partial = '',
+  inputBytes = 0,
+  commandIndex = 0,
+  reportedRead = false;
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk) => {
   partial += chunk;
+  inputBytes += Buffer.byteLength(chunk);
+  if (!reportedRead) {
+    emit('transport_progress', {
+      step: 'read',
+      command: 'none',
+      commandIndex: 0,
+      bytesRead: inputBytes,
+    });
+    reportedRead = true;
+  }
   for (let end; (end = partial.indexOf('\n')) !== -1;) {
     const f = JSON.parse(partial.slice(0, end));
     partial = partial.slice(end + 1);
+    commandIndex++;
+    const diagnostic = {
+      command: f.type,
+      commandIndex: mode === 'bad-transport' ? 5 : commandIndex,
+      bytesRead: inputBytes,
+    };
+    emit('transport_progress', { ...diagnostic, step: 'parsed' });
+    emit('transport_progress', { ...diagnostic, step: 'applied' });
     if (f.type === 'clock_probe') {
+      if (mode === 'no-clock') continue;
       const clockTicks = process.hrtime.bigint();
       emit('clock_sample', {
         probeId: f.probeId,

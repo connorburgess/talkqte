@@ -566,3 +566,30 @@ for (const fixtureCase of [
     assert.ok(player.diagnostics.preparationProgressCount <= 12);
   });
 }
+
+test('clock transport diagnostics survive deadline and allow independent late Stop acknowledgement', async () => {
+  const player = createLabPlayerFixture({
+    ...fixtureOptions,
+    fixtureCase: 'no-clock',
+  });
+  await assert.rejects(player.prepare({ media }));
+  await assert.rejects(player.close({ nativeReleased: true }));
+  const d = player.diagnostics;
+  assert.equal(d.failure.category, 'deadline');
+  assert.equal(d.transport.clockProbeQueued, true);
+  assert.equal(d.transport.clockProbeParsed, true);
+  assert.equal(d.transport.clockProbeApplied, true);
+  assert.equal(d.transport.clockSampleReceived, false);
+  assert.equal(d.transport.stoppedAcknowledged, true);
+  assert.equal(d.process.exitCode, 0); // Acknowledged retirement is distinct from failed-run cleanup result.
+});
+test('unbounded control diagnostics fail protocol without replacing first failure', async () => {
+  const player = createLabPlayerFixture({
+    ...fixtureOptions,
+    fixtureCase: 'bad-transport',
+  });
+  await assert.rejects(player.prepare({ media }));
+  await assert.rejects(player.close({ nativeReleased: true }));
+  assert.equal(player.diagnostics.failure.category, 'protocol');
+  assert.equal(player.diagnostics.transport.parsedCommands, 0);
+});
