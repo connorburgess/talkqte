@@ -214,7 +214,8 @@ export function createLabPlaybackSession({
     throw gateFailure('protocol');
   }
   const onAbort = () => fail('cancelled');
-  const onRunAbort = () => fail('protocol');
+  const onRunAbort = () =>
+    fail(run.signal.reason === 'cancelled' ? 'cancelled' : 'protocol');
   run.signal.addEventListener('abort', onRunAbort, { once: true });
   signal?.addEventListener('abort', onAbort, { once: true });
   const timer = setTimeout(() => fail('deadline'), takeMs);
@@ -378,7 +379,7 @@ export function createLabPlaybackSession({
     },
   );
   done.catch(() => {});
-  if (signal?.aborted) fail();
+  if (signal?.aborted) fail('cancelled');
 
   function close() {
     if (closing) return closing;

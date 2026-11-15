@@ -21,6 +21,13 @@ const deferred = () => {
   });
   return { promise, resolve };
 };
+async function waitForTrace(fixture, entry) {
+  const until = performance.now() + 1000;
+  while (!fixture.trace.includes(entry)) {
+    assert.ok(performance.now() < until, `Missing stand-in event ${entry}`);
+    await delay(1);
+  }
+}
 const media = {
   fictional: true,
   path: '/fictional/prepared.mp4',
@@ -278,7 +285,15 @@ function fixture({
           },
         });
         const completed = await playback;
-        await evaluated.promise;
+        const aborted = deferred();
+        const onAbort = () => aborted.resolve();
+        options.signal.addEventListener('abort', onAbort, { once: true });
+        try {
+          if (!options.signal.aborted)
+            await Promise.race([evaluated.promise, aborted.promise]);
+        } finally {
+          options.signal.removeEventListener('abort', onAbort);
+        }
         return completed;
       },
     };
@@ -287,7 +302,7 @@ function fixture({
     player.close = async ({ nativeReleased }) => {
       assert.equal(nativeReleased, true);
       trace.push('player-retired');
-      assert.ok(trace.includes('native-released'));
+      assert.ok(!trace.includes('launch') || trace.includes('native-released'));
       assert.ok(trace.includes('recorder-stop'));
       if (playerRetirementFails) throw Error('fictional retirement failure');
       return { closed: !playerRetirementUnconfirmed };
@@ -569,6 +584,56 @@ test('different authenticated session cannot dispatch or complete the strict mod
   const f = fixture({ fixedModel: true, helloSession: '2' });
   await assert.rejects(f.take.done);
   assert.equal(f.counts.requests, 0);
+  assert.equal(f.counts.nativeStop, 1);
+  assert.equal(f.counts.providerClose, 1);
+});
+for (const name of ['SIGINT', 'SIGTERM']) {
+  test(`host ${name} after validated quiet remains cancelled with once-only cleanup`, async () => {
+    const records = [];
+    const pendingPlayback = deferred();
+    const f = fixture({
+      fixedModel: true,
+      playbackWait: pendingPlayback.promise,
+      observe: (e) => records.push(e),
+    });
+    await waitForTrace(f, 'validated-quiet');
+    f.events.emit(name);
+    await assert.rejects(f.take.done, { category: 'cancelled' });
+    assert.equal(records.at(-1).outcome, 'cancelled');
+    assert.equal(f.counts.nativeStop, 1);
+    assert.equal(f.counts.playerStop, 1);
+    assert.equal(f.counts.recorderStop, 1);
+    assert.equal(f.counts.providerClose, 1);
+  });
+}
+test('pre-aborted outer signal remains cancelled without model dispatch', async () => {
+  const signal = AbortSignal.abort();
+  const records = [];
+  const f = fixture({
+    fixedModel: true,
+    initialSignal: signal,
+    observe: (e) => records.push(e),
+  });
+  await assert.rejects(f.take.done, { category: 'cancelled' });
+  assert.equal(records.at(-1).outcome, 'cancelled');
+  assert.equal(f.counts.requests, 0);
+  assert.equal(f.counts.playerStop, 1);
+  assert.equal(f.counts.recorderStop, 1);
+});
+test('actual source failure stays first cause when host cancellation follows', async () => {
+  const records = [],
+    pendingPlayback = deferred();
+  const f = fixture({
+    fixedModel: true,
+    playbackWait: pendingPlayback.promise,
+    observe: (e) => records.push(e),
+  });
+  await waitForTrace(f, 'validated-quiet');
+  f.failSource();
+  await delay(0);
+  f.events.emit('SIGINT');
+  await assert.rejects(f.take.done, { category: 'protocol' });
+  assert.equal(records.at(-1).outcome, 'failure');
   assert.equal(f.counts.nativeStop, 1);
   assert.equal(f.counts.providerClose, 1);
 });
