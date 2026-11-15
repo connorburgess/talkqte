@@ -211,8 +211,14 @@ fn expire(h: &mut Harness, link: &Lifecycle) {
         link.verdicts.lock().unwrap().last(),
         Some(&Settlement::Expired)
     );
+    // The timed-out call has returned once the worker is idle or has already
+    // taken the waiting speech; waiting for idle alone races that dispatch.
+    let sent = h.engine.evaluation.as_ref().unwrap().requests_sent;
     reply(h, "show", Some("Who owns the checklist?"));
-    until(h, |e| !e.evaluation.as_ref().unwrap().worker.is_busy());
+    until(h, |e| {
+        let state = e.evaluation.as_ref().unwrap();
+        !state.worker.is_busy() || state.requests_sent > sent
+    });
 }
 #[test]
 fn lab_timeout_is_no_decision_in_time_and_the_run_continues() {
