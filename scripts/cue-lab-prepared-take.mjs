@@ -4,6 +4,7 @@ import { isAbsolute } from 'node:path';
 import { createLabNativeOwner } from './cue-lab-native-owner.mjs';
 import { createLabRun } from './cue-lab-run.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
+import { LAB_PLAYER_MEDIA_SHA256 } from './cue-lab-player.mjs';
 
 const required = (condition) => {
   if (!condition) throw gateFailure('protocol');
@@ -11,6 +12,22 @@ const required = (condition) => {
 export function createPreparedTake(options) {
   required(options?.body === undefined);
   return createLabPlaybackSession(options);
+}
+
+// Fixed saved-meeting model recording. It shares the existing provider/broker
+// owner; this wrapper cannot create a second gate, retry or change the media.
+export function createFixedModelTake(options) {
+  required(
+    options?.body === undefined &&
+      options?.settings?.provider === 'codex' &&
+      options.settings.model === 'gpt-6.1-sol' &&
+      options.settings.effort === 'medium' &&
+      options.settings.maxCalls === 20 &&
+      options.stopAfterS === 110 &&
+      options.media?.sha256 === LAB_PLAYER_MEDIA_SHA256 &&
+      options.media.durationMs === 102480,
+  );
+  return createPreparedTake({ ...options, fixedSource: true });
 }
 
 // Adaptive follow-up may reuse ownership with an explicitly labelled neutral
@@ -32,6 +49,12 @@ export function createLabPlaybackSession({
   armingMs = 5000,
   nativeReleaseMs = 6000,
   takeMs = 135000,
+  fixedSource = false,
+  recorderMs = 3000,
+  startBudgetMs = 1000,
+  completionReserveMs = 1000,
+  observe,
+  onGuard,
 } = {}) {
   required(
     launcher &&
@@ -59,6 +82,47 @@ export function createLabPlaybackSession({
       (body === undefined ||
         (typeof body === 'function' && typeof body.close === 'function')),
   );
+  required(
+    (observe === undefined || typeof observe === 'function') &&
+      (onGuard === undefined || typeof onGuard === 'function'),
+  );
+  const checkSource = () => {
+    if (!fixedSource) return;
+    required(
+      !body &&
+        source.mode === 'v1' &&
+        launcher.mode === 'model-enabled' &&
+        player.identity?.runId === runId &&
+        launcher.playerSource === player.identity &&
+        recorder.playerSource === player.identity &&
+        typeof player.close === 'function' &&
+        Number.isSafeInteger(player.startDeadlineMs) &&
+        player.startDeadlineMs > 0 &&
+        player.startDeadlineMs <= startBudgetMs &&
+        Number.isSafeInteger(recorderMs) &&
+        recorderMs >= 1 &&
+        recorderMs <= 3000 &&
+        Number.isSafeInteger(startBudgetMs) &&
+        startBudgetMs >= 1 &&
+        startBudgetMs <= 1000 &&
+        Number.isSafeInteger(completionReserveMs) &&
+        completionReserveMs >= 1000 &&
+        completionReserveMs <= 3000,
+    );
+  };
+  checkSource();
+  const report = (stage, outcome = 'observed', ids = {}, timing) =>
+    observe?.({
+      stage,
+      outcome,
+      ids,
+      timing: timing ?? {
+        clockId: 'node',
+        atMs: performance.now(),
+        uncertaintyMs: 0,
+        basis: 'receipt',
+      },
+    });
   if (body)
     required(
       media.purpose === 'neutral-calibration' &&
@@ -77,6 +141,8 @@ export function createLabPlaybackSession({
     work,
     startObserved = false,
     launchInfo;
+  let nativeStartedAt,
+    guard = null;
   let resolveArmed, rejectArmed;
   const armed = new Promise((yes, no) => {
     resolveArmed = yes;
@@ -100,6 +166,9 @@ export function createLabPlaybackSession({
     async start(options) {
       launchInfo = { runId: options.runId };
       try {
+        checkSource();
+        nativeStartedAt = performance.now();
+        report('run.started');
         await owner.start(options);
         resolveArmed();
       } catch {
@@ -110,9 +179,11 @@ export function createLabPlaybackSession({
     stop: owner.stop,
   };
   const subscriptions = [];
-  const fail = () => {
+  const fail = (reason = 'protocol') => {
     if (closing) return;
-    failure ??= 'cancelled';
+    failure ??= ['cancelled', 'deadline', 'protocol'].includes(reason)
+      ? reason
+      : 'protocol';
     void close().catch(() => {});
   };
   // Notifications can re-enter cleanup synchronously; close reserves its promise
@@ -142,10 +213,11 @@ export function createLabPlaybackSession({
     launcher.close();
     throw gateFailure('protocol');
   }
-  const onAbort = () => fail();
-  run.signal.addEventListener('abort', onAbort, { once: true });
+  const onAbort = () => fail('cancelled');
+  const onRunAbort = () => fail('protocol');
+  run.signal.addEventListener('abort', onRunAbort, { once: true });
   signal?.addEventListener('abort', onAbort, { once: true });
-  const timer = setTimeout(fail, takeMs);
+  const timer = setTimeout(() => fail('deadline'), takeMs);
   work = Promise.resolve().then(async () => {
     if (root.signal.aborted) throw gateFailure('cancelled');
     const verified = await player.prepare({
@@ -157,6 +229,7 @@ export function createLabPlaybackSession({
         (k) => verified?.[k] === identity[k],
       ),
     );
+    checkSource();
     await armed;
     if (root.signal.aborted) throw gateFailure('cancelled');
     const listening = await source.waitListening({
@@ -172,14 +245,49 @@ export function createLabPlaybackSession({
       );
       run.expectSourceSession(listening.sessionId);
     }
+    if (fixedSource)
+      required(listening.source?.application === 'TalkQTE Lab Player');
+    report('source.listening', 'observed', { sessionId: listening.sessionId });
     if (root.signal.aborted) throw gateFailure('cancelled');
-    const recording = await recorder.start({
-      media: identity,
-      ...launchInfo,
-      signal: root.signal,
-    });
+    const recordTimer = fixedSource
+      ? setTimeout(() => fail('deadline'), recorderMs)
+      : undefined;
+    let recording;
+    try {
+      // On expiry root Stop aborts the adapter; retain ownership of its startup
+      // until it settles, rather than detaching a late recorder after a race.
+      recording = await recorder.start({
+        media: identity,
+        ...launchInfo,
+        signal: root.signal,
+      });
+    } finally {
+      clearTimeout(recordTimer);
+    }
     required(recording?.started === true);
+    report('recorder.frame-accepted');
     if (root.signal.aborted) throw gateFailure('cancelled');
+    if (fixedSource) {
+      const sourceDeadline = nativeStartedAt + 110000;
+      const startRequestAt = performance.now();
+      required(
+        startRequestAt +
+          startBudgetMs +
+          identity.durationMs +
+          completionReserveMs <=
+          sourceDeadline,
+      );
+      guard = Object.freeze({
+        nativeStartedAt,
+        sourceDeadline,
+        startRequestAt,
+        startBudgetMs,
+        mediaDurationMs: identity.durationMs,
+        completionReserveMs,
+        remainingAtRequestMs: sourceDeadline - startRequestAt,
+      });
+      onGuard?.(guard);
+    }
     phase = 'playing';
     // Start the actual voiced file BEFORE lazy native authentication/ready.
     // The adapter reports its actual audio-clock start, never request/receipt time.
@@ -196,10 +304,47 @@ export function createLabPlaybackSession({
                 (!body || anchor.displayLabel === identity.displayLabel),
             );
             startObserved = true;
+            if (fixedSource) {
+              required(
+                anchor.basis === 'audio-render' &&
+                  Number.isFinite(anchor.monotonicMs) &&
+                  anchor.monotonicMs >= nativeStartedAt &&
+                  anchor.monotonicMs <= performance.now() &&
+                  Number.isFinite(anchor.uncertaintyMs) &&
+                  anchor.uncertaintyMs >= 0 &&
+                  anchor.uncertaintyMs <= 100 &&
+                  anchor.monotonicMs +
+                    anchor.uncertaintyMs +
+                    identity.durationMs +
+                    completionReserveMs <=
+                    guard.sourceDeadline,
+              );
+              guard = Object.freeze({
+                ...guard,
+                actualAnchorMs: anchor.monotonicMs,
+                actualUncertaintyMs: anchor.uncertaintyMs,
+                remainingAtAnchorMs:
+                  guard.sourceDeadline -
+                  anchor.monotonicMs -
+                  anchor.uncertaintyMs,
+              });
+              onGuard?.(guard);
+            }
             run.acknowledgePlaybackStart({
               monotonicMs: anchor.monotonicMs,
               uncertaintyMs: anchor.uncertaintyMs,
             });
+            report(
+              'speech.render-start',
+              'observed',
+              {},
+              {
+                clockId: 'node',
+                atMs: anchor.monotonicMs,
+                uncertaintyMs: anchor.uncertaintyMs,
+                basis: 'event',
+              },
+            );
           } catch {
             fail();
           }
@@ -211,6 +356,7 @@ export function createLabPlaybackSession({
           result?.completed === true &&
           result.sha256 === identity.sha256,
       );
+      report('speech.render-end');
     });
     await Promise.all([playback, run.ready]);
     if (root.signal.aborted) throw gateFailure('cancelled');
@@ -226,8 +372,8 @@ export function createLabPlaybackSession({
   run.ready.catch(fail);
   const done = work.then(
     () => close(),
-    () => {
-      failure ??= 'cancelled';
+    (error) => {
+      failure ??= error?.category === 'deadline' ? 'deadline' : 'protocol';
       return close();
     },
   );
@@ -303,19 +449,36 @@ export function createLabPlaybackSession({
       }
       clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
-      run.signal.removeEventListener('abort', onAbort);
+      run.signal.removeEventListener('abort', onRunAbort);
       phase = cleanupFailed
         ? 'failed-cleanup'
         : failure || !normal
           ? 'stopped'
           : 'completed';
+      try {
+        report(
+          'run.ended',
+          cleanupFailed
+            ? 'failure'
+            : failure === 'cancelled'
+              ? 'cancelled'
+              : failure || !normal
+                ? 'failure'
+                : 'observed',
+        );
+      } catch {
+        cleanupFailed = true;
+        phase = 'failed-cleanup';
+      }
       if (cleanupFailed) throw gateFailure('cleanup');
-      if (failure || !normal) throw gateFailure('cancelled');
+      if (failure || !normal) throw gateFailure(failure ?? 'cancelled');
       return Object.freeze({
         completed: true,
         nativeReleased: true,
         dispatchesUsed: run.dispatchesUsed,
         mediaSha256: identity.sha256,
+        guard,
+        clockCalibration: run.clockCalibration,
       });
     })().then(resolve, reject);
     return closing;
@@ -328,6 +491,15 @@ export function createLabPlaybackSession({
     },
     get phase() {
       return phase;
+    },
+    get guard() {
+      return guard;
+    },
+    get dispatchesUsed() {
+      return run.dispatchesUsed;
+    },
+    get clockCalibration() {
+      return run.clockCalibration;
     },
   });
 }

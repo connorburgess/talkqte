@@ -59,6 +59,7 @@ export function createLabRun({
     closing = null,
     terminal = null,
     expectedSourceSession = null,
+    clockCalibration = null,
     playback = null,
     playbackResolve,
     unsubscribe = () => {},
@@ -124,6 +125,7 @@ export function createLabRun({
       calibrated.sessionId !== expectedSourceSession
     )
       throw gateFailure('protocol');
+    clockCalibration = Object.freeze({ ...calibrated });
     await Promise.race([played, stopped]);
     if (root.signal.aborted || broker.gate.terminal)
       throw gateFailure('cancelled');
@@ -222,6 +224,9 @@ export function createLabRun({
     },
     get dispatchesUsed() {
       return broker?.gate.dispatchesUsed ?? 0;
+    },
+    get clockCalibration() {
+      return clockCalibration;
     },
     expectSourceSession(value) {
       if (
