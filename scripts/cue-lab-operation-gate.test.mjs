@@ -350,3 +350,39 @@ test('a new evaluator waits behind a retired one; if retired while waiting it sp
   assert.equal(gate.dispatchesUsed, 2);
   await gate.close();
 });
+
+test('a queued evaluator retired while waiting frees the queue for the next one at once', async () => {
+  let n = 0;
+  let releaseFirst;
+  const { gate } = setup({
+    request: ({ signal }) => {
+      n++;
+      if (n === 1)
+        return new Promise((_, reject) => {
+          signal.addEventListener('abort', () => {
+            releaseFirst = () =>
+              reject(Object.assign(new Error('f'), { category: 'cancelled' }));
+          });
+        });
+      return Promise.resolve({ value: {} });
+    },
+  });
+  const run = (options) =>
+    gate.run(() => gate.request(req('cue-evaluator')), {
+      role: 'cue-evaluator',
+      scoped: true,
+      ...options,
+    });
+  const first = run({ deadlineMs: 10 });
+  await delay(30);
+  const second = run({ deadlineMs: 10 });
+  await assert.rejects(second, (e) => e.scoped === true);
+  // The first lease is still settling; a third request must still queue.
+  const third = run({});
+  releaseFirst();
+  await assert.rejects(first, (e) => e.scoped === true);
+  assert.deepEqual(await third, { value: {} });
+  assert.equal(gate.terminal, null);
+  assert.equal(gate.dispatchesUsed, 2);
+  await gate.close();
+});

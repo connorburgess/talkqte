@@ -1001,7 +1001,7 @@ test('a request deadline during the fixed model take is recorded and the take co
     assert.ok(f.trace.includes('validated-quiet'));
     const summary = f.take.evaluationSummary;
     assert.equal(summary.deadlineByBroker, 1);
-    assert.equal(summary.results, 1);
+    assert.equal(summary.resultsSent, 1);
     assert.equal(summary.resultActions.quiet, 1);
     assert.equal(f.counts.providerClose, 1);
   } finally {

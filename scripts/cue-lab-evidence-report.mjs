@@ -387,8 +387,7 @@ export function importNativeRows(rows, { runId, artifactId, clockId }) {
           if (
             lag.length !== 3 ||
             !DECISION_ACTIONS.has(r.outcome) ||
-            !text(String(r.through_segment), 160) ||
-            typeof r.through_segment !== 'string' ||
+            !text(r.through_segment, 160) ||
             !Number.isSafeInteger(r.lag_lines) ||
             r.lag_lines < 0 ||
             !Number.isSafeInteger(r.lag_ms) ||
@@ -956,7 +955,7 @@ export function renderEvidenceMarkdown(r, { recordingHref } = {}) {
     ),
     '',
     r.evaluations.some((e) => e.staleness)
-      ? 'Lab decisions may be applied to a transcript that grew while the model replied (bounded staleness, within the 8 s deadline). Lines and ms behind show how far each applied decision lagged the newest speech; a cue can reflect speech that newer lines already answered.'
+      ? 'Lab decisions may be applied to a transcript that grew while the model replied (bounded staleness, within the native evaluator deadline). Lines and ms behind show how far each applied decision lagged the newest speech; a cue can reflect speech that newer lines already answered.'
       : 'No applied decision reported staleness fields.',
     '',
     '| Cue / declared decider | Publication / paint | Validated → published | Visible duration | Heard end → paint | Evaluated through / lines behind / ms behind |',

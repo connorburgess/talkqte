@@ -234,7 +234,7 @@ export async function openLabBroker({
   const retiredRequests = new Set();
   const evaluations = {
     requested: 0,
-    results: 0,
+    resultsSent: 0,
     deadlineByBroker: 0,
     deadlineByNative: 0,
     verdicts: { current: 0, staleSuccess: 0, expired: 0, failed: 0 },
@@ -353,7 +353,11 @@ export async function openLabBroker({
             throw gateFailure('invalid-reply');
           }
           const elapsedMs = Math.ceil(performance.now() - started);
-          if (elapsedMs > frame.budgetMs) throw gateFailure('deadline');
+          // Over budget by rounding or timer order: retire this request only.
+          if (elapsedMs > frame.budgetMs) {
+            operation.controller.abort();
+            throw gateFailure('cancelled');
+          }
           const usage = Object.fromEntries(
             [
               'input_tokens',
@@ -377,7 +381,7 @@ export async function openLabBroker({
             usage,
           });
           operation.resultSent = true;
-          evaluations.results++;
+          evaluations.resultsSent++;
           evaluations.resultActions[result.value.action]++;
           await gate.settle(() => ack, { deadlineMs: 1000 });
           return result;

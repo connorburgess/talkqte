@@ -1129,7 +1129,7 @@ test('a broker lease deadline fails only that request and the next request is ev
     const summary = ctx.broker.evaluationSummary;
     assert.equal(summary.deadlineByBroker, 1);
     assert.equal(summary.deadlineByNative, 0);
-    assert.equal(summary.results, 1);
+    assert.equal(summary.resultsSent, 1);
     assert.equal(summary.resultActions.quiet, 1);
     assert.equal(summary.verdicts.current, 1);
   } finally {
@@ -1175,7 +1175,7 @@ test('a native deadline cancel while awaiting settlement retires that request', 
     ctx.settle('2');
     await ctx.broker.gate.waitIdle();
     assert.equal(ctx.broker.gate.terminal, null);
-    assert.equal(ctx.broker.evaluationSummary.results, 2);
+    assert.equal(ctx.broker.evaluationSummary.resultsSent, 2);
   } finally {
     await ctx.close();
   }

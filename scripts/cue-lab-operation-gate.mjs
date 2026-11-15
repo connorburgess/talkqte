@@ -186,6 +186,12 @@ export function createLabOperationGate({
       if (terminal || lease.retired) return;
       lease.retired = reason;
       lease.controller.abort();
+      // A queued lease retired while waiting leaves the queue at once, so the
+      // next evaluator can queue behind the settling one.
+      if (pending === lease) {
+        pending = null;
+        lease.leaveQueue?.();
+      }
       try {
         onRetire?.(reason);
       } catch {
@@ -206,8 +212,12 @@ export function createLabOperationGate({
       if (active) {
         pending = lease;
         const previous = active;
-        await previous.finished;
+        await Promise.race([
+          previous.finished,
+          new Promise((resolve) => (lease.leaveQueue = resolve)),
+        ]);
         if (terminal) throw gateFailure(terminal);
+        if (lease.retired) throw gateFailure(lease.retired);
         pending = null;
       }
       active = lease;

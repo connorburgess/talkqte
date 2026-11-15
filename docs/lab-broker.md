@@ -108,14 +108,16 @@ run. A native `cancel` with reason `deadline` and the request identity does the
 same without a reply. A `settled` verdict of `expired` (a result read after the
 native deadline, never applied) is also not terminal. Late `cancel` frames for a
 request already retired this way are ignored; any other unknown request is a
-protocol failure. Each retired request has spent its dispatch, so repeated
-deadlines end the run at the dispatch cap. An unconfirmed provider process-group
+protocol failure. A request retired after dispatch has spent its dispatch, so
+repeated timeouts end the run at the dispatch cap; one retired while still
+queued spends none. A missing settlement within one second of a sent result
+stays terminal. An unconfirmed provider process-group
 retirement, every other `cancel` reason and every other `failed` code stay
 terminal.
 
-`evaluationSummary` reports content-free counts: requests, results and their
-fixed actions, deadlines retired by the broker or by native, and settlement
-verdicts.
+`evaluationSummary` reports content-free event counts, not a partition:
+requests, results sent and their fixed actions, deadlines retired by the broker
+or by native (a sent result can later be retired), and settlement verdicts.
 
 ## Observed cues and clocks
 
