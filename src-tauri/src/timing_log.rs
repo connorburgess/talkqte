@@ -138,6 +138,15 @@ pub enum Event {
         failure: Option<&'static str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         action: Option<&'static str>,
+        /// Lab only, on an applied decision: the newest transcript line it
+        /// was evaluated through (`segment.id`), and how many lines and how
+        /// much session time had arrived after that line when it was applied.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        through_segment: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        lag_lines: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        lag_ms: Option<u64>,
         elapsed_ms: u64,
     },
     /// A cue is in the snapshot sent to the companion window. The log cannot
@@ -674,7 +683,22 @@ mod tests {
                 latency_ms: 8_000,
                 failure: Some("timeout"),
                 action: Some("quiet"),
+                through_segment: None,
+                lag_lines: None,
+                lag_ms: None,
                 elapsed_ms: 8_200,
+            },
+            Event::EvaluationResult {
+                session: 3,
+                request: 2,
+                outcome: "show",
+                latency_ms: 6_250,
+                failure: None,
+                action: None,
+                through_segment: Some("w4".into()),
+                lag_lines: Some(2),
+                lag_ms: Some(6_000),
+                elapsed_ms: 15_000,
             },
         ]
         .iter()
@@ -687,6 +711,10 @@ mod tests {
         assert_eq!(lines[2]["event"], "evaluation_result");
         assert_eq!(lines[2]["failure"], "timeout");
         assert_eq!(lines[2]["action"], "quiet");
+        assert!(lines[2].get("lag_ms").is_none());
+        assert_eq!(lines[3]["through_segment"], "w4");
+        assert_eq!(lines[3]["lag_lines"], 2);
+        assert_eq!(lines[3]["lag_ms"], 6_000);
         for value in &lines {
             assert_eq!(value["wall_ms"], 1);
             assert_eq!(value["mono_ms"], 2);

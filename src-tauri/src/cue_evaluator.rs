@@ -203,11 +203,6 @@ impl Request {
         Ok(self)
     }
 
-    #[cfg(any(test, feature = "lab-evaluator"))]
-    #[allow(
-        dead_code,
-        reason = "native facade activation and API usage vary by build/test configuration"
-    )]
     pub(crate) fn session_id(&self) -> u64 {
         self.session
     }

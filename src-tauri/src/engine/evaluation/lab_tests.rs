@@ -55,7 +55,7 @@ fn reply(h: &Harness, action: &str, cue: Option<&str>) {
         .unwrap();
 }
 #[test]
-fn continuous_speech_keeps_original_running_discards_stale_and_only_dispatches_latest() {
+fn continuous_speech_keeps_original_running_applies_its_prefix_reply_and_dispatches_latest() {
     let mut h = Harness::new();
     let link = lab(&mut h);
     h.line("Who owns the fictional checklist?");
@@ -66,7 +66,11 @@ fn continuous_speech_keeps_original_running_discards_stale_and_only_dispatches_l
     assert_eq!(link.cancelled.load(Ordering::Acquire), 0);
     assert_eq!(h.engine.evaluation.as_ref().unwrap().requests_sent, 1);
     assert!(h.requests.try_recv().is_err());
+    // Speech only grew while it was pending, so the reply still applies.
     reply(&h, "show", Some("Who owns the checklist?"));
+    until(&mut h, |e| e.state.cue.is_some());
+    assert_eq!(*link.verdicts.lock().unwrap(), vec![Settlement::Current]);
+    // Newer speech is checked next, with the lagged cue as the existing cue.
     until(&mut h, |e| {
         e.evaluation.as_ref().unwrap().requests_sent == 2
     });
@@ -76,40 +80,57 @@ fn continuous_speech_keeps_original_running_discards_stale_and_only_dispatches_l
         .sources()
         .iter()
         .any(|s| s.id == "transcript:line-20"));
-    assert!(!latest.sources().iter().any(|s| s.id == "transcript:line-1"));
-    assert!(h.engine.state.cue.is_none());
-    assert_eq!(
-        *link.verdicts.lock().unwrap(),
-        vec![Settlement::StaleSuccess]
-    );
-    h.replies.send(serde_json::json!({"action":"show","cue":"What is the agreed handoff?","sourceIds":["transcript:line-20"]}).to_string()).unwrap();
-    until(&mut h, |e| e.state.cue.is_some());
+    assert!(latest.existing_cue().is_some());
+    reply(&h, "quiet", None);
+    until(&mut h, |e| e.evaluation.as_ref().unwrap().pending.is_none());
     assert_eq!(link.cancelled.load(Ordering::Acquire), 0);
-    assert_eq!(h.engine.evaluation.as_ref().unwrap().requests_sent, 2);
-    assert_eq!(
-        link.verdicts.lock().unwrap().last(),
-        Some(&Settlement::Current)
-    );
     h.engine.advance(100);
     assert!(h.requests.try_recv().is_err());
 }
 #[test]
-fn newer_answer_cannot_be_overridden_by_stale_show_or_quiet() {
-    for action in ["show", "quiet"] {
+fn a_lagged_cue_is_shown_and_the_next_reply_can_resolve_it() {
+    let mut h = Harness::new();
+    let link = lab(&mut h);
+    h.line("Who owns the fictional checklist?");
+    h.request();
+    h.line("Maya owns the checklist; that question is answered.");
+    reply(&h, "show", Some("Who owns the checklist?"));
+    until(&mut h, |e| e.state.cue.is_some());
+    until(&mut h, |e| {
+        e.evaluation.as_ref().unwrap().requests_sent == 2
+    });
+    let next = h.request();
+    assert!(next.existing_cue().is_some());
+    assert!(next.sources().iter().any(|s| s.id == "transcript:line-2"));
+    h.replies
+        .send(
+            serde_json::json!({"action":"resolved","cue":null,"sourceIds":["transcript:line-2"]})
+                .to_string(),
+        )
+        .unwrap();
+    until(&mut h, |e| {
+        e.evaluation_status() == Some(EvaluationStatus::Decided(EvaluationOutcome::Resolved))
+    });
+    assert_eq!(
+        *link.verdicts.lock().unwrap(),
+        vec![Settlement::Current, Settlement::Current]
+    );
+}
+#[test]
+fn an_edited_or_removed_line_makes_the_reply_stale() {
+    for remove in [false, true] {
         let mut h = Harness::new();
         let link = lab(&mut h);
         h.line("Who owns the fictional checklist?");
         h.request();
-        h.line("Maya owns the checklist; that question is answered.");
-        reply(
-            &h,
-            action,
-            (action == "show").then_some("Who owns the checklist?"),
-        );
-        until(&mut h, |e| {
-            e.evaluation.as_ref().unwrap().requests_sent == 2
-        });
-        h.request();
+        h.line("The meeting continues.");
+        if remove {
+            h.engine.state.transcript.remove(0);
+        } else {
+            h.engine.state.transcript[0].text = "Who owns the fictional budget?".into();
+        }
+        reply(&h, "show", Some("Who owns the checklist?"));
+        until(&mut h, |_| !link.verdicts.lock().unwrap().is_empty());
         assert!(h.engine.state.cue.is_none());
         assert_eq!(
             *link.verdicts.lock().unwrap(),
@@ -118,6 +139,45 @@ fn newer_answer_cannot_be_overridden_by_stale_show_or_quiet() {
         h.engine.revoke_processing();
         reply(&h, "quiet", None);
     }
+}
+#[test]
+fn prefix_lag_is_measured_and_a_changed_existing_cue_is_stale() {
+    let mut h = Harness::new();
+    lab(&mut h);
+    h.line("Who owns the fictional checklist?");
+    let submitted = h.request();
+    h.line("Still discussing it.");
+    h.line("And the venue.");
+    let current = h.engine.evaluation_request().unwrap().unwrap();
+    let lag = h.engine.lab_lag(&submitted, &current).unwrap();
+    assert_eq!(lag.through_segment, "line-1");
+    assert_eq!(lag.lines, 2);
+    assert_eq!(lag.ms, 20);
+    // The same lines with a different existing cue never apply.
+    let with_cue = Request::new(
+        current.session_id(),
+        current.context_revision(),
+        current.sources().to_vec(),
+        Some(crate::cue_evaluator::ExistingCue {
+            id: "fictional-cue".into(),
+            text: "Who owns the checklist?".into(),
+            source_ids: vec!["transcript:line-1".into()],
+        }),
+    )
+    .unwrap();
+    assert!(h.engine.lab_lag(&submitted, &with_cue).is_none());
+    h.replies.send("{}".into()).unwrap();
+}
+#[test]
+fn a_prefix_reply_past_the_deadline_is_never_applied() {
+    let mut h = Harness::with_budget(Duration::from_millis(100));
+    let link = lab(&mut h);
+    h.line("Who owns the fictional checklist?");
+    h.request();
+    h.line("The meeting continues.");
+    expire(&mut h, &link);
+    assert!(h.engine.state.cue.is_none());
+    assert_eq!(*link.verdicts.lock().unwrap(), vec![Settlement::Expired]);
 }
 #[test]
 fn malformed_stale_reply_is_terminal_before_latest_dispatch() {
