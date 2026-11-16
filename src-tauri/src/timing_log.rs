@@ -193,6 +193,21 @@ pub enum Event {
         live_operation: String,
         session: String,
     },
+    /// Development lab only: TalkQTE's own check of the pinned player
+    /// failed transiently (`failing`, with the check's name) or passed again
+    /// (`recovered`, after `after_ms`). A failure that lasts ends the source
+    /// with its own problem detail.
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    LabSourceCheck {
+        state: &'static str,
+        check: &'static str,
+        after_ms: u64,
+    },
     /// Lines lost since the last line written, because the queue was full
     /// or a write failed.
     Dropped { count: u64 },
