@@ -46,6 +46,10 @@ pub struct ProcessorConfiguration {
     effort: Option<String>,
     /// Whether this backend may be sent approved prior notes.
     pub(super) accepts_notes: bool,
+    /// Where the session's audio goes for transcription once this review is
+    /// approved, when a cloud transcription service is selected. Part of the
+    /// reviewed configuration, so the review names it as a destination.
+    pub(super) audio_destination: Option<String>,
 }
 
 impl ProcessorConfiguration {
@@ -74,6 +78,7 @@ impl ProcessorConfiguration {
             disclosure,
             effort: None,
             accepts_notes: true,
+            audio_destination: None,
         })
     }
 
@@ -81,6 +86,13 @@ impl ProcessorConfiguration {
     /// is refused, so the review cannot say a note will be sent.
     pub fn without_notes(mut self) -> Self {
         self.accepts_notes = false;
+        self
+    }
+
+    /// Names the service the session's audio is sent to for transcription
+    /// once this processor's review is approved.
+    pub fn with_audio_destination(mut self, destination: String) -> Self {
+        self.audio_destination = Some(destination);
         self
     }
 
@@ -134,6 +146,9 @@ pub(super) struct Permission {
 
 pub(super) struct Grant {
     session: u64,
+    /// The session time the grant was made. Cloud transcription never sends
+    /// audio captured before it.
+    approved_at_ms: u64,
     processor: ProcessorConfiguration,
     pub(super) after_ms: Option<u64>,
     pub(super) notes: Vec<Source>,
@@ -310,6 +325,7 @@ impl Engine {
         }
         self.evaluation.as_mut().unwrap().permission.grant = Some(Grant {
             session: review.session,
+            approved_at_ms: self.state.elapsed_ms,
             processor: review.processor,
             after_ms: match review.conversation {
                 ConversationScope::NewSpeechOnly => Some(self.state.elapsed_ms),
@@ -385,6 +401,42 @@ impl Engine {
             && self.evaluation.as_ref().is_some_and(|state| {
                 !state.lab_terminal && state.permission.valid(self.generation, &self.notes)
             })
+    }
+
+    /// Cloud transcription's gate: the session time of a grant the person
+    /// made in this session's own review, while it holds. A grant from a
+    /// launch setting never opens it, so audio is never sent without a
+    /// review shown in the app.
+    pub fn audio_approval(&self) -> Option<u64> {
+        if !self.has_processing_permission() {
+            return None;
+        }
+        let state = self.evaluation.as_ref()?;
+        if state.approval_by_setting {
+            return None;
+        }
+        state
+            .permission
+            .grant
+            .as_ref()
+            .map(|grant| grant.approved_at_ms)
+    }
+
+    /// Why an open cloud stream must stop sending now, if it must: the lab
+    /// run ended, or the review was withdrawn. A Stop in progress keeps it
+    /// sending, so the last captured audio is transcribed.
+    pub fn audio_withdrawal(&self) -> Option<&'static str> {
+        if self.audio_approval().is_some() || self.live_stopping {
+            return None;
+        }
+        if self
+            .evaluation
+            .as_ref()
+            .is_some_and(|state| state.lab_terminal)
+        {
+            return Some("lab_ended");
+        }
+        Some("withdrawn")
     }
 
     pub(in crate::engine) fn reconcile_processing_permission(&mut self) {

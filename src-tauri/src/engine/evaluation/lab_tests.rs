@@ -1,5 +1,5 @@
 //! Controlled offline providers; no native activation or subscription process.
-use super::tests::Harness;
+use super::tests::{Harness, OUTPUT_LIMIT, REFUSED};
 use super::*;
 use crate::cue_evaluator::{EvaluationLifecycle, Settlement};
 use std::sync::{
@@ -323,8 +323,12 @@ fn pause_cancels_immediately_and_resume_cannot_restart_strict_run() {
     let link = lab(&mut h);
     h.line("Who owns the fictional checklist?");
     h.request();
+    assert!(h.engine.audio_approval().is_some());
     h.engine.set_live_cues_paused(true).unwrap();
     assert_eq!(link.cancelled.load(Ordering::Acquire), 1);
+    // In the lab, Pause ends the run, and cloud transcription stops with
+    // that reason rather than as a withdrawn review.
+    assert_eq!(h.engine.audio_withdrawal(), Some("lab_ended"));
     h.engine.set_live_cues_paused(false).unwrap();
     h.line("New speech after resume.");
     assert!(!h.engine.has_processing_permission());
@@ -433,12 +437,79 @@ fn a_prefix_reply_completed_in_time_but_read_after_the_deadline_is_not_applied()
     h.line("Who owns the fictional checklist?");
     h.request();
     h.line("The meeting continues.");
-    // A valid reply to a transcript that has only grown is queued well before
-    // the deadline, but the engine does not poll until after it.
+    // A valid reply to a transcript that has only grown reaches the worker's
+    // channel before the deadline, but the engine does not poll until after.
+    let deadline = h
+        .engine
+        .evaluation
+        .as_ref()
+        .unwrap()
+        .worker
+        .pending_deadline()
+        .unwrap();
     reply(&h, "show", Some("Who owns the checklist?"));
-    std::thread::sleep(budget + Duration::from_millis(100));
+    while !h
+        .engine
+        .evaluation
+        .as_ref()
+        .unwrap()
+        .worker
+        .adapter_finished()
+    {
+        assert!(Instant::now() < deadline, "reply did not arrive in time");
+        std::thread::yield_now();
+    }
+    assert!(
+        Instant::now() < deadline,
+        "reply arrived after the deadline"
+    );
+    std::thread::sleep(
+        deadline.saturating_duration_since(Instant::now()) + Duration::from_millis(50),
+    );
     h.engine.advance(1);
     assert_eq!(*link.verdicts.lock().unwrap(), vec![Settlement::Expired]);
     assert!(h.engine.state.cue.is_none());
     assert!(h.engine.has_processing_permission());
+}
+#[test]
+fn a_refusal_or_output_limit_is_a_non_decision_and_the_run_continues() {
+    for sentinel in [REFUSED, OUTPUT_LIMIT] {
+        refused_and_continued(sentinel);
+    }
+}
+fn refused_and_continued(sentinel: &str) {
+    let mut h = Harness::new();
+    let link = lab(&mut h);
+    h.line("Who owns the fictional checklist?");
+    h.request();
+    h.line("Still discussing the checklist.");
+    h.replies.send(sentinel.into()).unwrap();
+    until(&mut h, |_| !link.verdicts.lock().unwrap().is_empty());
+    assert_eq!(*link.verdicts.lock().unwrap(), vec![Settlement::Retired]);
+    assert!(h.engine.has_processing_permission());
+    assert!(h.engine.state.cue.is_none());
+    assert!(!matches!(
+        h.engine.evaluation_status(),
+        Some(EvaluationStatus::Unavailable(_))
+    ));
+    assert_eq!(link.cancelled.load(Ordering::Acquire), 0);
+    // The waiting speech is evaluated next and a reply in time is applied.
+    until(&mut h, |e| {
+        e.evaluation.as_ref().unwrap().requests_sent == 2
+    });
+    h.request();
+    reply(&h, "quiet", None);
+    until(&mut h, |_| link.verdicts.lock().unwrap().len() == 2);
+    assert_eq!(link.verdicts.lock().unwrap()[1], Settlement::Current);
+}
+#[test]
+fn a_refusal_the_link_cannot_retire_ends_the_run() {
+    let mut h = Harness::new();
+    let link = lab(&mut h);
+    link.reject_ack.store(true, Ordering::Release);
+    h.line("Who owns the fictional checklist?");
+    h.request();
+    h.replies.send(REFUSED.into()).unwrap();
+    until(&mut h, |e| !e.has_processing_permission());
+    assert_eq!(*link.verdicts.lock().unwrap(), vec![Settlement::Retired]);
 }

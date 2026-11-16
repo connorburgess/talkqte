@@ -126,7 +126,9 @@ pub enum Event {
         elapsed_ms: u64,
     },
     /// What came back: `show`, `quiet`, `resolved`, `withdraw`, `failed`,
-    /// `stale` or `cancelled`, with a fixed failure code when it failed.
+    /// `stale`, `cancelled`, `refused` (the lab provider declined that one
+    /// request) or `output_limit` (its reply ran out of output room), with a
+    /// fixed failure code when it failed.
     /// `action` is the reply's action code when a decision arrived but was
     /// not applied: on `stale`, and on a `timeout` read after the deadline.
     EvaluationResult {
@@ -151,6 +153,30 @@ pub enum Event {
         #[serde(skip_serializing_if = "Option::is_none")]
         lag_ms: Option<u64>,
         elapsed_ms: u64,
+    },
+    /// Cloud transcription started (at review approval), finished, ended, or
+    /// stopped with a fixed failure code. `audio_ms` is audio sent so far.
+    SttState {
+        session: u64,
+        state: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<&'static str>,
+        audio_ms: u64,
+        /// On `connected` only: the query string of the URL the connection
+        /// actually used. The token is never in it; it travels in a header.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
+    },
+    /// A cloud transcription final, on the session clock. The provider's
+    /// speaker label is an untrusted guess, recorded here only: it is never
+    /// shown and never sent to a cue model. Its text is in the `segment` row.
+    SttFinal {
+        session: u64,
+        seq: u64,
+        start_ms: u64,
+        end_ms: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        untrusted_speaker: Option<u32>,
     },
     /// A cue is in the snapshot sent to the companion window. The log cannot
     /// see when the window paints it.
@@ -177,12 +203,12 @@ pub enum Event {
         detail: Option<String>,
     },
     /// An application source's run ended: why, if anything went wrong, and
-    /// how many chunks of its audio were transcribed.
+    /// how many final results its cloud stream returned.
     SourceEnded {
         application: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         problem: Option<String>,
-        recognized_chunks: Option<u64>,
+        transcribed_finals: Option<u64>,
     },
     /// Development builds only: the launch setting naming an application
     /// source acted. `step` is `acknowledged` (the setting stands for the
@@ -467,7 +493,7 @@ pub fn commit() -> &'static str {
 /// The Cargo features this build has, among those that change capture.
 pub fn features() -> Vec<&'static str> {
     [
-        ("local-whisper", cfg!(feature = "local-whisper")),
+        ("cloud-transcription", cfg!(feature = "cloud-transcription")),
         ("native-audio-spike", cfg!(feature = "native-audio-spike")),
         ("timing-log", cfg!(feature = "timing-log")),
         ("claude-cli", cfg!(feature = "claude-cli")),
@@ -615,7 +641,7 @@ impl Runtime {
     /// Its callers are the live sinks, which only some builds compile.
     #[cfg_attr(
         not(any(
-            feature = "local-whisper",
+            feature = "cloud-transcription",
             all(target_os = "macos", feature = "native-audio-spike"),
             test
         )),

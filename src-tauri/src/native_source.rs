@@ -1,25 +1,21 @@
 //! Development-only host loop for one selected application's audio. It runs on
 //! the worker that owns the native selection: measure and accept the clock
 //! (which attaches the source to the live session), begin the approved
-//! selection, then move blocks to chunks, a transcription worker and the
-//! runtime's source sink until native cleanup is released. Called only by the
+//! selection, then move blocks to a cloud transcription stream and its finals
+//! to the runtime's source sink until native cleanup is released. Called only by the
 //! development host in `application_audio_host`; nothing here was run against
 //! a device.
 
 use crate::{
     application_audio::{
         handoff::{Rejected, MAX_BLOCKS},
-        native::{
-            ClockBinding, NativeBlock, NativeChunk, NativeChunker, NativeOwner, NativeReader,
-            Selection, Stage, Status,
-        },
+        native::{ClockBinding, NativeBlock, NativeOwner, NativeReader, Selection, Stage, Status},
         timing::TimingError,
         Control, Failure, Start,
     },
-    live::WORKER_QUEUE,
     live_source::LineRefused,
     native_session_clock::{Measurement, Snapshot},
-    transcription::{Stats, Transcriber, Worker},
+    transcription::cloud::{CloudFeed, CloudStats, Opener},
     Runtime,
 };
 use std::{
@@ -84,13 +80,32 @@ pub(crate) enum Refused {
     Start(Failure),
 }
 
+/// Batches stream audio into about a second per `audio_received` row.
+#[derive(Default)]
+struct AudioRows {
+    start_ms: u64,
+    samples: Vec<f32>,
+}
+
+impl AudioRows {
+    fn add(&mut self, session: u64, start_ms: u64, samples: &[f32]) {
+        if self.samples.is_empty() {
+            self.start_ms = start_ms;
+        }
+        self.samples.extend_from_slice(samples);
+        if self.samples.len() >= crate::transcription::SAMPLE_RATE {
+            crate::timing_log::record_audio("application", session, self.start_ms, &self.samples);
+            self.samples.clear();
+        }
+    }
+}
+
 /// Metadata only; no audio or text.
 #[derive(Debug)]
 pub(crate) struct Report {
     pub status: Status,
-    pub worker: Stats,
-    /// Chunks the transcription queue had no room for.
-    pub refused_chunks: u64,
+    /// What the cloud stream sent and delivered.
+    pub transcription: CloudStats,
     /// Width of the accepted host-clock read, to keep with acceptance evidence.
     pub bracket_width: Duration,
 }
@@ -234,12 +249,12 @@ fn prepare<A: Access>(
 /// disclosed the application-wide scope and obtained the person's approval for
 /// this exact selection, and must never call this from the UI thread, an audio
 /// callback or a pool whose shutdown waits for it.
-pub(crate) unsafe fn run<A: Access, T: Transcriber>(
+pub(crate) unsafe fn run<A: Access>(
     runtime: A,
     start: Start,
     selection: Selection,
     limits: Limits,
-    transcriber: T,
+    opener: Opener,
     monitor: Monitor,
 ) -> Result<Report, Refused> {
     run_with(
@@ -248,7 +263,7 @@ pub(crate) unsafe fn run<A: Access, T: Transcriber>(
         |snapshot| snapshot.measure(limits.max_width, limits.max_age),
         // SAFETY: the caller's obligations are those of this call.
         |start, binding| unsafe { NativeOwner::begin(start, selection, binding) },
-        transcriber,
+        opener,
         monitor,
     )
 }
@@ -256,19 +271,18 @@ pub(crate) unsafe fn run<A: Access, T: Transcriber>(
 /// `run` with its two native steps supplied: the host-clock read and the
 /// start of the source. Tests pass a fictional clock and a scripted owner, so
 /// the same ordering runs without a stream.
-pub(crate) fn run_with<A: Access, T: Transcriber, S: Source>(
+pub(crate) fn run_with<A: Access, S: Source>(
     runtime: A,
     start: Start,
     measure: impl FnOnce(Snapshot) -> Result<Measurement, TimingError>,
     begin: impl FnOnce(Start, ClockBinding) -> Result<S, Failure>,
-    transcriber: T,
+    opener: Opener,
     monitor: Monitor,
 ) -> Result<Report, Refused> {
     let control = start.control();
     let accepted = prepare(&runtime, &control, measure).map_err(Refused::Clock)?;
-    // Before any native request: if this thread cannot be started, nothing
-    // has been asked of the OS yet.
-    let worker = start_worker(runtime.clone(), accepted.session, &control, transcriber);
+    // Before any native request. Nothing is sent until the review is approved.
+    let feed = cloud_feed(runtime.clone(), accepted.session, &control, opener);
     // A refused start drops its lease, which cancels the operation; the next
     // runtime sync then detaches it.
     let source = begin(start, accepted.binding).map_err(Refused::Start)?;
@@ -277,57 +291,87 @@ pub(crate) fn run_with<A: Access, T: Transcriber, S: Source>(
         accepted.session,
         control,
         source,
-        worker,
+        feed,
         accepted.bracket_width,
         monitor,
     ))
 }
 
-/// The transcription worker whose only sink is the runtime's source sink.
-/// A source that turns out not to be attached, or a runtime that cannot be
-/// reached, cancels the operation: nothing it captures could be delivered.
-fn start_worker<A: Access, T: Transcriber>(
-    runtime: A,
-    session: u64,
-    control: &Control,
-    transcriber: T,
-) -> Worker<NativeChunk> {
-    let control = control.clone();
-    Worker::start(
+/// A cloud stream for this source. It opens, and audio is first sent, only
+/// once the session's processing review is approved; until then the audio is
+/// discarded. Its finals reach the engine through the same source sink.
+fn cloud_feed<A: Access>(runtime: A, session: u64, control: &Control, opener: Opener) -> CloudFeed {
+    let approval = runtime.clone();
+    let notice = runtime.clone();
+    let keep = runtime.clone();
+    let dropped = runtime.clone();
+    CloudFeed::new(
         session,
-        WORKER_QUEUE,
-        transcriber,
-        move |session, segment| {
-            let taken =
-                runtime.with(|runtime| runtime.ingest_source_line(session, &control, segment));
-            match taken {
-                Some(Ok(())) => Ok(()),
-                Some(Err(LineRefused::Engine(reason))) => Err(reason),
-                Some(Err(LineRefused::NotAttached)) => {
-                    control.cancel();
-                    Err("That audio source is not attached to this live session.".into())
-                }
-                None => {
-                    control.cancel();
-                    Err("The session is unavailable.".into())
-                }
-            }
+        1,
+        opener,
+        move || {
+            approval
+                .with(|runtime| runtime.engine.audio_approval())
+                .flatten()
         },
+        source_sink(runtime, control),
     )
+    .stop_sending_when(move || {
+        keep.with(|runtime| {
+            crate::transcription::cloud::withdrawal(runtime.engine.audio_withdrawal())
+        })
+        .unwrap_or(Some(crate::transcription::cloud::SttFailure::Withdrawn))
+    })
+    .on_dropped(move || {
+        dropped.with(|runtime| runtime.engine.cloud_transcription_dropped(session));
+    })
+    // The pump then cancels the source, which ends the session; the session
+    // keeps the reason for the notebook to show.
+    .on_failure(move |failure| {
+        notice.with(|runtime| {
+            runtime
+                .engine
+                .cloud_transcription_stopped(session, failure.code())
+        });
+    })
+}
+
+/// Delivers a line only while this source is attached to the session; a
+/// source that is not, or an unreachable runtime, cancels the operation.
+fn source_sink<A: Access>(
+    runtime: A,
+    control: &Control,
+) -> impl FnMut(u64, crate::engine::Segment) -> Result<(), String> + Send + 'static {
+    let control = control.clone();
+    move |session, segment| {
+        let taken = runtime.with(|runtime| runtime.ingest_source_line(session, &control, segment));
+        match taken {
+            Some(Ok(())) => Ok(()),
+            Some(Err(LineRefused::Engine(reason))) => Err(reason),
+            Some(Err(LineRefused::NotAttached)) => {
+                control.cancel();
+                Err("That audio source is not attached to this live session.".into())
+            }
+            None => {
+                control.cancel();
+                Err("The session is unavailable.".into())
+            }
+        }
+    }
 }
 
 /// Blocks reach the engine only through `Runtime::ingest_source_line`, which
 /// refuses a source that is not attached. When reading ends for any reason,
 /// including a clean end of input, the operation is cancelled: audio that has
 /// not produced a delivered line is discarded, never flushed. Reading also
-/// ends when the transcription worker has died or the source is found not to
-/// be attached, because capturing would then serve nothing.
+/// ends when the cloud stream has failed or the source is found not to be
+/// attached, because capturing would then serve nothing.
 fn pump<A: Access, S: Source>(
     runtime: A,
     session: u64,
     control: Control,
     source: S,
-    worker: Worker<NativeChunk>,
+    feed: CloudFeed,
     bracket_width: Duration,
     monitor: Monitor,
 ) -> Report {
@@ -336,7 +380,7 @@ fn pump<A: Access, S: Source>(
         session,
         control,
         source,
-        worker,
+        feed,
         bracket_width,
         monitor,
         Pace::APP,
@@ -349,7 +393,7 @@ fn pump_paced<A: Access, S: Source>(
     session: u64,
     control: Control,
     mut source: S,
-    worker: Worker<NativeChunk>,
+    mut feed: CloudFeed,
     bracket_width: Duration,
     monitor: Monitor,
     pace: Pace,
@@ -359,9 +403,8 @@ fn pump_paced<A: Access, S: Source>(
         control: &control,
         released: false,
     };
-    let mut chunker = NativeChunker::new(control.clone(), session);
+    let mut rows = AudioRows::default();
     let mut reading = true;
-    let mut refused_chunks = 0;
     let mut passes = 0_u32;
     loop {
         // Native completions first, and on every pass: a silent or retired
@@ -378,8 +421,7 @@ fn pump_paced<A: Access, S: Source>(
             abandon.released = true;
             return Report {
                 status,
-                worker: worker.stop(),
-                refused_chunks,
+                transcription: feed.end(),
                 bracket_width,
             };
         }
@@ -388,7 +430,7 @@ fn pump_paced<A: Access, S: Source>(
             let attached = !passes.is_multiple_of(pace.attached_every)
                 || runtime.with(|runtime| runtime.live_source_accepts(session, &control))
                     == Some(true);
-            if !attached || !worker.is_running() {
+            if !attached || feed.failure().is_some() {
                 reading = false;
             }
         }
@@ -400,25 +442,37 @@ fn pump_paced<A: Access, S: Source>(
             match source.try_next(session) {
                 Ok(Some(block)) => {
                     idle = false;
-                    match chunker.push(block, session) {
-                        Ok(Some(chunk)) => {
-                            crate::timing_log::record_audio(
-                                "application",
-                                session,
-                                chunk.audio().start_ms,
-                                &chunk.audio().samples,
-                            );
-                            if worker.submit(chunk).is_err() {
-                                refused_chunks += 1;
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(_) => reading = false,
+                    let timed = block.timing();
+                    // Audio another operation or an older session produced
+                    // never reaches the stream, and ends this source.
+                    if !timed.belongs_to(session, &control) {
+                        reading = false;
+                        continue;
+                    }
+                    let format = timed.audio().format();
+                    if format.sample_rate() as usize != crate::transcription::SAMPLE_RATE
+                        || format.channels() != 1
+                    {
+                        reading = false;
+                        continue;
+                    }
+                    let samples = timed.audio().samples();
+                    rows.add(session, timed.start_ms(), samples);
+                    // A cloud failure ends this source: nothing falls back
+                    // to another recognizer.
+                    if feed
+                        .push(timed.start_ms(), timed.end_ms(), samples)
+                        .is_err()
+                    {
+                        reading = false;
                     }
                 }
                 Ok(None) | Err(TimingError::Handoff(Rejected::NotReady)) => break,
                 Err(_) => reading = false,
             }
+        }
+        if feed.poll().is_err() {
+            reading = false;
         }
         if !reading {
             control.cancel();
@@ -439,7 +493,10 @@ mod tests {
             Application, Capture, Gate, Phase,
         },
         native_session_clock::tests::accepted,
-        transcription::{AudioChunk, Recognized},
+        transcription::{
+            cloud::{Full, StreamingTranscriber, SttEvent, SttFailure},
+            SAMPLE_RATE,
+        },
     };
     use objc2_core_media::{CMTime, CMTimeFlags};
     use std::sync::{
@@ -529,27 +586,93 @@ mod tests {
         }
     }
 
-    /// Reports each call. With `release`, waits from the second call on, so a
-    /// test can act while the recognizer holds the second chunk.
-    struct Recognizer {
-        calls: u64,
+    /// A scripted stream: each full second of audio it is sent becomes one
+    /// final, "Fictional line N.", 100 ms into that second. It reports each
+    /// line as it becomes due. With `release`, line 2 and later are held,
+    /// without blocking the pump, until the test releases them. A silent
+    /// stream returns nothing.
+    struct Lines {
+        received: Arc<AtomicU64>,
+        emitted: u64,
+        reported: u64,
         started: mpsc::Sender<u64>,
         release: Option<mpsc::Receiver<()>>,
+        released: bool,
+        silent: bool,
     }
 
-    impl Transcriber for Recognizer {
-        fn transcribe(&mut self, _: &AudioChunk) -> Result<Vec<Recognized>, String> {
-            self.calls += 1;
-            let _ = self.started.send(self.calls);
-            if let Some(release) = self.release.as_ref().filter(|_| self.calls >= 2) {
-                let _ = release.recv_timeout(WAIT);
+    impl Lines {
+        fn new(started: mpsc::Sender<u64>, release: Option<mpsc::Receiver<()>>) -> Self {
+            Self {
+                received: Arc::default(),
+                emitted: 0,
+                reported: 0,
+                started,
+                release,
+                released: false,
+                silent: false,
             }
-            Ok(vec![Recognized {
-                offset_ms: 100,
-                speaker: "Speaker 1".into(),
-                text: format!("Fictional line {}.", self.calls),
-            }])
         }
+
+        fn silent() -> Self {
+            Self {
+                silent: true,
+                ..Self::new(mpsc::channel().0, None)
+            }
+        }
+    }
+
+    impl StreamingTranscriber for Lines {
+        fn push(&mut self, samples: &[f32]) -> Result<(), Full> {
+            self.received
+                .fetch_add(samples.len() as u64, Ordering::SeqCst);
+            Ok(())
+        }
+        fn poll(&mut self) -> Vec<SttEvent> {
+            let seconds = self.received.load(Ordering::SeqCst) / SAMPLE_RATE as u64;
+            let next = self.emitted + 1;
+            if self.silent || next > seconds {
+                return Vec::new();
+            }
+            if self.reported < next {
+                self.reported = next;
+                let _ = self.started.send(next);
+            }
+            if next >= 2 && !self.released {
+                match &self.release {
+                    Some(release) if release.try_recv().is_err() => return Vec::new(),
+                    _ => self.released = true,
+                }
+            }
+            self.emitted = next;
+            vec![SttEvent::Final {
+                seq: next,
+                text: format!("Fictional line {next}."),
+                start_ms: (next - 1) * 1_000 + 100,
+                end_ms: next * 1_000,
+                untrusted_speaker: Some(1),
+            }]
+        }
+        fn finish(&mut self, _: Duration) -> Vec<SttEvent> {
+            Vec::new()
+        }
+        fn abort(&mut self) {}
+    }
+
+    /// The stream as `run` would open it once approved, approved from the
+    /// start, delivering through the source sink.
+    fn approved_feed<A: Access>(
+        fixture: &Fixture,
+        runtime: A,
+        stream: impl StreamingTranscriber + 'static,
+    ) -> CloudFeed {
+        CloudFeed::new(
+            fixture.session,
+            1,
+            Box::new(move || Ok(Box::new(stream) as Box<dyn StreamingTranscriber>)),
+            || Some(0),
+            source_sink(runtime, &fixture.control),
+        )
     }
 
     struct Fixture {
@@ -658,8 +781,8 @@ mod tests {
         }
     }
 
-    /// Runs `host` on another thread once the recognizer holds the second
-    /// chunk, releases the recognizer afterwards, and returns the report.
+    /// Runs `host` on another thread once the stream holds the second line,
+    /// releases it afterwards, and returns the report.
     fn pump_while(
         fixture: &mut Fixture,
         source: Scripted,
@@ -671,68 +794,46 @@ mod tests {
         let watchdog = Watchdog(fixture.control.clone());
         let host = thread::spawn(move || {
             assert_eq!(calls.recv_timeout(WAIT), Ok(1));
-            // The worker is single-threaded: the first chunk's line has been
-            // through the sink before the recognizer is called again.
+            // The pump delivers each line before it polls again: the first
+            // line has been through the sink before the second is due.
             assert_eq!(calls.recv_timeout(WAIT), Ok(2));
             host();
-            release.send(()).unwrap();
+            // The stream may already be closed by a release the host waited for.
+            let _ = release.send(());
             watchdog.expect_cancelled();
         });
-        let recognizer = Recognizer {
-            calls: 0,
-            started,
-            release: Some(released),
-        };
         let runtime = fixture.runtime.clone();
-        let report = pump_with(fixture, runtime, source, recognizer, monitor);
+        let stream = Lines::new(started, Some(released));
+        let report = pump_with(fixture, runtime, source, stream, monitor);
         host.join().unwrap();
         report
     }
 
-    /// Runs the pump with an ungated recognizer until the pump itself ends.
+    /// Runs the pump with an ungated stream until the pump itself ends.
     fn pump_alone<A: Access>(fixture: &mut Fixture, runtime: A, source: Scripted) -> Report {
-        let (started, _calls) = mpsc::channel();
-        let recognizer = Recognizer {
-            calls: 0,
-            started,
-            release: None,
-        };
-        pump_alone_with(fixture, runtime, source, recognizer)
-    }
-
-    fn pump_alone_with<A: Access>(
-        fixture: &mut Fixture,
-        runtime: A,
-        source: Scripted,
-        transcriber: impl Transcriber,
-    ) -> Report {
         let watchdog = Watchdog(fixture.control.clone());
         let host = thread::spawn(move || watchdog.expect_cancelled());
-        let report = pump_with(fixture, runtime, source, transcriber, Monitor::default());
+        let stream = Lines::new(mpsc::channel().0, None);
+        let report = pump_with(fixture, runtime, source, stream, Monitor::default());
         host.join().unwrap();
         report
     }
 
-    /// The worker and loop exactly as `run` joins them, after its native step.
+    /// The stream and loop exactly as `run` joins them, after its native step.
     fn pump_with<A: Access>(
         fixture: &Fixture,
         runtime: A,
         source: Scripted,
-        transcriber: impl Transcriber,
+        stream: impl StreamingTranscriber + 'static,
         monitor: Monitor,
     ) -> Report {
-        let worker = start_worker(
-            runtime.clone(),
-            fixture.session,
-            &fixture.control,
-            transcriber,
-        );
+        let feed = approved_feed(fixture, runtime.clone(), stream);
         pump(
             runtime,
             fixture.session,
             fixture.control.clone(),
             source,
-            worker,
+            feed,
             Duration::ZERO,
             monitor,
         )
@@ -753,6 +854,175 @@ mod tests {
     fn attach(fixture: &Fixture) -> ClockBinding {
         let mut runtime = fixture.runtime.lock().unwrap();
         accepted(&mut runtime, &fixture.control).unwrap().binding
+    }
+
+    /// A scripted cloud stream: counts samples sent; each poll returns the
+    /// next scripted batch of events.
+    #[derive(Clone, Default)]
+    struct CloudScript {
+        sent: Arc<AtomicU64>,
+        batches: Arc<Mutex<std::collections::VecDeque<Vec<SttEvent>>>>,
+    }
+    impl StreamingTranscriber for CloudScript {
+        fn push(&mut self, samples: &[f32]) -> Result<(), Full> {
+            self.sent.fetch_add(samples.len() as u64, Ordering::SeqCst);
+            Ok(())
+        }
+        fn poll(&mut self) -> Vec<SttEvent> {
+            self.batches.lock().unwrap().pop_front().unwrap_or_default()
+        }
+        fn finish(&mut self, _: Duration) -> Vec<SttEvent> {
+            Vec::new()
+        }
+        fn abort(&mut self) {}
+    }
+
+    #[test]
+    fn cloud_finals_reach_the_engine_and_a_lost_stream_stops_the_source() {
+        let mut fixture = fixture();
+        let binding = attach(&fixture);
+        fixture.advance();
+        fixture.queue_audio();
+        let script = CloudScript::default();
+        script.batches.lock().unwrap().extend([
+            vec![
+                SttEvent::Partial,
+                SttEvent::Final {
+                    seq: 1,
+                    text: "Fictional cloud line.".into(),
+                    start_ms: 100,
+                    end_ms: 600,
+                    untrusted_speaker: Some(2),
+                },
+            ],
+            vec![SttEvent::Failed(SttFailure::Network)],
+        ]);
+        let stream = script.clone();
+        let feed = CloudFeed::new(
+            fixture.session,
+            1,
+            Box::new(move || Ok(Box::new(stream) as Box<dyn StreamingTranscriber>)),
+            || Some(0),
+            source_sink(fixture.runtime.clone(), &fixture.control),
+        );
+        let source = fixture.scripted(binding);
+        let report = pump(
+            fixture.runtime.clone(),
+            fixture.session,
+            fixture.control.clone(),
+            source,
+            feed,
+            Duration::ZERO,
+            Monitor::default(),
+        );
+        // Timed on the capture clock: 100 ms of stream audio is 100 ms into
+        // the session. Only the final became a line, with no speaker label.
+        assert_eq!(
+            fixture.transcript(),
+            [(100, "Fictional cloud line.".to_string())]
+        );
+        assert_eq!(
+            fixture.runtime.lock().unwrap().engine.state.transcript[0].speaker,
+            "Speaker"
+        );
+        // The lost stream ended the source; nothing fell back to another path.
+        assert!(fixture.control.is_cancelled());
+        assert_eq!(report.status.stage, Stage::Released);
+        assert_eq!(report.transcription.accepted, 1);
+        assert!(script.sent.load(Ordering::SeqCst) > 0);
+    }
+
+    #[test]
+    fn a_block_from_another_operation_is_never_sent_and_stops_the_source() {
+        let mut fixture = fixture();
+        let binding = attach(&fixture);
+        fixture.queue_audio();
+        let mut source = fixture.scripted(binding);
+        // One valid block of the same session from a different operation,
+        // read first. Its reader sees nothing wrong; the pump must refuse it.
+        let other_gate = Gate::default();
+        let mut review = other_gate
+            .review(Application::new("other".into(), "Fictional player".into()).unwrap())
+            .unwrap();
+        let other = review.control();
+        let mut start = other_gate.approve(&mut review).unwrap();
+        let (mut input, reader) = start.handoff(Format::new(16_000, 1).unwrap(), 1).unwrap();
+        let capture = start.run(|_, _| Ok(())).unwrap();
+        input.push(&other, 0, &[0.25; 2_048]).unwrap();
+        source.foreign = Some((Feed::new(reader, unattached(&fixture), 1.0), capture));
+        let script = CloudScript::default();
+        let stream = script.clone();
+        let feed = CloudFeed::new(
+            fixture.session,
+            1,
+            Box::new(move || Ok(Box::new(stream) as Box<dyn StreamingTranscriber>)),
+            || Some(0),
+            source_sink(fixture.runtime.clone(), &fixture.control),
+        );
+        let watchdog = Watchdog(fixture.control.clone());
+        let host = thread::spawn(move || watchdog.expect_cancelled());
+        let report = pump(
+            fixture.runtime.clone(),
+            fixture.session,
+            fixture.control.clone(),
+            source,
+            feed,
+            Duration::ZERO,
+            Monitor::default(),
+        );
+        host.join().unwrap();
+        assert_eq!(report.status.stage, Stage::Released);
+        assert!(fixture.control.is_cancelled());
+        assert_eq!(script.sent.load(Ordering::SeqCst), 0, "nothing was sent");
+        assert!(fixture.transcript().is_empty());
+    }
+
+    #[test]
+    fn an_unapproved_session_never_opens_a_cloud_stream() {
+        let mut fixture = fixture();
+        let binding = attach(&fixture);
+        fixture.advance();
+        fixture.queue_audio();
+        assert!(!fixture
+            .runtime
+            .lock()
+            .unwrap()
+            .engine
+            .has_processing_permission());
+        let opened = Arc::new(AtomicU64::new(0));
+        let count = opened.clone();
+        let feed = cloud_feed(
+            fixture.runtime.clone(),
+            fixture.session,
+            &fixture.control,
+            Box::new(move || {
+                count.fetch_add(1, Ordering::SeqCst);
+                Err(SttFailure::Network)
+            }),
+        );
+        let source = fixture.scripted(binding);
+        let control = fixture.control.clone();
+        let stopper = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(200));
+            control.cancel();
+        });
+        let report = pump(
+            fixture.runtime.clone(),
+            fixture.session,
+            fixture.control.clone(),
+            source,
+            feed,
+            Duration::ZERO,
+            Monitor::default(),
+        );
+        stopper.join().unwrap();
+        assert_eq!(
+            opened.load(Ordering::SeqCst),
+            0,
+            "no stream without approval"
+        );
+        assert!(fixture.transcript().is_empty());
+        assert_eq!(report.status.stage, Stage::Released);
     }
 
     #[test]
@@ -778,19 +1048,18 @@ mod tests {
                     drop(runtime.take_live_for_stop().unwrap());
                 }
             });
-            // The first sample is 1 µs into the session and the recognizer
-            // placed its line 100 ms into the chunk.
+            // The first sample is 1 µs into the session and the stream
+            // placed its line 100 ms into its first second.
             assert_eq!(
                 fixture.transcript(),
                 [(100, "Fictional line 1.".to_string())],
                 "ended {ended}"
             );
             assert_eq!(report.status.stage, Stage::Released);
-            assert_eq!(report.worker.accepted, 1);
-            // Stop cancels the source, so the held chunk's line is withheld
-            // before the sink. An ended session leaves the source running
-            // until the sink refuses the line and retires it.
-            assert_eq!(report.worker.rejected, u64::from(ended));
+            assert_eq!(report.transcription.accepted, 1);
+            // The held line is never accepted: after Stop the source is no
+            // longer attached, and an ended session refuses it at the sink.
+            assert!(report.transcription.rejected <= 1);
             assert!(fixture.control.is_cancelled());
             assert_eq!(fixture.gate.snapshot().unwrap().phase, Phase::Idle);
         }
@@ -808,13 +1077,9 @@ mod tests {
         let report = pump_alone(&mut fixture, runtime, source);
         assert!(fixture.transcript().is_empty());
         assert_eq!(
-            (
-                report.worker.chunks,
-                report.worker.accepted,
-                report.worker.rejected
-            ),
-            (1, 0, 1),
-            "recognized once, refused at the sink, then no more inference"
+            (report.transcription.accepted, report.transcription.rejected),
+            (0, 1),
+            "refused at the sink, which ends the source"
         );
         assert!(fixture.control.is_cancelled());
         assert_eq!(report.status.stage, Stage::Released);
@@ -839,18 +1104,13 @@ mod tests {
             source.poll_limit = 10 * u64::from(every);
             let (polls, first_cancelled) =
                 (source.polls.clone(), source.first_cancelled_poll.clone());
-            let worker = start_worker(
-                fixture.runtime.clone(),
-                fixture.session,
-                &fixture.control,
-                Silent,
-            );
+            let feed = approved_feed(&fixture, fixture.runtime.clone(), Lines::silent());
             let report = pump_paced(
                 fixture.runtime.clone(),
                 fixture.session,
                 fixture.control.clone(),
                 source,
-                worker,
+                feed,
                 Duration::ZERO,
                 Monitor::default(),
                 Pace {
@@ -866,38 +1126,14 @@ mod tests {
                 "every {every}"
             );
             assert_eq!(report.status.stage, Stage::Released);
-            assert_eq!((report.worker.chunks, report.worker.rejected), (0, 0));
+            assert_eq!(
+                (report.transcription.finals, report.transcription.rejected),
+                (0, 0)
+            );
             assert!(fixture.control.is_cancelled());
             // Two polls of stopping, then released.
             assert_eq!(polls.load(Ordering::SeqCst), u64::from(every) + 3);
         }
-    }
-
-    struct Silent;
-    impl Transcriber for Silent {
-        fn transcribe(&mut self, _: &AudioChunk) -> Result<Vec<Recognized>, String> {
-            Ok(Vec::new())
-        }
-    }
-
-    struct Crashes;
-    impl Transcriber for Crashes {
-        fn transcribe(&mut self, _: &AudioChunk) -> Result<Vec<Recognized>, String> {
-            panic!("fictional recognizer failure");
-        }
-    }
-
-    #[test]
-    fn a_dead_transcription_worker_stops_the_source() {
-        let mut fixture = fixture();
-        let binding = attach(&fixture);
-        fixture.queue_audio();
-        let source = fixture.scripted(binding);
-        let runtime = fixture.runtime.clone();
-        let report = pump_alone_with(&mut fixture, runtime, source, Crashes);
-        assert_eq!(report.status.stage, Stage::Released);
-        assert!(fixture.control.is_cancelled());
-        assert!(fixture.transcript().is_empty());
     }
 
     #[test]
@@ -911,7 +1147,7 @@ mod tests {
         let runtime = fixture.runtime.clone();
         let (seen, shared) = (monitor.clone(), &fixture);
         let ended = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-            pump_with(shared, runtime, source, Crashes, seen)
+            pump_with(shared, runtime, source, Lines::silent(), seen)
         }));
         assert!(ended.is_err());
         assert!(monitor.abandoned());
@@ -993,42 +1229,14 @@ mod tests {
         let report = pump_alone(&mut fixture, runtime, source);
         assert_eq!(report.status.stage, Stage::Released);
         assert!(fixture.control.is_cancelled());
-        // Two chunks were complete; the trailing block was never flushed to
-        // the recognizer, and nothing arrives once the pump has returned.
-        assert!(report.worker.chunks <= 2);
+        // At most the two whole seconds became lines, and nothing arrives
+        // once the pump has returned.
+        assert!(report.transcription.finals <= 2);
         assert!(fixture.transcript().len() <= 2);
         assert!(fixture
             .transcript()
             .iter()
-            .all(|(at_ms, _)| *at_ms == 100 || *at_ms == 100 + 1_280 + 1_000));
-    }
-
-    #[test]
-    fn a_block_the_chunker_refuses_stops_the_source_it_was_read_for() {
-        let mut fixture = fixture();
-        let binding = attach(&fixture);
-        fixture.queue_audio();
-        let mut source = fixture.scripted(binding);
-        // One valid block of the same session from a different operation.
-        // The reader that produced it sees nothing wrong; only the chunker,
-        // bound to this worker's source, refuses it.
-        let other_gate = Gate::default();
-        let mut review = other_gate
-            .review(Application::new("other".into(), "Fictional player".into()).unwrap())
-            .unwrap();
-        let other = review.control();
-        let mut start = other_gate.approve(&mut review).unwrap();
-        let (mut input, reader) = start.handoff(Format::new(16_000, 1).unwrap(), 1).unwrap();
-        let capture = start.run(|_, _| Ok(())).unwrap();
-        input.push(&other, 0, &[0.25; 2_048]).unwrap();
-        let binding = unattached(&fixture);
-        source.foreign = Some((Feed::new(reader, binding, 1.0), capture));
-        let runtime = fixture.runtime.clone();
-        let report = pump_alone(&mut fixture, runtime, source);
-        assert_eq!(report.status.stage, Stage::Released);
-        assert!(fixture.control.is_cancelled());
-        assert_eq!(report.worker.chunks, 0, "its own queued audio is not read");
-        assert!(fixture.transcript().is_empty());
+            .all(|(at_ms, _)| *at_ms == 100 || *at_ms == 1_100));
     }
 
     #[derive(Clone)]
@@ -1048,7 +1256,7 @@ mod tests {
         let report = pump_alone(&mut fixture, Unavailable, source);
         assert_eq!(report.status.stage, Stage::Released);
         assert!(fixture.control.is_cancelled());
-        assert_eq!(report.worker.accepted, 0);
+        assert_eq!(report.transcription.accepted, 0);
         assert!(fixture.transcript().is_empty());
     }
 
