@@ -436,6 +436,9 @@ mod tests {
     #[derive(Clone)]
     struct Fake {
         info: Result<Info, Missing>,
+        /// What the second process-table read returns, if it differs.
+        second_info: Option<Result<Info, Missing>>,
+        reads: std::cell::Cell<u32>,
         path: Option<PathBuf>,
         canonical: Option<PathBuf>,
         file: Option<FileInfo>,
@@ -452,6 +455,8 @@ mod tests {
                     seconds: 1_000,
                     micros: 5,
                 }),
+                second_info: None,
+                reads: std::cell::Cell::new(0),
                 path: Some(EXE.into()),
                 canonical: Some(EXE.into()),
                 file: Some(FileInfo {
@@ -469,7 +474,12 @@ mod tests {
             501
         }
         fn info(&self, _: i32) -> Result<Info, Missing> {
-            self.info
+            let read = self.reads.get() + 1;
+            self.reads.set(read);
+            match self.second_info {
+                Some(second) if read >= 2 => second,
+                _ => self.info,
+            }
         }
         fn path(&self, _: i32) -> Option<PathBuf> {
             self.path.clone()
@@ -575,6 +585,33 @@ mod tests {
         assert_eq!(
             check(|f| f.running = Some((false, None))),
             Check::Transient("bundle_identifier")
+        );
+        // The process is replaced during the reads: everything else matches,
+        // but the closing read of the process table shows a new start time.
+        let replaced_during = Fake {
+            second_info: Some(Ok(Info {
+                uid: 501,
+                seconds: 1_000,
+                micros: 6,
+            })),
+            ..Fake::admitted()
+        };
+        assert_eq!(
+            check_pin_with(&replaced_during, &pin),
+            Check::Gone("start_time")
+        );
+        assert_eq!(
+            replaced_during.reads.get(),
+            2,
+            "the start time is read twice"
+        );
+        let gone_during = Fake {
+            second_info: Some(Err(Missing::Gone)),
+            ..Fake::admitted()
+        };
+        assert_eq!(
+            check_pin_with(&gone_during, &pin),
+            Check::Gone("process_gone")
         );
         // A pid that is not a process at all is gone.
         let no_pid = Process { pid: 0, ..pin };
