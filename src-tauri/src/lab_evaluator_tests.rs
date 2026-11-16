@@ -881,6 +881,23 @@ fn the_ready_frame_must_match_the_backend_budget_and_cap() {
     );
 }
 #[test]
+fn a_broker_output_limit_retires_one_request_like_a_refusal() {
+    let (_f, link, (tx, replies, job), mut s, mut r) = opened(Duration::from_secs(2));
+    write_frame(&mut s, &failed_for(1, 3, "output_limit")).unwrap();
+    assert_eq!(
+        replies.recv_timeout(Duration::from_secs(1)).unwrap(),
+        Err(Failure::OutputLimit)
+    );
+    tx.send(Event::Settled(id(1, 3), Settlement::Retired))
+        .unwrap();
+    write_frame(&mut s, &failed_for(1, 3, "output_limit")).unwrap();
+    let _replies = evaluate(&tx, 2, 4);
+    assert_eq!(read(&mut r, &mut s)["requestId"], "2");
+    assert!(link.terminal().is_none());
+    write_frame(&mut s, &failed_for(9, 9, "output_limit")).unwrap();
+    assert_eq!(job.join().unwrap(), Err(Failure::InvalidDecision));
+}
+#[test]
 fn a_broker_refusal_retires_one_request_and_the_run_continues() {
     let (_f, link, (tx, replies, job), mut s, mut r) = opened(Duration::from_secs(2));
     write_frame(&mut s, &failed_for(1, 3, "refusal")).unwrap();

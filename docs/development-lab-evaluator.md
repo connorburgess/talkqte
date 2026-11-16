@@ -29,8 +29,9 @@ subscription backend, is refused. The broker's `ready` frame for it must report
 `dispatchBudgetKind` `apiRequests`, `spendCapMicroUsd` equal to the launch cap and
 `spendUsedMicroUsd` not above it; the subscription backends report
 `cliDispatchAttempts` and never send spend fields. A broker `failed` frame with
-code `refusal` for the active request is request-scoped: that request is retired,
-recorded as `refused`, shows no cue, and the run continues. One request per
+code `refusal` or `output_limit` for the active request is request-scoped: that
+request is retired, recorded as `refused` or `output_limit`, shows no cue, and the
+run continues. One request per
 check, no retries, no other model, and the spend cap itself are guarantees of the
 lab broker, which holds the key; the app cannot see those requests. It only
 refuses a broker whose reported cap differs from the launch cap or whose reported

@@ -649,6 +649,7 @@ fn code(v: &Value) -> Failure {
         Some("usage_limit" | "dispatch_limit") => Failure::UsageLimit,
         Some("deadline") => Failure::Expired,
         Some("refusal") => Failure::Refused,
+        Some("output_limit") => Failure::OutputLimit,
         Some("invalid_reply" | "protocol") => Failure::InvalidDecision,
         Some("unavailable") => Failure::Unreachable,
         _ => Failure::InvalidDecision,
@@ -1108,12 +1109,17 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
                         return Err(Failure::InvalidDecision);
                     }
                 }
-                if v["code"] == "refusal" {
+                let scoped = match v["code"].as_str() {
+                    Some("refusal") => Some(Failure::Refused),
+                    Some("output_limit") => Some(Failure::OutputLimit),
+                    _ => None,
+                };
+                if let Some(non_decision) = scoped {
                     // A request-scoped non-decision: retire it now and hand
-                    // the refusal to the engine, which settles it silently.
+                    // it to the engine, which settles it silently.
                     let (id, reply, _) = active.take().ok_or(Failure::InvalidDecision)?;
                     unsettled = Some(retire(&mut retired, &id, Instant::now()));
-                    match reply.try_send(Err(Failure::Refused)) {
+                    match reply.try_send(Err(non_decision)) {
                         Ok(()) | Err(mpsc::TrySendError::Disconnected(_)) => {}
                         Err(_) => return Err(Failure::WorkerUnavailable),
                     }
