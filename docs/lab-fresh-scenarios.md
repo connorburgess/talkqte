@@ -44,8 +44,9 @@ A speaker who continues after their own line waits at least 450 ms. The gaps are
 
 - the scenario ID, seed, brief ID, title mode and title;
 - how the conversation was generated;
-- the media file's absolute path, SHA-256, size and duration;
-- the window, plus whether the file fits under the lab player's current 105 s limit;
+- the media file's absolute path, SHA-256, size in bytes and duration in milliseconds, all whole numbers;
+- the verified streams: `video` (`codec` `h264`, `width`, `height`, `fps`) and `audio` (`codec` `aac`, `sampleRate` 48000 in hertz, `channels`);
+- the window, plus whether the file fits under the 104 s that the lab's timing bounds were set for (`withinCurrentLabCap`);
 - pacing statistics, the line schedule and the verification result;
 - hashes of the companion files;
 - `runtimeInputs: "media-only"`.
@@ -53,14 +54,21 @@ A speaker who continues after their own line waits at least 450 ms. The gaps are
 A manifest is refused if any of these is true:
 
 - a title is present when its mode forbids one, or missing when its mode needs one;
+- the title names a listed real company or product, or contains a web address, email, handle or phone number;
+- a size or duration is not a whole number, or a stream is missing or in another format;
 - the media is outside the window;
+- a schedule row ends after the media does;
 - schedule rows overlap;
 - the verification did not pass.
 
+## Content checks
+
+`contentProblems()` and `generatedContentProblems()` apply the dialogue lab's deny list of real companies and products, matched literally as whole words, and its contact-detail pattern. A generator step should run `generatedContentProblems()` over the title and every line, and refuse to write a manifest when it finds anything. The deny list cannot catch every real name. A generator should still be told to invent every name, and a person should still read the conversation.
+
 ## Limits
 
-- The lab's media acceptance is unchanged. Its runner and player still accept one specific prepared recording. Accepting a manifest instead is separate work.
-- Generating the conversation and rendering voices are not part of this module. Neither is the content check applied to generated speech.
+- This module does not decide what the lab plays. The lab's own loader does, with its own checks, and it may be stricter than `validateManifest()`, for example about where files are stored.
+- Generating the conversation and rendering voices are not part of this module.
 - A seed fixes the brief and the pacing, not the words a generator writes.
 - The brief space is finite, though large.
 
@@ -71,6 +79,7 @@ A manifest is refused if any of these is true:
 - **Briefs:** the same seed gives the same brief, and 400 seeds give varied briefs covering 2, 3 and 4 speakers, 1 to 3 topic changes and all three title modes. No brief carries a title or agenda, names and voices are distinct, and the brief space names no listed company or product.
 - **Pacing:** a schedule fits the window with no overlap, quick gaps are shorter than normal ones and normal shorter than pauses, and speech too long or too short for the window is refused.
 - **Mix check:** a faithful track passes. The check finds sound in a gap, a missing line, a 6 dB level drop, a line starting 90 ms late, a duration outside the window, mismatched lengths and the wrong sample rate.
-- **Manifest:** wrong titles, media, schedules, generation counts, lab-limit flags and failed checks are each refused.
+- **Manifest:** each of these is refused: wrong titles, a title naming a brand or contact detail, wrong media, fractional sizes or durations, missing or wrong streams, overlapping rows, a row ending after the media, wrong generation counts, wrong lab-limit flags and failed checks. Fractional values passed to `buildManifest()` are rounded. Media over 104 s is marked as not fitting the lab cap.
+- **Content:** brands and contact details are found in a title or line and reported by line, and list entries are matched literally.
 
 See also the [cue lab batches and simulations](cue-simulation.md).

@@ -11,6 +11,8 @@ import {
   LAB_MEDIA_CAP_MS,
   SAMPLE_RATE,
   buildManifest,
+  contentProblems,
+  generatedContentProblems,
   namesRealBrand,
   sampleBrief,
   scheduleLines,
@@ -251,6 +253,8 @@ function manifestFor({ brief, plan, probe }, overrides = {}) {
       bytes: 1_290_419,
       durationMs: probe.durationMs,
       audioDurationMs: probe.audioDurationMs,
+      video: { ...probe.video, fps: 25 },
+      audio: { ...probe.audio, channels: 1 },
     },
     schedule: plan,
     verification: { passed: true },
@@ -321,4 +325,125 @@ test('a manifest with a title its mode forbids, bad media or a failed check is r
     (m) => ({ ...m, window: { ...m.window, withinCurrentLabCap: false } }),
     /lab cap/,
   );
+  refuse(
+    (m) => {
+      m.schedule.at(-1).endMs = m.media.durationMs + 1;
+      return m;
+    },
+    new RegExp(`schedule row ${good.schedule.length}`),
+  );
+  refuse(
+    (m) => ({ ...m, media: { ...m.media, bytes: 1_290_419.5 } }),
+    /media size/,
+  );
+  refuse(
+    (m) => ({
+      ...m,
+      media: { ...m.media, durationMs: m.media.durationMs + 0.4 },
+    }),
+    /whole milliseconds/,
+  );
+  refuse(
+    (m) => ({
+      ...m,
+      media: { ...m.media, video: { ...m.media.video, codec: 'hevc' } },
+    }),
+    /video stream/,
+  );
+  refuse((m) => {
+    delete m.media.video;
+    return m;
+  }, /video stream/);
+  refuse(
+    (m) => ({
+      ...m,
+      media: { ...m.media, audio: { ...m.media.audio, sampleRate: 44_100 } },
+    }),
+    /audio stream/,
+  );
+  refuse(
+    (m) => ({
+      ...m,
+      media: { ...m.media, audio: { ...m.media.audio, sampleRate: '48000' } },
+    }),
+    /audio stream/,
+  );
+  refuse((m) => ({ ...m, title: 'Zoom rota check' }), /real brand or contact/);
+  refuse(
+    (m) => ({ ...m, title: 'Call ana@example.test back' }),
+    /real brand or contact/,
+  );
+});
+
+test('a manifest carries the verified streams in the shape the lab loader reads', () => {
+  const s = scenario();
+  const manifest = manifestFor(s, {
+    media: {
+      path: '/fictional/fresh-scenarios/fs-test-s6/fs-test-s6.mp4',
+      sha256: 'a'.repeat(64),
+      bytes: 1_290_419.4,
+      durationMs: s.probe.durationMs + 0.4,
+      audioDurationMs: s.probe.audioDurationMs - 0.3,
+      video: { codec: 'h264', width: 1280, height: 800, fps: 25 },
+      audio: { codec: 'aac', sampleRate: 48_000, channels: 1 },
+    },
+  });
+  // Whole numbers, as the loader requires, rounded rather than refused.
+  assert.equal(manifest.media.bytes, 1_290_419);
+  assert.ok(Number.isSafeInteger(manifest.media.durationMs));
+  assert.ok(Number.isSafeInteger(manifest.media.audioDurationMs));
+  assert.equal(manifest.media.video.codec, 'h264');
+  assert.equal(manifest.media.audio.codec, 'aac');
+  assert.equal(manifest.media.audio.sampleRate, 48_000);
+});
+
+test('media longer than the lab cap is described as not fitting it', () => {
+  const s = scenario();
+  assert.equal(LAB_MEDIA_CAP_MS, 104_000);
+  const lengths = s.plan.rows.map((row) => row.endMs);
+  assert.ok(Math.max(...lengths) < 104_000);
+  const manifest = manifestFor(s, {
+    window: { minMs: 90_000, maxMs: 110_000 },
+    media: {
+      path: '/fictional/fresh-scenarios/fs-test-s6/fs-test-s6.mp4',
+      sha256: 'a'.repeat(64),
+      bytes: 1_400_000,
+      durationMs: 104_001,
+      audioDurationMs: 104_000,
+      video: { codec: 'h264', width: 1280, height: 800, fps: 25 },
+      audio: { codec: 'aac', sampleRate: 48_000, channels: 1 },
+    },
+  });
+  assert.equal(manifest.window.withinCurrentLabCap, false);
+});
+
+test('generated text naming a real brand or contact detail is found, line by line', () => {
+  assert.deepEqual(contentProblems('Saturday at seven, then.'), []);
+  assert.deepEqual(contentProblems('Ping me on Slack.'), ['real-brand']);
+  assert.deepEqual(contentProblems('Call 555-201-3344 first.'), [
+    'contact-detail',
+  ]);
+  // A brand inside a longer word is not a match.
+  assert.deepEqual(contentProblems('A metal sign.'), []);
+  assert.deepEqual(
+    generatedContentProblems({
+      title: null,
+      lines: [
+        { text: 'Okay, everyone here?' },
+        { text: 'It is on www.example.test now.' },
+        { text: 'Put it in Dropbox.' },
+      ],
+    }),
+    [
+      { where: 'l2', problem: 'contact-detail' },
+      { where: 'l3', problem: 'real-brand' },
+    ],
+  );
+  assert.deepEqual(
+    generatedContentProblems({ title: 'Google sync', lines: [] }),
+    [{ where: 'title', problem: 'real-brand' }],
+  );
+  // List entries are matched literally, never as patterns.
+  assert.equal(namesRealBrand('We write C++ daily.', ['C++']), true);
+  assert.equal(namesRealBrand('We write C daily.', ['C++']), false);
 });

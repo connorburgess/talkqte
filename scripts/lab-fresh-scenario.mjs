@@ -19,13 +19,13 @@
 // lab's media acceptance is unchanged by this module.
 import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
-import { DENY_LIST } from './cue-dialogue-briefs.mjs';
+import { CONTACT, DENY_LIST } from './cue-dialogue-briefs.mjs';
 
 export const BRIEF_SCHEMA = 'talkqte.fresh-scenario.brief.v1';
 export const MANIFEST_SCHEMA = 'talkqte.fresh-scenario.media.v1';
 export const SAMPLE_RATE = 48_000;
-/** The lab's player refuses media longer than this today. */
-export const LAB_MEDIA_CAP_MS = 105_000;
+/** The longest media the lab's timing bounds were set for. */
+export const LAB_MEDIA_CAP_MS = 104_000;
 export const DEFAULT_WINDOW = Object.freeze({ minMs: 90_000, maxMs: 104_000 });
 export const TITLE_MODES = ['none', 'on-topic', 'drifted'];
 export const BEATS = ['quick', 'normal', 'pause'];
@@ -567,11 +567,28 @@ export function buildManifest({
     titleMode: brief.titleMode,
     title,
     generation,
-    media,
+    media: {
+      path: media.path,
+      sha256: media.sha256,
+      bytes: Math.round(media.bytes),
+      durationMs: Math.round(media.durationMs),
+      audioDurationMs: Math.round(media.audioDurationMs),
+      video: {
+        codec: media.video?.codec,
+        width: media.video?.width,
+        height: media.video?.height,
+        fps: media.video?.fps,
+      },
+      audio: {
+        codec: media.audio?.codec,
+        sampleRate: media.audio?.sampleRate,
+        channels: media.audio?.channels,
+      },
+    },
     window: {
       ...window,
       labCapMs: LAB_MEDIA_CAP_MS,
-      withinCurrentLabCap: media.durationMs <= LAB_MEDIA_CAP_MS,
+      withinCurrentLabCap: Math.round(media.durationMs) <= LAB_MEDIA_CAP_MS,
     },
     pacing: {
       lines: schedule.rows.length,
@@ -611,6 +628,8 @@ export function validateManifest(manifest) {
       : typeof m.title !== 'string' || !m.title.trim() || m.title.length > 80
   )
     fail('title does not match its mode');
+  if (m.title !== null && contentProblems(m.title).length)
+    fail('title names a real brand or contact detail');
   if (
     !['offline-stand-in', 'codex-subscription'].includes(m.generation?.route) ||
     !Number.isSafeInteger(m.generation.dispatches) ||
@@ -623,7 +642,28 @@ export function validateManifest(manifest) {
   if (!isAbsolute(media.path ?? '') || !/\.mp4$/.test(media.path))
     fail('media path');
   if (!HEX64.test(media.sha256 ?? '')) fail('media sha256');
-  if (!(media.bytes > 0)) fail('media size');
+  if (!(Number.isSafeInteger(media.bytes) && media.bytes > 0))
+    fail('media size');
+  if (
+    !Number.isSafeInteger(media.durationMs) ||
+    !Number.isSafeInteger(media.audioDurationMs)
+  )
+    fail('durations must be whole milliseconds');
+  const { video, audio } = media;
+  if (
+    video?.codec !== 'h264' ||
+    !Number.isSafeInteger(video.width) ||
+    !Number.isSafeInteger(video.height) ||
+    !(video.fps > 0)
+  )
+    fail('video stream');
+  if (
+    audio?.codec !== 'aac' ||
+    audio.sampleRate !== SAMPLE_RATE ||
+    !Number.isSafeInteger(audio.channels) ||
+    audio.channels < 1
+  )
+    fail('audio stream');
   const { minMs, maxMs } = m.window ?? {};
   if (!(minMs >= 60_000 && maxMs <= 120_000 && maxMs - minMs >= 8_000))
     fail('window');
@@ -660,9 +700,39 @@ export function validateManifest(manifest) {
   return Object.freeze(structuredClone(m));
 }
 
-/** True when a text names a common real company or product. */
-export function namesRealBrand(text) {
-  return DENY_LIST.some((name) =>
-    new RegExp(`(^|[^A-Za-z])${name}([^A-Za-z]|$)`).test(text),
+const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** True when a text names a listed real company or product. Matched as a
+ * whole word, the same way the dialogue lab checks its briefs. */
+export function namesRealBrand(text, list = DENY_LIST) {
+  return list.some((name) =>
+    new RegExp(
+      `(?<![\\p{L}\\p{N}])${escape(name)}(?![\\p{L}\\p{N}])`,
+      'u',
+    ).test(text),
   );
+}
+
+/** What is wrong with generated text that should be fictional: a listed
+ * real company or product, or a web address, email, handle or phone number.
+ * Empty when nothing is. */
+export function contentProblems(text) {
+  const problems = [];
+  if (namesRealBrand(text)) problems.push('real-brand');
+  if (CONTACT.test(text)) problems.push('contact-detail');
+  return problems;
+}
+
+/** Checks a generated title and every line before a manifest is written.
+ * Returns the problems found, by line; empty when the text is usable. */
+export function generatedContentProblems({ title, lines }) {
+  const found = [];
+  if (title !== null && title !== undefined)
+    for (const problem of contentProblems(title))
+      found.push({ where: 'title', problem });
+  lines.forEach((line, i) => {
+    for (const problem of contentProblems(line.text))
+      found.push({ where: `l${i + 1}`, problem });
+  });
+  return found;
 }
