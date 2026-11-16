@@ -46,10 +46,15 @@ approval or proves that a missing log event was delivered.
 
 Supply the pinned provider/model/effort/attempt cap as `selection`, the explicit
 `sourceApplication:"QuickTime Player"`, positive finite integer `stopAfterS`,
-`modelConnection:"on"` for the subscription routes (the direct API route has
-none; its in-app review approves the connection), and on the API route the
-`transcription` described below. There is no local transcription model: a
-`whisperModel` option is refused. The source
+and the `transcription` described below. A model run uses the direct API
+route only: its in-app review approves both the model connection and cloud
+transcription. A Codex or Claude CLI model launch is refused before anything
+is verified: "This route has no transcription: cloud transcription is approved
+only through the in-app review, which the subscription routes do not use." An
+API-route model launch without cloud transcription is refused too. There is no
+local transcription model, and a `whisperModel` option is refused. The
+subscription adapters remain for offline use (the scenario generator uses the
+Codex route). The source
 is restricted to the approved fictional QuickTime-only topology. This selects
 all QuickTime windows/audio, not one document; the run plan must establish that
 only the intended fictional document is active. Native must enforce its pristine

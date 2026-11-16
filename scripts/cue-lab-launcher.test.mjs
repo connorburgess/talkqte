@@ -34,6 +34,10 @@ import {
   prepareLabLauncher,
   validateLabBuildRecord,
 } from './cue-lab-launcher.mjs';
+import {
+  NO_TRANSCRIPTION_SELECTED,
+  NO_TRANSCRIPTION_SUBSCRIPTION,
+} from './cue-lab-launcher.mjs';
 const selection = {
   provider: 'codex',
   model: 'gpt-6.1-sol',
@@ -572,6 +576,23 @@ for (const mutation of ['content', 'time', 'identity'])
 
 // Exercise production preparation and final verification with bounded OS-command
 // stand-ins only. No signature command or app executable is run by these tests.
+const buildSelection = {
+  provider: 'anthropic-api',
+  model: 'claude-opus-5-5',
+  effort: 'low',
+  maxCalls: 2,
+};
+// A grant stand-in: no key, no network; writes a fictional token once.
+const stubGrant = () => ({
+  ttlSeconds: 900,
+  writeTokenFile(path) {
+    writeFileSync(path, 'fictional-offline-token-0123456789', {
+      mode: 0o600,
+      flag: 'wx',
+    });
+  },
+  discard() {},
+});
 function fakeBuild() {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'tq-build-')));
   const bundlePath = join(directory, 'Fixture.app');
@@ -639,25 +660,27 @@ function fakeBuild() {
       executableSha256: value.sha256,
       commit: value.commit,
     },
-    selection,
+    // The only model route left: the direct API with cloud transcription.
+    selection: buildSelection,
     sourceApplication: 'QuickTime Player',
     stopAfterS: 120,
-    modelConnection: 'on',
     environment: {},
+    transcription: { backend: 'deepgram', minuteCap: 5, grant: stubGrant() },
   };
   const launchOptions = {
     executable,
-    metadata: selection,
+    metadata: { ...buildSelection, spendCapMicroUsd: 1_000_000 },
     onTiming() {},
     environment: {
       TALKQTE_DEV_STOP_SIGNAL: 'usr2',
       TALKQTE_DEV_STOP_AFTER_S: '120',
       TALKQTE_DEV_LAB_RUN_ID: 'fixture-run',
-      TALKQTE_DEV_CUE_BACKEND: 'lab-subscription',
+      TALKQTE_DEV_CUE_BACKEND: 'lab-api',
       TALKQTE_DEV_LAB_DESCRIPTOR: descriptor,
-      TALKQTE_DEV_LAB_PROVIDER: selection.provider,
-      TALKQTE_DEV_LAB_MODEL: selection.model,
-      TALKQTE_DEV_LAB_EFFORT: selection.effort,
+      TALKQTE_DEV_LAB_PROVIDER: buildSelection.provider,
+      TALKQTE_DEV_LAB_MODEL: buildSelection.model,
+      TALKQTE_DEV_LAB_EFFORT: buildSelection.effort,
+      TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD: '1000000',
     },
   };
   return {
@@ -695,6 +718,48 @@ for (const changed of ['resource', 'plist'])
       f.close();
     }
   });
+
+test('a subscription-route model launch is refused outright: it has no transcription', () => {
+  const f = fakeBuild();
+  try {
+    for (const selection of [
+      {
+        provider: 'codex',
+        model: 'gpt-6.1-sol',
+        effort: 'medium',
+        maxCalls: 2,
+      },
+      {
+        provider: 'claude-code',
+        model: 'claude-opus-5-5',
+        effort: 'medium',
+        maxCalls: 2,
+      },
+    ])
+      assert.throws(
+        () =>
+          prepareLabLauncher({
+            ...f.options,
+            selection,
+            transcription: undefined,
+            modelConnection: 'on',
+          }),
+        {
+          category: 'no-transcription',
+          message: NO_TRANSCRIPTION_SUBSCRIPTION,
+        },
+      );
+    // The direct API route without cloud transcription has none either.
+    assert.throws(
+      () => prepareLabLauncher({ ...f.options, transcription: undefined }),
+      { category: 'no-transcription', message: NO_TRANSCRIPTION_SELECTED },
+    );
+    // Refused before the build is even verified.
+    assert.equal(f.verifies, 0);
+  } finally {
+    f.close();
+  }
+});
 
 test('a Whisper model is refused now that local transcription is gone', () => {
   const f = fakeBuild();

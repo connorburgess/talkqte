@@ -716,6 +716,13 @@ export function removeStaleTranscriptionTokens({
   return removed;
 }
 
+export const NO_TRANSCRIPTION_SUBSCRIPTION =
+  'This route has no transcription: cloud transcription is approved only through the in-app review, which the subscription routes do not use.';
+export const NO_TRANSCRIPTION_SELECTED =
+  'This model run has no transcription: select cloud transcription (Deepgram).';
+const noTranscription = (reason) =>
+  Object.assign(new Error(reason), { category: 'no-transcription' });
+
 export function prepareLabLauncher({
   manifestFile,
   approved,
@@ -732,6 +739,16 @@ export function prepareLabLauncher({
   // Local transcription is gone: a Whisper model or any other unknown
   // option is refused rather than ignored.
   requireThat(Object.keys(rest).length === 0);
+  // A model run needs a transcript, and the only one left is cloud
+  // transcription, approved only by the in-app review that the direct API
+  // route uses. The subscription routes are refused before anything is
+  // verified or launched.
+  if (mode === 'model-enabled') {
+    if (selection?.provider !== 'anthropic-api')
+      throw noTranscription(NO_TRANSCRIPTION_SUBSCRIPTION);
+    if (transcription === undefined)
+      throw noTranscription(NO_TRANSCRIPTION_SELECTED);
+  }
   try {
     return launcher({
       build: verifyBuild(manifestFile, approved),
