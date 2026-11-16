@@ -517,6 +517,12 @@ fn pump_paced<A: Access, S: Source>(
                         unreachable!("matched above")
                     };
                     let timed = block.timing();
+                    // Audio another operation or an older session produced
+                    // never reaches the stream, and ends this source.
+                    if !timed.belongs_to(session, &control) {
+                        reading = false;
+                        continue;
+                    }
                     let format = timed.audio().format();
                     if format.sample_rate() as usize != crate::transcription::SAMPLE_RATE
                         || format.channels() != 1
@@ -977,6 +983,51 @@ mod tests {
         assert_eq!(report.status.stage, Stage::Released);
         assert_eq!(report.worker.accepted, 1);
         assert!(script.sent.load(Ordering::SeqCst) > 0);
+    }
+
+    #[test]
+    fn a_block_from_another_operation_is_never_sent_and_stops_the_source() {
+        let mut fixture = fixture();
+        let binding = attach(&fixture);
+        fixture.queue_audio();
+        let mut source = fixture.scripted(binding);
+        // One valid block of the same session from a different operation,
+        // read first. Its reader sees nothing wrong; the pump must refuse it.
+        let other_gate = Gate::default();
+        let mut review = other_gate
+            .review(Application::new("other".into(), "Fictional player".into()).unwrap())
+            .unwrap();
+        let other = review.control();
+        let mut start = other_gate.approve(&mut review).unwrap();
+        let (mut input, reader) = start.handoff(Format::new(16_000, 1).unwrap(), 1).unwrap();
+        let capture = start.run(|_, _| Ok(())).unwrap();
+        input.push(&other, 0, &[0.25; 2_048]).unwrap();
+        source.foreign = Some((Feed::new(reader, unattached(&fixture), 1.0), capture));
+        let script = CloudScript::default();
+        let stream = script.clone();
+        let feed = CloudFeed::new(
+            fixture.session,
+            1,
+            Box::new(move || Ok(Box::new(stream) as Box<dyn StreamingTranscriber>)),
+            || true,
+            source_sink(fixture.runtime.clone(), &fixture.control),
+        );
+        let watchdog = Watchdog(fixture.control.clone());
+        let host = thread::spawn(move || watchdog.expect_cancelled());
+        let report = pump(
+            fixture.runtime.clone(),
+            fixture.session,
+            fixture.control.clone(),
+            source,
+            Recognizing::Cloud(Box::new(feed)),
+            Duration::ZERO,
+            Monitor::default(),
+        );
+        host.join().unwrap();
+        assert_eq!(report.status.stage, Stage::Released);
+        assert!(fixture.control.is_cancelled());
+        assert_eq!(script.sent.load(Ordering::SeqCst), 0, "nothing was sent");
+        assert!(fixture.transcript().is_empty());
     }
 
     #[test]
