@@ -159,9 +159,9 @@ const modelBuild = new URLSearchParams(location.search).has('model');
 let model: ModelStatus = {
   revision: 0,
   status: modelBuild ? 'missing' : 'unavailable',
-  name: 'base.en',
-  sizeBytes: 147_964_211,
-  neededBytes: 147_964_211 + 512 * 1024 * 1024,
+  name: 'tiny.en',
+  sizeBytes: 77_704_715,
+  neededBytes: 77_704_715 + 512 * 1024 * 1024,
   received: 0,
   message: null,
 };

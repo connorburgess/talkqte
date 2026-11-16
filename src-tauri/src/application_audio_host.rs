@@ -1151,7 +1151,7 @@ pub(crate) mod app {
                 .filter(|(path, _)| path.is_file())
                 .ok_or("The local speech model is not installed.")?;
             if pinned {
-                crate::model::verify(&model, &crate::model::DEFAULT)?;
+                crate::model::verify(&model, &crate::model::TINY_EN)?;
             }
             let loaded = crate::transcription::whisper::LocalWhisper::load(&model, 4)
                 .map_err(|_| "Could not load the local speech model.".to_string())?;
