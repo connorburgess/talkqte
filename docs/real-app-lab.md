@@ -92,7 +92,9 @@ The model never goes inside the repository. Use one of these:
 
 - **In the app:** Settings → speech model → Download. It is saved as
   `~/Library/Application Support/com.talkqte.desktop/models/ggml-tiny.en.bin`
-  and checked against its pinned SHA-256 before use.
+  and checked against its pinned SHA-256 before use. A debug lab build
+  launched with `TALKQTE_DEV_SPEECH_MODEL=base.en` downloads, checks and
+  loads `ggml-base.en.bin` instead ([development setting](local-transcription.md#development-setting-baseen)).
 - **A file you already have:** set `TALKQTE_WHISPER_MODEL` to its absolute
   path when launching. That file is not checksum-checked.
 

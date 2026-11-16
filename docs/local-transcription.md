@@ -10,6 +10,16 @@ The optional `local-whisper` Cargo feature adds `LocalWhisper`, a [Transcriber](
 
 The app looks for the model at `TALKQTE_WHISPER_MODEL`, or at `models/ggml-tiny.en.bin` in its data folder, where **Download speech model** in Settings puts it after checking its SHA-256. **Start live session** loads it before opening the microphone, so a missing or unreadable model is reported without starting capture. The capture callback feeds the [audio tap](architecture.md); a runner thread moves chunks of 1–3 seconds, cut at pauses where possible, to the worker every 250 ms and the worker's lines go to `Engine::ingest`. Stop releases the microphone first, then transcribes what was queued, waiting up to 10 seconds. If the microphone is refused or fails, the session ends.
 
+### Development setting: `base.en`
+
+A debug build launched with `TALKQTE_DEV_SPEECH_MODEL=base.en` uses the English-only `base.en` model instead of `tiny.en`. It is pinned like `tiny.en`: the same fixed revision of the upstream repository, SHA-256 `a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002`, 147,964,211 bytes. Settings then offers and checks that file (`models/ggml-base.en.bin`), and live sessions load it.
+
+- Unset or `tiny.en` means the default.
+- Any other value is refused with a stated reason, and no model is loaded.
+- A release build ignores the setting.
+
+On fictional call-paced meetings `base.en` made fewer word errors than `tiny.en`, but it used about twice the processor time, over the [CPU budget](budgets.md). So it is a development choice for lab runs, not the default.
+
 ## Run the check
 
 Use a fictional synthetic clip only: 16 kHz, mono, 16-bit PCM WAV, at most 30 seconds. Keep the model and clip outside the repository.
