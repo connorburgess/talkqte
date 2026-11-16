@@ -1213,7 +1213,8 @@ mod tests {
         assert_eq!(base_file, DEFAULT.file);
         assert_eq!(DEFAULT.sha256.len(), 64);
         assert!(DEFAULT.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
-        assert!(DEFAULT.bytes > TINY_EN.bytes);
+        assert_ne!(DEFAULT.sha256, TINY_EN.sha256);
+        assert_ne!(DEFAULT.file, TINY_EN.file);
     }
 
     #[test]
