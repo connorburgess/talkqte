@@ -23,6 +23,7 @@ import {
   loadEvidence,
   writeEvidenceReport,
 } from './cue-lab-evidence-report.mjs';
+import { DEEPGRAM_APP_QUERY } from './cue-lab-deepgram.mjs';
 
 const manifest = () => ({
   schema: MANIFEST_SCHEMA,
@@ -977,4 +978,171 @@ test('a refused evaluation on the direct API route is its own non-decision outco
     },
   ]);
   assert.equal(limited.evaluations[0].outcome, 'output_limit');
+});
+
+// Cloud transcription (#344): settings, stream order against the in-app
+// review, stop codes, audio against the cap and final → line delay.
+const transcriptionSettings = {
+  backend: 'deepgram',
+  minuteCap: 5,
+  grantTtlS: 900,
+  query: DEEPGRAM_APP_QUERY,
+};
+function cloudReport(rows, settings = transcriptionSettings) {
+  const m = manifest();
+  if (settings) m.transcription = settings;
+  const events = importNativeRows(
+    rows.map((r) => ({ ...r })),
+    {
+      runId: m.runId,
+      artifactId: 'native',
+      clockId: 'audio',
+    },
+  );
+  m.artifacts.push({
+    id: 'native',
+    kind: 'native-timing',
+    path: 'native.jsonl',
+    clockId: 'audio',
+    bytes: 0,
+    sha256: 'a'.repeat(64),
+  });
+  return buildEvidenceReport(m, events);
+}
+const cloudRows = ({ reviewFirst = true, stop } = {}) => {
+  const review = {
+    event: 'evaluator',
+    approval: 'review',
+    session: '9',
+    state: 'on',
+    backend: 'lab-api',
+    model: 'claude-opus-5-5',
+    effort: 'low',
+    elapsed_ms: 400,
+    mono_ms: 1400,
+  };
+  const started = {
+    event: 'stt_state',
+    session: '2',
+    state: 'started',
+    audio_ms: 0,
+    mono_ms: 1500,
+  };
+  return [
+    {
+      event: 'session',
+      session: '2',
+      live: true,
+      state: 'started',
+      elapsed_ms: 0,
+      mono_ms: 1000,
+      commit: 'c',
+      features: [],
+    },
+    ...(reviewFirst ? [review, started] : [started, review]),
+    {
+      event: 'stt_final',
+      session: '2',
+      seq: 1,
+      start_ms: 2000,
+      end_ms: 4200,
+      untrusted_speaker: 3,
+      mono_ms: 5700,
+    },
+    {
+      event: 'segment',
+      session: '2',
+      id: 'c2-1-1',
+      at_ms: 2000,
+      speaker: 'Speaker',
+      text: 'A fictional plan for Friday.',
+      accepted: true,
+      mono_ms: 5701,
+    },
+    stop ?? {
+      event: 'stt_state',
+      session: '2',
+      state: 'ended',
+      audio_ms: 95000,
+      mono_ms: 9000,
+    },
+  ];
+};
+
+test('cloud transcription evidence records settings, review order, stop, cap and final delay, and no speaker label', () => {
+  const r = cloudReport(cloudRows());
+  const c = r.cloudTranscription;
+  assert.deepEqual(c.settings, transcriptionSettings);
+  assert.equal(c.reviewRowSeen, true);
+  assert.deepEqual(c.streams, [
+    {
+      sessionId: '2',
+      starts: 1,
+      startedAfterReview: true,
+      stopState: 'ended',
+      stopCode: null,
+      audioMs: 95000,
+      capMs: 300000,
+      withinCap: true,
+    },
+  ]);
+  // Speech ended at session 4200 ms = mono 5200; the line arrived at 5701.
+  assert.equal(c.finals[0].segmentId, 'c2-1-1');
+  assert.equal(c.finals[0].finalToSegmentMs, 501);
+  assert.equal(c.finalToSegment.maxMs, 501);
+  assert.equal(JSON.stringify(r).includes('untrusted'), false);
+  assert.equal(JSON.stringify(r).includes('Speaker":3'), false);
+  const md = renderEvidenceMarkdown(r);
+  assert.match(md, /### Cloud transcription/);
+  assert.match(md, /mip_opt_out=true/);
+});
+
+test('a stream that started before the review row, and a stop code, are reported as such', () => {
+  const r = cloudReport(
+    cloudRows({
+      reviewFirst: false,
+      stop: {
+        event: 'stt_state',
+        session: '2',
+        state: 'stopped',
+        code: 'cap_reached',
+        audio_ms: 300000,
+        mono_ms: 9000,
+      },
+    }),
+  );
+  const [s] = r.cloudTranscription.streams;
+  assert.equal(s.startedAfterReview, false);
+  assert.deepEqual([s.stopState, s.stopCode], ['stopped', 'cap_reached']);
+});
+
+test('malformed transcription rows and settings are refused, never guessed', () => {
+  for (const row of [
+    { event: 'stt_state', session: '2', state: 'paused', audio_ms: 0 },
+    { event: 'stt_state', session: '2', state: 'stopped', audio_ms: 0 },
+    {
+      event: 'stt_state',
+      session: '2',
+      state: 'stopped',
+      code: 'provider said no',
+      audio_ms: 0,
+    },
+    { event: 'stt_final', session: '2', seq: 1, start_ms: 5, end_ms: 4 },
+    {
+      event: 'evaluator',
+      session: '9',
+      approval: 'implicit',
+      state: 'on',
+      backend: 'lab-api',
+    },
+  ])
+    assert.throws(() => cloudReport([row]));
+  for (const settings of [
+    { ...transcriptionSettings, query: 'model=nova-3' },
+    { ...transcriptionSettings, minuteCap: 61 },
+    { ...transcriptionSettings, token: 'x' },
+  ])
+    assert.throws(() => cloudReport(cloudRows(), settings), {
+      message: /transcription settings/,
+    });
 });

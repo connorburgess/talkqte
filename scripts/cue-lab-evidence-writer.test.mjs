@@ -325,3 +325,43 @@ test('canonical repository descendants and symlink aliases cannot be evidence pa
     }),
   );
 });
+
+test('cloud transcription settings are recorded once, with the app query and never a token', (t) => {
+  const f = fixture(t);
+  assert.throws(() =>
+    f.writer.recordTranscription({
+      backend: 'deepgram',
+      minuteCap: 5,
+      grantTtlS: 900,
+      token: 'fictional',
+    }),
+  );
+  assert.throws(() =>
+    f.writer.recordTranscription({
+      backend: 'deepgram',
+      minuteCap: 0,
+      grantTtlS: 900,
+    }),
+  );
+  f.writer.recordTranscription({
+    backend: 'deepgram',
+    minuteCap: 5,
+    grantTtlS: 900,
+  });
+  assert.throws(() =>
+    f.writer.recordTranscription({
+      backend: 'deepgram',
+      minuteCap: 5,
+      grantTtlS: 900,
+    }),
+  );
+  assert.equal(f.writer.emit(event), true);
+  const { manifest } = f.read();
+  assert.deepEqual(Object.keys(manifest.transcription).sort(), [
+    'backend',
+    'grantTtlS',
+    'minuteCap',
+    'query',
+  ]);
+  assert.match(manifest.transcription.query, /(^|&)mip_opt_out=true(&|$)/);
+});

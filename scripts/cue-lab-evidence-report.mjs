@@ -12,6 +12,7 @@ import {
 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMain } from './is-main.mjs';
+import { DEEPGRAM_APP_QUERY } from './cue-lab-deepgram.mjs';
 
 export const EVENT_SCHEMA = 'talkqte.lab.evidence.event.v1';
 export const MANIFEST_SCHEMA = 'talkqte.lab.evidence.manifest.v1';
@@ -30,6 +31,12 @@ const STAGES = new Set([
     'settled',
     'result',
   ].map((s) => `evaluator.${s}`),
+  // The native model connection turning on or off, and how it was approved.
+  'evaluator.connection',
+  // A live native session starting: anchors its session clock to mono time.
+  'session.started',
+  // Cloud transcription stream start/stop with its fixed code and audio sent.
+  'transcription.stream',
   'cue.decided',
   'cue.published',
   'cue.cleared',
@@ -283,6 +290,22 @@ export function validateManifest(m) {
     (!Array.isArray(m.reviews) || m.reviews.length > 1000)
   )
     fail('invalid reviews');
+  // Cloud transcription settings the launcher used: never the token.
+  if (
+    m.transcription !== undefined &&
+    (!object(m.transcription) ||
+      Object.keys(m.transcription).sort().join() !==
+        'backend,grantTtlS,minuteCap,query' ||
+      m.transcription.backend !== 'deepgram' ||
+      !Number.isSafeInteger(m.transcription.minuteCap) ||
+      m.transcription.minuteCap < 1 ||
+      m.transcription.minuteCap > 60 ||
+      !Number.isSafeInteger(m.transcription.grantTtlS) ||
+      m.transcription.grantTtlS < 300 ||
+      m.transcription.grantTtlS > 3600 ||
+      m.transcription.query !== DEEPGRAM_APP_QUERY)
+  )
+    fail('invalid transcription settings');
   for (const r of m.reviews ?? []) {
     ids(r.ids);
     if (!Array.isArray(r.labels) || r.labels.some((l) => !LABELS.has(l)))
@@ -413,6 +436,56 @@ export function importNativeRows(rows, { runId, artifactId, clockId }) {
         }
         break;
       }
+      case 'evaluator':
+        if (
+          !['review', 'launchSetting'].includes(r.approval) ||
+          !['on', 'off'].includes(r.state) ||
+          !/^[A-Za-z0-9._-]{1,64}$/.test(r.backend ?? '')
+        )
+          fail('invalid native connection row');
+        stage = 'evaluator.connection';
+        // The connection's session numbering is not the transcript's.
+        delete identity.sessionId;
+        payload = {
+          approval: r.approval,
+          connectionState: r.state,
+          backend: r.backend,
+        };
+        break;
+      case 'session':
+        if (r.live !== true || r.state !== 'started') continue;
+        if (!number(r.elapsed_ms)) fail('invalid native session row');
+        stage = 'session.started';
+        payload = { sessionElapsedMs: r.elapsed_ms };
+        break;
+      case 'stt_state':
+        if (
+          !STT_STATES.has(r.state) ||
+          (r.code !== undefined && !STT_CODES.has(r.code)) ||
+          (r.state === 'stopped') !== (r.code !== undefined) ||
+          !Number.isSafeInteger(r.audio_ms) ||
+          r.audio_ms < 0
+        )
+          fail('invalid native transcription state row');
+        stage = 'transcription.stream';
+        payload = {
+          sttState: r.state,
+          ...(r.code !== undefined ? { sttCode: r.code } : {}),
+          audioMs: r.audio_ms,
+        };
+        break;
+      case 'stt_final':
+        if (
+          ![r.seq, r.start_ms, r.end_ms].every(Number.isSafeInteger) ||
+          r.seq < 0 ||
+          r.start_ms < 0 ||
+          r.end_ms < r.start_ms
+        )
+          fail('invalid native transcription final row');
+        // The provider's speaker label is untrusted: never carried forward.
+        stage = 'transcript.finalized';
+        payload = { sttSeq: r.seq, startMs: r.start_ms, endMs: r.end_ms };
+        break;
       case 'cue_decision':
         stage = 'cue.decided';
         if (r.decider !== undefined) payload = { decider: r.decider };
@@ -518,6 +591,18 @@ const key = (e, kind) =>
     ? `${e.ids.sessionId}/${e.ids[kind]}`
     : null;
 const DECISION_ACTIONS = new Set(['show', 'quiet', 'resolved', 'withdraw']);
+const STT_STATES = new Set(['started', 'finished', 'ended', 'stopped']);
+const STT_CODES = new Set([
+  'auth',
+  'quota',
+  'rate_limited',
+  'cap_reached',
+  'network',
+  'protocol',
+  'closed',
+  'settings',
+  'withdrawn',
+]);
 // Native segment identities such as `t1-0-4`; never free text.
 const SEGMENT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 // How far behind the current transcript an applied lab decision was.
@@ -555,6 +640,17 @@ function safePayload(payload, includeContent) {
   if (['phrase_rule', 'model'].includes(payload.decider))
     result.decider = payload.decider;
   if (typeof payload.accepted === 'boolean') result.accepted = payload.accepted;
+  if (['review', 'launchSetting'].includes(payload.approval))
+    result.approval = payload.approval;
+  if (['on', 'off'].includes(payload.connectionState))
+    result.connectionState = payload.connectionState;
+  if (/^[A-Za-z0-9._-]{1,64}$/.test(payload.backend ?? ''))
+    result.backend = payload.backend;
+  if (STT_STATES.has(payload.sttState)) result.sttState = payload.sttState;
+  if (STT_CODES.has(payload.sttCode)) result.sttCode = payload.sttCode;
+  for (const k of ['audioMs', 'sttSeq', 'startMs', 'endMs', 'sessionElapsedMs'])
+    if (Number.isSafeInteger(payload[k]) && payload[k] >= 0)
+      result[k] = payload[k];
   if (number(payload.nativeReportedLatencyMs))
     result.nativeReportedLatencyMs = payload.nativeReportedLatencyMs;
   if (includeContent) {
@@ -582,6 +678,99 @@ function safePayload(payload, includeContent) {
       }
   }
   return Object.keys(result).length ? result : undefined;
+}
+// Cloud transcription evidence, from native rows only: the settings used,
+// whether each stream opened only after the in-app review, how it stopped,
+// audio sent against the cap, and each final's delay from its end of speech
+// (session clock, bridged through the session's start row) to the arrival
+// of its transcript line.
+function cloudSummary(events, m) {
+  const streamEvents = events.filter((e) => e.stage === 'transcription.stream');
+  const finals = events.filter((e) => e.stage === 'transcript.finalized');
+  if (!m.transcription && !streamEvents.length && !finals.length) return null;
+  const index = new Map(events.map((e, i) => [e, i]));
+  const firstReview = events.findIndex(
+    (e) =>
+      e.stage === 'evaluator.connection' &&
+      e.payload?.approval === 'review' &&
+      e.payload?.connectionState === 'on',
+  );
+  const capMs = m.transcription ? m.transcription.minuteCap * 60000 : null;
+  const sessions = [
+    ...new Set(streamEvents.map((e) => e.ids?.sessionId ?? null)),
+  ];
+  const streams = sessions.map((sessionId) => {
+    const own = streamEvents.filter(
+      (e) => (e.ids?.sessionId ?? null) === sessionId,
+    );
+    const starts = own.filter((e) => e.payload?.sttState === 'started');
+    const stops = own.filter((e) => e.payload?.sttState !== 'started');
+    const last = stops.at(-1) ?? null;
+    const audioMs = Math.max(0, ...own.map((e) => e.payload?.audioMs ?? 0));
+    return {
+      sessionId,
+      starts: starts.length,
+      startedAfterReview:
+        starts.length > 0 &&
+        firstReview >= 0 &&
+        starts.every((e) => index.get(e) > firstReview),
+      stopState: last?.payload?.sttState ?? null,
+      stopCode: last?.payload?.sttCode ?? null,
+      audioMs,
+      capMs,
+      withinCap: capMs === null ? null : audioMs <= capMs,
+    };
+  });
+  const arrivals = events.filter((e) => e.stage === 'transcript.arrived');
+  const finalRows = finals.map((f) => {
+    const sessionId = f.ids?.sessionId ?? null;
+    const seq = f.payload?.sttSeq;
+    const pattern = new RegExp(`^c${sessionId}-[0-9]+-${seq}$`);
+    const matches = arrivals.filter(
+      (a) => a.ids?.sessionId === sessionId && pattern.test(a.ids?.segmentId),
+    );
+    const arrival = matches.length === 1 ? matches[0] : null;
+    const starts = events.filter(
+      (e) => e.stage === 'session.started' && e.ids?.sessionId === sessionId,
+    );
+    const start = starts.length === 1 ? starts[0] : null;
+    let finalToSegmentMs = null;
+    if (
+      arrival?.timing &&
+      start?.timing &&
+      arrival.timing.clockId === start.timing.clockId &&
+      Number.isSafeInteger(f.payload?.endMs)
+    )
+      finalToSegmentMs =
+        arrival.timing.atMs -
+        (start.timing.atMs +
+          (f.payload.endMs - start.payload.sessionElapsedMs));
+    return {
+      eventId: f.eventId,
+      sessionId,
+      seq: seq ?? null,
+      segmentId: arrival?.ids?.segmentId ?? null,
+      endMs: f.payload?.endMs ?? null,
+      finalToSegmentMs,
+    };
+  });
+  const delays = finalRows
+    .map((r) => r.finalToSegmentMs)
+    .filter((v) => v !== null)
+    .sort((a, b) => a - b);
+  return {
+    settings: m.transcription ? { ...m.transcription } : null,
+    reviewRowSeen: firstReview >= 0,
+    streams,
+    finals: finalRows,
+    finalToSegment: {
+      count: delays.length,
+      medianMs: delays.length ? delays[Math.floor(delays.length / 2)] : null,
+      maxMs: delays.length ? delays.at(-1) : null,
+      basis:
+        'native session clock bridged through the session start row; about ±2 ms of logging resolution',
+    },
+  };
 }
 export function buildEvidenceReport(
   manifest,
@@ -693,6 +882,7 @@ export function buildEvidenceReport(
       staleness: staleness(one('evaluator.result')),
     };
   });
+  const cloudTranscription = cloudSummary(events, m);
   const cueRows = [...cues].map(([id, group]) => {
     const published = pick(group, 'cue.published'),
       painted = pick(group, 'video.cue-painted');
@@ -872,6 +1062,7 @@ export function buildEvidenceReport(
       ]),
     ),
     transcription,
+    cloudTranscription,
     evaluations,
     cues: cueRows,
     timeline,
@@ -898,6 +1089,27 @@ const metric = (m) =>
   m.status === 'unknown'
     ? `unknown (${m.reason})`
     : `${Math.round(m.valueMs)} ± ${Math.round(m.uncertaintyMs)} ms${m.status === 'uncertain' ? ' (uncertain order)' : ''}`;
+function cloudMarkdown(c) {
+  return [
+    '### Cloud transcription',
+    '',
+    c.settings
+      ? `Settings: ${escape(c.settings.backend)}, cap ${c.settings.minuteCap} min, grant TTL ${c.settings.grantTtlS} s; the app's fixed query: \`${escape(c.settings.query)}\`. The token is not evidence.`
+      : 'Settings: not recorded in the manifest.',
+    '',
+    `In-app review row seen: ${c.reviewRowSeen}.`,
+    '',
+    '| Session | Starts | Started only after review | Stop state / code | Audio sent / cap |',
+    '| --- | --- | --- | --- | --- |',
+    ...c.streams.map(
+      (s) =>
+        `| ${escape(s.sessionId ?? 'unknown')} | ${s.starts} | ${s.startedAfterReview} | ${s.stopState ?? 'none'} / ${s.stopCode ?? 'none'} | ${s.audioMs} ms / ${s.capMs ?? 'unknown'} ms |`,
+    ),
+    '',
+    `Final end of speech → transcript line: ${c.finalToSegment.count} finals; median ${c.finalToSegment.medianMs ?? 'unknown'} ms, max ${c.finalToSegment.maxMs ?? 'unknown'} ms (${c.finalToSegment.basis}). The provider's speaker label is untrusted and not reported.`,
+    '',
+  ];
+}
 export function renderEvidenceMarkdown(r, { recordingHref } = {}) {
   const time = (e) =>
     e.recording
@@ -979,6 +1191,7 @@ export function renderEvidenceMarkdown(r, { recordingHref } = {}) {
         `| ${escape(c.id)} / ${c.decider} | ${c.publication} / ${c.paint} | ${metric(c.publicationDelay)} | ${metric(c.visibleDuration)} | ${metric(c.endToEnd)} | ${lagText(c.staleness)} |`,
     ),
     '',
+    ...(r.cloudTranscription ? cloudMarkdown(r.cloudTranscription) : []),
     '| Transcript event | Heard end → arrival |',
     '| --- | --- |',
     ...r.transcription.map(

@@ -69,6 +69,18 @@ exists, not during prelaunch verification. The owner waits for exact-run `armed`
 sends USR2 once and requires `latched` → `stopping` → `released` or failure.
 Six seconds after signaling and twelve seconds total remain the cleanup bounds.
 
+## Cloud transcription token
+
+On the direct API route a run may transcribe through Deepgram (#344) instead of a local model. Pass `transcription: { backend: 'deepgram', minuteCap, grant }`, where `minuteCap` is 1–60 and `grant` comes from `mintDeepgramGrant` (`scripts/cue-lab-deepgram.mjs`). A Whisper model is then refused.
+
+- **Minting:** the grant reads `TALKQTE_LAB_DEEPGRAM_KEY` from `~/.config/talkqte-lab/deepgram.env`. That file follows the same owner, mode and location rules as the API key file (`scripts/cue-lab-key-file.mjs`). The grant then posts once to `https://api.deepgram.com/v1/auth/grant` for a 900 s token, enough to outlive launch, Listening and the 180 s approval wait, because the app reads the token only when the stream opens, at approval. A refused key, unpaid account or rate limit (401, 402, 403, 429), or any other status, stops before launch.
+- **Where the key and token live:** the key is used only for that request, in this process. The token is held in a closure, never returned or logged.
+- **At launch:** the launcher writes the token to a new `0600` file in its `0700` run folder and sets `TALKQTE_DEV_STT_BACKEND=deepgram`, `TALKQTE_DEV_STT_TOKEN_FILE` and `TALKQTE_DEV_STT_MINUTE_CAP`. Neither the key nor the token is ever in argv or the environment.
+- **Deletion:** the file is deleted as soon as the stream has opened (`stt_state` `started`), and otherwise at close, on a failed launch, or at process exit.
+- **Order check:** a stream that opens before the app's in-app review row stops the run.
+
+Tests use a loopback grant stand-in and dummy keys.
+
 ## Bounded observation, not a disk quota
 
 Each launch gets a unique external `0700` directory and owned `0600` regular
