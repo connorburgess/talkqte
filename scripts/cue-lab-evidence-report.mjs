@@ -37,6 +37,10 @@ const STAGES = new Set([
   'session.started',
   // Cloud transcription stream start/stop with its fixed code and audio sent.
   'transcription.stream',
+  // The native capture source failing (source_problem), and TalkQTE's own
+  // owned-player identity check failing, recovering or ending it.
+  'source.problem',
+  'source.check',
   'cue.decided',
   'cue.published',
   'cue.cleared',
@@ -481,6 +485,34 @@ export function importNativeRows(rows, { runId, artifactId, clockId }) {
           audioMs: r.audio_ms,
         };
         break;
+      case 'source_problem':
+        if (
+          !FIXED_LABEL.test(r.problem ?? '') ||
+          (r.os_code !== undefined && !Number.isSafeInteger(r.os_code))
+        )
+          fail('invalid native source problem row');
+        // Only the fixed label and OS code; any detail stays in the original.
+        stage = 'source.problem';
+        payload = {
+          sourceProblem: r.problem,
+          ...(r.os_code !== undefined ? { osCode: r.os_code } : {}),
+        };
+        break;
+      case 'lab_source_check':
+        if (
+          !['failing', 'recovered', 'ended'].includes(r.state) ||
+          !FIXED_LABEL.test(r.check ?? '') ||
+          !Number.isSafeInteger(r.after_ms) ||
+          r.after_ms < 0
+        )
+          fail('invalid native lab source check row');
+        stage = 'source.check';
+        payload = {
+          checkState: r.state,
+          check: r.check,
+          afterMs: r.after_ms,
+        };
+        break;
       case 'stt_final':
         if (
           ![r.seq, r.start_ms, r.end_ms].every(Number.isSafeInteger) ||
@@ -599,6 +631,7 @@ const key = (e, kind) =>
     : null;
 const DECISION_ACTIONS = new Set(['show', 'quiet', 'resolved', 'withdraw']);
 // `dropping`: written once when the send queue first overflows.
+const FIXED_LABEL = /^[a-z_]{1,40}$/;
 const STT_STATES = new Set([
   'started',
   // Connected to the provider, with the query of the URL actually used.
@@ -664,9 +697,22 @@ function safePayload(payload, includeContent) {
   if (/^[A-Za-z0-9._-]{1,64}$/.test(payload.backend ?? ''))
     result.backend = payload.backend;
   if (STT_STATES.has(payload.sttState)) result.sttState = payload.sttState;
+  if (FIXED_LABEL.test(payload.sourceProblem ?? ''))
+    result.sourceProblem = payload.sourceProblem;
+  if (Number.isSafeInteger(payload.osCode)) result.osCode = payload.osCode;
+  if (['failing', 'recovered', 'ended'].includes(payload.checkState))
+    result.checkState = payload.checkState;
+  if (FIXED_LABEL.test(payload.check ?? '')) result.check = payload.check;
   if (STT_CODES.has(payload.sttCode)) result.sttCode = payload.sttCode;
   if (isAllowedSttQuery(payload.query)) result.query = payload.query;
-  for (const k of ['audioMs', 'sttSeq', 'startMs', 'endMs', 'sessionElapsedMs'])
+  for (const k of [
+    'afterMs',
+    'audioMs',
+    'sttSeq',
+    'startMs',
+    'endMs',
+    'sessionElapsedMs',
+  ])
     if (Number.isSafeInteger(payload[k]) && payload[k] >= 0)
       result[k] = payload[k];
   if (number(payload.nativeReportedLatencyMs))
@@ -923,6 +969,29 @@ export function buildEvidenceReport(
     };
   });
   const cloudTranscription = cloudSummary(events, m);
+  // Whether the native capture source held: every source problem (with
+  // ScreenCaptureKit's -3815 "source_gone" told apart from TalkQTE's own
+  // "lab_source_lost") and every identity-check transition.
+  const sourceHealth = {
+    problems: events
+      .filter((e) => e.stage === 'source.problem')
+      .map((e) => ({
+        eventId: e.eventId,
+        problem: e.payload.sourceProblem,
+        osCode: e.payload.osCode ?? null,
+      })),
+    checks: events
+      .filter((e) => e.stage === 'source.check')
+      .map((e) => ({
+        eventId: e.eventId,
+        state: e.payload.checkState,
+        check: e.payload.check,
+        afterMs: e.payload.afterMs,
+      })),
+  };
+  sourceHealth.held =
+    sourceHealth.problems.length === 0 &&
+    !sourceHealth.checks.some((c) => c.state === 'ended');
   const cueRows = [...cues].map(([id, group]) => {
     const published = pick(group, 'cue.published'),
       painted = pick(group, 'video.cue-painted');
@@ -1103,6 +1172,7 @@ export function buildEvidenceReport(
     ),
     transcription,
     cloudTranscription,
+    sourceHealth,
     evaluations,
     cues: cueRows,
     timeline,
@@ -1241,6 +1311,10 @@ export function renderEvidenceMarkdown(r, { recordingHref } = {}) {
     ),
     '',
     ...(r.cloudTranscription ? cloudMarkdown(r.cloudTranscription) : []),
+    '### Capture source',
+    '',
+    `Source held to the end: ${r.sourceHealth.held}. Source problems: ${r.sourceHealth.problems.map((p) => `${escape(p.problem)}${p.osCode === null ? '' : ` (${p.osCode})`}`).join(', ') || 'none'}. Identity-check transitions: ${r.sourceHealth.checks.map((c) => `${c.state} ${escape(c.check)} after ${c.afterMs} ms`).join('; ') || 'none'}.`,
+    '',
     '| Transcript event | Heard end → arrival |',
     '| --- | --- |',
     ...r.transcription.map(
