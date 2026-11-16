@@ -24,9 +24,9 @@ const visuallyHidden = {
 
 export const issueText = {
   labStopped:
-    'Cues stopped: this strict development lab run ended. Start a new lab run and session to continue; Resume does not restart it.',
+    'Cues stopped: this development lab run ended. Start a new lab run and session to continue; Resume does not restart it.',
   labUnavailable:
-    'Cues are off: the development lab provider, model, effort or local broker settings are unavailable. Correct the launch settings before starting a new run.',
+    'Cues are off: the development lab backend, provider, model, effort, spend cap or local broker settings are unavailable. Correct the launch settings before starting a new run.',
   devSettings:
     'Cues are off: TALKQTE_DEV_MODEL_CONNECTION must be on or absent, and TALKQTE_DEV_MODEL_CALLS must be a whole number from 1 to 100. Correct the launch settings and relaunch.',
   callLimit:
@@ -59,12 +59,17 @@ function isLabProcessor(id: string | undefined): boolean {
   return id === 'lab-subscription' || id === 'lab-api';
 }
 
+const apiLaunchApproval =
+  'Cues are off: launch-time approval (TALKQTE_DEV_MODEL_CONNECTION=on) is not accepted for the API lab backend. Relaunch without it, then approve in the session review.';
+
 export function processingIssueText(
   issue: keyof typeof issueText,
   provider = 'Claude',
   lab = false,
+  api = false,
 ): string {
   if (!lab) return issueText[issue];
+  if (api && issue === 'devSettings') return apiLaunchApproval;
   if (
     issue === 'labStopped' ||
     issue === 'labUnavailable' ||
@@ -76,9 +81,9 @@ export function processingIssueText(
     issue === 'timedOut'
       ? 'a deadline ended the lab connection'
       : issue === 'authentication'
-        ? `${provider} subscription sign-in or CLI setup is unavailable`
+        ? `${provider} sign-in or setup for the lab connection is unavailable`
         : issue === 'credentials'
-          ? 'the subscription authentication policy was not met'
+          ? "the lab connection's credential policy was not met"
           : issue === 'allowance' || issue === 'rateLimit'
             ? `${provider} usage or rate limit was reached`
             : issue === 'invalidReply'
@@ -495,6 +500,7 @@ export function ProcessingControl({
             snapshot.issue,
             snapshot.processor?.name,
             isLabProcessor(snapshot.processor?.id),
+            snapshot.processor?.id === 'lab-api',
           )}
         </p>
       )}

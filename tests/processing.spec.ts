@@ -726,6 +726,35 @@ test('the API lab names Claude, its billing and caps, and shares the lab stop ru
   ).toBeVisible();
 });
 
+test('the API lab explains a refused launch-time approval instead of a malformed setting', async ({
+  page,
+}) => {
+  await open(page);
+  await send(page, {
+    processor: {
+      id: 'lab-api',
+      revision: 1,
+      name: 'Claude',
+      model: 'claude-haiku-5-5',
+      location: 'hosted',
+      destination:
+        "the Anthropic API, with the lab owner's API key (billed per token)",
+      dataPolicy: 'Fictional conversation-only processing with a spend cap.',
+      acceptsNotes: false,
+    },
+    phase: 'unavailable',
+    sending: false,
+    issue: 'devSettings',
+  });
+  await expect(
+    page.getByRole('status').filter({
+      hasText:
+        'launch-time approval (TALKQTE_DEV_MODEL_CONNECTION=on) is not accepted for the API lab backend',
+    }),
+  ).toBeVisible();
+  await expect(page.getByText(/must be on or absent/)).toHaveCount(0);
+});
+
 test('strict subscription lab names Codex and discloses terminal controls in the panel', async ({
   page,
 }) => {
