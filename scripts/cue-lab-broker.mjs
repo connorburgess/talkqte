@@ -248,6 +248,7 @@ export async function openLabBroker({
     deadlineByBroker: 0,
     deadlineByNative: 0,
     refusals: 0,
+    outputLimits: 0,
     verdicts: { current: 0, staleSuccess: 0, expired: 0, failed: 0 },
     resultActions: { show: 0, quiet: 0, resolved: 0, withdraw: 0 },
   };
@@ -448,9 +449,16 @@ export async function openLabBroker({
       evaluations.deadlineByNative++;
       return;
     }
-    // A provider refusal is a recorded non-decision for this request only.
-    const code = reason === 'refusal' ? 'refusal' : 'deadline';
+    // A provider refusal, or an API reply that reached its output bound, is
+    // a recorded non-decision for this request only.
+    const code =
+      reason === 'refusal'
+        ? 'refusal'
+        : reason === 'output-limit'
+          ? 'output_limit'
+          : 'deadline';
     if (code === 'refusal') evaluations.refusals++;
+    else if (code === 'output_limit') evaluations.outputLimits++;
     else evaluations.deadlineByBroker++;
     if (authenticated && socket && !socket.destroyed)
       try {

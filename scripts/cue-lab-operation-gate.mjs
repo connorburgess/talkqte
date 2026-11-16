@@ -20,7 +20,10 @@ const CODES = new Set([
   'cleanup',
   'usage-limit',
   'refusal',
+  'output-limit',
 ]);
+// Provider outcomes that end only one scoped evaluator request.
+const REQUEST_SCOPED = new Set(['refusal', 'output-limit']);
 export const gateFailure = (category) =>
   Object.assign(new Error(`Lab run stopped: ${category}.`), { category });
 const safe = (error) =>
@@ -79,7 +82,7 @@ export function createLabOperationGate({
   const scopedRetirement = (lease, error) =>
     !!lease?.retired &&
     !terminal &&
-    ['cancelled', 'deadline', 'refusal'].includes(error?.category);
+    ['cancelled', 'deadline', ...REQUEST_SCOPED].includes(error?.category);
   const notify = () => {
     for (const waiter of waiters) waiter();
   };
@@ -120,10 +123,12 @@ export function createLabOperationGate({
       return result;
     } catch (error) {
       if (scopedRetirement(lease, error)) throw gateFailure(lease.retired);
-      // A provider refusal ends only this scoped evaluator request.
-      if (lease.scoped && !terminal && safe(error).category === 'refusal') {
-        lease.retire('refusal');
-        throw gateFailure('refusal');
+      // A provider refusal, or an API reply that reached its output bound,
+      // ends only this scoped evaluator request.
+      const category = safe(error).category;
+      if (lease.scoped && !terminal && REQUEST_SCOPED.has(category)) {
+        lease.retire(category);
+        throw gateFailure(category);
       }
       stop(safe(error).category);
       throw safe(error);

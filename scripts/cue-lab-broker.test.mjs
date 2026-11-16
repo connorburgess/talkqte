@@ -146,6 +146,8 @@ async function setup({
     descriptor,
     socket,
     calls,
+    // Frames received and not yet taken by next().
+    frames,
     next,
     frame,
     send,
@@ -1470,6 +1472,104 @@ test('a provider refusal is a request-scoped failed refusal and the next request
     assert.equal(ctx.broker.gate.terminal, null);
     assert.equal(ctx.broker.evaluationSummary.refusals, 1);
     assert.equal(ctx.broker.gate.dispatchesUsed, 2);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('an API reply at its output bound is a request-scoped failed output_limit and the next request is evaluated', async () => {
+  let n = 0;
+  const ctx = await setup({
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+    request: async () => {
+      n++;
+      if (n === 1)
+        throw Object.assign(new Error('fictional'), {
+          category: 'output-limit',
+        });
+      return { value, elapsedMs: 1, usage: {} };
+    },
+  });
+  try {
+    ctx.evaluate('1');
+    const failed = await ctx.next('failed');
+    assert.deepEqual([failed.requestId, failed.code], ['1', 'output_limit']);
+    assert.equal(ctx.broker.gate.terminal, null);
+    ctx.evaluate('2');
+    assert.equal((await ctx.next('result')).requestId, '2');
+    ctx.settle('2');
+    await ctx.broker.gate.waitIdle();
+    assert.equal(ctx.broker.evaluationSummary.outputLimits, 1);
+    assert.equal(ctx.broker.gate.dispatchesUsed, 2);
+  } finally {
+    await ctx.close();
+  }
+});
+
+// Native (#341) treats `failed` code refusal as request-scoped only when it
+// names the active request, and as terminal otherwise. The broker therefore
+// sends it exactly once, with the active request's ids, and never for a
+// request it has already retired.
+test('a refusal frame names the active request exactly; a late refusal after retirement sends nothing', async () => {
+  let n = 0;
+  const ctx = await setup({
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+    request: async ({ signal }) => {
+      n++;
+      if (n === 1)
+        throw Object.assign(new Error('fictional'), { category: 'refusal' });
+      if (n === 2)
+        // Outlives its budget, then reports a refusal after retirement.
+        return new Promise((_, reject) =>
+          signal.addEventListener(
+            'abort',
+            () =>
+              setTimeout(
+                () =>
+                  reject(
+                    Object.assign(new Error('fictional'), {
+                      category: 'refusal',
+                    }),
+                  ),
+                20,
+              ),
+            { once: true },
+          ),
+        );
+      return { value, elapsedMs: 1, usage: {} };
+    },
+  });
+  try {
+    ctx.evaluate('1');
+    const refusal = await ctx.next('failed');
+    assert.deepEqual(Object.keys(refusal).sort(), [
+      'code',
+      'contextRevision',
+      'requestId',
+      'runId',
+      'schema',
+      'sessionId',
+      'type',
+    ]);
+    assert.deepEqual(
+      [refusal.requestId, refusal.contextRevision, refusal.code],
+      ['1', '1', 'refusal'],
+    );
+    ctx.evaluate('2', { budgetMs: 50 });
+    const deadline = await ctx.next('failed');
+    assert.deepEqual([deadline.requestId, deadline.code], ['2', 'deadline']);
+    await delay(100);
+    ctx.evaluate('3');
+    assert.equal((await ctx.next('result')).requestId, '3');
+    ctx.settle('3');
+    await ctx.broker.gate.waitIdle();
+    // No second failed frame for request 2, so native never sees an
+    // unmatched refusal.
+    assert.equal(ctx.frames.filter((f) => f.type === 'failed').length, 0);
+    assert.equal(ctx.broker.gate.terminal, null);
+    assert.equal(ctx.broker.evaluationSummary.refusals, 1);
   } finally {
     await ctx.close();
   }

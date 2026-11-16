@@ -321,14 +321,17 @@ export async function openLabProvider({
         error?.category === 'cancelled'
       )
         throw failure('cancelled', calls);
-      // An API refusal is a recorded non-decision for this request only.
+      // An API refusal, or an API reply that reached its output bound, is a
+      // recorded non-decision for this request only. On the CLI routes an
+      // output limit stays terminal.
       if (
         !timedOut &&
         !terminal &&
         !signal?.aborted &&
-        error?.category === 'refusal'
+        (error?.category === 'refusal' ||
+          (provider === 'anthropic-api' && error?.category === 'output-limit'))
       )
-        throw failure('refusal', calls);
+        throw failure(error.category, calls);
       stop();
       if (error?.category === 'cleanup') throw failure('cleanup', calls);
       throw normalizeFailure(

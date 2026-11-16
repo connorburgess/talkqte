@@ -24,8 +24,9 @@ const failure = (category, calls = 0) =>
     category,
     calls,
   });
-// API outcomes that end only the one request (a recorded non-decision).
-const REQUEST_SCOPED = new Set(['refusal']);
+// API outcomes that end only the one request (a recorded non-decision): a
+// refusal, or a reply that reached the output bound (thinking shares it).
+const REQUEST_SCOPED = new Set(['refusal', 'output-limit']);
 const TERMINAL = {
   'usage-limit': 'usage-limit',
   auth: 'auth',
@@ -146,6 +147,7 @@ export async function openAnthropicLab({
   let calls = 0,
     spent = 0,
     terminal = false,
+    capReached = false,
     active = null,
     closing = null,
     nextId = 1;
@@ -180,6 +182,8 @@ export async function openAnthropicLab({
   }
 
   const request = async ({ role, input, signal: requestSignal } = {}) => {
+    // After the spend cap ends the run, later requests report it as such.
+    if (capReached) throw failure('usage-limit', calls);
     if (terminal || exited) throw failure('terminal', calls);
     if (active) {
       stop();
@@ -199,6 +203,7 @@ export async function openAnthropicLab({
     // per-run cap; that ends the run as a usage limit.
     const worst = worstCaseMicroUsd(model, input);
     if (spent + worst > cap) {
+      capReached = true;
       stop();
       throw failure('usage-limit', calls);
     }
@@ -224,12 +229,29 @@ export async function openAnthropicLab({
           budgetMs: deadlineMs,
         }) + '\n',
       );
-      const { result, text } = await pending.promise;
+      let settled;
+      try {
+        settled = await pending.promise;
+      } catch (error) {
+        // The worker died mid-request: whatever it sent may still be billed.
+        spent += worst;
+        Object.assign(receipt, { outcome: 'process', costMicroUsd: worst });
+        if (spent >= cap) capReached = true;
+        throw error;
+      }
+      const { result, text } = settled;
       const usage = result.usage ?? {};
-      const known =
+      // Only a reply that reached message_stop reports its final usage; any
+      // other outcome (cancelled, provider error, output bound, a stream cut
+      // short) may still be billed for what was generated, so it is charged
+      // the full worst case.
+      const complete =
+        result.messageStopMs !== null &&
+        result.messageStopMs !== undefined &&
         Number.isSafeInteger(usage.input_tokens) &&
-        Number.isSafeInteger(usage.output_tokens);
-      const cost = known ? costMicroUsd(model, usage) : worst;
+        Number.isSafeInteger(usage.output_tokens) &&
+        result.outcome !== 'output-limit';
+      const cost = complete ? costMicroUsd(model, usage) : worst;
       spent += cost;
       Object.assign(receipt, {
         outcome: result.outcome ?? 'provider',
@@ -255,8 +277,16 @@ export async function openAnthropicLab({
         if (typeof value?.action === 'string')
           value.action = value.action.toLowerCase();
         // A cap reached by this call ends the run after its decision.
-        if (spent >= cap) stop();
+        if (spent >= cap) {
+          capReached = true;
+          stop();
+        }
         return { value, elapsedMs: result.settledMs ?? 0, usage };
+      }
+      if (spent >= cap) {
+        capReached = true;
+        stop();
+        throw failure('usage-limit', calls);
       }
       if (result.outcome === 'cancelled') throw failure('cancelled', calls);
       if (REQUEST_SCOPED.has(result.outcome))

@@ -124,6 +124,15 @@ that request; the run, provider and dispatch budget continue.
 - **Provider refusal (direct API route only):** the model refused; the broker
   sends `failed` with code `refusal` for that request only. Native records a
   non-decision and sends nothing more for that request.
+- **Output bound (direct API route only):** the reply, including adaptive
+  thinking, reached `max_tokens`. The broker sends `failed` with code
+  `output_limit` for that request only. A native build without this code
+  treats it as terminal, which fails safe.
+
+Each of these `failed` frames names the active request's `requestId` and
+`contextRevision` and is sent at most once. Nothing is sent for a request the
+broker has already retired, because native treats an unmatched `failed` frame
+as terminal.
 
 After a `result` is sent, native may settle or retire the request until one
 second after the request's deadline (the broker allows a further 250 ms for
@@ -157,7 +166,7 @@ native's own session call limit bounds the rest.
 `evaluationSummary` reports content-free event counts, not a partition:
 `requested` (evaluates seen), `dispatched` (provider calls started),
 `retiredBeforeDispatch`, `resultsSent` with their fixed actions,
-`deadlineByBroker`, `refusals`, `deadlineByNative` (a sent result can later be retired by
+`deadlineByBroker`, `refusals`, `outputLimits`, `deadlineByNative` (a sent result can later be retired by
 native) and settlement `verdicts`.
 
 **Native timing fields.** In lab mode, native's `evaluation_result` log row

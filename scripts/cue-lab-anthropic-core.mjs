@@ -12,7 +12,9 @@ import { COMPACT_PROMPT, CONTRACT } from './cue-lab.mjs';
 export const ANTHROPIC_PROVIDER = 'anthropic-api';
 export const ANTHROPIC_BASE_URL = 'https://api.anthropic.com';
 export const ANTHROPIC_EFFORT = 'low';
-export const ANTHROPIC_MAX_TOKENS = 1024;
+// Shared by adaptive thinking (Opus, Haiku) and the reply; a reply that
+// reaches it is a request-scoped non-decision.
+export const ANTHROPIC_MAX_TOKENS = 2048;
 export const ANTHROPIC_MAX_TEXT_BYTES = 4096;
 export const ANTHROPIC_KEY_NAME = 'TALKQTE_LAB_ANTHROPIC_KEY';
 
@@ -232,10 +234,10 @@ const fixedLabel = (value) =>
 
 // ---------- credentials ----------
 
-/** True when the environment carries any ANTHROPIC_* setting. */
+/** Names of any ANTHROPIC_* setting, including one set to an empty string. */
 export function anthropicEnvironmentNames(environment) {
   return Object.keys(environment ?? {}).filter(
-    (key) => environment[key] && /^ANTHROPIC_/i.test(key),
+    (key) => environment[key] !== undefined && /^ANTHROPIC_/i.test(key),
   );
 }
 

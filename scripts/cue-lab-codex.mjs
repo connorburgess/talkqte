@@ -149,7 +149,9 @@ export function assertSubscriptionEnvironment(environment) {
     !environment ||
     typeof environment !== 'object' ||
     Object.keys(environment).some(
-      (key) => environment[key] && CREDENTIAL.test(key),
+      // An ANTHROPIC_* name counts even when set to an empty string.
+      (key) =>
+        (environment[key] || /^ANTHROPIC_/i.test(key)) && CREDENTIAL.test(key),
     )
   )
     throw codexFailure('ambient-credentials');

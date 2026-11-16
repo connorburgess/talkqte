@@ -8,6 +8,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,6 +27,7 @@ import {
 } from './cue-lab-anthropic-core.mjs';
 import { openAnthropicLab } from './cue-lab-anthropic.mjs';
 import { openLabProvider } from './cue-lab-provider.mjs';
+import { assertSubscriptionEnvironment } from './cue-lab-codex.mjs';
 import { systemPromptFor } from './cue-lab.mjs';
 
 // Fictional inputs only; the key is a dummy that never reaches a network.
@@ -128,7 +130,7 @@ test('the request is one streamed call with the fixed schema, stable system prom
   assert.equal(f.calls[0].url, 'https://api.anthropic.com/v1/messages');
   const body = JSON.parse(f.calls[0].init.body);
   assert.equal(body.stream, true);
-  assert.equal(body.max_tokens, 1024);
+  assert.equal(body.max_tokens, 2048);
   assert.deepEqual(body.output_config, {
     effort: 'low',
     format: { type: 'json_schema', schema: ANTHROPIC_DECISION_SCHEMA },
@@ -259,9 +261,23 @@ test('every ANTHROPIC_* setting is refused as an ambient credential', () => {
       ANTHROPIC_PROFILE: 'x',
       ANTHROPIC_LOG: 'debug',
       anthropic_base_url: 'x',
+      ANTHROPIC_API_KEY: '',
     }).sort(),
-    ['ANTHROPIC_LOG', 'ANTHROPIC_PROFILE', 'anthropic_base_url'],
+    [
+      'ANTHROPIC_API_KEY',
+      'ANTHROPIC_LOG',
+      'ANTHROPIC_PROFILE',
+      'anthropic_base_url',
+    ],
   );
+  // Set but empty still counts, here and in the shared subscription guard.
+  assert.throws(
+    () => assertSubscriptionEnvironment({ ANTHROPIC_API_KEY: '' }),
+    {
+      category: 'ambient-credentials',
+    },
+  );
+  assert.doesNotThrow(() => assertSubscriptionEnvironment({ HOME: '' }));
 });
 
 // A private key file in an owner-only directory outside any repository.
@@ -346,6 +362,13 @@ async function fakeApi(replies) {
     const reply = replies[Math.min(requests.length, replies.length - 1)];
     requests.push({ authorization: req.headers.authorization, body });
     if (reply.hold) return; // never answers; the caller must abort
+    if (reply.partial) {
+      // Starts the reply (message_start reports output_tokens 1), then
+      // stalls before message_delta, as a request cut off by a deadline.
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.write(sse().split('\n\n')[0] + '\n\n');
+      return;
+    }
     if (reply.status) {
       res.writeHead(reply.status, { 'content-type': 'application/json' });
       res.end('{"type":"error","error":{"type":"x","message":"x"}}');
@@ -444,7 +467,97 @@ test('the spend cap is enforced before dispatch and ends the run as a usage limi
       category: 'usage-limit',
     });
     assert.equal(api.requests.length, 1);
-    await assert.rejects(session.request(request()), { category: 'terminal' });
+    // Later requests still report the spend cap, not a generic stop.
+    await assert.rejects(session.request(request()), {
+      category: 'usage-limit',
+    });
+  } finally {
+    await session.close();
+    await api.close();
+  }
+});
+
+test('a request cut off after message_start is charged its full worst case', async () => {
+  const api = await fakeApi([{ partial: true }, {}]);
+  const session = await open(api);
+  try {
+    const controller = new AbortController();
+    const pending = session.request(request({ signal: controller.signal }));
+    for (let n = 0; n < 200 && api.requests.length < 1; n++)
+      await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 50));
+    controller.abort();
+    await assert.rejects(pending, { category: 'cancelled' });
+    const worst = worstCaseMicroUsd('claude-opus-5-5', input);
+    // Not the one output token message_start reported.
+    assert.equal(session.receipts[0].costMicroUsd, worst);
+    assert.equal(session.spentMicroUsd, worst);
+    assert.deepEqual((await session.request(request())).value, decision);
+    assert.equal(session.spentMicroUsd, worst + 900 * 4 + 40 * 20);
+  } finally {
+    await session.close();
+    await api.close();
+  }
+});
+
+test('a worker that dies mid-request is charged the worst case and ends the run', async () => {
+  const api = await fakeApi([{ hold: true }]);
+  const session = await open(api);
+  try {
+    const pending = session.request(request());
+    for (let n = 0; n < 200 && api.requests.length < 1; n++)
+      await new Promise((r) => setTimeout(r, 10));
+    const pids = execFileSync('pgrep', ['-P', String(process.pid)], {
+      encoding: 'utf8',
+    })
+      .trim()
+      .split('\n')
+      .map(Number);
+    for (const pid of pids) process.kill(pid, 'SIGKILL');
+    await assert.rejects(pending, { category: 'process' });
+    const worst = worstCaseMicroUsd('claude-opus-5-5', input);
+    assert.equal(session.spentMicroUsd, worst);
+    assert.deepEqual(
+      [session.receipts[0].outcome, session.receipts[0].costMicroUsd],
+      ['process', worst],
+    );
+  } finally {
+    await session.close().catch(() => {});
+    await api.close();
+  }
+});
+
+test('a decision that brings spend to the cap returns, then the run ends as a usage limit', async () => {
+  // 250,000 input tokens at $4/M: exactly $1.00 with the 40 output tokens.
+  const api = await fakeApi([{ inputTokens: 249_800 }, {}]);
+  const session = await open(api);
+  try {
+    assert.deepEqual((await session.request(request())).value, decision);
+    assert.ok(session.spentMicroUsd >= 1_000_000);
+    await assert.rejects(session.request(request()), {
+      category: 'usage-limit',
+    });
+    assert.equal(api.requests.length, 1);
+  } finally {
+    await session.close();
+    await api.close();
+  }
+});
+
+test('a reply that reaches max_tokens is a charged, request-scoped output limit', async () => {
+  const api = await fakeApi([{ stopReason: 'max_tokens', text: '' }, {}]);
+  const session = await open(api);
+  try {
+    await assert.rejects(session.request(request()), {
+      category: 'output-limit',
+    });
+    const worst = worstCaseMicroUsd('claude-opus-5-5', input);
+    assert.deepEqual(
+      [session.receipts[0].outcome, session.receipts[0].costMicroUsd],
+      ['output-limit', worst],
+    );
+    // The run continues.
+    assert.deepEqual((await session.request(request())).value, decision);
   } finally {
     await session.close();
     await api.close();
