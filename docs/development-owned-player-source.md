@@ -40,9 +40,30 @@ remain unchanged; no helper expansion, unrelated application, whole-system filte
 or alternative capture adapter is added. An absent SCK entry fails the attempt.
 
 The native owner rechecks identity while polling off the callback, without
-Runtime/host locks. A missing/reused process, changed canonical executable/file
-identity or failed inspection cancels that exact operation through the existing
-Stop/remove/serial-queue cleanup path. Polling and admission checks have TOCTOU
+Runtime/host locks.
+
+- **Definitive change:** the pinned process is gone (`ESRCH`), now has another
+  owner or another start time, or has a changed canonical executable path or
+  file identity. This cancels that exact operation at once, through the
+  existing Stop/remove/serial-queue cleanup path.
+- **Transient failure:** a failed read of the process information or path, an
+  executable that cannot be read, a missing `NSRunningApplication` entry, its
+  bundle identifier, or `isTerminated`. This ends the operation only if it keeps
+  failing for two seconds; a check that passes again clears it.
+  - In RunB07 (17 November 2026) a single such failure ended capture about
+    0.3 s after the owner switched applications. The player was still running
+    and unchanged.
+  - The timing log records `lab_source_check` rows: `failing` with the check's
+    name when a transient failure starts, `recovered` with how long it lasted,
+    and `ended` with the check that ended the operation.
+- **How the end is recorded:** an operation ended by this check records the
+  problem `lab_source_lost` with TalkQTE's own code 3 and no `os_code`. Its detail
+  names the check, for example "lab source check running_application kept
+  failing for 2 s". ScreenCaptureKit stopping the stream itself is still
+  recorded as `source_gone` with macOS's `os_code` -3815, so the two are told
+  apart by label as well as by code.
+
+ Polling and admission checks have TOCTOU
 windows: they do not make process lifetime or mutable filesystem state atomic,
 prevent a hostile same-user replacement, or prove continuous source identity.
 No timeout, process exit or name match substitutes for native release.

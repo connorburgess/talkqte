@@ -66,12 +66,22 @@ pub(crate) const NO_CODE: i64 = 0;
 pub(crate) const OTHER_DOMAIN: i64 = 1;
 /// TalkQTE's own reading of the audio failed; not a macOS code.
 pub(crate) const AUDIO_UNREADABLE: i64 = 2;
+/// TalkQTE's own check of a pinned lab source failed definitively, or kept
+/// failing for `LAB_SOURCE_GRACE`; not a macOS code, so the log tells it
+/// apart from ScreenCaptureKit's own NoCaptureSource (-3815).
+pub(crate) const LAB_SOURCE_LOST: i64 = 3;
+/// How long a transient failure of the pinned lab source's check may last
+/// before it ends the session. An application switch can briefly fail it.
+#[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+pub(crate) const LAB_SOURCE_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// The problem a ScreenCaptureKit error `code` means, or `fallback`.
 fn classify(code: i64, fallback: Problem) -> Problem {
     let is = |known: SCStreamErrorCode| code == known.0 as i64;
     if code == AUDIO_UNREADABLE {
         Problem::AudioUnreadable
+    } else if code == LAB_SOURCE_LOST {
+        Problem::SourceGone
     } else if is(SCStreamErrorCode::UserDeclined) {
         Problem::PermissionNeeded
     } else if is(SCStreamErrorCode::NoCaptureSource)
@@ -89,10 +99,33 @@ fn classify(code: i64, fallback: Problem) -> Problem {
     }
 }
 
+/// A transient failure of the pinned lab source's check, or its recovery,
+/// in the timing log. Owner thread only.
+#[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+fn record_lab_check(state: &'static str, check: &'static str, after: std::time::Duration) {
+    crate::timing_log::record(crate::timing_log::Event::LabSourceCheck {
+        state,
+        check,
+        after_ms: u64::try_from(after.as_millis()).unwrap_or(u64::MAX),
+    });
+}
+
 /// Note a start or stream problem and macOS's code in the timing log. Runs
 /// on the owning worker, never in a callback.
 fn record(problem: Problem, code: i64, detail: Option<String>) {
-    let label = match problem {
+    crate::timing_log::record(crate::timing_log::Event::SourceProblem {
+        problem: label(problem, code),
+        os_code: (code < 0).then_some(code),
+        detail,
+    });
+}
+
+/// The timing log's name for a problem and the code that caused it.
+fn label(problem: Problem, code: i64) -> &'static str {
+    match problem {
+        // TalkQTE's own check of a pinned lab source, told apart from
+        // ScreenCaptureKit's source_gone by its label as well as its code.
+        Problem::SourceGone if code == LAB_SOURCE_LOST => "lab_source_lost",
         Problem::StreamFailed => "stream_failed",
         Problem::StartFailed => "start_failed",
         Problem::StopFailed => "stop_failed",
@@ -102,12 +135,7 @@ fn record(problem: Problem, code: i64, detail: Option<String>) {
         Problem::AudioFailed => "audio_failed",
         Problem::StoppedByMacOS => "stopped_by_macos",
         Problem::AudioUnreadable => "audio_unreadable",
-    };
-    crate::timing_log::record(crate::timing_log::Event::SourceProblem {
-        problem: label,
-        os_code: (code < 0).then_some(code),
-        detail,
-    });
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -149,16 +177,83 @@ struct StreamFault {
     /// For a buffer TalkQTE could not read: which check refused it and its
     /// metadata. Set once, with a non-waiting lock, in the callback.
     refused: std::sync::Mutex<Option<(&'static str, pcm::Seen)>>,
+    /// Owner thread only: since when, and which, transient check of a pinned
+    /// lab source has been failing; then the check that ended it.
+    #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+    lab: std::sync::Mutex<LabSourceCheck>,
+}
+
+#[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+#[derive(Default)]
+struct LabSourceCheck {
+    failing: Option<(std::time::Instant, &'static str)>,
+    lost: Option<(&'static str, bool)>,
 }
 
 impl StreamFault {
+    /// Owner thread only. Ordinary Stop wins over a late identity read. A
+    /// definitive failure (the player gone or replaced) cancels the exact
+    /// operation at once; a transient one only once it has lasted
+    /// `LAB_SOURCE_GRACE`, and a check that passes again clears it.
     #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
-    fn inspect_lab_source(&self, current: impl FnOnce() -> bool) {
-        // Owner thread only. Ordinary Stop wins over a late identity read;
-        // a player disappearing while still active cancels the exact operation.
-        if !self.control.is_cancelled() && !current() && !self.control.is_cancelled() {
-            self.record_code(SCStreamErrorCode::NoCaptureSource.0 as i64);
+    fn inspect_lab_source(
+        &self,
+        now: std::time::Instant,
+        check: impl FnOnce() -> crate::dev_lab_source::Check,
+    ) {
+        use crate::dev_lab_source::Check;
+        if self.control.is_cancelled() {
+            return;
         }
+        let result = check();
+        if self.control.is_cancelled() {
+            return;
+        }
+        let mut lab = self.lab.lock().unwrap_or_else(|e| e.into_inner());
+        if lab.lost.is_some() {
+            return;
+        }
+        let lost = match result {
+            Check::Current => {
+                if let Some((since, name)) = lab.failing.take() {
+                    record_lab_check("recovered", name, now.duration_since(since));
+                }
+                None
+            }
+            Check::Gone(name) => Some((name, false)),
+            Check::Transient(name) => {
+                let (since, first) = *lab.failing.get_or_insert_with(|| {
+                    record_lab_check("failing", name, std::time::Duration::ZERO);
+                    (now, name)
+                });
+                (now.duration_since(since) >= LAB_SOURCE_GRACE).then_some((first, true))
+            }
+        };
+        if let Some(lost) = lost {
+            let after = lab.failing.map_or(std::time::Duration::ZERO, |(since, _)| {
+                now.duration_since(since)
+            });
+            record_lab_check("ended", lost.0, after);
+            lab.lost = Some(lost);
+            drop(lab);
+            self.record_code(LAB_SOURCE_LOST);
+        }
+    }
+
+    /// Why the pinned lab source ended this stream, as text for the log.
+    #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+    fn lab_detail(&self) -> Option<String> {
+        let lab = self.lab.lock().unwrap_or_else(|e| e.into_inner());
+        lab.lost.map(|(name, persisted)| {
+            if persisted {
+                format!(
+                    "lab source check {name} kept failing for {} s",
+                    LAB_SOURCE_GRACE.as_secs()
+                )
+            } else {
+                format!("lab source check {name} failed: the player is gone or was replaced")
+            }
+        })
     }
 
     fn new(control: Control) -> Self {
@@ -167,6 +262,8 @@ impl StreamFault {
             failed: AtomicBool::new(false),
             code: std::sync::atomic::AtomicI64::new(NO_CODE),
             refused: std::sync::Mutex::new(None),
+            #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+            lab: std::sync::Mutex::new(LabSourceCheck::default()),
         }
     }
 
