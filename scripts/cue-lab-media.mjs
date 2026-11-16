@@ -24,9 +24,13 @@ export const LAB_FIXED_MEDIA_DURATION_MS = 102480;
 // the fixed media's compiled hash, or derived from one of those. A hand-built
 // object with the right fields and a matching file hash is not approved.
 const approved = new WeakSet();
+// Bound once at load, so later changes to WeakSet.prototype cannot widen
+// what counts as approved.
+const isApproved = WeakSet.prototype.has.bind(approved);
+const addApproved = WeakSet.prototype.add.bind(approved);
 const approve = (descriptor) => {
   const frozen = Object.freeze(descriptor);
-  approved.add(frozen);
+  addApproved(frozen);
   return frozen;
 };
 // The player hashes the media and then opens it again, so approved files
@@ -57,7 +61,7 @@ const required = (ok) => {
 /** True only for a descriptor this module approved, within the lab bounds. */
 export function isLabMedia(media) {
   return (
-    approved.has(media) &&
+    isApproved(media) &&
     media.fictional === true &&
     typeof media.path === 'string' &&
     isAbsolute(media.path) &&

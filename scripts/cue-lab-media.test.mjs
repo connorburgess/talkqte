@@ -210,3 +210,17 @@ test(
     assert.equal(isLabMedia(media), true);
   },
 );
+
+test('replacing WeakSet.prototype.has after load cannot approve a hand-built descriptor', () => {
+  const s = scenario();
+  const original = WeakSet.prototype.has;
+  try {
+    const media = loadLabMediaManifest(s.manifestPath, { sha256: s.sha256 });
+    WeakSet.prototype.has = () => true;
+    assert.equal(isLabMedia({ ...media }), false);
+    assert.equal(isLabMedia(media), true);
+  } finally {
+    WeakSet.prototype.has = original;
+    s.cleanup();
+  }
+});
