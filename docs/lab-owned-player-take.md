@@ -1,6 +1,7 @@
 # Owned-player first recording integration
 
-This internal integration uses the saved 102.48-second fictional meeting. It
+This internal integration uses approved fictional media: the saved 102.48-second
+meeting or a per-run scenario pinned by a reviewed manifest. It
 adds no generation, synthesis, adaptive append or forced cue. Runtime remains a
 separately coordinated action with concrete signed receipts and a reviewed plan.
 The source policy dependency is the native fixed-player implementation; the JS

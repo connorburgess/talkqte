@@ -18,9 +18,11 @@ import {
   createLabPlayerFixture,
   verifyLabPlayerBuild,
   mapLabPlayerStart,
-  LAB_PLAYER_MEDIA_SHA256,
   validateLabPlayerDurations,
 } from './cue-lab-player.mjs';
+// The fixed 102.48 s fictional fixture media used before per-run manifests.
+const LAB_PLAYER_MEDIA_SHA256 =
+  '1faf1c404249bed069065f51262abfce6956fa8a31f237e68bb6e9d06cb893e2';
 const bridge = {
   sentMs: 1000,
   receivedMs: 1002,
@@ -702,5 +704,46 @@ test('a cancelled playback whose retire leaves a process behind is failed cleanu
     assert.deepEqual(player.diagnostics.failure, { category: 'cancelled' });
   } finally {
     await player.close({ nativeReleased: true }).catch(() => {});
+  }
+});
+
+test('a different approved fictional media plays end to end with its own sha256 and duration', async () => {
+  // A per-run scenario: another approved hash and a 100.577 s duration.
+  const scenario = {
+    fictional: true,
+    path: '/fictional/scenario.mp4',
+    sha256: 'e'.repeat(64),
+    durationMs: 100577,
+  };
+  const player = createLabPlayerFixture(fixtureOptions);
+  try {
+    assert.equal(
+      (await player.prepare({ media: scenario })).sha256,
+      scenario.sha256,
+    );
+    assert.equal(player.identity.mediaSha256, scenario.sha256);
+    const result = await player.play({ media: scenario, onStarted() {} });
+    assert.equal(result.completed, true);
+    assert.equal(result.sha256, scenario.sha256);
+    assert.equal(result.durations.assetDurationMs, scenario.durationMs);
+    assert.deepEqual(await player.stop(), { stopped: true });
+    assert.deepEqual(await player.close({ nativeReleased: true }), {
+      closed: true,
+    });
+  } finally {
+    await player.close({ nativeReleased: true }).catch(() => {});
+  }
+});
+
+test('media outside the approved bounds is refused before any player process starts', () => {
+  for (const bad of [
+    { ...media, durationMs: 104001 },
+    { ...media, fictional: false },
+    { ...media, sha256: 'not-a-hash' },
+    { ...media, path: 'relative.mp4' },
+  ]) {
+    const player = createLabPlayerFixture(fixtureOptions);
+    assert.throws(() => player.prepare({ media: bad }));
+    assert.equal(player.identity, null);
   }
 });

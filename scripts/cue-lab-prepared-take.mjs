@@ -4,7 +4,7 @@ import { isAbsolute } from 'node:path';
 import { createLabNativeOwner } from './cue-lab-native-owner.mjs';
 import { createLabRun } from './cue-lab-run.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
-import { LAB_PLAYER_MEDIA_SHA256 } from './cue-lab-player.mjs';
+import { isLabMedia } from './cue-lab-media.mjs';
 
 const required = (condition) => {
   if (!condition) throw gateFailure('protocol');
@@ -29,8 +29,9 @@ export function assertFixedModelTakeOptions(options) {
       ['low', 'medium'].includes(options.settings.effort) &&
       options.settings.maxCalls === 20 &&
       options.stopAfterS === 110 &&
-      options.media?.sha256 === LAB_PLAYER_MEDIA_SHA256 &&
-      options.media.durationMs === 102480,
+      // Approved fictional media (fixed MP4 or a reviewed per-run manifest)
+      // within the bounds every timing guard below was set for.
+      isLabMedia(options.media),
   );
 }
 export function createFixedModelTake(options) {

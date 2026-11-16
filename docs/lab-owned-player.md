@@ -33,12 +33,20 @@ canonical executable. Native independently verifies that process at admission/us
 The integration wiring is a separate follow-up; this module does not expand the
 native source allowlist itself.
 
+The approved media is a fictional MP4 whose sha256 was approved before launch:
+either the original fixed meeting or a per-run generated scenario pinned by a
+reviewed manifest (`loadLabMediaManifest` in `scripts/cue-lab-media.mjs`). The
+player binary receives that sha256 as its third argument and still hashes the
+file itself. Media is limited to 104 s, the length every existing timing guard
+was set for.
+
 Prepare validates the exact file hash, one audio/video track, duration, continuous
 PCM timestamps/frame counts and bounded decoded memory (128 MiB, at most 105 s).
 It decodes locally without persisting PCM. Video uses an audio-free composition,
 so only the audio engine produces sound. Prepared means the engine is not playing,
 the dedicated window exists and controls are installed, not observed window paint.
-The fixed visual/container duration is 102.48 seconds. Audio is validated against
+For the original fixed media the visual/container duration is 102.48 seconds.
+Audio is validated against
 its own edited track time range (zero-origin required), not the longer asset.
 The preserved MP4 has audio media duration about 101.0403 seconds and an edited
 presentation duration about 101.019 seconds; its remaining visual tail is not

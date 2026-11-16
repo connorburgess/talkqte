@@ -10,10 +10,10 @@ import {
   createFixedModelTake,
   assertFixedModelTakeOptions,
 } from './cue-lab-prepared-take.mjs';
-import {
-  createLabPlayerFixture,
-  LAB_PLAYER_MEDIA_SHA256,
-} from './cue-lab-player.mjs';
+import { createLabPlayerFixture } from './cue-lab-player.mjs';
+// The fixed 102.48 s fictional fixture media used before per-run manifests.
+const LAB_PLAYER_MEDIA_SHA256 =
+  '1faf1c404249bed069065f51262abfce6956fa8a31f237e68bb6e9d06cb893e2';
 
 const deferred = () => {
   let resolve;
@@ -1054,7 +1054,8 @@ test('the fixed model take option check is usable on its own and matches constru
     { settings: { ...settings, effort: 'high' } },
     { settings: { ...settings, maxCalls: 19 } },
     { stopAfterS: 120 },
-    { media: { ...media, durationMs: 102481 } },
+    { media: { ...media, durationMs: 104001 } },
+    { media: { ...media, fictional: false } },
   ])
     assert.throws(
       () => assertFixedModelTakeOptions({ ...options, ...changed }),

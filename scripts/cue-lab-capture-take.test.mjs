@@ -3,10 +3,10 @@ import { test, mock } from 'node:test';
 import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { createLabCaptureTake } from './cue-lab-capture-take.mjs';
-import {
-  createLabPlayerFixture,
-  LAB_PLAYER_MEDIA_SHA256,
-} from './cue-lab-player.mjs';
+import { createLabPlayerFixture } from './cue-lab-player.mjs';
+// The fixed 102.48 s fictional fixture media used before per-run manifests.
+const LAB_PLAYER_MEDIA_SHA256 =
+  '1faf1c404249bed069065f51262abfce6956fa8a31f237e68bb6e9d06cb893e2';
 const media = {
   fictional: true,
   path: '/fictional/prepared.mp4',

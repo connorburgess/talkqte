@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { parseUniqueLabJson } from './cue-lab-strict-json.mjs';
 import { TextDecoder } from 'node:util';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
+import { LAB_MEDIA_MAX_MS } from './cue-lab-media.mjs';
 const CHECKOUT = realpathSync(fileURLToPath(new URL('../', import.meta.url)));
 const EVENT = 'talkqte.lab.evidence.event.v1';
 const MANIFEST = 'talkqte.lab.evidence.manifest.v1';
@@ -291,7 +292,8 @@ export function createLabEvidenceWriter({
       );
       required(
         guard.sourceDeadline - guard.nativeStartedAt === 110000 &&
-          guard.mediaDurationMs === 102480 &&
+          guard.mediaDurationMs > 0 &&
+          guard.mediaDurationMs <= LAB_MEDIA_MAX_MS &&
           guard.startRequestAt >= guard.nativeStartedAt &&
           guard.remainingAtRequestMs ===
             guard.sourceDeadline - guard.startRequestAt,

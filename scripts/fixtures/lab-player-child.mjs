@@ -1,7 +1,10 @@
 // Harmless deterministic protocol fixture, never a media/audio implementation.
 import { spawn } from 'node:child_process';
-const [runId, mode] = process.argv.slice(2);
-const hash = '1faf1c404249bed069065f51262abfce6956fa8a31f237e68bb6e9d06cb893e2';
+// The approved media sha256 and duration arrive as arguments, as they do for
+// the real player; this fixture never reads any media file.
+const [runId, mode, hash, durationText] = process.argv.slice(2);
+const durationMs = Number(durationText);
+if (!/^[0-9a-f]{64}$/.test(hash ?? '') || !(durationMs > 0)) process.exit(2);
 const base = {
   schema: 'talkqte.lab.player.v1',
   runId: mode === 'wrong-run' ? 'other' : runId,
@@ -10,7 +13,11 @@ const base = {
 };
 const emit = (type, fields = {}) =>
   process.stdout.write(JSON.stringify({ ...base, type, ...fields }) + '\n');
-const frames = mode === 'video-tail' ? 4848912 : 4919040;
+// For the fixed 102.48 s media these equal the recorded 4919040 frames and
+// the 101.019 s edited audio track (4848912 frames) of the video-tail case.
+const frames = Math.round(
+  (mode === 'video-tail' ? durationMs - 1461 : durationMs) * 48,
+);
 const progress = (stage) =>
   emit('preparation_progress', {
     stage,
@@ -55,7 +62,7 @@ const prepared = () => {
     totalFrames: frames,
     durationMs: frames / 48,
     audioTrackDurationMs: frames / 48,
-    assetDurationMs: 102480,
+    assetDurationMs: durationMs,
     videoOnly: true,
     pcmFormat:
       mode === 'wrong-pcm-format' ? 'float32-interleaved' : 'float32-planar',
@@ -168,8 +175,8 @@ process.stdin.on('data', (chunk) => {
         () => {
           if (mode === 'missing-video') return;
           emit('video_completed', {
-            videoTimeMs: 102480,
-            assetDurationMs: 102480,
+            videoTimeMs: durationMs,
+            assetDurationMs: durationMs,
           });
           emit('completed', {
             audioCompleted: true,
