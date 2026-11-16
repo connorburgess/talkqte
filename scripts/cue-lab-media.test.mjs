@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import {
+  chmodSync,
   mkdtempSync,
   realpathSync,
   rmSync,
@@ -147,3 +148,17 @@ test(
     assert.ok(media.durationMs <= LAB_MEDIA_MAX_MS);
   },
 );
+
+test('a manifest or media directory that others can write or read is refused', () => {
+  const s = scenario();
+  try {
+    chmodSync(s.dir, 0o755);
+    assert.throws(
+      () => loadLabMediaManifest(s.manifestPath, { sha256: s.sha256 }),
+      { category: 'protocol' },
+    );
+  } finally {
+    chmodSync(s.dir, 0o700);
+    s.cleanup();
+  }
+});

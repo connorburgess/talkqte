@@ -62,7 +62,8 @@ const prepared = () => {
     totalFrames: frames,
     durationMs: frames / 48,
     audioTrackDurationMs: frames / 48,
-    assetDurationMs: durationMs,
+    // duration-mismatch: the file disagrees with the approved duration.
+    assetDurationMs: durationMs + (mode === 'duration-mismatch' ? 500 : 0),
     videoOnly: true,
     pcmFormat:
       mode === 'wrong-pcm-format' ? 'float32-interleaved' : 'float32-planar',

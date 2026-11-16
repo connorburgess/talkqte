@@ -38,7 +38,10 @@ either the original fixed meeting or a per-run generated scenario pinned by a
 reviewed manifest (`loadLabMediaManifest` in `scripts/cue-lab-media.mjs`). The
 player binary receives that sha256 as its third argument and still hashes the
 file itself. Media is limited to 104 s, the length every existing timing guard
-was set for.
+was set for, and preparation refuses a file whose measured duration differs from
+the approved one by more than 100 ms. The player hashes the file and then opens
+it again, so the manifest and media must sit in owner-only (`0700`) directories;
+the manifest loader refuses any other.
 
 Prepare validates the exact file hash, one audio/video track, duration, continuous
 PCM timestamps/frame counts and bounded decoded memory (128 MiB, at most 105 s).

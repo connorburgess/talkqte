@@ -747,3 +747,17 @@ test('media outside the approved bounds is refused before any player process sta
     assert.equal(player.identity, null);
   }
 });
+
+test('a file whose measured duration disagrees with the approved duration is refused at preparation', async () => {
+  const player = createLabPlayerFixture({
+    ...fixtureOptions,
+    fixtureCase: 'duration-mismatch',
+  });
+  try {
+    // The fixture reports an asset 500 ms longer than the approved duration.
+    await assert.rejects(player.prepare({ media }));
+    assert.equal(player.diagnostics.prepared, false);
+  } finally {
+    await player.close({ nativeReleased: true }).catch(() => {});
+  }
+});

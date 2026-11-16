@@ -4,12 +4,15 @@
 // within the existing bounds, so no timing guard changes.
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { isAbsolute } from 'node:path';
+import { dirname, isAbsolute } from 'node:path';
 import { parseUniqueLabJson } from './cue-lab-strict-json.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
 
 // Every lab timing bound (110 s source guard, 135 s take, 105 s player
-// frames) was set for media up to this length.
+// frames) was set for media up to this length. Two looser ceilings remain
+// behind it: the player controller's 105000 ms duration checks and the Swift
+// player's compiled 105 s decode limit. The player also refuses a file whose
+// measured asset duration differs from the approved one by more than 100 ms.
 export const LAB_MEDIA_MAX_MS = 104000;
 export const LAB_MEDIA_MANIFEST_SCHEMA = 'talkqte.fresh-scenario.media.v1';
 const MANIFEST_MAX_BYTES = 256 * 1024;
@@ -42,6 +45,18 @@ export function loadLabMediaManifest(manifestPath, { sha256 } = {}) {
       isAbsolute(manifestPath) &&
       hex64(sha256),
   );
+  // The player hashes the media and then opens it again, so the per-run
+  // files must sit in owner-only directories nobody else can swap them in.
+  const ownerOnly = (dir) => {
+    const s = lstatSync(dir);
+    return (
+      s.isDirectory() &&
+      !s.isSymbolicLink() &&
+      (s.mode & 0o077) === 0 &&
+      s.uid === process.getuid?.()
+    );
+  };
+  required(ownerOnly(dirname(manifestPath)));
   const stat = lstatSync(manifestPath);
   required(
     stat.isFile() &&
@@ -66,6 +81,7 @@ export function loadLabMediaManifest(manifestPath, { sha256 } = {}) {
       typeof media?.path === 'string' &&
       isAbsolute(media.path) &&
       realpathSync(media.path) === media.path &&
+      ownerOnly(dirname(media.path)) &&
       hex64(media.sha256) &&
       Number.isSafeInteger(media.bytes) &&
       media.bytes > 0 &&

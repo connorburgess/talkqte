@@ -1178,6 +1178,7 @@ export function createLabPlayerFixture({
       'duplicate',
       'oversize',
       'held-pipes',
+      'duration-mismatch',
       'stop-silent',
       'fail-after-cancel',
     ].includes(fixtureCase),
