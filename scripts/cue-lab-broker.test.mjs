@@ -1507,6 +1507,25 @@ test('an API reply at its output bound is a request-scoped failed output_limit a
   }
 });
 
+test('on a subscription route an output limit still ends the run', async () => {
+  const ctx = await setup({
+    request: async () => {
+      throw Object.assign(new Error('fictional'), {
+        category: 'output-limit',
+      });
+    },
+  });
+  try {
+    ctx.evaluate('1');
+    const failed = await ctx.next('failed');
+    assert.notEqual(failed.code, 'output_limit');
+    await terminal(ctx.broker);
+    assert.equal(ctx.broker.evaluationSummary.outputLimits, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
 // Native (#341) treats `failed` code refusal as request-scoped only when it
 // names the active request, and as terminal otherwise. The broker therefore
 // sends it exactly once, with the active request's ids, and never for a

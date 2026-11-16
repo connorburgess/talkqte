@@ -22,8 +22,13 @@ const CODES = new Set([
   'refusal',
   'output-limit',
 ]);
-// Provider outcomes that end only one scoped evaluator request.
-const REQUEST_SCOPED = new Set(['refusal', 'output-limit']);
+// Provider outcomes that end only one scoped evaluator request. An output
+// limit is request-scoped only on the direct API route; on the subscription
+// CLI routes it still ends the run.
+const requestScoped = (provider, category) =>
+  category === 'refusal' ||
+  (category === 'output-limit' &&
+    provider.metadata?.provider === 'anthropic-api');
 export const gateFailure = (category) =>
   Object.assign(new Error(`Lab run stopped: ${category}.`), { category });
 const safe = (error) =>
@@ -82,7 +87,8 @@ export function createLabOperationGate({
   const scopedRetirement = (lease, error) =>
     !!lease?.retired &&
     !terminal &&
-    ['cancelled', 'deadline', ...REQUEST_SCOPED].includes(error?.category);
+    (['cancelled', 'deadline'].includes(error?.category) ||
+      requestScoped(provider, error?.category));
   const notify = () => {
     for (const waiter of waiters) waiter();
   };
@@ -126,7 +132,7 @@ export function createLabOperationGate({
       // A provider refusal, or an API reply that reached its output bound,
       // ends only this scoped evaluator request.
       const category = safe(error).category;
-      if (lease.scoped && !terminal && REQUEST_SCOPED.has(category)) {
+      if (lease.scoped && !terminal && requestScoped(provider, category)) {
         lease.retire(category);
         throw gateFailure(category);
       }
