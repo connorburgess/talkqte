@@ -1148,6 +1148,13 @@ test('the query the app used is reported, and compared with the expected one', (
   assert.throws(() =>
     cloudReport(cloudRows({ query: 'model=nova-3&token=abc' })),
   );
+  // Only the app's own parameter names are accepted, so no other parameter,
+  // however named, can carry a value into evidence; nor a repeated one.
+  for (const query of [
+    DEEPGRAM_APP_QUERY + '&session_ref=abcdef0123456789',
+    'model=nova-3&model=nova-3',
+  ])
+    assert.throws(() => cloudReport(cloudRows({ query })));
   assert.throws(() =>
     cloudReport([
       {

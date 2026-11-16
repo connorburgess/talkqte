@@ -11,6 +11,7 @@ import {
 import { TextDecoder } from 'node:util';
 import { parseUniqueLabJson } from './cue-lab-strict-json.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
+import { isAllowedSttQuery } from './cue-lab-deepgram.mjs';
 
 const canonicalSession = (value) =>
   typeof value === 'string' &&
@@ -232,15 +233,7 @@ export function watchLabTiming({
         ].includes(value.state) ||
         // Only `connected` carries the query of the URL the app used; it
         // never holds the token, which travels only in a header.
-        (value.state === 'connected') !==
-          (typeof value.query === 'string' &&
-            value.query.length <= 1024 &&
-            /^[A-Za-z0-9_.-]+=[A-Za-z0-9_.-]*(&[A-Za-z0-9_.-]+=[A-Za-z0-9_.-]*)*$/.test(
-              value.query,
-            ) &&
-            !/(^|&)(token|key|access_token|authorization)=/i.test(
-              value.query,
-            )) ||
+        (value.state === 'connected') !== isAllowedSttQuery(value.query) ||
         (value.code !== undefined &&
           ![
             'auth',

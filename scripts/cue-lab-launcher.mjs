@@ -12,8 +12,10 @@ import {
   readSync,
   fstatSync,
   readdirSync,
+  readFileSync,
   renameSync,
   unlinkSync,
+  writeFileSync,
   constants,
 } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
@@ -305,6 +307,11 @@ function launcher({
   requireThat(outside(temporaryRoot));
   const directory = realpathSync(mkdtempSync(join(temporaryRoot, 'tq-owned-')));
   chmodSync(directory, 0o700);
+  // Lets a later stale-token sweep tell whether this run's runner is alive.
+  writeFileSync(join(directory, 'runner.pid'), String(process.pid), {
+    mode: 0o600,
+    flag: 'wx',
+  });
   requireThat(outside(directory));
   const timingPath = join(directory, 'timing.jsonl');
   // The run's transcription token file. At launch it is an empty 0600
@@ -678,11 +685,16 @@ function launcher({
  * Removes transcription token files left by earlier runs whose runner was
  * killed (SIGKILL skips every cleanup path). Only launcher run folders are
  * touched: `tq-owned-*` directories directly in the temporary root, owned by
- * this user, mode 0700, not symlinks; and in them only this user's regular
- * `stt-token` or `stt-token.next` files. Returns how many were removed.
+ * this user, mode 0700, not symlinks. A folder's token files are removed
+ * only when its run has provably ended: the runner pid it recorded is gone,
+ * or nothing in it changed for longer than the grant's 900 s TTL. A live
+ * run (another lane's, or this process's own) is never touched. Returns how
+ * many files were removed.
  */
 export function removeStaleTranscriptionTokens({
   temporaryRoot = realpathSync(tmpdir()),
+  now = Date.now(),
+  alive = processAlive,
 } = {}) {
   const uid = process.getuid?.();
   let removed = 0;
@@ -702,6 +714,7 @@ export function removeStaleTranscriptionTokens({
       (stat.mode & 0o777) !== 0o700
     )
       continue;
+    if (!runEnded(folder, uid, now, alive)) continue;
     for (const file of ['stt-token', 'stt-token.next']) {
       const path = join(folder, file);
       try {
@@ -714,6 +727,38 @@ export function removeStaleTranscriptionTokens({
     }
   }
   return removed;
+}
+const STALE_AFTER_MS = 900 * 1000 + 60 * 1000;
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: a process exists under another user; treat as alive.
+    return error?.code !== 'ESRCH';
+  }
+}
+function runEnded(folder, uid, now, alive) {
+  // Ended if the recorded runner pid no longer exists.
+  try {
+    const f = lstatSync(join(folder, 'runner.pid'));
+    if (f.isFile() && !f.isSymbolicLink() && f.uid === uid && f.size <= 32) {
+      const pid = Number(readFileSync(join(folder, 'runner.pid'), 'utf8'));
+      if (Number.isSafeInteger(pid) && pid > 0) return !alive(pid);
+    }
+  } catch {}
+  // Otherwise only if nothing in it changed for longer than the token TTL.
+  let newest = 0;
+  try {
+    for (const entry of readdirSync(folder)) {
+      const e = lstatSync(join(folder, entry));
+      newest = Math.max(newest, e.mtimeMs);
+    }
+    newest = Math.max(newest, lstatSync(folder).mtimeMs);
+  } catch {
+    return false;
+  }
+  return now - newest > STALE_AFTER_MS;
 }
 
 export const NO_TRANSCRIPTION_SUBSCRIPTION =

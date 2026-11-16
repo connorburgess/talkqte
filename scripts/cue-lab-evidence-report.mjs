@@ -12,7 +12,7 @@ import {
 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMain } from './is-main.mjs';
-import { DEEPGRAM_APP_QUERY } from './cue-lab-deepgram.mjs';
+import { DEEPGRAM_APP_QUERY, isAllowedSttQuery } from './cue-lab-deepgram.mjs';
 
 export const EVENT_SCHEMA = 'talkqte.lab.evidence.event.v1';
 export const MANIFEST_SCHEMA = 'talkqte.lab.evidence.manifest.v1';
@@ -461,7 +461,7 @@ export function importNativeRows(rows, { runId, artifactId, clockId }) {
           !STT_STATES.has(r.state) ||
           (r.code !== undefined && !STT_CODES.has(r.code)) ||
           (r.state === 'stopped') !== (r.code !== undefined) ||
-          (r.state === 'connected') !== STT_QUERY.test(r.query ?? '') ||
+          (r.state === 'connected') !== isAllowedSttQuery(r.query) ||
           !Number.isSafeInteger(r.audio_ms) ||
           r.audio_ms < 0
         )
@@ -601,9 +601,6 @@ const STT_STATES = new Set([
   'ended',
   'stopped',
 ]);
-// A URL query of plain `name=value` pairs, never a token or key.
-const STT_QUERY =
-  /^(?!.*(^|&)(token|key|access_token|authorization)=)[A-Za-z0-9_.-]+=[A-Za-z0-9_.-]*(&[A-Za-z0-9_.-]+=[A-Za-z0-9_.-]*){0,63}$/i;
 const STT_CODES = new Set([
   'auth',
   'quota',
@@ -661,8 +658,7 @@ function safePayload(payload, includeContent) {
     result.backend = payload.backend;
   if (STT_STATES.has(payload.sttState)) result.sttState = payload.sttState;
   if (STT_CODES.has(payload.sttCode)) result.sttCode = payload.sttCode;
-  if (STT_QUERY.test(payload.query ?? '') && payload.query.length <= 1024)
-    result.query = payload.query;
+  if (isAllowedSttQuery(payload.query)) result.query = payload.query;
   for (const k of ['audioMs', 'sttSeq', 'startMs', 'endMs', 'sessionElapsedMs'])
     if (Number.isSafeInteger(payload[k]) && payload[k] >= 0)
       result[k] = payload[k];

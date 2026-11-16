@@ -440,28 +440,77 @@ test("the lab's expected query is the app's QUERY constant", (t) => {
   assert.equal(match[1], DEEPGRAM_APP_QUERY);
 });
 
-test('stale token files from killed runs are removed only from owner-only launcher folders', (t) => {
+test('the stale-token sweep removes tokens only from runs that have provably ended, never a live one', (t) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'tq-stale-root-')));
   chmodSync(root, 0o700);
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const folder = (name, mode) => {
+  const DEAD = 2147480001;
+  const run = (name, { mode = 0o700, pid } = {}) => {
     const path = join(root, name);
     mkdirSync(path);
     chmodSync(path, mode);
+    if (pid !== undefined)
+      writeFileSync(join(path, 'runner.pid'), String(pid), { mode: 0o600 });
+    writeFileSync(join(path, 'stt-token'), TOKEN, { mode: 0o600 });
     return path;
   };
-  const owned = folder('tq-owned-abc123', 0o700);
-  writeFileSync(join(owned, 'stt-token'), TOKEN, { mode: 0o600 });
-  writeFileSync(join(owned, 'stt-token.next'), TOKEN, { mode: 0o600 });
-  writeFileSync(join(owned, 'timing.jsonl'), '', { mode: 0o600 });
-  const open = folder('tq-owned-def456', 0o755);
-  writeFileSync(join(open, 'stt-token'), TOKEN, { mode: 0o600 });
-  const other = folder('not-a-run-folder', 0o700);
-  writeFileSync(join(other, 'stt-token'), TOKEN, { mode: 0o600 });
-  assert.equal(removeStaleTranscriptionTokens({ temporaryRoot: root }), 2);
-  assert.equal(existsSync(join(owned, 'stt-token')), false);
-  assert.equal(existsSync(join(owned, 'stt-token.next')), false);
-  assert.equal(existsSync(join(owned, 'timing.jsonl')), true);
+  const ended = run('tq-owned-dead01', { pid: DEAD });
+  writeFileSync(join(ended, 'stt-token.next'), TOKEN, { mode: 0o600 });
+  // A concurrent run in this very process: its runner is alive.
+  const live = run('tq-owned-live01', { pid: process.pid });
+  const recent = run('tq-owned-new001');
+  const open = run('tq-owned-open01', { mode: 0o755, pid: DEAD });
+  const other = run('not-a-run-folder', { pid: DEAD });
+  const alive = (pid) => pid !== DEAD;
+  assert.equal(
+    removeStaleTranscriptionTokens({ temporaryRoot: root, alive }),
+    2,
+  );
+  assert.equal(existsSync(join(ended, 'stt-token')), false);
+  assert.equal(existsSync(join(ended, 'stt-token.next')), false);
+  assert.equal(existsSync(join(live, 'stt-token')), true);
+  assert.equal(existsSync(join(recent, 'stt-token')), true);
   assert.equal(existsSync(join(open, 'stt-token')), true);
   assert.equal(existsSync(join(other, 'stt-token')), true);
+  // Without a pid record, only a folder untouched for longer than the
+  // 900 s token TTL counts as ended; the live run still never does.
+  const later = Date.now() + 2 * 3600 * 1000;
+  assert.equal(
+    removeStaleTranscriptionTokens({ temporaryRoot: root, alive, now: later }),
+    1,
+  );
+  assert.equal(existsSync(join(recent, 'stt-token')), false);
+  assert.equal(existsSync(join(live, 'stt-token')), true);
+});
+
+test('a launcher run folder records its runner pid for the sweep', async (t) => {
+  const api = await fakeGrant();
+  t.after(api.close);
+  const launcher = prepareLabFixtureLauncher({
+    fixtureCase: 'normal',
+    selection: apiSelection,
+    transcription: {
+      backend: 'deepgram',
+      minuteCap: 5,
+      grant: await mint(api),
+    },
+  });
+  t.after(() => {
+    launcher.close();
+    rmSync(launcher.directory, { recursive: true, force: true });
+  });
+  const pidFile = join(launcher.directory, 'runner.pid');
+  assert.equal(readFileSync(pidFile, 'utf8'), String(process.pid));
+  assert.equal(lstatSync(pidFile).mode & 0o777, 0o600);
+});
+
+test("the grant checks this process's own environment even when a clean one is passed", async (t) => {
+  const api = await fakeGrant();
+  t.after(api.close);
+  process.env.NODE_EXTRA_CA_CERTS = '';
+  t.after(() => delete process.env.NODE_EXTRA_CA_CERTS);
+  await assert.rejects(mint(api, { environment: { PATH: '/bin' } }), {
+    category: 'environment',
+  });
+  assert.equal(api.requests.length, 0);
 });

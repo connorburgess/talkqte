@@ -624,6 +624,18 @@ test('the API session refuses TLS or code-loading Node settings, even empty', as
   }
 });
 
+test("the API session checks this process's own environment even when a clean one is passed", async (t) => {
+  const api = await fakeApi([{}]);
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  t.after(() => delete process.env.NODE_TLS_REJECT_UNAUTHORIZED);
+  try {
+    await assert.rejects(open(api), { category: 'environment' });
+    assert.equal(api.requests.length, 0);
+  } finally {
+    await api.close();
+  }
+});
+
 test('the provider wrapper runs the API route only as api execution at effort low', async () => {
   const base = {
     provider: 'anthropic-api',

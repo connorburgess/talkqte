@@ -30,6 +30,22 @@ export const DEEPGRAM_GRANT_TTL_S = 900;
 // recorded in evidence as the request the app sends; the app logs no URL.
 export const DEEPGRAM_APP_QUERY =
   'model=nova-3&language=en&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&diarize=true&endpointing=300&utterance_end_ms=1000&vad_events=true&mip_opt_out=true';
+// A query the app may report on its `connected` row: plain `name=value`
+// pairs whose names are only those of the app's own query (an allowlist, so
+// no other parameter, however named, can carry a value into evidence).
+const QUERY_NAMES = new Set(
+  DEEPGRAM_APP_QUERY.split('&').map((pair) => pair.split('=')[0]),
+);
+export function isAllowedSttQuery(query) {
+  if (typeof query !== 'string' || !query || query.length > 1024) return false;
+  const seen = new Set();
+  return query.split('&').every((pair) => {
+    const m = pair.match(/^([a-z_]+)=([A-Za-z0-9_.-]{1,40})$/);
+    if (!m || !QUERY_NAMES.has(m[1]) || seen.has(m[1])) return false;
+    seen.add(m[1]);
+    return true;
+  });
+}
 // What the app accepts in its token file.
 const TOKEN = /^[A-Za-z0-9._-]{20,4096}$/;
 
@@ -68,8 +84,10 @@ export async function mintDeepgramGrant({
       (!offline || typeof customFetch !== 'function'))
   )
     throw failure('configuration');
-  // The grant runs in this process with the real key.
-  if (refusedEnvironment(environment)) throw failure('environment');
+  // The grant runs in this process with the real key, so this process's own
+  // environment is always checked, whatever the caller passes.
+  if (refusedEnvironment(process.env) || refusedEnvironment(environment))
+    throw failure('environment');
   const fetch = customFetch ?? globalThis.fetch;
   let key, url;
   if (offline) {
