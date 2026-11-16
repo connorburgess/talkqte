@@ -46,3 +46,12 @@ exercise complete-prefix selection, limits, exact owned-file identity, malformed
 records, preservation and hash-bound writer attachment. A harmless launcher
 fixture checks timing-file identity provenance. No native app, player, capture,
 transcription or provider is executed. README is unchanged for internal tooling.
+
+## When native ends the session itself
+
+Native can end a session without the lab's ordinary Stop, when its source fails (`source_problem`, for example `source_gone`). RunB07 launch 2 ended this way after an app switch.
+
+- **What the launcher records:** the reader passes on that row's fixed problem label and OS code, and the launcher records it as `nativeEnded`. This is separate from a release by Stop (`sourceReleased`).
+- **Snapshot:** a snapshot may then be taken with `nativeEnded: { problem }` instead of `sourceReleased: true`. Its coverage says `sourceEnd: "native-ended"`, with the problem label and `sourceReleaseObserved: false`.
+- **Checks:** the evidence writer and report accept exactly that combination. The report says the source was ended by native, not released by Stop.
+- **First causes:** the run's first stop reason (`stopReason`) and the take's first failure cause (`failure`, `runStopReason`) are kept, so the evidence names what ended a take even when cleanup fails afterwards.
