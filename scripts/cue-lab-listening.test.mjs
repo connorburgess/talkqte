@@ -52,8 +52,8 @@ test('observed source stopping/end aborts ownership without claiming native rele
   assert.deepEqual(await stopping, { released: true });
 });
 const features = [
+  'cloud-transcription',
   'lab-evaluator',
-  'local-whisper',
   'native-audio-spike',
   'timing-log',
 ];

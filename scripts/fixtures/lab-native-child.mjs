@@ -87,8 +87,8 @@ if (mode === 'listening') {
       live: true,
       commit: 'b'.repeat(40),
       features: [
+        'cloud-transcription',
         'lab-evaluator',
-        'local-whisper',
         'native-audio-spike',
         'timing-log',
       ],

@@ -20,8 +20,9 @@ The exact `talkqte.lab.build.v1` record contains `schema`, `executable`,
 `signature` contains only `identifier`, `authority` and `designatedRequirement`.
 Unknown/missing fields, duplicate JSON keys, duplicate/extra/missing features,
 unapproved digest/commit, noncanonical paths and nonprivate records are refused.
-The approved features are exactly `lab-evaluator`, `local-whisper`,
-`native-audio-spike` and `timing-log`.
+The approved features are exactly `cloud-transcription`, `lab-evaluator`,
+`native-audio-spike` and `timing-log`. Local transcription has been removed
+from the app (#346), so a build reporting `local-whisper` is refused.
 
 The executable must be the canonical regular `Contents/MacOS/talkqte` inside the
 canonical `.app`. Info.plist must name that executable and
@@ -45,7 +46,10 @@ approval or proves that a missing log event was delivered.
 
 Supply the pinned provider/model/effort/attempt cap as `selection`, the explicit
 `sourceApplication:"QuickTime Player"`, positive finite integer `stopAfterS`,
-`modelConnection:"on"` and canonical existing external `whisperModel`. The source
+`modelConnection:"on"` for the subscription routes (the direct API route has
+none; its in-app review approves the connection), and on the API route the
+`transcription` described below. There is no local transcription model: a
+`whisperModel` option is refused. The source
 is restricted to the approved fictional QuickTime-only topology. This selects
 all QuickTime windows/audio, not one document; the run plan must establish that
 only the intended fictional document is active. Native must enforce its pristine
@@ -71,7 +75,7 @@ Six seconds after signaling and twelve seconds total remain the cleanup bounds.
 
 ## Cloud transcription token
 
-On the direct API route a run may transcribe through Deepgram (#344) instead of a local model. Pass `transcription: { backend: 'deepgram', minuteCap, grant }`, where `minuteCap` is 1–60 for the whole launch and `grant` comes from `mintDeepgramGrant` (`scripts/cue-lab-deepgram.mjs`). A Whisper model is then refused.
+On the direct API route a run transcribes through Deepgram (#344). Pass `transcription: { backend: 'deepgram', minuteCap, grant }`, where `minuteCap` is 1–60 for the whole launch and `grant` comes from `mintDeepgramGrant` (`scripts/cue-lab-deepgram.mjs`).
 
 - **Minting:** the grant reads `TALKQTE_LAB_DEEPGRAM_KEY` from `~/.config/talkqte-lab/deepgram.env`. That file follows the same owner, mode and location rules as the API key file (`scripts/cue-lab-key-file.mjs`). The grant posts once, through the platform `fetch`, to `https://api.deepgram.com/v1/auth/grant` for a 900 s token. A refused key, unpaid account or rate limit (401, 402, 403, 429), or any other status, stops before launch.
 - **Environment refused:** the grant refuses to run if `NODE_TLS_REJECT_UNAUTHORIZED`, `NODE_EXTRA_CA_CERTS`, `NODE_OPTIONS` or `NODE_USE_ENV_PROXY` is set, even empty. The API route refuses them too.

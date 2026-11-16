@@ -31,9 +31,11 @@ import {
   isAnthropicModel,
 } from './cue-lab-anthropic-core.mjs';
 
+// The reviewed lab build's compiled features. Local transcription is gone
+// (#346); `lab-evaluator` implies `cloud-transcription`.
 const FEATURES = [
+  'cloud-transcription',
   'lab-evaluator',
-  'local-whisper',
   'native-audio-spike',
   'timing-log',
 ];
@@ -240,7 +242,6 @@ function launcher({
   selection,
   stopAfterS,
   sourceApplication,
-  whisperModel,
   modelConnection,
   environment,
   fixtureCase,
@@ -259,8 +260,7 @@ function launcher({
         transcription.minuteCap <= 60 &&
         typeof transcription.grant?.writeTokenFile === 'function' &&
         mode === 'model-enabled' &&
-        selection?.provider === 'anthropic-api' &&
-        whisperModel === undefined),
+        selection?.provider === 'anthropic-api'),
   );
   requireThat(
     ['capture-only', 'model-enabled'].includes(mode) &&
@@ -301,13 +301,6 @@ function launcher({
       .filter((key) => typeof environment[key] === 'string')
       .map((key) => [key, environment[key]]),
   );
-  if (!fixtureCase && !transcription)
-    requireThat(
-      isAbsolute(whisperModel ?? '') &&
-        realpathSync(whisperModel) === whisperModel &&
-        lstatSync(whisperModel).isFile() &&
-        outside(whisperModel),
-    );
   const temporaryRoot = realpathSync(tmpdir());
   requireThat(outside(temporaryRoot));
   const directory = realpathSync(mkdtempSync(join(temporaryRoot, 'tq-owned-')));
@@ -602,7 +595,6 @@ function launcher({
                 TALKQTE_DEV_PLAYER_EXECUTABLE: playerSource.executable,
               }
             : {}),
-          ...(whisperModel ? { TALKQTE_WHISPER_MODEL: whisperModel } : {}),
           ...(transcription
             ? {
                 TALKQTE_DEV_STT_BACKEND: 'deepgram',
@@ -730,13 +722,16 @@ export function prepareLabLauncher({
   selection,
   sourceApplication,
   stopAfterS,
-  whisperModel,
   modelConnection,
   mode = 'model-enabled',
   playerSource,
   environment = process.env,
   transcription,
+  ...rest
 } = {}) {
+  // Local transcription is gone: a Whisper model or any other unknown
+  // option is refused rather than ignored.
+  requireThat(Object.keys(rest).length === 0);
   try {
     return launcher({
       build: verifyBuild(manifestFile, approved),
@@ -745,7 +740,6 @@ export function prepareLabLauncher({
       selection,
       sourceApplication,
       stopAfterS,
-      whisperModel,
       modelConnection,
       environment,
       transcription,

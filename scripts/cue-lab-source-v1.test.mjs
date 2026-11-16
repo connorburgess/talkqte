@@ -6,8 +6,8 @@ import { join } from 'node:path';
 import { createLabSourceV1 } from './cue-lab-source-v1.mjs';
 import { watchLabTiming } from './cue-lab-timing-reader.mjs';
 const features = [
+  'cloud-transcription',
   'lab-evaluator',
-  'local-whisper',
   'native-audio-spike',
   'timing-log',
 ];

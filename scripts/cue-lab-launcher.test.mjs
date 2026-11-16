@@ -221,8 +221,8 @@ const record = {
   sha256: 'a'.repeat(64),
   commit: 'b'.repeat(40),
   features: [
+    'cloud-transcription',
     'lab-evaluator',
-    'local-whisper',
     'native-audio-spike',
     'timing-log',
   ],
@@ -595,9 +595,7 @@ function fakeBuild() {
   const manifestFile = join(directory, 'manifest.json');
   writeFileSync(manifestFile, bytes, { mode: 0o600 });
   const descriptor = join(directory, 'descriptor.json');
-  const model = join(directory, 'model.bin');
   writeFileSync(descriptor, '{}', { mode: 0o600 });
-  writeFileSync(model, 'offline');
   let verifies = 0;
   mock.method(childProcess, 'execFileSync', (command, args) => {
     if (command === '/usr/bin/plutil') {
@@ -644,7 +642,6 @@ function fakeBuild() {
     selection,
     sourceApplication: 'QuickTime Player',
     stopAfterS: 120,
-    whisperModel: model,
     modelConnection: 'on',
     environment: {},
   };
@@ -699,7 +696,21 @@ for (const changed of ['resource', 'plist'])
     }
   });
 
-test('changed caller cwd cannot admit repository-local manifest, model or descriptor via direct or symlink paths', () => {
+test('a Whisper model is refused now that local transcription is gone', () => {
+  const f = fakeBuild();
+  try {
+    assert.throws(() =>
+      prepareLabLauncher({
+        ...f.options,
+        whisperModel: '/fictional/model.bin',
+      }),
+    );
+  } finally {
+    f.close();
+  }
+});
+
+test('changed caller cwd cannot admit repository-local manifest or descriptor via direct or symlink paths', () => {
   const f = fakeBuild();
   const cwd = process.cwd();
   const root = fileURLToPath(new URL('../', import.meta.url));
@@ -707,18 +718,13 @@ test('changed caller cwd cannot admit repository-local manifest, model or descri
   let prepared;
   try {
     const manifest = join(inside, 'manifest.json');
-    const model = join(inside, 'model.bin');
     const descriptor = join(inside, 'descriptor.json');
     copyFileSync(f.options.manifestFile, manifest);
     chmodSync(manifest, 0o600);
-    writeFileSync(model, 'offline');
     writeFileSync(descriptor, '{}', { mode: 0o600 });
     process.chdir(f.directory);
     assert.throws(() =>
       prepareLabLauncher({ ...f.options, manifestFile: manifest }),
-    );
-    assert.throws(() =>
-      prepareLabLauncher({ ...f.options, whisperModel: model }),
     );
     const alias = join(f.directory, 'inside-alias');
     symlinkSync(inside, alias);
@@ -726,12 +732,6 @@ test('changed caller cwd cannot admit repository-local manifest, model or descri
       prepareLabLauncher({
         ...f.options,
         manifestFile: join(alias, 'manifest.json'),
-      }),
-    );
-    assert.throws(() =>
-      prepareLabLauncher({
-        ...f.options,
-        whisperModel: join(alias, 'model.bin'),
       }),
     );
     prepared = prepareLabLauncher(f.options);
