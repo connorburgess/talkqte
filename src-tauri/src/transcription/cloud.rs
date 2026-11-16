@@ -396,9 +396,16 @@ impl CloudFeed {
     }
 
     fn stop_reason(&mut self) -> Option<SttFailure> {
+        // A different approval than the one the stream opened under means the
+        // review was withdrawn and given again between two pushes: the old
+        // stream is not kept open under the new approval.
+        let approval = (self.approved)();
+        if approval.is_some_and(|at| at != self.approved_at) {
+            return Some(SttFailure::Withdrawn);
+        }
         match self.keep.as_mut() {
             Some(keep) => keep(),
-            None => (self.approved)().is_none().then_some(SttFailure::Withdrawn),
+            None => approval.is_none().then_some(SttFailure::Withdrawn),
         }
     }
 
@@ -751,6 +758,36 @@ mod tests {
         assert_eq!(feed.push(100, 200, &[0.1; 1_600]), Err(SttFailure::Network));
         assert_eq!(feed.failure(), Some(SttFailure::Network));
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn an_approval_withdrawn_and_given_again_between_pushes_closes_the_old_stream() {
+        let script = Script::default();
+        let approval = Arc::new(Mutex::new(Some(100)));
+        let (tx, _rx) = mpsc::channel();
+        let stream = script.clone();
+        let seen = approval.clone();
+        let mut feed = CloudFeed::new(
+            7,
+            1,
+            Box::new(move || Ok(Box::new(stream) as Box<dyn StreamingTranscriber>)),
+            move || *seen.lock().unwrap(),
+            move |_, segment| {
+                tx.send(segment).unwrap();
+                Ok(())
+            },
+        )
+        // The engine sees a valid approval both times, so it names no reason.
+        .stop_sending_when(|| None);
+        feed.push(100, 200, &[0.1; 1_600]).unwrap();
+        // Off, then a new review, between two pushes: a different approval.
+        *approval.lock().unwrap() = Some(500);
+        assert_eq!(
+            feed.push(600, 700, &[0.1; 1_600]),
+            Err(SttFailure::Withdrawn)
+        );
+        assert_eq!(*script.sent.lock().unwrap(), vec![1_600]);
+        assert!(*script.aborted.lock().unwrap());
     }
 
     #[test]

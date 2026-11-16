@@ -403,12 +403,13 @@ impl Engine {
             })
     }
 
-    /// Cloud transcription's gate: the session time of a grant the person
-    /// made in this session's own review, while it holds. A grant from a
-    /// launch setting never opens it, so audio is never sent without a
-    /// review shown in the app.
-    pub fn audio_approval(&self) -> Option<u64> {
-        if !self.has_processing_permission() {
+    /// Cloud transcription's gate for `session`'s stream: the session time of
+    /// a grant the person made in that session's own review, while it holds.
+    /// A grant from a launch setting never opens it, so audio is never sent
+    /// without a review shown in the app, and a later session's grant never
+    /// opens an earlier session's stream.
+    pub fn audio_approval(&self, session: u64) -> Option<u64> {
+        if session != self.generation || !self.has_processing_permission() {
             return None;
         }
         let state = self.evaluation.as_ref()?;
@@ -425,8 +426,11 @@ impl Engine {
     /// Why an open cloud stream must stop sending now, if it must: the lab
     /// run ended, or the review was withdrawn. A Stop in progress keeps it
     /// sending, so the last captured audio is transcribed.
-    pub fn audio_withdrawal(&self) -> Option<&'static str> {
-        if self.audio_approval().is_some() || self.live_stopping {
+    pub fn audio_withdrawal(&self, session: u64) -> Option<&'static str> {
+        if session != self.generation {
+            return Some("withdrawn");
+        }
+        if self.audio_approval(session).is_some() || self.live_stopping {
             return None;
         }
         if self

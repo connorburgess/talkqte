@@ -43,7 +43,5 @@ export function transcriptionStopText(
 export function transcribedWhere(
   transcription: CloudTranscription | undefined,
 ): string {
-  return transcription
-    ? `transcribed by ${transcription.provider} once cue processing is enabled`
-    : 'not transcribed';
+  return `transcribed by ${transcription?.provider ?? 'the transcription service'} once cue processing is enabled`;
 }

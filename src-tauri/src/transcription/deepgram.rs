@@ -393,12 +393,29 @@ pub(crate) fn parse(text: &str, seq: &mut u64) -> Result<Option<SttEvent>, SttFa
         .into_iter()
         .max_by_key(|&(speaker, count)| (count, std::cmp::Reverse(speaker)))
         .map(|(speaker, _)| speaker);
+    // A result's start and duration cover its audio window, which can begin
+    // well before the first word (the first result starts at the stream's
+    // first sample, the moment of approval). Time the line by its words
+    // when they say, within that window.
+    let window_end = start + duration;
+    let time = |word: &serde_json::Value, key: &str| {
+        word[key]
+            .as_f64()
+            .filter(|t| t.is_finite() && (start..=window_end).contains(t))
+    };
+    let words = alternative["words"].as_array();
+    let first = words.and_then(|w| w.first()).and_then(|w| time(w, "start"));
+    let last = words.and_then(|w| w.last()).and_then(|w| time(w, "end"));
+    let (from, to) = match (first, last) {
+        (Some(from), Some(to)) if from <= to => (from, to),
+        _ => (start, window_end),
+    };
     *seq += 1;
     Ok(Some(SttEvent::Final {
         seq: *seq,
         text: transcript.chars().take(1_000).collect(),
-        start_ms: (start * 1_000.0) as u64,
-        end_ms: ((start + duration) * 1_000.0) as u64,
+        start_ms: (from * 1_000.0) as u64,
+        end_ms: (to * 1_000.0) as u64,
         untrusted_speaker,
     }))
 }
@@ -633,6 +650,37 @@ mod tests {
         .to_string()
     }
 
+    #[test]
+    fn a_line_is_timed_by_its_words_not_by_its_audio_window() {
+        // The first result's window starts at the stream's first sample, the
+        // moment of approval; its words start two seconds later.
+        let text = serde_json::json!({"type":"Results","is_final":true,"start":0.0,"duration":3.5,
+            "channel":{"alternatives":[{"transcript":"Before I go tomorrow,","words":[
+                {"word":"before","start":2.04,"end":2.3,"speaker":0},
+                {"word":"tomorrow","start":2.9,"end":3.32,"speaker":0}]}]}})
+        .to_string();
+        let mut seq = 0;
+        let Some(SttEvent::Final {
+            start_ms, end_ms, ..
+        }) = parse(&text, &mut seq).unwrap()
+        else {
+            panic!("a final")
+        };
+        assert_eq!((start_ms, end_ms), (2_040, 3_320));
+        // Word times outside the window are not trusted: the window is used.
+        let odd = serde_json::json!({"type":"Results","is_final":true,"start":1.0,"duration":1.0,
+            "channel":{"alternatives":[{"transcript":"Fictional.","words":[
+                {"word":"fictional","start":9.0,"end":9.5}]}]}})
+        .to_string();
+        let Some(SttEvent::Final {
+            start_ms, end_ms, ..
+        }) = parse(&odd, &mut seq).unwrap()
+        else {
+            panic!("a final")
+        };
+        assert_eq!((start_ms, end_ms), (1_000, 2_000));
+    }
+
     fn wait_for(
         stream: &mut DeepgramStream,
         mut done: impl FnMut(&[SttEvent]) -> bool,
@@ -742,7 +790,7 @@ mod tests {
                 seq: 1,
                 text: "Fictional final line.".into(),
                 start_ms: 2_000,
-                end_ms: 3_500,
+                end_ms: 2_100,
                 untrusted_speaker: Some(1),
             }
         );

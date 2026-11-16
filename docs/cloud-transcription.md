@@ -61,8 +61,12 @@ on the stream's own thread after approval. The file may still be an empty
 placeholder then: the lab launcher writes the token only after it has seen
 the review, by renaming a new file over the placeholder. The stream looks for
 a valid token every 50 ms for up to 10 seconds after approval, keeping the
-audio captured since approval in its bounded queue (12.8 seconds), and stops
-with `settings` if none arrives.
+audio captured since approval in its bounded queue, and stops with `settings`
+if none arrives. The queue holds 128 pushes. For the microphone, which pushes
+100 ms chunks, that is 12.8 seconds, more than the wait. Application audio is
+pushed as it arrives from the system, in smaller blocks, so the queue holds
+less of it, possibly less than the 10 second wait. Audio that does not fit is
+dropped and reported, as described under [what stops it](#what-stops-it).
 
 After approval, each capture source opens one WebSocket stream to
 `wss://api.deepgram.com/v1/listen` and sends:
