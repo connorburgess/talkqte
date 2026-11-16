@@ -218,6 +218,38 @@ export function watchLabTiming({
         ...(value.effort !== undefined ? { effort: value.effort } : {}),
         session: value.session,
       });
+    } else if (value.event === 'stt_state') {
+      // Cloud transcription start and stop, with a fixed code and the
+      // audio sent so far. No provider message is ever in the row.
+      if (
+        !['started', 'finished', 'ended', 'stopped'].includes(value.state) ||
+        (value.code !== undefined &&
+          ![
+            'auth',
+            'quota',
+            'rate_limited',
+            'cap_reached',
+            'network',
+            'protocol',
+            'closed',
+            'settings',
+            'withdrawn',
+          ].includes(value.code)) ||
+        (value.state === 'stopped') !== (value.code !== undefined) ||
+        !Number.isSafeInteger(value.audio_ms) ||
+        value.audio_ms < 0 ||
+        (sourceObservation === 'v1'
+          ? !canonicalSession(value.session)
+          : !Number.isSafeInteger(value.session) || value.session < 0)
+      )
+        throw gateFailure('protocol');
+      onEvent({
+        event: 'stt_state',
+        state: value.state,
+        ...(value.code !== undefined ? { code: value.code } : {}),
+        audio_ms: value.audio_ms,
+        session: value.session,
+      });
     } else if (value.event === 'source_problem' || value.event === 'dropped')
       throw gateFailure('protocol');
     else if (value.event === 'dev_source') {
@@ -282,7 +314,8 @@ export function watchLabTiming({
                 ? function (key, value, context) {
                     if (
                       ((this?.event === 'session' && this.live === true) ||
-                        this?.event === 'evaluator') &&
+                        this?.event === 'evaluator' ||
+                        this?.event === 'stt_state') &&
                       key === 'session'
                     ) {
                       if (!canonicalSession(context?.source))

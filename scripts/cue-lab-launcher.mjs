@@ -11,6 +11,7 @@ import {
   realpathSync,
   readSync,
   fstatSync,
+  unlinkSync,
   constants,
 } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
@@ -243,7 +244,22 @@ function launcher({
   fixtureCase,
   mode = 'model-enabled',
   playerSource,
+  transcription,
 }) {
+  // Cloud transcription (Deepgram) runs only on the direct API route, whose
+  // in-app session review also approves streaming the audio.
+  requireThat(
+    transcription === undefined ||
+      (exact(transcription, ['backend', 'minuteCap', 'grant']) &&
+        transcription.backend === 'deepgram' &&
+        Number.isSafeInteger(transcription.minuteCap) &&
+        transcription.minuteCap >= 1 &&
+        transcription.minuteCap <= 60 &&
+        typeof transcription.grant?.writeTokenFile === 'function' &&
+        mode === 'model-enabled' &&
+        selection?.provider === 'anthropic-api' &&
+        whisperModel === undefined),
+  );
   requireThat(
     ['capture-only', 'model-enabled'].includes(mode) &&
       (mode === 'capture-only'
@@ -283,7 +299,7 @@ function launcher({
       .filter((key) => typeof environment[key] === 'string')
       .map((key) => [key, environment[key]]),
   );
-  if (!fixtureCase)
+  if (!fixtureCase && !transcription)
     requireThat(
       isAbsolute(whisperModel ?? '') &&
         realpathSync(whisperModel) === whisperModel &&
@@ -296,6 +312,22 @@ function launcher({
   chmodSync(directory, 0o700);
   requireThat(outside(directory));
   const timingPath = join(directory, 'timing.jsonl');
+  // The run's transcription token: written at launch into this owner-only
+  // folder, deleted once the stream has opened, at close, on a failed launch
+  // or at process exit.
+  const tokenPath = transcription ? join(directory, 'stt-token') : null;
+  let tokenRemoved = true;
+  const removeToken = () => {
+    if (tokenRemoved) return;
+    try {
+      unlinkSync(tokenPath);
+      tokenRemoved = true;
+    } catch (error) {
+      if (error?.code === 'ENOENT') tokenRemoved = true;
+    }
+  };
+  let reviewSeen = false,
+    transcriptionStarted = false;
   const fixturePath = fixtureCase ? join(directory, 'fixture-child.mjs') : null;
   let fixtureSnapshot;
   if (fixturePath) {
@@ -316,6 +348,9 @@ function launcher({
   const subscribers = new Set();
   const evaluatorSubscribers = new Set();
   const close = () => {
+    transcription?.grant.discard?.();
+    removeToken();
+    if (tokenRemoved) process.off('exit', removeToken);
     if (closed) return;
     closed = true;
     reader?.close();
@@ -451,6 +486,27 @@ function launcher({
               step = event.step;
               if (step === 'released') released = true;
             }
+            // A cloud stream may open only after the in-app review approved
+            // the session; the token is not needed once it has opened.
+            if (event.event === 'stt_state') {
+              if (event.state === 'started') {
+                if (!transcription || !reviewSeen || transcriptionStarted) {
+                  onTiming({ event: 'dropped', count: 1 });
+                  for (const listener of subscribers)
+                    listener({ event: 'dropped', count: 1 });
+                  return;
+                }
+                transcriptionStarted = true;
+                removeToken();
+              }
+              return;
+            }
+            if (
+              event.event === 'evaluator' &&
+              event.approval === 'review' &&
+              event.state === 'on'
+            )
+              reviewSeen = true;
             // Connection rows go only to the approval gate, never to the
             // lifecycle or source observers, which refuse unknown rows.
             if (event.event === 'evaluator') {
@@ -472,6 +528,11 @@ function launcher({
             current.sha256 === fixtureSnapshot.sha256 &&
               current.stamp === fixtureSnapshot.stamp,
           );
+        }
+        if (transcription) {
+          tokenRemoved = false;
+          process.on('exit', removeToken);
+          transcription.grant.writeTokenFile(tokenPath);
         }
         const env = {
           ...osEnv,
@@ -500,6 +561,13 @@ function launcher({
               }
             : {}),
           ...(whisperModel ? { TALKQTE_WHISPER_MODEL: whisperModel } : {}),
+          ...(transcription
+            ? {
+                TALKQTE_DEV_STT_BACKEND: 'deepgram',
+                TALKQTE_DEV_STT_TOKEN_FILE: tokenPath,
+                TALKQTE_DEV_STT_MINUTE_CAP: String(transcription.minuteCap),
+              }
+            : {}),
           ...(fixtureCase ? { TALKQTE_FIXTURE_CASE: fixtureCase } : {}),
         };
         child = spawn(executable, fixtureCase ? [fixturePath] : [], {
@@ -527,6 +595,18 @@ function launcher({
     get sourceReleased() {
       return released;
     },
+    // Content-free transcription facts for evidence: never the token.
+    get transcription() {
+      return transcription
+        ? Object.freeze({
+            backend: transcription.backend,
+            minuteCap: transcription.minuteCap,
+            grantTtlS: transcription.grant.ttlSeconds,
+            started: transcriptionStarted,
+            tokenRemoved,
+          })
+        : null;
+    },
     get processStarted() {
       return child !== null;
     },
@@ -547,6 +627,7 @@ export function prepareLabLauncher({
   mode = 'model-enabled',
   playerSource,
   environment = process.env,
+  transcription,
 } = {}) {
   try {
     return launcher({
@@ -559,6 +640,7 @@ export function prepareLabLauncher({
       whisperModel,
       modelConnection,
       environment,
+      transcription,
     });
   } catch {
     throw gateFailure('protocol');
@@ -573,9 +655,12 @@ export function prepareLabFixtureLauncher({
   mode = 'model-enabled',
   stopAfterS = 120,
   environment = {},
+  transcription,
 } = {}) {
   requireThat(
     [
+      'cloud-transcription',
+      'cloud-early',
       'capture-only',
       'normal',
       'partial',
@@ -619,5 +704,6 @@ export function prepareLabFixtureLauncher({
         : 'on',
     environment,
     fixtureCase,
+    transcription,
   });
 }

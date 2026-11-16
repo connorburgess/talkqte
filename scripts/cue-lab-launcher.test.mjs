@@ -417,6 +417,59 @@ test('the reader passes on connection rows with their approval and refuses a mal
   }
 });
 
+test('the reader passes on cloud transcription state rows with fixed codes and refuses a malformed one', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tq-reader-'));
+  chmodSync(directory, 0o700);
+  const path = join(directory, 'timing.jsonl');
+  writeFileSync(path, '', { mode: 0o600 });
+  const events = [];
+  const reader = watchLabTiming({
+    path,
+    runId: 'fixture-run',
+    sourceObservation: 'v1',
+    onEvent: (event) => events.push(event),
+  });
+  try {
+    appendFileSync(
+      path,
+      '{"event":"stt_state","session":18446744073709551615,"state":"started","audio_ms":0,"wall_ms":1,"mono_ms":2}\n' +
+        '{"event":"stt_state","session":3,"state":"stopped","code":"cap_reached","audio_ms":300000,"wall_ms":1,"mono_ms":3}\n',
+    );
+    reader.poll();
+    assert.deepEqual(events, [
+      {
+        event: 'stt_state',
+        state: 'started',
+        audio_ms: 0,
+        session: '18446744073709551615',
+      },
+      {
+        event: 'stt_state',
+        state: 'stopped',
+        code: 'cap_reached',
+        audio_ms: 300000,
+        session: '3',
+      },
+    ]);
+    // A stop without its code, or a provider message, is refused.
+    appendFileSync(
+      path,
+      JSON.stringify({
+        event: 'stt_state',
+        session: 3,
+        state: 'stopped',
+        audio_ms: 1,
+      }) + '\n',
+    );
+    reader.poll();
+    assert.equal(reader.failed, true);
+    assert.deepEqual(events.at(-1), { event: 'dropped', count: 1 });
+  } finally {
+    reader.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('a different application acknowledgement fails the QuickTime-only observer', () => {
   const directory = mkdtempSync(join(tmpdir(), 'tq-reader-'));
   chmodSync(directory, 0o700);

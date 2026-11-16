@@ -3,6 +3,7 @@
 // descriptor-peer case alone connects to the test's own local broker socket.
 import {
   appendFileSync,
+  lstatSync,
   readFileSync,
   writeFileSync,
   renameSync,
@@ -151,6 +152,58 @@ if (mode === 'descriptor-peer') {
   socket.on('error', () => {
     if (!connected) process.exit(5);
   });
+}
+if (mode === 'cloud-transcription' || mode === 'cloud-early') {
+  // Mirrors the app's cloud transcription settings and token-file rules
+  // (#344 transcription/cloud.rs), then reports approval and a stream start
+  // in the right order, or the stream first for the refused case.
+  const file = process.env.TALKQTE_DEV_STT_TOKEN_FILE ?? '';
+  let usable = false;
+  try {
+    const f = lstatSync(file),
+      d = lstatSync(dirname(file));
+    usable =
+      process.env.TALKQTE_DEV_STT_BACKEND === 'deepgram' &&
+      /^[1-9][0-9]?$/.test(process.env.TALKQTE_DEV_STT_MINUTE_CAP ?? '') &&
+      Number(process.env.TALKQTE_DEV_STT_MINUTE_CAP) <= 60 &&
+      file.startsWith('/') &&
+      process.env.TALKQTE_WHISPER_MODEL === undefined &&
+      f.isFile() &&
+      (f.mode & 0o777) === 0o600 &&
+      f.uid === process.getuid() &&
+      f.size <= 4096 &&
+      d.isDirectory() &&
+      (d.mode & 0o777) === 0o700 &&
+      d.uid === process.getuid() &&
+      /^[A-Za-z0-9._-]{20,4096}$/.test(readFileSync(file, 'utf8').trim());
+  } catch {}
+  if (!usable) process.exit(6);
+  const review = {
+    event: 'evaluator',
+    approval: 'review',
+    session: 2,
+    state: 'on',
+    backend: 'lab-api',
+    model: process.env.TALKQTE_DEV_LAB_MODEL,
+    effort: 'low',
+    elapsed_ms: 5,
+    wall_ms: 1,
+    mono_ms: 2,
+  };
+  const started = {
+    event: 'stt_state',
+    session: 2,
+    state: 'started',
+    audio_ms: 0,
+    wall_ms: 1,
+    mono_ms: 3,
+  };
+  setTimeout(() => {
+    for (const row of mode === 'cloud-early'
+      ? [started, review]
+      : [review, started])
+      appendFileSync(path, JSON.stringify(row) + '\n');
+  }, 40);
 }
 // Fixture only; never evidence of release.
 setTimeout(() => process.exit(0), mode === 'descriptor-peer' ? 5000 : 1500);
