@@ -3,6 +3,10 @@ import { test, mock } from 'node:test';
 import { EventEmitter } from 'node:events';
 import { createConnection } from 'node:net';
 import { readFile } from 'node:fs/promises';
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createLabEvidenceWriter } from './cue-lab-evidence-writer.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
   createPreparedTake,
@@ -66,7 +70,13 @@ function fixture({
   helloSession = '1',
   lateBeforeStart = false,
   firstRequestTimesOut = false,
+  // Direct API route: the owner's in-app approval is read from native
+  // connection rows, delivered here once the take reports it is waiting.
+  api = false,
+  approvalRows = [],
+  onApproval,
 } = {}) {
+  if (api) effort = 'low';
   if (fixedModel) {
     strictSource = true;
     preallocatedRunId = 'fictional-run';
@@ -138,6 +148,12 @@ function fixture({
       counts.launcherClose++;
     },
   };
+  let evaluatorHandler;
+  if (api)
+    launcher.subscribeEvaluator = (handler) => {
+      evaluatorHandler = handler;
+      return () => (evaluatorHandler = null);
+    };
   async function authenticate() {
     const d = JSON.parse(
       await readFile(
@@ -241,8 +257,8 @@ function fixture({
       JSON.stringify(
         frame('hello', {
           nonce: d.nonce,
-          expectedProvider: 'codex',
-          expectedModel: 'gpt-6.1-sol',
+          expectedProvider: api ? 'anthropic-api' : 'codex',
+          expectedModel: api ? 'claude-opus-5-5' : 'gpt-6.1-sol',
           expectedEffort: effort,
         }),
       ) + '\n',
@@ -383,7 +399,19 @@ function fixture({
   const options = {
     ...(preallocatedRunId ? { runId: preallocatedRunId } : {}),
     launcher,
-    stopAfterS: 110,
+    stopAfterS: api ? 290 : 110,
+    ...(api
+      ? {
+          approvalBudgetMs: 180000,
+          onApproval(event) {
+            trace.push('approval-' + event.state);
+            onApproval?.(event);
+            if (event.state === 'waiting')
+              for (const row of approvalRows)
+                queueMicrotask(() => evaluatorHandler?.(Object.freeze(row)));
+          },
+        }
+      : {}),
     media: selectedMedia,
     player: selectedPlayer,
     recorder,
@@ -422,15 +450,15 @@ function fixture({
       },
     },
     settings: {
-      provider: 'codex',
-      model: 'gpt-6.1-sol',
+      provider: api ? 'anthropic-api' : 'codex',
+      model: api ? 'claude-opus-5-5' : 'gpt-6.1-sol',
       effort,
-      maxCalls: fixedModel ? 20 : 3,
+      maxCalls: fixedModel ? (api ? 40 : 20) : 3,
       deadlineMs: 30000,
       execution: 'offline-stand-in',
       environment: {},
       openers: {
-        codex: async () => ({
+        [api ? 'anthropic-api' : 'codex']: async () => ({
           async request({ signal }) {
             counts.requests++;
             if (firstRequestTimesOut && counts.requests === 1)
@@ -496,6 +524,9 @@ function fixture({
     trace,
     counts,
     events,
+    get evaluatorSubscribed() {
+      return typeof evaluatorHandler === 'function';
+    },
     providerClosing: providerClosing.promise,
     failSource: () => sourceHandler?.({ type: 'failed' }),
     failPlayer: () => playerHandler(),
@@ -1082,4 +1113,179 @@ test('the takes refuse a hand-built media descriptor even with the approved path
       category: 'protocol',
     },
   );
+});
+
+// Direct API route: the owner approves the connection in the app after
+// Listening and before playback (native `evaluator` row, approval `review`).
+const reviewRow = {
+  event: 'evaluator',
+  approval: 'review',
+  state: 'on',
+  backend: 'lab-api',
+  model: 'claude-opus-5-5',
+  effort: 'low',
+  session: '7',
+};
+async function apiTake(t, { onApproval, evidence = false, ...options } = {}) {
+  // The full 1 s start budget: a loaded test host can miss 100 ms.
+  const player = createLabPlayerFixture({
+    runId: 'fictional-run',
+    prepareMs: 2000,
+    startMs: 1000,
+    stopMs: 100,
+  });
+  t.after(() => player.close({ nativeReleased: true }).catch(() => {}));
+  await player.prepare({ media });
+  let writer;
+  if (evidence) {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'tq-api-take-')));
+    t.after(() => rmSync(parent, { recursive: true, force: true }));
+    writer = createLabEvidenceWriter({
+      parentDirectory: parent,
+      runId: 'fictional-run',
+      fictional: true,
+    });
+    writer.addClock({ id: 'node', kind: 'monotonic' });
+  }
+  const approvals = [];
+  const f = fixture({
+    fixedModel: true,
+    api: true,
+    ownedPlayer: player,
+    recordDelayMs: 25,
+    guardSink: (g) => writer?.recordGuard(g),
+    onApproval(event) {
+      approvals.push(event);
+      onApproval?.(event);
+    },
+    ...options,
+  });
+  return { f, approvals, writer };
+}
+
+test('the API take plays only after the in-app approval and records the wait apart from the source window', async (t) => {
+  const { f, approvals, writer } = await apiTake(t, {
+    approvalRows: [reviewRow],
+    evidence: true,
+  });
+  const result = await f.take.done;
+  assert.equal(result.completed, true);
+  assert.equal(result.dispatchesUsed, 1);
+  assert.deepEqual(
+    approvals.map((e) => e.state),
+    ['waiting', 'approved'],
+  );
+  assert.equal(approvals[0].budgetMs, 180000);
+  assert.equal(approvals[1].session, '7');
+  assert.deepEqual(result.approval, {
+    budgetMs: 180000,
+    waitMs: approvals[1].waitMs,
+    session: '7',
+  });
+  // Approval sits between Listening and the recorder, before any playback.
+  const at = (entry) => f.trace.indexOf(entry);
+  assert.ok(at('listening') < at('approval-waiting'));
+  assert.ok(at('approval-approved') < at('record-ready'));
+  assert.ok(at('record-ready') < at('authenticate'));
+  // The native Stop guard moves out by exactly the approval budget.
+  assert.equal(result.guard.approvalBudgetMs, 180000);
+  assert.equal(result.guard.approvalWaitMs, approvals[1].waitMs);
+  assert.equal(
+    result.guard.sourceDeadline - result.guard.nativeStartedAt,
+    290000,
+  );
+  const { manifestPath } = writer.close();
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  assert.equal(manifest.writer.failed, false);
+  assert.equal(manifest.guards.length, 2);
+  assert.equal(manifest.guards[1].approvalBudgetMs, 180000);
+});
+
+test('no approval within 180 s stops the API take without playback, a request or an approved notice', async (t) => {
+  const { f, approvals } = await apiTake(t, {
+    onApproval(event) {
+      if (event.state !== 'waiting') return;
+      // Advance only the approval timer: it is created right after this
+      // notice, then real timers return before cleanup starts.
+      mock.timers.enable({ apis: ['setTimeout'] });
+      queueMicrotask(() => {
+        mock.timers.tick(180000);
+        mock.timers.reset();
+      });
+    },
+  });
+  await assert.rejects(f.take.done, { category: 'approval-not-given' });
+  assert.deepEqual(
+    approvals.map((e) => e.state),
+    ['waiting'],
+  );
+  assert.equal(f.take.approval, null);
+  assert.equal(f.counts.requests, 0);
+  assert.equal(f.trace.includes('record-ready'), false);
+  assert.equal(f.trace.includes('authenticate'), false);
+  assert.equal(f.counts.nativeStop, 1);
+  assert.equal(f.counts.providerClose, 1);
+  assert.equal(f.take.phase, 'stopped');
+});
+
+for (const [name, row] of [
+  ['a launch-setting approval', { ...reviewRow, approval: 'launchSetting' }],
+  ['another backend', { ...reviewRow, backend: 'claude-cli' }],
+  ['another model', { ...reviewRow, model: 'claude-sonnet-5-5' }],
+])
+  test(`${name} is an approval fault: no playback and no request`, async (t) => {
+    const { f, approvals } = await apiTake(t, { approvalRows: [row] });
+    await assert.rejects(f.take.done, { category: 'approval-fault' });
+    assert.deepEqual(
+      approvals.map((e) => e.state),
+      ['waiting'],
+    );
+    assert.equal(f.counts.requests, 0);
+    assert.equal(f.trace.includes('record-ready'), false);
+    assert.equal(f.counts.nativeStop, 1);
+  });
+
+test('a launch-setting row after approval stops the API take as a fault', async (t) => {
+  const { f, approvals } = await apiTake(t, {
+    approvalRows: [reviewRow, { ...reviewRow, approval: 'launchSetting' }],
+  });
+  await assert.rejects(f.take.done, { category: 'approval-fault' });
+  assert.equal(approvals[0].state, 'waiting');
+});
+
+test('the option check pins each route: Codex 20 calls at 110 s, API 40 calls with the 180 s approval', () => {
+  const codex = {
+    settings: {
+      provider: 'codex',
+      model: 'gpt-6.1-sol',
+      effort: 'low',
+      maxCalls: 20,
+    },
+    stopAfterS: 110,
+    media,
+  };
+  const api = {
+    settings: {
+      provider: 'anthropic-api',
+      model: 'claude-opus-5-5',
+      effort: 'low',
+      maxCalls: 40,
+    },
+    stopAfterS: 290,
+    approvalBudgetMs: 180000,
+    media,
+  };
+  assert.doesNotThrow(() => assertFixedModelTakeOptions(codex));
+  assert.doesNotThrow(() => assertFixedModelTakeOptions(api));
+  for (const changed of [
+    { ...codex, settings: { ...codex.settings, maxCalls: 40 } },
+    { ...codex, approvalBudgetMs: 180000, stopAfterS: 290 },
+    { ...api, settings: { ...api.settings, maxCalls: 20 } },
+    { ...api, approvalBudgetMs: undefined },
+    { ...api, approvalBudgetMs: 120000, stopAfterS: 230 },
+    { ...api, stopAfterS: 110 },
+  ])
+    assert.throws(() => assertFixedModelTakeOptions(changed), {
+      category: 'protocol',
+    });
 });

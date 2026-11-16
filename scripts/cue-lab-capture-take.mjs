@@ -279,6 +279,9 @@ export function createLabCaptureTake({
       mediaDurationMs: media.durationMs,
       completionReserveMs,
       remainingAtRequestMs: sourceDeadline - startRequestAt,
+      // Capture-only takes have no model connection to approve.
+      approvalBudgetMs: 0,
+      approvalWaitMs: 0,
     });
     onGuard?.(guard);
     phase = 'playing';

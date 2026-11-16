@@ -287,6 +287,10 @@ export function createLabRun({
     get providerReceipts() {
       return provider?.receipts ?? null;
     },
+    // Estimated direct API spend so far; null for routes without one.
+    get providerSpentMicroUsd() {
+      return provider?.spentMicroUsd ?? null;
+    },
     get startupDiagnostics() {
       return Object.freeze({
         stage: startupStage,

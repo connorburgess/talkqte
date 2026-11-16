@@ -194,6 +194,30 @@ export function watchLabTiming({
           ? { commit: value.commit, features: [...value.features] }
           : {}),
       });
+    } else if (value.event === 'evaluator') {
+      // The model connection turning on or off, and how it was approved. Only
+      // fixed labels and names pass; the lab's approval gate reads them.
+      const name = /^[A-Za-z0-9._-]{1,64}$/;
+      if (
+        !['review', 'launchSetting'].includes(value.approval) ||
+        !['on', 'off'].includes(value.state) ||
+        !name.test(value.backend ?? '') ||
+        !name.test(value.model ?? '') ||
+        (value.effort !== undefined && !name.test(value.effort)) ||
+        (sourceObservation === 'v1'
+          ? !canonicalSession(value.session)
+          : !Number.isSafeInteger(value.session) || value.session < 0)
+      )
+        throw gateFailure('protocol');
+      onEvent({
+        event: 'evaluator',
+        approval: value.approval,
+        state: value.state,
+        backend: value.backend,
+        model: value.model,
+        ...(value.effort !== undefined ? { effort: value.effort } : {}),
+        session: value.session,
+      });
     } else if (value.event === 'source_problem' || value.event === 'dropped')
       throw gateFailure('protocol');
     else if (value.event === 'dev_source') {
@@ -257,8 +281,8 @@ export function watchLabTiming({
               sourceObservation === 'v1'
                 ? function (key, value, context) {
                     if (
-                      this?.event === 'session' &&
-                      this.live === true &&
+                      ((this?.event === 'session' && this.live === true) ||
+                        this?.event === 'evaluator') &&
                       key === 'session'
                     ) {
                       if (!canonicalSession(context?.source))

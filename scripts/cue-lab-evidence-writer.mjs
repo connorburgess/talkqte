@@ -277,6 +277,8 @@ export function createLabEvidenceWriter({
         'mediaDurationMs',
         'completionReserveMs',
         'remainingAtRequestMs',
+        'approvalBudgetMs',
+        'approvalWaitMs',
       ];
       const actual = [
         'actualAnchorMs',
@@ -291,7 +293,16 @@ export function createLabEvidenceWriter({
           base.every((k) => number(guard[k])),
       );
       required(
-        guard.sourceDeadline - guard.nativeStartedAt === 110000 &&
+        // A 110 s source window, moved out by the in-app approval budget
+        // (direct API route) and recorded with the time actually waited.
+        [0, 180000].includes(guard.approvalBudgetMs) &&
+          Number.isSafeInteger(guard.approvalWaitMs) &&
+          guard.approvalWaitMs >= 0 &&
+          guard.approvalWaitMs <= guard.approvalBudgetMs &&
+          guard.sourceDeadline - guard.nativeStartedAt ===
+            110000 + guard.approvalBudgetMs &&
+          guard.startRequestAt >=
+            guard.nativeStartedAt + guard.approvalWaitMs &&
           guard.mediaDurationMs > 0 &&
           guard.mediaDurationMs <= LAB_MEDIA_MAX_MS &&
           guard.startRequestAt >= guard.nativeStartedAt &&
