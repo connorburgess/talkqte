@@ -591,7 +591,7 @@ impl Engine {
     pub fn live() -> Self {
         Self::from_script(Script {
             title: "Live session".into(),
-            description: "Transcript lines from a local transcription source.".into(),
+            description: "Transcript lines from this session's transcription.".into(),
             duration_ms: u64::MAX,
             segments: vec![],
         })

@@ -17,13 +17,13 @@ const title = (page: import('@playwright/test').Page) =>
 const session = (page: import('@playwright/test').Page) =>
   page.getByRole('region', { name: 'Session', exact: true });
 
-test('before a session, a build without local transcription says plainly that it cannot show a cue', async ({
+test('before a session, a build without live transcription says plainly that it cannot show a cue', async ({
   page,
 }) => {
   await standIn(page);
   await expect(title(page)).toHaveText('No session yet');
   await expect(session(page)).toContainText(
-    'Nothing is being captured. Cues appear only during a live session. This build does not include local transcription.',
+    'Nothing is being captured. Cues appear only during a live session. This build has no live transcription.',
   );
   await expect(
     page.getByRole('button', { name: 'Start live session' }),
@@ -117,22 +117,6 @@ test('before a session, the notebook never says nothing is captured while the mi
   await expect(session(page)).not.toContainText('Nothing is being captured');
 });
 
-test('before a session, a build that needs its speech model points to setup', async ({
-  page,
-}) => {
-  await standIn(page, '/?model');
-  await expect(title(page)).toHaveText('No session yet');
-  await expect(session(page)).toContainText(
-    'Nothing is being captured. A live session needs the speech model first.',
-  );
-  await session(page)
-    .getByRole('button', { name: 'Set up live session' })
-    .click();
-  await expect(
-    page.getByRole('heading', { name: 'Live transcription' }),
-  ).toBeFocused();
-});
-
 test('a session runs from Start to Stop, and what remains afterwards is stated', async ({
   page,
 }) => {
@@ -148,7 +132,7 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
     .click();
   await expect(title(page)).toHaveText('Live session in progress');
   await expect(session(page)).toContainText(
-    'Your microphone · transcribed on this device · not saved',
+    'Your microphone · transcribed by Deepgram once cue processing is enabled · not saved by TalkQTE',
   );
   await expect(
     session(page).getByRole('button', { name: 'Start live session' }),

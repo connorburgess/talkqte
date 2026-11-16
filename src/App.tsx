@@ -25,12 +25,10 @@ import {
   type ContextItem,
   type CueSnapshot,
   type LiveStatus,
-  type ModelStatus,
   type Snapshot,
   type GranolaStatus,
 } from './lib/types';
 
-const megabytes = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
 import { CueCard } from './components/Question';
 import {
   ProcessingControl,
@@ -116,7 +114,7 @@ function FloatingQuestion() {
   // Capture is on and nothing about it is changing or wrong.
   const capturing =
     (listening || appAudio) && !(microphoneControl && microphone.stopPending);
-  // While a model connection may send lines, "Local" would be untrue.
+  // Where lines and audio go is said whenever they may leave the device.
   // Paused cues send nothing, so they say only that they are paused.
   const modelProvider = state?.modelProvider ?? 'Claude';
   const modelLinked =
@@ -149,7 +147,7 @@ function FloatingQuestion() {
               : `Mic on · lines go to ${modelProvider}`
             : cloudNote
               ? `Mic on · ${cloudNote}`
-              : 'Mic on · Local'
+              : 'Mic on'
         : state.sourceSession
           ? state.cuesPaused
             ? audioSent
@@ -161,7 +159,7 @@ function FloatingQuestion() {
                 : `App audio · lines go to ${modelProvider}`
               : cloudNote
                 ? `App audio · ${cloudNote}`
-                : 'App audio · Local'
+                : 'App audio'
           : microphoneLabel(mic)
       : microphoneControl
         ? microphone.stopPending && mic?.status !== 'stopping'
@@ -507,15 +505,6 @@ function Notebook() {
     finishing,
     view,
   ]);
-  // Set when a link opens Settings at the live transcription section.
-  const [focusLiveSetup, setFocusLiveSetup] = useState(false);
-  useEffect(() => {
-    if (view !== 'settings' || !focusLiveSetup) return;
-    const heading = document.getElementById('live-transcription');
-    heading?.scrollIntoView({ block: 'start' });
-    heading?.focus();
-    setFocusLiveSetup(false);
-  }, [view, focusLiveSetup]);
   const [tab, setTab] = useState<'notes' | 'transcript'>('notes');
   const [notes, setNotes] = useState('');
   const [userName, setUserName] = useState('');
@@ -668,7 +657,6 @@ function Notebook() {
   const [preview, setPreview] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
-  const [model, setModel] = useState<ModelStatus | null>(null);
   const [contextItems, setContextItems] = useState<ContextItem[]>([]);
   // The setup card: put away for this app session with Not now, or gone
   // once the required steps are done.
@@ -714,11 +702,7 @@ function Notebook() {
     if (!target) return;
     pendingFocus.current = null;
     const element = document.getElementById(
-      target === 'name'
-        ? 'user-name'
-        : target === 'appearance'
-          ? 'question-size'
-          : 'live-transcription',
+      target === 'name' ? 'user-name' : 'question-size',
     );
     element?.scrollIntoView({ block: 'center' });
     element?.focus();
@@ -775,9 +759,7 @@ function Notebook() {
       confirmedFocus.current = state.focus.join('\n');
     }
   }, [state]);
-  const modelState = model?.status;
   useEffect(() => {
-    // Only the latest model state may determine whether a live session is ready.
     let current = true;
     setLiveStatus(null);
     bridge
@@ -794,28 +776,6 @@ function Notebook() {
       });
     return () => {
       current = false;
-    };
-  }, [modelState]);
-  useEffect(() => {
-    let disposed = false;
-    let stop: (() => void) | undefined;
-    bridge
-      .watchModel((incoming) => {
-        if (!disposed)
-          setModel((previous) =>
-            !previous || incoming.revision >= previous.revision
-              ? incoming
-              : previous,
-          );
-      })
-      .then((unsubscribe) => {
-        if (disposed) unsubscribe();
-        else stop = unsubscribe;
-      })
-      .catch(() => {});
-    return () => {
-      disposed = true;
-      stop?.();
     };
   }, []);
   const returnToExport = useRef(false);
@@ -852,8 +812,6 @@ function Notebook() {
   // tests/fixtures/native-microphone.ts); the desktop engine never sends it,
   // so every `simulated` branch is unreachable in the app.
   const simulated = !!state.simulated && state.status === 'running';
-  const modelNeeded =
-    model?.status === 'missing' || model?.status === 'downloading';
   const holdCue = () => {
     if (!state.cue) return;
     void run(() => bridge.command('inspect_cue', { id: state.cue!.id }));
@@ -975,16 +933,12 @@ function Notebook() {
               !setupDismissed &&
               !live &&
               !simulated &&
-              !(
-                state.userName &&
-                (!model || !['missing', 'downloading'].includes(model.status))
-              ) && (
+              !state.userName && (
                 <details className="setup-disclosure">
                   <summary>Set up a live session</summary>
                   <SetupCard
                     name={state.userName}
                     focus={state.focus}
-                    model={model}
                     items={contextItems}
                     busy={busy}
                     onGoTo={goToSetup}
@@ -1215,7 +1169,7 @@ function Notebook() {
                   </h1>
                   <p>
                     {preparing
-                      ? 'Local speech model · capture status shown above'
+                      ? 'Starting · capture status shown above'
                       : finishing
                         ? capture.state?.source?.mayBeCapturing &&
                           microphoneNotCapturing(microphone.state)
@@ -1228,8 +1182,8 @@ function Notebook() {
                                 ? 'Application audio and transcript continue. Stop live session to stop listening.'
                                 : 'Microphone and transcript continue. Stop live session to stop listening.'
                               : sourceApp
-                                ? `Audio from ${sourceApp} · ${transcribedWhere(state.transcription)} · not saved${state.transcription ? ' by TalkQTE' : ''}`
-                                : `Your microphone · ${transcribedWhere(state.transcription)} · not saved${state.transcription ? ' by TalkQTE' : ''}`
+                                ? `Audio from ${sourceApp} · ${transcribedWhere(state.transcription)} · not saved by TalkQTE`
+                                : `Your microphone · ${transcribedWhere(state.transcription)} · not saved by TalkQTE`
                             : 'Nothing was saved. The transcript stays here until you start another session or quit and is never exported; your notes stay until you quit and can be exported.'
                           : simulated
                             ? 'Fictional replay · nothing is captured'
@@ -1242,11 +1196,9 @@ function Notebook() {
                                   : 'No live session. The microphone check above is on; it records and transcribes nothing.'
                                 : liveStatus?.available
                                   ? 'Nothing is being captured. Start a live session when your meeting begins.'
-                                  : modelNeeded
-                                    ? 'Nothing is being captured. A live session needs the speech model first.'
-                                    : liveStatus?.reason
-                                      ? `Nothing is being captured. Cues appear only during a live session. ${liveStatus.reason}`
-                                      : 'Nothing is being captured.'}
+                                  : liveStatus?.reason
+                                    ? `Nothing is being captured. Cues appear only during a live session. ${liveStatus.reason}`
+                                    : 'Nothing is being captured.'}
                   </p>
                   {transcriptionStopText(state.transcription) && (
                     <p role="alert">
@@ -1316,19 +1268,6 @@ function Notebook() {
                       >
                         <Play size={15} />
                         Start live session
-                      </button>
-                    )}
-                    {!liveStatus?.available && modelNeeded && (
-                      <button
-                        className="secondary-button"
-                        onClick={() => {
-                          setFocusLiveSetup(true);
-                          setView('settings');
-                        }}
-                      >
-                        {model?.status === 'downloading'
-                          ? 'View download progress'
-                          : 'Set up live session'}
                       </button>
                     )}
                   </>
@@ -1953,78 +1892,21 @@ function Notebook() {
                 </h2>
                 <p>
                   Start live session in the notebook to get questions from what
-                  your microphone hears. A speech model transcribes on this
-                  device. Audio is not recorded, and other apps’ audio is not
-                  captured. The transcript stays in memory until you start
-                  another session or close the app; it is never saved, exported,
-                  or sent.
+                  your microphone hears. TalkQTE does not transcribe on this
+                  device. A development build can send the session’s audio to
+                  Deepgram for transcription once you enable cue processing for
+                  that session; other builds have no live transcription. Audio
+                  is not recorded by TalkQTE. The transcript stays in memory
+                  until you start another session or close the app; it is never
+                  saved or exported.
                 </p>
                 <p className="small muted" role="status">
                   {!liveStatus
                     ? 'Checking…'
                     : liveStatus.available
-                      ? 'Ready on this device.'
+                      ? 'Ready. Nothing is sent until you enable cue processing for a session.'
                       : liveStatus.reason}
                 </p>
-                {model &&
-                  ['missing', 'downloading', 'installed'].includes(
-                    model.status,
-                  ) && (
-                    <div className="model-download">
-                      <h3>Speech model</h3>
-                      <p>
-                        {model.status === 'installed'
-                          ? `${model.name} is installed on this device (${megabytes(model.sizeBytes)}).`
-                          : `Download ${model.name} (${megabytes(model.sizeBytes)}) over HTTPS from the whisper.cpp repository on Hugging Face (MIT license). It needs about ${megabytes(model.neededBytes)} free. Hugging Face and its download network see your IP address and a file request from TalkQTE; no account, audio, transcript, or notes are sent. The file is checked against a pinned checksum before use.`}
-                      </p>
-                      {model.status === 'downloading' && (
-                        <progress
-                          aria-label="Model download"
-                          value={model.received}
-                          max={model.sizeBytes}
-                        />
-                      )}
-                      {model.message && (
-                        <p className="microphone-message" role="alert">
-                          {model.message}
-                        </p>
-                      )}
-                      {model.status === 'missing' && (
-                        <button
-                          className="secondary-button"
-                          disabled={busy}
-                          onClick={() =>
-                            void run(() => bridge.command('download_model'))
-                          }
-                        >
-                          Download speech model
-                        </button>
-                      )}
-                      {model.status === 'downloading' && (
-                        <button
-                          className="secondary-button"
-                          onClick={() =>
-                            void run(() =>
-                              bridge.command('cancel_model_download'),
-                            )
-                          }
-                        >
-                          Cancel download
-                        </button>
-                      )}
-                      {model.status === 'installed' && (
-                        <button
-                          className="secondary-button"
-                          disabled={busy || live}
-                          onClick={() =>
-                            void run(() => bridge.command('remove_model'))
-                          }
-                        >
-                          Remove model
-                        </button>
-                      )}
-                    </div>
-                  )}
               </div>
             </section>
             <section className="setting">
@@ -2032,10 +1914,12 @@ function Notebook() {
                 <h2>Your data in this prototype</h2>
                 <p>
                   The optional microphone check retains no audio and does not
-                  transcribe. A live session’s transcript is kept in memory only
-                  and cannot be exported. Notes exist in memory until you close
-                  the app. Exports contain exactly the text you review and are
-                  saved to the location you choose.
+                  transcribe. With cloud transcription or cue processing on,
+                  audio goes to Deepgram and recent lines to Anthropic for that
+                  session only. A live session’s transcript is kept in memory
+                  only and cannot be exported. Notes exist in memory until you
+                  close the app. Exports contain exactly the text you review and
+                  are saved to the location you choose.
                 </p>
               </div>
               <ShieldCheck size={24} />
@@ -2043,10 +1927,9 @@ function Notebook() {
             <section className="coming-next">
               <h2>What comes next</h2>
               <p>
-                A guided first-run setup that offers the speech model, both
-                sides of a call rather than the microphone alone, and a notebook
-                that remembers your sessions. Integrations with other
-                note-takers are planned for later.
+                A guided first-run setup, both sides of a call rather than the
+                microphone alone, and a notebook that remembers your sessions.
+                Integrations with other note-takers are planned for later.
               </p>
               <p className="small muted">
                 These features are not available in this prototype.

@@ -48,7 +48,9 @@ test('companion stays compact between cues and returns to its bar after Dismiss'
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 76 });
-  await expect(page.getByRole('status')).toHaveText('Mic on · Local');
+  await expect(page.getByRole('status')).toHaveText(
+    'Mic on · not transcribing yet',
+  );
   // The controls are icons: each has a name and a tooltip.
   for (const name of ['Stop live session', 'Hide companion']) {
     const control = page.getByRole('button', { name, exact: true });
@@ -75,7 +77,9 @@ test('companion stays compact between cues and returns to its bar after Dismiss'
     page.getByRole('region', { name: 'Suggested question' }),
   ).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Pause cues' })).toBeVisible();
-  await expect(page.getByRole('status')).toHaveText('Mic on · Local');
+  await expect(page.getByRole('status')).toHaveText(
+    'Mic on · not transcribing yet',
+  );
 });
 
 test('a question fits the narrow window used on a small display', async ({
@@ -182,7 +186,9 @@ test('a cue that passes untouched leaves the bar, with no countdown shown meanwh
   await page.evaluate(() => window.liveTest.setCue(null));
   await expect(question).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Pause cues' })).toBeVisible();
-  await expect(page.getByRole('status')).toHaveText('Mic on · Local');
+  await expect(page.getByRole('status')).toHaveText(
+    'Mic on · not transcribing yet',
+  );
 });
 
 const soon = 'We should have it ready soon, before the next visitors arrive.';
@@ -217,7 +223,9 @@ test('a quoted line is the cue itself, with nothing repeated under it', async ({
   // no control but Hold and Dismiss.
   await expect(question.locator('blockquote')).toHaveCount(0);
   await expect(question.getByRole('button')).toHaveCount(2);
-  await expect(page.getByRole('status')).toHaveText('Mic on · Local');
+  await expect(page.getByRole('status')).toHaveText(
+    'Mic on · not transcribing yet',
+  );
 });
 
 test('an answered question being read stays and shows the answer', async ({

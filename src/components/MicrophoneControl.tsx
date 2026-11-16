@@ -87,8 +87,8 @@ export function MicrophoneControl({
         {preparing ? (
           <p role="status">
             {cancelling
-              ? 'Start cancelled. Waiting for model preparation to finish before you can start again.'
-              : 'Preparing local transcription. Cancel start to prevent capture.'}
+              ? 'Start cancelled. Waiting for the start to finish before you can start again.'
+              : 'Starting the live session. Cancel start to prevent capture.'}
           </p>
         ) : (
           <p>
@@ -97,13 +97,11 @@ export function MicrophoneControl({
                 ? `Audio from ${sourceSession} is sent to ${transcription.provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. The microphone is not used. TalkQTE does not record audio.`
                 : `Your microphone is sent to ${transcription.provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. TalkQTE does not record audio.`
               : sourceSession
-                ? `Audio from ${sourceSession} is transcribed on this device; the microphone is not used. Audio is not recorded.`
-                : 'Your microphone is transcribed on this device. Audio is not recorded.'}
+                ? `Audio from ${sourceSession} is not transcribed. TalkQTE does not record audio.`
+                : 'Your microphone is not transcribed. TalkQTE does not record audio.'}
             {processingConfigured
               ? ' Cue processing has separate permissions below.'
-              : transcription
-                ? ' TalkQTE does not save the transcript.'
-                : ' The transcript is not saved or sent.'}{' '}
+              : ' TalkQTE does not save the transcript.'}{' '}
             {sourceSession
               ? 'Stop live session to end it.'
               : 'Stop live session to release the microphone.'}
