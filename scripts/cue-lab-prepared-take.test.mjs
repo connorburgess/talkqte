@@ -8,6 +8,7 @@ import {
   createPreparedTake,
   createLabPlaybackSession,
   createFixedModelTake,
+  assertFixedModelTakeOptions,
 } from './cue-lab-prepared-take.mjs';
 import {
   createLabPlayerFixture,
@@ -1038,4 +1039,27 @@ test('the fixed model take refuses any effort the native lab build does not acce
     assert.throws(() => fixture({ fixedModel: true, effort }), {
       category: 'protocol',
     });
+});
+
+test('the fixed model take option check is usable on its own and matches construction', () => {
+  const settings = {
+    provider: 'codex',
+    model: 'gpt-6.1-sol',
+    effort: 'low',
+    maxCalls: 20,
+  };
+  const options = { settings, stopAfterS: 110, media };
+  assert.doesNotThrow(() => assertFixedModelTakeOptions(options));
+  for (const changed of [
+    { settings: { ...settings, effort: 'high' } },
+    { settings: { ...settings, maxCalls: 19 } },
+    { stopAfterS: 120 },
+    { media: { ...media, durationMs: 102481 } },
+  ])
+    assert.throws(
+      () => assertFixedModelTakeOptions({ ...options, ...changed }),
+      {
+        category: 'protocol',
+      },
+    );
 });

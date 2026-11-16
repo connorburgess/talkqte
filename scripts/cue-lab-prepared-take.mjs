@@ -16,7 +16,11 @@ export function createPreparedTake(options) {
 
 // Fixed saved-meeting model recording. It shares the existing provider/broker
 // owner; this wrapper cannot create a second gate, retry or change the media.
-export function createFixedModelTake(options) {
+//
+// The option check is exported so a run package can verify, before approval
+// and without launching anything, that its plan matches what this code
+// accepts.
+export function assertFixedModelTakeOptions(options) {
   required(
     options?.body === undefined &&
       options?.settings?.provider === 'codex' &&
@@ -28,6 +32,9 @@ export function createFixedModelTake(options) {
       options.media?.sha256 === LAB_PLAYER_MEDIA_SHA256 &&
       options.media.durationMs === 102480,
   );
+}
+export function createFixedModelTake(options) {
+  assertFixedModelTakeOptions(options);
   return createPreparedTake({ ...options, fixedSource: true });
 }
 
