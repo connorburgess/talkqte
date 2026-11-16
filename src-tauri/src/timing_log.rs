@@ -162,6 +162,10 @@ pub enum Event {
         #[serde(skip_serializing_if = "Option::is_none")]
         code: Option<&'static str>,
         audio_ms: u64,
+        /// On `connected` only: the query string of the URL the connection
+        /// actually used. The token is never in it; it travels in a header.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
     },
     /// A cloud transcription final, on the session clock. The provider's
     /// speaker label is an untrusted guess, recorded here only: it is never

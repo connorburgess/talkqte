@@ -30,10 +30,15 @@ impl Settings {
     }
 
     fn apply(self, engine: &mut Engine) {
+        self.apply_with(engine, crate::transcription::cloud::selected());
+    }
+
+    fn apply_with(self, engine: &mut Engine, cloud_transcription: bool) {
         engine.set_model_call_limit(self.calls);
-        if self.consent && engine.is_lab_api() {
-            // Sending conversation text to the paid API needs the per-run
-            // review, so a launch setting that tries to approve it fails closed.
+        if self.consent && (engine.is_lab_api() || cloud_transcription) {
+            // Sending conversation text to the paid API, or the session's
+            // audio to a transcription service, needs the review shown in the
+            // app, so a launch setting that tries to approve it fails closed.
             engine.invalid_dev_model_settings();
             return;
         }
@@ -134,6 +139,39 @@ mod tests {
         assert!(engine.has_processing_permission());
         let snapshot = engine.processing_snapshot(crate::engine::CaptureState::Running, 0);
         assert!(!snapshot.approval_by_setting);
+    }
+
+    #[test]
+    fn with_cloud_transcription_a_launch_setting_approves_nothing_and_never_opens_audio() {
+        // A subscription backend, launch consent on, cloud transcription
+        // selected: the setting fails closed instead of approving.
+        let mut e = engine();
+        Settings::parse(Some("on"), None)
+            .unwrap()
+            .apply_with(&mut e, true);
+        assert!(!e.has_processing_permission());
+        assert_eq!(e.audio_approval(), None);
+        assert_eq!(
+            serde_json::to_value(e.processing_issue()).unwrap(),
+            "devSettings"
+        );
+        // Even a grant a launch setting did make never opens the audio gate.
+        let mut e = engine();
+        Settings::parse(Some("on"), None)
+            .unwrap()
+            .apply_with(&mut e, false);
+        assert!(e.has_processing_permission());
+        assert_eq!(e.audio_approval(), None);
+        assert_eq!(e.audio_withdrawal(), Some("withdrawn"));
+        // Only the review shown in the app does, at the session time it was made.
+        let mut e = engine();
+        e.advance(4_000);
+        let review = e
+            .review_processing(ConversationScope::RecentAndNewSpeech, &[])
+            .unwrap();
+        e.approve_processing(review).unwrap();
+        assert_eq!(e.audio_approval(), Some(4_000));
+        assert_eq!(e.audio_withdrawal(), None);
     }
 
     #[test]

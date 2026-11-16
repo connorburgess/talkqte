@@ -44,7 +44,11 @@ import {
 } from './components/PanelDivider';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
 import { useCaptureControl } from './lib/useCaptureControl';
-import { transcribedWhere, transcriptionStopText } from './lib/transcription';
+import {
+  transcribedWhere,
+  transcriptionDropText,
+  transcriptionStopText,
+} from './lib/transcription';
 import {
   microphoneNotCapturing,
   sourceOnlyApplication,
@@ -1205,6 +1209,11 @@ function Notebook() {
                       {transcriptionStopText(state.transcription)}
                     </p>
                   )}
+                  {transcriptionDropText(state.transcription) && (
+                    <p role="status">
+                      {transcriptionDropText(state.transcription)}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="session-actions">
@@ -1904,7 +1913,7 @@ function Notebook() {
                   {!liveStatus
                     ? 'Checking…'
                     : liveStatus.available
-                      ? 'Ready. Nothing is sent until you enable cue processing for a session.'
+                      ? `Ready. Audio goes to ${liveStatus.transcription ?? 'the transcription service'} only after you enable cue processing for a session.`
                       : liveStatus.reason}
                 </p>
               </div>
@@ -1915,11 +1924,12 @@ function Notebook() {
                 <p>
                   The optional microphone check retains no audio and does not
                   transcribe. With cloud transcription or cue processing on,
-                  audio goes to Deepgram and recent lines to Anthropic for that
-                  session only. A live session’s transcript is kept in memory
-                  only and cannot be exported. Notes exist in memory until you
-                  close the app. Exports contain exactly the text you review and
-                  are saved to the location you choose.
+                  audio goes to the named transcription service and recent lines
+                  to the cue provider, for that session only. A live session’s
+                  transcript is kept in memory only and cannot be exported.
+                  Notes exist in memory until you close the app. Exports contain
+                  exactly the text you review and are saved to the location you
+                  choose.
                 </p>
               </div>
               <ShieldCheck size={24} />

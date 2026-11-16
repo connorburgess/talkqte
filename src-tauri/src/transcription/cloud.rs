@@ -39,6 +39,9 @@ pub enum SttFailure {
     Settings,
     /// The session's review was turned off after audio began to be sent.
     Withdrawn,
+    /// The lab's cue run ended (for example on Pause), which ends the
+    /// session's approval in the lab.
+    LabEnded,
 }
 
 impl SttFailure {
@@ -53,6 +56,7 @@ impl SttFailure {
             Self::Closed => "closed",
             Self::Settings => "settings",
             Self::Withdrawn => "withdrawn",
+            Self::LabEnded => "lab_ended",
         }
     }
 }
@@ -69,6 +73,11 @@ pub enum SttEvent {
         end_ms: u64,
         /// The provider's guess at who spoke. Untrusted: logged only.
         untrusted_speaker: Option<u32>,
+    },
+    /// The connection is open. `query` is the query string of the URL it
+    /// used, without the token.
+    Connected {
+        query: String,
     },
     Failed(SttFailure),
 }
@@ -151,7 +160,10 @@ type Sink = Box<dyn FnMut(u64, Segment) -> Result<(), String> + Send>;
 pub struct CloudFeed {
     session: u64,
     stream_index: u64,
-    approved: Box<dyn FnMut() -> bool + Send>,
+    approved: Box<dyn FnMut() -> Option<u64> + Send>,
+    /// The session time of the approval the stream opened under. Audio
+    /// captured before it is never sent.
+    approved_at: u64,
     opener: Option<Opener>,
     stream: Option<Box<dyn StreamingTranscriber>>,
     clock: StreamClock,
@@ -159,7 +171,8 @@ pub struct CloudFeed {
     last_at: u64,
     failure: Option<SttFailure>,
     on_failure: Option<Box<dyn FnMut(SttFailure) + Send>>,
-    keep: Option<Box<dyn FnMut() -> bool + Send>>,
+    on_dropped: Option<Box<dyn FnMut() + Send>>,
+    keep: Option<Box<dyn FnMut() -> Option<SttFailure> + Send>>,
     pub stats: CloudStats,
 }
 
@@ -168,13 +181,14 @@ impl CloudFeed {
         session: u64,
         stream_index: u64,
         opener: Opener,
-        approved: impl FnMut() -> bool + Send + 'static,
+        approved: impl FnMut() -> Option<u64> + Send + 'static,
         sink: impl FnMut(u64, Segment) -> Result<(), String> + Send + 'static,
     ) -> Self {
         Self {
             session,
             stream_index,
             approved: Box::new(approved),
+            approved_at: 0,
             opener: Some(opener),
             stream: None,
             clock: StreamClock::default(),
@@ -182,6 +196,7 @@ impl CloudFeed {
             last_at: 0,
             failure: None,
             on_failure: None,
+            on_dropped: None,
             keep: None,
             stats: CloudStats::default(),
         }
@@ -194,10 +209,20 @@ impl CloudFeed {
         self
     }
 
-    /// Once the stream is open, it keeps sending while `keep` holds, instead
-    /// of while the opening approval holds: a Stop in progress closes the
-    /// review but still sends the last queued audio.
-    pub fn keep_sending_while(mut self, keep: impl FnMut() -> bool + Send + 'static) -> Self {
+    /// Called once, from the feeding thread, the first time audio is
+    /// dropped because the send queue is full, so the session can say so.
+    pub fn on_dropped(mut self, notify: impl FnMut() + Send + 'static) -> Self {
+        self.on_dropped = Some(Box::new(notify));
+        self
+    }
+
+    /// Once the stream is open, it keeps sending until `stop` names a
+    /// reason, instead of while the opening approval holds: a Stop in
+    /// progress closes the review but still sends the last captured audio.
+    pub fn stop_sending_when(
+        mut self,
+        keep: impl FnMut() -> Option<SttFailure> + Send + 'static,
+    ) -> Self {
         self.keep = Some(Box::new(keep));
         self
     }
@@ -208,19 +233,22 @@ impl CloudFeed {
     }
 
     /// Audio captured from `start_ms` to `end_ms` on the session clock.
+    /// Nothing captured before the approval is sent, whenever it arrives.
     pub fn push(&mut self, start_ms: u64, end_ms: u64, samples: &[f32]) -> Result<(), SttFailure> {
         if let Some(failure) = self.failure {
             return Err(failure);
         }
         // Turning the review off stops sending at once; the stream is not
         // reopened for this session.
-        if self.stream.is_some() && !self.keeps_sending() {
-            return Err(self.fail(SttFailure::Withdrawn));
+        if self.stream.is_some() {
+            if let Some(reason) = self.stop_reason() {
+                return Err(self.fail(reason));
+            }
         }
         if self.stream.is_none() {
-            if !(self.approved)() {
+            let Some(approved_at) = (self.approved)() else {
                 return Ok(());
-            }
+            };
             let Some(opener) = self.opener.take() else {
                 return Err(self.fail(SttFailure::Closed));
             };
@@ -231,11 +259,26 @@ impl CloudFeed {
                         state: "started",
                         code: None,
                         audio_ms: 0,
+                        query: None,
                     });
+                    self.approved_at = approved_at;
                     self.stream = Some(stream);
                 }
                 Err(failure) => return Err(self.fail(failure)),
             }
+        }
+        // Audio captured before the approval: drop it, or its leading part.
+        let (start_ms, samples) = if end_ms <= self.approved_at {
+            return self.poll();
+        } else if start_ms < self.approved_at {
+            let skip =
+                ((self.approved_at - start_ms) as usize * SAMPLE_RATE / 1_000).min(samples.len());
+            (self.approved_at, &samples[skip..])
+        } else {
+            (start_ms, samples)
+        };
+        if samples.is_empty() {
+            return self.poll();
         }
         let stream = self.stream.as_mut().expect("stream opened");
         match stream.push(samples) {
@@ -243,7 +286,21 @@ impl CloudFeed {
                 self.clock.record(start_ms, end_ms, samples.len() as u64);
                 self.stats.sent_ms += samples.len() as u64 * 1_000 / SAMPLE_RATE as u64;
             }
-            Err(Full) => self.stats.dropped_samples += samples.len() as u64,
+            Err(Full) => {
+                if self.stats.dropped_samples == 0 {
+                    crate::timing_log::record(crate::timing_log::Event::SttState {
+                        session: self.session,
+                        state: "dropping",
+                        code: None,
+                        audio_ms: self.stats.sent_ms,
+                        query: None,
+                    });
+                    if let Some(notify) = self.on_dropped.as_mut() {
+                        notify();
+                    }
+                }
+                self.stats.dropped_samples += samples.len() as u64;
+            }
         }
         self.poll()
     }
@@ -285,6 +342,15 @@ impl CloudFeed {
         for event in events {
             match event {
                 SttEvent::Partial => {}
+                SttEvent::Connected { query } => {
+                    crate::timing_log::record(crate::timing_log::Event::SttState {
+                        session: self.session,
+                        state: "connected",
+                        code: None,
+                        audio_ms: self.stats.sent_ms,
+                        query: Some(query),
+                    });
+                }
                 SttEvent::Final {
                     seq,
                     text,
@@ -329,10 +395,10 @@ impl CloudFeed {
         Ok(())
     }
 
-    fn keeps_sending(&mut self) -> bool {
+    fn stop_reason(&mut self) -> Option<SttFailure> {
         match self.keep.as_mut() {
             Some(keep) => keep(),
-            None => (self.approved)(),
+            None => (self.approved)().is_none().then_some(SttFailure::Withdrawn),
         }
     }
 
@@ -346,6 +412,7 @@ impl CloudFeed {
             state: "stopped",
             code: Some(failure.code()),
             audio_ms: self.stats.sent_ms,
+            query: None,
         });
         if let Some(mut notify) = self.on_failure.take() {
             notify(failure);
@@ -359,6 +426,7 @@ impl CloudFeed {
             state,
             code: None,
             audio_ms: self.stats.sent_ms,
+            query: None,
         });
     }
 }
@@ -424,6 +492,61 @@ pub fn settings() -> Result<Settings, SttFailure> {
         .clone()
 }
 
+/// The stream failure for an engine's reason to stop sending audio.
+pub fn withdrawal(reason: Option<&'static str>) -> Option<SttFailure> {
+    reason.map(|reason| match reason {
+        "lab_ended" => SttFailure::LabEnded,
+        _ => SttFailure::Withdrawn,
+    })
+}
+
+/// The audio a launch may still send, shared by every stream of the launch,
+/// microphone and application audio alike, across sessions.
+#[derive(Clone, Debug)]
+pub struct Budget(std::sync::Arc<std::sync::atomic::AtomicU64>);
+
+impl Budget {
+    pub fn new(cap: Duration) -> Self {
+        Self(std::sync::Arc::new(std::sync::atomic::AtomicU64::new(
+            cap.as_secs() * SAMPLE_RATE as u64,
+        )))
+    }
+
+    /// Takes up to `want` samples from what is left; returns how many.
+    pub fn reserve(&self, want: u64) -> u64 {
+        use std::sync::atomic::Ordering;
+        let mut granted = 0;
+        let _ = self
+            .0
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |left| {
+                granted = left.min(want);
+                Some(left - granted)
+            });
+        granted
+    }
+}
+
+impl From<Duration> for Budget {
+    fn from(cap: Duration) -> Self {
+        Self::new(cap)
+    }
+}
+
+/// This launch's budget, made once from its minute cap.
+pub fn launch_budget(settings: &Settings) -> Budget {
+    static BUDGET: std::sync::OnceLock<Budget> = std::sync::OnceLock::new();
+    BUDGET.get_or_init(|| Budget::new(settings.cap())).clone()
+}
+
+/// Whether this launch can transcribe: its settings parse and the token
+/// file passes the owner-only checks. The token itself is not read until a
+/// stream opens, so a bad setup is reported before anyone is asked to
+/// approve anything.
+pub fn ready() -> Result<(), SttFailure> {
+    let settings = settings()?;
+    check_token_file(&settings.token_file)
+}
+
 /// The opener for this launch's selected cloud provider. It reads the token
 /// file only when the stream opens, after the review is approved. Refused
 /// when the settings are invalid or this build has no cloud transcription;
@@ -446,37 +569,30 @@ pub fn opener() -> Result<Opener, SttFailure> {
 pub fn review_sentence() -> Option<String> {
     let settings = settings().ok()?;
     Some(format!(
-        "Also sends the audio of the selected capture source, live, to Deepgram (US, model Nova-3) for transcription, with Deepgram's per-request opt-out (no retention after each response, no model training), at most {} minutes this run. Transcription starts only after this approval; if it stops, nothing is transcribed and no on-device fallback is used.",
+        "Audio: this approval also sends the live audio of the session's capture source (the microphone, or the selected application) to Deepgram (US, model Nova-3) for transcription. Each request asks Deepgram to opt out of its Model Improvement Program; what Deepgram keeps is set by its terms (https://deepgram.com/terms). Audio captured before this approval is never sent. At most {} minutes of audio for this whole launch, across sessions and sources. If transcription stops, nothing is transcribed and nothing falls back to another service.",
         settings.minute_cap
     ))
+}
+
+/// The audio destination the session review names beside the cue
+/// destination, when cloud transcription is selected.
+pub fn audio_destination() -> Option<String> {
+    settings()
+        .ok()
+        .map(|_| "Deepgram (US), for transcription of the session's audio".to_string())
+}
+
+/// Checks the token file without reading the token.
+pub fn check_token_file(path: &std::path::Path) -> Result<(), SttFailure> {
+    open_token_file(path).map(drop)
 }
 
 /// Reads a short-lived token from an owner-only file: a 0600 regular file,
 /// not a symlink, at most 4 KiB, owned by this user, in a 0700 directory
 /// owned by this user. The token is never logged.
-#[cfg(unix)]
 pub fn read_token(path: &std::path::Path) -> Result<String, SttFailure> {
-    use std::{
-        fs::{self, OpenOptions},
-        io::Read,
-        os::unix::fs::{MetadataExt, OpenOptionsExt},
-    };
-    let parent = path.parent().ok_or(SttFailure::Settings)?;
-    let dir = fs::symlink_metadata(parent).map_err(|_| SttFailure::Settings)?;
-    // SAFETY: geteuid has no arguments or side effects.
-    let uid = unsafe { libc::geteuid() };
-    if !dir.is_dir() || dir.uid() != uid || dir.mode() & 0o777 != 0o700 {
-        return Err(SttFailure::Settings);
-    }
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)
-        .map_err(|_| SttFailure::Settings)?;
-    let meta = file.metadata().map_err(|_| SttFailure::Settings)?;
-    if !meta.is_file() || meta.uid() != uid || meta.mode() & 0o777 != 0o600 || meta.len() > 4096 {
-        return Err(SttFailure::Settings);
-    }
+    use std::io::Read;
+    let mut file = open_token_file(path)?;
     let mut text = String::new();
     file.by_ref()
         .take(4097)
@@ -492,6 +608,38 @@ pub fn read_token(path: &std::path::Path) -> Result<String, SttFailure> {
         return Err(SttFailure::Settings);
     }
     Ok(token.to_string())
+}
+
+/// Opens the token file after the owner-only checks on it and its folder.
+/// Other platforms have no such checks and are refused.
+#[cfg(not(unix))]
+fn open_token_file(_: &std::path::Path) -> Result<std::fs::File, SttFailure> {
+    Err(SttFailure::Settings)
+}
+
+#[cfg(unix)]
+fn open_token_file(path: &std::path::Path) -> Result<std::fs::File, SttFailure> {
+    use std::{
+        fs::{self, OpenOptions},
+        os::unix::fs::{MetadataExt, OpenOptionsExt},
+    };
+    let parent = path.parent().ok_or(SttFailure::Settings)?;
+    let dir = fs::symlink_metadata(parent).map_err(|_| SttFailure::Settings)?;
+    // SAFETY: geteuid has no arguments or side effects.
+    let uid = unsafe { libc::geteuid() };
+    if !dir.is_dir() || dir.uid() != uid || dir.mode() & 0o777 != 0o700 {
+        return Err(SttFailure::Settings);
+    }
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .map_err(|_| SttFailure::Settings)?;
+    let meta = file.metadata().map_err(|_| SttFailure::Settings)?;
+    if !meta.is_file() || meta.uid() != uid || meta.mode() & 0o777 != 0o600 || meta.len() > 4096 {
+        return Err(SttFailure::Settings);
+    }
+    Ok(file)
 }
 
 #[cfg(test)]
@@ -543,7 +691,7 @@ mod tests {
             7,
             1,
             Box::new(move || Ok(Box::new(stream) as Box<dyn StreamingTranscriber>)),
-            move || *approved.lock().unwrap(),
+            move || approved.lock().unwrap().then_some(0),
             move |_, segment| {
                 tx.send(segment).unwrap();
                 Ok(())
@@ -639,7 +787,7 @@ mod tests {
         let flag = stopping.clone();
         let mut opened = feed(&script, approved.clone())
             .0
-            .keep_sending_while(move || *flag.lock().unwrap());
+            .stop_sending_when(move || (!*flag.lock().unwrap()).then_some(SttFailure::Withdrawn));
         opened.push(0, 100, &[0.1; 1_600]).unwrap();
         // Stop closes the review; the queued tail is still sent.
         *approved.lock().unwrap() = false;
@@ -651,9 +799,68 @@ mod tests {
         let unopened = Script::default();
         let mut never = feed(&unopened, Arc::new(Mutex::new(false)))
             .0
-            .keep_sending_while(|| true);
+            .stop_sending_when(|| None);
         never.push(0, 100, &[0.1; 1_600]).unwrap();
         assert!(unopened.sent.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn audio_captured_before_the_approval_is_never_sent_however_late_it_arrives() {
+        let script = Script::default();
+        let (tx, _rx) = mpsc::channel();
+        let stream = script.clone();
+        // Approved at 1,150 ms on the session clock.
+        let mut feed = CloudFeed::new(
+            7,
+            1,
+            Box::new(move || Ok(Box::new(stream) as Box<dyn StreamingTranscriber>)),
+            || Some(1_150),
+            move |_, segment| {
+                tx.send(segment).unwrap();
+                Ok(())
+            },
+        );
+        // Captured wholly before the approval but pushed after it: dropped.
+        feed.push(1_000, 1_100, &[0.1; 1_600]).unwrap();
+        assert!(script.sent.lock().unwrap().is_empty());
+        // Straddling it: only the part from 1,150 ms on is sent.
+        feed.push(1_100, 1_200, &[0.1; 1_600]).unwrap();
+        feed.push(1_200, 1_300, &[0.1; 1_600]).unwrap();
+        assert_eq!(*script.sent.lock().unwrap(), vec![800, 1_600]);
+        assert_eq!(feed.clock.session_ms(0), Some(1_150));
+    }
+
+    #[test]
+    fn a_full_queue_is_reported_once() {
+        let script = Script {
+            full: true,
+            ..Script::default()
+        };
+        let told = Arc::new(Mutex::new(0));
+        let count = told.clone();
+        let mut feed = feed(&script, Arc::new(Mutex::new(true)))
+            .0
+            .on_dropped(move || *count.lock().unwrap() += 1);
+        feed.push(0, 100, &[0.1; 1_600]).unwrap();
+        feed.push(100, 200, &[0.1; 1_600]).unwrap();
+        assert_eq!(*told.lock().unwrap(), 1);
+        assert_eq!(feed.stats.dropped_samples, 3_200);
+    }
+
+    #[test]
+    fn one_budget_is_shared_by_every_stream_of_the_launch() {
+        let budget = Budget::new(Duration::from_secs(1));
+        let other = budget.clone();
+        assert_eq!(budget.reserve(10_000), 10_000);
+        assert_eq!(other.reserve(10_000), 6_000, "only what is left");
+        assert_eq!(budget.reserve(1), 0);
+    }
+
+    #[test]
+    fn a_lab_run_ending_is_its_own_stop_reason() {
+        assert_eq!(withdrawal(None), None);
+        assert_eq!(withdrawal(Some("lab_ended")), Some(SttFailure::LabEnded));
+        assert_eq!(withdrawal(Some("withdrawn")), Some(SttFailure::Withdrawn));
     }
 
     #[test]
@@ -675,7 +882,7 @@ mod tests {
             7,
             1,
             Box::new(|| Err(SttFailure::Auth)),
-            || true,
+            || Some(0),
             move |_, s| {
                 tx.send(s).unwrap();
                 Ok(())

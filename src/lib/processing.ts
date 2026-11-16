@@ -28,6 +28,9 @@ export interface ProcessorSummary {
   dataPolicy: string;
   /** False when the review must not offer prior notes for this processor. */
   acceptsNotes?: boolean;
+  /** Where the session's audio goes for transcription once the review is
+   * approved, when a cloud transcription service is selected. */
+  audioDestination?: string;
 }
 export type ProcessingIssue =
   | 'scopeChanged'

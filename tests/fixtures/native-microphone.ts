@@ -81,6 +81,7 @@ if (new URLSearchParams(location.search).has('processor'))
     ...processing,
     ...permissionFixture.configuration(
       new URLSearchParams(location.search).has('hosted'),
+      new URLSearchParams(location.search).has('audio'),
     ),
   };
 async function completeCaptureStop() {
@@ -148,7 +149,10 @@ let releaseQuestionResponse: (() => void) | undefined;
 const calls: string[] = [];
 const delayed = new URLSearchParams(location.search).has('delay-microphone');
 // With ?live, the build and launch report live transcription as available.
-const liveAvailable = new URLSearchParams(location.search).has('live');
+// (?cloud is the same: every live transcription is cloud transcription.)
+const liveAvailable = ['live', 'cloud'].some((key) =>
+  new URLSearchParams(location.search).has(key),
+);
 Object.defineProperty(window, 'isTauri', { value: true, configurable: true });
 
 async function send(value: Partial<MicrophoneSnapshot>) {
@@ -398,7 +402,7 @@ mockIPC(
         return;
       case 'live_status': {
         const value: LiveStatus = liveAvailable
-          ? { available: true, reason: null }
+          ? { available: true, reason: null, transcription: 'Deepgram' }
           : {
               available: false,
               reason: 'This build has no live transcription.',

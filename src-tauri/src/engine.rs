@@ -484,6 +484,9 @@ pub struct CloudTranscription {
     /// after audio began to be sent. Nothing falls back to another path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stopped: Option<String>,
+    /// Some audio was not sent because the connection fell behind.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub dropped_audio: bool,
 }
 
 // The floating window never receives the notebook or full transcript.
@@ -717,6 +720,7 @@ impl Engine {
             .then(|| CloudTranscription {
                 provider: crate::transcription::cloud::PROVIDER.into(),
                 stopped: None,
+                dropped_audio: false,
             });
         self.state.status = Status::Running;
         self.changed();
@@ -856,6 +860,23 @@ impl Engine {
     /// an earlier session is rejected instead of reviving it.
     pub fn session(&self) -> u64 {
         self.generation
+    }
+
+    /// Records that `session`'s cloud stream dropped audio it had no room
+    /// to send, so the notebook can say so.
+    pub fn cloud_transcription_dropped(&mut self, session: u64) {
+        if session != self.generation {
+            return;
+        }
+        if let Some(transcription) = self
+            .state
+            .transcription
+            .as_mut()
+            .filter(|transcription| !transcription.dropped_audio)
+        {
+            transcription.dropped_audio = true;
+            self.changed();
+        }
     }
 
     /// Records why `session`'s cloud transcription ended. The first code
@@ -2724,6 +2745,7 @@ mod tests {
         engine.state.transcription = Some(CloudTranscription {
             provider: "Deepgram".into(),
             stopped: None,
+            dropped_audio: false,
         });
         let session = engine.session();
         engine.cloud_transcription_stopped(session + 1, "network");

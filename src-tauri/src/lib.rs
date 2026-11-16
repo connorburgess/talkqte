@@ -559,6 +559,10 @@ async fn export_markdown(
 struct LiveStatus {
     available: bool,
     reason: Option<&'static str>,
+    /// The cloud service this launch transcribes with, when one is
+    /// selected; absent when speech is transcribed on this device.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transcription: Option<&'static str>,
 }
 
 /// Why a live session cannot start, if it cannot. Transcription is only
@@ -569,7 +573,8 @@ pub(crate) fn live_unavailable() -> Option<&'static str> {
         Some("This build has no live transcription.")
     } else if !transcription::cloud::selected() {
         Some("Live transcription needs cloud transcription selected for this development launch.")
-    } else if transcription::cloud::settings().is_err() {
+    } else if transcription::cloud::ready().is_err() {
+        // The token file is checked too, without reading the token.
         Some("The cloud transcription settings are not usable.")
     } else {
         None
@@ -582,6 +587,7 @@ fn live_status() -> LiveStatus {
     LiveStatus {
         available: reason.is_none(),
         reason,
+        transcription: transcription::cloud::selected().then_some(transcription::cloud::PROVIDER),
     }
 }
 
@@ -1218,6 +1224,7 @@ async fn start_live_session(
             let approval_app = handle.clone();
             let failure_app = handle.clone();
             let keep_app = handle.clone();
+            let dropped_app = handle.clone();
             let sink_app = handle.clone();
             let sink = move |session, segment| {
                 let state = sink_app.state::<AppState>();
@@ -1264,15 +1271,27 @@ async fn start_live_session(
                                     .state::<AppState>()
                                     .0
                                     .lock()
-                                    .is_ok_and(|runtime| runtime.engine.has_processing_permission())
+                                    .ok()
+                                    .and_then(|runtime| runtime.engine.audio_approval())
                             },
                             sink,
                         )
-                        .keep_sending_while(move || {
-                            keep_app.state::<AppState>().0.lock().is_ok_and(|runtime| {
-                                runtime.engine.has_processing_permission()
-                                    || runtime.engine.is_live_stopping()
-                            })
+                        .stop_sending_when(move || {
+                            keep_app.state::<AppState>().0.lock().map_or(
+                                Some(transcription::cloud::SttFailure::Withdrawn),
+                                |runtime| {
+                                    transcription::cloud::withdrawal(
+                                        runtime.engine.audio_withdrawal(),
+                                    )
+                                },
+                            )
+                        })
+                        .on_dropped(move || {
+                            let state = dropped_app.state::<AppState>();
+                            if let Ok(mut runtime) = state.0.lock() {
+                                runtime.engine.cloud_transcription_dropped(session);
+                                publish(&dropped_app, &mut runtime);
+                            };
                         })
                         .on_failure(move |failure| {
                             stop_after_cloud_failure(&failure_app, session, failure)
