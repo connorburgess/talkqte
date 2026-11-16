@@ -49,7 +49,7 @@ export interface Cue {
 export interface CueSnapshot {
   revision: number;
   status: Status;
-  /** A live session fed by local transcription. */
+  /** A live session fed by transcription. */
   live: boolean;
   /** Browser preview and test stand-in only: a replay of a fictional
    * conversation that captures nothing. The desktop app never sends it. */
@@ -71,6 +71,9 @@ export interface CueSnapshot {
   /** Development builds only: the running session is fed by a selected
    * application alone, with no microphone. */
   sourceSession?: boolean;
+  /** Development builds that selected cloud transcription only. Absent when
+   * speech is transcribed on this device. */
+  transcription?: import('./transcription').CloudTranscription;
 }
 export interface Snapshot extends CueSnapshot {
   title: string;

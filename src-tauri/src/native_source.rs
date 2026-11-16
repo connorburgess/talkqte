@@ -379,6 +379,8 @@ fn start_worker<A: Access, T: Transcriber>(
 /// discarded. Its finals reach the engine through the same source sink.
 fn cloud_feed<A: Access>(runtime: A, session: u64, control: &Control, opener: Opener) -> CloudFeed {
     let approval = runtime.clone();
+    let notice = runtime.clone();
+    let keep = runtime.clone();
     CloudFeed::new(
         session,
         1,
@@ -386,6 +388,20 @@ fn cloud_feed<A: Access>(runtime: A, session: u64, control: &Control, opener: Op
         move || approval.with(|runtime| runtime.engine.has_processing_permission()) == Some(true),
         source_sink(runtime, control),
     )
+    .keep_sending_while(move || {
+        keep.with(|runtime| {
+            runtime.engine.has_processing_permission() || runtime.engine.is_live_stopping()
+        }) == Some(true)
+    })
+    // The pump then cancels the source, which ends the session; the session
+    // keeps the reason for the notebook to show.
+    .on_failure(move |failure| {
+        notice.with(|runtime| {
+            runtime
+                .engine
+                .cloud_transcription_stopped(session, failure.code())
+        });
+    })
 }
 
 /// Delivers a line only while this source is attached to the session; a

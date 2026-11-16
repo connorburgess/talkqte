@@ -467,6 +467,23 @@ pub struct Snapshot {
     /// the end. Never saved; the companion sees a line only inside that
     /// Still open list.
     pub focus: Vec<String>,
+    /// Development builds that selected cloud transcription only: the
+    /// provider this live session's audio goes to after its review is
+    /// approved, and the fixed code that ended it, if it ended. Absent when
+    /// the session's speech is transcribed on this device.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcription: Option<CloudTranscription>,
+}
+
+/// Where a live session's audio is transcribed, when that is not this device.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudTranscription {
+    pub provider: String,
+    /// A fixed failure code, `withdrawn` when the review was turned off
+    /// after audio began to be sent. Nothing falls back to another path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stopped: Option<String>,
 }
 
 // The floating window never receives the notebook or full transcript.
@@ -499,6 +516,8 @@ pub struct CueSnapshot {
     pub model_provider: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub model_lab: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcription: Option<CloudTranscription>,
 }
 
 /// The companion's indicator for a model connection.
@@ -608,6 +627,7 @@ impl Engine {
                 cues_paused: false,
                 user_name: None,
                 focus: vec![],
+                transcription: None,
             },
             script,
             generation: 0,
@@ -661,6 +681,7 @@ impl Engine {
             model_issue: self.processing_issue(),
             model_provider: self.model_provider(),
             model_lab: self.is_lab_evaluator(),
+            transcription: self.state.transcription.clone(),
         }
     }
 
@@ -692,6 +713,11 @@ impl Engine {
         self.state.elapsed_ms = 0;
         self.state.transcript.clear();
         self.state.cue = None;
+        self.state.transcription = (self.state.live && crate::transcription::cloud::selected())
+            .then(|| CloudTranscription {
+                provider: crate::transcription::cloud::PROVIDER.into(),
+                stopped: None,
+            });
         self.state.status = Status::Running;
         self.changed();
         Ok(())
@@ -830,6 +856,23 @@ impl Engine {
     /// an earlier session is rejected instead of reviving it.
     pub fn session(&self) -> u64 {
         self.generation
+    }
+
+    /// Records why `session`'s cloud transcription ended. The first code
+    /// stays; a later session is not affected.
+    pub fn cloud_transcription_stopped(&mut self, session: u64, code: &str) {
+        if session != self.generation {
+            return;
+        }
+        if let Some(transcription) = self
+            .state
+            .transcription
+            .as_mut()
+            .filter(|transcription| transcription.stopped.is_none())
+        {
+            transcription.stopped = Some(code.into());
+            self.changed();
+        }
     }
 
     /// Accepts one transcript segment from a live source for the running
@@ -2671,6 +2714,28 @@ fn resolves_with(kind: &str, text: &str, tasks: &[&str]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cloud_transcription_stop_is_kept_once_for_its_own_session_only() {
+        let mut engine = Engine::live();
+        engine.start().unwrap();
+        // Test builds never select cloud transcription from the environment.
+        assert_eq!(engine.state.transcription, None);
+        engine.state.transcription = Some(CloudTranscription {
+            provider: "Deepgram".into(),
+            stopped: None,
+        });
+        let session = engine.session();
+        engine.cloud_transcription_stopped(session + 1, "network");
+        assert_eq!(engine.state.transcription.as_ref().unwrap().stopped, None);
+        let revision = engine.state.revision;
+        engine.cloud_transcription_stopped(session, "withdrawn");
+        engine.cloud_transcription_stopped(session, "network");
+        let shown = serde_json::to_value(engine.cue_snapshot()).unwrap();
+        assert_eq!(shown["transcription"]["provider"], "Deepgram");
+        assert_eq!(shown["transcription"]["stopped"], "withdrawn");
+        assert_eq!(engine.state.revision, revision + 1);
+    }
 
     fn with_cue() -> Engine {
         let mut engine = Engine::fictional();

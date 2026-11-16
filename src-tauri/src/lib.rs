@@ -1352,6 +1352,41 @@ fn finish_live(app: &tauri::AppHandle, live: Live, flush: bool) {
     let _ = finished;
 }
 
+/// A microphone session's cloud stream ended with a failure: the session
+/// records why and stops, as if Stop were chosen, without flushing to any
+/// other recognizer. Runs off the feeding thread, which the stop joins.
+#[cfg(feature = "local-whisper")]
+fn stop_after_cloud_failure(
+    app: &tauri::AppHandle,
+    session: u64,
+    failure: transcription::cloud::SttFailure,
+) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let live = app
+            .state::<AppState>()
+            .0
+            .lock()
+            .ok()
+            .and_then(|mut runtime| {
+                runtime
+                    .engine
+                    .cloud_transcription_stopped(session, failure.code());
+                let live = runtime
+                    .live
+                    .as_ref()
+                    .is_some_and(|live| live.session == session)
+                    .then(|| runtime.take_live_for_stop())
+                    .flatten();
+                publish(&app, &mut runtime);
+                live
+            });
+        if let Some(live) = live {
+            finish_live(&app, live, false);
+        }
+    });
+}
+
 /// Starts a live session: the microphone feeds transcription, and the cue
 /// engine runs on what is said. Nothing is recorded or stored. With cloud
 /// transcription selected, audio is sent to that provider only after the
@@ -1446,6 +1481,8 @@ async fn start_live_session(
                 chunker.cut_at_pauses(LIVE_PAUSE_MIN_MS);
             }
             let approval_app = handle.clone();
+            let failure_app = handle.clone();
+            let keep_app = handle.clone();
             let sink_app = handle.clone();
             let sink = move |session, segment| {
                 let state = sink_app.state::<AppState>();
@@ -1498,7 +1535,16 @@ async fn start_live_session(
                                         )
                                     },
                                     sink,
-                                ),
+                                )
+                                .keep_sending_while(move || {
+                                    keep_app.state::<AppState>().0.lock().is_ok_and(|runtime| {
+                                        runtime.engine.has_processing_permission()
+                                            || runtime.engine.is_live_stopping()
+                                    })
+                                })
+                                .on_failure(move |failure| {
+                                    stop_after_cloud_failure(&failure_app, session, failure)
+                                }),
                             ),
                         });
                     true

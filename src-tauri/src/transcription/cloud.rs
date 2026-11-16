@@ -15,6 +15,9 @@ use super::SAMPLE_RATE;
 use crate::engine::Segment;
 use std::time::Duration;
 
+/// The only provider implemented, as the app names it.
+pub const PROVIDER: &str = "Deepgram";
+
 /// Fixed failure codes. No provider message ever reaches a log or the UI.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SttFailure {
@@ -34,6 +37,8 @@ pub enum SttFailure {
     Closed,
     /// The development settings or the token file are not usable.
     Settings,
+    /// The session's review was turned off after audio began to be sent.
+    Withdrawn,
 }
 
 impl SttFailure {
@@ -47,6 +52,7 @@ impl SttFailure {
             Self::Protocol => "protocol",
             Self::Closed => "closed",
             Self::Settings => "settings",
+            Self::Withdrawn => "withdrawn",
         }
     }
 }
@@ -152,6 +158,8 @@ pub struct CloudFeed {
     sink: Sink,
     last_at: u64,
     failure: Option<SttFailure>,
+    on_failure: Option<Box<dyn FnMut(SttFailure) + Send>>,
+    keep: Option<Box<dyn FnMut() -> bool + Send>>,
     pub stats: CloudStats,
 }
 
@@ -173,8 +181,25 @@ impl CloudFeed {
             sink: Box::new(sink),
             last_at: 0,
             failure: None,
+            on_failure: None,
+            keep: None,
             stats: CloudStats::default(),
         }
+    }
+
+    /// Called once, from the feeding thread, when the stream ends with a
+    /// failure, so the session can stop and say why.
+    pub fn on_failure(mut self, notify: impl FnMut(SttFailure) + Send + 'static) -> Self {
+        self.on_failure = Some(Box::new(notify));
+        self
+    }
+
+    /// Once the stream is open, it keeps sending while `keep` holds, instead
+    /// of while the opening approval holds: a Stop in progress closes the
+    /// review but still sends the last queued audio.
+    pub fn keep_sending_while(mut self, keep: impl FnMut() -> bool + Send + 'static) -> Self {
+        self.keep = Some(Box::new(keep));
+        self
     }
 
     /// The failure that ended this feed, if any.
@@ -186,6 +211,11 @@ impl CloudFeed {
     pub fn push(&mut self, start_ms: u64, end_ms: u64, samples: &[f32]) -> Result<(), SttFailure> {
         if let Some(failure) = self.failure {
             return Err(failure);
+        }
+        // Turning the review off stops sending at once; the stream is not
+        // reopened for this session.
+        if self.stream.is_some() && !self.keeps_sending() {
+            return Err(self.fail(SttFailure::Withdrawn));
         }
         if self.stream.is_none() {
             if !(self.approved)() {
@@ -299,6 +329,13 @@ impl CloudFeed {
         Ok(())
     }
 
+    fn keeps_sending(&mut self) -> bool {
+        match self.keep.as_mut() {
+            Some(keep) => keep(),
+            None => (self.approved)(),
+        }
+    }
+
     fn fail(&mut self, failure: SttFailure) -> SttFailure {
         self.failure = Some(failure);
         if let Some(mut stream) = self.stream.take() {
@@ -310,6 +347,9 @@ impl CloudFeed {
             code: Some(failure.code()),
             audio_ms: self.stats.sent_ms,
         });
+        if let Some(mut notify) = self.on_failure.take() {
+            notify(failure);
+        }
         failure
     }
 
@@ -563,6 +603,57 @@ mod tests {
         assert_eq!(feed.push(100, 200, &[0.1; 1_600]), Err(SttFailure::Network));
         assert_eq!(feed.failure(), Some(SttFailure::Network));
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn turning_the_review_off_closes_the_stream_and_says_so_once() {
+        let script = Script::default();
+        let approved = Arc::new(Mutex::new(true));
+        let told = Arc::new(Mutex::new(vec![]));
+        let record = told.clone();
+        let mut feed = feed(&script, approved.clone())
+            .0
+            .on_failure(move |failure| record.lock().unwrap().push(failure));
+        feed.push(0, 100, &[0.1; 1_600]).unwrap();
+        *approved.lock().unwrap() = false;
+        assert_eq!(
+            feed.push(100, 200, &[0.1; 1_600]),
+            Err(SttFailure::Withdrawn)
+        );
+        // Approval again does not reopen it, and nothing more is sent.
+        *approved.lock().unwrap() = true;
+        assert_eq!(
+            feed.push(200, 300, &[0.1; 1_600]),
+            Err(SttFailure::Withdrawn)
+        );
+        assert_eq!(*script.sent.lock().unwrap(), vec![1_600]);
+        assert!(*script.aborted.lock().unwrap());
+        assert_eq!(*told.lock().unwrap(), vec![SttFailure::Withdrawn]);
+    }
+
+    #[test]
+    fn a_stop_in_progress_still_sends_the_last_audio_but_never_opens_a_stream() {
+        let script = Script::default();
+        let approved = Arc::new(Mutex::new(true));
+        let stopping = Arc::new(Mutex::new(false));
+        let flag = stopping.clone();
+        let mut opened = feed(&script, approved.clone())
+            .0
+            .keep_sending_while(move || *flag.lock().unwrap());
+        opened.push(0, 100, &[0.1; 1_600]).unwrap();
+        // Stop closes the review; the queued tail is still sent.
+        *approved.lock().unwrap() = false;
+        *stopping.lock().unwrap() = true;
+        opened.push(100, 200, &[0.1; 1_600]).unwrap();
+        assert_eq!(*script.sent.lock().unwrap(), vec![1_600, 1_600]);
+
+        // A feed never approved does not open during a Stop.
+        let unopened = Script::default();
+        let mut never = feed(&unopened, Arc::new(Mutex::new(false)))
+            .0
+            .keep_sending_while(|| true);
+        never.push(0, 100, &[0.1; 1_600]).unwrap();
+        assert!(unopened.sent.lock().unwrap().is_empty());
     }
 
     #[test]

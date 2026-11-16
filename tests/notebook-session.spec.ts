@@ -315,3 +315,27 @@ test('a simulated replay is labelled in the app’s own words and never as live 
     companion.getByRole('button', { name: /Pause|Resume|Stop/ }),
   ).toHaveCount(0);
 });
+
+test('with cloud transcription, the notebook names the service, and says plainly when it stopped', async ({
+  page,
+}) => {
+  await standIn(page, '/?live');
+  await startLive(page);
+  const publish = (value: Record<string, unknown>) =>
+    page.evaluate((value) => window.liveTest.publish(value as never), value);
+  await publish({ transcription: { provider: 'Deepgram' } });
+  await expect(session(page)).toContainText(
+    'Your microphone · transcribed by Deepgram once cue processing is enabled · not saved by TalkQTE',
+  );
+  await expect(page.getByRole('region', { name: 'Microphone' })).toContainText(
+    'Your microphone is sent to Deepgram for transcription once you enable cue processing for this session; until then nothing is transcribed.',
+  );
+  await expect(page.locator('body')).not.toContainText('on this device');
+  await publish({
+    status: 'ended',
+    transcription: { provider: 'Deepgram', stopped: 'withdrawn' },
+  });
+  await expect(session(page).getByRole('alert')).toHaveText(
+    'Transcription by Deepgram stopped: cue processing was turned off, so audio stopped being sent. The live session ended; nothing fell back to another transcription service.',
+  );
+});

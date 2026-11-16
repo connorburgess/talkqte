@@ -46,6 +46,7 @@ import {
 } from './components/PanelDivider';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
 import { useCaptureControl } from './lib/useCaptureControl';
+import { transcribedWhere, transcriptionStopText } from './lib/transcription';
 import {
   microphoneNotCapturing,
   sourceOnlyApplication,
@@ -120,21 +121,47 @@ function FloatingQuestion() {
   const modelProvider = state?.modelProvider ?? 'Claude';
   const modelLinked =
     !state?.cuesPaused && (state?.model === 'on' || state?.model === 'sending');
+  // With cloud transcription, audio leaves the device while the session's
+  // review holds, paused cues included; before that nothing is transcribed.
+  const cloud = state?.transcription;
+  const audioSent =
+    !!cloud &&
+    !cloud.stopped &&
+    (state?.model === 'on' || state?.model === 'sending');
+  const cloudNote = !cloud
+    ? null
+    : cloud.stopped
+      ? 'transcription stopped'
+      : audioSent
+        ? null
+        : 'not transcribing yet';
   const statusText = !state
     ? ''
     : live
       ? mic?.status === 'listening'
         ? state.cuesPaused
-          ? 'Mic still on'
+          ? audioSent
+            ? `Mic still on · audio to ${cloud.provider}`
+            : 'Mic still on'
           : modelLinked
-            ? `Mic on · lines go to ${modelProvider}`
-            : 'Mic on · Local'
+            ? audioSent
+              ? `Mic on · to ${cloud.provider} and ${modelProvider}`
+              : `Mic on · lines go to ${modelProvider}`
+            : cloudNote
+              ? `Mic on · ${cloudNote}`
+              : 'Mic on · Local'
         : state.sourceSession
           ? state.cuesPaused
-            ? 'App audio still on'
+            ? audioSent
+              ? `App audio still on · audio to ${cloud.provider}`
+              : 'App audio still on'
             : modelLinked
-              ? `App audio · lines go to ${modelProvider}`
-              : 'App audio · Local'
+              ? audioSent
+                ? `App audio · to ${cloud.provider} and ${modelProvider}`
+                : `App audio · lines go to ${modelProvider}`
+              : cloudNote
+                ? `App audio · ${cloudNote}`
+                : 'App audio · Local'
           : microphoneLabel(mic)
       : microphoneControl
         ? microphone.stopPending && mic?.status !== 'stopping'
@@ -1081,6 +1108,7 @@ function Notebook() {
           processingConfigured={!!capture.state?.processor}
           sourceMayBeCapturing={!!capture.state?.source?.mayBeCapturing}
           sourceSession={sourceApp}
+          transcription={state?.transcription}
           action={
             preparing ? (
               <button
@@ -1200,8 +1228,8 @@ function Notebook() {
                                 ? 'Application audio and transcript continue. Stop live session to stop listening.'
                                 : 'Microphone and transcript continue. Stop live session to stop listening.'
                               : sourceApp
-                                ? `Audio from ${sourceApp} · transcribed on this device · not saved`
-                                : 'Your microphone · transcribed on this device · not saved'
+                                ? `Audio from ${sourceApp} · ${transcribedWhere(state.transcription)} · not saved${state.transcription ? ' by TalkQTE' : ''}`
+                                : `Your microphone · ${transcribedWhere(state.transcription)} · not saved${state.transcription ? ' by TalkQTE' : ''}`
                             : 'Nothing was saved. The transcript stays here until you start another session or quit and is never exported; your notes stay until you quit and can be exported.'
                           : simulated
                             ? 'Fictional replay · nothing is captured'
@@ -1220,6 +1248,11 @@ function Notebook() {
                                       ? `Nothing is being captured. Cues appear only during a live session. ${liveStatus.reason}`
                                       : 'Nothing is being captured.'}
                   </p>
+                  {transcriptionStopText(state.transcription) && (
+                    <p role="alert">
+                      {transcriptionStopText(state.transcription)}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="session-actions">
@@ -1401,8 +1434,8 @@ function Notebook() {
                       <p className="muted small">
                         {state.live
                           ? sourceApp
-                            ? `Audio from ${sourceApp} · transcribed on this device`
-                            : 'Your microphone · transcribed on this device'
+                            ? `Audio from ${sourceApp} · ${transcribedWhere(state.transcription)}`
+                            : `Your microphone · ${transcribedWhere(state.transcription)}`
                           : 'Fictional replay · not from microphone audio'}
                       </p>
                     )}
