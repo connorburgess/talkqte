@@ -14,9 +14,9 @@ The [recorded lab](claude-cue-lab.md#validation-record) contains 33 authorized f
 
 | Choice | What exists | Decision and remaining evidence |
 | --- | --- | --- |
-| Current local phrase cues | Implemented; no reasoning provider. The optional developer build transcribes the user's microphone locally. | Remains the default. Phrase matching is not semantic meeting understanding. |
+| Current local phrase cues | Implemented; no reasoning provider. A debug build with the `cloud-transcription` feature transcribes the session's audio through Deepgram once cue processing is approved for the session. | Remains the default. Phrase matching is not semantic meeting understanding. |
 | Personal subscription CLI experiment | An isolated, manually invoked Claude Code lab accepts fictional fixtures only. | First comparison candidate, not a live or production service. A later replay needs an exact fixture/call cap and explicit authorization; account/model access, extra-usage setting, cancellation, retention and latency must be checked again. |
-| On-device reasoning | No model or adapter selected. Whisper performs transcription, not reasoning. | Evaluate model quality, licence, delivery size, memory/CPU/energy and latency on the supported Mac alongside transcription. Do not promise that an arbitrary local model fits. |
+| On-device reasoning | No model or adapter selected. Transcription is a separate cloud service (Deepgram), not reasoning. | Evaluate model quality, licence, delivery size, memory/CPU/energy and latency on the supported Mac alongside transcription. Do not promise that an arbitrary local model fits. |
 | Cursor CLI comparison | No TalkQTE adapter or validation record. | Alternative only if a specific comparison is warranted; account allowance, model access, isolation, retention and distribution remain unverified. No automatic fallback. |
 
 Separately billed APIs, project-funded inference, shared subscriptions, recurring lab runs and live hosted processing are outside the current implementation scope.
@@ -59,7 +59,7 @@ An accepted `quiet` decision and an unavailable evaluator are different states. 
 | Missing authentication, exhausted allowance or rate limit | Stop submissions and show the reason. The user may resolve it and explicitly resume; do not sign in, purchase, wait-loop or restart inference automatically. |
 | Worker exit or ignored cancellation | No overlapping replacement worker. A provider adapter must prove subprocess/request termination; the current cooperative trait alone does not guarantee it. |
 
-Ordinary local operation remains available. Choosing phrase cues again must be explicit when it changes the active cue mode. A fixed, content-free error code may be kept in session memory; raw input/output, credentials, cue-use labels and diagnostics are not silently retained or uploaded.
+Phrase cues remain available without model processing until they are removed ([cue model](cue-model.md)). Choosing phrase cues again must be explicit when it changes the active cue mode. A fixed, content-free error code may be kept in session memory; raw input/output, credentials, cue-use labels and diagnostics are not silently retained or uploaded.
 
 ## Acceptance and dependency order
 
