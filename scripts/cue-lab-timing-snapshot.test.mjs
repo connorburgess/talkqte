@@ -238,6 +238,20 @@ snapshotTest(
     assert.throws(() =>
       snapshotLabTiming({ ...rest, nativeEnded: { problem: 'Source gone!' } }),
     );
+    // Released and native-ended are mutually exclusive.
+    assert.throws(() =>
+      snapshotLabTiming({
+        ...f.options,
+        nativeEnded: { problem: 'source_gone' },
+      }),
+    );
+    assert.throws(() =>
+      snapshotLabTiming({
+        ...rest,
+        sourceReleased: false,
+        nativeEnded: { problem: 'source_gone' },
+      }),
+    );
     // As the runner does: the snapshot goes inside the evidence directory.
     const writer = createLabEvidenceWriter({
       parentDirectory: f.parent,

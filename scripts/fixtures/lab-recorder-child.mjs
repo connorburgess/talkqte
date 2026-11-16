@@ -31,6 +31,8 @@ process.on('SIGTERM', () => {
     audioBuffers: mode === 'no-audio' ? 0 : 1,
     status: mode === 'bad-final' ? 'failed' : 'completed',
     problem: '',
+    windowsMoved: mode === 'moved',
+    windowsResized: false,
   });
   setTimeout(() => process.exit(mode === 'exit1' ? 1 : 0), 5);
 });
