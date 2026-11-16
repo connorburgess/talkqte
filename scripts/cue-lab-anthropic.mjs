@@ -67,7 +67,8 @@ export async function openAnthropicLab({
     throw failure('ambient-credentials');
   // The worker inherits only PATH, HOME, TMPDIR and LANG, so these never
   // reach it; they are refused anyway, as for the transcription grant.
-  if (refusedEnvironment(environment)) throw failure('environment');
+  if (refusedEnvironment(process.env) || refusedEnvironment(environment))
+    throw failure('environment');
   if (signal?.aborted) throw failure('cancelled');
   let key;
   let offlineBaseUrl;

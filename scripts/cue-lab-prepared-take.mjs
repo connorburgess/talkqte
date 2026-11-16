@@ -396,11 +396,11 @@ export function createLabPlaybackSession({
       // startup clock restarts here with a full startupMs.
       await run.approve();
       if (root.signal.aborted) throw gateFailure('cancelled');
-      // Cloud transcription: the app has only an empty placeholder until
-      // now, so nothing can stream before this accepted review.
-      if (launcher.transcription) launcher.releaseTranscriptionToken();
       // Opening must not have used up the room the media needs.
       if (!inTime()) throw gateFailure('approval-not-given');
+      // Cloud transcription: the app has only an empty placeholder until
+      // now, so nothing can stream before this accepted, in-time review.
+      if (launcher.transcription) launcher.releaseTranscriptionToken();
       approval = Object.freeze({
         budgetMs: approvalBudgetMs,
         waitMs,

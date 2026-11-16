@@ -243,7 +243,7 @@ evidence-loss markers. The original artifact remains the source for other rows.
 
 - `evaluator` becomes `evaluator.connection`, with its approval, state, backend and engine session.
 - A live `session` start becomes `session.started`, with its session clock reading.
-- `stt_state` becomes `transcription.stream`, with the state (`started`, `connected`, `dropping`, `finished`, `ended` or `stopped`), the fixed stop code (only on `stopped`; `lab_ended` when the lab cue run ends), `audio_ms`, and on `connected` only the query of the URL the app actually used (never the token, which travels in a header).
+- `stt_state` becomes `transcription.stream`, with the state (`started`, `connected`, `dropping`, `finished`, `ended` or `stopped`), the fixed stop code (only on `stopped`; `lab_ended` when the lab cue run ends), `audio_ms`, and on `connected` only the query of the URL the app actually used (never the token, which travels in a header). Only the app's own parameter names are accepted there, each once; any other parameter refuses the row.
 - `stt_final` becomes `transcript.finalized`, with its sequence and the start and end of speech on the session clock.
 
 The provider's speaker label is untrusted: it is dropped on import and never reported or scored.

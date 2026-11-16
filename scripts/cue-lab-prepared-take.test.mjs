@@ -83,6 +83,8 @@ function fixture({
   // Cloud transcription: the launcher's token release, observed in order.
   cloud = false,
   releaseFails = false,
+  // Called while the provider opens (after approval), e.g. to move a clock.
+  onProviderOpen,
 } = {}) {
   if (api) effort = 'low';
   if (fixedModel) {
@@ -479,7 +481,7 @@ function fixture({
       environment: {},
       openers: {
         [api ? 'anthropic-api' : 'codex']: async () => ({
-          ...(counts.providerOpen++, {}),
+          ...(counts.providerOpen++, onProviderOpen?.(), {}),
           async request({ signal }) {
             counts.requests++;
             if (firstRequestTimesOut && counts.requests === 1)
@@ -1481,4 +1483,25 @@ test('a failed token release stops the take before the approved notice', async (
     ['waiting'],
   );
   assert.equal(f.trace.includes('play'), false);
+});
+
+test('a take that runs out of time while the provider opens stops without releasing the token', async (t) => {
+  const advance = shiftedClock(t);
+  const { f, approvals } = await apiTake(t, {
+    owned: false,
+    cloud: true,
+    approvalRows: [reviewRow],
+    onApproval(event) {
+      if (event.state === 'waiting') advance(170000);
+    },
+    // Opening the provider takes the take past its 180 s approval budget.
+    onProviderOpen: () => advance(15000),
+  });
+  await assert.rejects(f.take.done, { category: 'approval-not-given' });
+  assert.equal(f.counts.providerOpen, 1);
+  assert.equal(f.trace.includes('token-released'), false);
+  assert.deepEqual(
+    approvals.map((e) => e.state),
+    ['waiting'],
+  );
 });
