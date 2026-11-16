@@ -126,8 +126,9 @@ that request; the run, provider and dispatch budget continue.
   non-decision and sends nothing more for that request.
 - **Output bound (direct API route only):** the reply, including adaptive
   thinking, reached `max_tokens`. The broker sends `failed` with code
-  `output_limit` for that request only. A native build without this code
-  treats it as terminal, which fails safe.
+  `output_limit` for that request only. Native retires and settles it
+  silently and logs `evaluation_result` with outcome `output_limit`; an older
+  native build without this code treats it as terminal, which fails safe.
 
 Each of these `failed` frames names the active request's `requestId` and
 `contextRevision` and is sent at most once. Nothing is sent for a request the

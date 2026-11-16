@@ -952,6 +952,9 @@ test('a refused evaluation on the direct API route is its own non-decision outco
   const [e] = load({ outcome: 'refused' });
   assert.equal(e.outcome, 'refused');
   assert.throws(() => load({ outcome: 'refused', action: 'quiet' }));
+  // Native's row for a reply at the output bound, also a non-decision.
+  assert.equal(load({ outcome: 'output_limit' })[0].outcome, 'output_limit');
+  assert.throws(() => load({ outcome: 'output_limit', action: 'show' }));
   const r = nativeReport([
     {
       event: 'evaluation_result',
@@ -963,4 +966,15 @@ test('a refused evaluation on the direct API route is its own non-decision outco
     },
   ]);
   assert.equal(r.evaluations[0].outcome, 'refused');
+  const limited = nativeReport([
+    {
+      event: 'evaluation_result',
+      mono_ms: 1,
+      session: sid,
+      request: 1,
+      latency_ms: 900,
+      outcome: 'output_limit',
+    },
+  ]);
+  assert.equal(limited.evaluations[0].outcome, 'output_limit');
 });

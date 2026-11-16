@@ -50,8 +50,10 @@ const OUTCOMES = new Set([
   'failure',
   'stale',
   'cancelled',
-  // A provider refusal on the direct API route: a recorded non-decision.
+  // Direct API route non-decisions for one request: a provider refusal, and
+  // a reply that reached its output bound (native outcome output_limit).
   'refused',
+  'output_limit',
   'unknown',
 ]);
 const LABELS = new Set([
