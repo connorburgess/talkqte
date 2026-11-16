@@ -1235,7 +1235,7 @@ fn disclosure(backend: Backend, settings: Option<&Settings>) -> (&'static str, S
             let cap = settings
                 .and_then(|s| s.spend_cap_micro_usd)
                 .map_or("an unset".into(), dollars);
-            let policy = format!("Fictional development lab only. Sends recent and new conversation, the optional Your name setting and current/earlier cues to {service}. {NEVER} Uses the owner's Anthropic API key, billed per token, with a per-run spend cap of {cap}. One request per check, no retries, no other model, no subscription fallback. The lab caps requests per run across all roles. {TIMING} Provider retention follows the API organisation's settings. No model cue text is persisted by this client.");
+            let policy = format!("Fictional development lab only. Sends recent and new conversation, the optional Your name setting and current/earlier cues to {service}. {NEVER} Uses the owner's Anthropic API key, billed per token, with a per-run spend cap of {cap}. The lab broker, not this app, holds the key, sends one request per check with no retries or other model, and enforces the cap and the per-run request limit; this app refuses a broker that reports a different cap or more spend than the cap, but cannot see the requests themselves. No subscription fallback. {TIMING} Provider retention follows the API organisation's settings. No model cue text is persisted by this client.");
             ("Claude", service.into(), policy)
         }
     }
