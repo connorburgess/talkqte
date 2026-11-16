@@ -222,7 +222,9 @@ export function watchLabTiming({
       // Cloud transcription start and stop, with a fixed code and the
       // audio sent so far. No provider message is ever in the row.
       if (
-        !['started', 'finished', 'ended', 'stopped'].includes(value.state) ||
+        !['started', 'dropping', 'finished', 'ended', 'stopped'].includes(
+          value.state,
+        ) ||
         (value.code !== undefined &&
           ![
             'auth',
@@ -234,6 +236,7 @@ export function watchLabTiming({
             'closed',
             'settings',
             'withdrawn',
+            'lab_ended',
           ].includes(value.code)) ||
         (value.state === 'stopped') !== (value.code !== undefined) ||
         !Number.isSafeInteger(value.audio_ms) ||

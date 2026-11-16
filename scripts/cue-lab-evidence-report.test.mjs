@@ -1009,11 +1009,11 @@ function cloudReport(rows, settings = transcriptionSettings) {
   });
   return buildEvidenceReport(m, events);
 }
-const cloudRows = ({ reviewFirst = true, stop } = {}) => {
+const cloudRows = ({ reviewFirst = true, stop, reviewSession = '2' } = {}) => {
   const review = {
     event: 'evaluator',
     approval: 'review',
-    session: '9',
+    session: reviewSession,
     state: 'on',
     backend: 'lab-api',
     model: 'claude-opus-5-5',
@@ -1079,13 +1079,14 @@ test('cloud transcription evidence records settings, review order, stop, cap and
       sessionId: '2',
       starts: 1,
       startedAfterReview: true,
+      dropping: false,
       stopState: 'ended',
       stopCode: null,
       audioMs: 95000,
-      capMs: 300000,
-      withinCap: true,
     },
   ]);
+  // The cap covers the whole launch.
+  assert.deepEqual([c.audioMs, c.capMs, c.withinCap], [95000, 300000, true]);
   // Speech ended at session 4200 ms = mono 5200; the line arrived at 5701.
   assert.equal(c.finals[0].segmentId, 'c2-1-1');
   assert.equal(c.finals[0].finalToSegmentMs, 501);
@@ -1114,6 +1115,37 @@ test('a stream that started before the review row, and a stop code, are reported
   const [s] = r.cloudTranscription.streams;
   assert.equal(s.startedAfterReview, false);
   assert.deepEqual([s.stopState, s.stopCode], ['stopped', 'cap_reached']);
+  // A review in another session does not approve this one.
+  assert.equal(
+    cloudReport(cloudRows({ reviewSession: '7' })).cloudTranscription.streams[0]
+      .startedAfterReview,
+    false,
+  );
+});
+
+test('a send-queue overflow is reported apart from the stop, and a lab run end is its own code', () => {
+  const rows = cloudRows({
+    stop: {
+      event: 'stt_state',
+      session: '2',
+      state: 'stopped',
+      code: 'lab_ended',
+      audio_ms: 50000,
+      mono_ms: 9000,
+    },
+  });
+  rows.splice(rows.length - 1, 0, {
+    event: 'stt_state',
+    session: '2',
+    state: 'dropping',
+    audio_ms: 40000,
+    mono_ms: 8000,
+  });
+  const [s] = cloudReport(rows).cloudTranscription.streams;
+  assert.deepEqual(
+    [s.dropping, s.stopState, s.stopCode, s.audioMs],
+    [true, 'stopped', 'lab_ended', 50000],
+  );
 });
 
 test('malformed transcription rows and settings are refused, never guessed', () => {

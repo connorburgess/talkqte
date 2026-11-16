@@ -444,8 +444,6 @@ export function importNativeRows(rows, { runId, artifactId, clockId }) {
         )
           fail('invalid native connection row');
         stage = 'evaluator.connection';
-        // The connection's session numbering is not the transcript's.
-        delete identity.sessionId;
         payload = {
           approval: r.approval,
           connectionState: r.state,
@@ -591,7 +589,14 @@ const key = (e, kind) =>
     ? `${e.ids.sessionId}/${e.ids[kind]}`
     : null;
 const DECISION_ACTIONS = new Set(['show', 'quiet', 'resolved', 'withdraw']);
-const STT_STATES = new Set(['started', 'finished', 'ended', 'stopped']);
+// `dropping`: written once when the send queue first overflows.
+const STT_STATES = new Set([
+  'started',
+  'dropping',
+  'finished',
+  'ended',
+  'stopped',
+]);
 const STT_CODES = new Set([
   'auth',
   'quota',
@@ -602,6 +607,7 @@ const STT_CODES = new Set([
   'closed',
   'settings',
   'withdrawn',
+  'lab_ended',
 ]);
 // Native segment identities such as `t1-0-4`; never free text.
 const SEGMENT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
@@ -689,12 +695,16 @@ function cloudSummary(events, m) {
   const finals = events.filter((e) => e.stage === 'transcript.finalized');
   if (!m.transcription && !streamEvents.length && !finals.length) return null;
   const index = new Map(events.map((e, i) => [e, i]));
-  const firstReview = events.findIndex(
-    (e) =>
-      e.stage === 'evaluator.connection' &&
-      e.payload?.approval === 'review' &&
-      e.payload?.connectionState === 'on',
-  );
+  // The review row carries the same engine session as the stream rows.
+  const firstReview = (sessionId) =>
+    events.findIndex(
+      (e) =>
+        e.stage === 'evaluator.connection' &&
+        e.payload?.approval === 'review' &&
+        e.payload?.connectionState === 'on' &&
+        (sessionId === undefined || e.ids?.sessionId === sessionId),
+    );
+  // The minute cap covers the whole launch: every session and source.
   const capMs = m.transcription ? m.transcription.minuteCap * 60000 : null;
   const sessions = [
     ...new Set(streamEvents.map((e) => e.ids?.sessionId ?? null)),
@@ -704,23 +714,27 @@ function cloudSummary(events, m) {
       (e) => (e.ids?.sessionId ?? null) === sessionId,
     );
     const starts = own.filter((e) => e.payload?.sttState === 'started');
-    const stops = own.filter((e) => e.payload?.sttState !== 'started');
+    const stops = own.filter(
+      (e) => !['started', 'dropping'].includes(e.payload?.sttState),
+    );
     const last = stops.at(-1) ?? null;
     const audioMs = Math.max(0, ...own.map((e) => e.payload?.audioMs ?? 0));
+    const review = firstReview(sessionId ?? undefined);
     return {
       sessionId,
       starts: starts.length,
       startedAfterReview:
         starts.length > 0 &&
-        firstReview >= 0 &&
-        starts.every((e) => index.get(e) > firstReview),
+        review >= 0 &&
+        starts.every((e) => index.get(e) > review),
+      // The send queue overflowed at least once: some audio was not sent.
+      dropping: own.some((e) => e.payload?.sttState === 'dropping'),
       stopState: last?.payload?.sttState ?? null,
       stopCode: last?.payload?.sttCode ?? null,
       audioMs,
-      capMs,
-      withinCap: capMs === null ? null : audioMs <= capMs,
     };
   });
+  const audioMs = streams.reduce((n, s) => n + s.audioMs, 0);
   const arrivals = events.filter((e) => e.stage === 'transcript.arrived');
   const finalRows = finals.map((f) => {
     const sessionId = f.ids?.sessionId ?? null;
@@ -760,8 +774,11 @@ function cloudSummary(events, m) {
     .sort((a, b) => a - b);
   return {
     settings: m.transcription ? { ...m.transcription } : null,
-    reviewRowSeen: firstReview >= 0,
+    reviewRowSeen: firstReview() >= 0,
     streams,
+    audioMs,
+    capMs,
+    withinCap: capMs === null ? null : audioMs <= capMs,
     finals: finalRows,
     finalToSegment: {
       count: delays.length,
@@ -1099,12 +1116,14 @@ function cloudMarkdown(c) {
     '',
     `In-app review row seen: ${c.reviewRowSeen}.`,
     '',
-    '| Session | Starts | Started only after review | Stop state / code | Audio sent / cap |',
-    '| --- | --- | --- | --- | --- |',
+    '| Session | Starts | Started only after its review | Send queue overflowed | Stop state / code | Audio sent |',
+    '| --- | --- | --- | --- | --- | --- |',
     ...c.streams.map(
       (s) =>
-        `| ${escape(s.sessionId ?? 'unknown')} | ${s.starts} | ${s.startedAfterReview} | ${s.stopState ?? 'none'} / ${s.stopCode ?? 'none'} | ${s.audioMs} ms / ${s.capMs ?? 'unknown'} ms |`,
+        `| ${escape(s.sessionId ?? 'unknown')} | ${s.starts} | ${s.startedAfterReview} | ${s.dropping} | ${s.stopState ?? 'none'} / ${s.stopCode ?? 'none'} | ${s.audioMs} ms |`,
     ),
+    '',
+    `Audio sent this launch: ${c.audioMs} ms against a cap of ${c.capMs ?? 'unknown'} ms (the cap covers every session and source).`,
     '',
     `Final end of speech → transcript line: ${c.finalToSegment.count} finals; median ${c.finalToSegment.medianMs ?? 'unknown'} ms, max ${c.finalToSegment.maxMs ?? 'unknown'} ms (${c.finalToSegment.basis}). The provider's speaker label is untrusted and not reported.`,
     '',

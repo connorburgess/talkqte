@@ -433,7 +433,9 @@ test('the reader passes on cloud transcription state rows with fixed codes and r
     appendFileSync(
       path,
       '{"event":"stt_state","session":18446744073709551615,"state":"started","audio_ms":0,"wall_ms":1,"mono_ms":2}\n' +
-        '{"event":"stt_state","session":3,"state":"stopped","code":"cap_reached","audio_ms":300000,"wall_ms":1,"mono_ms":3}\n',
+        '{"event":"stt_state","session":3,"state":"stopped","code":"cap_reached","audio_ms":300000,"wall_ms":1,"mono_ms":3}\n' +
+        '{"event":"stt_state","session":3,"state":"dropping","audio_ms":4,"wall_ms":1,"mono_ms":4}\n' +
+        '{"event":"stt_state","session":3,"state":"stopped","code":"lab_ended","audio_ms":5,"wall_ms":1,"mono_ms":5}\n',
     );
     reader.poll();
     assert.deepEqual(events, [
@@ -448,6 +450,14 @@ test('the reader passes on cloud transcription state rows with fixed codes and r
         state: 'stopped',
         code: 'cap_reached',
         audio_ms: 300000,
+        session: '3',
+      },
+      { event: 'stt_state', state: 'dropping', audio_ms: 4, session: '3' },
+      {
+        event: 'stt_state',
+        state: 'stopped',
+        code: 'lab_ended',
+        audio_ms: 5,
         session: '3',
       },
     ]);

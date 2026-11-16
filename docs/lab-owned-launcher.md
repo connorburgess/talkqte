@@ -76,7 +76,7 @@ On the direct API route a run may transcribe through Deepgram (#344) instead of 
 - **Minting:** the grant reads `TALKQTE_LAB_DEEPGRAM_KEY` from `~/.config/talkqte-lab/deepgram.env`. That file follows the same owner, mode and location rules as the API key file (`scripts/cue-lab-key-file.mjs`). The grant then posts once to `https://api.deepgram.com/v1/auth/grant` for a 900 s token, enough to outlive launch, Listening and the 180 s approval wait, because the app reads the token only when the stream opens, at approval. A refused key, unpaid account or rate limit (401, 402, 403, 429), or any other status, stops before launch.
 - **Where the key and token live:** the key is used only for that request, in this process. The token is held in a closure, never returned or logged.
 - **At launch:** the launcher writes the token to a new `0600` file in its `0700` run folder and sets `TALKQTE_DEV_STT_BACKEND=deepgram`, `TALKQTE_DEV_STT_TOKEN_FILE` and `TALKQTE_DEV_STT_MINUTE_CAP`. Neither the key nor the token is ever in argv or the environment.
-- **Deletion:** the file is deleted as soon as the stream has opened (`stt_state` `started`), and otherwise at close, on a failed launch, or at process exit.
+- **Deletion:** the file is deleted as soon as the stream has opened (`stt_state` `started`), and otherwise at close, on a failed launch, or at process exit. The app checks the file when a session starts, so a lab run has one session per launch: a later session in the same launch would refuse to start once the file is gone.
 - **Order check:** a stream that opens before the app's in-app review row stops the run.
 
 Tests use a loopback grant stand-in and dummy keys.

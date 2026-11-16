@@ -241,18 +241,21 @@ evidence-loss markers. The original artifact remains the source for other rows.
 
 **Cloud transcription rows (#344).** The importer also reads four kinds of row:
 
-- `evaluator` becomes `evaluator.connection`, with its approval, state and backend. Its session numbering is not the transcript's, so it carries no session identity.
+- `evaluator` becomes `evaluator.connection`, with its approval, state, backend and engine session.
 - A live `session` start becomes `session.started`, with its session clock reading.
-- `stt_state` becomes `transcription.stream`, with the state, the fixed stop code and `audio_ms`.
+- `stt_state` becomes `transcription.stream`, with the state (`started`, `dropping`, `finished`, `ended` or `stopped`), the fixed stop code (only on `stopped`; `lab_ended` when the lab cue run ends) and `audio_ms`.
 - `stt_final` becomes `transcript.finalized`, with its sequence and the start and end of speech on the session clock.
 
 The provider's speaker label is untrusted: it is dropped on import and never reported or scored.
 
 When the manifest records the launcher's `transcription` settings (backend, minute cap, grant TTL and the app's fixed query, never the token), or the rows include a stream, the report adds a cloud transcription section. Per session it gives:
 
-- whether every stream start comes after the first in-app review row (`approval` `review`, state `on`) in file order;
+- whether every stream start comes after that session's in-app review row (`approval` `review`, state `on`) in file order;
+- whether the send queue overflowed (`dropping`);
 - the last stop state and code;
-- the most audio sent, against the cap.
+- the most audio sent.
+
+It also gives the total audio sent across the launch, against the minute cap, which covers every session and source.
 
 For each final, it gives the delay from its end of speech to the arrival of its transcript line (`c{session}-{stream}-{seq}`, matched only when exactly one line has that session and sequence). The end of speech is placed on the logger clock through the session's start row. Malformed rows or settings are refused, not guessed. The app does not log the stream URL, so the query is evidence of what the app is built to send, not a capture of traffic.
 
