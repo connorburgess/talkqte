@@ -80,6 +80,9 @@ function fixture({
   noHello = false,
   beforeListening,
   startupMs: startupOverride,
+  // Cloud transcription: the launcher's token release, observed in order.
+  cloud = false,
+  releaseFails = false,
 } = {}) {
   if (api) effort = 'low';
   if (fixedModel) {
@@ -155,6 +158,13 @@ function fixture({
       counts.launcherClose++;
     },
   };
+  if (cloud) {
+    launcher.transcription = { backend: 'deepgram' };
+    launcher.releaseTranscriptionToken = () => {
+      trace.push('token-released');
+      if (releaseFails) throw Error('fictional release failure');
+    };
+  }
   let evaluatorHandler;
   if (api)
     launcher.subscribeEvaluator = (handler) => {
@@ -412,6 +422,8 @@ function fixture({
           approvalBudgetMs: 180000,
           onApproval(event) {
             trace.push('approval-' + event.state);
+            if (event.state === 'approved' && cloud)
+              assert.ok(trace.includes('token-released'));
             onApproval?.(event);
             if (event.state === 'waiting')
               for (const row of approvalRows)
@@ -1435,5 +1447,38 @@ test('an approval that could no longer fit the media before native Stop is not g
     ['waiting'],
   );
   assert.equal(f.counts.providerOpen, 0);
+  assert.equal(f.trace.includes('play'), false);
+});
+
+test('with cloud transcription the token is released after approval and before the approved notice', async (t) => {
+  const { f, approvals } = await apiTake(t, {
+    owned: false,
+    cloud: true,
+    approvalRows: [reviewRow],
+  });
+  const result = await f.take.done;
+  assert.equal(result.completed, true);
+  const at = (entry) => f.trace.indexOf(entry);
+  assert.ok(at('approval-waiting') < at('token-released'));
+  assert.ok(at('token-released') < at('approval-approved'));
+  assert.ok(at('approval-approved') < at('record-ready'));
+  assert.deepEqual(
+    approvals.map((e) => e.state),
+    ['waiting', 'approved'],
+  );
+});
+
+test('a failed token release stops the take before the approved notice', async (t) => {
+  const { f, approvals } = await apiTake(t, {
+    owned: false,
+    cloud: true,
+    releaseFails: true,
+    approvalRows: [reviewRow],
+  });
+  await assert.rejects(f.take.done);
+  assert.deepEqual(
+    approvals.map((e) => e.state),
+    ['waiting'],
+  );
   assert.equal(f.trace.includes('play'), false);
 });

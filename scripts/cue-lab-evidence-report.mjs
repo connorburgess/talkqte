@@ -461,6 +461,7 @@ export function importNativeRows(rows, { runId, artifactId, clockId }) {
           !STT_STATES.has(r.state) ||
           (r.code !== undefined && !STT_CODES.has(r.code)) ||
           (r.state === 'stopped') !== (r.code !== undefined) ||
+          (r.state === 'connected') !== STT_QUERY.test(r.query ?? '') ||
           !Number.isSafeInteger(r.audio_ms) ||
           r.audio_ms < 0
         )
@@ -469,6 +470,7 @@ export function importNativeRows(rows, { runId, artifactId, clockId }) {
         payload = {
           sttState: r.state,
           ...(r.code !== undefined ? { sttCode: r.code } : {}),
+          ...(r.query !== undefined ? { query: r.query } : {}),
           audioMs: r.audio_ms,
         };
         break;
@@ -592,11 +594,16 @@ const DECISION_ACTIONS = new Set(['show', 'quiet', 'resolved', 'withdraw']);
 // `dropping`: written once when the send queue first overflows.
 const STT_STATES = new Set([
   'started',
+  // Connected to the provider, with the query of the URL actually used.
+  'connected',
   'dropping',
   'finished',
   'ended',
   'stopped',
 ]);
+// A URL query of plain `name=value` pairs, never a token or key.
+const STT_QUERY =
+  /^(?!.*(^|&)(token|key|access_token|authorization)=)[A-Za-z0-9_.-]+=[A-Za-z0-9_.-]*(&[A-Za-z0-9_.-]+=[A-Za-z0-9_.-]*){0,63}$/i;
 const STT_CODES = new Set([
   'auth',
   'quota',
@@ -654,6 +661,8 @@ function safePayload(payload, includeContent) {
     result.backend = payload.backend;
   if (STT_STATES.has(payload.sttState)) result.sttState = payload.sttState;
   if (STT_CODES.has(payload.sttCode)) result.sttCode = payload.sttCode;
+  if (STT_QUERY.test(payload.query ?? '') && payload.query.length <= 1024)
+    result.query = payload.query;
   for (const k of ['audioMs', 'sttSeq', 'startMs', 'endMs', 'sessionElapsedMs'])
     if (Number.isSafeInteger(payload[k]) && payload[k] >= 0)
       result[k] = payload[k];
@@ -715,8 +724,11 @@ function cloudSummary(events, m) {
     );
     const starts = own.filter((e) => e.payload?.sttState === 'started');
     const stops = own.filter(
-      (e) => !['started', 'dropping'].includes(e.payload?.sttState),
+      (e) =>
+        !['started', 'connected', 'dropping'].includes(e.payload?.sttState),
     );
+    const connected = own.filter((e) => e.payload?.sttState === 'connected');
+    const query = connected.length === 1 ? connected[0].payload.query : null;
     const last = stops.at(-1) ?? null;
     const audioMs = Math.max(0, ...own.map((e) => e.payload?.audioMs ?? 0));
     const review = firstReview(sessionId ?? undefined);
@@ -727,6 +739,14 @@ function cloudSummary(events, m) {
         starts.length > 0 &&
         review >= 0 &&
         starts.every((e) => index.get(e) > review),
+      connected: connected.length === 1,
+      // The query of the URL the app actually used, and whether it is the
+      // one the lab expects (opt-out included).
+      query,
+      queryMatchesExpected:
+        query === null || !m.transcription
+          ? null
+          : query === m.transcription.query,
       // The send queue overflowed at least once: some audio was not sent.
       dropping: own.some((e) => e.payload?.sttState === 'dropping'),
       stopState: last?.payload?.sttState ?? null,
@@ -1111,17 +1131,24 @@ function cloudMarkdown(c) {
     '### Cloud transcription',
     '',
     c.settings
-      ? `Settings: ${escape(c.settings.backend)}, cap ${c.settings.minuteCap} min, grant TTL ${c.settings.grantTtlS} s; the app's fixed query: \`${escape(c.settings.query)}\`. The token is not evidence.`
+      ? `Settings: ${escape(c.settings.backend)}, cap ${c.settings.minuteCap} min, grant TTL ${c.settings.grantTtlS} s; expected query: \`${escape(c.settings.query)}\`. The token is not evidence.`
       : 'Settings: not recorded in the manifest.',
     '',
     `In-app review row seen: ${c.reviewRowSeen}.`,
     '',
-    '| Session | Starts | Started only after its review | Send queue overflowed | Stop state / code | Audio sent |',
-    '| --- | --- | --- | --- | --- | --- |',
+    '| Session | Starts | Started only after its review | Connected | Query used = expected | Send queue overflowed | Stop state / code | Audio sent |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- |',
     ...c.streams.map(
       (s) =>
-        `| ${escape(s.sessionId ?? 'unknown')} | ${s.starts} | ${s.startedAfterReview} | ${s.dropping} | ${s.stopState ?? 'none'} / ${s.stopCode ?? 'none'} | ${s.audioMs} ms |`,
+        `| ${escape(s.sessionId ?? 'unknown')} | ${s.starts} | ${s.startedAfterReview} | ${s.connected} | ${s.queryMatchesExpected ?? 'unknown'} | ${s.dropping} | ${s.stopState ?? 'none'} / ${s.stopCode ?? 'none'} | ${s.audioMs} ms |`,
     ),
+    '',
+    ...c.streams
+      .filter((s) => s.query)
+      .map(
+        (s) =>
+          `Session ${escape(s.sessionId)} query used: \`${escape(s.query)}\``,
+      ),
     '',
     `Audio sent this launch: ${c.audioMs} ms against a cap of ${c.capMs ?? 'unknown'} ms (the cap covers every session and source).`,
     '',

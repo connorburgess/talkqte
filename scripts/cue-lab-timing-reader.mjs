@@ -222,9 +222,25 @@ export function watchLabTiming({
       // Cloud transcription start and stop, with a fixed code and the
       // audio sent so far. No provider message is ever in the row.
       if (
-        !['started', 'dropping', 'finished', 'ended', 'stopped'].includes(
-          value.state,
-        ) ||
+        ![
+          'started',
+          'connected',
+          'dropping',
+          'finished',
+          'ended',
+          'stopped',
+        ].includes(value.state) ||
+        // Only `connected` carries the query of the URL the app used; it
+        // never holds the token, which travels only in a header.
+        (value.state === 'connected') !==
+          (typeof value.query === 'string' &&
+            value.query.length <= 1024 &&
+            /^[A-Za-z0-9_.-]+=[A-Za-z0-9_.-]*(&[A-Za-z0-9_.-]+=[A-Za-z0-9_.-]*)*$/.test(
+              value.query,
+            ) &&
+            !/(^|&)(token|key|access_token|authorization)=/i.test(
+              value.query,
+            )) ||
         (value.code !== undefined &&
           ![
             'auth',
@@ -250,6 +266,7 @@ export function watchLabTiming({
         event: 'stt_state',
         state: value.state,
         ...(value.code !== undefined ? { code: value.code } : {}),
+        ...(value.query !== undefined ? { query: value.query } : {}),
         audio_ms: value.audio_ms,
         session: value.session,
       });

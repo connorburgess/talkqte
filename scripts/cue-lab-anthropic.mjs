@@ -16,6 +16,8 @@ import {
   worstCaseMicroUsd,
 } from './cue-lab-anthropic-core.mjs';
 
+import { refusedEnvironment } from './cue-lab-key-file.mjs';
+
 const WORKER = fileURLToPath(
   new URL('./cue-lab-anthropic-worker.mjs', import.meta.url),
 );
@@ -63,6 +65,9 @@ export async function openAnthropicLab({
     throw failure('configuration');
   if (anthropicEnvironmentNames(environment).length)
     throw failure('ambient-credentials');
+  // The worker inherits only PATH, HOME, TMPDIR and LANG, so these never
+  // reach it; they are refused anyway, as for the transcription grant.
+  if (refusedEnvironment(environment)) throw failure('environment');
   if (signal?.aborted) throw failure('cancelled');
   let key;
   let offlineBaseUrl;

@@ -14,7 +14,11 @@ import {
   writeSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
-import { LAB_KEY_DIR, readLabKeyFile } from './cue-lab-key-file.mjs';
+import {
+  LAB_KEY_DIR,
+  readLabKeyFile,
+  refusedEnvironment,
+} from './cue-lab-key-file.mjs';
 
 export const DEEPGRAM_KEY_NAME = 'TALKQTE_LAB_DEEPGRAM_KEY';
 export const DEEPGRAM_KEY_FILE = join(LAB_KEY_DIR, 'deepgram.env');
@@ -50,17 +54,23 @@ export function readDeepgramKeyFile({ file = DEEPGRAM_KEY_FILE } = {}) {
 export async function mintDeepgramGrant({
   ttlSeconds = DEEPGRAM_GRANT_TTL_S,
   keyFile,
-  fetch = globalThis.fetch,
+  fetch: customFetch,
   offline,
   timeoutMs = 10000,
+  environment = process.env,
 } = {}) {
   if (
     !Number.isSafeInteger(ttlSeconds) ||
     ttlSeconds < 300 ||
     ttlSeconds > 3600 ||
-    typeof fetch !== 'function'
+    // A substitute fetch only with the offline stand-in, never the real key.
+    (customFetch !== undefined &&
+      (!offline || typeof customFetch !== 'function'))
   )
     throw failure('configuration');
+  // The grant runs in this process with the real key.
+  if (refusedEnvironment(environment)) throw failure('environment');
+  const fetch = customFetch ?? globalThis.fetch;
   let key, url;
   if (offline) {
     if (

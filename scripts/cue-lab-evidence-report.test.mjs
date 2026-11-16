@@ -1009,7 +1009,12 @@ function cloudReport(rows, settings = transcriptionSettings) {
   });
   return buildEvidenceReport(m, events);
 }
-const cloudRows = ({ reviewFirst = true, stop, reviewSession = '2' } = {}) => {
+const cloudRows = ({
+  reviewFirst = true,
+  stop,
+  reviewSession = '2',
+  query = DEEPGRAM_APP_QUERY,
+} = {}) => {
   const review = {
     event: 'evaluator',
     approval: 'review',
@@ -1040,6 +1045,14 @@ const cloudRows = ({ reviewFirst = true, stop, reviewSession = '2' } = {}) => {
       features: [],
     },
     ...(reviewFirst ? [review, started] : [started, review]),
+    {
+      event: 'stt_state',
+      session: '2',
+      state: 'connected',
+      audio_ms: 0,
+      query,
+      mono_ms: 1600,
+    },
     {
       event: 'stt_final',
       session: '2',
@@ -1079,6 +1092,9 @@ test('cloud transcription evidence records settings, review order, stop, cap and
       sessionId: '2',
       starts: 1,
       startedAfterReview: true,
+      connected: true,
+      query: DEEPGRAM_APP_QUERY,
+      queryMatchesExpected: true,
       dropping: false,
       stopState: 'ended',
       stopCode: null,
@@ -1120,6 +1136,28 @@ test('a stream that started before the review row, and a stop code, are reported
     cloudReport(cloudRows({ reviewSession: '7' })).cloudTranscription.streams[0]
       .startedAfterReview,
     false,
+  );
+});
+
+test('the query the app used is reported, and compared with the expected one', () => {
+  const used = DEEPGRAM_APP_QUERY.replace('model=nova-3', 'model=nova-2');
+  const [s] = cloudReport(cloudRows({ query: used })).cloudTranscription
+    .streams;
+  assert.deepEqual([s.query, s.queryMatchesExpected], [used, false]);
+  // A query carrying a credential, or a query on another state, is refused.
+  assert.throws(() =>
+    cloudReport(cloudRows({ query: 'model=nova-3&token=abc' })),
+  );
+  assert.throws(() =>
+    cloudReport([
+      {
+        event: 'stt_state',
+        session: '2',
+        state: 'started',
+        audio_ms: 0,
+        query: DEEPGRAM_APP_QUERY,
+      },
+    ]),
   );
 });
 

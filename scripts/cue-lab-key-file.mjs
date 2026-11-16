@@ -11,6 +11,19 @@ export const LAB_KEY_DIR = join(
   'talkqte-lab',
 );
 
+// Settings that would weaken or redirect a process's TLS or load code into
+// it. A process that uses a lab key refuses any of them, even empty.
+export const LAB_REFUSED_ENVIRONMENT = Object.freeze([
+  'NODE_TLS_REJECT_UNAUTHORIZED',
+  'NODE_EXTRA_CA_CERTS',
+  'NODE_OPTIONS',
+  'NODE_USE_ENV_PROXY',
+]);
+export const refusedEnvironment = (environment) =>
+  LAB_REFUSED_ENVIRONMENT.some((name) =>
+    Object.hasOwn(environment ?? {}, name),
+  );
+
 class KeyRefused extends Error {
   constructor(reason) {
     super(`Lab key refused: ${reason}.`);

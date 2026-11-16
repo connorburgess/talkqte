@@ -11,6 +11,8 @@ import {
   realpathSync,
   readSync,
   fstatSync,
+  readdirSync,
+  renameSync,
   unlinkSync,
   constants,
 } from 'node:fs';
@@ -312,21 +314,30 @@ function launcher({
   chmodSync(directory, 0o700);
   requireThat(outside(directory));
   const timingPath = join(directory, 'timing.jsonl');
-  // The run's transcription token: written at launch into this owner-only
-  // folder, deleted once the stream has opened, at close, on a failed launch
-  // or at process exit.
+  // The run's transcription token file. At launch it is an empty 0600
+  // placeholder, which the app accepts at session start but cannot use; the
+  // take replaces it with the token (atomic rename) only after it has
+  // accepted the in-app review row. It is deleted once the stream has
+  // connected, at close, on a failed launch, or at process exit.
   const tokenPath = transcription ? join(directory, 'stt-token') : null;
-  let tokenRemoved = true;
+  const tokenNext = transcription ? join(directory, 'stt-token.next') : null;
+  let tokenRemoved = true,
+    tokenReleased = false,
+    connectedQuery = null;
   const removeToken = () => {
     if (tokenRemoved) return;
-    try {
-      unlinkSync(tokenPath);
-      tokenRemoved = true;
-    } catch (error) {
-      if (error?.code === 'ENOENT') tokenRemoved = true;
-    }
+    let gone = true;
+    for (const path of [tokenNext, tokenPath])
+      try {
+        unlinkSync(path);
+      } catch (error) {
+        if (error?.code !== 'ENOENT') gone = false;
+      }
+    tokenRemoved = gone;
   };
-  let reviewSeen = false,
+  // The session the in-app review approved for this launch's backend and
+  // model; a stream may start only in that session.
+  let reviewedSession = null,
     transcriptionStarted = false;
   const fixturePath = fixtureCase ? join(directory, 'fixture-child.mjs') : null;
   let fixtureSnapshot;
@@ -490,13 +501,33 @@ function launcher({
             // the session; the token is not needed once it has opened.
             if (event.event === 'stt_state') {
               if (event.state === 'started') {
-                if (!transcription || !reviewSeen || transcriptionStarted) {
+                if (
+                  !transcription ||
+                  reviewedSession === null ||
+                  event.session !== reviewedSession ||
+                  transcriptionStarted
+                ) {
                   onTiming({ event: 'dropped', count: 1 });
                   for (const listener of subscribers)
                     listener({ event: 'dropped', count: 1 });
                   return;
                 }
                 transcriptionStarted = true;
+              } else if (event.state === 'connected') {
+                // The app has read the token and connected; it never rereads
+                // it, so the file goes now. The query is what it used.
+                if (
+                  !transcriptionStarted ||
+                  !tokenReleased ||
+                  connectedQuery !== null ||
+                  event.session !== reviewedSession
+                ) {
+                  onTiming({ event: 'dropped', count: 1 });
+                  for (const listener of subscribers)
+                    listener({ event: 'dropped', count: 1 });
+                  return;
+                }
+                connectedQuery = event.query;
                 removeToken();
               }
               return;
@@ -504,9 +535,12 @@ function launcher({
             if (
               event.event === 'evaluator' &&
               event.approval === 'review' &&
-              event.state === 'on'
+              event.state === 'on' &&
+              event.backend === 'lab-api' &&
+              event.model === pinned?.model &&
+              reviewedSession === null
             )
-              reviewSeen = true;
+              reviewedSession = event.session;
             // Connection rows go only to the approval gate, never to the
             // lifecycle or source observers, which refuse unknown rows.
             if (event.event === 'evaluator') {
@@ -532,7 +566,15 @@ function launcher({
         if (transcription) {
           tokenRemoved = false;
           process.on('exit', removeToken);
-          transcription.grant.writeTokenFile(tokenPath);
+          const placeholder = openSync(
+            tokenPath,
+            constants.O_WRONLY |
+              constants.O_CREAT |
+              constants.O_EXCL |
+              constants.O_NOFOLLOW,
+            0o600,
+          );
+          closeSync(placeholder);
         }
         const env = {
           ...osEnv,
@@ -602,10 +644,34 @@ function launcher({
             backend: transcription.backend,
             minuteCap: transcription.minuteCap,
             grantTtlS: transcription.grant.ttlSeconds,
+            reviewedSession,
+            released: tokenReleased,
             started: transcriptionStarted,
+            connectedQuery,
             tokenRemoved,
           })
         : null;
+    },
+    // Hands the app its token: only once, only after the in-app review row
+    // for this launch's backend and model has been seen, by writing it
+    // beside the placeholder and renaming it over. The take calls this after
+    // it has accepted the review and opened the provider.
+    releaseTranscriptionToken() {
+      requireThat(
+        transcription &&
+          !closed &&
+          !tokenRemoved &&
+          !tokenReleased &&
+          reviewedSession !== null,
+      );
+      tokenReleased = true;
+      try {
+        transcription.grant.writeTokenFile(tokenNext);
+        renameSync(tokenNext, tokenPath);
+      } catch {
+        removeToken();
+        throw gateFailure('protocol');
+      }
     },
     get processStarted() {
       return child !== null;
@@ -614,6 +680,48 @@ function launcher({
       return !!child && (child.exitCode !== null || child.signalCode !== null);
     },
   });
+}
+
+/**
+ * Removes transcription token files left by earlier runs whose runner was
+ * killed (SIGKILL skips every cleanup path). Only launcher run folders are
+ * touched: `tq-owned-*` directories directly in the temporary root, owned by
+ * this user, mode 0700, not symlinks; and in them only this user's regular
+ * `stt-token` or `stt-token.next` files. Returns how many were removed.
+ */
+export function removeStaleTranscriptionTokens({
+  temporaryRoot = realpathSync(tmpdir()),
+} = {}) {
+  const uid = process.getuid?.();
+  let removed = 0;
+  for (const name of readdirSync(temporaryRoot)) {
+    if (!/^tq-owned-[A-Za-z0-9]{6}$/.test(name)) continue;
+    const folder = join(temporaryRoot, name);
+    let stat;
+    try {
+      stat = lstatSync(folder);
+    } catch {
+      continue;
+    }
+    if (
+      !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
+      stat.uid !== uid ||
+      (stat.mode & 0o777) !== 0o700
+    )
+      continue;
+    for (const file of ['stt-token', 'stt-token.next']) {
+      const path = join(folder, file);
+      try {
+        const f = lstatSync(path);
+        if (f.isFile() && !f.isSymbolicLink() && f.uid === uid) {
+          unlinkSync(path);
+          removed++;
+        }
+      } catch {}
+    }
+  }
+  return removed;
 }
 
 export function prepareLabLauncher({
@@ -661,6 +769,7 @@ export function prepareLabFixtureLauncher({
     [
       'cloud-transcription',
       'cloud-early',
+      'cloud-other-session',
       'capture-only',
       'normal',
       'partial',

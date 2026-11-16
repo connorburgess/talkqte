@@ -480,6 +480,45 @@ test('the reader passes on cloud transcription state rows with fixed codes and r
   }
 });
 
+test('the reader keeps the query only on a connected row and refuses one carrying a credential', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tq-reader-'));
+  chmodSync(directory, 0o700);
+  const path = join(directory, 'timing.jsonl');
+  writeFileSync(path, '', { mode: 0o600 });
+  const events = [];
+  const reader = watchLabTiming({
+    path,
+    runId: 'fixture-run',
+    sourceObservation: 'v1',
+    onEvent: (event) => events.push(event),
+  });
+  try {
+    appendFileSync(
+      path,
+      '{"event":"stt_state","session":3,"state":"connected","audio_ms":0,"query":"model=nova-3&mip_opt_out=true","wall_ms":1,"mono_ms":2}\n',
+    );
+    reader.poll();
+    assert.deepEqual(events, [
+      {
+        event: 'stt_state',
+        state: 'connected',
+        query: 'model=nova-3&mip_opt_out=true',
+        audio_ms: 0,
+        session: '3',
+      },
+    ]);
+    appendFileSync(
+      path,
+      '{"event":"stt_state","session":3,"state":"connected","audio_ms":0,"query":"model=nova-3&token=abc","wall_ms":1,"mono_ms":3}\n',
+    );
+    reader.poll();
+    assert.equal(reader.failed, true);
+  } finally {
+    reader.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('a different application acknowledgement fails the QuickTime-only observer', () => {
   const directory = mkdtempSync(join(tmpdir(), 'tq-reader-'));
   chmodSync(directory, 0o700);

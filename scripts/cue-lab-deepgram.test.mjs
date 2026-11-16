@@ -20,11 +20,15 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
+  DEEPGRAM_APP_QUERY,
   DEEPGRAM_GRANT_TTL_S,
   mintDeepgramGrant,
   readDeepgramKeyFile,
 } from './cue-lab-deepgram.mjs';
-import { prepareLabFixtureLauncher } from './cue-lab-launcher.mjs';
+import {
+  prepareLabFixtureLauncher,
+  removeStaleTranscriptionTokens,
+} from './cue-lab-launcher.mjs';
 import { createLabNativeOwner } from './cue-lab-native-owner.mjs';
 
 const KEY = 'offlinefictionalkey0001';
@@ -242,7 +246,7 @@ async function launchCloud(t, fixtureCase, grant, { minuteCap = 5 } = {}) {
   return { launcher, owner, seen: () => seen, failures };
 }
 
-test('the launcher passes the token only as a file path with the cap, and deletes it once the stream opens after review', async (t) => {
+test('the app gets only an empty placeholder until the review row; the token follows, and goes once the stream connects', async (t) => {
   const api = await fakeGrant();
   t.after(api.close);
   const grant = await mint(api);
@@ -260,38 +264,72 @@ test('the launcher passes the token only as a file path with the cap, and delete
   // Neither the key nor the token is in the environment or arguments.
   assert.equal(JSON.stringify(env).includes(TOKEN), false);
   assert.equal(JSON.stringify(env).includes(KEY), false);
-  for (let n = 0; n < 100 && !launcher.transcription.started; n++)
+  // Before the review: an empty owner-only placeholder, no token anywhere.
+  assert.equal(lstatSync(tokenFile).size, 0);
+  assert.equal(lstatSync(tokenFile).mode & 0o777, 0o600);
+  for (
+    let n = 0;
+    n < 100 && launcher.transcription.reviewedSession === null;
+    n++
+  )
     await delay(10);
-  assert.equal(launcher.transcription.started, true);
+  assert.equal(launcher.transcription.reviewedSession, 2);
+  assert.equal(lstatSync(tokenFile).size, 0);
+  // What the take does after accepting the review and opening the provider.
+  launcher.releaseTranscriptionToken();
+  assert.throws(() => launcher.releaseTranscriptionToken());
+  for (
+    let n = 0;
+    n < 200 && launcher.transcription.connectedQuery === null;
+    n++
+  )
+    await delay(10);
+  assert.match(launcher.transcription.connectedQuery, /(^|&)mip_opt_out=true$/);
   assert.equal(existsSync(tokenFile), false);
-  assert.deepEqual(
-    { ...launcher.transcription },
-    {
-      backend: 'deepgram',
-      minuteCap: 5,
-      grantTtlS: 900,
-      started: true,
-      tokenRemoved: true,
-    },
-  );
+  assert.equal(existsSync(join(launcher.directory, 'stt-token.next')), false);
+  const facts = { ...launcher.transcription };
+  delete facts.connectedQuery;
+  assert.deepEqual(facts, {
+    backend: 'deepgram',
+    minuteCap: 5,
+    grantTtlS: 900,
+    reviewedSession: 2,
+    released: true,
+    started: true,
+    tokenRemoved: true,
+  });
   assert.deepEqual(await owner.stop(), { released: true });
 });
 
-test('a stream that opens before the review row stops the run', async (t) => {
+test('the token cannot be released before the review row', async (t) => {
   const api = await fakeGrant();
   t.after(api.close);
-  const { launcher, owner, failures } = await launchCloud(
-    t,
-    'cloud-early',
-    await mint(api),
-  );
-  for (let n = 0; n < 100 && !failures.includes('failed'); n++) await delay(10);
-  assert.ok(failures.includes('failed'));
-  assert.equal(launcher.transcription.started, false);
-  await owner.stop().catch(() => {});
-  launcher.close();
-  assert.equal(existsSync(join(launcher.directory, 'stt-token')), false);
+  const { launcher, owner } = await launchCloud(t, 'normal', await mint(api));
+  assert.throws(() => launcher.releaseTranscriptionToken());
+  assert.equal(lstatSync(join(launcher.directory, 'stt-token')).size, 0);
+  assert.deepEqual(await owner.stop(), { released: true });
 });
+
+for (const [name, fixtureCase] of [
+  ['before the review row', 'cloud-early'],
+  ['in a session other than the reviewed one', 'cloud-other-session'],
+])
+  test(`a stream that opens ${name} stops the run`, async (t) => {
+    const api = await fakeGrant();
+    t.after(api.close);
+    const { launcher, owner, failures } = await launchCloud(
+      t,
+      fixtureCase,
+      await mint(api),
+    );
+    for (let n = 0; n < 100 && !failures.includes('failed'); n++)
+      await delay(10);
+    assert.ok(failures.includes('failed'));
+    assert.equal(launcher.transcription.started, false);
+    await owner.stop().catch(() => {});
+    launcher.close();
+    assert.equal(existsSync(join(launcher.directory, 'stt-token')), false);
+  });
 
 test('the token file is deleted at close when the stream never opened', async (t) => {
   const api = await fakeGrant();
@@ -361,4 +399,69 @@ test('cloud transcription is refused off the direct API route, in capture-only m
     assert.throws(() =>
       prepareLabFixtureLauncher({ fixtureCase: 'normal', ...options }),
     );
+});
+
+test('the grant refuses TLS or code-loading Node settings, even empty, and a substitute fetch without the stand-in', async (t) => {
+  const api = await fakeGrant();
+  t.after(api.close);
+  for (const name of [
+    'NODE_TLS_REJECT_UNAUTHORIZED',
+    'NODE_EXTRA_CA_CERTS',
+    'NODE_OPTIONS',
+    'NODE_USE_ENV_PROXY',
+  ])
+    await assert.rejects(mint(api, { environment: { [name]: '' } }), {
+      category: 'environment',
+    });
+  // A custom fetch is accepted only with the offline stand-in, so the real
+  // key can only ever go through the platform fetch.
+  await assert.rejects(
+    mintDeepgramGrant({ fetch: async () => new Response('{}') }),
+    { category: 'configuration' },
+  );
+  assert.equal(api.requests.length, 0);
+});
+
+// The lab's expected query must be the app's own constant. The app's source
+// arrives with #344; in a checkout without it this test says so and skips.
+test("the lab's expected query is the app's QUERY constant", (t) => {
+  const source = new URL(
+    '../src-tauri/src/transcription/deepgram.rs',
+    import.meta.url,
+  );
+  if (!existsSync(source)) {
+    t.skip('src-tauri/src/transcription/deepgram.rs is not in this checkout');
+    return;
+  }
+  const match = readFileSync(source, 'utf8').match(
+    /const QUERY: &str = "([^"]*)";/,
+  );
+  assert.ok(match, 'QUERY constant not found');
+  assert.equal(match[1], DEEPGRAM_APP_QUERY);
+});
+
+test('stale token files from killed runs are removed only from owner-only launcher folders', (t) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'tq-stale-root-')));
+  chmodSync(root, 0o700);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const folder = (name, mode) => {
+    const path = join(root, name);
+    mkdirSync(path);
+    chmodSync(path, mode);
+    return path;
+  };
+  const owned = folder('tq-owned-abc123', 0o700);
+  writeFileSync(join(owned, 'stt-token'), TOKEN, { mode: 0o600 });
+  writeFileSync(join(owned, 'stt-token.next'), TOKEN, { mode: 0o600 });
+  writeFileSync(join(owned, 'timing.jsonl'), '', { mode: 0o600 });
+  const open = folder('tq-owned-def456', 0o755);
+  writeFileSync(join(open, 'stt-token'), TOKEN, { mode: 0o600 });
+  const other = folder('not-a-run-folder', 0o700);
+  writeFileSync(join(other, 'stt-token'), TOKEN, { mode: 0o600 });
+  assert.equal(removeStaleTranscriptionTokens({ temporaryRoot: root }), 2);
+  assert.equal(existsSync(join(owned, 'stt-token')), false);
+  assert.equal(existsSync(join(owned, 'stt-token.next')), false);
+  assert.equal(existsSync(join(owned, 'timing.jsonl')), true);
+  assert.equal(existsSync(join(open, 'stt-token')), true);
+  assert.equal(existsSync(join(other, 'stt-token')), true);
 });

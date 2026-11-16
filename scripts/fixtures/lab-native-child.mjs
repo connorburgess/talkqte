@@ -153,31 +153,47 @@ if (mode === 'descriptor-peer') {
     if (!connected) process.exit(5);
   });
 }
-if (mode === 'cloud-transcription' || mode === 'cloud-early') {
+if (
+  mode === 'cloud-transcription' ||
+  mode === 'cloud-early' ||
+  mode === 'cloud-other-session'
+) {
   // Mirrors the app's cloud transcription settings and token-file rules
-  // (#344 transcription/cloud.rs), then reports approval and a stream start
-  // in the right order, or the stream first for the refused case.
+  // (#344): at session start the token file exists as an owner-only file in
+  // an owner-only folder (here still the empty placeholder); after the
+  // review the stream starts, polls the file until it holds a token, then
+  // connects and reports the query it used.
   const file = process.env.TALKQTE_DEV_STT_TOKEN_FILE ?? '';
-  let usable = false;
-  try {
-    const f = lstatSync(file),
-      d = lstatSync(dirname(file));
-    usable =
-      process.env.TALKQTE_DEV_STT_BACKEND === 'deepgram' &&
-      /^[1-9][0-9]?$/.test(process.env.TALKQTE_DEV_STT_MINUTE_CAP ?? '') &&
-      Number(process.env.TALKQTE_DEV_STT_MINUTE_CAP) <= 60 &&
-      file.startsWith('/') &&
-      process.env.TALKQTE_WHISPER_MODEL === undefined &&
-      f.isFile() &&
-      (f.mode & 0o777) === 0o600 &&
-      f.uid === process.getuid() &&
-      f.size <= 4096 &&
-      d.isDirectory() &&
-      (d.mode & 0o777) === 0o700 &&
-      d.uid === process.getuid() &&
-      /^[A-Za-z0-9._-]{20,4096}$/.test(readFileSync(file, 'utf8').trim());
-  } catch {}
-  if (!usable) process.exit(6);
+  const usableFile = () => {
+    try {
+      const f = lstatSync(file),
+        d = lstatSync(dirname(file));
+      return (
+        f.isFile() &&
+        (f.mode & 0o777) === 0o600 &&
+        f.uid === process.getuid() &&
+        f.size <= 4096 &&
+        d.isDirectory() &&
+        (d.mode & 0o777) === 0o700 &&
+        d.uid === process.getuid()
+      );
+    } catch {
+      return false;
+    }
+  };
+  const settings =
+    process.env.TALKQTE_DEV_STT_BACKEND === 'deepgram' &&
+    /^[1-9][0-9]?$/.test(process.env.TALKQTE_DEV_STT_MINUTE_CAP ?? '') &&
+    Number(process.env.TALKQTE_DEV_STT_MINUTE_CAP) <= 60 &&
+    file.startsWith('/') &&
+    process.env.TALKQTE_WHISPER_MODEL === undefined;
+  // Before the review the file must be the empty placeholder.
+  if (!settings || !usableFile() || lstatSync(file).size !== 0) process.exit(6);
+  const row = (fields) =>
+    appendFileSync(
+      path,
+      JSON.stringify({ wall_ms: 1, mono_ms: 2, ...fields }) + '\n',
+    );
   const review = {
     event: 'evaluator',
     approval: 'review',
@@ -187,22 +203,45 @@ if (mode === 'cloud-transcription' || mode === 'cloud-early') {
     model: process.env.TALKQTE_DEV_LAB_MODEL,
     effort: 'low',
     elapsed_ms: 5,
-    wall_ms: 1,
-    mono_ms: 2,
   };
   const started = {
     event: 'stt_state',
-    session: 2,
+    session: mode === 'cloud-other-session' ? 3 : 2,
     state: 'started',
     audio_ms: 0,
-    wall_ms: 1,
-    mono_ms: 3,
   };
   setTimeout(() => {
-    for (const row of mode === 'cloud-early'
+    for (const fields of mode === 'cloud-early'
       ? [started, review]
       : [review, started])
-      appendFileSync(path, JSON.stringify(row) + '\n');
+      row(fields);
+    const until = Date.now() + 3000;
+    const poll = setInterval(() => {
+      let token = '';
+      try {
+        token = usableFile() ? readFileSync(file, 'utf8').trim() : '';
+      } catch {}
+      if (/^[A-Za-z0-9._-]{20,4096}$/.test(token)) {
+        clearInterval(poll);
+        row({
+          event: 'stt_state',
+          session: started.session,
+          state: 'connected',
+          audio_ms: 0,
+          query:
+            'model=nova-3&language=en&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&diarize=true&endpointing=300&utterance_end_ms=1000&vad_events=true&mip_opt_out=true',
+        });
+      } else if (Date.now() > until) {
+        clearInterval(poll);
+        row({
+          event: 'stt_state',
+          session: started.session,
+          state: 'stopped',
+          code: 'settings',
+          audio_ms: 0,
+        });
+      }
+    }, 20);
   }, 40);
 }
 // Fixture only; never evidence of release.
