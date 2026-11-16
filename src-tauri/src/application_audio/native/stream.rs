@@ -492,6 +492,13 @@ mod tests {
             fault.lab_detail().as_deref(),
             Some("lab source check bundle_identifier kept failing for 2 s")
         );
+        // The log's label tells it apart from ScreenCaptureKit's own source_gone.
+        let code = fault.code.load(Ordering::Acquire);
+        let problem = super::super::classify(code, Problem::StreamFailed);
+        assert_eq!(super::super::label(problem, code), "lab_source_lost");
+        let macos = SCStreamErrorCode::NoCaptureSource.0 as i64;
+        let problem = super::super::classify(macos, Problem::StreamFailed);
+        assert_eq!(super::super::label(problem, macos), "source_gone");
     }
 
     #[test]

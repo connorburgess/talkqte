@@ -194,9 +194,10 @@ pub enum Event {
         session: String,
     },
     /// Development lab only: TalkQTE's own check of the pinned player
-    /// failed transiently (`failing`, with the check's name) or passed again
-    /// (`recovered`, after `after_ms`). A failure that lasts ends the source
-    /// with its own problem detail.
+    /// failed transiently (`failing`, with the check's name), passed again
+    /// (`recovered`, after `after_ms`), or ended the source (`ended`, with
+    /// the check that did, after `after_ms` of failing; 0 for a definitive
+    /// change). The source_problem row that follows says `lab_source_lost`.
     #[cfg(all(
         debug_assertions,
         target_os = "macos",

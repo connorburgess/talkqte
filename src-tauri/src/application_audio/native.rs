@@ -115,7 +115,19 @@ fn record_lab_check(state: &'static str, check: &'static str, after: std::time::
 /// Note a start or stream problem and macOS's code in the timing log. Runs
 /// on the owning worker, never in a callback.
 fn record(problem: Problem, code: i64, detail: Option<String>) {
-    let label = match problem {
+    crate::timing_log::record(crate::timing_log::Event::SourceProblem {
+        problem: label(problem, code),
+        os_code: (code < 0).then_some(code),
+        detail,
+    });
+}
+
+/// The timing log's name for a problem and the code that caused it.
+fn label(problem: Problem, code: i64) -> &'static str {
+    match problem {
+        // TalkQTE's own check of a pinned lab source, told apart from
+        // ScreenCaptureKit's source_gone by its label as well as its code.
+        Problem::SourceGone if code == LAB_SOURCE_LOST => "lab_source_lost",
         Problem::StreamFailed => "stream_failed",
         Problem::StartFailed => "start_failed",
         Problem::StopFailed => "stop_failed",
@@ -125,12 +137,7 @@ fn record(problem: Problem, code: i64, detail: Option<String>) {
         Problem::AudioFailed => "audio_failed",
         Problem::StoppedByMacOS => "stopped_by_macos",
         Problem::AudioUnreadable => "audio_unreadable",
-    };
-    crate::timing_log::record(crate::timing_log::Event::SourceProblem {
-        problem: label,
-        os_code: (code < 0).then_some(code),
-        detail,
-    });
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -225,6 +232,10 @@ impl StreamFault {
             }
         };
         if let Some(lost) = lost {
+            let after = lab.failing.map_or(std::time::Duration::ZERO, |(since, _)| {
+                now.duration_since(since)
+            });
+            record_lab_check("ended", lost.0, after);
             lab.lost = Some(lost);
             drop(lab);
             self.record_code(LAB_SOURCE_LOST);

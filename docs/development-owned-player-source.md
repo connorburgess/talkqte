@@ -54,13 +54,14 @@ Runtime/host locks.
     0.3 s after the owner switched applications. The player was still running
     and unchanged.
   - The timing log records `lab_source_check` rows: `failing` with the check's
-    name when a transient failure starts, and `recovered` with how long it
-    lasted.
+    name when a transient failure starts, `recovered` with how long it lasted,
+    and `ended` with the check that ended the operation.
 - **How the end is recorded:** an operation ended by this check records the
-  problem `source_gone` with TalkQTE's own code 3 and no `os_code`. Its detail
+  problem `lab_source_lost` with TalkQTE's own code 3 and no `os_code`. Its detail
   names the check, for example "lab source check running_application kept
   failing for 2 s". ScreenCaptureKit stopping the stream itself is still
-  recorded with macOS's `os_code` -3815, so the two are told apart.
+  recorded as `source_gone` with macOS's `os_code` -3815, so the two are told
+  apart by label as well as by code.
 
  Polling and admission checks have TOCTOU
 windows: they do not make process lifetime or mutable filesystem state atomic,
