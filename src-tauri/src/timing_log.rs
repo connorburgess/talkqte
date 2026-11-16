@@ -126,7 +126,8 @@ pub enum Event {
         elapsed_ms: u64,
     },
     /// What came back: `show`, `quiet`, `resolved`, `withdraw`, `failed`,
-    /// `stale` or `cancelled`, with a fixed failure code when it failed.
+    /// `stale`, `cancelled` or `refused` (the lab provider declined that one
+    /// request), with a fixed failure code when it failed.
     /// `action` is the reply's action code when a decision arrived but was
     /// not applied: on `stale`, and on a `timeout` read after the deadline.
     EvaluationResult {

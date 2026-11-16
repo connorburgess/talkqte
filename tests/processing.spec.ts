@@ -693,6 +693,39 @@ test('Cancel start still stops its own capture if startup finishes before delive
   expect(await calls(page, 'stop_capture')).toHaveLength(1);
 });
 
+test('the API lab names Claude, its billing and caps, and shares the lab stop rules', async ({
+  page,
+}) => {
+  await open(page);
+  await send(page, {
+    processor: {
+      id: 'lab-api',
+      revision: 1,
+      name: 'Claude',
+      model: 'claude-haiku-5-5',
+      location: 'hosted',
+      destination:
+        "the Anthropic API, with the lab owner's API key (billed per token)",
+      dataPolicy: 'Fictional conversation-only processing with a spend cap.',
+      acceptsNotes: false,
+    },
+    phase: 'active',
+    sending: true,
+  });
+  await expect(
+    page.getByText(
+      /A cue reflects speech up to 8 s before it appears; newer speech is checked next\. A reply later than 8 s shows no cue and the run continues\. Pause, Dismiss, Off, Stop and any other failure end the run; Resume does not restart it\. Uses the lab owner's Anthropic API key, billed per token; the lab caps requests and spending per run\./,
+    ),
+  ).toBeVisible();
+  await expect(page.getByText(/CLI-dispatch budget/)).toHaveCount(0);
+  await send(page, { phase: 'unavailable', sending: false, issue: 'timedOut' });
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'a deadline ended the lab connection' }),
+  ).toBeVisible();
+});
+
 test('strict subscription lab names Codex and discloses terminal controls in the panel', async ({
   page,
 }) => {

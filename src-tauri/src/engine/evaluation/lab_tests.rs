@@ -1,5 +1,5 @@
 //! Controlled offline providers; no native activation or subscription process.
-use super::tests::Harness;
+use super::tests::{Harness, REFUSED};
 use super::*;
 use crate::cue_evaluator::{EvaluationLifecycle, Settlement};
 use std::sync::{
@@ -466,4 +466,41 @@ fn a_prefix_reply_completed_in_time_but_read_after_the_deadline_is_not_applied()
     assert_eq!(*link.verdicts.lock().unwrap(), vec![Settlement::Expired]);
     assert!(h.engine.state.cue.is_none());
     assert!(h.engine.has_processing_permission());
+}
+#[test]
+fn a_refusal_is_a_non_decision_and_the_run_continues() {
+    let mut h = Harness::new();
+    let link = lab(&mut h);
+    h.line("Who owns the fictional checklist?");
+    h.request();
+    h.line("Still discussing the checklist.");
+    h.replies.send(REFUSED.into()).unwrap();
+    until(&mut h, |_| !link.verdicts.lock().unwrap().is_empty());
+    assert_eq!(*link.verdicts.lock().unwrap(), vec![Settlement::Retired]);
+    assert!(h.engine.has_processing_permission());
+    assert!(h.engine.state.cue.is_none());
+    assert!(!matches!(
+        h.engine.evaluation_status(),
+        Some(EvaluationStatus::Unavailable(_))
+    ));
+    assert_eq!(link.cancelled.load(Ordering::Acquire), 0);
+    // The waiting speech is evaluated next and a reply in time is applied.
+    until(&mut h, |e| {
+        e.evaluation.as_ref().unwrap().requests_sent == 2
+    });
+    h.request();
+    reply(&h, "quiet", None);
+    until(&mut h, |_| link.verdicts.lock().unwrap().len() == 2);
+    assert_eq!(link.verdicts.lock().unwrap()[1], Settlement::Current);
+}
+#[test]
+fn a_refusal_the_link_cannot_retire_ends_the_run() {
+    let mut h = Harness::new();
+    let link = lab(&mut h);
+    link.reject_ack.store(true, Ordering::Release);
+    h.line("Who owns the fictional checklist?");
+    h.request();
+    h.replies.send(REFUSED.into()).unwrap();
+    until(&mut h, |e| !e.has_processing_permission());
+    assert_eq!(*link.verdicts.lock().unwrap(), vec![Settlement::Retired]);
 }

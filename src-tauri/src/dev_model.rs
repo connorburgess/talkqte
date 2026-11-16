@@ -31,6 +31,12 @@ impl Settings {
 
     fn apply(self, engine: &mut Engine) {
         engine.set_model_call_limit(self.calls);
+        if self.consent && engine.is_lab_api() {
+            // Sending conversation text to the paid API needs the per-run
+            // review, so a launch setting that tries to approve it fails closed.
+            engine.invalid_dev_model_settings();
+            return;
+        }
         if self.consent {
             // Existing review validation binds the grant to this running session
             // and the backend. An empty note selection cannot expand sources.
@@ -73,6 +79,10 @@ mod tests {
     use super::*;
 
     fn engine() -> Engine {
+        engine_with("fictional")
+    }
+
+    fn engine_with(id: &str) -> Engine {
         struct Offline;
         impl crate::cue_evaluator::Evaluator for Offline {
             fn evaluate(
@@ -84,7 +94,7 @@ mod tests {
             }
         }
         let config = crate::engine::ProcessorConfiguration::new(
-            "fictional".into(),
+            id.into(),
             1,
             "fixture".into(),
             crate::engine::ProcessingLocation::OnDevice,
@@ -100,6 +110,30 @@ mod tests {
         let mut engine = Engine::live_with_evaluator(worker, config);
         engine.start().unwrap();
         engine
+    }
+
+    #[test]
+    fn a_launch_setting_cannot_approve_the_paid_api_but_a_review_can() {
+        let mut engine = engine_with("lab-api");
+        Settings::parse(Some("on"), None)
+            .unwrap()
+            .apply(&mut engine);
+        assert!(!engine.has_processing_permission());
+        assert_eq!(
+            serde_json::to_value(engine.processing_issue()).unwrap(),
+            "devSettings"
+        );
+        // Without the launch consent, the per-run review is the only way in.
+        let mut engine = engine_with("lab-api");
+        Settings::parse(None, None).unwrap().apply(&mut engine);
+        assert!(!engine.has_processing_permission());
+        let review = engine
+            .review_processing(ConversationScope::RecentAndNewSpeech, &[])
+            .unwrap();
+        engine.approve_processing(review).unwrap();
+        assert!(engine.has_processing_permission());
+        let snapshot = engine.processing_snapshot(crate::engine::CaptureState::Running, 0);
+        assert!(!snapshot.approval_by_setting);
     }
 
     #[test]

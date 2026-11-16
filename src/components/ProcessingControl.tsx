@@ -54,6 +54,11 @@ export const issueText = {
   worker:
     'Cues stopped: the model connection stopped working. Nothing more will be sent until you turn it on again.',
 };
+/** The development lab's processors: a subscription CLI or the paid API. */
+function isLabProcessor(id: string | undefined): boolean {
+  return id === 'lab-subscription' || id === 'lab-api';
+}
+
 export function processingIssueText(
   issue: keyof typeof issueText,
   provider = 'Claude',
@@ -489,18 +494,19 @@ export function ProcessingControl({
           {processingIssueText(
             snapshot.issue,
             snapshot.processor?.name,
-            snapshot.processor?.id === 'lab-subscription',
+            isLabProcessor(snapshot.processor?.id),
           )}
         </p>
       )}
-      {snapshot?.processor?.id === 'lab-subscription' && (
+      {isLabProcessor(snapshot?.processor?.id) && (
         <p className="processing-muted">
           Fictional development lab. A cue reflects speech up to 8 s before it
           appears; newer speech is checked next. A reply later than 8 s shows no
           cue and the run continues. Pause, Dismiss, Off, Stop and any other
-          failure end the run; Resume does not restart it. The lab shares a
-          CLI-dispatch budget across roles; underlying provider request count is
-          unobserved.
+          failure end the run; Resume does not restart it.{' '}
+          {snapshot?.processor?.id === 'lab-api'
+            ? "Uses the lab owner's Anthropic API key, billed per token; the lab caps requests and spending per run."
+            : 'The lab shares a CLI-dispatch budget across roles; underlying provider request count is unobserved.'}
         </p>
       )}
       {snapshot?.phase === 'off' && snapshot.processor && !snapshot.issue && (
