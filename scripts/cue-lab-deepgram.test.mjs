@@ -514,3 +514,64 @@ test("the grant checks this process's own environment even when a clean one is p
   });
   assert.equal(api.requests.length, 0);
 });
+
+test('a capture-only launch gets the transcription setting with an empty placeholder only, never a token', async (t) => {
+  const launcher = prepareLabFixtureLauncher({
+    fixtureCase: 'capture-only',
+    mode: 'capture-only',
+    stopAfterS: 110,
+    transcription: { backend: 'deepgram', minuteCap: 5 },
+  });
+  t.after(() => rmSync(launcher.directory, { recursive: true, force: true }));
+  const original = childProcess.spawn;
+  let seen;
+  mock.method(childProcess, 'spawn', (command, args, options) => {
+    seen = options.env;
+    return original(command, args, options);
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  const owner = createLabNativeOwner({
+    executable: launcher.executable,
+    launch: launcher.launch,
+    mode: 'capture-only',
+    stopAfterS: 110,
+    armingMs: 1000,
+    releaseMs: 1000,
+  });
+  const tokenFile = join(launcher.directory, 'stt-token');
+  try {
+    await owner.start({ runId: 'capture-only-fixture' });
+    assert.equal(seen.TALKQTE_DEV_STT_BACKEND, 'deepgram');
+    assert.equal(seen.TALKQTE_DEV_STT_TOKEN_FILE, tokenFile);
+    assert.equal(seen.TALKQTE_DEV_STT_MINUTE_CAP, '5');
+    assert.equal(
+      Object.keys(seen).some((k) =>
+        /CUE_BACKEND|MODEL_CONNECTION|LAB_PROVIDER|DESCRIPTOR/.test(k),
+      ),
+      false,
+    );
+    assert.equal(lstatSync(tokenFile).size, 0);
+    // There is no grant, so no token can ever be released.
+    assert.throws(() => launcher.releaseTranscriptionToken());
+    assert.equal(launcher.transcription.grantTtlS, null);
+    assert.deepEqual(await owner.stop(), { released: true });
+  } finally {
+    launcher.close();
+  }
+  assert.equal(existsSync(tokenFile), false);
+  // A grant is refused in capture-only mode, and the setting is required.
+  const api = await fakeGrant();
+  t.after(api.close);
+  const grant = await mint(api);
+  assert.throws(() =>
+    prepareLabFixtureLauncher({
+      fixtureCase: 'capture-only',
+      mode: 'capture-only',
+      transcription: { backend: 'deepgram', minuteCap: 5, grant },
+    }),
+  );
+});
