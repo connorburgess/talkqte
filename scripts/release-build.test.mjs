@@ -105,6 +105,7 @@ test('every way of asking for a development feature is refused', () => {
     'timing-log',
     'claude-cli',
     'lab-evaluator',
+    'cloud-transcription',
   ]) {
     const refused = (args, env = {}, files = {}) =>
       requestedDevelopmentFeatures(args, env, (path) => files[path]);
@@ -184,6 +185,6 @@ test('the build script refuses before building anything', (t) => {
   assert.equal(result.status, 2, result.stdout + result.stderr);
   assert.match(
     result.stderr,
-    /refusing to build a release with a development feature \(native-audio-spike, timing-log, claude-cli, lab-evaluator\):\n {2}argument 4 names native-audio-spike/,
+    /refusing to build a release with a development feature \(native-audio-spike, timing-log, claude-cli, lab-evaluator, cloud-transcription\):\n {2}argument 4 names native-audio-spike/,
   );
 });
