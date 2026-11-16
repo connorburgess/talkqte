@@ -1,8 +1,12 @@
 // Records exactly two windows, the meeting emulator's and the real TalkQTE
 // companion's, with the emulator app's sound, using ScreenCaptureKit. It
-// never records the whole screen: the picture is a display filtered to
-// those two windows only, cropped to them, and the sound comes from the
-// emulator app alone. If either window cannot be found it records nothing.
+// never records the whole screen: each window is captured on its own,
+// independently of the active Space and of other windows covering it, and
+// the two are composited at their on-screen positions into one picture.
+// (A display filter showed only windows on the active Space, so a run
+// recorded black whenever the operator's frontmost app was on another
+// Space; RunB07.) The sound comes from the emulator app alone. If either
+// window cannot be found it records nothing.
 //
 // Built and run by scripts/lab-window-record.mjs. It needs the Screen &
 // System Audio Recording permission for the app that starts it (Terminal,
@@ -20,6 +24,7 @@
 // never printed.
 import AVFoundation
 import CoreGraphics
+import CoreImage
 import CoreMedia
 import Foundation
 import ScreenCaptureKit
@@ -69,7 +74,17 @@ func frameDictionary(_ rect: CGRect) -> [String: Double] {
 final class Writer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
   let writer: AVAssetWriter
   let video: AVAssetWriterInput
+  let adaptor: AVAssetWriterInputPixelBufferAdaptor
   let audio: AVAssetWriterInput
+  let width: Int
+  let height: Int
+  // Each window stream's place in the picture, in output pixels with a
+  // top-left origin, and its latest complete frame. Touched only on the
+  // capture queue.
+  var places: [ObjectIdentifier: CGRect] = [:]
+  var latest: [ObjectIdentifier: CVPixelBuffer] = [:]
+  var lastTime = CMTime.invalid
+  let context = CIContext(options: [.cacheIntermediates: false])
   var started = false
   var frames = 0
   var audioBuffers = 0
@@ -88,6 +103,8 @@ final class Writer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Senda
 
   init(url: URL, width: Int, height: Int, strictWindows: Bool = false) throws {
     self.strictWindows = strictWindows
+    self.width = width
+    self.height = height
     writer = try AVAssetWriter(outputURL: url, fileType: .mov)
     video = AVAssetWriterInput(
       mediaType: .video,
@@ -96,6 +113,13 @@ final class Writer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Senda
         AVVideoHeightKey: height,
       ])
     video.expectsMediaDataInRealTime = true
+    adaptor = AVAssetWriterInputPixelBufferAdaptor(
+      assetWriterInput: video,
+      sourcePixelBufferAttributes: [
+        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+        kCVPixelBufferWidthKey as String: width,
+        kCVPixelBufferHeightKey as String: height,
+      ])
     audio = AVAssetWriterInput(
       mediaType: .audio,
       outputSettings: [
@@ -119,14 +143,44 @@ final class Writer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Senda
         let attachments = CMSampleBufferGetSampleAttachmentsArray(
           buffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
         let raw = attachments.first?[.status] as? Int,
-        let status = SCFrameStatus(rawValue: raw), status == .complete
+        let status = SCFrameStatus(rawValue: raw), status == .complete,
+        let image = CMSampleBufferGetImageBuffer(buffer),
+        places[ObjectIdentifier(stream)] != nil
       else { return }
+      latest[ObjectIdentifier(stream)] = image
+      // The picture starts once both windows have delivered a frame; after
+      // that each new frame of either window redraws both at their places.
+      guard latest.count == places.count else { return }
+      let time = buffer.presentationTimeStamp
+      if lastTime.isValid && CMTimeCompare(time, lastTime) <= 0 { return }
       if !started {
-        writer.startSession(atSourceTime: buffer.presentationTimeStamp)
+        writer.startSession(atSourceTime: time)
         started = true
         if !strictWindows { emit(["event": "started", "wallMs": wallMs()]) }
       }
-      if video.isReadyForMoreMediaData, video.append(buffer) {
+      guard video.isReadyForMoreMediaData, let pool = adaptor.pixelBufferPool else { return }
+      var output: CVPixelBuffer?
+      guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &output) == kCVReturnSuccess,
+        let output
+      else { return }
+      let extent = CGRect(x: 0, y: 0, width: width, height: height)
+      var picture = CIImage(color: .black).cropped(to: extent)
+      for (key, place) in places {
+        guard let frame = latest[key] else { continue }
+        let source = CIImage(cvPixelBuffer: frame)
+        // Core Image's origin is bottom-left; places are top-left.
+        let sx = place.width / max(source.extent.width, 1)
+        let sy = place.height / max(source.extent.height, 1)
+        let placed = source
+          .transformed(by: CGAffineTransform(scaleX: sx, y: sy))
+          .transformed(
+            by: CGAffineTransform(
+              translationX: place.minX, y: CGFloat(height) - place.maxY))
+        picture = placed.composited(over: picture)
+      }
+      context.render(picture, to: output)
+      if adaptor.append(output, withPresentationTime: time) {
+        lastTime = time
         frames += 1
         reportReady()
       }
@@ -141,6 +195,11 @@ final class Writer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Senda
 
   func stream(_ stream: SCStream, didStopWithError error: Error) {
     problem = error.localizedDescription
+  }
+
+  /// Where `stream`'s window goes in the picture (output pixels, top-left).
+  func place(_ stream: SCStream, at rect: CGRect) {
+    places[ObjectIdentifier(stream)] = rect
   }
 }
 
@@ -279,21 +338,32 @@ struct Capture {
     else { fail("No display was found.", code: 2) }
 
     let union = emulator.frame.union(companion.frame).intersection(display.frame)
-    let crop = union.offsetBy(dx: -display.frame.minX, dy: -display.frame.minY)
-    let pictureFilter = SCContentFilter(display: display, including: [emulator, companion])
-    let scale = CGFloat(pictureFilter.pointPixelScale)
+    // Each window on its own, wherever it is: not limited to the active
+    // Space and not hidden by other windows.
+    let emulatorFilter = SCContentFilter(desktopIndependentWindow: emulator)
+    let companionFilter = SCContentFilter(desktopIndependentWindow: companion)
+    let scale = CGFloat(emulatorFilter.pointPixelScale)
     let even = { (value: CGFloat) in max(2, Int((value * scale) / 2) * 2) }
-    let width = even(crop.width)
-    let height = even(crop.height)
-
-    let picture = SCStreamConfiguration()
-    picture.sourceRect = crop
-    picture.width = width
-    picture.height = height
-    picture.showsCursor = false
-    picture.capturesAudio = false
-    picture.minimumFrameInterval = CMTime(value: 1, timescale: 30)
-    picture.queueDepth = 6
+    let width = even(union.width)
+    let height = even(union.height)
+    func windowConfiguration(_ window: SCWindow) -> SCStreamConfiguration {
+      let configuration = SCStreamConfiguration()
+      configuration.width = even(window.frame.width)
+      configuration.height = even(window.frame.height)
+      configuration.showsCursor = false
+      configuration.capturesAudio = false
+      configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+      configuration.queueDepth = 6
+      configuration.pixelFormat = kCVPixelFormatType_32BGRA
+      return configuration
+    }
+    func placeOf(_ window: SCWindow) -> CGRect {
+      CGRect(
+        x: (window.frame.minX - union.minX) * scale,
+        y: (window.frame.minY - union.minY) * scale,
+        width: CGFloat(even(window.frame.width)),
+        height: CGFloat(even(window.frame.height)))
+    }
 
     // The sound: the emulator app alone. TalkQTE makes no sound, and no
     // other app is heard.
@@ -331,12 +401,21 @@ struct Capture {
       fail("Could not write \(out): \(error.localizedDescription)")
     }
     let queue = DispatchQueue(label: "talkqte.lab.capture")
-    let pictureStream = SCStream(filter: pictureFilter, configuration: picture, delegate: writer)
+    let emulatorStream = SCStream(
+      filter: emulatorFilter, configuration: windowConfiguration(emulator), delegate: writer)
+    let companionStream = SCStream(
+      filter: companionFilter, configuration: windowConfiguration(companion), delegate: writer)
     let soundStream = SCStream(filter: soundFilter, configuration: sound, delegate: writer)
+    queue.sync {
+      writer.place(emulatorStream, at: placeOf(emulator))
+      writer.place(companionStream, at: placeOf(companion))
+    }
     do {
-      try pictureStream.addStreamOutput(writer, type: .screen, sampleHandlerQueue: queue)
+      try emulatorStream.addStreamOutput(writer, type: .screen, sampleHandlerQueue: queue)
+      try companionStream.addStreamOutput(writer, type: .screen, sampleHandlerQueue: queue)
       try soundStream.addStreamOutput(writer, type: .audio, sampleHandlerQueue: queue)
-      try await pictureStream.startCapture()
+      try await emulatorStream.startCapture()
+      try await companionStream.startCapture()
       try await soundStream.startCapture()
     } catch {
       fail("Could not start recording: \(error.localizedDescription)")
@@ -364,7 +443,8 @@ struct Capture {
     _ = signals
 
     try? await soundStream.stopCapture()
-    try? await pictureStream.stopCapture()
+    try? await emulatorStream.stopCapture()
+    try? await companionStream.stopCapture()
     await withCheckedContinuation { continuation in
       queue.async {
         writer.video.markAsFinished()

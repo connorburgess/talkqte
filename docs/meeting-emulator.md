@@ -79,7 +79,7 @@ It lists the windows of those two apps only, and captures nothing.
 Exactly two windows, the emulator's and the real TalkQTE companion's ("TalkQTE companion", owned by TalkQTE), with the emulator app's sound. It never records the whole screen, so no notification or other window of the owner's can appear.
 
 - **The capture program:** `scripts/lab-window-capture.swift`, a small ScreenCaptureKit program, built on first use into a temporary folder. It needs the Xcode command line tools and macOS 14 or later.
-- **The picture:** a display filtered to those two windows only, cropped to them.
+- **The picture:** each of the two windows captured on its own, independently of the active Space and of other windows covering it, then composited at their on-screen positions. Window positions are taken once when recording starts. A display filtered to the two windows used to show them only while they were on the active Space; RunB07 recorded black whenever the operator's frontmost app was on another Space.
 - **The sound:** a second stream that takes only the emulator app's sound.
 - **If a window is missing:** if either window cannot be found, nothing is recorded.
 - **If two copies of TalkQTE are running:** a preview build has the same app name, so if windows of more than one TalkQTE process are on screen, nothing is recorded, and the dry run says so.
