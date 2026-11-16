@@ -111,8 +111,8 @@ test('every way of asking for a development feature is refused', () => {
       requestedDevelopmentFeatures(args, env, (path) => files[path]);
     for (const args of [
       ['--features', feature],
-      ['--features', 'local-whisper', feature],
-      ['--features', `local-whisper,${feature}`],
+      ['--features', 'fictional-extra', feature],
+      ['--features', `fictional-extra,${feature}`],
       [`--features=${feature}`],
       ['-f', feature],
       ['--bundles', 'app', '--', '--features', feature],
@@ -152,7 +152,7 @@ test('ordinary release arguments, and look-alike names, are not refused', () => 
   const refused = (args, env = {}) =>
     requestedDevelopmentFeatures(args, env, () => undefined);
   assert.deepEqual(
-    refused(['--bundles', 'app,dmg', '--features', 'local-whisper']),
+    refused(['--bundles', 'app,dmg', '--features', 'fictional-extra']),
     [],
   );
   assert.deepEqual(refused(['--features', 'native-audio-spike-free']), []);
@@ -178,7 +178,7 @@ test('the build script refuses before building anything', (t) => {
       '--bundles',
       'app',
       '--features',
-      'local-whisper,native-audio-spike',
+      'fictional-extra,native-audio-spike',
     ],
     { encoding: 'utf8', env },
   );

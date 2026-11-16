@@ -22,12 +22,7 @@ import { parseUniqueLabJson } from './cue-lab-strict-json.mjs';
 import { watchLabTiming } from './cue-lab-timing-reader.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
 
-const FEATURES = [
-  'lab-evaluator',
-  'local-whisper',
-  'native-audio-spike',
-  'timing-log',
-];
+const FEATURES = ['lab-evaluator', 'native-audio-spike', 'timing-log'];
 const exact = (value, keys) =>
   value &&
   typeof value === 'object' &&
@@ -237,7 +232,6 @@ function launcher({
   selection,
   stopAfterS,
   sourceApplication,
-  whisperModel,
   modelConnection,
   environment,
   fixtureCase,
@@ -265,13 +259,6 @@ function launcher({
       .filter((key) => typeof environment[key] === 'string')
       .map((key) => [key, environment[key]]),
   );
-  if (!fixtureCase)
-    requireThat(
-      isAbsolute(whisperModel ?? '') &&
-        realpathSync(whisperModel) === whisperModel &&
-        lstatSync(whisperModel).isFile() &&
-        outside(whisperModel),
-    );
   const temporaryRoot = realpathSync(tmpdir());
   requireThat(outside(temporaryRoot));
   const directory = realpathSync(mkdtempSync(join(temporaryRoot, 'tq-owned-')));
@@ -381,7 +368,6 @@ function launcher({
           TALKQTE_DEV_APPLICATION_SOURCE: sourceApplication,
           TALKQTE_DEV_MODEL_CONNECTION: modelConnection,
           TALKQTE_DEV_MODEL_CALLS: String(pinned.maxCalls),
-          ...(whisperModel ? { TALKQTE_WHISPER_MODEL: whisperModel } : {}),
           ...(fixtureCase ? { TALKQTE_FIXTURE_CASE: fixtureCase } : {}),
         };
         child = spawn(executable, fixtureCase ? [fixturePath] : [], {
@@ -421,7 +407,6 @@ export function prepareLabLauncher({
   selection,
   sourceApplication,
   stopAfterS,
-  whisperModel,
   modelConnection,
   environment = process.env,
 } = {}) {
@@ -431,7 +416,6 @@ export function prepareLabLauncher({
       selection,
       sourceApplication,
       stopAfterS,
-      whisperModel,
       modelConnection,
       environment,
     });
