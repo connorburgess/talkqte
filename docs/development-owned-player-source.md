@@ -42,17 +42,34 @@ or alternative capture adapter is added. An absent SCK entry fails the attempt.
 The native owner rechecks identity while polling off the callback, without
 Runtime/host locks.
 
-- **Definitive change:** the pinned process is gone (`ESRCH`), now has another
-  owner or another start time, or has a changed canonical executable path or
-  file identity. This cancels that exact operation at once, through the
-  existing Stop/remove/serial-queue cleanup path.
-- **Transient failure:** a failed read of the process information or path, an
-  executable that cannot be read, a missing `NSRunningApplication` entry, its
-  bundle identifier, or `isTerminated`. This ends the operation only if it keeps
-  failing for two seconds; a check that passes again clears it.
+- **Definitive change:** anything that can show the pinned process was
+  replaced is compared with the pin first, before any other read, and ends that
+  exact operation at once through the existing Stop/remove/serial-queue cleanup
+  path. That covers:
+  - the process gone (`ESRCH`), or the pid now held by another user (`EPERM`);
+  - a different start time, at the start or the end of the check;
+  - an executable path from `proc_pidpath` other than the pinned one, for
+    example after an `exec()`;
+  - a canonical path that now differs from it (a symlink);
+  - a link count other than one, or a different file identity;
+  - a bundle identifier other than the player's.
+- **Transient failure:** only a read that could not complete for the process
+  already verified as the pinned one is transient: the process information,
+  the path, the canonical path, the file metadata, a missing
+  `NSRunningApplication` entry or bundle identifier, or `isTerminated`. It ends
+  the operation only if it keeps failing for two seconds; a check that passes
+  again clears it.
   - In RunB07 (17 November 2026) a single such failure ended capture about
     0.3 s after the owner switched applications. The player was still running
     and unchanged.
+  - While a transient failure is tolerated, captured audio keeps flowing as
+    before: to the engine and, once the session's review is approved, to cloud
+    transcription. That can last up to two seconds, where before the operation
+    ended at the first failed poll. This is accepted for this development-lab
+    path with a fictional player, because by then the process has already been
+    verified as the pinned one.
+  - The product's application-audio capture has no pinned-process check, so
+    this tolerance does not apply to it.
   - The timing log records `lab_source_check` rows: `failing` with the check's
     name when a transient failure starts, `recovered` with how long it lasted,
     and `ended` with the check that ended the operation.
