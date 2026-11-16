@@ -457,13 +457,25 @@ pub(super) mod tests {
         rate: f64,
         packets: &[(u64, usize)],
     ) -> (Gate, Control, Capture<()>, Vec<NativeBlock>) {
+        let steady: Vec<(u64, Vec<f32>)> = packets
+            .iter()
+            .map(|&(first, frames)| (first, vec![0.25; frames]))
+            .collect();
+        native_blocks_from(rate, &steady)
+    }
+
+    /// As `native_blocks`, with each packet's own samples.
+    pub(in crate::application_audio::native) fn native_blocks_from(
+        rate: f64,
+        packets: &[(u64, Vec<f32>)],
+    ) -> (Gate, Control, Capture<()>, Vec<NativeBlock>) {
         let (gate, control, start, mut input, mut delivery) = setup();
         let capture = accept(start);
         let base = timebase(rate);
         let blocks = packets
             .iter()
-            .map(|&(first, frames)| {
-                input.push(&control, first, &vec![0.25; frames]).unwrap();
+            .map(|(first, samples)| {
+                input.push(&control, *first, samples).unwrap();
                 delivery
                     .try_next(7, |o, f| convert(&base, o, f))
                     .unwrap()

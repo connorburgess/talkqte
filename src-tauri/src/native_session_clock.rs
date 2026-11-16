@@ -537,10 +537,10 @@ pub(crate) mod tests {
         let mut feed = Feed::new(reader, binding, 1.0);
         let mut chunker = NativeChunker::new(control.clone(), session);
 
-        // 24 fictional blocks fill one three-second chunk and leave a
-        // remainder pending in the chunker.
+        // 80 steady fictional blocks fill one ten-second chunk (the longest
+        // without a pause) and leave a remainder pending in the chunker.
         let mut ready = Vec::new();
-        for i in 0..24 {
+        for i in 0..80 {
             input.push(&control, i * 2_048, &[0.25; 2_048]).unwrap();
             let block = feed.next(session).unwrap().unwrap();
             ready.extend(chunker.push(block, session).unwrap());
@@ -572,15 +572,15 @@ pub(crate) mod tests {
         // The recognizer holds the first chunk.
         recognizing.recv_timeout(Duration::from_secs(5)).unwrap();
         // One more block is with the worker and one packet is still queued.
-        input.push(&control, 24 * 2_048, &[0.25; 2_048]).unwrap();
+        input.push(&control, 80 * 2_048, &[0.25; 2_048]).unwrap();
         let returned = feed.next(session).unwrap().unwrap();
-        input.push(&control, 25 * 2_048, &[0.25; 2_048]).unwrap();
+        input.push(&control, 81 * 2_048, &[0.25; 2_048]).unwrap();
 
         // The live session's own Stop, not the source's gate.
         runtime.take_live_for_stop().unwrap();
 
         assert_eq!(
-            input.push(&control, 26 * 2_048, &[0.25; 2_048]),
+            input.push(&control, 82 * 2_048, &[0.25; 2_048]),
             Err(Rejected::Cancelled)
         );
         let cancelled = TimingError::Handoff(Rejected::Cancelled);

@@ -6,18 +6,26 @@
 
 use super::{clock::NativeBlock, position::Position};
 use crate::application_audio::{
-    chunks::{ChunkError, CHUNK_SAMPLES},
-    handoff::Rejected,
+    chunks::ChunkError,
+    handoff::{Rejected, MAX_SAMPLES},
     timing::TimingError,
     Control,
 };
+use crate::audio_tap::{Cut, PauseCuts};
 use crate::transcription::{AudioChunk, Timed, SAMPLE_RATE};
 use std::sync::Arc;
+
+/// The longest chunk: speech without a pause is handed on after 10 s.
+pub const CHUNK_SAMPLES: usize = 10 * SAMPLE_RATE;
+/// The shortest chunk that may end at a pause, as on the microphone path.
+pub const MIN_CHUNK_SAMPLES: usize = SAMPLE_RATE;
+// One block never fills a chunk on its own.
+const _: () = assert!(MAX_SAMPLES < MIN_CHUNK_SAMPLES);
 
 /// Timing segments one chunk may hold. Typical native blocks fill a chunk
 /// with far fewer; a stream of tiny blocks ends chunks early instead of
 /// growing the map. Ending early never joins or drops audio.
-pub const MAX_SEGMENTS: usize = 256;
+pub const MAX_SEGMENTS: usize = 1_024;
 
 const SAMPLES_PER_MS: u64 = (SAMPLE_RATE / 1_000) as u64;
 const _: () = assert!(SAMPLE_RATE.is_multiple_of(1_000));
@@ -100,10 +108,12 @@ impl Timed for NativeChunk {
     }
 }
 
-/// Assembles native blocks into at most three-second chunks on the worker
-/// that owns the NativeReader. Each push returns at most one chunk. A gap or
-/// the segment limit can end a shorter chunk. Stop, cancellation and session
-/// replacement never flush pending audio. `finish` can release the last
+/// Assembles native blocks into chunks on the worker that owns the
+/// NativeReader. A chunk ends at the first pause after a second of audio, or
+/// after ten seconds, by the microphone path's pause rule; a full-length
+/// chunk of true silence is skipped. Each push returns at most one chunk. A
+/// gap or the segment limit can end a shorter chunk. Stop, cancellation and
+/// session replacement never flush pending audio. `finish` can release the last
 /// partial chunk at a clean end of input, but the source worker discards it
 /// by decision and never calls `finish`.
 pub struct NativeChunker {
@@ -111,6 +121,7 @@ pub struct NativeChunker {
     session: u64,
     pending: Vec<f32>,
     segments: Vec<Segment>,
+    cuts: PauseCuts,
     terminal: Option<ChunkError>,
 }
 
@@ -119,8 +130,9 @@ impl NativeChunker {
         Self {
             control,
             session,
-            pending: Vec::with_capacity(CHUNK_SAMPLES),
+            pending: Vec::with_capacity(CHUNK_SAMPLES + MAX_SAMPLES),
             segments: Vec::with_capacity(MAX_SEGMENTS),
+            cuts: PauseCuts::new(MIN_CHUNK_SAMPLES, CHUNK_SAMPLES),
             terminal: None,
         }
     }
@@ -175,42 +187,90 @@ impl NativeChunker {
         let frames = samples.len() as u64;
         let (start, end) = block.bounds();
         // Gap presence comes from exact frames, never rounded milliseconds.
-        let mut ready = if timed.gap().is_some() || self.segments.len() == MAX_SEGMENTS {
+        let ready = if timed.gap().is_some() || self.segments.len() == MAX_SEGMENTS {
+            self.cuts.reset();
             self.take_pending()
         } else {
             None
         };
-        let take = samples.len().min(CHUNK_SAMPLES - self.pending.len());
-        // The shared split boundary is computed once and used on both sides.
-        let split = if take < samples.len() {
-            start
-                .interpolate(end, take as u64, frames)
-                .map_err(ChunkError::Timing)?
-        } else {
-            end
-        };
-        self.segments.push(Segment {
-            first: self.pending.len() as u64,
-            frames: take as u64,
-            start,
-            end: split,
-        });
-        self.pending.extend_from_slice(&samples[..take]);
-        if self.pending.len() == CHUNK_SAMPLES {
-            // A block either ends a chunk early or fills one, never both.
-            debug_assert!(ready.is_none());
-            ready = self.take_pending();
-        }
-        if take < samples.len() {
+        if frames > 0 {
             self.segments.push(Segment {
-                first: 0,
-                frames: frames - take as u64,
-                start: split,
+                first: self.pending.len() as u64,
+                frames,
+                start,
                 end,
             });
-            self.pending.extend_from_slice(&samples[take..]);
+            self.pending.extend_from_slice(samples);
         }
-        Ok(ready)
+        let Some(cut) = self.cuts.next(&self.pending) else {
+            return Ok(ready);
+        };
+        // A block shorter than the minimum chunk cannot both follow a flush
+        // and complete a cut, so each push still returns at most one chunk.
+        debug_assert!(ready.is_none());
+        match cut {
+            Cut::Keep(at) => self.split_pending(at),
+            Cut::Skip(at) => {
+                self.split_pending(at)?;
+                Ok(None)
+            }
+        }
+    }
+
+    /// Hands on the first `at` samples as a chunk and keeps the rest pending.
+    /// A block that straddles the cut is divided at one shared boundary,
+    /// interpolated as for any position inside a block.
+    fn split_pending(&mut self, at: usize) -> Result<Option<NativeChunk>, ChunkError> {
+        let at = at as u64;
+        let index = self
+            .segments
+            .partition_point(|segment| segment.first + segment.frames <= at);
+        let mut rest = Vec::with_capacity(MAX_SEGMENTS);
+        if let Some(&segment) = self.segments.get(index) {
+            let inside = at - segment.first;
+            if inside > 0 {
+                let boundary = segment
+                    .start
+                    .interpolate(segment.end, inside, segment.frames)
+                    .map_err(ChunkError::Timing)?;
+                self.segments[index].frames = inside;
+                self.segments[index].end = boundary;
+                rest.push(Segment {
+                    first: 0,
+                    frames: segment.frames - inside,
+                    start: boundary,
+                    end: segment.end,
+                });
+                rest.extend(self.segments.drain(index + 1..).map(|s| Segment {
+                    first: s.first - at,
+                    ..s
+                }));
+            } else {
+                rest.extend(self.segments.drain(index..).map(|s| Segment {
+                    first: s.first - at,
+                    ..s
+                }));
+            }
+        }
+        let tail = self.pending.split_off(at as usize);
+        let mut head_pending = std::mem::replace(&mut self.pending, tail);
+        self.pending
+            .reserve(CHUNK_SAMPLES + MAX_SAMPLES - self.pending.len());
+        let head_segments = std::mem::replace(&mut self.segments, rest);
+        let start_ms = head_segments[0]
+            .start
+            .millis()
+            .expect("a validated position has representable milliseconds");
+        head_pending.shrink_to_fit();
+        Ok(Some(NativeChunk {
+            audio: AudioChunk {
+                start_ms,
+                samples: head_pending,
+            },
+            segments: head_segments,
+            control: self.control.clone(),
+            session: self.session,
+        }))
     }
 
     fn take_pending(&mut self) -> Option<NativeChunk> {
@@ -227,7 +287,10 @@ impl NativeChunker {
         Some(NativeChunk {
             audio: AudioChunk {
                 start_ms,
-                samples: std::mem::replace(&mut self.pending, Vec::with_capacity(CHUNK_SAMPLES)),
+                samples: std::mem::replace(
+                    &mut self.pending,
+                    Vec::with_capacity(CHUNK_SAMPLES + MAX_SAMPLES),
+                ),
             },
             segments,
             control: self.control.clone(),
@@ -238,6 +301,7 @@ impl NativeChunker {
     fn retire(&mut self, error: ChunkError) -> ChunkError {
         self.pending = Vec::new();
         self.segments = Vec::new();
+        self.cuts.reset();
         self.terminal = Some(error);
         error
     }
@@ -245,7 +309,7 @@ impl NativeChunker {
 
 #[cfg(test)]
 mod tests {
-    use super::super::clock::tests::native_blocks;
+    use super::super::clock::tests::{native_blocks, native_blocks_from};
     use super::*;
     use crate::transcription::{Recognized, Transcriber, Worker};
     use std::{
@@ -278,9 +342,10 @@ mod tests {
     #[test]
     fn recognizer_offsets_follow_the_native_clock_across_a_split_block() {
         for (rate, phase, frame_ns) in RATES {
-            // 24 blocks of 2,048 frames: the last one splits at 48,000.
+            // 80 blocks of 2,048 steady (pause-free) frames: the 10 s
+            // maximum splits block 79 at frame 160,000.
             let (_gate, control, _capture, blocks) =
-                native_blocks(rate, &contiguous(13, 24, 2_048));
+                native_blocks(rate, &contiguous(13, 80, 2_048));
             let mut chunker = NativeChunker::new(control.clone(), 7);
             let mut ready = Vec::new();
             for block in blocks {
@@ -293,33 +358,163 @@ mod tests {
             assert_eq!(full.audio().start_ms, expected(phase, frame_ns, 13));
             // Every recognizer millisecond, including the split boundary and
             // interior block boundaries, lands on the clock's own time.
-            for offset in 0..=3_000 {
+            for offset in 0..=10_000 {
                 assert_eq!(
                     full.session_ms(offset),
                     Ok(expected(phase, frame_ns, 13 + offset * 16)),
                     "rate {rate}, offset {offset}"
                 );
             }
-            assert_eq!(full.session_ms(3_001), Err(TimingError::Clock));
+            assert_eq!(full.session_ms(10_001), Err(TimingError::Clock));
             assert_eq!(full.session_ms(u64::MAX), Err(TimingError::Overflow));
 
             // The remainder of the split block continues from the same
             // boundary, not from a restarted nominal origin.
             let rest = chunker.finish(7).unwrap().unwrap();
-            assert_eq!(rest.audio().samples.len(), 24 * 2_048 - CHUNK_SAMPLES);
-            for offset in [0, 1, 36, 72] {
+            assert_eq!(rest.audio().samples.len(), 80 * 2_048 - CHUNK_SAMPLES);
+            for offset in [0, 1, 16, 120, 240] {
                 assert_eq!(
                     rest.session_ms(offset),
-                    Ok(expected(phase, frame_ns, 13 + 48_000 + offset * 16)),
+                    Ok(expected(phase, frame_ns, 13 + 160_000 + offset * 16)),
                     "rate {rate}, rest offset {offset}"
                 );
             }
-            assert_eq!(rest.session_ms(73), Err(TimingError::Clock));
+            assert_eq!(rest.session_ms(241), Err(TimingError::Clock));
             assert_eq!(
                 chunker.finish(7).err(),
                 Some(ChunkError::Timing(TimingError::Handoff(Rejected::Closed)))
             );
         }
+    }
+
+    /// Fictional "speech" (a steady tone level) and pauses, in milliseconds,
+    /// cut into blocks of the given sizes in turn, starting at frame 13.
+    fn spoken(parts: &[(bool, u64)], sizes: &[usize]) -> (Vec<f32>, Vec<(u64, Vec<f32>)>) {
+        let mut audio = Vec::new();
+        for (index, &(speech, ms)) in parts.iter().enumerate() {
+            for n in 0..ms * 16 {
+                // Varied but always well above the sound floor while speaking.
+                audio.push(if speech {
+                    0.2 + ((n + index as u64) % 7) as f32 * 0.01
+                } else {
+                    0.0
+                });
+            }
+        }
+        let mut packets = Vec::new();
+        let (mut at, mut size) = (0, 0);
+        while at < audio.len() {
+            let len = sizes[size % sizes.len()].min(audio.len() - at);
+            packets.push((13 + at as u64, audio[at..at + len].to_vec()));
+            at += len;
+            size += 1;
+        }
+        (audio, packets)
+    }
+
+    fn all_chunks(packets: &[(u64, Vec<f32>)]) -> Vec<NativeChunk> {
+        let (_gate, control, _capture, blocks) = native_blocks_from(1.0, packets);
+        let mut chunker = NativeChunker::new(control, 7);
+        let mut ready = Vec::new();
+        for block in blocks {
+            ready.extend(chunker.push(block, 7).unwrap());
+        }
+        ready.extend(chunker.finish(7).unwrap());
+        ready
+    }
+
+    #[test]
+    fn a_chunk_ends_at_a_pause_once_it_holds_a_second_of_speech() {
+        // 1.5 s of speech, a 300 ms pause, then more speech: the chunk ends
+        // after 200 ms of the pause, at 1.7 s, inside a block.
+        let (_, packets) = spoken(&[(true, 1_500), (false, 300), (true, 1_200)], &[1_000]);
+        let ready = all_chunks(&packets);
+        assert_eq!(ready.len(), 2);
+        assert_eq!(ready[0].audio().samples.len(), 1_700 * 16);
+        assert_eq!(ready[0].audio().start_ms, expected(1_000, 62_500, 13));
+        assert_eq!(
+            ready[1].session_ms(0),
+            Ok(expected(1_000, 62_500, 13 + 1_700 * 16))
+        );
+        assert_eq!(ready[1].audio().samples.len(), (100 + 1_200) * 16);
+    }
+
+    #[test]
+    fn a_pause_before_the_first_second_does_not_end_a_chunk() {
+        // A pause at 0.5 s is too early; the next one, after 1.8 s, ends it.
+        let (_, packets) = spoken(
+            &[
+                (true, 500),
+                (false, 300),
+                (true, 1_000),
+                (false, 300),
+                (true, 500),
+            ],
+            &[512],
+        );
+        let ready = all_chunks(&packets);
+        assert_eq!(ready.len(), 2);
+        assert_eq!(
+            ready[0].audio().samples.len(),
+            (500 + 300 + 1_000 + 200) * 16
+        );
+        assert!(ready[0].audio().samples.len() >= MIN_CHUNK_SAMPLES);
+    }
+
+    #[test]
+    fn steady_speech_is_handed_on_at_ten_seconds() {
+        let (_, packets) = spoken(&[(true, 25_000)], &[2_048]);
+        let ready = all_chunks(&packets);
+        let lengths: Vec<usize> = ready.iter().map(|c| c.audio().samples.len()).collect();
+        assert_eq!(lengths, [CHUNK_SAMPLES, CHUNK_SAMPLES, 5_000 * 16]);
+    }
+
+    #[test]
+    fn cuts_neither_lose_nor_repeat_audio_and_keep_the_clock_continuous() {
+        // About a minute of irregular speech and pauses in irregular blocks.
+        let mut parts = Vec::new();
+        for i in 0..40u64 {
+            parts.push((true, 300 + (i * 397) % 2_900));
+            parts.push((false, 50 + (i * 131) % 600));
+        }
+        let (audio, packets) = spoken(&parts, &[1, 7, 160, 2_048, 333, 1_024, 2_000, 64]);
+        let ready = all_chunks(&packets);
+        assert!(ready.len() > 10, "pauses end chunks");
+        let mut joined = Vec::new();
+        for chunk in &ready {
+            assert!(chunk.audio().samples.len() <= CHUNK_SAMPLES);
+            assert_eq!(
+                chunk.session_ms(0),
+                Ok(expected(1_000, 62_500, 13 + joined.len() as u64)),
+                "each chunk starts where the previous one ended"
+            );
+            joined.extend_from_slice(&chunk.audio().samples);
+        }
+        assert_eq!(joined, audio);
+        // Every chunk but the last held at least the minimum before its cut.
+        assert!(ready[..ready.len() - 1]
+            .iter()
+            .all(|c| c.audio().samples.len() >= MIN_CHUNK_SAMPLES));
+    }
+
+    #[test]
+    fn ten_seconds_of_silence_is_skipped_and_later_audio_keeps_its_time() {
+        let (_, packets) = spoken(&[(false, 12_000), (true, 2_000)], &[2_048]);
+        let ready = all_chunks(&packets);
+        // The silent first ten seconds never reach the recognizer.
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].audio().samples.len(), (2_000 + 2_000) * 16);
+        assert_eq!(
+            ready[0].session_ms(0),
+            Ok(expected(1_000, 62_500, 13 + CHUNK_SAMPLES as u64))
+        );
+        // A short pause between words is kept, not skipped.
+        let (audio, packets) = spoken(&[(true, 1_200), (false, 150), (true, 900)], &[700]);
+        let joined: Vec<f32> = all_chunks(&packets)
+            .iter()
+            .flat_map(|c| c.audio().samples.clone())
+            .collect();
+        assert_eq!(joined, audio);
     }
 
     #[test]
@@ -365,8 +560,15 @@ mod tests {
         );
         let rest = chunker.finish(7).unwrap().unwrap();
         assert_eq!(rest.audio().samples.len(), 16);
-        assert_eq!(rest.session_ms(0), Ok(expected(phase, frame_ns, 13 + 256)));
-        assert_eq!(rest.session_ms(1), Ok(expected(phase, frame_ns, 13 + 272)));
+        let limit = MAX_SEGMENTS as u64;
+        assert_eq!(
+            rest.session_ms(0),
+            Ok(expected(phase, frame_ns, 13 + limit))
+        );
+        assert_eq!(
+            rest.session_ms(1),
+            Ok(expected(phase, frame_ns, 13 + limit + 16))
+        );
     }
 
     #[test]
@@ -408,7 +610,7 @@ mod tests {
 
     #[test]
     fn a_chunk_released_by_stop_no_longer_belongs() {
-        let (gate, control, _capture, blocks) = native_blocks(1.0, &contiguous(13, 24, 2_048));
+        let (gate, control, _capture, blocks) = native_blocks(1.0, &contiguous(13, 80, 2_048));
         let mut chunker = NativeChunker::new(control.clone(), 7);
         let mut ready = None;
         for block in blocks {
@@ -474,13 +676,13 @@ mod tests {
     fn a_queued_chunk_times_recognized_lines_on_the_native_clock() {
         for (rate, phase, frame_ns) in RATES {
             let (_gate, control, _capture, blocks) =
-                native_blocks(rate, &contiguous(13, 24, 2_048));
+                native_blocks(rate, &contiguous(13, 80, 2_048));
             let ready = chunks(&control, blocks);
             assert_eq!(ready.len(), 2, "a full chunk and the split remainder");
             let calls = Arc::new(AtomicU64::new(0));
             // Out of order, with one offset past each chunk's audio.
             let script = Script {
-                offsets: vec![72, 0, 3_001, 40],
+                offsets: vec![72, 0, 10_001, 40],
                 calls: calls.clone(),
                 gate: None,
             };
@@ -510,9 +712,9 @@ mod tests {
                     at(0, 0),
                     at(0, 40),
                     at(0, 72),
-                    at(48_000, 0),
-                    at(48_000, 40),
-                    at(48_000, 72)
+                    at(160_000, 0),
+                    at(160_000, 40),
+                    at(160_000, 72)
                 ],
                 "rate {rate}"
             );
@@ -525,7 +727,7 @@ mod tests {
 
     #[test]
     fn stop_during_recognition_withholds_the_result_and_skips_queued_audio() {
-        let (gate, control, _capture, blocks) = native_blocks(1.0, &contiguous(13, 30, 2_048));
+        let (gate, control, _capture, blocks) = native_blocks(1.0, &contiguous(13, 90, 2_048));
         let ready = chunks(&control, blocks);
         assert_eq!(ready.len(), 2);
         let calls = Arc::new(AtomicU64::new(0));

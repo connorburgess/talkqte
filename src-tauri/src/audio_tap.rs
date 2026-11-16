@@ -60,7 +60,7 @@ pub fn tap(device_rate: u32, channels: u16, chunk_ms: u64) -> (TapInput, Chunker
             counted_overruns: 0,
             gap_applied: 0,
             device_rate: device_rate.max(1),
-            min_samples: None,
+            pauses: None,
             skipped: 0,
         },
     )
@@ -118,8 +118,8 @@ pub struct Chunker {
     /// 16 kHz samples of gap already added to `emitted`.
     gap_applied: u64,
     device_rate: u32,
-    /// With pause cuts on, the shortest chunk that may end at a pause.
-    min_samples: Option<usize>,
+    /// With pause cuts on, where each chunk may end early.
+    pauses: Option<PauseCuts>,
     skipped: u64,
 }
 
@@ -134,60 +134,17 @@ impl Chunker {
     /// chunks keep their session times.
     pub fn cut_at_pauses(&mut self, min_ms: u64) {
         let min = (SAMPLE_RATE as u64 * min_ms / 1_000) as usize;
-        self.min_samples = Some(min.max(FRAME).min(self.chunk_samples));
+        self.pauses = Some(PauseCuts::new(min, self.chunk_samples));
     }
 
     /// The next cut of pending audio, if one is due.
-    fn next_cut(&self) -> Option<Cut> {
-        let Some(min) = self.min_samples else {
-            return (self.pending.len() >= self.chunk_samples)
-                .then_some(Cut::Keep(self.chunk_samples));
-        };
-        let limit = self.pending.len().min(self.chunk_samples);
-        let needed = (PAUSE_MS as usize * SAMPLE_RATE / 1_000).div_ceil(FRAME);
-        // Each frame is judged against the typical level of the sound before
-        // it: the median, so one loud thump cannot make ordinary speech look
-        // like a pause. Only earlier frames count, so the cut does not depend
-        // on how often the chunker drains.
-        let (mut loudest, mut run) = (0.0f32, 0);
-        let mut sounds: Vec<f32> = Vec::new();
-        for (index, frame) in self.pending[..limit].chunks_exact(FRAME).enumerate() {
-            let level = (frame.iter().map(|x| x * x).sum::<f32>() / FRAME as f32).sqrt();
-            loudest = loudest.max(level);
-            let typical = if sounds.is_empty() {
-                level
-            } else {
-                let mut sorted = sounds.clone();
-                sorted.sort_unstable_by(f32::total_cmp);
-                sorted[sorted.len() / 2]
-            };
-            if level < (typical * 0.1).max(QUIET_FLOOR) {
-                run += 1;
-            } else {
-                run = 0;
-            }
-            if level >= SOUND_FLOOR {
-                sounds.push(level);
-            }
-            let end = (index + 1) * FRAME;
-            if loudest >= SOUND_FLOOR && run >= needed && end >= min {
-                return Some(Cut::Keep(end));
+    fn next_cut(&mut self) -> Option<Cut> {
+        match &mut self.pauses {
+            Some(pauses) => pauses.next(&self.pending),
+            None => {
+                (self.pending.len() >= self.chunk_samples).then_some(Cut::Keep(self.chunk_samples))
             }
         }
-        if self.pending.len() < self.chunk_samples {
-            return None;
-        }
-        // Only true silence is skipped, judged over the whole chunk, so soft
-        // speech still reaches the recognizer.
-        let silent = self.chunk_samples >= FRAME
-            && self.pending[..self.chunk_samples]
-                .iter()
-                .all(|sample| sample.abs() < QUIET_FLOOR);
-        Some(if silent {
-            Cut::Skip(self.chunk_samples)
-        } else {
-            Cut::Keep(self.chunk_samples)
-        })
     }
 
     /// Moves everything queued so far through the resampler and returns any
@@ -229,6 +186,9 @@ impl Chunker {
                 let samples = std::mem::take(&mut self.pending);
                 chunks.push(self.chunk(session_start_ms, samples));
             }
+            if let Some(pauses) = &mut self.pauses {
+                pauses.reset();
+            }
             let gap_total = dropped_total * SAMPLE_RATE as u64 / self.device_rate as u64;
             self.emitted += gap_total - self.gap_applied;
             self.gap_applied = gap_total;
@@ -250,6 +210,9 @@ impl Chunker {
             }
         }
         let partial = std::mem::take(&mut self.pending);
+        if let Some(pauses) = &mut self.pauses {
+            pauses.reset();
+        }
         if !partial.is_empty() {
             chunks.push(self.chunk(session_start_ms, partial));
         }
@@ -273,9 +236,99 @@ impl Chunker {
 }
 
 /// Where to cut pending audio: hand a chunk on, or skip silence.
-enum Cut {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Cut {
     Keep(usize),
     Skip(usize),
+}
+
+/// The pause rule shared by every live chunker. A chunk ends at the first
+/// pause after `min` samples, or at `max`: a pause is `PAUSE_MS` of 16 kHz
+/// audio below a tenth of the chunk's typical (median) sound level so far,
+/// after some sound. A full-length chunk in which every sample is below the
+/// quiet floor is skipped rather than transcribed. Each frame is judged only
+/// against earlier frames, so the cut never depends on how audio arrives in
+/// blocks, and only new frames are scanned on each call.
+pub(crate) struct PauseCuts {
+    min: usize,
+    max: usize,
+    /// Frames of the pending audio already judged, and their running state.
+    scanned: usize,
+    loudest: f32,
+    run: usize,
+    /// Levels of the frames counted as sound, kept sorted for the median.
+    sounds: Vec<f32>,
+}
+
+impl PauseCuts {
+    pub(crate) fn new(min: usize, max: usize) -> Self {
+        let max = max.max(1);
+        Self {
+            min: min.max(FRAME).min(max),
+            max,
+            scanned: 0,
+            loudest: 0.0,
+            run: 0,
+            sounds: Vec::new(),
+        }
+    }
+
+    /// The next cut of `pending`, the audio since the previous cut, if one is
+    /// due. After a cut, the caller removes that many samples from the front.
+    pub(crate) fn next(&mut self, pending: &[f32]) -> Option<Cut> {
+        let limit = pending.len().min(self.max);
+        let needed = (PAUSE_MS as usize * SAMPLE_RATE / 1_000).div_ceil(FRAME);
+        while (self.scanned + 1) * FRAME <= limit {
+            let frame = &pending[self.scanned * FRAME..(self.scanned + 1) * FRAME];
+            let level = (frame.iter().map(|x| x * x).sum::<f32>() / FRAME as f32).sqrt();
+            self.loudest = self.loudest.max(level);
+            // The median, so one loud thump cannot make ordinary speech look
+            // like a pause.
+            let typical = if self.sounds.is_empty() {
+                level
+            } else {
+                self.sounds[self.sounds.len() / 2]
+            };
+            if level < (typical * 0.1).max(QUIET_FLOOR) {
+                self.run += 1;
+            } else {
+                self.run = 0;
+            }
+            if level >= SOUND_FLOOR {
+                let at = self.sounds.partition_point(|x| x.total_cmp(&level).is_lt());
+                self.sounds.insert(at, level);
+            }
+            self.scanned += 1;
+            let end = self.scanned * FRAME;
+            if self.loudest >= SOUND_FLOOR && self.run >= needed && end >= self.min {
+                self.reset();
+                return Some(Cut::Keep(end));
+            }
+        }
+        if pending.len() < self.max {
+            return None;
+        }
+        // Only true silence is skipped, judged over the whole chunk, so soft
+        // speech still reaches the recognizer.
+        let silent = self.max >= FRAME
+            && pending[..self.max]
+                .iter()
+                .all(|sample| sample.abs() < QUIET_FLOOR);
+        self.reset();
+        Some(if silent {
+            Cut::Skip(self.max)
+        } else {
+            Cut::Keep(self.max)
+        })
+    }
+
+    /// Forget the scan, for a cut made elsewhere (a gap) or a new start.
+    pub(crate) fn reset(&mut self) {
+        self.scanned = 0;
+        self.loudest = 0.0;
+        self.run = 0;
+        self.sounds.clear();
+    }
 }
 
 /// Converts mono audio at the device rate to 16 kHz. Each output sample
@@ -340,6 +393,98 @@ impl Resampler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The pause rule as it was before it became `PauseCuts`: rescanned from
+    /// the start of the pending audio on every call.
+    fn stateless_cut(pending: &[f32], max: usize, min: usize) -> Option<Cut> {
+        let min = min.max(FRAME).min(max);
+        let limit = pending.len().min(max);
+        let needed = (PAUSE_MS as usize * SAMPLE_RATE / 1_000).div_ceil(FRAME);
+        let (mut loudest, mut run) = (0.0f32, 0);
+        let mut sounds: Vec<f32> = Vec::new();
+        for (index, frame) in pending[..limit].chunks_exact(FRAME).enumerate() {
+            let level = (frame.iter().map(|x| x * x).sum::<f32>() / FRAME as f32).sqrt();
+            loudest = loudest.max(level);
+            let typical = if sounds.is_empty() {
+                level
+            } else {
+                let mut sorted = sounds.clone();
+                sorted.sort_unstable_by(f32::total_cmp);
+                sorted[sorted.len() / 2]
+            };
+            if level < (typical * 0.1).max(QUIET_FLOOR) {
+                run += 1;
+            } else {
+                run = 0;
+            }
+            if level >= SOUND_FLOOR {
+                sounds.push(level);
+            }
+            let end = (index + 1) * FRAME;
+            if loudest >= SOUND_FLOOR && run >= needed && end >= min {
+                return Some(Cut::Keep(end));
+            }
+        }
+        if pending.len() < max {
+            return None;
+        }
+        let silent = pending[..max].iter().all(|s| s.abs() < QUIET_FLOOR);
+        Some(if silent {
+            Cut::Skip(max)
+        } else {
+            Cut::Keep(max)
+        })
+    }
+
+    #[test]
+    fn the_incremental_pause_rule_cuts_exactly_where_the_rescanning_one_did() {
+        // Speech of varying loudness, pauses of varying length, a thump, and
+        // a stretch of true silence, fed in irregular blocks.
+        let mut audio = Vec::new();
+        for i in 0..60usize {
+            let level = 0.02 + (i % 9) as f32 * 0.04;
+            audio.extend(
+                (0..(2_000 + (i * 733) % 30_000))
+                    .map(|n| level * if n % 2 == 0 { 1.0 } else { -0.8 }),
+            );
+            audio.extend(std::iter::repeat_n(0.0005, 800 + (i * 211) % 6_000));
+            if i % 13 == 0 {
+                audio.extend(std::iter::repeat_n(0.9, 300));
+            }
+            if i == 30 {
+                audio.extend(std::iter::repeat_n(0.0, 3 * SAMPLE_RATE));
+            }
+        }
+        for (min, max) in [
+            (SAMPLE_RATE, 3 * SAMPLE_RATE),
+            (SAMPLE_RATE, 10 * SAMPLE_RATE),
+        ] {
+            let (mut fed, mut size) = (0, 0);
+            let mut pending: Vec<f32> = Vec::new();
+            let mut cuts = PauseCuts::new(min, max);
+            let (mut incremental, mut rescanned) = (Vec::new(), Vec::new());
+            let mut reference: Vec<f32> = Vec::new();
+            while fed < audio.len() {
+                let len = [1, 333, 2_048, 160, 4_096, 17][size % 6].min(audio.len() - fed);
+                pending.extend_from_slice(&audio[fed..fed + len]);
+                reference.extend_from_slice(&audio[fed..fed + len]);
+                fed += len;
+                size += 1;
+                while let Some(cut) = cuts.next(&pending) {
+                    let (Cut::Keep(n) | Cut::Skip(n)) = cut;
+                    pending.drain(..n);
+                    incremental.push(cut);
+                }
+                while let Some(cut) = stateless_cut(&reference, max, min) {
+                    let (Cut::Keep(n) | Cut::Skip(n)) = cut;
+                    reference.drain(..n);
+                    rescanned.push(cut);
+                }
+            }
+            assert!(incremental.len() > 20);
+            assert_eq!(incremental, rescanned, "max {max}");
+        }
+    }
     use std::f32::consts::PI;
 
     fn tone(rate: u32, hz: f32, seconds: f32) -> Vec<f32> {
