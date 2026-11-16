@@ -79,6 +79,7 @@ function fixture({
   neverArm = false,
   noHello = false,
   beforeListening,
+  startupMs: startupOverride,
 } = {}) {
   if (api) effort = 'low';
   if (fixedModel) {
@@ -499,7 +500,7 @@ function fixture({
       },
     },
     processEvents: events,
-    startupMs: fixedModel ? 1000 : 100,
+    startupMs: startupOverride ?? (fixedModel ? 1000 : 100),
     releaseMs: 100,
     armingMs: 50,
     nativeReleaseMs: 50,
@@ -1367,12 +1368,14 @@ test('an approval after 181 s is not given: no marker, no provider opened, nothi
 });
 
 test('a real wait longer than the startup budget does not fail the run', async (t) => {
-  // startupMs is 1 s in this fixture; the owner approves after 1.3 s.
+  // A 2 s startup budget, and the owner approves after 2.5 s. The rest of
+  // startup after approval keeps a full 2 s on a busy test host.
   const { f, approvals } = await apiTake(t, {
     owned: false,
+    startupMs: 2000,
     onApproval(event) {
       if (event.state === 'waiting')
-        setTimeout(() => f.deliverEvaluator(reviewRow), 1300);
+        setTimeout(() => f.deliverEvaluator(reviewRow), 2500);
     },
   });
   const result = await f.take.done;
@@ -1381,7 +1384,7 @@ test('a real wait longer than the startup budget does not fail the run', async (
     approvals.map((e) => e.state),
     ['waiting', 'approved'],
   );
-  assert.ok(result.approval.waitMs >= 1300);
+  assert.ok(result.approval.waitMs >= 2500);
 });
 
 test('a startup failure before approval still stops the take, with no provider opened', async (t) => {
