@@ -18,6 +18,8 @@ const CODES = new Set([
   'invalid-reply',
   'provider',
   'cleanup',
+  'usage-limit',
+  'refusal',
 ]);
 export const gateFailure = (category) =>
   Object.assign(new Error(`Lab run stopped: ${category}.`), { category });
@@ -77,7 +79,7 @@ export function createLabOperationGate({
   const scopedRetirement = (lease, error) =>
     !!lease?.retired &&
     !terminal &&
-    ['cancelled', 'deadline'].includes(error?.category);
+    ['cancelled', 'deadline', 'refusal'].includes(error?.category);
   const notify = () => {
     for (const waiter of waiters) waiter();
   };
@@ -118,6 +120,11 @@ export function createLabOperationGate({
       return result;
     } catch (error) {
       if (scopedRetirement(lease, error)) throw gateFailure(lease.retired);
+      // A provider refusal ends only this scoped evaluator request.
+      if (lease.scoped && !terminal && safe(error).category === 'refusal') {
+        lease.retire('refusal');
+        throw gateFailure('refusal');
+      }
       stop(safe(error).category);
       throw safe(error);
     } finally {
@@ -199,6 +206,7 @@ export function createLabOperationGate({
         stop('protocol');
       }
     };
+    lease.retire = retire;
     const abort = () => (scoped ? retire('cancelled') : stop('cancelled'));
     operationSignal?.addEventListener('abort', abort, { once: true });
     lease.timer = setTimeout(

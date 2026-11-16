@@ -4,7 +4,12 @@ import { EventEmitter } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createLabNativeOwner } from './cue-lab-native-owner.mjs';
 const executable = '/fictional/TalkQTE.app/Contents/MacOS/talkqte';
-function setup({ armingMs = 100, releaseMs = 100, kill = true } = {}) {
+function setup({
+  armingMs = 100,
+  releaseMs = 100,
+  kill = true,
+  metadata = { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' },
+} = {}) {
   const child = new EventEmitter();
   Object.assign(child, {
     pid: 4242,
@@ -35,7 +40,7 @@ function setup({ armingMs = 100, releaseMs = 100, kill = true } = {}) {
     owner.start({
       runId: 'fictional-run',
       descriptorPath: '/fictional/private/descriptor.json',
-      metadata: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' },
+      metadata,
     });
   const timing = (step, extra = {}) =>
     callback({ event: 'dev_stop', step, run_id: 'fictional-run', ...extra });
@@ -235,4 +240,45 @@ test('capture-only rejects model metadata and launches with only Stop/run settin
     step: 'released',
   });
   assert.deepEqual(await stopping, { released: true });
+});
+
+test('the direct API route launches with the lab-api backend and its spend cap; the CLI route does not', async () => {
+  const api = setup({
+    metadata: {
+      provider: 'anthropic-api',
+      model: 'claude-opus-5-5',
+      effort: 'low',
+      spendCapMicroUsd: 1_000_000,
+    },
+  });
+  const starting = api.start();
+  api.timing('armed');
+  await starting;
+  assert.equal(api.environment.TALKQTE_DEV_CUE_BACKEND, 'lab-api');
+  assert.equal(api.environment.TALKQTE_DEV_LAB_PROVIDER, 'anthropic-api');
+  assert.equal(api.environment.TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD, '1000000');
+  // No credential of any kind reaches the native launch environment.
+  assert.equal(
+    Object.keys(api.environment).some((k) => /KEY|TOKEN|ANTHROPIC/.test(k)),
+    false,
+  );
+  const cli = setup();
+  const s2 = cli.start();
+  cli.timing('armed');
+  await s2;
+  assert.equal(cli.environment.TALKQTE_DEV_CUE_BACKEND, 'lab-subscription');
+  assert.equal(
+    Object.hasOwn(cli.environment, 'TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD'),
+    false,
+  );
+  // An API launch without a spend cap is refused before any process starts.
+  const missing = setup({
+    metadata: {
+      provider: 'anthropic-api',
+      model: 'claude-opus-5-5',
+      effort: 'low',
+    },
+  });
+  await assert.rejects(missing.start(), { category: 'protocol' });
+  assert.equal(missing.environment, undefined);
 });

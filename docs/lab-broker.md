@@ -70,19 +70,19 @@ Session, request, context and snapshot revisions are canonical decimal strings
 within `u64`, preserving exact values in JavaScript. Native elapsed milliseconds
 are finite safe JSON numbers.
 
-| Direction    | Type           | Additional fields                                                                                                        |
-| ------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| App → broker | `hello`        | `nonce`, `expectedProvider`, `expectedModel`, `expectedEffort`                                                           |
-| Broker → app | `ready`        | exact `provider`, `model`, `effort`, `dispatchBudgetKind:"cliDispatchAttempts"`, `dispatchLimit`, `dispatchesUsed`       |
-| App → broker | `evaluate`     | `requestId`, `contextRevision`, `budgetMs` (1–10,000), `input` object                                                    |
-| Broker → app | `result`       | same request identity, validated `value`, `elapsedMs`, numeric `usage`                                                   |
-| App → broker | `settled`      | same request identity, `verdict` (`current`, `staleSuccess`, `expired`, `failed`), optional fixed `code` only on failure |
-| App → broker | `cancel`       | fixed control `reason`, optional active request identity; `deadline` always carries it                                   |
-| Broker → app | `failed`       | request identity and fixed `code`                                                                                        |
-| Broker → app | `terminal`     | fixed `reason`, including while no evaluation is pending                                                                 |
-| Broker → app | `clock_probe`  | `probeId`                                                                                                                |
-| App → broker | `clock_sample` | same `probeId`, `nativeSessionElapsedMs`                                                                                 |
-| App → broker | `cue_state`    | `observation` described below                                                                                            |
+| Direction    | Type           | Additional fields                                                                                                                                                                                                                          |
+| ------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| App → broker | `hello`        | `nonce`, `expectedProvider`, `expectedModel`, `expectedEffort`                                                                                                                                                                             |
+| Broker → app | `ready`        | exact `provider`, `model`, `effort`, `dispatchBudgetKind` (`apiRequests` for `anthropic-api`, else `cliDispatchAttempts`), `dispatchLimit`, `dispatchesUsed`; for `anthropic-api` only, integer `spendCapMicroUsd` and `spendUsedMicroUsd` |
+| App → broker | `evaluate`     | `requestId`, `contextRevision`, `budgetMs` (1–10,000), `input` object                                                                                                                                                                      |
+| Broker → app | `result`       | same request identity, validated `value`, `elapsedMs`, numeric `usage`                                                                                                                                                                     |
+| App → broker | `settled`      | same request identity, `verdict` (`current`, `staleSuccess`, `expired`, `failed`), optional fixed `code` only on failure                                                                                                                   |
+| App → broker | `cancel`       | fixed control `reason`, optional active request identity; `deadline` always carries it                                                                                                                                                     |
+| Broker → app | `failed`       | request identity and fixed `code`                                                                                                                                                                                                          |
+| Broker → app | `terminal`     | fixed `reason`, including while no evaluation is pending                                                                                                                                                                                   |
+| Broker → app | `clock_probe`  | `probeId`                                                                                                                                                                                                                                  |
+| App → broker | `clock_sample` | same `probeId`, `nativeSessionElapsedMs`                                                                                                                                                                                                   |
+| App → broker | `cue_state`    | `observation` described below                                                                                                                                                                                                              |
 
 The evaluator input is the JSON **object** parsed from Rust's
 `Request::prompt_input()`: bounded transcript `events`, `existingCue`, optional
@@ -109,7 +109,7 @@ request preserves that ownership ordering.
 
 ### Request outcomes and what stays terminal
 
-Each `evaluate` ends in exactly one of these ways. The first four retire only
+Each `evaluate` ends in exactly one of these ways. The first five retire only
 that request; the run, provider and dispatch budget continue.
 
 - **Settled `current` or `staleSuccess`:** native validated the result in time.
@@ -121,6 +121,9 @@ that request; the run, provider and dispatch budget continue.
 - **Native deadline:** native sends `cancel` with reason `deadline` and the
   request identity, while the provider runs or while a sent result awaits
   settlement. The broker retires the request without a reply.
+- **Provider refusal (direct API route only):** the model refused; the broker
+  sends `failed` with code `refusal` for that request only. Native records a
+  non-decision and sends nothing more for that request.
 
 After a `result` is sent, native may settle or retire the request until one
 second after the request's deadline (the broker allows a further 250 ms for
@@ -154,7 +157,7 @@ native's own session call limit bounds the rest.
 `evaluationSummary` reports content-free event counts, not a partition:
 `requested` (evaluates seen), `dispatched` (provider calls started),
 `retiredBeforeDispatch`, `resultsSent` with their fixed actions,
-`deadlineByBroker`, `deadlineByNative` (a sent result can later be retired by
+`deadlineByBroker`, `refusals`, `deadlineByNative` (a sent result can later be retired by
 native) and settlement `verdicts`.
 
 **Native timing fields.** In lab mode, native's `evaluation_result` log row

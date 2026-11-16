@@ -5,6 +5,7 @@ import { createLabNativeOwner } from './cue-lab-native-owner.mjs';
 import { createLabRun } from './cue-lab-run.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
 import { isLabMedia } from './cue-lab-media.mjs';
+import { isAnthropicModel } from './cue-lab-anthropic-core.mjs';
 
 const required = (condition) => {
   if (!condition) throw gateFailure('protocol');
@@ -23,10 +24,14 @@ export function createPreparedTake(options) {
 export function assertFixedModelTakeOptions(options) {
   required(
     options?.body === undefined &&
-      options?.settings?.provider === 'codex' &&
-      options.settings.model === 'gpt-6.1-sol' &&
-      // Exactly the efforts the signed native lab build accepts.
-      ['low', 'medium'].includes(options.settings.effort) &&
+      // The Codex subscription route at the efforts the signed native lab
+      // build accepts, or the direct API route at its listed models and low.
+      (options?.settings?.provider === 'codex'
+        ? options.settings.model === 'gpt-6.1-sol' &&
+          ['low', 'medium'].includes(options.settings.effort)
+        : options?.settings?.provider === 'anthropic-api' &&
+          isAnthropicModel(options.settings.model) &&
+          options.settings.effort === 'low') &&
       options.settings.maxCalls === 20 &&
       options.stopAfterS === 110 &&
       // Approved fictional media (fixed MP4 or a reviewed per-run manifest)

@@ -170,7 +170,12 @@ export async function openLabBroker({
     provider &&
       typeof provider.request === 'function' &&
       typeof provider.close === 'function' &&
-      ['codex', 'claude-code'].includes(provider.metadata?.provider) &&
+      ['codex', 'claude-code', 'anthropic-api'].includes(
+        provider.metadata?.provider,
+      ) &&
+      // The API route declares its per-run spend cap; the CLIs never do.
+      (provider.metadata.provider === 'anthropic-api') ===
+        Number.isSafeInteger(provider.metadata.spendCapMicroUsd) &&
       text(provider.metadata.model, 100) &&
       text(provider.metadata.effort, 20) &&
       // The adapter's own deadline is terminal, so it must outlast the largest
@@ -242,6 +247,7 @@ export async function openLabBroker({
     resultsSent: 0,
     deadlineByBroker: 0,
     deadlineByNative: 0,
+    refusals: 0,
     verdicts: { current: 0, staleSuccess: 0, expired: 0, failed: 0 },
     resultActions: { show: 0, quiet: 0, resolved: 0, withdraw: 0 },
   };
@@ -442,13 +448,16 @@ export async function openLabBroker({
       evaluations.deadlineByNative++;
       return;
     }
-    evaluations.deadlineByBroker++;
+    // A provider refusal is a recorded non-decision for this request only.
+    const code = reason === 'refusal' ? 'refusal' : 'deadline';
+    if (code === 'refusal') evaluations.refusals++;
+    else evaluations.deadlineByBroker++;
     if (authenticated && socket && !socket.destroyed)
       try {
         send('failed', {
           requestId: operation.requestId,
           contextRevision: operation.contextRevision,
-          code: 'deadline',
+          code,
         });
       } catch {
         socket.destroy();
@@ -566,9 +575,20 @@ export async function openLabBroker({
         provider: provider.metadata.provider,
         model: provider.metadata.model,
         effort: provider.metadata.effort,
-        dispatchBudgetKind: 'cliDispatchAttempts',
+        // One API dispatch is exactly one HTTP request; a CLI dispatch is a
+        // process attempt that may hide further requests.
+        dispatchBudgetKind:
+          provider.metadata.provider === 'anthropic-api'
+            ? 'apiRequests'
+            : 'cliDispatchAttempts',
         dispatchLimit: maxCalls,
         dispatchesUsed: gate.dispatchesUsed,
+        ...(provider.metadata.provider === 'anthropic-api'
+          ? {
+              spendCapMicroUsd: provider.metadata.spendCapMicroUsd,
+              spendUsedMicroUsd: provider.spentMicroUsd ?? 0,
+            }
+          : {}),
       });
       readyResolve();
       return;

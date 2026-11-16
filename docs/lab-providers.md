@@ -131,3 +131,19 @@ The next acceptance check is a separately authorized integrated fictional run:
 incremental generated speech, actual model cue-versus-silence decisions, timely
 companion paint and bounded window-only recording. Provider smoke alone does not
 meet that check. README needs no change for these internal lab modules.
+
+## Direct Anthropic API route
+
+`anthropic-api` sends one cue evaluation per request to the Anthropic Messages API with the owner's own API key. It exists only for the development lab evaluator; the subscription routes above are unchanged. The native app's support for it (backend `lab-api`, a per-run export confirmation) is a separate change.
+
+**What leaves the device, per request:** the recent fictional transcript lines the broker received for that evaluation (at most 32 short lines), the existing cue if one is on screen, the optional user name and earlier cue texts, a fixed system prompt and a fixed reply schema. Nothing else: no audio, notes, history, files or identifiers beyond those line ids. The reply is one decision. Requests go only to `https://api.anthropic.com`.
+
+**Models and settings:** exactly `claude-opus-5-5` (adaptive thinking), `claude-sonnet-5-5` (thinking `between_tools`) or `claude-haiku-5-5` (adaptive), always at effort `low`; nothing else is accepted. The client uses the pinned official SDK with no retries, a timeout from the request budget, logging off and streaming with abort. No sampling settings or fallbacks are sent. The system prompt is byte-stable; the user name and earlier cues travel only in the user message. Lengths, at most four sources and source membership are still checked client-side.
+
+**Key handling:** the key is read only from `~/.config/talkqte-lab/anthropic.env`, a `0600` file in a `0700` directory owned by the current user and outside any repository or temporary directory, holding exactly `TALKQTE_LAB_ANTHROPIC_KEY=` with a Console API key (`sk-ant-api…` or `sk-ant-usr-…`; admin and OAuth credentials are refused). It goes to a per-run worker process over stdin only, never in arguments, environment, logs, evidence or errors. Any `ANTHROPIC_*` variable in the environment is refused as an ambient credential.
+
+**Limits:** one dispatch is exactly one HTTP request, counted by the shared gate against the dispatch cap. Before each request the adapter refuses if the spend so far plus that request's worst case could exceed the per-run cap ($1.00 for Opus, $0.25 for Sonnet and Haiku), which ends the run as a usage limit; spend is computed from the reported token usage with a pinned price table. A refusal from the model (`stop_reason: refusal`) is a recorded non-decision for that request only; the run continues. Authentication errors, rate limits, a reply from a different model and invalid replies end the run.
+
+**Evidence:** per call, content-free receipts keep the time to first byte and first token, the stop reason, a refusal category, token usage and the computed cost. No prompt, reply or key text is kept.
+
+Tests drive the adapter with a fake fetch or a loopback stand-in endpoint and a dummy key; no test reaches the network.

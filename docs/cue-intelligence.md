@@ -48,7 +48,14 @@ Official documentation checked 8 November 2026:
 
 For a subscription-only experiment, verify the active login and billing mode without exposing credentials. Keep extra/on-demand usage disabled and stop at limits. Claude Code can use an API key from its environment instead of subscription login; its documented `--bare` mode does not use subscription credentials. Do not use that mode for this experiment or silently fall back to API billing. Keep this setup isolated from unrelated development credentials and settings. Subscription usage is finite and shared with other work; listed token rates are not a promise of unlimited or free operation.
 
-Use the vendor's normal sign-in flow and unmodified CLI. Do not extract session tokens or imitate private endpoints. A local CLI still sends selected context to a hosted model; it does not establish on-device inference. Begin with a bounded, user-started fictional replay, disable unnecessary tools and integrations, and verify local session storage and provider data settings before considering real conversations. Direct inference APIs and SDK-based product integration are deferred under the current no-API preference.
+Use the vendor's normal sign-in flow and unmodified CLI. Do not extract session tokens or imitate private endpoints. A local CLI still sends selected context to a hosted model; it does not establish on-device inference. Begin with a bounded, user-started fictional replay, disable unnecessary tools and integrations, and verify local session storage and provider data settings before considering real conversations. SDK-based product integration remains deferred.
+
+### Owner decision, 16 November 2026: direct API for the lab
+
+The owner decided to use the Anthropic Messages API directly for the development lab's live cue evaluator, alongside the subscription route. Offline measurements found that a subscription CLI started per request could not answer within the native 8-second evaluator deadline, and that the Claude Code subscription route was refused by a usage limit. The direct API answered in about 2 seconds in a 25-call fictional benchmark.
+
+- **Scope:** fictional lab playback only, under the [lab API provider](lab-providers.md#direct-anthropic-api-route) rules: the owner's own API key, billed per token, one request per check, no retries, no other model, and a per-run spend cap.
+- **Not a production runtime.** This does not select a hosted provider for the product, change the local-first plan, or imply on-device inference. Any product use of hosted processing still needs its own explicit, revocable opt-in and a processing decision.
 
 The [processing and permission proposal](processing-plan.md) records the 10 November provider-documentation check, concrete source scope, failure behavior and dependency order. It enables no model or app inference.
 

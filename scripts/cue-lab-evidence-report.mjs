@@ -50,6 +50,8 @@ const OUTCOMES = new Set([
   'failure',
   'stale',
   'cancelled',
+  // A provider refusal on the direct API route: a recorded non-decision.
+  'refused',
   'unknown',
 ]);
 const LABELS = new Set([
