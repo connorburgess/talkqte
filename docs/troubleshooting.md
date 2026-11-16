@@ -28,7 +28,7 @@ If a problem is not listed, the [feedback route](#reporting-a-problem) at the en
 | "A live session is already running."                                  | Start was chosen twice.                                                                                      | Nothing to do; the first session continues.                                                                                                     |
 | The session ends by itself soon after starting                        | Microphone access was refused or the device failed; a live session never runs with nothing listening.        | See the microphone message shown beside it, fix that, then start again.                                                                         |
 | Lines appear several seconds late                                     | Speech is transcribed in chunks of up to 3 seconds, ending early at a pause, and then recognized.            | Expected in this version; the measured delay on one Mac is in [local transcription](local-transcription.md#pause-based-chunks).                 |
-| Lines are wrong or missing                                            | The `tiny.en` model is small and English-only, and recognition in real rooms has not been checked.           | Expected limitation. Record what was said and what appeared, with the setup, when reporting it.                                                 |
+| Lines are wrong or missing                                            | The `base.en` model is English-only, and recognition in real rooms has not been checked.                     | Expected limitation. Record what was said and what appeared, with the setup, when reporting it.                                                 |
 
 ## Speech model download
 

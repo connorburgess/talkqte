@@ -204,6 +204,13 @@ support and participation/listening evidence remain release blockers.
 
 ## Gap-aware transcription chunks — 12 November 2026
 
+Update, 16 November 2026: the native capture path's `NativeChunker` no longer
+cuts every three seconds. A chunk ends at the first 200 ms pause after one
+second of audio, or after ten seconds of speech, by the microphone path's pause
+rule, and a ten-second chunk of true silence is skipped. A cut inside a block
+divides that block's clock mapping at one interpolated boundary. The offline
+`into_chunks` assembler described below keeps fixed three-second chunks.
+
 `SessionReader::into_chunks` consumes the mapped reader and accepts only an
 explicit 16 kHz mono format. Other rates and channel layouts are refused; no
 samples are resampled, downmixed or relabelled. This is worker-side preparation

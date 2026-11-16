@@ -91,7 +91,7 @@ On 14 November 2026 a rebuild signed this way kept the grant.
 The model never goes inside the repository. Use one of these:
 
 - **In the app:** Settings → speech model → Download. It is saved as
-  `~/Library/Application Support/com.talkqte.desktop/models/ggml-tiny.en.bin`
+  `~/Library/Application Support/com.talkqte.desktop/models/ggml-base.en.bin`
   and checked against its pinned SHA-256 before use.
 - **A file you already have:** set `TALKQTE_WHISPER_MODEL` to its absolute
   path when launching. That file is not checksum-checked.
@@ -351,9 +351,9 @@ What it can and cannot tell you:
   recording shows that.
 - `cue_published` is written whether or not the companion window is visible.
   Keep the companion shown during a run.
-- **Alignment without transcription.** Audio is handed over in chunks of
-  about 3 seconds, so an `audio_received` line is written up to 3 seconds
-  after the sound in it. Do not use that line's `wall_ms`. Instead, take the
+- **Alignment without transcription.** Application audio is handed over in
+  chunks of 1 to 10 seconds that end at a pause, so an `audio_received` line
+  is written up to 10 seconds after the sound in it. Do not use that line's `wall_ms`. Instead, take the
   `session` `started` event's `wall_ms − elapsed_ms`, the wall time of
   session time zero, and add the `start_ms` of the first `application` chunk
   with `audible: true`. That is the wall time at which that chunk began; the

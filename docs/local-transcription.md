@@ -8,20 +8,20 @@ The optional `local-whisper` Cargo feature adds `LocalWhisper`, a [Transcriber](
 
 `Engine::live()` creates a session with no scripted lines, for transcript input through `Engine::ingest`.
 
-The app looks for the model at `TALKQTE_WHISPER_MODEL`, or at `models/ggml-tiny.en.bin` in its data folder, where **Download speech model** in Settings puts it after checking its SHA-256. **Start live session** loads it before opening the microphone, so a missing or unreadable model is reported without starting capture. The capture callback feeds the [audio tap](architecture.md); a runner thread moves chunks of 1–3 seconds, cut at pauses where possible, to the worker every 250 ms and the worker's lines go to `Engine::ingest`. Stop releases the microphone first, then transcribes what was queued, waiting up to 10 seconds. If the microphone is refused or fails, the session ends.
+The app looks for the model at `TALKQTE_WHISPER_MODEL`, or at `models/ggml-base.en.bin` in its data folder, where **Download speech model** in Settings puts it after checking its SHA-256. **Start live session** loads it before opening the microphone, so a missing or unreadable model is reported without starting capture. The capture callback feeds the [audio tap](architecture.md); a runner thread moves chunks of 1–3 seconds, cut at pauses where possible, to the worker every 250 ms and the worker's lines go to `Engine::ingest`. Stop releases the microphone first, then transcribes what was queued, waiting up to 10 seconds. If the microphone is refused or fails, the session ends.
 
 ## Run the check
 
 Use a fictional synthetic clip only: 16 kHz, mono, 16-bit PCM WAV, at most 30 seconds. Keep the model and clip outside the repository.
 
-Download the English-only `tiny.en` model from the [upstream whisper.cpp model repository](https://huggingface.co/ggerganov/whisper.cpp) and check it. The reviewed SHA-256 is `921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f`.
+Download the English-only `base.en` model from the [upstream whisper.cpp model repository](https://huggingface.co/ggerganov/whisper.cpp), at the revision the app pins, and check it. The reviewed SHA-256 is `a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002`.
 
 ```sh
 mkdir -p "$HOME/.local/share/talkqte-models"
 curl --fail --location \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin \
-  --output "$HOME/.local/share/talkqte-models/ggml-tiny.en.bin"
-shasum -a 256 "$HOME/.local/share/talkqte-models/ggml-tiny.en.bin"
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en.bin \
+  --output "$HOME/.local/share/talkqte-models/ggml-base.en.bin"
+shasum -a 256 "$HOME/.local/share/talkqte-models/ggml-base.en.bin"
 ```
 
 On macOS, make a fictional clip with a system voice and convert it:
@@ -33,7 +33,7 @@ afconvert -f WAVE -d LEI16@16000 -c 1 /tmp/talkqte-clip.aiff /tmp/talkqte-clip.w
 
 ```sh
 cd src-tauri
-TALKQTE_WHISPER_MODEL="/absolute/path/to/ggml-tiny.en.bin" \
+TALKQTE_WHISPER_MODEL="/absolute/path/to/ggml-base.en.bin" \
 TALKQTE_WHISPER_CLIP="/absolute/path/to/synthetic.wav" \
   cargo test --features local-whisper a_synthetic_clip_is_transcribed_locally -- --nocapture
 ```
@@ -54,7 +54,7 @@ With `--end-at-ms`, the session ends at that moment. The check fails unless audi
 ```sh
 cd src-tauri
 cargo run --features local-whisper --example replay_clip -- \
-  --model "$HOME/.local/share/talkqte-models/ggml-tiny.en.bin" \
+  --model "$HOME/.local/share/talkqte-models/ggml-base.en.bin" \
   --clip /tmp/talkqte-meeting.wav --chunk-ms 5000 [--end-at-ms 10000]
 ```
 
@@ -156,6 +156,25 @@ The audio tap can end a chunk at the first pause after a minimum length instead 
 Pause cuts showed the question about 0.3 s sooner, with about the same median delay; the 95th percentile was about 0.15 s worse, and the withdrawal came about 0.2 s later. This clip's speakers rarely pause within 3 seconds, so most chunks still reach the maximum. An earlier version that also trimmed silence before speech lowered the median delay to 2.3 s but showed the question 1.2 s later, because each window then started at the speech and ended later; it was dropped. Whether pause cuts reduce cut words was not scored.
 
 These figures describe one clean synthetic voice pair on one Mac. They do not include capture, the companion window, the other side of a call, noise, or other hardware, and they are inputs to the budget proposal, not budgets. It does not measure accuracy on real meetings, noisy audio, overlapping speakers, sustained sessions, or other hardware, and it is not a latency or resource budget.
+
+## Application audio: model and chunks
+
+Measured offline on 16 November 2026 with the app's own whisper.cpp build and decode settings (greedy, English, 4 threads, no context between chunks). Inputs were two fictional generated meetings: a call-paced four-person one (100 s, 24 lines, about 0.6 s between turns) and a slower three-person one (101 s, 12 lines). Each was run from the source media's audio and from a lab run's screen recording of it, at 16 kHz mono. Word errors are counted against each meeting's script. The machine was busy with other work, so times are upper bounds.
+
+| Recording of the run | Model | Chunks | Word errors, faster / slower meeting | Line end to text, median / max | Processor, share of one core |
+| --- | --- | --- | --- | --- | --- |
+| The app as it ran | `tiny.en` | Fixed 3 s | 30.3% / 15.7% | Not measured | Not measured |
+| Offline replay | `tiny.en` | Fixed 3 s | 22.6% / 11.0% | 0.9 / 3.1 s | About 13% |
+| Offline replay | `tiny.en` | Pauses, 1–10 s | 14.5% / 2.9% | 0.4 / 0.4 s | About 14% |
+| Offline replay | `base.en` | Fixed 3 s | 17.6% / 14.5% | 1.0 / 3.2 s | About 21% |
+| Offline replay | `base.en` | Pauses, 1–10 s | 11.8% / 2.9% | 0.5 / 0.5 s | About 26–27% |
+
+- Ending chunks at a pause gave most of the gain, and text arrives sooner because a chunk closes when the speaker pauses instead of at the next 3-second mark. The source media and the screen recording scored about the same, so capture was not the main loss.
+- `small.en` was no better than `base.en` with pause chunks, at about three times the processor time and 790 MB. Overlapping re-decoded windows were worse on every count.
+- Remaining errors are mostly names and sound-alikes, such as a name heard as a common word.
+- `base.en` peaked at about 336 MB in the replay tool, against 222 MB for `tiny.en`. Its processor time is over the [15% budget](budgets.md); the lowest supported Mac has not been measured.
+
+The application-audio path now uses `base.en` with 1–10 s pause chunks; the microphone path keeps its 1–3 s pause chunks and also loads `base.en`.
 
 ## Still needed
 
