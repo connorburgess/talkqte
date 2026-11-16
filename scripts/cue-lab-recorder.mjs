@@ -95,6 +95,7 @@ function recorder({
     pid,
     used = false,
     matched = false,
+    geometry = null,
     accepted = false,
     final = null,
     invalid = false,
@@ -195,6 +196,34 @@ function recorder({
           ),
         );
       requireThat(value.companion.rule === 'exact pid/window');
+      // Where each window sits and the picture's size and scale, as numbers
+      // only, so a run can locate a region (the player's captions) in the
+      // recording.
+      const rect = (r) =>
+        ['x', 'y', 'width', 'height'].every((k) => Number.isFinite(r?.[k])) &&
+        r.width > 0 &&
+        r.height > 0;
+      if (value.emulator.frame !== undefined || value.picture !== undefined) {
+        requireThat(
+          rect(value.emulator.frame) &&
+            rect(value.companion.frame) &&
+            integer(value.picture?.width) &&
+            integer(value.picture?.height) &&
+            Number.isFinite(value.picture.scale) &&
+            value.picture.scale > 0,
+        );
+        const pick = (r) =>
+          Object.freeze({ x: r.x, y: r.y, width: r.width, height: r.height });
+        geometry = Object.freeze({
+          emulator: pick(value.emulator.frame),
+          companion: pick(value.companion.frame),
+          picture: Object.freeze({
+            width: value.picture.width,
+            height: value.picture.height,
+            scale: value.picture.scale,
+          }),
+        });
+      }
       matched = true;
     } else if (value.event === 'frame_accepted') {
       requireThat(
@@ -290,6 +319,7 @@ function recorder({
             audioBuffers: final.audioBuffers,
             windowsMoved: final.windowsMoved ?? null,
             windowsResized: final.windowsResized ?? null,
+            geometry,
           })
         : null;
     },
