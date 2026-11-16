@@ -133,7 +133,7 @@ test('strict Swift source gates exact identities before streams and readiness af
   );
   assert.ok(
     source.indexOf('if strictWindows {') <
-      source.indexOf('let pictureStream ='),
+      source.indexOf('let emulatorStream ='),
   );
   assert.match(
     source,
@@ -142,7 +142,18 @@ test('strict Swift source gates exact identities before streams and readiness af
   assert.match(source, /&& writer.status == \.writing else/);
   assert.match(
     source,
-    /video\.append\(buffer\) \{\s*frames \+= 1\s*reportReady\(\)/,
+    /adaptor\.append\(output, withPresentationTime: time\) \{\s*lastTime = time\s*frames \+= 1\s*reportReady\(\)/,
+  );
+  // Each window is captured on its own, never through a display filter
+  // that shows only the active Space (RunB07's black recording).
+  assert.match(source, /SCContentFilter\(desktopIndependentWindow: emulator\)/);
+  assert.match(
+    source,
+    /SCContentFilter\(desktopIndependentWindow: companion\)/,
+  );
+  assert.doesNotMatch(
+    source,
+    /SCContentFilter\(display: display, including: \[emulator, companion\]\)/,
   );
   assert.ok(
     source.indexOf('try await soundStream.startCapture()') <
