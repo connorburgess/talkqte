@@ -86,6 +86,7 @@ if (new URLSearchParams(location.search).has('processor'))
     ...processing,
     ...permissionFixture.configuration(
       new URLSearchParams(location.search).has('hosted'),
+      new URLSearchParams(location.search).has('audio'),
     ),
   };
 async function completeCaptureStop() {
@@ -154,6 +155,9 @@ const calls: string[] = [];
 const delayed = new URLSearchParams(location.search).has('delay-microphone');
 // With ?live, the build reports local transcription as available.
 const liveAvailable = new URLSearchParams(location.search).has('live');
+// With ?cloud, the launch selected cloud transcription and its settings are
+// usable; no local model is involved.
+const cloudLaunch = new URLSearchParams(location.search).has('cloud');
 // With ?model, the build has local transcription but no model yet.
 const modelBuild = new URLSearchParams(location.search).has('model');
 let model: ModelStatus = {
@@ -447,8 +451,9 @@ mockIPC(
         await sendModel({ status: 'missing', message: null });
         return;
       case 'live_status': {
-        const value: LiveStatus =
-          liveAvailable || model.status === 'installed'
+        const value: LiveStatus = cloudLaunch
+          ? { available: true, reason: null, transcription: 'Deepgram' }
+          : liveAvailable || model.status === 'installed'
             ? { available: true, reason: null }
             : {
                 available: false,

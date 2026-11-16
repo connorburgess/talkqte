@@ -46,7 +46,11 @@ import {
 } from './components/PanelDivider';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
 import { useCaptureControl } from './lib/useCaptureControl';
-import { transcribedWhere, transcriptionStopText } from './lib/transcription';
+import {
+  transcribedWhere,
+  transcriptionDropText,
+  transcriptionStopText,
+} from './lib/transcription';
 import {
   microphoneNotCapturing,
   sourceOnlyApplication,
@@ -852,8 +856,10 @@ function Notebook() {
   // tests/fixtures/native-microphone.ts); the desktop engine never sends it,
   // so every `simulated` branch is unreachable in the app.
   const simulated = !!state.simulated && state.status === 'running';
+  // A launch that transcribes in the cloud needs no speech model.
   const modelNeeded =
-    model?.status === 'missing' || model?.status === 'downloading';
+    !liveStatus?.transcription &&
+    (model?.status === 'missing' || model?.status === 'downloading');
   const holdCue = () => {
     if (!state.cue) return;
     void run(() => bridge.command('inspect_cue', { id: state.cue!.id }));
@@ -984,7 +990,7 @@ function Notebook() {
                   <SetupCard
                     name={state.userName}
                     focus={state.focus}
-                    model={model}
+                    model={liveStatus?.transcription ? null : model}
                     items={contextItems}
                     busy={busy}
                     onGoTo={goToSetup}
@@ -1215,7 +1221,9 @@ function Notebook() {
                   </h1>
                   <p>
                     {preparing
-                      ? 'Local speech model · capture status shown above'
+                      ? liveStatus?.transcription
+                        ? 'Starting · capture status shown above'
+                        : 'Local speech model · capture status shown above'
                       : finishing
                         ? capture.state?.source?.mayBeCapturing &&
                           microphoneNotCapturing(microphone.state)
@@ -1251,6 +1259,11 @@ function Notebook() {
                   {transcriptionStopText(state.transcription) && (
                     <p role="alert">
                       {transcriptionStopText(state.transcription)}
+                    </p>
+                  )}
+                  {transcriptionDropText(state.transcription) && (
+                    <p role="status">
+                      {transcriptionDropText(state.transcription)}
                     </p>
                   )}
                 </div>
@@ -1951,22 +1964,38 @@ function Notebook() {
                 <h2 id="live-transcription" tabIndex={-1}>
                   Live transcription
                 </h2>
-                <p>
-                  Start live session in the notebook to get questions from what
-                  your microphone hears. A speech model transcribes on this
-                  device. Audio is not recorded, and other apps’ audio is not
-                  captured. The transcript stays in memory until you start
-                  another session or close the app; it is never saved, exported,
-                  or sent.
-                </p>
+                {liveStatus?.transcription ? (
+                  <p>
+                    Start live session in the notebook to get questions from
+                    what your microphone hears. This development launch sends
+                    the session’s audio to {liveStatus.transcription} for
+                    transcription once you enable cue processing for that
+                    session; nothing is transcribed on this device, and nothing
+                    is sent before then. TalkQTE does not record audio. The
+                    transcript stays in memory until you start another session
+                    or close the app; it is never saved or exported.
+                  </p>
+                ) : (
+                  <p>
+                    Start live session in the notebook to get questions from
+                    what your microphone hears. A speech model transcribes on
+                    this device. Audio is not recorded, and other apps’ audio is
+                    not captured. The transcript stays in memory until you start
+                    another session or close the app; it is never saved,
+                    exported, or sent.
+                  </p>
+                )}
                 <p className="small muted" role="status">
                   {!liveStatus
                     ? 'Checking…'
                     : liveStatus.available
-                      ? 'Ready on this device.'
+                      ? liveStatus.transcription
+                        ? `Ready. Audio goes to ${liveStatus.transcription} only after you enable cue processing for a session.`
+                        : 'Ready on this device.'
                       : liveStatus.reason}
                 </p>
                 {model &&
+                  !liveStatus?.transcription &&
                   ['missing', 'downloading', 'installed'].includes(
                     model.status,
                   ) && (
@@ -2032,10 +2061,13 @@ function Notebook() {
                 <h2>Your data in this prototype</h2>
                 <p>
                   The optional microphone check retains no audio and does not
-                  transcribe. A live session’s transcript is kept in memory only
-                  and cannot be exported. Notes exist in memory until you close
-                  the app. Exports contain exactly the text you review and are
-                  saved to the location you choose.
+                  transcribe. With cloud transcription or cue processing on,
+                  audio goes to the named transcription service and recent lines
+                  to the cue provider, for that session only. A live session’s
+                  transcript is kept in memory only and cannot be exported.
+                  Notes exist in memory until you close the app. Exports contain
+                  exactly the text you review and are saved to the location you
+                  choose.
                 </p>
               </div>
               <ShieldCheck size={24} />

@@ -203,6 +203,8 @@ export interface ModelStatus {
 export interface LiveStatus {
   available: boolean;
   reason: string | null;
+  /** The cloud service this launch transcribes with, when one is selected. */
+  transcription?: string;
 }
 export function clockTime(ms: number) {
   const seconds = Math.floor(ms / 1000);

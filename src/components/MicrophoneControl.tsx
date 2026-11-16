@@ -87,8 +87,8 @@ export function MicrophoneControl({
         {preparing ? (
           <p role="status">
             {cancelling
-              ? 'Start cancelled. Waiting for model preparation to finish before you can start again.'
-              : 'Preparing local transcription. Cancel start to prevent capture.'}
+              ? 'Start cancelled. Waiting for the start to finish before you can start again.'
+              : 'Starting the live session. Cancel start to prevent capture.'}
           </p>
         ) : (
           <p>
