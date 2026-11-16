@@ -695,22 +695,21 @@ mod tests {
                 _ => None,
             })
         };
-        let good = parse(
-            Some("deepgram"),
-            Some("/fictional/run/stt-token"),
-            Some("5"),
-        )
-        .unwrap();
+        // Absolute on every platform; the file itself is never read here.
+        let absolute = std::env::temp_dir().join("fictional-stt-token");
+        let absolute = absolute.to_str().unwrap();
+        let good = parse(Some("deepgram"), Some(absolute), Some("5")).unwrap();
         assert_eq!(good.cap(), Duration::from_secs(300));
+        let file = Some(absolute);
         for (backend, file, cap) in [
-            (Some("Deepgram"), Some("/f/t"), Some("5")),
+            (Some("Deepgram"), file, Some("5")),
             (Some("deepgram"), Some("relative/t"), Some("5")),
             (Some("deepgram"), None, Some("5")),
-            (Some("deepgram"), Some("/f/t"), None),
-            (Some("deepgram"), Some("/f/t"), Some("0")),
-            (Some("deepgram"), Some("/f/t"), Some("61")),
-            (Some("deepgram"), Some("/f/t"), Some("05")),
-            (Some("deepgram"), Some("/f/t"), Some("1.5")),
+            (Some("deepgram"), file, None),
+            (Some("deepgram"), file, Some("0")),
+            (Some("deepgram"), file, Some("61")),
+            (Some("deepgram"), file, Some("05")),
+            (Some("deepgram"), file, Some("1.5")),
         ] {
             assert_eq!(parse(backend, file, cap), Err(SttFailure::Settings));
         }
