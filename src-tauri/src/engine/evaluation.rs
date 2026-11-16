@@ -357,7 +357,7 @@ impl Engine {
             Failure::Unreachable => EvaluationIssue::Unreachable,
             // Only the lab can refuse, and there the request is skipped
             // before this point; anywhere else it is an invalid reply.
-            Failure::Refused => EvaluationIssue::InvalidReply,
+            Failure::Refused | Failure::OutputLimit => EvaluationIssue::InvalidReply,
             // Superseded work and controls are not provider outages.
             Failure::Busy | Failure::Cancelled | Failure::Stale
                 if self.evaluation.as_ref().is_some_and(|s| s.lab.is_some()) =>
@@ -670,7 +670,7 @@ impl Engine {
             use crate::cue_evaluator::Settlement;
             let verdict = match &result {
                 Err(Failure::Expired) => Settlement::Expired,
-                Err(Failure::Refused) => Settlement::Retired,
+                Err(Failure::Refused | Failure::OutputLimit) => Settlement::Retired,
                 Err(_) => Settlement::Failed,
                 Ok(_) if applies => Settlement::Current,
                 Ok(_) => Settlement::StaleSuccess,
@@ -682,10 +682,17 @@ impl Engine {
                     // The link retired only this request: a recorded "no
                     // decision in time", and the run continues. The session
                     // call limit and the broker's dispatch cap still bound it.
-                    Ok(()) if matches!(*failure, Failure::Expired | Failure::Refused) => {}
+                    Ok(())
+                        if matches!(
+                            *failure,
+                            Failure::Expired | Failure::Refused | Failure::OutputLimit
+                        ) => {}
                     // An expiry the link could not retire ends the run.
                     Err(link_failure)
-                        if matches!(*failure, Failure::Expired | Failure::Refused) =>
+                        if matches!(
+                            *failure,
+                            Failure::Expired | Failure::Refused | Failure::OutputLimit
+                        ) =>
                     {
                         self.fail_evaluation(link_failure)
                     }
@@ -779,6 +786,7 @@ impl Engine {
             Err(Failure::Cancelled | Failure::Busy) => ("cancelled", None),
             Err(Failure::Stale) => ("stale", None),
             Err(Failure::Refused) => ("refused", None),
+            Err(Failure::OutputLimit) => ("output_limit", None),
             Err(failure) => (
                 "failed",
                 Some(match failure {
@@ -1101,10 +1109,14 @@ mod tests {
             if reply == REFUSED {
                 return Err(Failure::Refused);
             }
+            if reply == OUTPUT_LIMIT {
+                return Err(Failure::OutputLimit);
+            }
             Ok(reply)
         }
     }
     pub(super) const REFUSED: &str = "\u{0}refused";
+    pub(super) const OUTPUT_LIMIT: &str = "\u{0}output-limit";
     pub(super) struct Harness {
         pub(super) engine: Engine,
         pub(super) requests: mpsc::Receiver<Request>,

@@ -1,5 +1,5 @@
 //! Controlled offline providers; no native activation or subscription process.
-use super::tests::{Harness, REFUSED};
+use super::tests::{Harness, OUTPUT_LIMIT, REFUSED};
 use super::*;
 use crate::cue_evaluator::{EvaluationLifecycle, Settlement};
 use std::sync::{
@@ -468,13 +468,18 @@ fn a_prefix_reply_completed_in_time_but_read_after_the_deadline_is_not_applied()
     assert!(h.engine.has_processing_permission());
 }
 #[test]
-fn a_refusal_is_a_non_decision_and_the_run_continues() {
+fn a_refusal_or_output_limit_is_a_non_decision_and_the_run_continues() {
+    for sentinel in [REFUSED, OUTPUT_LIMIT] {
+        refused_and_continued(sentinel);
+    }
+}
+fn refused_and_continued(sentinel: &str) {
     let mut h = Harness::new();
     let link = lab(&mut h);
     h.line("Who owns the fictional checklist?");
     h.request();
     h.line("Still discussing the checklist.");
-    h.replies.send(REFUSED.into()).unwrap();
+    h.replies.send(sentinel.into()).unwrap();
     until(&mut h, |_| !link.verdicts.lock().unwrap().is_empty());
     assert_eq!(*link.verdicts.lock().unwrap(), vec![Settlement::Retired]);
     assert!(h.engine.has_processing_permission());

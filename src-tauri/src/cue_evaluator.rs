@@ -365,6 +365,9 @@ pub enum Failure {
     /// The provider declined to answer this one request. A recorded
     /// non-decision for the lab; never a cue.
     Refused,
+    /// The provider's reply reached its output limit before a decision. A
+    /// recorded non-decision for the lab, like a refusal; never a cue.
+    OutputLimit,
 }
 
 pub struct Cancellation {
@@ -413,8 +416,9 @@ pub(crate) enum Settlement {
     Failed,
     /// Past the per-request deadline: no decision in time. The run continues.
     Expired,
-    /// The provider refused this request and the broker already ended it.
-    /// A non-decision; nothing more is sent for it and the run continues.
+    /// The provider refused this request, or its reply hit the output limit,
+    /// and the broker already ended it. A non-decision; nothing more is sent
+    /// for it and the run continues.
     Retired,
 }
 
@@ -495,7 +499,8 @@ impl Worker {
                                 | Failure::UsageLimit
                                 | Failure::Unreachable
                                 | Failure::InvalidDecision
-                                | Failure::Refused => failure,
+                                | Failure::Refused
+                                | Failure::OutputLimit => failure,
                                 _ => Failure::EvaluatorUnavailable,
                             })
                             .and_then(|text| {
