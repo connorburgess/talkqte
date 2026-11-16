@@ -567,7 +567,7 @@ fn model_path(app: &tauri::AppHandle) -> Option<(std::path::PathBuf, bool)> {
     if let Some(path) = std::env::var_os("TALKQTE_WHISPER_MODEL") {
         return Some((path.into(), false));
     }
-    models_dir(app).map(|dir| (model::installed_path(&dir, &model::TINY_EN), true))
+    models_dir(app).map(|dir| (model::installed_path(&dir, &model::DEFAULT), true))
 }
 
 #[derive(serde::Serialize)]
@@ -584,7 +584,7 @@ fn live_status(app: tauri::AppHandle) -> LiveStatus {
     } else if !model_path(&app).is_some_and(|(path, pinned)| {
         if pinned {
             path.parent()
-                .is_some_and(|dir| model::is_installed(dir, &model::TINY_EN))
+                .is_some_and(|dir| model::is_installed(dir, &model::DEFAULT))
         } else {
             path.is_file()
         }
@@ -630,7 +630,7 @@ impl ModelDownload {
 }
 
 fn model_status_now(app: &tauri::AppHandle, revision: u64) -> ModelStatus {
-    let spec = model::TINY_EN;
+    let spec = model::DEFAULT;
     let status = if !cfg!(feature = "local-whisper") {
         "unavailable"
     } else if std::env::var_os("TALKQTE_WHISPER_MODEL").is_some() {
@@ -742,7 +742,7 @@ fn download_model(
                 let mut last_percent = 0;
                 let result = model::download(
                     &dir,
-                    &model::TINY_EN,
+                    &model::DEFAULT,
                     &model::Https,
                     model::available_space,
                     |received, total| {
@@ -754,6 +754,10 @@ fn download_model(
                     },
                     &cancel,
                 );
+                if result.is_ok() {
+                    // The earlier, less accurate model is no longer loaded.
+                    let _ = model::remove_superseded(&dir);
+                }
                 done.message = result.err().map(|failure| failure.message());
             });
         if spawned.is_err() {
@@ -798,7 +802,9 @@ fn remove_model(
     if status.status == "downloading" {
         return Err("Cancel the download before removing the model.".into());
     }
-    model::remove(&dir, &model::TINY_EN).map_err(|_| "The model could not be removed.")?;
+    model::remove(&dir, &model::DEFAULT)
+        .and_then(|()| model::remove_superseded(&dir))
+        .map_err(|_| "The model could not be removed.")?;
     let revision = status.revision + 1;
     *status = model_status_now(&app, revision);
     let _ = app.emit_to("main", "model:changed", status.clone());
@@ -1371,7 +1377,7 @@ async fn start_live_session(
         let (start, recognizer) = tauri::async_runtime::spawn_blocking(move || {
             start.load(|| {
                 if pinned {
-                    model::verify(&model, &model::TINY_EN)?;
+                    model::verify(&model, &model::DEFAULT)?;
                 }
                 transcription::whisper::LocalWhisper::load(&model, 4)
                     .map_err(|_| "Could not load the local speech model.".to_string())

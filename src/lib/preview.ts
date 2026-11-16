@@ -364,9 +364,9 @@ export function modelStatus(): ModelStatus {
   return {
     revision: 0,
     status: 'unavailable',
-    name: 'tiny.en',
-    sizeBytes: 77_704_715,
-    neededBytes: 77_704_715 + 512 * 1024 * 1024,
+    name: 'base.en',
+    sizeBytes: 147_964_211,
+    neededBytes: 147_964_211 + 512 * 1024 * 1024,
     received: 0,
     message: null,
   };

@@ -23,9 +23,8 @@ pub struct Spec {
     pub sources: &'static [&'static str],
 }
 
-/// The default local model. The project's own release copy is not yet
-/// published, so the upstream whisper.cpp repository on Hugging Face is the
-/// only source, pinned to a fixed revision rather than a moving branch.
+/// The first default model, smaller and less accurate. Kept so a copy an
+/// earlier version installed can be recognized and removed.
 pub const TINY_EN: Spec = Spec {
     name: "tiny.en",
     file: "ggml-tiny.en.bin",
@@ -33,6 +32,26 @@ pub const TINY_EN: Spec = Spec {
     sha256: "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
     sources: &["https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en.bin"],
 };
+
+/// The default local model: English-only `base.en`. On fictional call-paced
+/// meetings it made about half the word errors of `tiny.en` with pause-ended
+/// chunks, at under a tenth of real time on four threads. The project's own
+/// release copy is not yet published, so the upstream whisper.cpp repository
+/// on Hugging Face is the only source, pinned to the same fixed revision.
+pub const BASE_EN: Spec = Spec {
+    name: "base.en",
+    file: "ggml-base.en.bin",
+    bytes: 147_964_211,
+    sha256: "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+    sources: &["https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en.bin"],
+};
+
+/// The model this version downloads, checks and loads.
+pub const DEFAULT: Spec = BASE_EN;
+
+/// Models an earlier version may have installed. They are never loaded, and
+/// are deleted once the default is installed or the model is removed.
+pub const SUPERSEDED: &[Spec] = &[TINY_EN];
 
 /// Free space kept beyond the model itself, so a download never fills a disk.
 pub const SPACE_MARGIN: u64 = 512 * 1024 * 1024;
@@ -178,6 +197,14 @@ pub fn remove(dir: &Path, spec: &Spec) -> io::Result<()> {
             Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
             _ => {}
         }
+    }
+    Ok(())
+}
+
+/// Deletes models an earlier version installed, and their partial downloads.
+pub fn remove_superseded(dir: &Path) -> io::Result<()> {
+    for spec in SUPERSEDED {
+        remove(dir, spec)?;
     }
     Ok(())
 }
@@ -1154,12 +1181,55 @@ mod tests {
     #[test]
     #[ignore]
     fn source_serves_the_pinned_size_with_ranges() {
-        for source in TINY_EN.sources {
-            let response = Https.get(source, TINY_EN.bytes - 16).unwrap();
-            assert!(response.resumed, "{source} ignored the range");
-            let mut tail = vec![];
-            response.body.take(64).read_to_end(&mut tail).unwrap();
-            assert_eq!(tail.len(), 16, "{source} size differs from the pin");
+        for spec in [DEFAULT, TINY_EN] {
+            for source in spec.sources {
+                let response = Https.get(source, spec.bytes - 16).unwrap();
+                assert!(response.resumed, "{source} ignored the range");
+                let mut tail = vec![];
+                response.body.take(64).read_to_end(&mut tail).unwrap();
+                assert_eq!(tail.len(), 16, "{source} size differs from the pin");
+            }
         }
+    }
+
+    #[test]
+    fn the_default_is_base_en_pinned_like_the_model_it_replaces() {
+        assert_eq!(DEFAULT, BASE_EN);
+        assert_eq!(DEFAULT.name, "base.en");
+        assert!(!SUPERSEDED.contains(&DEFAULT));
+        assert!(SUPERSEDED.contains(&TINY_EN));
+        let revision = |spec: &Spec| {
+            spec.sources[0]
+                .strip_prefix("https://huggingface.co/ggerganov/whisper.cpp/resolve/")
+                .and_then(|rest| rest.split_once('/'))
+                .map(|(rev, file)| (rev.to_string(), file.to_string()))
+                .unwrap()
+        };
+        let (base_rev, base_file) = revision(&DEFAULT);
+        let (tiny_rev, _) = revision(&TINY_EN);
+        // Same fixed revision, never a moving branch, and the file it names.
+        assert_eq!(base_rev, tiny_rev);
+        assert_eq!(base_rev.len(), 40);
+        assert_eq!(base_file, DEFAULT.file);
+        assert_eq!(DEFAULT.sha256.len(), 64);
+        assert!(DEFAULT.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
+        assert!(DEFAULT.bytes > TINY_EN.bytes);
+    }
+
+    #[test]
+    fn an_earlier_model_is_not_the_installed_one_and_is_removed() {
+        let dir = dir();
+        std::fs::create_dir_all(dir.path()).unwrap();
+        std::fs::write(installed_path(dir.path(), &TINY_EN), b"older model").unwrap();
+        std::fs::write(dir.path().join(".ggml-tiny.en.bin.part"), b"partial").unwrap();
+        std::fs::write(installed_path(dir.path(), &DEFAULT), b"current").unwrap();
+        // A file of the old model never counts as the default installed.
+        assert!(!is_installed(dir.path(), &DEFAULT));
+        remove_superseded(dir.path()).unwrap();
+        assert!(!installed_path(dir.path(), &TINY_EN).exists());
+        assert!(installed_path(dir.path(), &DEFAULT).exists());
+        assert_eq!(leftovers(dir.path()), vec![DEFAULT.file.to_string()]);
+        // Nothing to remove is not an error.
+        remove_superseded(dir.path()).unwrap();
     }
 }

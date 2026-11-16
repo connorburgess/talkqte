@@ -469,7 +469,7 @@ test('the speech model downloads only when chosen, shows progress, and can be ca
   await expect(heading).toBeFocused();
   await expect(heading).toBeInViewport();
   const section = page.locator('.model-download');
-  await expect(section).toContainText('78 MB');
+  await expect(section).toContainText('148 MB');
   await expect(section).toContainText('see your IP address');
   expect(await page.evaluate(() => window.microphoneTest.calls)).not.toContain(
     'download_model',
