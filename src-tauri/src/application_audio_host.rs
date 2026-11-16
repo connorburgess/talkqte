@@ -1038,8 +1038,12 @@ pub(crate) mod app {
         fn begin_session(&mut self, control: &Control) -> Result<Box<dyn FnOnce()>, Failure> {
             // The same check the recognizer load makes first. Whisper builds
             // verify the model again when loading; that can still fail.
-            let recognizer_available = cfg!(feature = "local-whisper")
-                && crate::model_path(&self.app).is_some_and(|(path, _)| path.is_file());
+            let recognizer_available = if crate::transcription::cloud::selected() {
+                crate::transcription::cloud::ready().is_ok()
+            } else {
+                cfg!(feature = "local-whisper")
+                    && crate::model_path(&self.app).is_some_and(|(path, _)| path.is_file())
+            };
             let controller = self
                 .app
                 .state::<crate::microphone::Controller>()
@@ -1150,7 +1154,8 @@ pub(crate) mod app {
         app: &tauri::AppHandle,
     ) -> Result<native_source::Recognition<Box<dyn Transcriber>>, String> {
         if crate::transcription::cloud::selected() {
-            return crate::transcription::cloud::opener()
+            return crate::transcription::cloud::ready()
+                .and_then(|()| crate::transcription::cloud::opener())
                 .map(native_source::Recognition::Cloud)
                 .map_err(|_| "The cloud transcription settings are not usable.".to_string());
         }

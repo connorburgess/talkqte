@@ -444,7 +444,7 @@ mod tests {
             session,
             2,
             Box::new(move || Ok(Box::new(opened) as Box<dyn StreamingTranscriber>)),
-            || true,
+            || Some(0),
             sink,
         );
         let live = LiveSession::start_cloud(chunker, session, 0, feed);

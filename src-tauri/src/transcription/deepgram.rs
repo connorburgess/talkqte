@@ -10,7 +10,7 @@
 //! is sent, a Finalize when speech has gone 6 s without a final, and
 //! CloseStream on finish or at the minute cap.
 
-use super::cloud::{Full, StreamingTranscriber, SttEvent, SttFailure};
+use super::cloud::{Budget, Full, StreamingTranscriber, SttEvent, SttFailure};
 use super::SAMPLE_RATE;
 use std::{
     sync::{
@@ -107,29 +107,32 @@ pub struct DeepgramStream {
 impl DeepgramStream {
     /// Starts the socket thread. The token is moved to that thread and
     /// dropped as soon as the connection is open.
+    /// `budget` is the audio this launch may still send, shared by every
+    /// stream of the launch.
     pub fn start(
         connector: impl Connector,
         request: ListenRequest,
         token: String,
-        cap: Duration,
+        budget: impl Into<Budget>,
     ) -> Self {
-        Self::start_with(connector, request, token, cap, Timing::default())
+        Self::start_with(connector, request, token, budget, Timing::default())
     }
 
     fn start_with(
         connector: impl Connector,
         request: ListenRequest,
         token: String,
-        cap: Duration,
+        budget: impl Into<Budget>,
         timing: Timing,
     ) -> Self {
+        let budget = budget.into();
         let (audio, queue) = mpsc::sync_channel(QUEUE);
         let (tx, events) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
         let thread = std::thread::Builder::new()
             .name("talkqte-cloud-transcription".into())
-            .spawn(move || run(connector, request, token, cap, timing, queue, tx, flag))
+            .spawn(move || run(connector, request, token, budget, timing, queue, tx, flag))
             .ok();
         Self {
             audio: Some(audio),
@@ -204,7 +207,7 @@ fn run(
     connector: impl Connector,
     request: ListenRequest,
     token: String,
-    cap: Duration,
+    budget: Budget,
     timing: Timing,
     queue: Receiver<Vec<f32>>,
     events: mpsc::Sender<SttEvent>,
@@ -220,9 +223,7 @@ fn run(
             return;
         }
     };
-    let cap_samples = cap.as_secs() * SAMPLE_RATE as u64;
     let mut pending: Vec<i16> = Vec::with_capacity(FRAME * 2);
-    let mut sent: u64 = 0;
     let mut last_send = Instant::now();
     let mut unfinalized: Option<Instant> = None;
     let mut seq = 0u64;
@@ -250,9 +251,13 @@ fn run(
             }
             let flush = closing.is_some();
             while pending.len() >= FRAME || (flush && !pending.is_empty()) {
-                let take = pending.len().min(FRAME);
-                let room = cap_samples.saturating_sub(sent) as usize;
-                let take = take.min(room);
+                // Checked per frame, so a withdrawn review stops what is
+                // queued from going out.
+                if stop.load(Ordering::Acquire) {
+                    socket.close();
+                    return;
+                }
+                let take = budget.reserve(pending.len().min(FRAME) as u64) as usize;
                 if take == 0 {
                     cap_reached = true;
                     break;
@@ -262,7 +267,6 @@ fn run(
                     let _ = events.send(SttEvent::Failed(failure));
                     return;
                 }
-                sent += take as u64;
                 last_send = Instant::now();
             }
             if cap_reached || closing.is_some() {
@@ -384,10 +388,13 @@ pub fn opener(settings: super::cloud::Settings) -> super::cloud::Opener {
             Network,
             ListenRequest::lab(),
             token,
-            settings.cap(),
+            super::cloud::launch_budget(&settings),
         )) as Box<dyn StreamingTranscriber>)
     })
 }
+
+/// How long opening the TCP connection may take before the stream fails.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The network connector: TLS with the bundled web roots, a WebSocket
 /// handshake carrying the token as a Bearer header, then short read waits.
@@ -419,7 +426,18 @@ impl Connector for Network {
             rustls::pki_types::ServerName::try_from(HOST).map_err(|_| SttFailure::Network)?;
         let tls = rustls::ClientConnection::new(Arc::new(config), name)
             .map_err(|_| SttFailure::Network)?;
-        let tcp = std::net::TcpStream::connect((HOST, 443)).map_err(|_| SttFailure::Network)?;
+        let tcp = {
+            use std::net::ToSocketAddrs;
+            let addresses = (HOST, 443)
+                .to_socket_addrs()
+                .map_err(|_| SttFailure::Network)?;
+            addresses
+                .into_iter()
+                .find_map(|address| {
+                    std::net::TcpStream::connect_timeout(&address, CONNECT_TIMEOUT).ok()
+                })
+                .ok_or(SttFailure::Network)?
+        };
         tcp.set_write_timeout(Some(Duration::from_secs(5)))
             .map_err(|_| SttFailure::Network)?;
         tcp.set_read_timeout(Some(Duration::from_secs(10)))
@@ -504,6 +522,8 @@ mod tests {
         text: Vec<String>,
         replies: std::collections::VecDeque<Result<Option<String>, SttFailure>>,
         closed: bool,
+        /// Each binary send takes this long, as on a slow network.
+        send_delay: Duration,
     }
 
     #[derive(Clone, Default)]
@@ -523,6 +543,8 @@ mod tests {
 
     impl Socket for Fake {
         fn send_binary(&mut self, data: Vec<u8>) -> Result<(), SttFailure> {
+            let delay = self.0.lock().unwrap().send_delay;
+            std::thread::sleep(delay);
             self.0.lock().unwrap().binary.push(data.len());
             Ok(())
         }
@@ -693,6 +715,64 @@ mod tests {
             Err(SttFailure::Protocol)
         );
         assert_eq!(parse("not json", &mut seq), Err(SttFailure::Protocol));
+    }
+
+    #[test]
+    fn queued_audio_stops_going_out_as_soon_as_the_stream_is_stopped() {
+        let fake = Fake::default();
+        fake.0.lock().unwrap().send_delay = Duration::from_millis(20);
+        let mut stream = DeepgramStream::start(
+            fake.clone(),
+            ListenRequest::lab(),
+            "t".repeat(24),
+            Duration::from_secs(60),
+        );
+        // About 6 s of audio queued, which takes over a second to send.
+        for _ in 0..64 {
+            stream.push(&[0.1; FRAME]).unwrap();
+        }
+        let until = Instant::now() + Duration::from_secs(5);
+        while fake.0.lock().unwrap().binary.is_empty() {
+            assert!(Instant::now() < until, "nothing was sent");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        stream.abort();
+        std::thread::sleep(Duration::from_millis(300));
+        let wire = fake.0.lock().unwrap();
+        assert!(
+            wire.binary.len() < 10,
+            "{} frames went out",
+            wire.binary.len()
+        );
+        assert!(wire.closed);
+    }
+
+    #[test]
+    fn two_streams_of_one_launch_share_its_minute_cap() {
+        let budget = Budget::new(Duration::from_secs(1));
+        let first = Fake::default();
+        let mut stream = DeepgramStream::start(
+            first.clone(),
+            ListenRequest::lab(),
+            "t".repeat(24),
+            budget.clone(),
+        );
+        stream.push(&[0.1; SAMPLE_RATE]).unwrap();
+        let _ = stream.finish(Duration::from_secs(2));
+        assert_eq!(
+            first.0.lock().unwrap().binary.iter().sum::<usize>(),
+            SAMPLE_RATE * 2
+        );
+        // The launch's minute is spent: a later stream sends nothing.
+        let second = Fake::default();
+        let mut later =
+            DeepgramStream::start(second.clone(), ListenRequest::lab(), "t".repeat(24), budget);
+        later.push(&[0.1; FRAME]).unwrap();
+        let events = wait_for(&mut later, |e| {
+            e.contains(&SttEvent::Failed(SttFailure::CapReached))
+        });
+        assert!(events.contains(&SttEvent::Failed(SttFailure::CapReached)));
+        assert!(second.0.lock().unwrap().binary.is_empty());
     }
 
     #[test]

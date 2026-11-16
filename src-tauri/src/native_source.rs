@@ -381,17 +381,26 @@ fn cloud_feed<A: Access>(runtime: A, session: u64, control: &Control, opener: Op
     let approval = runtime.clone();
     let notice = runtime.clone();
     let keep = runtime.clone();
+    let dropped = runtime.clone();
     CloudFeed::new(
         session,
         1,
         opener,
-        move || approval.with(|runtime| runtime.engine.has_processing_permission()) == Some(true),
+        move || {
+            approval
+                .with(|runtime| runtime.engine.audio_approval())
+                .flatten()
+        },
         source_sink(runtime, control),
     )
-    .keep_sending_while(move || {
+    .stop_sending_when(move || {
         keep.with(|runtime| {
-            runtime.engine.has_processing_permission() || runtime.engine.is_live_stopping()
-        }) == Some(true)
+            crate::transcription::cloud::withdrawal(runtime.engine.audio_withdrawal())
+        })
+        .unwrap_or(Some(crate::transcription::cloud::SttFailure::Withdrawn))
+    })
+    .on_dropped(move || {
+        dropped.with(|runtime| runtime.engine.cloud_transcription_dropped(session));
     })
     // The pump then cancels the source, which ends the session; the session
     // keeps the reason for the notebook to show.
@@ -955,7 +964,7 @@ mod tests {
             fixture.session,
             1,
             Box::new(move || Ok(Box::new(stream) as Box<dyn StreamingTranscriber>)),
-            || true,
+            || Some(0),
             source_sink(fixture.runtime.clone(), &fixture.control),
         );
         let source = fixture.scripted(binding);
@@ -1009,7 +1018,7 @@ mod tests {
             fixture.session,
             1,
             Box::new(move || Ok(Box::new(stream) as Box<dyn StreamingTranscriber>)),
-            || true,
+            || Some(0),
             source_sink(fixture.runtime.clone(), &fixture.control),
         );
         let watchdog = Watchdog(fixture.control.clone());
