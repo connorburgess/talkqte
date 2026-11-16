@@ -3,9 +3,11 @@
 14 November 2026. How to run the real TalkQTE desktop app against a fictional
 meeting played on the same Mac. Only the meeting is simulated: a mock-call
 video plays in QuickTime Player. Everything else is the real app:
-application-audio capture of QuickTime Player, on-device transcription with
-the local speech model, the engine's phrase-rule cues and the real companion
-window.
+application-audio capture of QuickTime Player, transcription by Deepgram
+through [cloud transcription](cloud-transcription.md) once the session's cue
+processing is approved, the engine's cues and the real companion window.
+On-device transcription was removed on 16 November 2026; this page was
+updated for that, and nothing here has been run with cloud transcription.
 
 **None of this has been run yet.** Every step below is written from the code
 and has to be confirmed on the owner's Mac. Steps marked _to confirm_ are the
@@ -15,32 +17,35 @@ meeting, a real person's voice, or any audio you would not publish.
 ## Disk
 
 Do not build below the project's disk floor. Measured on 14 November 2026,
-building into a folder that already held the project's debug test builds:
+with the former `local-whisper` feature (removed 16 November 2026), building
+into a folder that already held the project's debug test builds:
 
 - 0.98 GiB for the first build with `local-whisper` and `native-audio-spike`,
   including whisper.cpp built from source (about 0.09 GiB of that) and the
   56.5 MiB app bundle;
-- 0.34 GiB more to add `timing-log`, which recompiles only TalkQTE's own code;
-- 0.08 GiB for the speech model, not yet downloaded, plus the 0.5 GiB the app
-  keeps free whenever it downloads one.
+- 0.34 GiB more to add `timing-log`, which recompiles only TalkQTE's own code.
 
-That is about 1.3 GiB for the build. A build into an empty folder compiles
-every dependency and needs more; allow several GiB above the floor.
+The current build, with `lab-evaluator` in place of `local-whisper`, has not
+been measured. A build into an empty folder compiles every dependency and
+needs more; allow several GiB above the floor.
 
 ## Build
 
-From the repository root, with Xcode's command-line tools and CMake installed:
+From the repository root, with Xcode's command-line tools installed:
 
 ```sh
 npm ci
 TALKQTE_COMMIT="$(git rev-parse HEAD)" \
   npm run tauri -- build --debug --bundles app \
-  --features local-whisper,native-audio-spike,timing-log
+  --features lab-evaluator,native-audio-spike,timing-log
 ```
 
-- `local-whisper` adds on-device transcription. `native-audio-spike` adds
-  application-audio capture. `timing-log` adds the timing log below. None of
-  these is in a default build, and this build must never be distributed.
+- `lab-evaluator` switches on `cloud-transcription`, the only live
+  transcription the app has, and adds the
+  [lab evaluator client](development-lab-evaluator.md). `native-audio-spike`
+  adds application-audio capture. `timing-log` adds the timing log below.
+  None of these is in a default build, the release scripts refuse all of
+  them, and this build must never be distributed.
 - `TALKQTE_COMMIT` puts the commit into the timing log's session events. If
   you leave it out they say `unknown`.
 - `tauri build` builds the interface first and loads it from the app bundle.
@@ -86,18 +91,25 @@ certificate leaf = H"…"`. Whether `APPLE_SIGNING_IDENTITY` does this
 
 On 14 November 2026 a rebuild signed this way kept the grant.
 
-## Speech model
+## Transcription
 
-The model never goes inside the repository. Use one of these:
+The session's audio is transcribed by Deepgram. Select it for the launch with
+`TALKQTE_DEV_STT_BACKEND=deepgram`, `TALKQTE_DEV_STT_TOKEN_FILE` (the
+absolute path of an owner-only file holding a short-lived Deepgram token) and
+`TALKQTE_DEV_STT_MINUTE_CAP` (1 to 60). The rules for the token file, what is
+sent and what stops it are in [cloud transcription](cloud-transcription.md).
+Keep the token file outside the repository, and never put the token itself
+on a command line.
 
-- **In the app:** Settings → speech model → Download. It is saved as
-  `~/Library/Application Support/com.talkqte.desktop/models/ggml-tiny.en.bin`
-  and checked against its pinned SHA-256 before use.
-- **A file you already have:** set `TALKQTE_WHISPER_MODEL` to its absolute
-  path when launching. That file is not checksum-checked.
+Nothing is sent until the session's cue processing review is approved. Until
+then the captured audio is thrown away and nothing is transcribed.
 
-Without a model, a session for the application is refused as unavailable and
-nothing is cleared.
+Without these settings, a session for the application is refused with "Live
+transcription needs cloud transcription selected for this development
+launch."; with settings the app refuses, "The cloud transcription settings
+are not usable." Nothing is cleared either way. Passing these settings from
+the [lab-owned launcher](lab-owned-launcher.md) is pending in the lab lane's
+change.
 
 ## Launch with the timing log
 
@@ -110,8 +122,15 @@ copies of the app at the same file: one process writes one file.
 mkdir -p ~/talkqte-lab-runs
 open -a ./src-tauri/target/debug/bundle/macos/TalkQTE.app \
   --stderr "$HOME/talkqte-lab-runs/run-01.stderr" \
-  --env TALKQTE_TIMING_LOG="$HOME/talkqte-lab-runs/run-01.jsonl"
+  --env TALKQTE_TIMING_LOG="$HOME/talkqte-lab-runs/run-01.jsonl" \
+  --env TALKQTE_DEV_STT_BACKEND=deepgram \
+  --env TALKQTE_DEV_STT_TOKEN_FILE="$HOME/talkqte-lab-runs/private/deepgram-token" \
+  --env TALKQTE_DEV_STT_MINUTE_CAP=15
 ```
+
+The token path and the cap of 15 minutes are examples; the token file and its
+folder must meet the rules in
+[cloud transcription](cloud-transcription.md#selecting-it).
 
 **Confirm the log is on** before starting capture. Once the main window has
 opened (_to confirm_ how soon), `run-01.stderr` has one line starting
@@ -169,8 +188,8 @@ Wait until the notebook's Cue processing panel says "Application audio from
 QuickTime Player is being captured", then press play in QuickTime Player.
 
 A session for one application starts only while the microphone is not
-capturing, no other live session or demo is running, and the speech model is
-installed. A refusal is shown under the panel's Start in words. Only open
+capturing, no other live session or demo is running, and cloud transcription
+is selected for the launch with usable settings. A refusal is shown under the panel's Start in words. Only open
 applications with a window are listed, on any desktop. If QuickTime Player is
 missing, open the MP4, then press **List again**.
 
@@ -186,7 +205,12 @@ one:
 - the audio arrived in a form TalkQTE cannot read.
 
 The timing log's `source_problem` line has the reason and ScreenCaptureKit's
-error code, and its `source_ended` line says how many chunks were transcribed.
+error code, and its `source_ended` line says how many final results the
+cloud stream returned.
+
+Capturing is not yet transcribing. Approve the session's cue processing
+review (**Enable for this session**) before pressing play, or the start of the
+conversation is thrown away untranscribed.
 
 ## Start and stop without clicks
 
@@ -217,7 +241,8 @@ open -a ./src-tauri/target/debug/bundle/macos/TalkQTE.app \
   - no running application, or more than one, has that exact name;
   - macOS refuses or never answers within 2 minutes;
   - the microphone or another session is running;
-  - the speech model is missing.
+  - cloud transcription is not selected for the launch, or its settings are
+    not usable.
 
   macOS is asked at most once per launch. The **one-time Screen Recording
   grant still needs a person**: grant it once, as in
@@ -278,7 +303,9 @@ run remain acceptance checks before relying on unattended runs.
 ## During the run
 
 - The notebook and the companion credit "Audio from QuickTime Player" and say
-  the microphone is not used. With the model connection off, the companion shows "App audio · Local". With it on, its status says that lines go to Claude.
+  the microphone is not used. Before cue processing is approved the companion
+  shows "App audio · not transcribing yet"; once audio is sent its status
+  names Deepgram, and Claude too when the model connection is on.
 - A build with `claude-cli` can use model cues after explicit review or the
   launch consent above; without that feature the existing phrase rules remain.
   This development connection is not a selected production provider.
@@ -332,13 +359,15 @@ session clock.
 | `event`          | Other fields                                                                           | Written when                                                                                                                                            |
 | ---------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `session`        | `session`, `live`, `state` (`started`/`ended`), `elapsed_ms`, `commit`, `features`     | A session starts or stops running, as seen in the snapshot sent to the companion.                                                                       |
-| `audio_received` | `source` (`microphone`/`application`), `session`, `start_ms`, `duration_ms`, `audible` | A chunk is handed to transcription. `start_ms` is its first sample on the session clock. `audible` means some sample reaches about −60 dBFS.            |
+| `audio_received` | `source` (`microphone`/`application`), `session`, `start_ms`, `duration_ms`, `audible` | Captured audio is handed on for transcription, about a second at a time for an application; it is sent only once the review is approved. `start_ms` is its first sample on the session clock. `audible` means some sample reaches about −60 dBFS. |
 | `segment`        | `session`, `id`, `at_ms`, `speaker`, `text`, `accepted`                                | A recognized line reaches the engine.                                                                                                                   |
 | `cue_decision`   | `session`, `cue`, `kind`, `source`, `question`, `source_id`, `elapsed_ms`              | The engine first holds a cue. `source` is `line`, `note`, `focus` or `evaluated`. Only `line` has `question` and `source_id`, the segment it came from. |
 | `cue_published`  | `session`, `cue`, `elapsed_ms`                                                         | The cue is in the snapshot sent to the companion window.                                                                                                |
 | `cue_cleared`    | `session`, `cue`, `elapsed_ms`                                                         | That cue has left the snapshot sent to the companion window.                                                                                            |
 | `source_problem` | `problem`, `os_code`                                                                   | An application source failed to start or stopped on its own. `os_code` is ScreenCaptureKit's error code, when it gave one.                              |
-| `source_ended`   | `application`, `problem`, `recognized_chunks`                                          | An application source's run ended, with its reason if it failed and how many chunks of its audio were transcribed.                                      |
+| `source_ended`   | `application`, `problem`, `transcribed_finals`                                         | An application source's run ended, with its reason if it failed and how many final results its cloud stream returned.                                   |
+| `stt_state`      | `session`, `state`, `code`, `audio_ms`                                                 | Cloud transcription started, finished, ended or stopped, with a fixed `code` when it failed and the audio sent so far ([cloud transcription](cloud-transcription.md#what-is-kept)). |
+| `stt_final`      | `session`, `seq`, `start_ms`, `end_ms`, `untrusted_speaker`                            | A final result arrived. Its text is in the `segment` row. The speaker label is the provider's guess; it is never shown or sent to a cue model.           |
 | `dev_source`     | `step`, `application`, `reason`                                                        | The launch setting acted: `acknowledged`, `started`, `refused` with a `reason`, or `stopping` when the stop setting asked the ordinary Stop.            |
 | `dropped`        | `count`                                                                                | Lines were lost since the last line written, because the queue was full or a write failed. Written before the next line.                                |
 
@@ -351,9 +380,9 @@ What it can and cannot tell you:
   recording shows that.
 - `cue_published` is written whether or not the companion window is visible.
   Keep the companion shown during a run.
-- **Alignment without transcription.** Audio is handed over in chunks of
-  about 3 seconds, so an `audio_received` line is written up to 3 seconds
-  after the sound in it. Do not use that line's `wall_ms`. Instead, take the
+- **Alignment without transcription.** An application's audio is logged
+  about a second at a time, so an `audio_received` line is written up to
+  about a second after the sound in it. Do not use that line's `wall_ms`. Instead, take the
   `session` `started` event's `wall_ms − elapsed_ms`, the wall time of
   session time zero, and add the `start_ms` of the first `application` chunk
   with `audible: true`. That is the wall time at which that chunk began; the
@@ -383,6 +412,8 @@ Everything here waits for the owner's first run, with these questions first:
   Recording permission is attributed to.
 - Whether the Web Inspector opens in this build, for a cleanup retry.
 - That QuickTime Player's audio is captured and nothing else is.
+- That cloud transcription works against the real service: no session has
+  been run with this code, and its delay on real hardware is unmeasured.
 - How long Stop takes to reach confirmed release.
 - Whether the companion's window title is visible to the lab's recorder.
 

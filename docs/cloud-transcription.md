@@ -1,11 +1,14 @@
 # Cloud transcription (development builds)
 
 A development build with the `cloud-transcription` Cargo feature can send a
-live session's audio to Deepgram for transcription instead of transcribing it
-on the device. The `lab-evaluator` feature switches it on. Release builds
-refuse the feature ([release preflight](release-path.md)), and the settings
-below are read only in debug builds, so an ordinary or release build has no
-cloud transcription. Deepgram is the only provider implemented; the
+live session's audio to Deepgram for transcription. This is the only way
+TalkQTE transcribes: on-device transcription was removed on 16 November 2026.
+The `lab-evaluator` feature switches it on. Release builds refuse the feature
+([release preflight](release-path.md)), and the settings below are read only
+in debug builds, so an ordinary or release build has no live transcription and
+says "This build has no live transcription." Transcription starts only when
+the session's cue processing review is approved, so a build also needs a cue
+backend (`claude-cli` or the lab evaluator). Deepgram is the only provider implemented; the
 `StreamingTranscriber` boundary in `src-tauri/src/transcription/cloud.rs`
 leaves room for others.
 
@@ -31,8 +34,10 @@ command line. The token is read when a stream opens, so it must still be
 valid then.
 
 With the backend selected, unusable settings refuse the start of a live
-session ("The cloud transcription settings are not usable."). Nothing falls
-back to the local recognizer.
+session ("The cloud transcription settings are not usable."). A development
+build launched without the backend says "Live transcription needs cloud
+transcription selected for this development launch." There is no other
+recognizer to fall back to.
 
 ## When audio is sent
 
@@ -115,8 +120,9 @@ Offline tests with a fake socket and scripted streams only:
   capture clock with no speaker label, failure without fallback, withdrawal,
   the last audio sent during Stop but no stream opened by it, the settings,
   and the token file rules.
-- `live` and `native_source` tests: both capture paths deliver finals, and an
-  unapproved session never opens a stream.
+- `live` and `native_source` tests: both capture paths deliver finals only,
+  Stop sends the last audio, End discards it, a block from another capture
+  operation is never sent, and an unapproved session never opens a stream.
 - Browser tests: the companion and notebook wording, and the stop message.
 
 Still unverified: a session against the real service, latency on real
