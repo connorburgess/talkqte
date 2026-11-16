@@ -199,12 +199,12 @@ pub enum Event {
         detail: Option<String>,
     },
     /// An application source's run ended: why, if anything went wrong, and
-    /// how many chunks of its audio were transcribed.
+    /// how many final results its cloud stream returned.
     SourceEnded {
         application: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         problem: Option<String>,
-        recognized_chunks: Option<u64>,
+        transcribed_finals: Option<u64>,
     },
     /// Development builds only: the launch setting naming an application
     /// source acted. `step` is `acknowledged` (the setting stands for the
@@ -489,7 +489,7 @@ pub fn commit() -> &'static str {
 /// The Cargo features this build has, among those that change capture.
 pub fn features() -> Vec<&'static str> {
     [
-        ("local-whisper", cfg!(feature = "local-whisper")),
+        ("cloud-transcription", cfg!(feature = "cloud-transcription")),
         ("native-audio-spike", cfg!(feature = "native-audio-spike")),
         ("timing-log", cfg!(feature = "timing-log")),
         ("claude-cli", cfg!(feature = "claude-cli")),
@@ -637,7 +637,7 @@ impl Runtime {
     /// Its callers are the live sinks, which only some builds compile.
     #[cfg_attr(
         not(any(
-            feature = "local-whisper",
+            feature = "cloud-transcription",
             all(target_os = "macos", feature = "native-audio-spike"),
             test
         )),

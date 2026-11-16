@@ -101,20 +101,15 @@ struct View {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Evidence {
-    /// Chunks the recognizer processed.
-    recognized_chunks: u64,
+    /// Milliseconds of audio sent to the cloud stream.
+    audio_sent_ms: u64,
+    /// Final results the stream returned.
+    finals: u64,
     accepted_lines: u64,
     /// Lines the sink or the engine refused, for example as out of order.
     refused_lines: u64,
-    /// Lines whose time fell outside their audio.
-    out_of_range_lines: u64,
-    /// Chunks withheld because the source had stopped.
-    stale_chunks: u64,
-    /// Chunks the transcription queue had no room for.
-    refused_chunks: u64,
-    recognizer_failures: u64,
-    /// The transcription worker did not stop in time; counts are incomplete.
-    worker_detached: bool,
+    /// Samples dropped because the send queue was full.
+    dropped_samples: u64,
     /// Width of the accepted host-clock read.
     clock_read_micros: u64,
 }
@@ -122,14 +117,11 @@ pub(crate) struct Evidence {
 impl Evidence {
     fn of(report: &Report) -> Self {
         Self {
-            recognized_chunks: report.worker.chunks,
-            accepted_lines: report.worker.accepted,
-            refused_lines: report.worker.rejected,
-            out_of_range_lines: report.worker.out_of_range,
-            stale_chunks: report.worker.stale,
-            refused_chunks: report.refused_chunks,
-            recognizer_failures: report.worker.failures,
-            worker_detached: report.worker.detached,
+            audio_sent_ms: report.transcription.sent_ms,
+            finals: report.transcription.finals,
+            accepted_lines: report.transcription.accepted,
+            refused_lines: report.transcription.rejected,
+            dropped_samples: report.transcription.dropped_samples,
             clock_read_micros: u64::try_from(report.bracket_width.as_micros()).unwrap_or(u64::MAX),
         }
     }
@@ -679,13 +671,7 @@ impl Host {
             return false;
         };
         self.settle(&mut state);
-        state.lab_stop_closed
-            && state.active.is_none()
-            && state.listing.is_none()
-            && !state
-                .last_run
-                .as_ref()
-                .is_some_and(|run| run.worker_detached)
+        state.lab_stop_closed && state.active.is_none() && state.listing.is_none()
     }
 
     /// Take a finished operation out, keeping why it ended.
@@ -725,8 +711,9 @@ impl Host {
             Some(Ended::Unwound) | None => return,
         };
         if crate::timing_log::enabled() {
-            let recognized_chunks = match &*active.ended.lock().unwrap_or_else(|e| e.into_inner()) {
-                Some(Ended::Released(report)) => Some(report.worker.chunks),
+            let transcribed_finals = match &*active.ended.lock().unwrap_or_else(|e| e.into_inner())
+            {
+                Some(Ended::Released(report)) => Some(report.transcription.finals),
                 _ => None,
             };
             crate::timing_log::record(crate::timing_log::Event::SourceEnded {
@@ -736,7 +723,7 @@ impl Host {
                         .ok()
                         .and_then(|value| value.as_str().map(str::to_owned))
                 }),
-                recognized_chunks,
+                transcribed_finals,
             });
         }
         state.problem = problem;
@@ -918,7 +905,7 @@ fn active_phase(abandoned: bool, stage: Option<Stage>, cancelled: bool) -> Phase
     }
 }
 
-/// Before a session for the source alone begins: a recognizer must be
+/// Before a session for the source alone begins: transcription must be
 /// available, or the session would end as soon as it began after clearing the
 /// previous one; and the microphone must read off, since the session says it
 /// is not used. A microphone that cannot be read counts as not off.
@@ -999,7 +986,6 @@ pub(crate) mod app {
     use crate::{
         application_audio::native::{shareable_applications, Selection},
         native_source::{self, Access, Limits},
-        transcription::Transcriber,
         AppState, Runtime,
     };
     use tauri::{Emitter, Manager};
@@ -1036,10 +1022,8 @@ pub(crate) mod app {
 
     impl Backend for Native {
         fn begin_session(&mut self, control: &Control) -> Result<Box<dyn FnOnce()>, Failure> {
-            // The same check the recognizer load makes first. Whisper builds
-            // verify the model again when loading; that can still fail.
-            let recognizer_available = cfg!(feature = "local-whisper")
-                && crate::model_path(&self.app).is_some_and(|(path, _)| path.is_file());
+            // The same check the start makes before any native request.
+            let recognizer_available = crate::live_unavailable().is_none();
             let controller = self
                 .app
                 .state::<crate::microphone::Controller>()
@@ -1087,7 +1071,7 @@ pub(crate) mod app {
                 recognizer(&self.app)
             });
             // Whatever the answer, the listed selections are spent.
-            let (chosen, recognition) = match ready {
+            let (chosen, opener) = match ready {
                 Ok(ready) => ready,
                 Err(refused) => {
                     self.selections.clear();
@@ -1100,7 +1084,7 @@ pub(crate) mod app {
             // through the gate, and this is the worker that constructed it.
             // The remaining obligations of NativeOwner::begin are unverified
             // device gates; see docs/native-audio-owner.md.
-            unsafe { native_source::run(access, start, selection, LIMITS, recognition, monitor) }
+            unsafe { native_source::run(access, start, selection, LIMITS, opener, monitor) }
         }
     }
 
@@ -1143,38 +1127,15 @@ pub(crate) mod app {
     }
 
     /// How this source is transcribed, decided before any native request:
-    /// a cloud stream when this launch selected one (refused, not replaced,
-    /// when its settings are invalid), otherwise a second local recognizer.
-    /// Builds without either refuse the start.
-    fn recognizer(
-        app: &tauri::AppHandle,
-    ) -> Result<native_source::Recognition<Box<dyn Transcriber>>, String> {
-        if crate::transcription::cloud::selected() {
-            return crate::transcription::cloud::opener()
-                .map(native_source::Recognition::Cloud)
-                .map_err(|_| "The cloud transcription settings are not usable.".to_string());
+    /// the cloud stream this launch selected. A build or launch without one,
+    /// or with unusable settings, refuses the start; nothing is transcribed
+    /// on this device.
+    fn recognizer(_app: &tauri::AppHandle) -> Result<crate::transcription::cloud::Opener, String> {
+        if let Some(reason) = crate::live_unavailable() {
+            return Err(reason.into());
         }
-        local_recognizer(app).map(native_source::Recognition::Local)
-    }
-
-    fn local_recognizer(app: &tauri::AppHandle) -> Result<Box<dyn Transcriber>, String> {
-        #[cfg(feature = "local-whisper")]
-        {
-            let (model, pinned) = crate::model_path(app)
-                .filter(|(path, _)| path.is_file())
-                .ok_or("The local speech model is not installed.")?;
-            if pinned {
-                crate::model::verify(&model, &crate::model::TINY_EN)?;
-            }
-            let loaded = crate::transcription::whisper::LocalWhisper::load(&model, 4)
-                .map_err(|_| "Could not load the local speech model.".to_string())?;
-            Ok(Box::new(loaded))
-        }
-        #[cfg(not(feature = "local-whisper"))]
-        {
-            let _ = app;
-            Err("This build does not include local transcription.".into())
-        }
+        crate::transcription::cloud::opener()
+            .map_err(|_| "The cloud transcription settings are not usable.".to_string())
     }
 
     /// The single command for this development surface, main window only.
