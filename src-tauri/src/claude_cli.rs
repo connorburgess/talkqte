@@ -68,7 +68,12 @@ pub fn connected_engine() -> crate::engine::Engine {
     };
     match Choice::from_environment() {
         Ok(choice) => {
-            let config = processor(choice.model_id.clone(), &choice.effort.clone(), DATA_POLICY);
+            // One review covers both exports when this launch also streams audio.
+            let policy = match crate::transcription::cloud::review_sentence() {
+                Some(transcription) => format!("{DATA_POLICY} {transcription}"),
+                None => DATA_POLICY.to_string(),
+            };
+            let config = processor(choice.model_id.clone(), &choice.effort.clone(), &policy);
             let worker = crate::cue_evaluator::Worker::start(
                 ClaudeCli::new(
                     None,

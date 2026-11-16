@@ -247,7 +247,7 @@ impl Backend for Fake {
                     script,
                 })
             },
-            Silent,
+            native_source::Recognition::Local(Silent),
             monitor,
         )
     }

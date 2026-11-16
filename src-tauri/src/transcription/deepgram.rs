@@ -376,6 +376,19 @@ pub(crate) fn parse(text: &str, seq: &mut u64) -> Result<Option<SttEvent>, SttFa
     }))
 }
 
+/// Opens the live stream with the token from the settings' owner-only file.
+pub fn opener(settings: super::cloud::Settings) -> super::cloud::Opener {
+    Box::new(move || {
+        let token = super::cloud::read_token(&settings.token_file)?;
+        Ok(Box::new(DeepgramStream::start(
+            Network,
+            ListenRequest::lab(),
+            token,
+            settings.cap(),
+        )) as Box<dyn StreamingTranscriber>)
+    })
+}
+
 /// The network connector: TLS with the bundled web roots, a WebSocket
 /// handshake carrying the token as a Bearer header, then short read waits.
 pub struct Network;

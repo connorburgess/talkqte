@@ -1178,7 +1178,11 @@ pub(crate) fn connected_engine() -> Engine {
         .map(|s| s.backend)
         .or(globals.map(|g| g.backend))
         .unwrap_or(Backend::Subscription);
-    let (label, service, policy) = disclosure(backend, settings.as_ref());
+    let (label, service, mut policy) = disclosure(backend, settings.as_ref());
+    // One review covers both exports when this launch also streams audio.
+    if let Some(transcription) = crate::transcription::cloud::review_sentence() {
+        policy = format!("{policy} {transcription}");
+    }
     let processor = ProcessorConfiguration::new(
         backend.id().into(),
         1,

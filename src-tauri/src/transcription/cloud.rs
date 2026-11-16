@@ -384,6 +384,23 @@ pub fn settings() -> Result<Settings, SttFailure> {
         .clone()
 }
 
+/// The opener for this launch's selected cloud provider. It reads the token
+/// file only when the stream opens, after the review is approved. Refused
+/// when the settings are invalid or this build has no cloud transcription;
+/// there is never a fallback to another recognizer.
+pub fn opener() -> Result<Opener, SttFailure> {
+    let settings = settings()?;
+    #[cfg(feature = "cloud-transcription")]
+    {
+        Ok(super::deepgram::opener(settings))
+    }
+    #[cfg(not(feature = "cloud-transcription"))]
+    {
+        let _ = settings;
+        Err(SttFailure::Settings)
+    }
+}
+
 /// The sentence the session review adds when cloud transcription is
 /// selected, so one approval covers both exports.
 pub fn review_sentence() -> Option<String> {
