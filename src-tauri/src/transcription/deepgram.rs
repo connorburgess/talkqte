@@ -112,7 +112,7 @@ impl DeepgramStream {
     pub fn start(
         connector: impl Connector,
         request: ListenRequest,
-        token: String,
+        token: impl Into<Token>,
         budget: impl Into<Budget>,
     ) -> Self {
         Self::start_with(connector, request, token, budget, Timing::default())
@@ -121,11 +121,12 @@ impl DeepgramStream {
     fn start_with(
         connector: impl Connector,
         request: ListenRequest,
-        token: String,
+        token: impl Into<Token>,
         budget: impl Into<Budget>,
         timing: Timing,
     ) -> Self {
         let budget = budget.into();
+        let token = token.into();
         let (audio, queue) = mpsc::sync_channel(QUEUE);
         let (tx, events) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
@@ -191,6 +192,7 @@ impl Drop for DeepgramStream {
 struct Timing {
     keep_alive: Duration,
     finalize_after: Duration,
+    token_wait: Duration,
 }
 
 impl Default for Timing {
@@ -198,6 +200,7 @@ impl Default for Timing {
         Self {
             keep_alive: KEEP_ALIVE,
             finalize_after: FINALIZE_AFTER,
+            token_wait: TOKEN_WAIT,
         }
     }
 }
@@ -206,13 +209,29 @@ impl Default for Timing {
 fn run(
     connector: impl Connector,
     request: ListenRequest,
-    token: String,
+    mut token: Token,
     budget: Budget,
     timing: Timing,
     queue: Receiver<Vec<f32>>,
     events: mpsc::Sender<SttEvent>,
     stop: Arc<AtomicBool>,
 ) {
+    // The token may arrive after approval: the lab hands it over only once
+    // it has seen the review. Audio waits in the bounded queue meanwhile.
+    let until = Instant::now() + timing.token_wait;
+    let token = loop {
+        if stop.load(Ordering::Acquire) {
+            return;
+        }
+        if let Some(token) = token.take() {
+            break token;
+        }
+        if Instant::now() >= until {
+            let _ = events.send(SttEvent::Failed(SttFailure::Settings));
+            return;
+        }
+        std::thread::sleep(TOKEN_POLL);
+    };
     let url = request.url();
     let socket = checked(&url).and_then(|url| connector.connect(url, &token));
     drop(token);
@@ -223,6 +242,10 @@ fn run(
             return;
         }
     };
+    let query = url.split_once('?').map_or("", |(_, query)| query);
+    let _ = events.send(SttEvent::Connected {
+        query: query.to_string(),
+    });
     let mut pending: Vec<i16> = Vec::with_capacity(FRAME * 2);
     let mut last_send = Instant::now();
     let mut unfinalized: Option<Instant> = None;
@@ -304,7 +327,7 @@ fn run(
                         SttEvent::Partial => {
                             unfinalized.get_or_insert_with(Instant::now);
                         }
-                        SttEvent::Failed(_) => {}
+                        SttEvent::Failed(_) | SttEvent::Connected { .. } => {}
                     }
                     if events.send(event).is_err() {
                         socket.close();
@@ -381,16 +404,46 @@ pub(crate) fn parse(text: &str, seq: &mut u64) -> Result<Option<SttEvent>, SttFa
 }
 
 /// Opens the live stream with the token from the settings' owner-only file.
+/// The token is read on the socket thread, from the owner-only file, as
+/// soon as a valid one is there: an empty placeholder is waited for, up to
+/// `TOKEN_WAIT` after approval.
 pub fn opener(settings: super::cloud::Settings) -> super::cloud::Opener {
     Box::new(move || {
-        let token = super::cloud::read_token(&settings.token_file)?;
+        let budget = super::cloud::launch_budget(&settings);
+        let path = settings.token_file;
         Ok(Box::new(DeepgramStream::start(
             Network,
             ListenRequest::lab(),
-            token,
-            super::cloud::launch_budget(&settings),
+            Token::from_file(path),
+            budget,
         )) as Box<dyn StreamingTranscriber>)
     })
+}
+
+/// How long a stream waits after approval for a valid token.
+const TOKEN_WAIT: Duration = Duration::from_secs(10);
+/// How often it looks.
+const TOKEN_POLL: Duration = Duration::from_millis(50);
+
+/// Where the socket thread gets its token: a fixed one, or the owner-only
+/// file read when a valid token is there.
+pub struct Token(Box<dyn FnMut() -> Option<String> + Send>);
+
+impl Token {
+    pub fn from_file(path: std::path::PathBuf) -> Self {
+        Self(Box::new(move || super::cloud::read_token(&path).ok()))
+    }
+
+    fn take(&mut self) -> Option<String> {
+        (self.0)()
+    }
+}
+
+impl From<String> for Token {
+    fn from(token: String) -> Self {
+        let mut token = Some(token);
+        Self(Box::new(move || token.take()))
+    }
 }
 
 /// How long opening the TCP connection may take before the stream fails.
@@ -680,10 +733,11 @@ mod tests {
             "t".repeat(24),
             Duration::from_secs(60),
         );
-        let events = wait_for(&mut stream, |e| e.len() >= 2);
-        assert_eq!(events[0], SttEvent::Partial);
+        let events = wait_for(&mut stream, |e| e.len() >= 3);
+        assert!(matches!(events[0], SttEvent::Connected { .. }));
+        assert_eq!(events[1], SttEvent::Partial);
         assert_eq!(
-            events[1],
+            events[2],
             SttEvent::Final {
                 seq: 1,
                 text: "Fictional final line.".into(),
@@ -715,6 +769,86 @@ mod tests {
             Err(SttFailure::Protocol)
         );
         assert_eq!(parse("not json", &mut seq), Err(SttFailure::Protocol));
+    }
+
+    /// An owner-only folder and an empty placeholder token file in it, as
+    /// the lab launcher leaves them before the review.
+    fn placeholder() -> (std::path::PathBuf, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!(
+            "talkqte-stt-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let file = dir.join("stt-token");
+        std::fs::write(&file, "").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        (dir, file)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_token_handed_over_after_approval_is_waited_for_and_the_audio_kept() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, file) = placeholder();
+        // The placeholder passes the start-time check without being read.
+        assert_eq!(super::super::cloud::check_token_file(&file), Ok(()));
+        let fake = Fake::default();
+        let mut stream = DeepgramStream::start(
+            fake.clone(),
+            ListenRequest::lab(),
+            Token::from_file(file.clone()),
+            Duration::from_secs(60),
+        );
+        // Speech after approval, before the token: kept, not sent yet.
+        for _ in 0..5 {
+            stream.push(&[0.1; FRAME]).unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(fake.0.lock().unwrap().url.is_none(), "no connection yet");
+        // The lab writes the token beside it and renames it over the placeholder.
+        let next = dir.join("stt-token.next");
+        std::fs::write(&next, "fictional.token_".to_string() + &"z".repeat(30)).unwrap();
+        std::fs::set_permissions(&next, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::rename(&next, &file).unwrap();
+        let events = wait_for(&mut stream, |e| {
+            e.iter().any(|e| matches!(e, SttEvent::Connected { .. }))
+        });
+        // The query actually used, with the opt-out and without the token.
+        assert!(events.contains(&SttEvent::Connected {
+            query: QUERY.to_string()
+        }));
+        assert!(QUERY.split('&').any(|p| p == "mip_opt_out=true"));
+        let _ = stream.finish(Duration::from_secs(2));
+        assert_eq!(fake.0.lock().unwrap().binary.len(), 5, "nothing was lost");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_token_that_never_arrives_stops_the_stream_with_settings() {
+        let (dir, file) = placeholder();
+        let fake = Fake::default();
+        let mut stream = DeepgramStream::start_with(
+            fake.clone(),
+            ListenRequest::lab(),
+            Token::from_file(file),
+            Duration::from_secs(60),
+            Timing {
+                token_wait: Duration::from_millis(150),
+                ..Timing::default()
+            },
+        );
+        stream.push(&[0.1; FRAME]).unwrap();
+        let events = wait_for(&mut stream, |e| !e.is_empty());
+        assert_eq!(events, vec![SttEvent::Failed(SttFailure::Settings)]);
+        assert!(fake.0.lock().unwrap().url.is_none());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -809,6 +943,7 @@ mod tests {
         let timing = Timing {
             keep_alive: Duration::from_millis(60),
             finalize_after: Duration::from_millis(80),
+            token_wait: TOKEN_WAIT,
         };
         let mut stream = DeepgramStream::start_with(
             fake.clone(),
@@ -848,8 +983,9 @@ mod tests {
             "t".repeat(24),
             Duration::from_secs(60),
         );
-        let events = wait_for(&mut stream, |e| !e.is_empty());
-        assert_eq!(events, vec![SttEvent::Failed(SttFailure::Network)]);
+        let events = wait_for(&mut stream, |e| e.len() >= 2);
+        assert!(matches!(events[0], SttEvent::Connected { .. }));
+        assert_eq!(events[1..], [SttEvent::Failed(SttFailure::Network)]);
         std::thread::sleep(Duration::from_millis(50));
         assert!(stream.poll().is_empty());
         assert!(fake.0.lock().unwrap().url.is_some());

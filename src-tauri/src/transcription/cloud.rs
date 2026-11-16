@@ -74,6 +74,11 @@ pub enum SttEvent {
         /// The provider's guess at who spoke. Untrusted: logged only.
         untrusted_speaker: Option<u32>,
     },
+    /// The connection is open. `query` is the query string of the URL it
+    /// used, without the token.
+    Connected {
+        query: String,
+    },
     Failed(SttFailure),
 }
 
@@ -254,6 +259,7 @@ impl CloudFeed {
                         state: "started",
                         code: None,
                         audio_ms: 0,
+                        query: None,
                     });
                     self.approved_at = approved_at;
                     self.stream = Some(stream);
@@ -287,6 +293,7 @@ impl CloudFeed {
                         state: "dropping",
                         code: None,
                         audio_ms: self.stats.sent_ms,
+                        query: None,
                     });
                     if let Some(notify) = self.on_dropped.as_mut() {
                         notify();
@@ -335,6 +342,15 @@ impl CloudFeed {
         for event in events {
             match event {
                 SttEvent::Partial => {}
+                SttEvent::Connected { query } => {
+                    crate::timing_log::record(crate::timing_log::Event::SttState {
+                        session: self.session,
+                        state: "connected",
+                        code: None,
+                        audio_ms: self.stats.sent_ms,
+                        query: Some(query),
+                    });
+                }
                 SttEvent::Final {
                     seq,
                     text,
@@ -396,6 +412,7 @@ impl CloudFeed {
             state: "stopped",
             code: Some(failure.code()),
             audio_ms: self.stats.sent_ms,
+            query: None,
         });
         if let Some(mut notify) = self.on_failure.take() {
             notify(failure);
@@ -409,6 +426,7 @@ impl CloudFeed {
             state,
             code: None,
             audio_ms: self.stats.sent_ms,
+            query: None,
         });
     }
 }

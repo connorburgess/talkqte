@@ -52,7 +52,12 @@ processing is enabled", and the companion says "not transcribing yet".
 The token file's presence and permissions are checked, without reading the
 token, when Settings checks readiness and when a session starts, so a bad
 setup is refused before anyone is asked to approve. The token itself is read
-when the stream opens.
+on the stream's own thread after approval. The file may still be an empty
+placeholder then: the lab launcher writes the token only after it has seen
+the review, by renaming a new file over the placeholder. The stream looks for
+a valid token every 50 ms for up to 10 seconds after approval, keeping the
+audio captured since approval in its bounded queue (12.8 seconds), and stops
+with `settings` if none arrives.
 
 After approval, each capture source opens one WebSocket stream to
 `wss://api.deepgram.com/v1/listen` and sends:
@@ -100,8 +105,9 @@ reaches the interface or a log; only fixed codes do.
 
 TalkQTE writes no audio and no token to disk. The transcript stays in memory
 as for any live session. A `timing-log` build also writes `stt_state` rows
-(started, dropping, finished, ended or stopped, with a fixed code and the
-audio sent so far) and `stt_final` rows (line number, times, and the untrusted speaker
+(started, connected, dropping, finished, ended or stopped, with a fixed code
+and the audio sent so far; the connected row also holds the query string of
+the URL the connection actually used, which never contains the token) and `stt_final` rows (line number, times, and the untrusted speaker
 label); recognized text is in the existing `segment` rows. Deepgram
 handles the audio under the key holder's Deepgram terms. TalkQTE cannot
 recall audio once it is sent.
@@ -135,7 +141,10 @@ Offline tests with a fake socket and scripted streams only:
   stream opened by it, a full queue reported once, one budget shared by the
   launch, the settings, and the token file rules.
 - `transcription::deepgram` tests also cover queued audio not going out once
-  the stream is stopped, and two streams sharing the launch's cap.
+  the stream is stopped, two streams sharing the launch's cap, a token handed
+  over after approval being waited for with no audio lost, the connected
+  event carrying the query used, and a token that never arrives stopping the
+  stream with `settings`.
 - Engine and launch tests: a launch setting approves nothing when cloud
   transcription is selected and a launch-setting grant never opens audio
   (`dev_model`), and Pause in the lab ends audio with the lab reason
