@@ -19,8 +19,25 @@ there is no provider fallback. The client currently accepts `gpt-6.1-sol` for Co
 `claude-opus-5-5` or `claude-haiku-5-5` for Claude Code, and `low` or `medium`
 effort. The broker must confirm the identical provider/model/effort at handshake.
 
+A second backend, `TALKQTE_DEV_CUE_BACKEND=lab-api`, sends the same context to the
+Anthropic API with the lab owner's API key, through the same broker; the key never
+reaches the app. It accepts only provider `anthropic-api`, model
+`claude-opus-5-5`, `claude-sonnet-5-5` or `claude-haiku-5-5`, effort `low`, and a
+required `TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD` (a decimal from 1 to 1,000,000
+micro-dollars). A provider used with the other backend, or a spend cap with the
+subscription backend, is refused. The broker's `ready` frame for it must report
+`dispatchBudgetKind` `apiRequests`, `spendCapMicroUsd` equal to the launch cap and
+`spendUsedMicroUsd` not above it; the subscription backends report
+`cliDispatchAttempts` and never send spend fields. A broker `failed` frame with
+code `refusal` for the active request is request-scoped: that request is retired,
+recorded as `refused`, shows no cue, and the run continues.
+
 Native integration reuses [launch consent](real-app-lab.md#model-connection-without-clicks)
-and its session cap, default 100, or the existing explicit session review. The lab
+and its session cap, default 100, or the existing explicit session review. The
+`lab-api` backend is the exception: sending conversation text to a paid API is an
+export, so the session review is its per-run confirmation. It names the Anthropic
+API, what is sent, billing per token, the per-run spend cap and the model. The
+launch setting cannot approve it; that combination fails closed. The lab
 backend does not require the separate `claude-cli` feature. No constructor grants
 permission. Construction is inert: the transport worker waits
 for its first permission-gated evaluation before reading a descriptor or opening
@@ -33,8 +50,8 @@ The notebook and companion name the selected provider while lines may leave the
 device. The lab sends bounded recent/new speech, the optional Your name setting and current/earlier
 cues; it refuses prior/imported notes and excludes focus lines. Model-generated
 cue text may return to the same provider as current/earlier context. Processing is
-fictional-lab-only, uses the explicitly selected subscription, and remains subject
-to that account's retention terms.
+fictional-lab-only, uses the explicitly selected subscription or API key, and
+remains subject to that account's or API organisation's retention terms.
 
 ## Stop for an owned development process
 
