@@ -91,7 +91,7 @@ On 14 November 2026 a rebuild signed this way kept the grant.
 The model never goes inside the repository. Use one of these:
 
 - **In the app:** Settings → speech model → Download. It is saved as
-  `~/Library/Application Support/com.talkqte.desktop/models/ggml-base.en.bin`
+  `~/Library/Application Support/com.talkqte.desktop/models/ggml-tiny.en.bin`
   and checked against its pinned SHA-256 before use.
 - **A file you already have:** set `TALKQTE_WHISPER_MODEL` to its absolute
   path when launching. That file is not checksum-checked.
