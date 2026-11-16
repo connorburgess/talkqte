@@ -553,6 +553,8 @@ export function buildManifest({
   schedule,
   verification,
   files,
+  renderer,
+  voices,
 }) {
   const gaps = schedule.rows.slice(1).map((row) => row.gapBeforeMs);
   const sorted = [...gaps].sort((a, b) => a - b);
@@ -604,8 +606,56 @@ export function buildManifest({
     schedule: schedule.rows.map(({ startSample: _, ...row }) => row),
     verification: { passed: verification.passed },
     files,
+    ...(renderer ? { renderer } : {}),
+    ...(voices ? { voices } : {}),
     runtimeInputs: 'media-only',
   });
+}
+
+export const GENERATION_ROUTES = [
+  'offline-stand-in',
+  'codex-subscription',
+  'anthropic-api',
+];
+export const VOICE_RENDERERS = ['say', 'deepgram'];
+// Query names a voice renderer may record, each with a plain value. Anything
+// else (and any field named like a credential) is refused, so a manifest can
+// never carry a key or a secret-bearing query.
+const RENDERER_QUERY_NAMES = new Set([
+  'model',
+  'encoding',
+  'container',
+  'sample_rate',
+  'bit_rate',
+  'mip_opt_out',
+]);
+const CREDENTIAL_NAME = /key|token|secret|auth|password|credential|bearer/i;
+const PLAIN = /^[A-Za-z0-9._-]{1,64}$/;
+const nonNegative = (n) => Number.isFinite(n) && n >= 0;
+
+function namesCredential(value, depth = 0) {
+  if (!value || typeof value !== 'object' || depth > 6) return false;
+  return Object.entries(value).some(
+    ([k, v]) => CREDENTIAL_NAME.test(k) || namesCredential(v, depth + 1),
+  );
+}
+
+function rendererProblem(r) {
+  if (typeof r !== 'object' || r === null || Array.isArray(r)) return 'shape';
+  if (!VOICE_RENDERERS.includes(r.engine)) return 'engine';
+  if (namesCredential(r)) return 'credential-like field';
+  if (r.model !== undefined && !PLAIN.test(r.model)) return 'model';
+  for (const k of ['requests', 'billedChars'])
+    if (r[k] !== undefined && !(Number.isSafeInteger(r[k]) && r[k] >= 0))
+      return k;
+  if (r.costUsd !== undefined && !nonNegative(r.costUsd)) return 'cost';
+  if (r.query !== undefined) {
+    if (typeof r.query !== 'object' || r.query === null) return 'query';
+    for (const [k, v] of Object.entries(r.query))
+      if (!RENDERER_QUERY_NAMES.has(k) || !PLAIN.test(String(v)))
+        return 'query';
+  }
+  return null;
 }
 
 /** Refuses a manifest that is not complete and self-consistent. */
@@ -631,11 +681,18 @@ export function validateManifest(manifest) {
   if (m.title !== null && contentProblems(m.title).length)
     fail('title names a real brand or contact detail');
   if (
-    !['offline-stand-in', 'codex-subscription'].includes(m.generation?.route) ||
+    !GENERATION_ROUTES.includes(m.generation?.route) ||
     !Number.isSafeInteger(m.generation.dispatches) ||
     m.generation.dispatches < 0 ||
     m.generation.dispatches > 1 ||
-    typeof m.generation.inference !== 'boolean'
+    typeof m.generation.inference !== 'boolean' ||
+    (m.generation.model !== undefined &&
+      m.generation.model !== null &&
+      !PLAIN.test(m.generation.model)) ||
+    (m.generation.costUsd !== undefined &&
+      m.generation.costUsd !== null &&
+      !nonNegative(m.generation.costUsd)) ||
+    namesCredential(m.generation)
   )
     fail('generation');
   const media = m.media ?? {};
@@ -696,6 +753,25 @@ export function validateManifest(manifest) {
     Object.values(m.files).some((hash) => !HEX64.test(hash))
   )
     fail('file hashes');
+  if (m.renderer !== undefined) {
+    const problem = rendererProblem(m.renderer);
+    if (problem) fail(`renderer ${problem}`);
+  }
+  if (m.voices !== undefined) {
+    const speakers = new Set(rows.map((row) => row.speaker));
+    if (
+      typeof m.voices !== 'object' ||
+      m.voices === null ||
+      namesCredential(m.voices) ||
+      Object.entries(m.voices).some(
+        ([name, v]) =>
+          !speakers.has(name) ||
+          !PLAIN.test(v?.voice ?? '') ||
+          (v.rateWpm !== undefined && !Number.isSafeInteger(v.rateWpm)),
+      )
+    )
+      fail('voices');
+  }
   if (m.runtimeInputs !== 'media-only') fail('runtime inputs');
   return Object.freeze(structuredClone(m));
 }

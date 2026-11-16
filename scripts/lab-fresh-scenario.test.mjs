@@ -447,3 +447,106 @@ test('generated text naming a real brand or contact detail is found, line by lin
   assert.equal(namesRealBrand('We write C++ daily.', ['C++']), true);
   assert.equal(namesRealBrand('We write C daily.', ['C++']), false);
 });
+
+test('a manifest may record the text route, voice renderer and voices, never a credential', () => {
+  const s = scenario();
+  const speakers = [...new Set(s.plan.rows.map((row) => row.speaker))];
+  const renderer = {
+    engine: 'deepgram',
+    model: 'aura-2',
+    requests: 22,
+    billedChars: 1093,
+    costUsd: 0.0328,
+    query: {
+      encoding: 'linear16',
+      container: 'wav',
+      sample_rate: '48000',
+      mip_opt_out: 'true',
+    },
+  };
+  const voices = Object.fromEntries(
+    speakers.map((name, i) => [name, { voice: `aura-2-voice${i}-en` }]),
+  );
+  const manifest = manifestFor(s, {
+    generation: {
+      route: 'anthropic-api',
+      model: 'claude-opus-5-5',
+      dispatches: 1,
+      inference: true,
+      costUsd: 0.0628,
+    },
+    renderer,
+    voices,
+  });
+  assert.equal(manifest.generation.route, 'anthropic-api');
+  assert.deepEqual(manifest.renderer, renderer);
+  assert.deepEqual(manifest.voices, voices);
+  // Both blocks stay optional.
+  assert.equal('renderer' in manifestFor(s), false);
+
+  const good = JSON.parse(JSON.stringify(manifest));
+  const refuse = (change, message) =>
+    assert.throws(
+      () => validateManifest(change(structuredClone(good))),
+      message,
+    );
+  refuse(
+    (m) => ({ ...m, generation: { ...m.generation, route: 'other-api' } }),
+    /generation/,
+  );
+  refuse(
+    (m) => ({ ...m, generation: { ...m.generation, costUsd: -1 } }),
+    /generation/,
+  );
+  refuse(
+    (m) => ({ ...m, generation: { ...m.generation, apiKey: 'x' } }),
+    /generation/,
+  );
+  refuse(
+    (m) => ({ ...m, renderer: { ...m.renderer, engine: 'other' } }),
+    /renderer engine/,
+  );
+  for (const field of ['key', 'apiKey', 'authorization', 'token', 'secret'])
+    refuse(
+      (m) => ({ ...m, renderer: { ...m.renderer, [field]: 'x' } }),
+      /renderer credential-like field/,
+    );
+  refuse(
+    (m) => ({
+      ...m,
+      renderer: { ...m.renderer, query: { ...m.renderer.query, token: 'x' } },
+    }),
+    /renderer credential-like field/,
+  );
+  refuse(
+    (m) => ({
+      ...m,
+      renderer: {
+        ...m.renderer,
+        query: { ...m.renderer.query, callback: 'x' },
+      },
+    }),
+    /renderer query/,
+  );
+  refuse(
+    (m) => ({
+      ...m,
+      renderer: {
+        ...m.renderer,
+        query: { ...m.renderer.query, model: 'a b/c' },
+      },
+    }),
+    /renderer query/,
+  );
+  refuse(
+    (m) => ({ ...m, voices: { ...m.voices, Stranger: { voice: 'v' } } }),
+    /voices/,
+  );
+  refuse(
+    (m) => ({
+      ...m,
+      voices: { ...m.voices, [speakers[0]]: { voice: 'has space' } },
+    }),
+    /voices/,
+  );
+});
