@@ -1537,50 +1537,48 @@ async fn start_live_session(
                         return false;
                     };
                     live.microphone = Some(generation);
-                    live.runner = Some(match recognizer {
-                        LiveRecognizer::Local(recognizer) => {
-                            live::LiveSession::start(chunker, session, started_at, recognizer, sink)
-                        }
-                        LiveRecognizer::Cloud(opener) => live::LiveSession::start_cloud(
-                            chunker,
-                            session,
-                            started_at,
-                            transcription::cloud::CloudFeed::new(
+                    live.runner =
+                        Some(match recognizer {
+                            LiveRecognizer::Local(recognizer) => live::LiveSession::start(
+                                chunker, session, started_at, recognizer, sink,
+                            ),
+                            LiveRecognizer::Cloud(opener) => live::LiveSession::start_cloud(
+                                chunker,
                                 session,
-                                2,
-                                opener,
-                                move || {
-                                    approval_app
-                                        .state::<AppState>()
-                                        .0
-                                        .lock()
-                                        .ok()
-                                        .and_then(|runtime| runtime.engine.audio_approval())
-                                },
-                                sink,
-                            )
-                            .stop_sending_when(move || {
-                                keep_app.state::<AppState>().0.lock().map_or(
-                                    Some(transcription::cloud::SttFailure::Withdrawn),
-                                    |runtime| {
-                                        transcription::cloud::withdrawal(
-                                            runtime.engine.audio_withdrawal(),
+                                started_at,
+                                transcription::cloud::CloudFeed::new(
+                                    session,
+                                    2,
+                                    opener,
+                                    move || {
+                                        approval_app.state::<AppState>().0.lock().ok().and_then(
+                                            |runtime| runtime.engine.audio_approval(session),
                                         )
                                     },
+                                    sink,
                                 )
-                            })
-                            .on_dropped(move || {
-                                let state = dropped_app.state::<AppState>();
-                                if let Ok(mut runtime) = state.0.lock() {
-                                    runtime.engine.cloud_transcription_dropped(session);
-                                    publish(&dropped_app, &mut runtime);
-                                };
-                            })
-                            .on_failure(move |failure| {
-                                stop_after_cloud_failure(&failure_app, session, failure)
-                            }),
-                        ),
-                    });
+                                .stop_sending_when(move || {
+                                    keep_app.state::<AppState>().0.lock().map_or(
+                                        Some(transcription::cloud::SttFailure::Withdrawn),
+                                        |runtime| {
+                                            transcription::cloud::withdrawal(
+                                                runtime.engine.audio_withdrawal(session),
+                                            )
+                                        },
+                                    )
+                                })
+                                .on_dropped(move || {
+                                    let state = dropped_app.state::<AppState>();
+                                    if let Ok(mut runtime) = state.0.lock() {
+                                        runtime.engine.cloud_transcription_dropped(session);
+                                        publish(&dropped_app, &mut runtime);
+                                    };
+                                })
+                                .on_failure(move |failure| {
+                                    stop_after_cloud_failure(&failure_app, session, failure)
+                                }),
+                            ),
+                        });
                     true
                 });
             if !kept {

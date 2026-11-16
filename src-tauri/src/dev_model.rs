@@ -150,7 +150,7 @@ mod tests {
             .unwrap()
             .apply_with(&mut e, true);
         assert!(!e.has_processing_permission());
-        assert_eq!(e.audio_approval(), None);
+        assert_eq!(e.audio_approval(e.session()), None);
         assert_eq!(
             serde_json::to_value(e.processing_issue()).unwrap(),
             "devSettings"
@@ -161,8 +161,8 @@ mod tests {
             .unwrap()
             .apply_with(&mut e, false);
         assert!(e.has_processing_permission());
-        assert_eq!(e.audio_approval(), None);
-        assert_eq!(e.audio_withdrawal(), Some("withdrawn"));
+        assert_eq!(e.audio_approval(e.session()), None);
+        assert_eq!(e.audio_withdrawal(e.session()), Some("withdrawn"));
         // Only the review shown in the app does, at the session time it was made.
         let mut e = engine();
         e.advance(4_000);
@@ -170,8 +170,12 @@ mod tests {
             .review_processing(ConversationScope::RecentAndNewSpeech, &[])
             .unwrap();
         e.approve_processing(review).unwrap();
-        assert_eq!(e.audio_approval(), Some(4_000));
-        assert_eq!(e.audio_withdrawal(), None);
+        assert_eq!(e.audio_approval(e.session()), Some(4_000));
+        assert_eq!(e.audio_withdrawal(e.session()), None);
+        // Bound to its own session: no other session's stream may use it.
+        let other = e.session() + 1;
+        assert_eq!(e.audio_approval(other), None);
+        assert_eq!(e.audio_withdrawal(other), Some("withdrawn"));
     }
 
     #[test]
