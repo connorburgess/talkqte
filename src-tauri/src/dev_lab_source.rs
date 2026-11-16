@@ -106,10 +106,132 @@ fn expected(
     }))
 }
 
+/// What the process table says about a pid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Info {
+    uid: u32,
+    seconds: u64,
+    micros: u64,
+}
+
+/// Why the process table could not be read for a pid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Missing {
+    /// No such process (`ESRCH`).
+    Gone,
+    /// A process exists but belongs to another user (`EPERM`).
+    OtherOwner,
+    /// The read failed for another reason.
+    Unreadable,
+}
+
+/// An executable's metadata: a regular file, its link count, and its
+/// identity (device, inode, length, modification time).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FileInfo {
+    regular: bool,
+    links: u64,
+    identity: (u64, u64, u64, i64, i64),
+}
+
+/// The system reads the identity check makes, so tests can stand in for a
+/// replaced or briefly unreadable process.
+trait Reads {
+    fn uid(&self) -> u32;
+    fn info(&self, pid: i32) -> Result<Info, Missing>;
+    fn path(&self, pid: i32) -> Option<PathBuf>;
+    fn canonical(&self, path: &std::path::Path) -> Option<PathBuf>;
+    fn file(&self, path: &std::path::Path) -> Option<FileInfo>;
+    /// Whether NSRunningApplication knows the pid: terminated, bundle id.
+    fn running(&self, pid: i32) -> Option<(bool, Option<String>)>;
+}
+
+struct System;
+
+impl Reads for System {
+    fn uid(&self) -> u32 {
+        // SAFETY: getuid has no arguments or side effects.
+        unsafe { libc::getuid() }
+    }
+
+    fn info(&self, pid: i32) -> Result<Info, Missing> {
+        // SAFETY: fixed-size owned buffer, exact returned struct length checked.
+        let read = unsafe {
+            let mut value: libc::proc_bsdinfo = std::mem::zeroed();
+            let size = std::mem::size_of_val(&value);
+            let copied = libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                (&mut value as *mut libc::proc_bsdinfo).cast(),
+                i32::try_from(size).unwrap_or(0),
+            );
+            (usize::try_from(copied).ok() == Some(size) && value.pbi_pid == pid as u32)
+                .then_some(value)
+        };
+        if let Some(value) = read {
+            return Ok(Info {
+                uid: value.pbi_uid,
+                seconds: value.pbi_start_tvsec,
+                micros: value.pbi_start_tvusec,
+            });
+        }
+        // SAFETY: signal 0 only checks that the process exists and may be signalled.
+        let signalled = unsafe { libc::kill(pid, 0) };
+        let errno = std::io::Error::last_os_error().raw_os_error();
+        Err(match (signalled, errno) {
+            (0, _) => Missing::Unreadable,
+            (_, Some(libc::ESRCH)) => Missing::Gone,
+            (_, Some(libc::EPERM)) => Missing::OtherOwner,
+            _ => Missing::Unreadable,
+        })
+    }
+
+    fn path(&self, pid: i32) -> Option<PathBuf> {
+        let mut path = [0u8; 4096];
+        // SAFETY: proc_pidpath writes at most the supplied buffer length.
+        let copied =
+            unsafe { libc::proc_pidpath(pid, path.as_mut_ptr().cast(), path.len() as u32) };
+        if copied <= 0 {
+            return None;
+        }
+        let end = path.iter().position(|b| *b == 0)?;
+        Some(PathBuf::from(std::str::from_utf8(&path[..end]).ok()?))
+    }
+
+    fn canonical(&self, path: &std::path::Path) -> Option<PathBuf> {
+        path.canonicalize().ok()
+    }
+
+    fn file(&self, path: &std::path::Path) -> Option<FileInfo> {
+        let metadata = std::fs::symlink_metadata(path).ok()?;
+        Some(FileInfo {
+            regular: metadata.is_file(),
+            links: metadata.nlink(),
+            identity: (
+                metadata.dev(),
+                metadata.ino(),
+                metadata.len(),
+                metadata.mtime(),
+                metadata.mtime_nsec(),
+            ),
+        })
+    }
+
+    fn running(&self, pid: i32) -> Option<(bool, Option<String>)> {
+        let running = NSRunningApplication::runningApplicationWithProcessIdentifier(pid)?;
+        Some((
+            running.isTerminated(),
+            running.bundleIdentifier().map(|id| id.to_string()),
+        ))
+    }
+}
+
 /// What a check of the pinned player found. A transient failure is a read
-/// that could not be completed or a property that may briefly be missing,
-/// such as during an application switch; a definitive one means the pinned
-/// process is gone or was replaced. Each names the check, for the log.
+/// that could not be completed for the same verified process, such as a
+/// missing NSRunningApplication entry during an application switch. A
+/// definitive one means the pinned process is gone or was replaced. Each
+/// names the check, for the log.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Check {
     Current,
@@ -117,124 +239,107 @@ pub(crate) enum Check {
     Gone(&'static str),
 }
 
-fn process(pid: i32) -> Option<Process> {
-    read_process(pid).ok()
+fn missing(why: Missing) -> Check {
+    match why {
+        Missing::Gone => Check::Gone("process_gone"),
+        Missing::OtherOwner => Check::Gone("process_owner"),
+        Missing::Unreadable => Check::Transient("process_info"),
+    }
 }
 
-/// Reads the process's identity, or names the check that failed and whether
-/// that failure is definitive (`Err((check, true))`).
-fn read_process(pid: i32) -> Result<Process, (&'static str, bool)> {
+/// The process admitted at launch: every read must succeed.
+fn process(pid: i32) -> Option<Process> {
+    admit(&System, pid)
+}
+
+fn admit(reads: &impl Reads, pid: i32) -> Option<Process> {
     if pid <= 0 {
-        return Err(("pid", true));
+        return None;
     }
-    // SAFETY: fixed-size owned buffers, exact returned struct length checked.
-    let info = || unsafe {
-        let mut value: libc::proc_bsdinfo = std::mem::zeroed();
-        let size = std::mem::size_of_val(&value);
-        let copied = libc::proc_pidinfo(
-            pid,
-            libc::PROC_PIDTBSDINFO,
-            0,
-            (&mut value as *mut libc::proc_bsdinfo).cast(),
-            i32::try_from(size).ok()?,
-        );
-        (usize::try_from(copied).ok()? == size && value.pbi_pid == pid as u32).then_some(value)
-    };
-    let gone = || {
-        // SAFETY: signal 0 only checks that the process exists.
-        let signalled = unsafe { libc::kill(pid, 0) };
-        signalled != 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
-    };
-    let Some(before) = info() else {
-        return Err(if gone() {
-            ("process_gone", true)
-        } else {
-            ("process_info", false)
-        });
-    };
-    // SAFETY: getuid has no arguments or side effects.
-    if before.pbi_uid != unsafe { libc::getuid() } {
-        return Err(("process_owner", true));
+    let before = reads.info(pid).ok()?;
+    if before.uid != reads.uid() {
+        return None;
     }
-    let mut path = [0u8; 4096];
-    // SAFETY: proc_pidpath writes at most the supplied buffer length.
-    let copied = unsafe { libc::proc_pidpath(pid, path.as_mut_ptr().cast(), path.len() as u32) };
-    if copied <= 0 {
-        return Err(("process_path", false));
+    let raw = reads.path(pid)?;
+    let executable = reads.canonical(&raw)?;
+    if raw != executable {
+        return None;
     }
-    let end = path
-        .iter()
-        .position(|b| *b == 0)
-        .ok_or(("process_path", false))?;
-    let raw =
-        PathBuf::from(std::str::from_utf8(&path[..end]).map_err(|_| ("process_path", false))?);
-    let executable = raw.canonicalize().map_err(|_| ("canonical_path", false))?;
-    if raw.as_os_str() != executable.as_os_str() {
-        return Err(("canonical_path", false));
+    let file = reads.file(&executable)?;
+    if !file.regular || file.links != 1 {
+        return None;
     }
-    let metadata =
-        std::fs::symlink_metadata(&executable).map_err(|_| ("executable_metadata", false))?;
-    if !metadata.is_file() || metadata.nlink() != 1 {
-        return Err(("executable_metadata", false));
+    let (terminated, bundle) = reads.running(pid)?;
+    if terminated || bundle.as_deref() != Some(BUNDLE) {
+        return None;
     }
-    let running = NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
-        .ok_or(("running_application", false))?;
-    if running.isTerminated() {
-        return Err(("terminated", false));
+    if reads.info(pid).ok()? != before {
+        return None;
     }
-    if running
-        .bundleIdentifier()
-        .map(|id| id.to_string())
-        .as_deref()
-        != Some(BUNDLE)
-    {
-        return Err(("bundle_identifier", false));
-    }
-    let after = info().ok_or(if gone() {
-        ("process_gone", true)
-    } else {
-        ("process_info", false)
-    })?;
-    if before.pbi_start_tvsec != after.pbi_start_tvsec
-        || before.pbi_start_tvusec != after.pbi_start_tvusec
-    {
-        return Err(("start_time", true));
-    }
-    Ok(Process {
+    Some(Process {
         pid,
-        seconds: before.pbi_start_tvsec,
-        micros: before.pbi_start_tvusec,
+        seconds: before.seconds,
+        micros: before.micros,
         executable,
-        file: (
-            metadata.dev(),
-            metadata.ino(),
-            metadata.len(),
-            metadata.mtime(),
-            metadata.mtime_nsec(),
-        ),
+        file: file.identity,
     })
 }
 
-/// Compares a fresh read with the pin, naming the first difference. Every
-/// difference is definitive: the pinned process was replaced.
-fn compare(pin: &Process, actual: &Process) -> Check {
-    if actual.pid != pin.pid || actual.seconds != pin.seconds || actual.micros != pin.micros {
-        Check::Gone("start_time")
-    } else if actual.executable.as_os_str() != pin.executable.as_os_str() {
-        Check::Gone("executable_path")
-    } else if actual.file != pin.file {
-        Check::Gone("executable_file")
-    } else {
-        Check::Current
+/// Checks the pinned process. Everything that can show a replacement (the
+/// owner, the start time, the executable's path, canonical form, link count
+/// and file identity) is compared with the pin first and is definitive.
+/// Only after the process is verified as the pinned one can a failed read
+/// be transient.
+fn check_pin_with(reads: &impl Reads, pin: &Process) -> Check {
+    if pin.pid <= 0 {
+        return Check::Gone("pid");
+    }
+    let before = match reads.info(pin.pid) {
+        Ok(info) => info,
+        Err(why) => return missing(why),
+    };
+    if before.uid != reads.uid() {
+        return Check::Gone("process_owner");
+    }
+    if before.seconds != pin.seconds || before.micros != pin.micros {
+        return Check::Gone("start_time");
+    }
+    let Some(raw) = reads.path(pin.pid) else {
+        return Check::Transient("process_path");
+    };
+    if raw.as_os_str() != pin.executable.as_os_str() {
+        return Check::Gone("executable_path");
+    }
+    match reads.canonical(&raw) {
+        None => return Check::Transient("canonical_path"),
+        Some(canonical) if canonical != raw => return Check::Gone("canonical_path"),
+        Some(_) => {}
+    }
+    match reads.file(&raw) {
+        None => return Check::Transient("executable_metadata"),
+        Some(file) if !file.regular || file.links != 1 => {
+            return Check::Gone("executable_metadata")
+        }
+        Some(file) if file.identity != pin.file => return Check::Gone("executable_file"),
+        Some(_) => {}
+    }
+    match reads.running(pin.pid) {
+        None => return Check::Transient("running_application"),
+        Some((true, _)) => return Check::Transient("terminated"),
+        Some((false, None)) => return Check::Transient("bundle_identifier"),
+        Some((false, Some(bundle))) if bundle != BUNDLE => return Check::Gone("bundle_identifier"),
+        Some(_) => {}
+    }
+    // The start time again, so a process replaced during the reads is caught.
+    match reads.info(pin.pid) {
+        Ok(after) if after == before => Check::Current,
+        Ok(_) => Check::Gone("start_time"),
+        Err(why) => missing(why),
     }
 }
 
 fn check_pin(pin: &Process) -> Check {
-    match read_process(pin.pid) {
-        Ok(actual) => compare(pin, &actual),
-        Err((name, true)) => Check::Gone(name),
-        Err((name, false)) => Check::Transient(name),
-    }
+    check_pin_with(&System, pin)
 }
 
 fn same_admission(expected: &Process, actual: &Process) -> bool {
@@ -325,33 +430,158 @@ mod tests {
             .into(),
         )
     }
+    /// A fictional process table: the pinned player as it was admitted,
+    /// changed field by field to stand in for a replacement or a read that
+    /// briefly fails.
+    #[derive(Clone)]
+    struct Fake {
+        info: Result<Info, Missing>,
+        path: Option<PathBuf>,
+        canonical: Option<PathBuf>,
+        file: Option<FileInfo>,
+        running: Option<(bool, Option<String>)>,
+    }
+
+    const EXE: &str = "/fictional/Player.app/Contents/MacOS/Player";
+
+    impl Fake {
+        fn admitted() -> Self {
+            Self {
+                info: Ok(Info {
+                    uid: 501,
+                    seconds: 1_000,
+                    micros: 5,
+                }),
+                path: Some(EXE.into()),
+                canonical: Some(EXE.into()),
+                file: Some(FileInfo {
+                    regular: true,
+                    links: 1,
+                    identity: (1, 2, 3, 4, 5),
+                }),
+                running: Some((false, Some(BUNDLE.into()))),
+            }
+        }
+    }
+
+    impl Reads for Fake {
+        fn uid(&self) -> u32 {
+            501
+        }
+        fn info(&self, _: i32) -> Result<Info, Missing> {
+            self.info
+        }
+        fn path(&self, _: i32) -> Option<PathBuf> {
+            self.path.clone()
+        }
+        fn canonical(&self, _: &std::path::Path) -> Option<PathBuf> {
+            self.canonical.clone()
+        }
+        fn file(&self, _: &std::path::Path) -> Option<FileInfo> {
+            self.file
+        }
+        fn running(&self, _: i32) -> Option<(bool, Option<String>)> {
+            self.running.clone()
+        }
+    }
+
     #[test]
-    fn a_replaced_player_is_definitive_and_names_what_changed() {
-        let pin = Process {
-            pid: 123,
-            seconds: 1_000,
-            micros: 5,
-            executable: "/fictional/Player.app/Contents/MacOS/Player".into(),
-            file: (1, 2, 3, 4, 5),
+    fn a_replaced_player_is_definitive_even_when_a_transient_read_also_fails() {
+        let pin = admit(&Fake::admitted(), 123).unwrap();
+        assert_eq!(check_pin_with(&Fake::admitted(), &pin), Check::Current);
+        let check = |change: fn(&mut Fake)| {
+            let mut fake = Fake::admitted();
+            change(&mut fake);
+            check_pin_with(&fake, &pin)
         };
-        assert_eq!(compare(&pin, &pin.clone()), Check::Current);
-        let restarted = Process {
-            micros: 6,
-            ..pin.clone()
-        };
-        assert_eq!(compare(&pin, &restarted), Check::Gone("start_time"));
-        let moved = Process {
-            executable: "/fictional/Other.app/Contents/MacOS/Player".into(),
-            ..pin.clone()
-        };
-        assert_eq!(compare(&pin, &moved), Check::Gone("executable_path"));
-        let rebuilt = Process {
-            file: (1, 2, 3, 4, 6),
-            ..pin.clone()
-        };
-        assert_eq!(compare(&pin, &rebuilt), Check::Gone("executable_file"));
-        // A pid that is not a process at all is gone, not a transient read.
-        assert_eq!(read_process(0).err(), Some(("pid", true)));
+        // (a) The pid now belongs to another user's process.
+        assert_eq!(
+            check(|f| f.info = Err(Missing::OtherOwner)),
+            Check::Gone("process_owner")
+        );
+        assert_eq!(
+            check(|f| f.info = Err(Missing::Gone)),
+            Check::Gone("process_gone")
+        );
+        // (b) The pid was reused by this user's process with a new start time,
+        // and the running-application lookup also fails.
+        assert_eq!(
+            check(|f| {
+                f.info = Ok(Info {
+                    uid: 501,
+                    seconds: 2_000,
+                    micros: 0,
+                });
+                f.running = None;
+            }),
+            Check::Gone("start_time")
+        );
+        // (c) The player exec()ed another binary: same pid and start time,
+        // another path, and its bundle identifier is gone too.
+        assert_eq!(
+            check(|f| {
+                f.path = Some("/fictional/Other.app/Contents/MacOS/Other".into());
+                f.running = Some((false, None));
+            }),
+            Check::Gone("executable_path")
+        );
+        // (d) Tamper signals: the path now resolves elsewhere, or the file has
+        // gained a link, or it was rewritten.
+        assert_eq!(
+            check(|f| f.canonical = Some("/fictional/elsewhere/Player".into())),
+            Check::Gone("canonical_path")
+        );
+        assert_eq!(
+            check(|f| f.file = Some(FileInfo {
+                links: 2,
+                ..f.file.unwrap()
+            })),
+            Check::Gone("executable_metadata")
+        );
+        assert_eq!(
+            check(|f| f.file = Some(FileInfo {
+                identity: (1, 2, 3, 4, 6),
+                ..f.file.unwrap()
+            })),
+            Check::Gone("executable_file")
+        );
+        assert_eq!(
+            check(|f| f.running = Some((false, Some("com.example.other".into())))),
+            Check::Gone("bundle_identifier")
+        );
+        // Only reads that could not complete for the verified process are
+        // transient.
+        assert_eq!(
+            check(|f| f.info = Err(Missing::Unreadable)),
+            Check::Transient("process_info")
+        );
+        assert_eq!(check(|f| f.path = None), Check::Transient("process_path"));
+        assert_eq!(
+            check(|f| f.canonical = None),
+            Check::Transient("canonical_path")
+        );
+        assert_eq!(
+            check(|f| f.file = None),
+            Check::Transient("executable_metadata")
+        );
+        assert_eq!(
+            check(|f| f.running = None),
+            Check::Transient("running_application")
+        );
+        assert_eq!(
+            check(|f| f.running = Some((true, Some(BUNDLE.into())))),
+            Check::Transient("terminated")
+        );
+        assert_eq!(
+            check(|f| f.running = Some((false, None))),
+            Check::Transient("bundle_identifier")
+        );
+        // A pid that is not a process at all is gone.
+        let no_pid = Process { pid: 0, ..pin };
+        assert_eq!(
+            check_pin_with(&Fake::admitted(), &no_pid),
+            Check::Gone("pid")
+        );
     }
 
     #[test]
