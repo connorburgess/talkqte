@@ -560,6 +560,25 @@ fn models_dir(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
     app.path().app_data_dir().ok().map(|dir| dir.join("models"))
 }
 
+/// The pinned model this launch uses: `tiny.en`, unless a debug build was
+/// launched with `TALKQTE_DEV_SPEECH_MODEL=base.en`. A release build ignores
+/// the setting. A name this build does not offer is refused, not replaced.
+pub(crate) fn speech_model() -> Result<model::Spec, &'static str> {
+    static CHOICE: std::sync::OnceLock<Result<model::Spec, ()>> = std::sync::OnceLock::new();
+    CHOICE
+        .get_or_init(|| {
+            if !cfg!(debug_assertions) {
+                return Ok(model::TINY_EN);
+            }
+            match std::env::var("TALKQTE_DEV_SPEECH_MODEL") {
+                Ok(value) => model::development_choice(Some(&value)),
+                Err(std::env::VarError::NotPresent) => model::development_choice(None),
+                Err(std::env::VarError::NotUnicode(_)) => Err(()),
+            }
+        })
+        .map_err(|()| "TALKQTE_DEV_SPEECH_MODEL names a speech model this build does not offer.")
+}
+
 /// Where the local speech model is loaded from: `TALKQTE_WHISPER_MODEL`, a
 /// developer-supplied file that is not checksum-checked, or the downloaded
 /// model in the app's data folder, which is.
@@ -567,7 +586,8 @@ fn model_path(app: &tauri::AppHandle) -> Option<(std::path::PathBuf, bool)> {
     if let Some(path) = std::env::var_os("TALKQTE_WHISPER_MODEL") {
         return Some((path.into(), false));
     }
-    models_dir(app).map(|dir| (model::installed_path(&dir, &model::TINY_EN), true))
+    let spec = speech_model().ok()?;
+    models_dir(app).map(|dir| (model::installed_path(&dir, &spec), true))
 }
 
 #[derive(serde::Serialize)]
@@ -581,10 +601,12 @@ struct LiveStatus {
 fn live_status(app: tauri::AppHandle) -> LiveStatus {
     let reason = if !cfg!(feature = "local-whisper") {
         Some("This build does not include local transcription.")
+    } else if let Err(reason) = speech_model() {
+        Some(reason)
     } else if !model_path(&app).is_some_and(|(path, pinned)| {
         if pinned {
             path.parent()
-                .is_some_and(|dir| model::is_installed(dir, &model::TINY_EN))
+                .is_some_and(|dir| speech_model().is_ok_and(|spec| model::is_installed(dir, &spec)))
         } else {
             path.is_file()
         }
@@ -630,8 +652,11 @@ impl ModelDownload {
 }
 
 fn model_status_now(app: &tauri::AppHandle, revision: u64) -> ModelStatus {
-    let spec = model::TINY_EN;
-    let status = if !cfg!(feature = "local-whisper") {
+    let (spec, choice) = match speech_model() {
+        Ok(spec) => (spec, None),
+        Err(reason) => (model::TINY_EN, Some(reason)),
+    };
+    let status = if !cfg!(feature = "local-whisper") || choice.is_some() {
         "unavailable"
     } else if std::env::var_os("TALKQTE_WHISPER_MODEL").is_some() {
         "developer"
@@ -647,7 +672,7 @@ fn model_status_now(app: &tauri::AppHandle, revision: u64) -> ModelStatus {
         size_bytes: spec.bytes,
         needed_bytes: spec.bytes + model::SPACE_MARGIN,
         received: 0,
-        message: None,
+        message: choice.map(str::to_string),
     }
 }
 
@@ -714,6 +739,7 @@ fn download_model(
     }
     #[cfg(feature = "local-whisper")]
     {
+        let spec = speech_model()?;
         let dir = models_dir(&app).ok_or("The app's storage folder is unavailable.")?;
         {
             // Checked and set under one lock, so two downloads never overlap.
@@ -742,7 +768,7 @@ fn download_model(
                 let mut last_percent = 0;
                 let result = model::download(
                     &dir,
-                    &model::TINY_EN,
+                    &spec,
                     &model::Https,
                     model::available_space,
                     |received, total| {
@@ -798,7 +824,8 @@ fn remove_model(
     if status.status == "downloading" {
         return Err("Cancel the download before removing the model.".into());
     }
-    model::remove(&dir, &model::TINY_EN).map_err(|_| "The model could not be removed.")?;
+    let spec = speech_model()?;
+    model::remove(&dir, &spec).map_err(|_| "The model could not be removed.")?;
     let revision = status.revision + 1;
     *status = model_status_now(&app, revision);
     let _ = app.emit_to("main", "model:changed", status.clone());
@@ -1371,7 +1398,7 @@ async fn start_live_session(
         let (start, recognizer) = tauri::async_runtime::spawn_blocking(move || {
             start.load(|| {
                 if pinned {
-                    model::verify(&model, &model::TINY_EN)?;
+                    model::verify(&model, &speech_model()?)?;
                 }
                 transcription::whisper::LocalWhisper::load(&model, 4)
                     .map_err(|_| "Could not load the local speech model.".to_string())

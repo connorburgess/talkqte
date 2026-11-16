@@ -34,6 +34,29 @@ pub const TINY_EN: Spec = Spec {
     sources: &["https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en.bin"],
 };
 
+/// English-only `base.en`, offered only as an explicit development choice.
+/// It made fewer word errors than `tiny.en` on fictional meetings but used
+/// about twice the processor time, over the budget in docs/budgets.md, so it
+/// is never the default. Pinned to the same fixed revision as `TINY_EN`.
+pub const BASE_EN: Spec = Spec {
+    name: "base.en",
+    file: "ggml-base.en.bin",
+    bytes: 147_964_211,
+    sha256: "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+    sources: &["https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en.bin"],
+};
+
+/// The model a development launch setting names: unset means the default
+/// `tiny.en`; any name this build does not offer is refused, never replaced.
+#[allow(clippy::result_unit_err)]
+pub fn development_choice(setting: Option<&str>) -> Result<Spec, ()> {
+    match setting {
+        None | Some("tiny.en") => Ok(TINY_EN),
+        Some("base.en") => Ok(BASE_EN),
+        Some(_) => Err(()),
+    }
+}
+
 /// Free space kept beyond the model itself, so a download never fills a disk.
 pub const SPACE_MARGIN: u64 = 512 * 1024 * 1024;
 /// Attempts per source that receive nothing new before giving up. An attempt
@@ -1154,12 +1177,50 @@ mod tests {
     #[test]
     #[ignore]
     fn source_serves_the_pinned_size_with_ranges() {
-        for source in TINY_EN.sources {
-            let response = Https.get(source, TINY_EN.bytes - 16).unwrap();
-            assert!(response.resumed, "{source} ignored the range");
-            let mut tail = vec![];
-            response.body.take(64).read_to_end(&mut tail).unwrap();
-            assert_eq!(tail.len(), 16, "{source} size differs from the pin");
+        for spec in [TINY_EN, BASE_EN] {
+            for source in spec.sources {
+                let response = Https.get(source, spec.bytes - 16).unwrap();
+                assert!(response.resumed, "{source} ignored the range");
+                let mut tail = vec![];
+                response.body.take(64).read_to_end(&mut tail).unwrap();
+                assert_eq!(tail.len(), 16, "{source} size differs from the pin");
+            }
         }
+    }
+
+    #[test]
+    fn base_en_is_chosen_only_by_name_and_tiny_en_stays_the_default() {
+        assert_eq!(development_choice(None), Ok(TINY_EN));
+        assert_eq!(development_choice(Some("tiny.en")), Ok(TINY_EN));
+        assert_eq!(development_choice(Some("base.en")), Ok(BASE_EN));
+        for refused in [
+            "",
+            "base",
+            "BASE.EN",
+            "small.en",
+            "base.en ",
+            "ggml-base.en.bin",
+        ] {
+            assert_eq!(development_choice(Some(refused)), Err(()), "{refused:?}");
+        }
+    }
+
+    #[test]
+    fn base_en_is_pinned_like_tiny_en() {
+        let split = |spec: &Spec| {
+            spec.sources[0]
+                .strip_prefix("https://huggingface.co/ggerganov/whisper.cpp/resolve/")
+                .and_then(|rest| rest.split_once('/'))
+                .map(|(rev, file)| (rev.to_string(), file.to_string()))
+                .unwrap()
+        };
+        let (base_rev, base_file) = split(&BASE_EN);
+        assert_eq!(base_rev, split(&TINY_EN).0);
+        assert_eq!(base_rev.len(), 40);
+        assert_eq!(base_file, BASE_EN.file);
+        assert_eq!(BASE_EN.sha256.len(), 64);
+        assert!(BASE_EN.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
+        assert_ne!(BASE_EN.sha256, TINY_EN.sha256);
+        assert_ne!(BASE_EN.file, TINY_EN.file);
     }
 }
