@@ -54,9 +54,11 @@ export function snapshotLabTiming({
   maxFrameBytes = 65536,
 } = {}) {
   required(
-    (sourceReleased === true ||
-      (nativeEnded !== undefined &&
-        /^[a-z_]{1,40}$/.test(nativeEnded?.problem ?? ''))) &&
+    // Exactly one: released by the lab's Stop, or ended by native itself.
+    (sourceReleased === true
+      ? nativeEnded === undefined
+      : sourceReleased === undefined &&
+        /^[a-z_]{1,40}$/.test(nativeEnded?.problem ?? '')) &&
       recorderFinalized === true &&
       /^[A-Za-z0-9_-]{1,64}$/.test(runId ?? '') &&
       expectedIdentity?.runId === runId &&
