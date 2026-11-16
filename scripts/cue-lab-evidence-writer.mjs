@@ -293,14 +293,16 @@ export function createLabEvidenceWriter({
           base.every((k) => number(guard[k])),
       );
       required(
-        // A 110 s source window, moved out by the in-app approval budget
-        // (direct API route) and recorded with the time actually waited.
+        // A 110 s source window. The direct API route's native Stop is at
+        // 320 s: the window plus its 180 s approval budget and a 30 s
+        // allowance from native start to Listening. The wait itself is
+        // recorded separately.
         [0, 180000].includes(guard.approvalBudgetMs) &&
           Number.isSafeInteger(guard.approvalWaitMs) &&
           guard.approvalWaitMs >= 0 &&
           guard.approvalWaitMs <= guard.approvalBudgetMs &&
           guard.sourceDeadline - guard.nativeStartedAt ===
-            110000 + guard.approvalBudgetMs &&
+            (guard.approvalBudgetMs ? 320000 : 110000) &&
           guard.startRequestAt >=
             guard.nativeStartedAt + guard.approvalWaitMs &&
           guard.mediaDurationMs > 0 &&

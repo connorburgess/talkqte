@@ -75,6 +75,10 @@ function fixture({
   api = false,
   approvalRows = [],
   onApproval,
+  // Startup failures: native never reports armed, or never says hello.
+  neverArm = false,
+  noHello = false,
+  beforeListening,
 } = {}) {
   if (api) effort = 'low';
   if (fixedModel) {
@@ -106,6 +110,7 @@ function fixture({
     unsubscribe: 0,
     bodyClose: 0,
     requests: 0,
+    providerOpen: 0,
   };
   Object.assign(child, {
     pid: 44001,
@@ -135,13 +140,14 @@ function fixture({
     launch(options) {
       launchOptions = options;
       trace.push('launch');
-      queueMicrotask(() =>
-        options.onTiming({
-          event: 'dev_stop',
-          run_id: options.environment.TALKQTE_DEV_LAB_RUN_ID,
-          step: 'armed',
-        }),
-      );
+      if (!neverArm)
+        queueMicrotask(() =>
+          options.onTiming({
+            event: 'dev_stop',
+            run_id: options.environment.TALKQTE_DEV_LAB_RUN_ID,
+            step: 'armed',
+          }),
+        );
       return child;
     },
     close() {
@@ -292,7 +298,7 @@ function fixture({
       };
       if (!missingAck) onStarted(ack);
       if (duplicateAck) onStarted(ack);
-      await authenticate();
+      if (!noHello) await authenticate();
       if (fixedModel)
         await Promise.race([evaluated.promise, activePlay.promise]);
       if (playbackWait) await Promise.race([playbackWait, activePlay.promise]);
@@ -318,7 +324,7 @@ function fixture({
           ...options,
           onStarted(anchor) {
             options.onStarted(anchor);
-            void authenticate().catch(() => activePlay.resolve());
+            if (!noHello) void authenticate().catch(() => activePlay.resolve());
           },
         });
         const completed = await playback;
@@ -399,7 +405,7 @@ function fixture({
   const options = {
     ...(preallocatedRunId ? { runId: preallocatedRunId } : {}),
     launcher,
-    stopAfterS: api ? 290 : 110,
+    stopAfterS: api ? 320 : 110,
     ...(api
       ? {
           approvalBudgetMs: 180000,
@@ -430,6 +436,7 @@ function fixture({
         if (sourceCloseFails) throw Error('private observer cleanup');
       },
       async waitListening({ runId }) {
+        beforeListening?.();
         sourceRunId = runId;
         trace.push('listening');
         return {
@@ -459,6 +466,7 @@ function fixture({
       environment: {},
       openers: {
         [api ? 'anthropic-api' : 'codex']: async () => ({
+          ...(counts.providerOpen++, {}),
           async request({ signal }) {
             counts.requests++;
             if (firstRequestTimesOut && counts.requests === 1)
@@ -495,7 +503,7 @@ function fixture({
     releaseMs: 100,
     armingMs: 50,
     nativeReleaseMs: 50,
-    takeMs: fixedModel ? 1500 : 300,
+    takeMs: api ? 135000 : fixedModel ? 1500 : 300,
     signal: initialSignal,
     ...(adaptedBody ? { body: adaptedBody } : {}),
     ...(recorderMs ? { recorderMs } : {}),
@@ -527,6 +535,7 @@ function fixture({
     get evaluatorSubscribed() {
       return typeof evaluatorHandler === 'function';
     },
+    deliverEvaluator: (row) => evaluatorHandler?.(Object.freeze(row)),
     providerClosing: providerClosing.promise,
     failSource: () => sourceHandler?.({ type: 'failed' }),
     failPlayer: () => playerHandler(),
@@ -563,6 +572,7 @@ test('prepared speech starts after Listening and recorder readiness but before l
     unsubscribe: 2,
     bodyClose: 0,
     requests: 0,
+    providerOpen: 1,
   });
 });
 
@@ -1126,16 +1136,24 @@ const reviewRow = {
   effort: 'low',
   session: '7',
 };
-async function apiTake(t, { onApproval, evidence = false, ...options } = {}) {
-  // The full 1 s start budget: a loaded test host can miss 100 ms.
-  const player = createLabPlayerFixture({
-    runId: 'fictional-run',
-    prepareMs: 2000,
-    startMs: 1000,
-    stopMs: 100,
-  });
-  t.after(() => player.close({ nativeReleased: true }).catch(() => {}));
-  await player.prepare({ media });
+async function apiTake(
+  t,
+  { onApproval, evidence = false, owned = true, ...options } = {},
+) {
+  // The real player stand-in, with its full 1 s start budget (a loaded test
+  // host can miss 100 ms); or the in-process player, whose start anchor
+  // follows a shifted test clock.
+  let player;
+  if (owned) {
+    player = createLabPlayerFixture({
+      runId: 'fictional-run',
+      prepareMs: 2000,
+      startMs: 1000,
+      stopMs: 100,
+    });
+    t.after(() => player.close({ nativeReleased: true }).catch(() => {}));
+    await player.prepare({ media });
+  }
   let writer;
   if (evidence) {
     const parent = realpathSync(mkdtempSync(join(tmpdir(), 'tq-api-take-')));
@@ -1192,7 +1210,7 @@ test('the API take plays only after the in-app approval and records the wait apa
   assert.equal(result.guard.approvalWaitMs, approvals[1].waitMs);
   assert.equal(
     result.guard.sourceDeadline - result.guard.nativeStartedAt,
-    290000,
+    320000,
   );
   const { manifestPath } = writer.close();
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
@@ -1224,7 +1242,9 @@ test('no approval within 180 s stops the API take without playback, a request or
   assert.equal(f.trace.includes('record-ready'), false);
   assert.equal(f.trace.includes('authenticate'), false);
   assert.equal(f.counts.nativeStop, 1);
-  assert.equal(f.counts.providerClose, 1);
+  // The provider (key file, worker) is never opened without approval.
+  assert.equal(f.counts.providerOpen, 0);
+  assert.equal(f.counts.providerClose, 0);
   assert.equal(f.take.phase, 'stopped');
 });
 
@@ -1253,7 +1273,7 @@ test('a launch-setting row after approval stops the API take as a fault', async 
   assert.equal(approvals[0].state, 'waiting');
 });
 
-test('the option check pins each route: Codex 20 calls at 110 s, API 40 calls with the 180 s approval', () => {
+test('the option check pins each route: Codex 20 calls at 110 s, API 40 calls with the 180 s approval and Stop at 320 s', () => {
   const codex = {
     settings: {
       provider: 'codex',
@@ -1271,8 +1291,9 @@ test('the option check pins each route: Codex 20 calls at 110 s, API 40 calls wi
       effort: 'low',
       maxCalls: 40,
     },
-    stopAfterS: 290,
+    stopAfterS: 320,
     approvalBudgetMs: 180000,
+    takeMs: 135000,
     media,
   };
   assert.doesNotThrow(() => assertFixedModelTakeOptions(codex));
@@ -1282,10 +1303,134 @@ test('the option check pins each route: Codex 20 calls at 110 s, API 40 calls wi
     { ...codex, approvalBudgetMs: 180000, stopAfterS: 290 },
     { ...api, settings: { ...api.settings, maxCalls: 20 } },
     { ...api, approvalBudgetMs: undefined },
-    { ...api, approvalBudgetMs: 120000, stopAfterS: 230 },
-    { ...api, stopAfterS: 110 },
+    { ...api, approvalBudgetMs: 120000, stopAfterS: 260 },
+    { ...api, stopAfterS: 290 },
+    { ...api, takeMs: undefined },
+    { ...api, takeMs: 315000 },
   ])
     assert.throws(() => assertFixedModelTakeOptions(changed), {
       category: 'protocol',
     });
+});
+
+// The approval wait is not startup or take time. A shifted clock stands in
+// for the owner taking 5 s, 60 s or 175 s; the run's own startup clock is
+// real and would fire at 1 s if it were still running.
+const shiftedClock = (t) => {
+  const real = performance.now.bind(performance);
+  let offset = 0;
+  t.mock.method(performance, 'now', () => real() + offset);
+  return (ms) => (offset += ms);
+};
+for (const seconds of [5, 60, 175])
+  test(`an approval after ${seconds} s proceeds to playback and completes`, async (t) => {
+    const advance = shiftedClock(t);
+    const { f, approvals } = await apiTake(t, {
+      owned: false,
+      approvalRows: [reviewRow],
+      onApproval(event) {
+        if (event.state === 'waiting') advance(seconds * 1000);
+      },
+    });
+    const result = await f.take.done;
+    assert.equal(result.completed, true);
+    assert.deepEqual(
+      approvals.map((e) => e.state),
+      ['waiting', 'approved'],
+    );
+    assert.ok(result.approval.waitMs >= seconds * 1000);
+    assert.equal(result.guard.approvalWaitMs, result.approval.waitMs);
+    assert.ok(result.guard.remainingAtAnchorMs >= media.durationMs + 1000);
+    assert.equal(f.counts.providerOpen, 1);
+    assert.equal(f.counts.requests, 1);
+  });
+
+test('an approval after 181 s is not given: no marker, no provider opened, nothing played', async (t) => {
+  const advance = shiftedClock(t);
+  const { f, approvals } = await apiTake(t, {
+    owned: false,
+    approvalRows: [reviewRow],
+    onApproval(event) {
+      if (event.state === 'waiting') advance(181000);
+    },
+  });
+  await assert.rejects(f.take.done, { category: 'approval-not-given' });
+  assert.deepEqual(
+    approvals.map((e) => e.state),
+    ['waiting'],
+  );
+  assert.equal(f.counts.providerOpen, 0);
+  assert.equal(f.counts.requests, 0);
+  assert.equal(f.trace.includes('record-ready'), false);
+  assert.equal(f.trace.includes('play'), false);
+  assert.equal(f.counts.nativeStop, 1);
+});
+
+test('a real wait longer than the startup budget does not fail the run', async (t) => {
+  // startupMs is 1 s in this fixture; the owner approves after 1.3 s.
+  const { f, approvals } = await apiTake(t, {
+    owned: false,
+    onApproval(event) {
+      if (event.state === 'waiting')
+        setTimeout(() => f.deliverEvaluator(reviewRow), 1300);
+    },
+  });
+  const result = await f.take.done;
+  assert.equal(result.completed, true);
+  assert.deepEqual(
+    approvals.map((e) => e.state),
+    ['waiting', 'approved'],
+  );
+  assert.ok(result.approval.waitMs >= 1300);
+});
+
+test('a startup failure before approval still stops the take, with no provider opened', async (t) => {
+  const { f, approvals } = await apiTake(t, {
+    owned: false,
+    neverArm: true,
+    approvalRows: [reviewRow],
+  });
+  await assert.rejects(f.take.done);
+  assert.deepEqual(approvals, []);
+  assert.equal(f.counts.providerOpen, 0);
+  assert.equal(f.trace.includes('play'), false);
+});
+
+test('after approval the startup deadline still catches a native that never says hello', async (t) => {
+  const { f, approvals } = await apiTake(t, {
+    owned: false,
+    noHello: true,
+    approvalRows: [reviewRow],
+  });
+  await assert.rejects(f.take.done);
+  assert.deepEqual(
+    approvals.map((e) => e.state),
+    ['waiting', 'approved'],
+  );
+  assert.deepEqual(f.take.startupDiagnostics.failure, {
+    stage: 'awaiting-hello',
+    reason: 'deadline',
+  });
+  assert.equal(f.counts.requests, 0);
+});
+
+test('an approval that could no longer fit the media before native Stop is not given', async (t) => {
+  // Listening 60 s after native start, then approval 165 s later: inside the
+  // 180 s budget, but 102 s of media would pass the 320 s native Stop.
+  const advance = shiftedClock(t);
+  const { f, approvals } = await apiTake(t, {
+    owned: false,
+    approvalRows: [reviewRow],
+    beforeListening: () => advance(60000),
+    onApproval(event) {
+      if (event.state === 'waiting') advance(165000);
+    },
+  });
+  await assert.rejects(f.take.done, { category: 'approval-not-given' });
+  assert.deepEqual(
+    approvals.map((e) => e.state),
+    ['waiting'],
+  );
+  assert.equal(f.counts.providerOpen, 0);
+  assert.equal(f.trace.includes('play'), false);
 });

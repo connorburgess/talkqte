@@ -11,6 +11,19 @@ import { isAnthropicModel } from './cue-lab-anthropic-core.mjs';
 // approval before it stops without playing or sending anything.
 export const APPROVAL_BUDGET_MS = 180000;
 const SOURCE_WINDOW_MS = 110000;
+// Direct API route: native Stop also allows for the time from native start to
+// Listening, so an approval late in its 180 s budget still leaves the full
+// media window. 110 + 180 + 30 = 320 s.
+const LAUNCH_ALLOWANCE_MS = 30000;
+export const API_STOP_AFTER_S =
+  (SOURCE_WINDOW_MS + APPROVAL_BUDGET_MS + LAUNCH_ALLOWANCE_MS) / 1000;
+// What must still fit after an approval: recorder start, a margin for the
+// approval handling itself, then the media within the source guard.
+const APPROVAL_HANDLING_MS = 1000;
+const sourceWindowMs = (approvalBudgetMs) =>
+  approvalBudgetMs
+    ? SOURCE_WINDOW_MS + approvalBudgetMs + LAUNCH_ALLOWANCE_MS
+    : SOURCE_WINDOW_MS;
 const required = (condition) => {
   if (!condition) throw gateFailure('protocol');
 };
@@ -47,7 +60,9 @@ export function assertFixedModelTakeOptions(options) {
           (options.approvalBudgetMs ?? 0) === 0
         : options.settings.maxCalls === 40 &&
           options.approvalBudgetMs === APPROVAL_BUDGET_MS &&
-          options.stopAfterS === 110 + APPROVAL_BUDGET_MS / 1000) &&
+          options.stopAfterS === API_STOP_AFTER_S &&
+          // The take clock restarts at approval with the usual 135 s.
+          options.takeMs === 135000) &&
       // Approved fictional media (fixed MP4 or a reviewed per-run manifest)
       // within the bounds every timing guard below was set for.
       isLabMedia(options.media),
@@ -109,10 +124,11 @@ export function createLabPlaybackSession({
       // launcher's native connection rows.
       (approvalBudgetMs === 0 ||
         (settings?.provider === 'anthropic-api' &&
+          fixedSource &&
           body === undefined &&
           typeof launcher.subscribeEvaluator === 'function' &&
           typeof onApproval === 'function')) &&
-      takeMs <= 180000 + approvalBudgetMs &&
+      takeMs <= 180000 &&
       (body === undefined ||
         (typeof body === 'function' && typeof body.close === 'function')),
   );
@@ -130,7 +146,7 @@ export function createLabPlaybackSession({
         launcher.playerSource === player.identity &&
         recorder.playerSource === player.identity &&
         typeof player.close === 'function' &&
-        stopAfterS * 1000 === SOURCE_WINDOW_MS + approvalBudgetMs &&
+        stopAfterS * 1000 === sourceWindowMs(approvalBudgetMs) &&
         Number.isSafeInteger(player.startDeadlineMs) &&
         player.startDeadlineMs > 0 &&
         player.startDeadlineMs <= startBudgetMs &&
@@ -286,6 +302,7 @@ export function createLabPlaybackSession({
       processEvents,
       startupMs,
       releaseMs,
+      approvalBudgetMs,
     });
   } catch {
     for (const unsubscribe of subscriptions) unsubscribe();
@@ -297,7 +314,9 @@ export function createLabPlaybackSession({
     fail(run.signal.reason === 'cancelled' ? 'cancelled' : 'protocol');
   run.signal.addEventListener('abort', onRunAbort, { once: true });
   signal?.addEventListener('abort', onAbort, { once: true });
-  const timer = setTimeout(() => fail('deadline'), takeMs);
+  // On the API route this clock is paused for the approval wait (bounded
+  // separately) and restarts with a full takeMs at approval.
+  let timer = setTimeout(() => fail('deadline'), takeMs);
   work = Promise.resolve().then(async () => {
     if (root.signal.aborted) throw gateFailure('cancelled');
     const verified = await player.prepare({
@@ -332,7 +351,22 @@ export function createLabPlaybackSession({
     if (approvalBudgetMs) {
       // Nothing plays and nothing is sent until the owner's review approves
       // the connection. No row in time: ordinary Stop, no attempt used.
+      clearTimeout(timer);
       const waitStartedAt = performance.now();
+      const sourceDeadline = nativeStartedAt + sourceWindowMs(approvalBudgetMs);
+      // The wait ends at its budget, or earlier if a later approval could no
+      // longer fit recorder start and the media before native Stop.
+      const waitDeadline = Math.min(
+        waitStartedAt + approvalBudgetMs,
+        sourceDeadline -
+          recorderMs -
+          APPROVAL_HANDLING_MS -
+          startBudgetMs -
+          identity.durationMs -
+          completionReserveMs,
+      );
+      const inTime = () => performance.now() <= waitDeadline;
+      if (!inTime()) throw gateFailure('approval-not-given');
       onApproval({ state: 'waiting', budgetMs: approvalBudgetMs });
       let approvalTimer;
       const row = await Promise.race([
@@ -343,7 +377,7 @@ export function createLabPlaybackSession({
         new Promise((_, reject) => {
           approvalTimer = setTimeout(
             () => reject(gateFailure('approval-not-given')),
-            approvalBudgetMs,
+            Math.max(0, waitDeadline - performance.now()),
           );
           root.signal.addEventListener(
             'abort',
@@ -356,11 +390,20 @@ export function createLabPlaybackSession({
         approvalGate.waiter = null;
       });
       if (root.signal.aborted) throw gateFailure('cancelled');
+      if (!inTime()) throw gateFailure('approval-not-given');
+      const waitMs = Math.floor(performance.now() - waitStartedAt);
+      // Only now is the provider opened (key file, worker). The run's
+      // startup clock restarts here with a full startupMs.
+      await run.approve();
+      if (root.signal.aborted) throw gateFailure('cancelled');
+      // Opening must not have used up the room the media needs.
+      if (!inTime()) throw gateFailure('approval-not-given');
       approval = Object.freeze({
         budgetMs: approvalBudgetMs,
-        waitMs: Math.floor(performance.now() - waitStartedAt),
+        waitMs,
         session: row.session,
       });
+      timer = setTimeout(() => fail('deadline'), takeMs);
       // The runner records the used attempt here, before playback; if it
       // cannot, the take stops.
       onApproval({ state: 'approved', ...approval });
@@ -385,8 +428,7 @@ export function createLabPlaybackSession({
     report('recorder.frame-accepted');
     if (root.signal.aborted) throw gateFailure('cancelled');
     if (fixedSource) {
-      const sourceDeadline =
-        nativeStartedAt + SOURCE_WINDOW_MS + approvalBudgetMs;
+      const sourceDeadline = nativeStartedAt + sourceWindowMs(approvalBudgetMs);
       const startRequestAt = performance.now();
       required(
         startRequestAt +
