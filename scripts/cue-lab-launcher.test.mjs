@@ -523,6 +523,39 @@ test('the reader keeps the query only on a connected row and refuses one carryin
   }
 });
 
+test('a native source problem is passed on with its fixed label and code, then ends the observation', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tq-reader-'));
+  chmodSync(directory, 0o700);
+  const path = join(directory, 'timing.jsonl');
+  writeFileSync(path, '', { mode: 0o600 });
+  const events = [];
+  const reader = watchLabTiming({
+    path,
+    runId: 'fixture-run',
+    onEvent: (event) => events.push(event),
+  });
+  try {
+    appendFileSync(
+      path,
+      JSON.stringify({
+        event: 'source_problem',
+        problem: 'source_gone',
+        os_code: -3815,
+        detail: 'fictional detail never passed on',
+      }) + '\n',
+    );
+    reader.poll();
+    assert.deepEqual(events, [
+      { event: 'source_problem', problem: 'source_gone', os_code: -3815 },
+      { event: 'dropped', count: 1 },
+    ]);
+    assert.equal(reader.failed, true);
+  } finally {
+    reader.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('a different application acknowledgement fails the QuickTime-only observer', () => {
   const directory = mkdtempSync(join(tmpdir(), 'tq-reader-'));
   chmodSync(directory, 0o700);
@@ -1069,5 +1102,24 @@ test('the direct API route launches with lab-api and its spend cap, and without 
     syncBuiltinESMExports();
     launcher.close();
     rmSync(launcher.directory, { recursive: true, force: true });
+  }
+});
+
+test('a source that native loses is recorded as ended by native, with its fixed label and code', async () => {
+  const f = fixture('source-gone');
+  try {
+    await f.start();
+    for (let n = 0; n < 100 && !f.launcher.nativeEnded; n++) await delay(10);
+    assert.deepEqual(
+      { ...f.launcher.nativeEnded },
+      { problem: 'source_gone', osCode: -3815 },
+    );
+    // The lab's own Stop never released it.
+    assert.equal(f.launcher.sourceReleased, false);
+    for (let n = 0; n < 100 && !f.events.includes('failed'); n++)
+      await delay(10);
+    assert.ok(f.events.includes('failed'));
+  } finally {
+    await f.close();
   }
 });

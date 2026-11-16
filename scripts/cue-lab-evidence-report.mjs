@@ -143,7 +143,12 @@ function snapshotCoverage(artifact, manifest) {
     artifact.kind !== 'native-timing' ||
     c.schema !== 'talkqte.lab.timing-snapshot.v1' ||
     c.runId !== manifest.runId ||
-    c.sourceReleaseObserved !== true ||
+    !(c.sourceEnd === 'native-ended'
+      ? c.sourceReleaseObserved === false &&
+        /^[a-z_]{1,40}$/.test(c.nativeEndProblem ?? '')
+      : (c.sourceEnd === undefined || c.sourceEnd === 'released') &&
+        c.sourceReleaseObserved === true &&
+        c.nativeEndProblem === undefined) ||
     c.recorderFinalizationObserved !== true ||
     c.nativeWriterMayRemainOpen !== true ||
     c.completeRunCoverage !== false ||
@@ -176,7 +181,9 @@ function snapshotCoverage(artifact, manifest) {
   return {
     schema: c.schema,
     ...Object.fromEntries(counters.map((k) => [k, c[k]])),
-    sourceReleaseObserved: true,
+    sourceReleaseObserved: c.sourceReleaseObserved,
+    sourceEnd: c.sourceEnd ?? 'released',
+    ...(c.nativeEndProblem ? { nativeEndProblem: c.nativeEndProblem } : {}),
     recorderFinalizationObserved: true,
     nativeWriterMayRemainOpen: true,
     completeRunCoverage: false,
@@ -1195,13 +1202,13 @@ export function renderEvidenceMarkdown(r, { recordingHref } = {}) {
       ? 'Snapshot coverage is independent of emitted event gaps. Each snapshot has completeRunCoverage=false and unknownLateRecords=true; the timeline is incomplete and the native writer may remain open.'
       : 'No snapshot coverage supplied; complete timeline coverage is not established.',
     '',
-    '| Artifact | Copied / cutoff / observed at open (bytes) | Omitted at cutoff / unobserved at open (bytes) | Rows / trailing partial bytes | Row limit / grew during copy |',
-    '| --- | --- | --- | --- | --- |',
+    '| Artifact | Source end | Copied / cutoff / observed at open (bytes) | Omitted at cutoff / unobserved at open (bytes) | Rows / trailing partial bytes | Row limit / grew during copy |',
+    '| --- | --- | --- | --- | --- | --- |',
     ...r.evidence
       .filter((a) => a.snapshotCoverage)
       .map((a) => {
         const c = a.snapshotCoverage;
-        return `| ${escape(a.id)} | ${c.copiedBytes} / ${c.cutoffBytes} / ${c.observedBytesAtOpen} | ${c.omittedBytesAtCutoff} / ${c.unobservedBytesAtOpen} | ${c.rows} / ${c.trailingPartialBytes ?? 'unknown'} | ${c.rowLimitReached} / ${c.grewDuringCopy} |`;
+        return `| ${escape(a.id)} | ${c.sourceEnd === 'native-ended' ? `ended by native (${escape(c.nativeEndProblem)}), not released by Stop` : 'released by Stop'} | ${c.copiedBytes} / ${c.cutoffBytes} / ${c.observedBytesAtOpen} | ${c.omittedBytesAtCutoff} / ${c.unobservedBytesAtOpen} | ${c.rows} / ${c.trailingPartialBytes ?? 'unknown'} | ${c.rowLimitReached} / ${c.grewDuringCopy} |`;
       }),
     '',
     '## Per-take timeline',

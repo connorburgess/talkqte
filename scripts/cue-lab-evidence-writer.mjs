@@ -474,6 +474,8 @@ export function createLabEvidenceWriter({
               'sourcePath',
               'sourceIdentity',
               'sourceReleaseObserved',
+              'sourceEnd',
+              'nativeEndProblem',
               'recorderFinalizationObserved',
               'nativeWriterMayRemainOpen',
               'cutoffReceipt',
@@ -502,7 +504,14 @@ export function createLabEvidenceWriter({
                 typeof c.sourceIdentity[k] === 'string' &&
                 /^(0|[1-9]\d*)$/.test(c.sourceIdentity[k]),
             ) &&
-            c.sourceReleaseObserved === true &&
+            // Released by the lab's Stop, or ended by native itself with a
+            // fixed problem label; never both, never unstated.
+            (c.sourceEnd === 'native-ended'
+              ? c.sourceReleaseObserved === false &&
+                /^[a-z_]{1,40}$/.test(c.nativeEndProblem ?? '')
+              : (c.sourceEnd === undefined || c.sourceEnd === 'released') &&
+                c.sourceReleaseObserved === true &&
+                c.nativeEndProblem === undefined) &&
             c.recorderFinalizationObserved === true &&
             c.nativeWriterMayRemainOpen === true &&
             c.completeRunCoverage === false &&

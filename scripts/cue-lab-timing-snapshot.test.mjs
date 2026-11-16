@@ -227,3 +227,57 @@ for (const tail of [
       assert.ok(s.coverage.readBytes <= 65536);
     },
   );
+
+snapshotTest(
+  'a session native ended itself is snapshotted as native-ended, not released, and the writer and report accept it',
+  async (t) => {
+    const f = fixture(t);
+    const { sourceReleased: _released, ...rest } = f.options;
+    // Without a release or a native end there is still no snapshot.
+    assert.throws(() => snapshotLabTiming(rest));
+    assert.throws(() =>
+      snapshotLabTiming({ ...rest, nativeEnded: { problem: 'Source gone!' } }),
+    );
+    // As the runner does: the snapshot goes inside the evidence directory.
+    const writer = createLabEvidenceWriter({
+      parentDirectory: f.parent,
+      runId: 'fictional-snapshot',
+      fictional: true,
+      contentMode: 'fictional-content',
+    });
+    writer.addClock({ id: 'node', kind: 'monotonic' });
+    const s = snapshotLabTiming({
+      ...rest,
+      parentDirectory: writer.directory,
+      nativeEnded: { problem: 'source_gone' },
+    });
+    assert.equal(s.coverage.sourceReleaseObserved, false);
+    assert.equal(s.coverage.sourceEnd, 'native-ended');
+    assert.equal(s.coverage.nativeEndProblem, 'source_gone');
+    writer.attach({
+      id: 'native',
+      kind: 'native-timing',
+      path: s.path,
+      clockId: 'node',
+      sealed: true,
+      snapshotCoverage: s.coverage,
+    });
+    const { manifestPath } = writer.close();
+    const { writeEvidenceReport } =
+      await import('./cue-lab-evidence-report.mjs');
+    const out = join(f.parent, 'report');
+    await writeEvidenceReport({ manifestPath, outDir: out });
+    const report = JSON.parse(
+      fs.readFileSync(join(out, 'report.json'), 'utf8'),
+    );
+    const coverage = report.evidence.find(
+      (a) => a.id === 'native',
+    ).snapshotCoverage;
+    assert.equal(coverage.sourceEnd, 'native-ended');
+    assert.equal(coverage.sourceReleaseObserved, false);
+    assert.match(
+      fs.readFileSync(join(out, 'report.md'), 'utf8'),
+      /ended by native \(source_gone\), not released by Stop/,
+    );
+  },
+);

@@ -338,7 +338,10 @@ function launcher({
   // The session the in-app review approved for this launch's backend and
   // model; a stream may start only in that session.
   let reviewedSession = null,
-    transcriptionStarted = false;
+    transcriptionStarted = false,
+    // Set when native reports its source failed and so ends the session
+    // itself, without the lab's ordinary Stop.
+    nativeEnded = null;
   const fixturePath = fixtureCase ? join(directory, 'fixture-child.mjs') : null;
   let fixtureSnapshot;
   if (fixturePath) {
@@ -485,6 +488,11 @@ function launcher({
           expectedFeatures: build.manifest?.features,
           expectedApplication: sourceApplication,
           onEvent(event) {
+            if (event.event === 'source_problem')
+              nativeEnded ??= Object.freeze({
+                problem: event.problem,
+                osCode: event.os_code ?? null,
+              });
             if (event.event === 'dev_stop') {
               const previous = {
                 armed: null,
@@ -635,6 +643,11 @@ function launcher({
     close,
     get sourceReleased() {
       return released;
+    },
+    // Native ended the session itself (source_problem), with its fixed label
+    // and OS code; null otherwise. Not a release by the lab's Stop.
+    get nativeEnded() {
+      return nativeEnded;
     },
     // Content-free transcription facts for evidence: never the token.
     get transcription() {
@@ -823,6 +836,7 @@ export function prepareLabFixtureLauncher({
 } = {}) {
   requireThat(
     [
+      'source-gone',
       'cloud-transcription',
       'cloud-early',
       'cloud-other-session',
