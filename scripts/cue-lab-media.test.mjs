@@ -12,8 +12,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import {
+  LAB_FIXED_MEDIA_SHA256,
   LAB_MEDIA_MAX_MS,
+  fixedLabMedia,
   isLabMedia,
+  labelLabBootstrapMedia,
   loadLabMediaManifest,
 } from './cue-lab-media.mjs';
 
@@ -162,3 +165,48 @@ test('a manifest or media directory that others can write or read is refused', (
     s.cleanup();
   }
 });
+
+test('fixed media is approved only for a file with the fixed hash in an owner-only directory', () => {
+  const s = scenario();
+  try {
+    // Placeholder bytes never hash to the fixed meeting's sha256.
+    assert.throws(() => fixedLabMedia(join(s.dir, 'scenario.mp4')), {
+      category: 'protocol',
+    });
+    assert.throws(() => fixedLabMedia('relative.mp4'));
+  } finally {
+    s.cleanup();
+  }
+});
+
+test('only descriptors created by this module are approved; a bootstrap label keeps approval', () => {
+  const s = scenario();
+  try {
+    const media = loadLabMediaManifest(s.manifestPath, { sha256: s.sha256 });
+    assert.equal(isLabMedia(media), true);
+    assert.equal(isLabMedia({ ...media }), false);
+    assert.equal(isLabMedia(Object.freeze({ ...media })), false);
+    const labelled = labelLabBootstrapMedia(media, 'Fictional calibration');
+    assert.equal(isLabMedia(labelled), true);
+    assert.equal(labelled.purpose, 'neutral-calibration');
+    for (const label of ['', '   ', 'x'.repeat(121), 'hidden\nlabel'])
+      assert.throws(() => labelLabBootstrapMedia(media, label));
+    assert.throws(() =>
+      labelLabBootstrapMedia({ ...media }, 'Fictional calibration'),
+    );
+  } finally {
+    s.cleanup();
+  }
+});
+
+// Opt-in: the original fixed meeting MP4 in an owner-only directory outside
+// the checkout. Set TALKQTE_LAB_FIXED_MEDIA to its canonical path.
+test(
+  'the actual fixed meeting MP4 is approved by its compiled hash',
+  { skip: !process.env.TALKQTE_LAB_FIXED_MEDIA },
+  () => {
+    const media = fixedLabMedia(process.env.TALKQTE_LAB_FIXED_MEDIA);
+    assert.equal(media.sha256, LAB_FIXED_MEDIA_SHA256);
+    assert.equal(isLabMedia(media), true);
+  },
+);

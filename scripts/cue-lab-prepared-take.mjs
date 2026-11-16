@@ -70,12 +70,8 @@ export function createLabPlaybackSession({
       typeof launcher.launch === 'function' &&
       typeof launcher.close === 'function' &&
       isAbsolute(launcher.executable ?? '') &&
-      media?.fictional === true &&
-      isAbsolute(media.path ?? '') &&
-      /^[a-f0-9]{64}$/.test(media.sha256 ?? '') &&
-      Number.isFinite(media.durationMs) &&
-      media.durationMs > 0 &&
-      media.durationMs <= 105000 &&
+      // Only media approved by cue-lab-media.mjs (manifest or fixed hash).
+      isLabMedia(media) &&
       typeof source?.waitListening === 'function' &&
       (source.mode === 'v1' || settings?.execution === 'offline-stand-in') &&
       (source.mode !== 'v1' || typeof source.subscribe === 'function') &&
@@ -140,7 +136,8 @@ export function createLabPlaybackSession({
         media.displayLabel.length <= 120 &&
         !/[\u0000-\u001f\u007f]/.test(media.displayLabel),
     );
-  const identity = Object.freeze({ ...media });
+  // The approved, frozen descriptor itself flows to the player and capture.
+  const identity = media;
   const root = new AbortController();
   let phase = 'starting',
     closing = null,

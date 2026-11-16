@@ -20,6 +20,7 @@ import {
   mapLabPlayerStart,
   validateLabPlayerDurations,
 } from './cue-lab-player.mjs';
+import { fictionalTestMedia } from './fixtures/lab-test-media.mjs';
 // The fixed 102.48 s fictional fixture media used before per-run manifests.
 const LAB_PLAYER_MEDIA_SHA256 =
   '1faf1c404249bed069065f51262abfce6956fa8a31f237e68bb6e9d06cb893e2';
@@ -167,12 +168,8 @@ test('Swift callback has only C atomic store and completion requires claim, fram
   assert.match(c, /atomic_compare_exchange_strong_explicit/);
 });
 
-const media = {
-  fictional: true,
-  path: '/fictional/prepared.mp4',
-  sha256: LAB_PLAYER_MEDIA_SHA256,
-  durationMs: 102480,
-};
+// Approved through the real manifest loader (synthetic, fictional).
+const media = fictionalTestMedia();
 const fixtureOptions = {
   runId: 'fictional-run',
   prepareMs: 2000,
@@ -709,12 +706,7 @@ test('a cancelled playback whose retire leaves a process behind is failed cleanu
 
 test('a different approved fictional media plays end to end with its own sha256 and duration', async () => {
   // A per-run scenario: another approved hash and a 100.577 s duration.
-  const scenario = {
-    fictional: true,
-    path: '/fictional/scenario.mp4',
-    sha256: 'e'.repeat(64),
-    durationMs: 100577,
-  };
+  const scenario = fictionalTestMedia({ durationMs: 100577 });
   const player = createLabPlayerFixture(fixtureOptions);
   try {
     assert.equal(
@@ -760,4 +752,11 @@ test('a file whose measured duration disagrees with the approved duration is ref
   } finally {
     await player.close({ nativeReleased: true }).catch(() => {});
   }
+});
+
+test('the player refuses a hand-built media descriptor even with the approved path and hash', () => {
+  const player = createLabPlayerFixture(fixtureOptions);
+  // Same fields as an approved descriptor, but not created by cue-lab-media.
+  assert.throws(() => player.prepare({ media: { ...media } }));
+  assert.equal(player.identity, null);
 });

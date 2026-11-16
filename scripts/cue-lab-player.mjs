@@ -963,7 +963,8 @@ function playerController({
         required(media.path === input.path);
         return preparing;
       }
-      media = Object.freeze({ ...input });
+      // Keep the approved descriptor itself: a copy would not be approved.
+      media = input;
       preparing = (async () => {
         armAbort(signal);
         if (!fixtureCase) {
@@ -1056,7 +1057,7 @@ function playerController({
         operationTimer = setTimeout(() => fail('deadline'), 100);
         await clock.promise;
         clearTimeout(operationTimer);
-        return Object.freeze({ ...media });
+        return media;
       })().catch((error) => {
         fail();
         throw gateFailure(error.category ?? 'protocol');

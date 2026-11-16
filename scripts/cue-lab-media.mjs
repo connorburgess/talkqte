@@ -16,15 +16,49 @@ import { gateFailure } from './cue-lab-operation-gate.mjs';
 export const LAB_MEDIA_MAX_MS = 104000;
 export const LAB_MEDIA_MANIFEST_SCHEMA = 'talkqte.fresh-scenario.media.v1';
 const MANIFEST_MAX_BYTES = 256 * 1024;
+// The original fixed fictional meeting, approved by its compiled hash.
+export const LAB_FIXED_MEDIA_SHA256 =
+  '1faf1c404249bed069065f51262abfce6956fa8a31f237e68bb6e9d06cb893e2';
+export const LAB_FIXED_MEDIA_DURATION_MS = 102480;
+// Descriptors created only by this module: from an approved manifest, from
+// the fixed media's compiled hash, or derived from one of those. A hand-built
+// object with the right fields and a matching file hash is not approved.
+const approved = new WeakSet();
+const approve = (descriptor) => {
+  const frozen = Object.freeze(descriptor);
+  approved.add(frozen);
+  return frozen;
+};
+// The player hashes the media and then opens it again, so approved files
+// must sit in owner-only directories nobody else can swap them in. Only the
+// immediate directory is checked, at approval time; this closes the gap to
+// other users but not to the owner's own processes.
+const ownerOnly = (dir) => {
+  const s = lstatSync(dir);
+  return (
+    s.isDirectory() &&
+    !s.isSymbolicLink() &&
+    (s.mode & 0o077) === 0 &&
+    s.uid === process.getuid?.()
+  );
+};
+const sha256OfFile = (path, max) => {
+  const st = lstatSync(path);
+  required(
+    st.isFile() && !st.isSymbolicLink() && st.size > 0 && st.size <= max,
+  );
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+};
 const hex64 = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
 const required = (ok) => {
   if (!ok) throw gateFailure('protocol');
 };
 
-/** True for an approved fictional media descriptor within the lab bounds. */
+/** True only for a descriptor this module approved, within the lab bounds. */
 export function isLabMedia(media) {
   return (
-    media?.fictional === true &&
+    approved.has(media) &&
+    media.fictional === true &&
     typeof media.path === 'string' &&
     isAbsolute(media.path) &&
     hex64(media.sha256) &&
@@ -45,17 +79,6 @@ export function loadLabMediaManifest(manifestPath, { sha256 } = {}) {
       isAbsolute(manifestPath) &&
       hex64(sha256),
   );
-  // The player hashes the media and then opens it again, so the per-run
-  // files must sit in owner-only directories nobody else can swap them in.
-  const ownerOnly = (dir) => {
-    const s = lstatSync(dir);
-    return (
-      s.isDirectory() &&
-      !s.isSymbolicLink() &&
-      (s.mode & 0o077) === 0 &&
-      s.uid === process.getuid?.()
-    );
-  };
   required(ownerOnly(dirname(manifestPath)));
   const stat = lstatSync(manifestPath);
   required(
@@ -92,7 +115,7 @@ export function loadLabMediaManifest(manifestPath, { sha256 } = {}) {
       media.audio?.codec === 'aac' &&
       media.audio?.sampleRate === 48000,
   );
-  const descriptor = Object.freeze({
+  const descriptor = approve({
     fictional: true,
     path: media.path,
     sha256: media.sha256,
@@ -101,4 +124,41 @@ export function loadLabMediaManifest(manifestPath, { sha256 } = {}) {
   });
   required(isLabMedia(descriptor));
   return descriptor;
+}
+
+/**
+ * The original fixed fictional meeting at `path`. The file must hash to the
+ * compiled fixed sha256 and sit in an owner-only directory, like per-run media.
+ */
+export function fixedLabMedia(path) {
+  required(
+    typeof path === 'string' &&
+      isAbsolute(path) &&
+      realpathSync(path) === path &&
+      ownerOnly(dirname(path)) &&
+      sha256OfFile(path, 256 * 1024 * 1024) === LAB_FIXED_MEDIA_SHA256,
+  );
+  return approve({
+    fictional: true,
+    path,
+    sha256: LAB_FIXED_MEDIA_SHA256,
+    durationMs: LAB_FIXED_MEDIA_DURATION_MS,
+    scenarioId: 'fixed-meeting-102480',
+  });
+}
+
+/**
+ * Labels an approved descriptor as neutral calibration media for the
+ * adaptive playback path. The result stays approved because it is derived
+ * from an approved descriptor and only adds a bounded display label.
+ */
+export function labelLabBootstrapMedia(media, displayLabel) {
+  required(
+    isLabMedia(media) &&
+      typeof displayLabel === 'string' &&
+      displayLabel.trim().length > 0 &&
+      displayLabel.length <= 120 &&
+      !/[\u0000-\u001f\u007f]/.test(displayLabel),
+  );
+  return approve({ ...media, purpose: 'neutral-calibration', displayLabel });
 }

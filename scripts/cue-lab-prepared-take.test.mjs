@@ -11,9 +11,8 @@ import {
   assertFixedModelTakeOptions,
 } from './cue-lab-prepared-take.mjs';
 import { createLabPlayerFixture } from './cue-lab-player.mjs';
-// The fixed 102.48 s fictional fixture media used before per-run manifests.
-const LAB_PLAYER_MEDIA_SHA256 =
-  '1faf1c404249bed069065f51262abfce6956fa8a31f237e68bb6e9d06cb893e2';
+import { labelLabBootstrapMedia } from './cue-lab-media.mjs';
+import { fictionalTestMedia } from './fixtures/lab-test-media.mjs';
 
 const deferred = () => {
   let resolve;
@@ -29,12 +28,8 @@ async function waitForTrace(fixture, entry) {
     await delay(1);
   }
 }
-const media = {
-  fictional: true,
-  path: '/fictional/prepared.mp4',
-  sha256: LAB_PLAYER_MEDIA_SHA256,
-  durationMs: 102480,
-};
+// Approved through the real manifest loader (synthetic, fictional).
+const media = fictionalTestMedia();
 function fixture({
   badIdentity = false,
   listening = true,
@@ -59,6 +54,7 @@ function fixture({
   playerRetirementUnconfirmed = false,
   fixedModel = false,
   effort = 'medium',
+  mediaOverride,
   ownedPlayer,
   foreignPlayer = false,
   wrongFixedSource = false,
@@ -77,12 +73,8 @@ function fixture({
     playerRetirement = true;
   }
   const selectedMedia = body
-    ? {
-        ...media,
-        purpose: 'neutral-calibration',
-        displayLabel: 'Fictional neutral calibration',
-      }
-    : media;
+    ? labelLabBootstrapMedia(media, 'Fictional neutral calibration')
+    : (mediaOverride ?? media);
   const trace = [],
     events = new EventEmitter(),
     child = new EventEmitter();
@@ -1063,4 +1055,31 @@ test('the fixed model take option check is usable on its own and matches constru
         category: 'protocol',
       },
     );
+});
+
+test('the takes refuse a hand-built media descriptor even with the approved path and hash', () => {
+  const settings = {
+    provider: 'codex',
+    model: 'gpt-6.1-sol',
+    effort: 'low',
+    maxCalls: 20,
+  };
+  assert.doesNotThrow(() =>
+    assertFixedModelTakeOptions({ settings, stopAfterS: 110, media }),
+  );
+  assert.throws(
+    () =>
+      assertFixedModelTakeOptions({
+        settings,
+        stopAfterS: 110,
+        media: { ...media },
+      }),
+    { category: 'protocol' },
+  );
+  assert.throws(
+    () => fixture({ fixedModel: true, mediaOverride: { ...media } }),
+    {
+      category: 'protocol',
+    },
+  );
 });
