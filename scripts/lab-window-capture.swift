@@ -82,6 +82,9 @@ final class Writer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Senda
   // top-left origin, and its latest complete frame. Touched only on the
   // capture queue.
   var places: [ObjectIdentifier: CGRect] = [:]
+  // Drawing order, fixed: the emulator first, the TalkQTE companion last,
+  // so the cue card is never hidden under the player where they overlap.
+  var order: [ObjectIdentifier] = []
   var latest: [ObjectIdentifier: CVPixelBuffer] = [:]
   var lastTime = CMTime.invalid
   let context = CIContext(options: [.cacheIntermediates: false])
@@ -165,8 +168,8 @@ final class Writer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Senda
       else { return }
       let extent = CGRect(x: 0, y: 0, width: width, height: height)
       var picture = CIImage(color: .black).cropped(to: extent)
-      for (key, place) in places {
-        guard let frame = latest[key] else { continue }
+      for key in order {
+        guard let place = places[key], let frame = latest[key] else { continue }
         let source = CIImage(cvPixelBuffer: frame)
         // Core Image's origin is bottom-left; places are top-left.
         let sx = place.width / max(source.extent.width, 1)
@@ -198,8 +201,11 @@ final class Writer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Senda
   }
 
   /// Where `stream`'s window goes in the picture (output pixels, top-left).
+  /// Windows are drawn in the order they are placed.
   func place(_ stream: SCStream, at rect: CGRect) {
-    places[ObjectIdentifier(stream)] = rect
+    let key = ObjectIdentifier(stream)
+    if places[key] == nil { order.append(key) }
+    places[key] = rect
   }
 }
 
@@ -337,7 +343,8 @@ struct Capture {
         ?? content.displays.first
     else { fail("No display was found.", code: 2) }
 
-    let union = emulator.frame.union(companion.frame).intersection(display.frame)
+    // The canvas is the two windows' union, whichever displays they are on.
+    let union = emulator.frame.union(companion.frame)
     // Each window on its own, wherever it is: not limited to the active
     // Space and not hidden by other windows.
     let emulatorFilter = SCContentFilter(desktopIndependentWindow: emulator)
@@ -445,6 +452,20 @@ struct Capture {
     try? await soundStream.stopCapture()
     try? await emulatorStream.stopCapture()
     try? await companionStream.stopCapture()
+    // Positions are taken once at the start. Report whether either window
+    // moved or changed size since, so a misplaced picture is known.
+    var windowsMoved = false
+    var windowsResized = false
+    if let now = try? await SCShareableContent.excludingDesktopWindows(
+      true, onScreenWindowsOnly: false)
+    {
+      for start in [emulator, companion] {
+        guard let current = now.windows.first(where: { $0.windowID == start.windowID })
+        else { continue }
+        if current.frame.origin != start.frame.origin { windowsMoved = true }
+        if current.frame.size != start.frame.size { windowsResized = true }
+      }
+    }
     await withCheckedContinuation { continuation in
       queue.async {
         writer.video.markAsFinished()
@@ -456,6 +477,7 @@ struct Capture {
     emit([
       "event": "stopped", "wallMs": wallMs(), "frames": writer.frames,
       "audioBuffers": writer.audioBuffers,
+      "windowsMoved": windowsMoved, "windowsResized": windowsResized,
       "status": writer.writer.status == .completed ? "completed" : "failed",
       "problem": writer.problem ?? writer.writer.error?.localizedDescription ?? "",
     ])

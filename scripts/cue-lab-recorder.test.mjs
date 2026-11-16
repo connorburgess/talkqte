@@ -38,7 +38,7 @@ function fixture(mode, extra = {}) {
     close: () => rmSync(directory, { recursive: true, force: true }),
   };
 }
-for (const mode of ['normal', 'partial'])
+for (const mode of ['normal', 'partial', 'moved'])
   test(
     'real harmless child ' +
       mode +
@@ -52,6 +52,17 @@ for (const mode of ['normal', 'partial'])
         const stop = f.recorder.stop();
         assert.equal(stop, f.recorder.stop());
         assert.deepEqual(await stop, { stopped: true });
+        // The helper's final report: frames written and whether a window
+        // moved or resized after its place in the picture was fixed.
+        assert.deepEqual(
+          { ...f.recorder.report },
+          {
+            frames: 1,
+            audioBuffers: 1,
+            windowsMoved: mode === 'moved',
+            windowsResized: false,
+          },
+        );
       } finally {
         f.close();
       }
@@ -154,6 +165,17 @@ test('strict Swift source gates exact identities before streams and readiness af
   assert.doesNotMatch(
     source,
     /SCContentFilter\(display: display, including: \[emulator, companion\]\)/,
+  );
+  // A fixed drawing order: the player first, the companion (cue card) last.
+  assert.match(source, /for key in order \{/);
+  assert.ok(
+    source.indexOf('writer.place(emulatorStream') <
+      source.indexOf('writer.place(companionStream'),
+  );
+  // The canvas is the windows' union alone, not clipped to one display.
+  assert.match(
+    source,
+    /let union = emulator\.frame\.union\(companion\.frame\)\n/,
   );
   assert.ok(
     source.indexOf('try await soundStream.startCapture()') <

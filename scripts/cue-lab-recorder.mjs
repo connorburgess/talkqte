@@ -214,7 +214,12 @@ function recorder({
           value.status === 'completed' &&
           value.problem === '' &&
           integer(value.frames) &&
-          integer(value.audioBuffers),
+          integer(value.audioBuffers) &&
+          // Whether either window moved or resized after the start, when
+          // the picture's placement was fixed.
+          ['windowsMoved', 'windowsResized'].every(
+            (k) => value[k] === undefined || typeof value[k] === 'boolean',
+          ),
       );
       final = value;
     } else throw gateFailure('protocol');
@@ -276,6 +281,18 @@ function recorder({
     return stopping;
   }
   return Object.freeze({
+    // The helper's final, content-free report once it stopped: frames and
+    // sound buffers written, and whether a window moved or resized.
+    get report() {
+      return final
+        ? Object.freeze({
+            frames: final.frames,
+            audioBuffers: final.audioBuffers,
+            windowsMoved: final.windowsMoved ?? null,
+            windowsResized: final.windowsResized ?? null,
+          })
+        : null;
+    },
     playerSource,
     output,
     subscribe(listener) {
@@ -406,6 +423,7 @@ export function createLabRecorderFixture(options = {}) {
     [
       'normal',
       'partial',
+      'moved',
       'wrong',
       'spawn-only',
       'oversize',
