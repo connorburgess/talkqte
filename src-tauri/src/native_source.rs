@@ -311,14 +311,14 @@ fn cloud_feed<A: Access>(runtime: A, session: u64, control: &Control, opener: Op
         opener,
         move || {
             approval
-                .with(|runtime| runtime.engine.audio_approval())
+                .with(|runtime| runtime.engine.audio_approval(session))
                 .flatten()
         },
         source_sink(runtime, control),
     )
     .stop_sending_when(move || {
         keep.with(|runtime| {
-            crate::transcription::cloud::withdrawal(runtime.engine.audio_withdrawal())
+            crate::transcription::cloud::withdrawal(runtime.engine.audio_withdrawal(session))
         })
         .unwrap_or(Some(crate::transcription::cloud::SttFailure::Withdrawn))
     })

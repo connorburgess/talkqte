@@ -58,6 +58,8 @@ export function MicrophoneControl({
   transcription?: CloudTranscription;
 }) {
   const { state, error, busy, active, start, stop } = microphone;
+  // Every live session names its transcription service.
+  const provider = transcription?.provider ?? 'the transcription service';
   if (live || preparing)
     return (
       <section className="microphone-panel" aria-label="Microphone">
@@ -92,13 +94,9 @@ export function MicrophoneControl({
           </p>
         ) : (
           <p>
-            {transcription
-              ? sourceSession
-                ? `Audio from ${sourceSession} is sent to ${transcription.provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. The microphone is not used. TalkQTE does not record audio.`
-                : `Your microphone is sent to ${transcription.provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. TalkQTE does not record audio.`
-              : sourceSession
-                ? `Audio from ${sourceSession} is not transcribed. TalkQTE does not record audio.`
-                : 'Your microphone is not transcribed. TalkQTE does not record audio.'}
+            {sourceSession
+              ? `Audio from ${sourceSession} is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. The microphone is not used. TalkQTE does not record audio.`
+              : `Your microphone is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. TalkQTE does not record audio.`}
             {processingConfigured
               ? ' Cue processing has separate permissions below.'
               : ' TalkQTE does not save the transcript.'}{' '}

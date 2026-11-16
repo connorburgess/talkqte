@@ -323,12 +323,15 @@ fn pause_cancels_immediately_and_resume_cannot_restart_strict_run() {
     let link = lab(&mut h);
     h.line("Who owns the fictional checklist?");
     h.request();
-    assert!(h.engine.audio_approval().is_some());
+    assert!(h.engine.audio_approval(h.engine.session()).is_some());
     h.engine.set_live_cues_paused(true).unwrap();
     assert_eq!(link.cancelled.load(Ordering::Acquire), 1);
     // In the lab, Pause ends the run, and cloud transcription stops with
     // that reason rather than as a withdrawn review.
-    assert_eq!(h.engine.audio_withdrawal(), Some("lab_ended"));
+    assert_eq!(
+        h.engine.audio_withdrawal(h.engine.session()),
+        Some("lab_ended")
+    );
     h.engine.set_live_cues_paused(false).unwrap();
     h.line("New speech after resume.");
     assert!(!h.engine.has_processing_permission());

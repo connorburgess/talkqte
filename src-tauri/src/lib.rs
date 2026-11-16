@@ -560,7 +560,7 @@ struct LiveStatus {
     available: bool,
     reason: Option<&'static str>,
     /// The cloud service this launch transcribes with, when one is
-    /// selected; absent when speech is transcribed on this device.
+    /// selected; absent otherwise, and then nothing is transcribed.
     #[serde(skip_serializing_if = "Option::is_none")]
     transcription: Option<&'static str>,
 }
@@ -1235,70 +1235,69 @@ async fn start_live_session(
                 result
             };
             // Attach the runner only to the session that asked for it.
-            let kept = handle
-                .state::<AppState>()
-                .0
-                .lock()
-                .is_ok_and(|mut runtime| {
-                    runtime.sync();
-                    let engine = &runtime.engine;
-                    if !(engine.state.live
-                        && engine.session() == session
-                        && engine.state.status == engine::Status::Running)
-                    {
-                        return false;
-                    }
-                    // Line times count from when capture began on the session clock.
-                    let started_at = engine.state.elapsed_ms;
-                    let Some(live) = runtime
-                        .live
-                        .as_mut()
-                        .filter(|live| live.session == session && live.runner.is_none())
-                    else {
-                        return false;
-                    };
-                    live.microphone = Some(generation);
-                    live.runner = Some(live::LiveSession::start_cloud(
-                        chunker,
-                        session,
-                        started_at,
-                        transcription::cloud::CloudFeed::new(
-                            session,
-                            2,
-                            opener,
-                            move || {
-                                approval_app
-                                    .state::<AppState>()
-                                    .0
-                                    .lock()
-                                    .ok()
-                                    .and_then(|runtime| runtime.engine.audio_approval())
-                            },
-                            sink,
-                        )
-                        .stop_sending_when(move || {
-                            keep_app.state::<AppState>().0.lock().map_or(
-                                Some(transcription::cloud::SttFailure::Withdrawn),
-                                |runtime| {
-                                    transcription::cloud::withdrawal(
-                                        runtime.engine.audio_withdrawal(),
+            let kept =
+                handle
+                    .state::<AppState>()
+                    .0
+                    .lock()
+                    .is_ok_and(|mut runtime| {
+                        runtime.sync();
+                        let engine = &runtime.engine;
+                        if !(engine.state.live
+                            && engine.session() == session
+                            && engine.state.status == engine::Status::Running)
+                        {
+                            return false;
+                        }
+                        // Line times count from when capture began on the session clock.
+                        let started_at = engine.state.elapsed_ms;
+                        let Some(live) = runtime
+                            .live
+                            .as_mut()
+                            .filter(|live| live.session == session && live.runner.is_none())
+                        else {
+                            return false;
+                        };
+                        live.microphone = Some(generation);
+                        live.runner =
+                            Some(live::LiveSession::start_cloud(
+                                chunker,
+                                session,
+                                started_at,
+                                transcription::cloud::CloudFeed::new(
+                                    session,
+                                    2,
+                                    opener,
+                                    move || {
+                                        approval_app.state::<AppState>().0.lock().ok().and_then(
+                                            |runtime| runtime.engine.audio_approval(session),
+                                        )
+                                    },
+                                    sink,
+                                )
+                                .stop_sending_when(move || {
+                                    keep_app.state::<AppState>().0.lock().map_or(
+                                        Some(transcription::cloud::SttFailure::Withdrawn),
+                                        |runtime| {
+                                            transcription::cloud::withdrawal(
+                                                runtime.engine.audio_withdrawal(session),
+                                            )
+                                        },
                                     )
-                                },
-                            )
-                        })
-                        .on_dropped(move || {
-                            let state = dropped_app.state::<AppState>();
-                            if let Ok(mut runtime) = state.0.lock() {
-                                runtime.engine.cloud_transcription_dropped(session);
-                                publish(&dropped_app, &mut runtime);
-                            };
-                        })
-                        .on_failure(move |failure| {
-                            stop_after_cloud_failure(&failure_app, session, failure)
-                        }),
-                    ));
-                    true
-                });
+                                })
+                                .on_dropped(move || {
+                                    let state = dropped_app.state::<AppState>();
+                                    if let Ok(mut runtime) = state.0.lock() {
+                                        runtime.engine.cloud_transcription_dropped(session);
+                                        publish(&dropped_app, &mut runtime);
+                                    };
+                                })
+                                .on_failure(move |failure| {
+                                    stop_after_cloud_failure(&failure_app, session, failure)
+                                }),
+                            ));
+                        true
+                    });
             if !kept {
                 microphone::stop_blocking(&handle, stopper, generation);
             }
