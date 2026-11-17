@@ -140,7 +140,8 @@ pub enum Event {
     /// `asked` (it cites a line that already raised "Asked you"),
     /// `expired_source` (its newest cited line is 18 s old), `cooldown`,
     /// `focus` (Focused and not about a focus line), `repeat` (the same cue
-    /// within two minutes) or `stale` (no cited line is fresh speech). No
+    /// within two minutes), `stale` (no cited line is fresh speech) or
+    /// `stale_request` (the context changed while the model answered). No
     /// cue text.
     CueDropped {
         session: u64,

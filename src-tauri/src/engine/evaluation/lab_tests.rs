@@ -115,6 +115,11 @@ fn newer_answer_cannot_be_overridden_by_stale_show_or_quiet() {
             *link.verdicts.lock().unwrap(),
             vec![Settlement::StaleSuccess]
         );
+        // A discarded show is logged as such.
+        assert_eq!(
+            h.engine.last_dropped,
+            (action == "show").then_some("stale_request")
+        );
         h.engine.revoke_processing();
         reply(&h, "quiet", None);
     }
