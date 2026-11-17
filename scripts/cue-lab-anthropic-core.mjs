@@ -6,7 +6,7 @@
 import { join } from 'node:path';
 import { LAB_KEY_DIR, readLabKeyFile } from './cue-lab-key-file.mjs';
 import { performance } from 'node:perf_hooks';
-import { COMPACT_PROMPT, CONTRACT } from './cue-lab.mjs';
+import { CONTRACT } from './cue-lab.mjs';
 
 export const ANTHROPIC_PROVIDER = 'anthropic-api';
 export const ANTHROPIC_BASE_URL = 'https://api.anthropic.com';
@@ -41,28 +41,53 @@ export const ANTHROPIC_SPEND_CAP_MICRO_USD = Object.freeze({
   'claude-haiku-5-5': 250_000,
 });
 
-// A fixed schema: no per-request enum and no length or item constraints the
-// API does not support. The broker's per-request schema and validateDecision
-// still check lengths, at most four sources and membership client-side.
+// Two fixed schemas, chosen by whether a cue is on screen, so a reply that is
+// invalid for that state cannot be produced (CUE-REPLAY-01: with a cue on
+// screen the model sometimes answered show with a null cue, which the broker
+// rejected; B11). Neither has a per-request enum or a length or item
+// constraint the API does not support, so each grammar compiles once. The
+// broker's per-request schema and validateDecision still check lengths, at
+// most four sources and membership client-side.
 export const ANTHROPIC_DECISION_SCHEMA = Object.freeze({
   type: 'object',
   properties: {
-    action: { type: 'string', enum: ['show', 'quiet', 'resolved', 'withdraw'] },
+    action: { type: 'string', enum: ['show', 'quiet'] },
     cue: { anyOf: [{ type: 'string' }, { type: 'null' }] },
     sourceIds: { type: 'array', minItems: 1, items: { type: 'string' } },
   },
   required: ['action', 'cue', 'sourceIds'],
   additionalProperties: false,
 });
+export const ANTHROPIC_CUE_ON_SCREEN_SCHEMA = Object.freeze({
+  type: 'object',
+  properties: {
+    action: { type: 'string', enum: ['quiet', 'resolved', 'withdraw'] },
+    cue: { type: 'null' },
+    sourceIds: { type: 'array', minItems: 1, items: { type: 'string' } },
+  },
+  required: ['action', 'cue', 'sourceIds'],
+  additionalProperties: false,
+});
+
+/** The schema for this request's state: a cue on screen or none. */
+export function anthropicSchemaFor(input) {
+  return input?.existingCue
+    ? ANTHROPIC_CUE_ON_SCREEN_SCHEMA
+    : ANTHROPIC_DECISION_SCHEMA;
+}
 
 /**
- * The byte-stable system prompt: the compact evaluator prompt with the
- * glance rule and both field notes always included. userName and earlierCues
- * travel only in the user message, so the system block never changes.
+ * The byte-stable system prompt for the live API route: the live evaluator
+ * prompt (CUE-REPLAY-01: a positive definition of when to show, without the
+ * old "a question already asked but still unanswered" quiet rule, and an
+ * explicit rule for the cue-on-screen state) with the glance rule and both
+ * field notes always included. userName and earlierCues travel only in the
+ * user message, so the system block never changes. The shared compact
+ * prompt (Codex and CLI routes) is unchanged.
  */
 export function anthropicSystemPrompt() {
   const p = CONTRACT.prompts;
-  return COMPACT_PROMPT + p.glanceRule + p.nameNote + p.historyNote;
+  return p.liveCompact + p.glanceRule + p.nameNote + p.historyNote;
 }
 
 export function isAnthropicModel(model) {
@@ -84,7 +109,7 @@ export function buildAnthropicParams(model, input) {
     messages: [{ role: 'user', content: JSON.stringify(input) }],
     output_config: {
       effort: ANTHROPIC_EFFORT,
-      format: { type: 'json_schema', schema: ANTHROPIC_DECISION_SCHEMA },
+      format: { type: 'json_schema', schema: anthropicSchemaFor(input) },
     },
     stream: true,
   };
@@ -111,7 +136,7 @@ export function worstCaseMicroUsd(model, input) {
   const bytes = Buffer.byteLength(
     anthropicSystemPrompt() +
       JSON.stringify(input) +
-      JSON.stringify(ANTHROPIC_DECISION_SCHEMA),
+      JSON.stringify(anthropicSchemaFor(input)),
   );
   const tokens = Math.ceil(bytes / 2) + 1500;
   return Math.ceil(

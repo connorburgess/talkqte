@@ -73,6 +73,54 @@ const wireCode = (category) =>
     closed: 'protocol',
   })[category] ?? 'unavailable';
 
+// A fixed, content-free code for the first check a compact reply fails, so a
+// refused reply can be counted without keeping any of its text.
+export const REPLY_PROBLEMS = Object.freeze([
+  'shape',
+  'action',
+  'source-ids',
+  'cue',
+  'action-without-cue',
+  'show-with-cue',
+  'glance',
+  'size',
+]);
+export function replyProblem(value, input) {
+  const keys = ['action', 'cue', 'sourceIds'];
+  if (!exact(value, keys) || Object.keys(value).length !== keys.length)
+    return 'shape';
+  if (!['show', 'quiet', 'resolved', 'withdraw'].includes(value.action))
+    return 'action';
+  const ids = new Set(input.events.map((event) => event.id));
+  if (
+    !Array.isArray(value.sourceIds) ||
+    value.sourceIds.length < 1 ||
+    value.sourceIds.length > 4 ||
+    new Set(value.sourceIds).size !== value.sourceIds.length ||
+    !value.sourceIds.every((id) => ids.has(id))
+  )
+    return 'source-ids';
+  const existing = input.existingCue !== null;
+  if (['resolved', 'withdraw'].includes(value.action) && !existing)
+    return 'action-without-cue';
+  if (value.action === 'show' && existing) return 'show-with-cue';
+  if (
+    value.action === 'show'
+      ? typeof value.cue !== 'string' ||
+        !value.cue.trim() ||
+        value.cue.length > 240
+      : value.cue !== null
+  )
+    return 'cue';
+  if (Buffer.byteLength(JSON.stringify(value)) > 4096) return 'size';
+  if (value.action === 'show' && value.cue.trim().split(/\s+/u).length > 10)
+    return 'glance';
+  return null;
+}
+// Invalid replies in a row that still end the run: a broken prompt or
+// schema must not run on silently.
+export const INVALID_REPLIES_IN_A_ROW = 3;
+
 export function evaluatorRequest(input) {
   requireThat(
     exact(input, ['events', 'existingCue'], ['userName', 'earlierCues']),
@@ -240,6 +288,7 @@ export async function openLabBroker({
   // Requests retired by a per-request deadline. Late frames for them are
   // ignored; every count below is content-free.
   const retiredRequests = new Set();
+  let invalidInARow = 0;
   const evaluations = {
     requested: 0,
     dispatched: 0,
@@ -249,6 +298,13 @@ export async function openLabBroker({
     deadlineByNative: 0,
     refusals: 0,
     outputLimits: 0,
+    // A show while a cue was already on screen, settled as quiet (B11: the
+    // model's "keep it"), and replies the broker's check refused, by the
+    // first check each failed. Each refused reply ends only its request on
+    // the API route; three in a row end the run.
+    showWithCue: 0,
+    invalidReplies: 0,
+    invalidReasons: Object.fromEntries(REPLY_PROBLEMS.map((code) => [code, 0])),
     verdicts: { current: 0, staleSuccess: 0, expired: 0, failed: 0 },
     resultActions: { show: 0, quiet: 0, resolved: 0, withdraw: 0 },
   };
@@ -363,16 +419,41 @@ export async function openLabBroker({
             evaluations.dispatched++;
           }
           const result = await requested;
-          try {
-            validateDecision(result.value, frame.input, { compact: true });
-            requireThat(
-              Buffer.byteLength(JSON.stringify(result.value)) <= 4096,
-            );
-            if (result.value.action === 'show')
-              requireThat(result.value.cue.trim().split(/\s+/u).length <= 10);
-          } catch {
+          let value = result.value;
+          // With a cue on screen, show is not a valid action. The model
+          // means "keep it" (B11), so it is settled as quiet, keeping the
+          // reply's own sources.
+          // Direct API route only; the subscription routes are unchanged.
+          if (
+            provider.metadata.provider === 'anthropic-api' &&
+            frame.input.existingCue !== null &&
+            object(value) &&
+            value.action === 'show'
+          ) {
+            value = { action: 'quiet', cue: null, sourceIds: value.sourceIds };
+            evaluations.showWithCue++;
+          }
+          let problem = replyProblem(value, frame.input);
+          if (problem === null)
+            try {
+              validateDecision(value, frame.input, { compact: true });
+            } catch {
+              problem = 'shape';
+            }
+          if (problem !== null) {
+            evaluations.invalidReplies++;
+            evaluations.invalidReasons[problem]++;
+            invalidInARow++;
+            // Request-scoped on the API route, unless it keeps happening.
+            if (
+              invalidInARow < INVALID_REPLIES_IN_A_ROW &&
+              gate.retireCurrent('invalid-reply')
+            )
+              throw gateFailure('invalid-reply');
+            gate.stop('invalid-reply');
             throw gateFailure('invalid-reply');
           }
+          invalidInARow = 0;
           const elapsedMs = Math.ceil(performance.now() - started);
           // Over budget by rounding or timer order: retire this request only.
           if (elapsedMs > frame.budgetMs) {
@@ -397,13 +478,13 @@ export async function openLabBroker({
           send('result', {
             requestId: frame.requestId,
             contextRevision: frame.contextRevision,
-            value: result.value,
+            value,
             elapsedMs,
             usage,
           });
           operation.resultSent = true;
           evaluations.resultsSent++;
-          evaluations.resultActions[result.value.action]++;
+          evaluations.resultActions[value.action]++;
           await gate.settle(() => ack, { deadlineMs: 1000 });
           return result;
         },
@@ -449,17 +530,20 @@ export async function openLabBroker({
       evaluations.deadlineByNative++;
       return;
     }
-    // A provider refusal, or an API reply that reached its output bound, is
-    // a recorded non-decision for this request only.
+    // A provider refusal, an API reply that reached its output bound, or one
+    // the broker's check refused, is a recorded non-decision for this
+    // request only. The signed native lab build accepts only `refusal` and
+    // `output_limit` as request-scoped codes, so a refused reply travels as
+    // `refusal`; its true reason is counted above, in invalidReasons.
     const code =
-      reason === 'refusal'
+      reason === 'refusal' || reason === 'invalid-reply'
         ? 'refusal'
         : reason === 'output-limit'
           ? 'output_limit'
           : 'deadline';
-    if (code === 'refusal') evaluations.refusals++;
+    if (reason === 'refusal') evaluations.refusals++;
     else if (code === 'output_limit') evaluations.outputLimits++;
-    else evaluations.deadlineByBroker++;
+    else if (reason !== 'invalid-reply') evaluations.deadlineByBroker++;
     if (authenticated && socket && !socket.destroyed)
       try {
         send('failed', {
