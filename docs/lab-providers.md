@@ -160,3 +160,37 @@ A take on this route allows 40 calls, against 20 for Codex. Four limits apply: t
 **Evidence:** per call, content-free receipts keep the time to first byte and first token, the stop reason, a refusal category, token usage and the computed cost. The run's estimated total spend is available beside the receipts. No prompt, reply or key text is kept.
 
 Tests drive the adapter with a fake fetch or a loopback stand-in endpoint and a dummy key; no test reaches the network.
+
+### Ownership-resolution prompt preparation
+
+The API lab's live prompt distinguishes a generic ownership question from an
+`asked` question. A generic ownership cue requires clear acceptance of the task
+before `resolved`; a suggestion, someone else's assignment, refusal, ambiguous
+acknowledgement or pending availability check keeps it `quiet`. Explicitly
+deferring or abandoning that task or ownership decision permits `withdraw`.
+An `asked` question can resolve on a clear answer, including a refusal; otherwise
+it stays `quiet`, never `withdraw`. Speaker identity must still come from the
+supplied text. Anonymous first-person commitment establishes someone accepting,
+not a named person's identity.
+
+On 17 November 2026, an authorized comparison used nine authored fictional
+controls, two prompt arms and three repeats: 54 requests to `claude-opus-5-5` at
+`low` effort. The candidate met the predeclared action and citation requirements
+on 27/27 requests; the preceding prompt met them on 20/27. Its seven failures
+were premature resolutions on an unconfirmed owner, an anonymous deferral of an
+asked question, and one third-party assignment. Raw and broker-settled actions
+matched throughout, with no occupied-slot `show` or raw asked `withdraw`.
+
+These are unblinded, near-rule authored diagnostics, not held-out validation,
+real-meeting accuracy or general effectiveness evidence. No native dispatch,
+Asked priority/lifetime, visible-card timing, staleness, blocked opportunities or
+participation benefit was measured. The assembled API system prompt fingerprint
+is `ad98cdf73eb7c2047510bb0b1b3a3e42b0c73db6cb36539c0077ff95432eb677`;
+the offline test verifies request assembly and preservation of asked state, not
+model correctness. Other prompt components, schemas and transport stay unchanged.
+
+This is code preparation for review, not activation or promotion of an existing
+app or launcher. The next acceptance check is a separately reviewed and
+authorized broader comparison that checks supported opportunities and temporal
+harm, including whether conservative retention blocks a later useful cue. No
+roadmap capability or production-readiness claim is closed by these controls.

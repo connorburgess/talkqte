@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import {
   chmodSync,
   mkdirSync,
@@ -195,6 +196,33 @@ test('the system prompt is byte-stable and carries no user name or earlier cues'
     false,
   );
   assert.match(a, /With an existing cue, answer quiet to keep it on screen/);
+});
+
+// Pins the assembled request contract that was previously exercised on
+// authored owner-resolution controls. This checks bytes/transport, not whether
+// a model understands acceptance or produces the right semantic decision.
+test('owner-resolution prompt fingerprint survives cue-state selection and user serialization', () => {
+  for (const existingCue of [
+    null,
+    { text: 'Who can take the rota?', sourceIds: ['s1'] },
+    { text: 'Freya, can you take the rota?', sourceIds: ['s1'], kind: 'asked' },
+  ]) {
+    const request = { ...input, existingCue, userName: 'Fictional Freya' };
+    const params = buildAnthropicParams('claude-opus-5-5', request);
+    assert.equal(
+      createHash('sha256').update(params.system[0].text).digest('hex'),
+      'ad98cdf73eb7c2047510bb0b1b3a3e42b0c73db6cb36539c0077ff95432eb677',
+    );
+    // Preserve asked identity in the real wire input, so the prompt's generic
+    // ownership distinction cannot accidentally apply to an asked question.
+    assert.deepEqual(JSON.parse(params.messages[0].content), request);
+    if (existingCue?.kind === 'asked') {
+      assert.deepEqual(
+        params.output_config.format.schema.properties.action.enum,
+        ['quiet', 'resolved'],
+      );
+    }
+  }
 });
 
 test('the schema follows the cue state: no show while a cue is on screen', () => {
