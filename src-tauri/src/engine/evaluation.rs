@@ -467,6 +467,7 @@ impl Engine {
                 id: cue.id.clone(),
                 text: cue.question.clone(),
                 source_ids: cited.iter().map(|source| source.id.clone()).collect(),
+                asked: cue.kind == super::ASKED,
             })
         } else {
             None
@@ -857,7 +858,16 @@ impl Engine {
                     source_time(source).is_some() && self.focus_match(&source.text).is_some()
                 });
                 let repeat_key = format!("Evaluated:{}", question.to_lowercase());
+                // A line that asked the user by name already raised "Asked
+                // you"; a model cue from it would ask them twice.
+                let from_asked_line = cited.iter().any(|source| {
+                    source
+                        .id
+                        .strip_prefix("transcript:")
+                        .is_some_and(|id| self.asked_lines.iter().any(|line| line == id))
+                });
                 if self.state.cue.is_some()
+                    || from_asked_line
                     || now.saturating_sub(at_ms) >= CUE_MS
                     || at_ms < self.cooldown_until
                     || (matches!(self.state.sensitivity, Sensitivity::Focused) && !about_focus)
@@ -922,6 +932,12 @@ impl Engine {
                 let Some(cue) = &mut self.state.cue else {
                     return;
                 };
+                // The model may say a question asked of the user was
+                // answered, but not withdraw it: a topic change does not
+                // take back a question someone put to them.
+                if decision.action == Action::Withdraw && cue.kind == super::ASKED {
+                    return;
+                }
                 if request.existing_cue().is_none_or(|old| old.id != cue.id) {
                     return;
                 }
@@ -1000,7 +1016,7 @@ impl Engine {
     }
 }
 
-fn transcript_source(line: &Segment) -> Source {
+pub(super) fn transcript_source(line: &Segment) -> Source {
     Source {
         id: format!("transcript:{}", line.id),
         revision: 0, // Ingestion is append-only; full text/provenance also compared.
@@ -1155,6 +1171,17 @@ mod tests {
                 replies,
                 next_line: 0,
             }
+        }
+        /// Approved after the user's name is set, as a person would.
+        fn named(name: &str) -> Self {
+            let mut h = Self::unapproved(fictional_processor(), Duration::from_secs(5));
+            h.engine.set_user_name(Some(name.into())).unwrap();
+            let review = h
+                .engine
+                .review_processing(ConversationScope::NewSpeechOnly, &[])
+                .unwrap();
+            h.engine.approve_processing(review).unwrap();
+            h
         }
         fn approve_notes(&mut self) {
             let scope: Vec<_> = self
@@ -2677,6 +2704,79 @@ mod tests {
         assert!(h.engine.state.cue.is_none());
         assert!(h.engine.state.notes.is_empty());
         assert!(h.engine.evaluated_cue.is_none());
+    }
+
+    #[test]
+    fn asked_you_fires_with_a_model_connected_and_the_model_cannot_replace_or_repeat_it() {
+        let mut h = Harness::named("Curtis");
+        h.line("The raffle tickets are printed.");
+        h.request();
+        // As in lab run B12, with fictional words: the question arrives while
+        // the model is still working on the line before.
+        h.line("Three for ten sells better, Curtis, didn't you run the booth before?");
+        let asked = h.engine.state.cue.clone().expect("asked of the user");
+        assert_eq!(asked.kind, super::super::ASKED);
+        assert!(
+            asked.sources.is_empty(),
+            "the phrase rule's cue, not the model's"
+        );
+        // A show already on its way cannot take the slot.
+        h.reply(
+            "show",
+            Some("Did you run the booth before?"),
+            &["transcript:line-1"],
+        );
+        assert_eq!(h.engine.state.cue.as_ref().unwrap().id, asked.id);
+        // With a model connected it lasts 20 s from the line, not 45 s.
+        assert_eq!(asked.total_ms, 20_000);
+        // The model is still asked, with the cue on screen marked as asked.
+        let request = next_scheduled_request(&mut h);
+        let existing = request.existing_cue().expect("the cue on screen");
+        assert!(existing.asked);
+        assert_eq!(existing.id, asked.id);
+        assert_eq!(existing.source_ids, ["transcript:line-2"]);
+        assert!(request
+            .prompt_input()
+            .unwrap()
+            .contains(r#""sourceIds":["transcript:line-2"],"kind":"asked"}"#));
+        // It cannot withdraw it.
+        h.reply("withdraw", None, &["transcript:line-2"]);
+        assert_eq!(h.engine.state.cue.as_ref().unwrap().id, asked.id);
+        // It can say it was answered; then the cue goes.
+        h.line("Yes, two years running.");
+        assert!(h.request().existing_cue().unwrap().asked);
+        h.reply("resolved", None, &["transcript:line-3"]);
+        assert!(h.engine.state.cue.is_none());
+        // It does not come back as the model's cue from that line.
+        h.engine.advance(10_000);
+        h.line("Prices are on the sign.");
+        h.request();
+        h.reply(
+            "show",
+            Some("Did you run the booth before?"),
+            &["transcript:line-2", "transcript:line-4"],
+        );
+        assert!(h.engine.state.cue.is_none());
+    }
+
+    #[test]
+    fn asked_you_takes_the_slot_from_an_unread_model_cue_but_not_a_held_one() {
+        let mut h = Harness::named("Curtis");
+        h.show();
+        h.line("Curtis, can you check the float?");
+        let cue = h.engine.state.cue.as_ref().unwrap();
+        assert_eq!(cue.kind, super::super::ASKED);
+        assert_eq!(
+            h.engine.evaluated_cue.as_ref().unwrap().0,
+            cue.id,
+            "now the asked cue"
+        );
+        // A model cue being read stays.
+        let mut h = Harness::named("Curtis");
+        let id = h.show();
+        h.engine.inspect_cue(&id).unwrap();
+        h.line("Curtis, can you check the float?");
+        assert_eq!(h.engine.state.cue.as_ref().unwrap().id, id);
     }
 
     #[test]
