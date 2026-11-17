@@ -1163,7 +1163,8 @@ struct Globals {
 static GLOBALS: OnceLock<Globals> = OnceLock::new();
 pub(crate) fn initialize_from_environment() {
     GLOBALS.get_or_init(|| Globals {
-        selected: std::env::var_os("TALKQTE_DEV_CUE_BACKEND").is_some(),
+        selected: std::env::var_os("TALKQTE_DEV_CUE_BACKEND").is_some()
+            || std::env::var_os("TALKQTE_DEV_LAB_CONTEXT").is_some(),
         backend: Backend::parse(std::env::var("TALKQTE_DEV_CUE_BACKEND").ok().as_deref())
             .unwrap_or(Backend::Subscription),
         settings: Settings::parse(|k| match std::env::var(k) {
@@ -1177,7 +1178,8 @@ pub(crate) fn initialize_from_environment() {
         fault: Arc::new(AtomicBool::new(false)),
     });
 }
-// An explicit invalid selector claims the lab path too, so it fails closed
+// Either explicit selector, including an orphan context value, claims the lab
+// path even when invalid, so it fails closed
 // rather than silently falling through to the standalone Claude backend.
 pub(crate) fn selected() -> bool {
     GLOBALS.get().is_some_and(|g| g.selected)
