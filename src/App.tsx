@@ -102,6 +102,26 @@ function useSession<T extends CueSnapshot>() {
 function FloatingQuestion() {
   const { state, error, busy, run } = useSession<CueSnapshot>();
   const microphone = useMicrophone();
+  // The bar sits on the window's edge that stays put, so a cue grows out of
+  // it without the bar moving on screen: the bottom one for the default
+  // bottom-right placement. The native side says which, before each move.
+  const [edge, setEdge] = useState<'top' | 'bottom'>('top');
+  useEffect(() => {
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    bridge
+      .watchAnchor(setEdge)
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else stop = unlisten;
+      })
+      // Without an answer the bar stays on top, where it was before.
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, []);
   const mic = microphone.state;
   const live = !!state?.live && state.status === 'running';
   // Browser preview and tests only: a replay of a fictional conversation,
@@ -194,7 +214,9 @@ function FloatingQuestion() {
   }, [busy, cueId]);
   return (
     <main className="floating-surface" aria-label="Meeting companion">
-      <div className="companion-shell">
+      <div
+        className={`companion-shell${edge === 'bottom' ? ' is-bottom' : ''}`}
+      >
         {active ? (
           <>
             {/* The bar is the handle: the native window follows a drag on
@@ -375,6 +397,7 @@ function FloatingQuestion() {
                 cue={state.cue}
                 size={state.questionSize}
                 announce={false}
+                compact
                 busy={busy}
                 onHold={() =>
                   void run(() =>
