@@ -193,6 +193,18 @@ struct Timing {
     keep_alive: Duration,
     finalize_after: Duration,
     token_wait: Duration,
+    /// Audio sent but nothing heard back for this long: ask for a reply
+    /// (`Finalize`, which Deepgram answers even when there is no speech).
+    quiet_probe: Duration,
+    /// Audio sent but nothing heard back for this long: the stream is
+    /// stalled and ends with `stalled`.
+    stall_after: Duration,
+    /// One frame write that takes longer than this means the connection is
+    /// not keeping up; the stream ends with `stalled`.
+    slow_write: Duration,
+    /// Frames sent between two reads, so replies and a close are read even
+    /// while audio is backed up.
+    frames_per_read: usize,
 }
 
 impl Default for Timing {
@@ -201,9 +213,20 @@ impl Default for Timing {
             keep_alive: KEEP_ALIVE,
             finalize_after: FINALIZE_AFTER,
             token_wait: TOKEN_WAIT,
+            quiet_probe: QUIET_PROBE,
+            stall_after: STALL_AFTER,
+            slow_write: SLOW_WRITE,
+            frames_per_read: FRAMES_PER_READ,
         }
     }
 }
+
+/// See `Timing`.
+const QUIET_PROBE: Duration = Duration::from_secs(5);
+const STALL_AFTER: Duration = Duration::from_secs(10);
+const SLOW_WRITE: Duration = Duration::from_secs(3);
+/// One second of 100 ms frames.
+const FRAMES_PER_READ: usize = 10;
 
 #[allow(clippy::too_many_arguments)]
 fn run(
@@ -248,6 +271,11 @@ fn run(
     });
     let mut pending: Vec<i16> = Vec::with_capacity(FRAME * 2);
     let mut last_send = Instant::now();
+    // When anything was last heard from Deepgram, and whether audio has gone
+    // out since; a probe is sent once per quiet spell.
+    let mut last_heard = Instant::now();
+    let mut sent_since_heard = false;
+    let mut probed = false;
     let mut unfinalized: Option<Instant> = None;
     let mut seq = 0u64;
     let mut closing: Option<Instant> = None;
@@ -273,7 +301,10 @@ fn run(
                 }
             }
             let flush = closing.is_some();
-            while pending.len() >= FRAME || (flush && !pending.is_empty()) {
+            let mut sent_frames = 0;
+            while (pending.len() >= FRAME || (flush && !pending.is_empty()))
+                && sent_frames < timing.frames_per_read
+            {
                 // Checked per frame, so a withdrawn review stops what is
                 // queued from going out.
                 if stop.load(Ordering::Acquire) {
@@ -286,11 +317,33 @@ fn run(
                     break;
                 }
                 let bytes: Vec<u8> = pending.drain(..take).flat_map(i16::to_le_bytes).collect();
+                let started = Instant::now();
                 if let Err(failure) = socket.send_binary(bytes) {
                     let _ = events.send(SttEvent::Failed(failure));
                     return;
                 }
+                if started.elapsed() > timing.slow_write {
+                    let _ = events.send(SttEvent::Failed(SttFailure::Stalled));
+                    socket.close();
+                    return;
+                }
                 last_send = Instant::now();
+                sent_since_heard = true;
+                sent_frames += 1;
+            }
+            // Audio is going out but nothing has come back: ask once, then
+            // give up, rather than let audio pile up unheard.
+            if sent_since_heard && last_heard.elapsed() >= timing.stall_after {
+                let _ = events.send(SttEvent::Failed(SttFailure::Stalled));
+                socket.close();
+                return;
+            }
+            if sent_since_heard && !probed && last_heard.elapsed() >= timing.quiet_probe {
+                probed = true;
+                if socket.send_text(r#"{"type":"Finalize"}"#).is_err() {
+                    let _ = events.send(SttEvent::Failed(SttFailure::Network));
+                    return;
+                }
             }
             if cap_reached || closing.is_some() {
                 closing.get_or_insert_with(Instant::now);
@@ -319,7 +372,13 @@ fn run(
             }
             return;
         }
-        match socket.recv() {
+        let reply = socket.recv();
+        if matches!(reply, Ok(Some(_))) {
+            last_heard = Instant::now();
+            sent_since_heard = false;
+            probed = false;
+        }
+        match reply {
             Ok(Some(text)) => match parse(&text, &mut seq) {
                 Ok(Some(event)) => {
                     match &event {
@@ -594,6 +653,8 @@ mod tests {
         closed: bool,
         /// Each binary send takes this long, as on a slow network.
         send_delay: Duration,
+        /// How many binary frames had been sent when the first reply was read.
+        binary_at_first_reply: Option<usize>,
     }
 
     #[derive(Clone, Default)]
@@ -628,12 +689,12 @@ mod tests {
         }
         fn recv(&mut self) -> Result<Option<String>, SttFailure> {
             std::thread::sleep(Duration::from_millis(2));
-            self.0
-                .lock()
-                .unwrap()
-                .replies
-                .pop_front()
-                .unwrap_or(Ok(None))
+            let mut wire = self.0.lock().unwrap();
+            let reply = wire.replies.pop_front().unwrap_or(Ok(None));
+            if matches!(reply, Ok(Some(_))) && wire.binary_at_first_reply.is_none() {
+                wire.binary_at_first_reply = Some(wire.binary.len());
+            }
+            reply
         }
         fn close(&mut self) {
             self.0.lock().unwrap().closed = true;
@@ -823,9 +884,12 @@ mod tests {
     /// the lab launcher leaves them before the review.
     fn placeholder() -> (std::path::PathBuf, std::path::PathBuf) {
         use std::os::unix::fs::PermissionsExt;
+        // Unique per call: two tests can read the same clock value.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "talkqte-stt-{}-{}",
+            "talkqte-stt-{}-{}-{}",
             std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -929,6 +993,137 @@ mod tests {
         assert!(wire.closed);
     }
 
+    /// Short timings so the stall tests run in well under a second.
+    fn quick() -> Timing {
+        Timing {
+            quiet_probe: Duration::from_millis(100),
+            stall_after: Duration::from_millis(250),
+            slow_write: Duration::from_millis(60),
+            ..Timing::default()
+        }
+    }
+
+    #[test]
+    fn a_stream_that_takes_audio_but_never_answers_is_probed_then_stopped_as_stalled() {
+        let fake = Fake::default();
+        let mut stream = DeepgramStream::start_with(
+            fake.clone(),
+            ListenRequest::lab(),
+            "t".repeat(24),
+            Duration::from_secs(60),
+            quick(),
+        );
+        // Audio keeps going out; Deepgram never says anything back.
+        let until = Instant::now() + Duration::from_secs(5);
+        let mut events = Vec::new();
+        while !events.contains(&SttEvent::Failed(SttFailure::Stalled)) {
+            assert!(Instant::now() < until, "never stopped: {events:?}");
+            let _ = stream.push(&[0.1; FRAME]);
+            events.extend(stream.poll());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let wire = fake.0.lock().unwrap();
+        // It asked for a reply once before giving up, and closed the socket.
+        assert_eq!(
+            wire.text.iter().filter(|t| t.contains("Finalize")).count(),
+            1,
+            "{:?}",
+            wire.text
+        );
+        assert!(wire.closed);
+    }
+
+    #[test]
+    fn a_reply_keeps_the_stream_alive_through_a_quiet_spell() {
+        let fake = Fake::default();
+        let mut stream = DeepgramStream::start_with(
+            fake.clone(),
+            ListenRequest::lab(),
+            "t".repeat(24),
+            Duration::from_secs(60),
+            quick(),
+        );
+        // Deepgram answers now and then, as it does while audio flows.
+        let until = Instant::now() + Duration::from_millis(800);
+        let mut events = Vec::new();
+        let mut answered = Instant::now();
+        while Instant::now() < until {
+            let _ = stream.push(&[0.1; FRAME]);
+            if answered.elapsed() > Duration::from_millis(150) {
+                fake.0
+                    .lock()
+                    .unwrap()
+                    .replies
+                    .push_back(Ok(Some(r#"{"type":"Metadata"}"#.into())));
+                answered = Instant::now();
+            }
+            events.extend(stream.poll());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            !events.iter().any(|e| matches!(e, SttEvent::Failed(_))),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn a_write_that_takes_too_long_stops_the_stream_as_stalled() {
+        let fake = Fake::default();
+        fake.0.lock().unwrap().send_delay = Duration::from_millis(120);
+        let mut stream = DeepgramStream::start_with(
+            fake.clone(),
+            ListenRequest::lab(),
+            "t".repeat(24),
+            Duration::from_secs(60),
+            quick(),
+        );
+        stream.push(&[0.1; FRAME]).unwrap();
+        let events = wait_for(&mut stream, |e| {
+            e.contains(&SttEvent::Failed(SttFailure::Stalled))
+        });
+        assert!(events.contains(&SttEvent::Failed(SttFailure::Stalled)));
+        assert!(fake.0.lock().unwrap().closed);
+    }
+
+    /// How many frames had gone out when a reply, arriving while 3 s of
+    /// audio was backed up, was read.
+    fn frames_before_reply(frames_per_read: usize) -> usize {
+        let fake = Fake::default();
+        fake.0.lock().unwrap().send_delay = Duration::from_millis(5);
+        let mut stream = DeepgramStream::start_with(
+            fake.clone(),
+            ListenRequest::lab(),
+            "t".repeat(24),
+            Duration::from_secs(60),
+            Timing {
+                frames_per_read,
+                ..Timing::default()
+            },
+        );
+        for _ in 0..30 {
+            stream.push(&[0.1; FRAME]).unwrap();
+        }
+        fake.0.lock().unwrap().replies.push_back(Ok(Some(result(
+            "Fictional line.",
+            true,
+            0.0,
+            &[0],
+        ))));
+        wait_for(&mut stream, |e| {
+            e.iter().any(|e| matches!(e, SttEvent::Final { .. }))
+        });
+        let at = fake.0.lock().unwrap().binary_at_first_reply.unwrap();
+        at
+    }
+
+    #[test]
+    fn replies_are_read_between_seconds_of_backed_up_audio() {
+        // With a second of frames between reads, the reply is read long
+        // before the backlog is gone; without a limit, only after all of it.
+        assert!(frames_before_reply(FRAMES_PER_READ) < 25);
+        assert_eq!(frames_before_reply(usize::MAX), 30);
+    }
+
     #[test]
     fn two_streams_of_one_launch_share_its_minute_cap() {
         let budget = Budget::new(Duration::from_secs(1));
@@ -991,7 +1186,7 @@ mod tests {
         let timing = Timing {
             keep_alive: Duration::from_millis(60),
             finalize_after: Duration::from_millis(80),
-            token_wait: TOKEN_WAIT,
+            ..Timing::default()
         };
         let mut stream = DeepgramStream::start_with(
             fake.clone(),

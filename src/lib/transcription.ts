@@ -18,6 +18,7 @@ const STOP_REASONS: Record<string, string> = {
   settings: 'the development transcription settings are not usable',
   withdrawn: 'cue processing was turned off, so audio stopped being sent',
   lab_ended: 'the lab run ended, so audio stopped being sent',
+  stalled: 'the connection stopped responding',
 };
 
 /** Said while a session continues after audio was dropped. */
