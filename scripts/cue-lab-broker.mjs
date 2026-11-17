@@ -147,7 +147,10 @@ export function evaluatorRequest(input) {
   if (input.existingCue !== null) {
     const cue = input.existingCue;
     requireThat(
-      exact(cue, ['text', 'sourceIds']) &&
+      // `kind: "asked"`: TalkQTE's own "Asked you" cue, which the model may
+      // only keep or resolve.
+      exact(cue, ['text', 'sourceIds'], ['kind']) &&
+        (cue.kind === undefined || cue.kind === 'asked') &&
         text(cue.text, 240) &&
         Array.isArray(cue.sourceIds) &&
         cue.sourceIds.length >= 1 &&
@@ -303,6 +306,8 @@ export async function openLabBroker({
     // first check each failed. Each refused reply ends only its request on
     // the API route; three in a row end the run.
     showWithCue: 0,
+    // A withdraw of TalkQTE's own "Asked you" cue, settled as quiet.
+    askedKept: 0,
     invalidReplies: 0,
     invalidReasons: Object.fromEntries(REPLY_PROBLEMS.map((code) => [code, 0])),
     verdicts: { current: 0, staleSuccess: 0, expired: 0, failed: 0 },
@@ -432,6 +437,17 @@ export async function openLabBroker({
           ) {
             value = { action: 'quiet', cue: null, sourceIds: value.sourceIds };
             evaluations.showWithCue++;
+          }
+          // TalkQTE's own "Asked you" cue is not the model's to withdraw:
+          // a withdraw is settled as quiet (keep it), counted.
+          if (
+            provider.metadata.provider === 'anthropic-api' &&
+            frame.input.existingCue?.kind === 'asked' &&
+            object(value) &&
+            value.action === 'withdraw'
+          ) {
+            value = { action: 'quiet', cue: null, sourceIds: value.sourceIds };
+            evaluations.askedKept++;
           }
           let problem = replyProblem(value, frame.input);
           if (problem === null)

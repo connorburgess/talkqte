@@ -1583,6 +1583,57 @@ test('an invalid API reply ends only its request, with a fixed reason and no tex
   }
 });
 
+// TalkQTE's own "Asked you" cue on screen (kind "asked"): the model may keep
+// or resolve it, never withdraw or replace it.
+const withAsked = {
+  ...input,
+  existingCue: {
+    text: 'Can you, Robin, check Friday?',
+    sourceIds: ['s1'],
+    kind: 'asked',
+  },
+};
+
+test('an asked cue is accepted only with its own kind and its source in the window', () => {
+  assert.doesNotThrow(() => evaluatorRequest(withAsked));
+  for (const existingCue of [
+    { ...withAsked.existingCue, kind: 'model' },
+    { ...withAsked.existingCue, sourceIds: [] },
+    { ...withAsked.existingCue, sourceIds: ['not-in-window'] },
+    { ...withAsked.existingCue, origin: 'asked' },
+  ])
+    assert.throws(() => evaluatorRequest({ ...input, existingCue }));
+});
+
+test('a withdraw or show of an asked cue is settled as quiet; resolved passes', async () => {
+  const ctx = await setup({
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+    request: replies(
+      { action: 'withdraw', cue: null, sourceIds: ['s1'] },
+      { action: 'show', cue: null, sourceIds: ['s1'] },
+      { action: 'resolved', cue: null, sourceIds: ['s1'] },
+    ),
+  });
+  try {
+    const actions = [];
+    for (const id of ['1', '2', '3']) {
+      ctx.evaluate(id, { input: withAsked });
+      actions.push((await ctx.next('result')).value.action);
+      ctx.settle(id);
+    }
+    await ctx.broker.gate.waitIdle();
+    assert.deepEqual(actions, ['quiet', 'quiet', 'resolved']);
+    const summary = ctx.broker.evaluationSummary;
+    assert.deepEqual(
+      [summary.askedKept, summary.showWithCue, summary.invalidReplies],
+      [1, 1, 0],
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
 test('three invalid API replies in a row end the run; a valid one in between resets the count', async () => {
   const bad = { action: 'resolved', cue: null, sourceIds: ['s1'] };
   const ctx = await setup({
