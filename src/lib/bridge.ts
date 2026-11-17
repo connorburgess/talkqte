@@ -53,6 +53,15 @@ export async function liveStatus() {
   return invoke<LiveStatus>('live_status');
 }
 
+/** The edge of the companion window that stays put when it grows for a
+ * cue, as the native side places it. Nothing is sent in the browser. */
+export async function watchAnchor(receive: (edge: 'top' | 'bottom') => void) {
+  if (preview) return () => {};
+  return listen<unknown>('companion:anchor', ({ payload }) => {
+    if (payload === 'top' || payload === 'bottom') receive(payload);
+  });
+}
+
 /** Reports the optional speech model download and its later changes. */
 export async function watchModel(receive: (status: ModelStatus) => void) {
   if (preview) {

@@ -9,7 +9,7 @@ use std::{
     sync::Mutex,
     time::{Duration, Instant},
 };
-use tauri::{Manager, PhysicalPosition, PhysicalSize};
+use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -58,25 +58,17 @@ fn frame(
     frame_at(origin, area, scale, mode, position, text_size, None)
 }
 
-/// The compact bar's width in logical pixels.
+/// The companion's width in logical pixels, the bar's and a cue's alike, so
+/// a cue grows out of the bar without the window changing its width. A cue
+/// is a small prompt beside a call: about 30 characters a line at the
+/// companion's 17 px cue size (an estimate from the font), far inside the
+/// 80 characters WCAG 2.2 SC 1.4.8 asks a block of text to be kept within.
 const COMPACT_WIDTH: f64 = 320.0;
 
-/// The question window's width in logical pixels for a display of this
-/// width of its work area. A glance window stays narrow: about 20 to 30
-/// characters a line at the standard 24 px question size (an estimate from
-/// the font), far inside the 80 characters WCAG 2.2 SC 1.4.8 asks a block
-/// of text to be kept within. A small laptop display gives up 60 px so the
-/// window covers less of the meeting; a large display gains 60 px so a
-/// question wraps to fewer lines.
-fn question_width(display_width: f64) -> f64 {
-    if display_width < 1100.0 {
-        360.0
-    } else if display_width > 2400.0 {
-        480.0
-    } else {
-        420.0
-    }
-}
+/// A cue's height in logical pixels: an ordinary cue and the one line it
+/// cites fit without scrolling. Large text adds `LARGE_EXTRA`.
+const QUESTION_HEIGHT: f64 = 212.0;
+const LARGE_EXTRA: f64 = 44.0;
 
 /// The companion's frame for a mode. A position the person dragged the
 /// window to wins over the Settings preset: its top-left corner is kept,
@@ -98,20 +90,15 @@ fn frame_at(
     };
     let margin = (20.0 * scale).round() as u32;
     let question = mode == Mode::Question;
-    let logical_width = if question {
-        question_width(f64::from(area.0) / scale)
-    } else {
-        COMPACT_WIDTH
-    };
+    let logical_width = COMPACT_WIDTH;
     let width =
         ((logical_width * scale).round() as u32).min(area.0.saturating_sub(2 * margin).max(1));
     let logical_height = match mode {
-        Mode::Question => 340.0,
+        Mode::Question => QUESTION_HEIGHT,
         _ => 76.0,
     } + if question && text_size == QuestionSize::Large {
-        // Large text wraps more in the narrow window, and WebKit sets the
-        // font a little taller than Chromium: 80 px keeps both inside.
-        80.0
+        // Large text wraps more in the narrow window.
+        LARGE_EXTRA
     } else {
         0.0
     };
@@ -152,6 +139,14 @@ fn frame_at(
         width,
         height,
     }
+}
+
+/// Whether the window keeps its bottom edge when it grows: the bottom-right
+/// preset does, unless the person dragged the window, whose top-left corner
+/// is then kept. The page puts the bar on that edge, so a cue grows out of
+/// the bar without the bar moving on screen.
+fn anchored_at_bottom(position: CompanionPosition, dragged: Option<(i32, i32)>) -> bool {
+    position == CompanionPosition::BottomRight && dragged.is_none()
 }
 
 #[derive(Default)]
@@ -325,6 +320,16 @@ pub fn refresh(app: &tauri::AppHandle) {
             return;
         }
         placement.expected = layout.map(|frame| ((frame.x, frame.y), Instant::now()));
+        if layout.is_some() {
+            // Before the frame changes, so the page has the bar on the edge
+            // that stays put. It rarely changes: only with a preset or a drag.
+            let edge = if anchored_at_bottom(cue.companion_position, placement.dragged) {
+                "bottom"
+            } else {
+                "top"
+            };
+            let _ = window.emit("companion:anchor", edge);
+        }
         let result = if let Some(frame) = layout {
             set_frame(&window, frame, scale).and_then(|_| window.show())
         } else {
@@ -465,7 +470,7 @@ mod tests {
     }
 
     #[test]
-    fn the_question_window_width_follows_the_display() {
+    fn a_cue_keeps_the_bars_width_on_every_display() {
         let width = |area: (u32, u32), scale: f64, mode| {
             frame(
                 (0, 0),
@@ -477,19 +482,50 @@ mod tests {
             )
             .width
         };
-        // A small laptop (1024 logical px), a 13-inch Mac at 2x (1440
-        // logical), a 27-inch display at 1x, and a 5K display at 2x.
-        assert_eq!(width((1024, 768), 1.0, Mode::Question), 360);
-        assert_eq!(width((2880, 1800), 2.0, Mode::Question), 840);
-        assert_eq!(width((2560, 1440), 1.0, Mode::Question), 480);
-        assert_eq!(width((5120, 2880), 2.0, Mode::Question), 960);
-        // Exactly at a boundary is the middle size; a fractional scale rounds.
-        assert_eq!(width((1100, 700), 1.0, Mode::Question), 420);
-        assert_eq!(width((2400, 1350), 1.0, Mode::Question), 420);
-        assert_eq!(width((1708, 960), 1.25, Mode::Question), 525);
-        // The compact bar does not change, and nothing exceeds the display.
+        // One width on every display: the bar's, in physical pixels.
+        assert_eq!(width((1024, 768), 1.0, Mode::Question), 320);
+        assert_eq!(width((2880, 1800), 2.0, Mode::Question), 640);
+        assert_eq!(width((2560, 1440), 1.0, Mode::Question), 320);
+        assert_eq!(width((5120, 2880), 2.0, Mode::Question), 640);
+        assert_eq!(width((1708, 960), 1.25, Mode::Question), 400);
         assert_eq!(width((2560, 1440), 1.0, Mode::Compact), 320);
+        // Nothing exceeds the display.
         assert_eq!(width((300, 200), 1.0, Mode::Question), 260);
+    }
+
+    #[test]
+    fn the_bar_sits_on_the_edge_that_stays_put_when_a_cue_grows() {
+        // The default preset grows upward from its bottom edge.
+        assert!(anchored_at_bottom(CompanionPosition::BottomRight, None));
+        // Top presets, and any window the person dragged, keep their top.
+        for position in [
+            CompanionPosition::TopLeft,
+            CompanionPosition::TopCenter,
+            CompanionPosition::TopRight,
+        ] {
+            assert!(!anchored_at_bottom(position, None));
+        }
+        assert!(!anchored_at_bottom(
+            CompanionPosition::BottomRight,
+            Some((300, 200))
+        ));
+        // And the frames agree: bottom right keeps the bar's bottom edge,
+        // a dragged window its top edge.
+        let at = |mode, dragged| {
+            frame_at(
+                (0, 0),
+                (1600, 1000),
+                1.0,
+                mode,
+                CompanionPosition::BottomRight,
+                QuestionSize::Standard,
+                dragged,
+            )
+        };
+        let (bar, cue) = (at(Mode::Compact, None), at(Mode::Question, None));
+        assert_eq!(bar.y + bar.height as i32, cue.y + cue.height as i32);
+        let dragged = Some((300, 200));
+        assert_eq!(at(Mode::Compact, dragged).y, at(Mode::Question, dragged).y);
     }
 
     #[test]
@@ -513,7 +549,7 @@ mod tests {
             (preset.x, preset.y)
         });
         // A cue arriving near the bottom edge moves it up, not off.
-        let grown = at(Mode::Question, Some((300, 700)));
+        let grown = at(Mode::Question, Some((300, 850)));
         assert_eq!(grown.y + grown.height as i32, 1000);
         assert_eq!(grown.x, 300);
         // A position past the right edge, or above the top, is pulled in.
@@ -592,9 +628,9 @@ mod tests {
             )
             .height
         };
-        // One height for a cue; large text adds 80 px.
-        assert_eq!(height(QuestionSize::Standard), 340);
-        assert_eq!(height(QuestionSize::Large), 420);
+        // One height for a cue; large text adds 44 px.
+        assert_eq!(height(QuestionSize::Standard), 212);
+        assert_eq!(height(QuestionSize::Large), 256);
     }
 
     #[test]
@@ -659,7 +695,8 @@ mod tests {
         );
         assert_eq!(compact.x, -680);
         assert_eq!(compact.y, 1188);
-        assert!(question.width > compact.width);
+        assert_eq!(question.width, compact.width);
+        assert!(question.height > compact.height);
         assert_eq!(
             question.x + question.width as i32,
             compact.x + compact.width as i32

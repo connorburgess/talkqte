@@ -78,10 +78,10 @@ for (const size of ['standard', 'large'] as const)
       size,
     );
     await page.evaluate((value) => window.liveTest.setCue(value), cue);
-    for (const width of [360, 420]) {
+    for (const width of [320]) {
       await page.setViewportSize({
         width,
-        height: size === 'large' ? 420 : 340,
+        height: size === 'large' ? 256 : 212,
       });
       // Capture is on: a microphone glyph with its dot, and no words.
       const dot = bar.getByRole('img', { name: 'Signal detected' });

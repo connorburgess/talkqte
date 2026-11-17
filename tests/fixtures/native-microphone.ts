@@ -584,6 +584,8 @@ declare global {
       publish: typeof publish;
       setCue: (cue: Snapshot['cue']) => Promise<void>;
       setQuestionSize: (size: Snapshot['questionSize']) => Promise<void>;
+      /** The edge the native companion window keeps when it grows. */
+      anchor: (edge: 'top' | 'bottom') => Promise<void>;
       setSourceSession: (sourceSession: boolean) => Promise<void>;
       rejectNextPause: () => void;
     };
@@ -670,6 +672,7 @@ window.liveTest = {
   publish,
   setCue: (cue) => publish({ cue }),
   setQuestionSize: (questionSize) => publish({ questionSize }),
+  anchor: (edge) => emit('companion:anchor', edge),
   // Development builds only: the cue snapshot marks a session fed by an
   // application alone.
   setSourceSession: (sourceSession: boolean) =>

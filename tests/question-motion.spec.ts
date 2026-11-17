@@ -11,7 +11,7 @@ import {
  * or transcription is involved. */
 async function firstCue(page: Page, surface: 'notebook' | 'companion') {
   if (surface === 'companion')
-    await page.setViewportSize({ width: 420, height: 340 });
+    await page.setViewportSize({ width: 320, height: 212 });
   await standIn(page, surface === 'companion' ? '/?window=cue' : '/?live');
   await page.evaluate(() => {
     const events: string[] = [];
@@ -251,7 +251,7 @@ test('a quoted line is replayed at about the pace it was said', async ({
 /** Opens the companion with the live-session stand-in, motion allowed. */
 async function liveCompanion(page: Page, width: number) {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await page.setViewportSize({ width, height: 340 });
+  await page.setViewportSize({ width, height: 212 });
   await standIn(page, '/?window=cue');
   await page.evaluate(() => window.liveTest.start());
   return page.getByRole('region', { name: 'Suggested question' });
@@ -274,7 +274,7 @@ const liveCue = {
 test('a very long answer still finishes within about six seconds, and a cue first seen held does not replay', async ({
   page,
 }) => {
-  const question = await liveCompanion(page, 420);
+  const question = await liveCompanion(page, 320);
   // The same cue shown already held, as after the companion is reopened.
   const held = { ...liveCue, id: 'fictional-held-first', held: true };
   await page.evaluate((value) => window.liveTest.setCue(value), held);
@@ -308,11 +308,12 @@ test('a very long answer still finishes within about six seconds, and a cue firs
 });
 
 for (const [name, width, cue, needed] of [
-  ['an ordinary cue at 420 px', 420, liveCue, 3],
+  // The companion sets a cue at 17 px or less, and bold text below 18.66 px
+  // is not large text, so both need the higher ratio.
+  ['an ordinary cue at 320 px', 320, liveCue, 4.5],
   [
-    // 16 px bold is not large text, so it needs the higher ratio.
-    'a long cue at 360 px',
-    360,
+    'a long cue at 320 px',
+    320,
     {
       ...liveCue,
       id: 'fictional-live-long',
@@ -453,7 +454,7 @@ test('an answer to a held cue opens in place with a tick, keeps focus, and does 
       ),
     });
   });
-  await page.setViewportSize({ width: 420, height: 340 });
+  await page.setViewportSize({ width: 320, height: 212 });
   await page.goto('/?window=cue');
   await page.waitForFunction(() => !!window.liveTest);
   await page.evaluate(() => window.liveTest.start());

@@ -146,8 +146,10 @@ async function show(page: Page, cue: Cue) {
   return question;
 }
 
+// The native companion's cue window: 320 × 212 CSS px, 256 tall with large
+// text, on every display.
 const height = (size: 'standard' | 'large') =>
-  340 + (size === 'large' ? 80 : 0);
+  212 + (size === 'large' ? 44 : 0);
 
 /** The window itself never scrolls, in either direction. */
 async function expectWindowFits(page: Page, label: string) {
@@ -224,7 +226,7 @@ for (const [kind, cue] of Object.entries(cues) as [keyof typeof cues, Cue][])
       page,
     }) => {
       await companion(page, size);
-      for (const width of [360, 420]) {
+      for (const width of [320]) {
         // A display's width does not change during one cue: each width
         // shows its own, as a new cue starts unscrolled.
         const shown = { ...cue, id: `${cue.id}-${width}` };
@@ -274,7 +276,7 @@ test('an Asked you question shows no countdown, and other cues show the time the
   page,
 }) => {
   await companion(page, 'standard');
-  await page.setViewportSize({ width: 420, height: height('standard') });
+  await page.setViewportSize({ width: 320, height: height('standard') });
   // The share of the line still filled, as drawn.
   const filled = (question: Locator) =>
     question.locator('.cue-track').evaluate((track) => {
@@ -310,7 +312,7 @@ test('a held question that is answered shows the answer first and every line sta
   page,
 }) => {
   await companion(page, 'standard');
-  for (const width of [360, 420]) {
+  for (const width of [320]) {
     await page.setViewportSize({ width, height: height('standard') });
     const held = { ...cues.question, id: `answered-${width}`, held: true };
     let question = await show(page, held);
@@ -375,7 +377,7 @@ for (const size of ['standard', 'large'] as const)
     page,
   }) => {
     await companion(page, size);
-    for (const width of [360, 420]) {
+    for (const width of [320]) {
       await page.setViewportSize({ width, height: height(size) });
       const question = await show(page, {
         ...longSuggestion,
@@ -397,10 +399,11 @@ for (const size of ['standard', 'large'] as const)
         .locator('.cue-scroll')
         .evaluate((words) => words.scrollHeight - words.clientHeight);
       await expect.poll(() => fadesAtEnd(question), label).toBe(hidden > 1);
-      // Every source stays there to read, to its last word.
+      // The companion shows the line the cue cites, and no second quote;
+      // the notebook keeps every source.
       await expect(
         page.getByRole('list', { name: 'Cue sources' }).getByRole('listitem'),
-      ).toHaveCount(2);
+      ).toHaveCount(1);
       await expectEndReachable(
         page,
         question,
@@ -436,7 +439,7 @@ for (const size of ['standard', 'large'] as const)
   }) => {
     await companion(page, size);
     for (const [kind, cue] of Object.entries(longest)) {
-      await page.setViewportSize({ width: 360, height: height(size) });
+      await page.setViewportSize({ width: 320, height: height(size) });
       const question = await show(page, cue);
       await expectWindowFits(page, kind);
       await expect(question.getByRole('heading')).toHaveText(cue.question);

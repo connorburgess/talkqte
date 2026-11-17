@@ -24,7 +24,7 @@ async function companion(
   reducedMotion: 'reduce' | 'no-preference',
 ) {
   await page.emulateMedia({ reducedMotion });
-  await page.setViewportSize({ width: 420, height: 340 });
+  await page.setViewportSize({ width: 320, height: 212 });
   await standIn(page, '/?window=cue');
   await page.evaluate(() => window.liveTest.start());
   // Keep a leaving card at the start of its fold, so its state can be read.
@@ -301,3 +301,206 @@ function contrast(one: string, two: string) {
   const [light, dark] = [luminance(one), luminance(two)].sort((a, b) => b - a);
   return (light + 0.05) / (dark + 0.05);
 }
+
+test('kept by its bottom edge, the window has its bar at the bottom and the cue grows up out of it', async ({
+  page,
+}) => {
+  const { bar, question } = await companion(page, 'no-preference');
+  await expect(bar).toBeVisible();
+  // The default bottom-right placement, as the native side reports it.
+  await page.evaluate(() => window.liveTest.anchor('bottom'));
+  const edge = () =>
+    page.evaluate(() => {
+      const bar = document.querySelector('.companion-bar')!;
+      return innerHeight - bar.getBoundingClientRect().bottom;
+    });
+  // The bar alone fills the window; with a cue it stays on the same edge.
+  const resting = await edge();
+  await show(page, first);
+  await expect(question.getByRole('heading')).toHaveText(first.question);
+  expect(await edge()).toBe(resting);
+  expect((await question.boundingBox())!.y).toBeLessThan(
+    (await bar.boundingBox())!.y,
+  );
+  // It opens from its lower edge, by the bar, and the cue at its top is
+  // uncovered within a tenth of a second.
+  const at = (time: number) =>
+    question.evaluate((card, ms) => {
+      for (const animation of card.getAnimations({ subtree: true })) {
+        animation.pause();
+        animation.currentTime = ms;
+      }
+      const [top, , bottom] = window.cueInset(card);
+      const open = card.getBoundingClientRect().top + top;
+      const covered = [...card.querySelectorAll('h2 span')].filter(
+        (word) => word.getBoundingClientRect().top < open - 0.5,
+      ).length;
+      return { top, bottom, covered };
+    }, time);
+  const early = await at(20);
+  expect(early.bottom).toBe(0);
+  expect(early.top).toBeGreaterThan(20);
+  expect((await at(100)).covered).toBe(0);
+  expect((await at(400)).top).toBe(0);
+  await question.evaluate((card) => {
+    for (const animation of card.getAnimations({ subtree: true }))
+      animation.finish();
+  });
+
+  // Going, it folds back down into the bar.
+  await question.getByRole('button', { name: 'Dismiss', exact: true }).click();
+  const leaving = page.locator('.cue-card.is-leaving');
+  await expect(leaving).toHaveCount(1);
+  expect(
+    await leaving.evaluate(
+      (card) => (card.getAnimations()[0] as CSSAnimation).animationName,
+    ),
+  ).toBe('cue-collapse-down');
+  expect(await edge()).toBe(resting);
+  await leaving.evaluate((card) => {
+    for (const animation of card.getAnimations()) animation.finish();
+  });
+  await expect(page.locator('.cue-card')).toHaveCount(0);
+  expect(await edge()).toBe(resting);
+  expect(await bar.boundingBox()).not.toBeNull();
+});
+
+for (const edge of ['top', 'bottom'] as const)
+  test(`no words overlap at any moment of the arrival, with the bar at the ${edge}`, async ({
+    page,
+  }) => {
+    const { question } = await companion(page, 'no-preference');
+    await page.evaluate((value) => window.liveTest.anchor(value), edge);
+    for (const value of [
+      first,
+      cue({
+        id: 'fictional-overlap-asked',
+        kind: 'Asked you',
+        question: 'Sam, could you take the first draft?',
+      }),
+    ]) {
+      await show(page, value);
+      await expect(question.getByRole('heading')).toHaveText(value.question);
+      for (let time = 0; time <= 480; time += 16) {
+        const overlaps = await question.evaluate((card, ms) => {
+          for (const animation of card.getAnimations({ subtree: true })) {
+            animation.pause();
+            animation.currentTime = ms;
+          }
+          // Each block of words that is drawn: the cue, the time line's
+          // words, the source's label and quote. The Hold control's 44 px
+          // target reaches over its neighbours by design, so it is
+          // measured by its words, not its box.
+          const blocks = [
+            ...card.querySelectorAll(
+              '.cue-line, .cue-stays, .cue-hold, .cue-source-label, .cue-quote',
+            ),
+          ]
+            .filter((block) => {
+              const style = getComputedStyle(block);
+              return (
+                parseFloat(style.fontSize) > 0 && Number(style.opacity) > 0
+              );
+            })
+            .map((block) => block.getBoundingClientRect())
+            .filter((box) => box.height > 0);
+          const found: number[][] = [];
+          blocks.forEach((a, i) =>
+            blocks.slice(i + 1).forEach((b, j) => {
+              const across =
+                Math.min(a.right, b.right) - Math.max(a.left, b.left);
+              const down =
+                Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+              if (across > 0.5 && down > 0.5) found.push([i, i + 1 + j, down]);
+            }),
+          );
+          return found;
+        }, time);
+        expect(overlaps, `${value.kind} at ${time} ms`).toEqual([]);
+      }
+    }
+  });
+
+test('the small card shows one cited line of at most two lines, and an Asked you question no countdown words', async ({
+  page,
+}) => {
+  const { question } = await companion(page, 'reduce');
+  const source = (id: string, atMs: number, text: string) => ({
+    id,
+    revision: 1,
+    text,
+    provenance: { kind: 'transcript' as const, atMs, speaker: 'Speaker' },
+  });
+  await show(page, {
+    ...cue({
+      id: 'fictional-compact',
+      kind: 'Suggestion',
+      question: 'Did you run the raffle booth before?',
+    }),
+    sources: [
+      source(
+        's1',
+        50_000,
+        'It sells better at the front, and someone who ran the raffle booth last spring said the queue moved faster with two tables and a float.',
+      ),
+      source('s2', 64_000, 'She sent the poster this morning.'),
+    ],
+  });
+  const quotes = question.locator('blockquote');
+  await expect(quotes).toHaveCount(1);
+  await expect(quotes).toContainText('It sells better at the front');
+  const lines = await quotes.evaluate((quote) => {
+    const style = getComputedStyle(quote);
+    return quote.getBoundingClientRect().height / parseFloat(style.lineHeight);
+  });
+  expect(lines).toBeLessThanOrEqual(2.05);
+  await expect(question.getByText('She sent the poster')).toHaveCount(0);
+
+  await show(
+    page,
+    cue({
+      id: 'fictional-compact-asked',
+      kind: 'Asked you',
+      question: 'Sam, could you take the first draft?',
+    }),
+  );
+  // The words give way to a plain rule; Hold still says it, to assistive
+  // technology.
+  const hold = question.getByRole('button', { name: 'Hold', exact: true });
+  await expect(hold).toHaveAccessibleDescription('Stays longer · no countdown');
+  expect(
+    await question
+      .locator('.cue-stays')
+      .evaluate((words) => getComputedStyle(words).fontSize),
+  ).toBe('0px');
+});
+
+test('a question put to you has a faint warm card on which every text colour keeps 4.5:1', async ({
+  page,
+}) => {
+  const { question } = await companion(page, 'reduce');
+  const surface = () =>
+    question.evaluate((card) => getComputedStyle(card).backgroundColor);
+  await show(page, first);
+  const calm = await surface();
+  await show(
+    page,
+    cue({
+      id: 'fictional-tint',
+      kind: 'Asked you',
+      question: 'Sam, could you take the first draft?',
+    }),
+  );
+  await expect(question.getByText('Asked you', { exact: true })).toBeVisible();
+  const warm = await surface();
+  expect(warm).not.toBe(calm);
+  const inks = await question.evaluate((card) =>
+    [
+      ...card.querySelectorAll(
+        '.cue-lead, h2, .cue-source-label, .cue-hold, .dismiss-question',
+      ),
+    ].map((element) => getComputedStyle(element).color),
+  );
+  for (const ink of inks)
+    expect(contrast(ink, warm), ink).toBeGreaterThanOrEqual(4.5);
+});
