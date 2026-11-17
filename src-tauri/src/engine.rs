@@ -12,6 +12,9 @@ pub use evaluation::{
 const CUE_MS: u64 = 18_000;
 /// A question asked of the user stays long enough for them to answer.
 const ASKED_MS: u64 = 45_000;
+/// The same with a model connected, which may also mark it answered: long
+/// enough to answer, short enough not to hold the one cue slot for long.
+const ASKED_WITH_MODEL_MS: u64 = 20_000;
 /// A question type shown within this window is not asked again.
 const REPEAT_MS: u64 = 120_000;
 const MAX_NOTE_CHARS: usize = 20_000;
@@ -948,14 +951,31 @@ impl Engine {
             // past the pause. The model still hears the line, but its reply
             // cannot replace, clear or repeat that cue.
             let correction = corrects(&segment.text);
-            if self.ask_of_user(&segment, correction, now)
-                && self
+            // The model is still asked while the cue is up, with it as the
+            // cue on screen, so it can say the question was answered.
+            if self.ask_of_user(&segment, correction, now) {
+                if let Some(cue) = self
                     .state
                     .cue
                     .as_ref()
-                    .is_some_and(|cue| cue.kind == ASKED && cue.source_id == segment.id)
-            {
-                self.evaluated_cue = None;
+                    .filter(|cue| cue.kind == ASKED && cue.source_id == segment.id)
+                {
+                    // Its sources: this line, and the line before when the
+                    // question was read across both.
+                    let mut sources = vec![evaluation::transcript_source(&segment)];
+                    if cue.evidence != segment.text {
+                        if let Some(previous) = self
+                            .state
+                            .transcript
+                            .len()
+                            .checked_sub(2)
+                            .and_then(|index| self.state.transcript.get(index))
+                        {
+                            sources.insert(0, evaluation::transcript_source(previous));
+                        }
+                    }
+                    self.evaluated_cue = Some((cue.id.clone(), sources));
+                }
             }
             self.submit_evaluation();
             return;
@@ -1348,7 +1368,12 @@ impl Engine {
             if self.state.cue.take().is_some() {
                 self.forget_unshown();
             }
-            self.cue_deadline = segment.at_ms + ASKED_MS;
+            let lifetime = if self.evaluation.is_some() {
+                ASKED_WITH_MODEL_MS
+            } else {
+                ASKED_MS
+            };
+            self.cue_deadline = segment.at_ms + lifetime;
             self.state.cue = Some(Cue {
                 sources: Vec::new(),
                 id: format!("{}:{}", self.generation, segment.id),
@@ -1357,7 +1382,7 @@ impl Engine {
                 evidence,
                 source_id: segment.id.clone(),
                 remaining_ms: self.cue_deadline - now,
-                total_ms: ASKED_MS,
+                total_ms: lifetime,
                 held: false,
                 resolved_by: None,
                 note: None,
@@ -2037,13 +2062,19 @@ fn asked_of(name: &str, text: &str) -> Option<String> {
                     .take_while(|word| LEAD_INS.contains(&word.as_str()))
                     .count();
                 let rest = words_of(&parts[at + 1..].join(","));
+                // "Could you, Robin, field the complaints?": the asking words
+                // come just before the name.
+                let asked_before = || {
+                    let before = words_of(parts[at - 1]);
+                    before.len() >= 2 && asks(&before[before.len() - 2..])
+                };
                 head[start..] == name[..]
                     && if at == 0 {
                         ends_with_mark || opens_question(&rest)
                     } else {
                         // And end with "?": "I spoke to Robin, Maya, who said
                         // it's fine." is a relative clause, not a question.
-                        ends_with_mark && asks(&rest)
+                        ends_with_mark && (asks(&rest) || asked_before())
                     }
             });
             // No comma: "Robin how many came?" or "So Robin, can you…" said
@@ -5653,6 +5684,7 @@ mod tests {
             "The budget is fine, Maya, what's left on the list?",
             "Maya what's the plan for Saturday?",
             "The van is booked, Maya, can you drive it?",
+            "If it locks anyone out, could you, Maya, field the complaints?",
         ] {
             let e = streamed("Maya", &[(10_000, asked)]);
             assert_eq!(
