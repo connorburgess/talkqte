@@ -229,6 +229,25 @@ open -a ./src-tauri/target/debug/bundle/macos/TalkQTE.app \
 Press play in QuickTime Player only once `dev_source` reads `started`. For an
 unattended run, start the video with the lab's own tooling.
 
+### The user's name without typing
+
+A **debug** build reads `TALKQTE_DEV_USER_NAME` once at launch and sets it as
+the user's name before the first session, as if it had been typed in
+Settings, so a run can check questions asked of the listener by name. Use the
+fictional listener's first name. The name accepts what Settings accepts:
+letters, combining accents, spaces, apostrophes and hyphens, up to 40
+characters, with at least one letter. It stays in memory only, appears in
+Settings, and can still be changed or cleared there. Like a typed name, it is
+sent with model requests when a model is connected
+([data policy](cue-model.md#what-leaves-the-device-and-when)).
+
+- Unset, there is no name, as before.
+- Set but empty, or not a usable name, every live session refuses to start
+  with "The developer name setting is not usable." Correct it and relaunch.
+- The timing log never records the name. Its `user_name_set` row says, at the
+  start of each session and whenever it changes, whether a name is set.
+- Release compilation excludes this setting.
+
 ### Model connection without clicks
 
 Only a **debug** build with **both** `claude-cli` and `native-audio-spike`
