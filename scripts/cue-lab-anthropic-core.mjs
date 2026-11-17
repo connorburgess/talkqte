@@ -6,7 +6,7 @@
 import { join } from 'node:path';
 import { LAB_KEY_DIR, readLabKeyFile } from './cue-lab-key-file.mjs';
 import { performance } from 'node:perf_hooks';
-import { COMPACT_PROMPT, CONTRACT } from './cue-lab.mjs';
+import { CONTRACT } from './cue-lab.mjs';
 
 export const ANTHROPIC_PROVIDER = 'anthropic-api';
 export const ANTHROPIC_BASE_URL = 'https://api.anthropic.com';
@@ -56,13 +56,16 @@ export const ANTHROPIC_DECISION_SCHEMA = Object.freeze({
 });
 
 /**
- * The byte-stable system prompt: the compact evaluator prompt with the
+ * The byte-stable system prompt for the live API route: the live evaluator
+ * prompt (CUE-REPLAY-01: a positive definition of when to show, without the
+ * old "a question already asked but still unanswered" quiet rule) with the
  * glance rule and both field notes always included. userName and earlierCues
  * travel only in the user message, so the system block never changes.
+ * The shared compact prompt (Codex and CLI routes) is unchanged.
  */
 export function anthropicSystemPrompt() {
   const p = CONTRACT.prompts;
-  return COMPACT_PROMPT + p.glanceRule + p.nameNote + p.historyNote;
+  return p.liveCompact + p.glanceRule + p.nameNote + p.historyNote;
 }
 
 export function isAnthropicModel(model) {
