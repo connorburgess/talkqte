@@ -1615,6 +1615,22 @@ test('three invalid API replies in a row end the run; a valid one in between res
   }
 });
 
+test('on a subscription route a show while a cue is on screen still ends the run', async () => {
+  const ctx = await setup({
+    request: replies({ action: 'show', cue: 'Again?', sourceIds: ['s1'] }),
+  });
+  try {
+    ctx.evaluate('1', { input: withCue });
+    assert.equal((await ctx.next('failed')).code, 'invalid_reply');
+    await terminal(ctx.broker);
+    const summary = ctx.broker.evaluationSummary;
+    assert.equal(summary.showWithCue, 0);
+    assert.equal(summary.invalidReasons['show-with-cue'], 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
 test('on a subscription route an invalid reply still ends the run', async () => {
   const ctx = await setup({
     request: replies({ action: 'quiet', cue: 'not null', sourceIds: ['s1'] }),
@@ -1651,6 +1667,13 @@ test('each reply problem has its fixed code', () => {
   ];
   for (const [reply, code] of cases)
     assert.equal(replyProblem(reply, input), code, JSON.stringify(reply));
+  assert.equal(
+    replyProblem(
+      { action: 'show', cue: 'Who confirms Friday?', sourceIds: ['s1'] },
+      withCue,
+    ),
+    'show-with-cue',
+  );
 });
 
 test('on a subscription route an output limit still ends the run', async () => {

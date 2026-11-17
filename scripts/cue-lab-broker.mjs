@@ -81,6 +81,7 @@ export const REPLY_PROBLEMS = Object.freeze([
   'source-ids',
   'cue',
   'action-without-cue',
+  'show-with-cue',
   'glance',
   'size',
 ]);
@@ -102,6 +103,7 @@ export function replyProblem(value, input) {
   const existing = input.existingCue !== null;
   if (['resolved', 'withdraw'].includes(value.action) && !existing)
     return 'action-without-cue';
+  if (value.action === 'show' && existing) return 'show-with-cue';
   if (
     value.action === 'show'
       ? typeof value.cue !== 'string' ||
@@ -421,7 +423,9 @@ export async function openLabBroker({
           // With a cue on screen, show is not a valid action. The model
           // means "keep it" (B11), so it is settled as quiet, keeping the
           // reply's own sources.
+          // Direct API route only; the subscription routes are unchanged.
           if (
+            provider.metadata.provider === 'anthropic-api' &&
             frame.input.existingCue !== null &&
             object(value) &&
             value.action === 'show'
