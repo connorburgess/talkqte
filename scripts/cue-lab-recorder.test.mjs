@@ -67,6 +67,7 @@ for (const mode of ['normal', 'partial', 'moved', 'missing'])
               companion: { x: 700, y: 620, width: 320, height: 76 },
               picture: { width: 1840, height: 1272, scale: 2 },
             },
+            filters: { emulator: 'independent', companion: 'display' },
           },
         );
       } finally {
@@ -163,11 +164,18 @@ test('strict Swift source gates exact identities before streams and readiness af
   );
   // Each window is captured on its own, never through a display filter
   // that shows only the active Space (RunB07's black recording).
-  assert.match(source, /SCContentFilter\(desktopIndependentWindow: emulator\)/);
+  // Independent only after a child probe built it cleanly, else a display
+  // filter that includes that one window; the window list is re-read first.
+  assert.match(source, /SCContentFilter\(desktopIndependentWindow: current\)/);
   assert.match(
     source,
-    /SCContentFilter\(desktopIndependentWindow: companion\)/,
+    /SCContentFilter\(display: onDisplay, including: \[current\]\)/,
   );
+  assert.match(
+    source,
+    /if probeIndependentFilter\(windowID: current\.windowID\)/,
+  );
+  assert.match(source, /"event": "filters"/);
   assert.doesNotMatch(
     source,
     /SCContentFilter\(display: display, including: \[emulator, companion\]\)/,

@@ -1,10 +1,10 @@
 // Records exactly two windows, the meeting emulator's and the real TalkQTE
 // companion's, with the emulator app's sound, using ScreenCaptureKit. It
 // never records the whole screen: each window is captured on its own,
-// on its own (the player independently of the active Space and of other
-// windows covering it; the companion bar, which stays on the active Space,
-// through a display filter limited to that window), and the two are
-// composited at their on-screen positions into one picture.
+// independently of the active Space and of other windows covering it when a
+// child probe shows macOS can do that for the window, and otherwise through
+// a display filter limited to that one window. The two are composited at
+// their on-screen positions into one picture.
 // (A display filter showed only windows on the active Space, so a run
 // recorded black whenever the operator's frontmost app was on another
 // Space; RunB07.) The sound comes from the emulator app alone. If either
@@ -51,11 +51,12 @@ func parseArguments() -> [String: String] {
   while let argument = iterator.next() {
     guard argument.hasPrefix("--") else { fail("Unknown argument \(argument).", code: 64) }
     let key = String(argument.dropFirst(2))
-    if ["check", "list", "capture", "strict-windows"].contains(key) {
+    if ["check", "list", "capture", "strict-windows", "probe-window"].contains(key) {
       options[key] = "yes"
     } else if [
       "apps", "emulator-app", "emulator-title", "companion-app", "companion-title", "seconds",
       "out", "emulator-pid", "emulator-window-id", "companion-pid", "companion-window-id",
+      "window-id",
     ].contains(key) {
       guard let value = iterator.next() else { fail("\(argument) needs a value.", code: 64) }
       options[key] = value
@@ -71,6 +72,32 @@ func frameDictionary(_ rect: CGRect) -> [String: Double] {
     "x": Double(rect.minX), "y": Double(rect.minY), "width": Double(rect.width),
     "height": Double(rect.height),
   ]
+}
+
+/// A window that can be captured: on screen, a finite size of at least 2x2,
+/// and on at least one display.
+func usableWindow(_ window: SCWindow, displays: [SCDisplay]) -> Bool {
+  let f = window.frame
+  return window.isOnScreen && f.width.isFinite && f.height.isFinite && f.width >= 2
+    && f.height >= 2 && displays.contains(where: { $0.frame.intersects(f) })
+}
+
+/// Runs this program again in --probe-window mode for one window, up to
+/// three seconds. True only if the child built the filter and exited 0.
+func probeIndependentFilter(windowID: CGWindowID) -> Bool {
+  let child = Process()
+  child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+  child.arguments = ["--probe-window", "--window-id", String(windowID)]
+  child.standardOutput = FileHandle.nullDevice
+  child.standardError = FileHandle.nullDevice
+  let done = DispatchSemaphore(value: 0)
+  child.terminationHandler = { _ in done.signal() }
+  do { try child.run() } catch { return false }
+  if done.wait(timeout: .now() + 3) == .timedOut {
+    child.terminate()
+    return false
+  }
+  return child.terminationReason == .exit && child.terminationStatus == 0
 }
 
 final class Writer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
@@ -264,6 +291,24 @@ struct Capture {
       return
     }
 
+    // A child of the capture run: build one desktop-independent filter for
+    // one window and exit. Creating that filter can abort inside macOS
+    // (RunB08), which no Swift code can catch; probing it in a child keeps
+    // the capture alive and lets it fall back to a display filter.
+    if options["probe-window"] != nil {
+      guard let id = UInt32(options["window-id"] ?? ""), id > 0 else {
+        fail("--probe-window needs --window-id.", code: 64)
+      }
+      guard let fresh = try? await SCShareableContent.excludingDesktopWindows(
+        true, onScreenWindowsOnly: false),
+        let window = fresh.windows.first(where: { $0.windowID == id }),
+        usableWindow(window, displays: fresh.displays)
+      else { exit(3) }
+      _ = SCContentFilter(desktopIndependentWindow: window)
+      emit(["event": "probe", "ok": true])
+      exit(0)
+    }
+
     guard options["capture"] != nil else {
       fail("Use --check, --list or --capture.", code: 64)
     }
@@ -349,16 +394,33 @@ struct Capture {
     let union = emulator.frame.union(companion.frame)
     // Each window on its own, wherever it is: not limited to the active
     // Space and not hidden by other windows.
-    // The player on its own, wherever it is. The TalkQTE companion bar
-    // through a display filter that includes that one window only: creating
-    // a desktop-independent filter for the bar aborted inside macOS
-    // (SkyLight SLGetDisplaysWithRect assert; RunB08). The bar is a floating
-    // panel that stays on the active Space, so it needs no independence.
-    let emulatorFilter = SCContentFilter(desktopIndependentWindow: emulator)
-    guard
-      let companionDisplay = content.displays.first(where: { $0.frame.intersects(companion.frame) })
-    else { fail("The companion window is on no display.", code: 2) }
-    let companionFilter = SCContentFilter(display: companionDisplay, including: [companion])
+    // Each window gets a desktop-independent filter (not limited to the
+    // active Space) only if a child probe built one cleanly just now;
+    // otherwise a display filter that includes that one window only, cropped
+    // to it. Creating the independent filter for the TalkQTE companion bar
+    // aborted inside macOS in RunB08 (SkyLight SLGetDisplaysWithRect
+    // assert). Either way nothing but the two windows can appear. The window
+    // list is re-read just before, so a moving or hidden window is not
+    // filtered with a stale rectangle.
+    guard let fresh = try? await SCShareableContent.excludingDesktopWindows(
+      true, onScreenWindowsOnly: false)
+    else { fail("Could not list windows again.", code: 2) }
+    func chooseFilter(_ window: SCWindow) -> (SCContentFilter, String, SCDisplay?, SCWindow) {
+      guard let current = fresh.windows.first(where: { $0.windowID == window.windowID }),
+        usableWindow(current, displays: fresh.displays),
+        let onDisplay = fresh.displays.first(where: { $0.frame.intersects(current.frame) })
+      else {
+        fail("A selected window is no longer usable (hidden, moving or off every display). Nothing was recorded.", code: 2)
+      }
+      if probeIndependentFilter(windowID: current.windowID) {
+        return (SCContentFilter(desktopIndependentWindow: current), "independent", nil, current)
+      }
+      return (
+        SCContentFilter(display: onDisplay, including: [current]), "display", onDisplay, current
+      )
+    }
+    let (emulatorFilter, emulatorKind, emulatorDisplay, emulatorNow) = chooseFilter(emulator)
+    let (companionFilter, companionKind, companionDisplay, companionNow) = chooseFilter(companion)
     let scale = CGFloat(emulatorFilter.pointPixelScale)
     let even = { (value: CGFloat) in max(2, Int((value * scale) / 2) * 2) }
     let width = even(union.width)
@@ -420,6 +482,18 @@ struct Capture {
       ],
       "picture": ["width": width, "height": height, "scale": Double(scale)],
     ])
+    // Which filter each window got, with what the helper saw of it.
+    emit([
+      "event": "filters",
+      "emulator": [
+        "kind": emulatorKind, "frame": frameDictionary(emulatorNow.frame),
+        "layer": emulatorNow.windowLayer, "onScreen": emulatorNow.isOnScreen,
+      ],
+      "companion": [
+        "kind": companionKind, "frame": frameDictionary(companionNow.frame),
+        "layer": companionNow.windowLayer, "onScreen": companionNow.isOnScreen,
+      ],
+    ])
 
     let writer: Writer
     do {
@@ -430,7 +504,8 @@ struct Capture {
     }
     let queue = DispatchQueue(label: "talkqte.lab.capture")
     let emulatorStream = SCStream(
-      filter: emulatorFilter, configuration: windowConfiguration(emulator), delegate: writer)
+      filter: emulatorFilter, configuration: windowConfiguration(emulator, display: emulatorDisplay),
+      delegate: writer)
     let companionStream = SCStream(
       filter: companionFilter,
       configuration: windowConfiguration(companion, display: companionDisplay), delegate: writer)

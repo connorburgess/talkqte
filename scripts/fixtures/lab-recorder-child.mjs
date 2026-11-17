@@ -51,6 +51,11 @@ else if (mode === 'truncated') {
   setTimeout(() => process.exit(0), 20);
 } else {
   emit(matched);
+  emit({
+    event: 'filters',
+    emulator: { kind: 'independent' },
+    companion: { kind: 'display' },
+  });
   if (mode === 'partial') {
     const data =
       JSON.stringify({ event: 'frame_accepted', frames: 1, wallMs: 1 }) + '\n';
