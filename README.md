@@ -2,13 +2,15 @@
 
 # TalkQTE
 
-**AI cues that help you stay grounded and respond in the moment.**
+**The right cue at the right moment, to help keep meetings on target.**
 
 ⭐ **Star the repo to follow development.** It is early, built in public, and not yet something to install for real meetings.
 
-TalkQTE is a small meeting companion being built to follow the conversation and surface useful context while it still matters. That might be a reminder of an earlier constraint, a point worth clarifying, or a prompt to help you respond. The aim is to help you keep up without pulling you away from listening.
+TalkQTE is a meeting companion, in early prototype, that surfaces the right cue at the right moment to help keep meetings on target. It follows the conversation and offers useful context while it still matters: a reminder of an earlier constraint, a point worth clarifying, or a prompt to help you respond, without pulling you away from listening. It runs on your own machine beside the call rather than joining the meeting.
 
 One cue appears in a quiet floating window. It says what it is and quotes the line or note it came from. You can hold it, dismiss it, or let it pass. There is no Save step or queue of questions to manage. Your existing note-taker can remain the record of what was actually said.
+
+Transcription and cue decisions are moving to cloud services that you turn on for each session: Deepgram for transcription and the Anthropic API for cue decisions. That work is in review ([#344](https://github.com/connorburgess/talkqte/pull/344), [#346](https://github.com/connorburgess/talkqte/pull/346)) and is not on `main` yet. Until it merges, the code on `main` still contains the earlier local transcription path, which [#346](https://github.com/connorburgess/talkqte/pull/346) removes.
 
 ## The experience we are working toward
 
@@ -72,6 +74,8 @@ On macOS, install Node.js 22, Rust 1.97.1, and Xcode Command Line Tools. The app
 npm ci
 npm run desktop
 ```
+
+This section and [Live session](#live-session-developer-build) below describe the code on `main`, which still contains the earlier local transcription path; [#346](https://github.com/connorburgess/talkqte/pull/346) removes it in favor of per-session cloud transcription.
 
 `npm run dev` serves the same notebook in a browser at `http://127.0.0.1:1420`, with no microphone and no live session, so it shows no cue. What the notebook, companion, focus list, prior notes, and export do today, with their limits, is in [Run the prototype](docs/run-the-prototype.md).
 
