@@ -23,11 +23,12 @@ const CODES = new Set([
   'output-limit',
 ]);
 // Provider outcomes that end only one scoped evaluator request. An output
-// limit is request-scoped only on the direct API route; on the subscription
-// CLI routes it still ends the run.
+// limit, and a reply the broker's own check refuses, are request-scoped only
+// on the direct API route; on the subscription CLI routes they still end
+// the run.
 const requestScoped = (provider, category) =>
   category === 'refusal' ||
-  (category === 'output-limit' &&
+  (['output-limit', 'invalid-reply'].includes(category) &&
     provider.metadata?.provider === 'anthropic-api');
 export const gateFailure = (category) =>
   Object.assign(new Error(`Lab run stopped: ${category}.`), { category });
@@ -338,10 +339,31 @@ export function createLabOperationGate({
       check();
     });
   };
+  // From inside a scoped task, after its provider call settled: retire only
+  // this request for a request-scoped reason (the broker's check refused the
+  // reply). False where that is not request-scoped; the caller then ends the
+  // run as before.
+  const retireCurrent = (category) => {
+    const lease = context.getStore();
+    if (
+      !lease ||
+      lease !== active ||
+      !lease.scoped ||
+      !lease.dispatched ||
+      !lease.providerSettled ||
+      lease.retired ||
+      terminal ||
+      !requestScoped(provider, category)
+    )
+      return false;
+    lease.retire(category);
+    return true;
+  };
   return Object.freeze({
     run,
     request,
     settle,
+    retireCurrent,
     waitIdle,
     stop,
     get dispatchesUsed() {
