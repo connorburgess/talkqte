@@ -527,6 +527,9 @@ pub struct Engine {
     next_segment: usize,
     cue_deadline: u64,
     cooldown_until: u64,
+    /// Lines that asked the user a question by name this session. A model
+    /// cue citing one would repeat the "Asked you" cue, so it is not shown.
+    asked_lines: Vec<String>,
     /// Ignore delayed transcription from before the most recent cue resume.
     cues_after_ms: Option<u64>,
     /// The user's name for this app session, used to recognize questions
@@ -618,6 +621,7 @@ impl Engine {
             next_segment: 0,
             cue_deadline: 0,
             cooldown_until: 0,
+            asked_lines: vec![],
             cues_after_ms: None,
             last_shown: vec![],
             focus_terms: vec![],
@@ -689,6 +693,7 @@ impl Engine {
         self.still_open_shown = false;
         self.next_segment = 0;
         self.cooldown_until = 0;
+        self.asked_lines.clear();
         self.state.elapsed_ms = 0;
         self.state.transcript.clear();
         self.state.cue = None;
@@ -922,6 +927,20 @@ impl Engine {
             return;
         }
         if self.evaluation.is_some() {
+            // A question put to the user by name is not left to the model:
+            // the same rule raises "Asked you" ahead of any model cue and
+            // past the pause. The model still hears the line, but its reply
+            // cannot replace, clear or repeat that cue.
+            let correction = corrects(&segment.text);
+            if self.ask_of_user(&segment, correction, now)
+                && self
+                    .state
+                    .cue
+                    .as_ref()
+                    .is_some_and(|cue| cue.kind == ASKED && cue.source_id == segment.id)
+            {
+                self.evaluated_cue = None;
+            }
             self.submit_evaluation();
             return;
         }
@@ -1265,6 +1284,7 @@ impl Engine {
 
     /// A question asked of the user by name: raises an "Asked you" cue and
     /// returns true when the line asks one, whether or not it could be shown.
+    /// Runs in every live session, with or without a model connected.
     fn ask_of_user(&mut self, segment: &Segment, correction: Option<usize>, now: u64) -> bool {
         // A question asked of the user by name takes priority over an unread
         // suggestion, ignores the cooldown, and shows the question itself.
@@ -1307,6 +1327,7 @@ impl Engine {
             return false;
         };
         if !self.state.cue.as_ref().is_some_and(|cue| cue.held) && now - segment.at_ms < CUE_MS {
+            self.asked_lines.push(segment.id.clone());
             // A suggestion replaced before it was published was never seen.
             if self.state.cue.take().is_some() {
                 self.forget_unshown();
