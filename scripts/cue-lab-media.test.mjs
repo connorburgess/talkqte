@@ -79,6 +79,42 @@ test('an approved manifest yields exactly the media it pins', () => {
   }
 });
 
+const schedule = [
+  { lineId: 'l1', speaker: 'Robin' },
+  { lineId: 'l2', speaker: 'Sam' },
+];
+
+test("a manifest's listener first name is carried for the app's name setting, and only a valid speaker's", () => {
+  const s = scenario({ schedule, listener: { firstName: 'Sam' } });
+  try {
+    const media = loadLabMediaManifest(s.manifestPath, { sha256: s.sha256 });
+    assert.equal(media.listenerFirstName, 'Sam');
+    assert.equal(isLabMedia(media), true);
+  } finally {
+    s.cleanup();
+  }
+  for (const listener of [
+    { firstName: 'Alex' },
+    { firstName: 'sam' },
+    { firstName: 'Sam Lee' },
+    { firstName: 'Sam', lastName: 'Lee' },
+    { firstName: '' },
+    null,
+    'Sam',
+  ]) {
+    const bad = scenario({ schedule, listener });
+    try {
+      assert.throws(
+        () => loadLabMediaManifest(bad.manifestPath, { sha256: bad.sha256 }),
+        undefined,
+        JSON.stringify(listener),
+      );
+    } finally {
+      bad.cleanup();
+    }
+  }
+});
+
 test('a manifest that differs from what was approved, or fails a lab rule, is refused', () => {
   const cases = [
     [{}, {}, (s) => 'f'.repeat(64)],
