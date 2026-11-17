@@ -396,6 +396,8 @@ impl CloudFeed {
 
     /// Sends what is queued, closes the stream and delivers its last finals.
     pub fn finish(mut self, wait: Duration) -> CloudStats {
+        // Stop sends what is left on this connection; it never opens another.
+        self.reopener = None;
         if self.failure.is_none() {
             if let Some(mut stream) = self.stream.take() {
                 let events = stream.finish(wait);
@@ -408,6 +410,7 @@ impl CloudFeed {
 
     /// Closes at once for End: nothing more reaches the engine.
     pub fn end(mut self) -> CloudStats {
+        self.reopener = None;
         if let Some(mut stream) = self.stream.take() {
             stream.abort();
             self.stopped("ended");
@@ -485,6 +488,15 @@ impl CloudFeed {
         );
         if !recoverable || self.reconnects >= MAX_RECONNECTS || self.reopener.is_none() {
             return Err(self.fail(failure));
+        }
+        // Never open a new connection once the review that allowed the old
+        // one is withdrawn, replaced, or the session is ending: stop with
+        // that reason instead.
+        if let Some(reason) = self.stop_reason() {
+            return Err(self.fail(reason));
+        }
+        if (self.approved)() != Some(self.approved_at) {
+            return Err(self.fail(SttFailure::Withdrawn));
         }
         if let Some(mut stream) = self.stream.take() {
             stream.abort();
@@ -1132,6 +1144,58 @@ mod tests {
             .unwrap()
             .push(SttEvent::Failed(SttFailure::Closed));
         assert_eq!(feed.poll(), Err(SttFailure::Settings));
+    }
+
+    /// A feed with a reopener that counts how often it was called.
+    fn counting(
+        first: &Script,
+        approved: Arc<Mutex<bool>>,
+    ) -> (CloudFeed, mpsc::Receiver<Segment>, Arc<Mutex<u32>>) {
+        let (feed, rx) = feed(first, approved);
+        let opened = Arc::new(Mutex::new(0));
+        let count = opened.clone();
+        let feed = feed.reconnect_with(Box::new(move || {
+            *count.lock().unwrap() += 1;
+            Ok(Box::new(Script::default()) as Box<dyn StreamingTranscriber>)
+        }));
+        (feed, rx, opened)
+    }
+
+    #[test]
+    fn a_connection_lost_after_the_review_was_withdrawn_is_not_reopened() {
+        let first = Script::default();
+        let approved = Arc::new(Mutex::new(true));
+        let (mut feed, _, opened) = counting(&first, approved.clone());
+        feed.push(0, 100, &[0.1; 1_600]).unwrap();
+        *approved.lock().unwrap() = false;
+        first
+            .events
+            .lock()
+            .unwrap()
+            .push(SttEvent::Failed(SttFailure::Network));
+        assert_eq!(feed.poll(), Err(SttFailure::Withdrawn));
+        assert_eq!(*opened.lock().unwrap(), 0);
+        assert_eq!(feed.failure(), Some(SttFailure::Withdrawn));
+    }
+
+    #[test]
+    fn a_connection_lost_during_stop_or_end_is_not_reopened() {
+        for stop in [true, false] {
+            let first = Script::default();
+            let (mut feed, _, opened) = counting(&first, Arc::new(Mutex::new(true)));
+            feed.push(0, 100, &[0.1; 1_600]).unwrap();
+            first
+                .events
+                .lock()
+                .unwrap()
+                .push(SttEvent::Failed(SttFailure::Closed));
+            if stop {
+                feed.finish(Duration::from_millis(10));
+            } else {
+                feed.end();
+            }
+            assert_eq!(*opened.lock().unwrap(), 0, "stop: {stop}");
+        }
     }
 
     #[test]
