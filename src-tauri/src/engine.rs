@@ -1772,16 +1772,7 @@ impl Engine {
             .map(|name| name.trim().to_string())
             .filter(|name| !name.is_empty());
         if let Some(name) = &name {
-            // Letters, combining accents, and name punctuation, with at least
-            // one letter.
-            let valid = name.chars().count() <= 40
-                && name.chars().any(char::is_alphabetic)
-                && name.chars().all(|character| {
-                    character.is_alphabetic()
-                        || ('\u{0300}'..='\u{036F}').contains(&character)
-                        || " '-’".contains(character)
-                });
-            if !valid {
+            if !valid_user_name(name) {
                 return Err(
                     "Use letters, spaces, apostrophes, or hyphens, up to 40 characters.".into(),
                 );
@@ -2042,6 +2033,18 @@ fn open_question(text: &str) -> Option<String> {
 const AFTER_UNREJECTED_MS: u64 = 3_000;
 /// The same pause in Quiet, whose full cooldown is 30 seconds.
 const AFTER_UNREJECTED_QUIET_MS: u64 = 10_000;
+
+/// Letters, combining accents, and name punctuation, with at least one
+/// letter, up to 40 characters: what Settings accepts as the user's name.
+pub(crate) fn valid_user_name(name: &str) -> bool {
+    name.chars().count() <= 40
+        && name.chars().any(char::is_alphabetic)
+        && name.chars().all(|character| {
+            character.is_alphabetic()
+                || ('\u{0300}'..='\u{036F}').contains(&character)
+                || " '-’".contains(character)
+        })
+}
 
 /// How long after a line ending on the user's name a following line may
 /// carry the question to them.
