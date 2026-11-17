@@ -555,6 +555,7 @@ export function buildManifest({
   files,
   renderer,
   voices,
+  listener,
 }) {
   const gaps = schedule.rows.slice(1).map((row) => row.gapBeforeMs);
   const sorted = [...gaps].sort((a, b) => a - b);
@@ -608,6 +609,7 @@ export function buildManifest({
     files,
     ...(renderer ? { renderer } : {}),
     ...(voices ? { voices } : {}),
+    ...(listener ? { listener } : {}),
     runtimeInputs: 'media-only',
   });
 }
@@ -771,6 +773,20 @@ export function validateManifest(manifest) {
       )
     )
       fail('voices');
+  }
+  // The person the recording follows, so a lab run can set the app's own
+  // "Your name" setting; it is one of the scheduled speakers' first names.
+  if (m.listener !== undefined) {
+    const name = m.listener?.firstName;
+    if (
+      typeof m.listener !== 'object' ||
+      m.listener === null ||
+      Object.keys(m.listener).some((k) => k !== 'firstName') ||
+      typeof name !== 'string' ||
+      !/^\p{Lu}[\p{L}'-]{1,23}$/u.test(name) ||
+      !rows.some((row) => row.speaker === name)
+    )
+      fail('listener');
   }
   if (m.runtimeInputs !== 'media-only') fail('runtime inputs');
   return Object.freeze(structuredClone(m));

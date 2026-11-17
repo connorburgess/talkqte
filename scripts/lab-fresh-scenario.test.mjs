@@ -550,3 +550,24 @@ test('a manifest may record the text route, voice renderer and voices, never a c
     /voices/,
   );
 });
+
+test('a manifest may name the listener, as one of the speakers', () => {
+  const s = scenario();
+  const speaker = s.plan.rows[0].speaker;
+  const manifest = manifestFor(s, { listener: { firstName: speaker } });
+  assert.deepEqual(manifest.listener, { firstName: speaker });
+  assert.equal('listener' in manifestFor(s), false);
+  const good = JSON.parse(JSON.stringify(manifest));
+  const refuse = (listener) =>
+    assert.throws(
+      () => validateManifest({ ...structuredClone(good), listener }),
+      /listener/,
+    );
+  refuse({ firstName: 'Stranger' });
+  refuse({ firstName: speaker.toLowerCase() });
+  refuse({ firstName: `${speaker} Smith` });
+  refuse({ firstName: speaker, lastName: 'x' });
+  refuse({ firstName: '' });
+  refuse(null);
+  refuse(speaker);
+});

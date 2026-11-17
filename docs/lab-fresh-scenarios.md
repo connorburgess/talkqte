@@ -49,6 +49,7 @@ A speaker who continues after their own line waits at least 450 ms. The gaps are
 - the window, plus whether the file fits under the 104 s that the lab's timing bounds were set for (`withinCurrentLabCap`);
 - how the conversation was generated: the route (`offline-stand-in`, `codex-subscription` or `anthropic-api`), and optionally the model and the cost in US dollars;
 - optionally, the voice renderer (`say` or `deepgram`) with its model, request count, billed characters, cost and the query settings it used, and each speaker's voice;
+- optionally, `listener.firstName`: the first name of the person the recording follows, so a lab run can set the app's own "Your name" setting. It must be one of the scheduled speakers;
 - pacing statistics, the line schedule and the verification result;
 - hashes of the companion files;
 - `runtimeInputs: "media-only"`.
@@ -63,6 +64,7 @@ A manifest is refused if any of these is true:
 - the generation route is unknown, or a cost is negative;
 - the renderer is not `say` or `deepgram`, any field in it or in the generation record is named like a credential (key, token, secret, auth, password, credential, bearer), or its query uses a name outside `model`, `encoding`, `container`, `sample_rate`, `bit_rate` and `mip_opt_out` or a value that is not plain;
 - a voice is given for someone not in the schedule, or a voice id is not plain;
+- `listener` has any field other than `firstName`, or the name is not a capitalised single word of one of the scheduled speakers;
 - schedule rows overlap;
 - the verification did not pass.
 
@@ -86,6 +88,7 @@ A manifest is refused if any of these is true:
 - **Mix check:** a faithful track passes. The check finds sound in a gap, a missing line, a 6 dB level drop, a line starting 90 ms late, a duration outside the window, mismatched lengths and the wrong sample rate.
 - **Manifest:** each of these is refused: wrong titles, a title naming a brand or contact detail, wrong media, fractional sizes or durations, missing or wrong streams, overlapping rows, a row ending after the media, wrong generation counts, wrong lab-limit flags and failed checks. Fractional values passed to `buildManifest()` are rounded. Media over 104 s is marked as not fitting the lab cap.
 - **Generation and voices:** an `anthropic-api` route with model and cost, a Deepgram renderer and per-speaker voices are accepted and stay optional; an unknown route, a negative cost, any credential-named field, an unlisted or non-plain query parameter, and a voice for someone not in the call are each refused.
+- **Listener:** a listener first name from the schedule is accepted and stays optional; a name not in the call, lower case, two words, an extra field, an empty value or a bare string are each refused.
 - **Content:** brands and contact details are found in a title or line and reported by line, and list entries are matched literally.
 
 See also the [cue lab batches and simulations](cue-simulation.md).
