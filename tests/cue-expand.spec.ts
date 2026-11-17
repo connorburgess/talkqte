@@ -24,7 +24,7 @@ async function companion(
   reducedMotion: 'reduce' | 'no-preference',
 ) {
   await page.emulateMedia({ reducedMotion });
-  await page.setViewportSize({ width: 320, height: 212 });
+  await page.setViewportSize({ width: 320, height: 232 });
   await standIn(page, '/?window=cue');
   await page.evaluate(() => window.liveTest.start());
   // Keep a leaving card at the start of its fold, so its state can be read.
@@ -322,8 +322,8 @@ test('kept by its bottom edge, the window has its bar at the bottom and the cue 
   expect((await question.boundingBox())!.y).toBeLessThan(
     (await bar.boundingBox())!.y,
   );
-  // It opens from its lower edge, by the bar, and the cue at its top is
-  // uncovered within a tenth of a second.
+  // It opens from its lower edge, by the bar, and its words ride up with
+  // its top edge, so the cue is uncovered from the first frame.
   const at = (time: number) =>
     question.evaluate((card, ms) => {
       for (const animation of card.getAnimations({ subtree: true })) {
@@ -340,7 +340,8 @@ test('kept by its bottom edge, the window has its bar at the bottom and the cue 
   const early = await at(20);
   expect(early.bottom).toBe(0);
   expect(early.top).toBeGreaterThan(20);
-  expect((await at(100)).covered).toBe(0);
+  for (const time of [0, 16, 50, 100])
+    expect((await at(time)).covered, `${time} ms`).toBe(0);
   expect((await at(400)).top).toBe(0);
   await question.evaluate((card) => {
     for (const animation of card.getAnimations({ subtree: true }))
@@ -503,4 +504,19 @@ test('a question put to you has a faint warm card on which every text colour kee
   );
   for (const ink of inks)
     expect(contrast(ink, warm), ink).toBeGreaterThanOrEqual(4.5);
+});
+
+test('a companion that loads while kept by its bottom edge has its bar at the bottom at once, before any move', async ({
+  page,
+}) => {
+  // A reload with a cue showing: no move follows, so the page must ask.
+  await page.addInitScript(() =>
+    Object.assign(window, { standInEdge: 'bottom' }),
+  );
+  const { bar, question } = await companion(page, 'reduce');
+  await show(page, first);
+  await expect(question.getByRole('heading')).toHaveText(first.question);
+  const card = (await question.boundingBox())!;
+  const below = (await bar.boundingBox())!;
+  expect(card.y + card.height).toBeLessThanOrEqual(below.y);
 });

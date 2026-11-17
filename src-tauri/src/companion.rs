@@ -67,7 +67,7 @@ const COMPACT_WIDTH: f64 = 320.0;
 
 /// A cue's height in logical pixels: an ordinary cue and the one line it
 /// cites fit without scrolling. Large text adds `LARGE_EXTRA`.
-const QUESTION_HEIGHT: f64 = 212.0;
+const QUESTION_HEIGHT: f64 = 232.0;
 const LARGE_EXTRA: f64 = 44.0;
 
 /// The companion's frame for a mode. A position the person dragged the
@@ -147,6 +147,39 @@ fn frame_at(
 /// the bar without the bar moving on screen.
 fn anchored_at_bottom(position: CompanionPosition, dragged: Option<(i32, i32)>) -> bool {
     position == CompanionPosition::BottomRight && dragged.is_none()
+}
+
+/// The edge the companion window keeps, as the page names it.
+fn edge(position: CompanionPosition, dragged: Option<(i32, i32)>) -> &'static str {
+    if anchored_at_bottom(position, dragged) {
+        "bottom"
+    } else {
+        "top"
+    }
+}
+
+/// The edge the companion window keeps when it grows, for a page that has
+/// just loaded: a reload with a cue showing, or a frame change before the
+/// page listened, would otherwise leave the bar on the wrong edge until the
+/// next move. Locks are taken one at a time, as in `refresh`.
+#[tauri::command]
+pub fn companion_anchor(
+    state: tauri::State<AppState>,
+    window: tauri::State<WindowState>,
+) -> Result<&'static str, String> {
+    let position = state
+        .0
+        .lock()
+        .map_err(|_| "The session is unavailable.")?
+        .engine
+        .state
+        .companion_position;
+    let dragged = window
+        .0
+        .lock()
+        .map_err(|_| "The companion is unavailable.")?
+        .dragged;
+    Ok(edge(position, dragged))
 }
 
 #[derive(Default)]
@@ -323,12 +356,10 @@ pub fn refresh(app: &tauri::AppHandle) {
         if layout.is_some() {
             // Before the frame changes, so the page has the bar on the edge
             // that stays put. It rarely changes: only with a preset or a drag.
-            let edge = if anchored_at_bottom(cue.companion_position, placement.dragged) {
-                "bottom"
-            } else {
-                "top"
-            };
-            let _ = window.emit("companion:anchor", edge);
+            let _ = window.emit(
+                "companion:anchor",
+                edge(cue.companion_position, placement.dragged),
+            );
         }
         let result = if let Some(frame) = layout {
             set_frame(&window, frame, scale).and_then(|_| window.show())
@@ -509,6 +540,13 @@ mod tests {
             CompanionPosition::BottomRight,
             Some((300, 200))
         ));
+        // The page reads the same answer when it loads.
+        assert_eq!(edge(CompanionPosition::BottomRight, None), "bottom");
+        assert_eq!(edge(CompanionPosition::TopRight, None), "top");
+        assert_eq!(
+            edge(CompanionPosition::BottomRight, Some((300, 200))),
+            "top"
+        );
         // And the frames agree: bottom right keeps the bar's bottom edge,
         // a dragged window its top edge.
         let at = |mode, dragged| {
@@ -629,8 +667,8 @@ mod tests {
             .height
         };
         // One height for a cue; large text adds 44 px.
-        assert_eq!(height(QuestionSize::Standard), 212);
-        assert_eq!(height(QuestionSize::Large), 256);
+        assert_eq!(height(QuestionSize::Standard), 232);
+        assert_eq!(height(QuestionSize::Large), 276);
     }
 
     #[test]

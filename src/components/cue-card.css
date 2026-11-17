@@ -525,8 +525,7 @@
 }
 /* With the window kept by its bottom edge (the default bottom-right
    placement) the bar is at the bottom, and the card grows up out of it and
-   folds back down into it. The cue is uncovered within a tenth of a second
-   either way. */
+   folds back down into it. */
 .floating-surface .companion-shell.is-bottom .question.cue-card {
   margin: 4px 4px 0;
   animation-name: cue-expand-up;
@@ -534,9 +533,25 @@
 .floating-surface .companion-shell.is-bottom .question.cue-card.is-leaving {
   animation-name: cue-collapse-down;
 }
+/* Its words ride up with its top edge, like a drawer, so the cue at the top
+   is in view from the first frame and the source below is what waits. */
+.floating-surface
+  .companion-shell.is-bottom
+  .question.cue-card:not(.is-leaving)
+  .cue-scroll {
+  animation: cue-ride-up 300ms var(--cue-ease) both;
+}
+@keyframes cue-ride-up {
+  from {
+    transform: translateY(30%);
+  }
+  to {
+    transform: none;
+  }
+}
 @keyframes cue-expand-up {
   from {
-    clip-path: inset(50% 0 0 0 round var(--cue-radius));
+    clip-path: inset(30% 0 0 0 round var(--cue-radius));
   }
   to {
     clip-path: inset(0 0 0 0 round var(--cue-radius));

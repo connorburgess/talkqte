@@ -105,10 +105,14 @@ function FloatingQuestion() {
   useEffect(() => {
     let disposed = false;
     let stop: (() => void) | undefined;
-    void bridge.watchAnchor(setEdge).then((unlisten) => {
-      if (disposed) unlisten();
-      else stop = unlisten;
-    });
+    bridge
+      .watchAnchor(setEdge)
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else stop = unlisten;
+      })
+      // Without an answer the bar stays on top, where it was before.
+      .catch(() => {});
     return () => {
       disposed = true;
       stop?.();

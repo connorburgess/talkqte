@@ -1577,6 +1577,7 @@ pub fn run() {
             export_markdown,
             live_status,
             model_status,
+            companion::companion_anchor,
             pick_context_file,
             import_context_notes,
             cancel_context_import,

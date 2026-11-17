@@ -146,10 +146,10 @@ async function show(page: Page, cue: Cue) {
   return question;
 }
 
-// The native companion's cue window: 320 × 212 CSS px, 256 tall with large
+// The native companion's cue window: 320 × 232 CSS px, 276 tall with large
 // text, on every display.
 const height = (size: 'standard' | 'large') =>
-  212 + (size === 'large' ? 44 : 0);
+  232 + (size === 'large' ? 44 : 0);
 
 /** The window itself never scrolls, in either direction. */
 async function expectWindowFits(page: Page, label: string) {

@@ -11,7 +11,7 @@ import {
  * or transcription is involved. */
 async function firstCue(page: Page, surface: 'notebook' | 'companion') {
   if (surface === 'companion')
-    await page.setViewportSize({ width: 320, height: 212 });
+    await page.setViewportSize({ width: 320, height: 232 });
   await standIn(page, surface === 'companion' ? '/?window=cue' : '/?live');
   await page.evaluate(() => {
     const events: string[] = [];
@@ -251,7 +251,7 @@ test('a quoted line is replayed at about the pace it was said', async ({
 /** Opens the companion with the live-session stand-in, motion allowed. */
 async function liveCompanion(page: Page, width: number) {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await page.setViewportSize({ width, height: 212 });
+  await page.setViewportSize({ width, height: 232 });
   await standIn(page, '/?window=cue');
   await page.evaluate(() => window.liveTest.start());
   return page.getByRole('region', { name: 'Suggested question' });
@@ -454,7 +454,7 @@ test('an answer to a held cue opens in place with a tick, keeps focus, and does 
       ),
     });
   });
-  await page.setViewportSize({ width: 320, height: 212 });
+  await page.setViewportSize({ width: 320, height: 232 });
   await page.goto('/?window=cue');
   await page.waitForFunction(() => !!window.liveTest);
   await page.evaluate(() => window.liveTest.start());

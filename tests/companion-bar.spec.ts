@@ -81,7 +81,7 @@ for (const size of ['standard', 'large'] as const)
     for (const width of [320]) {
       await page.setViewportSize({
         width,
-        height: size === 'large' ? 256 : 212,
+        height: size === 'large' ? 276 : 232,
       });
       // Capture is on: a microphone glyph with its dot, and no words.
       const dot = bar.getByRole('img', { name: 'Signal detected' });

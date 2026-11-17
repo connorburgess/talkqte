@@ -54,12 +54,23 @@ export async function liveStatus() {
 }
 
 /** The edge of the companion window that stays put when it grows for a
- * cue, as the native side places it. Nothing is sent in the browser. */
+ * cue, as the native side places it: read when the page loads, then sent
+ * before each move. Nothing is sent in the browser. */
 export async function watchAnchor(receive: (edge: 'top' | 'bottom') => void) {
   if (preview) return () => {};
-  return listen<unknown>('companion:anchor', ({ payload }) => {
-    if (payload === 'top' || payload === 'bottom') receive(payload);
-  });
+  const valid = (value: unknown) => {
+    if (value === 'top' || value === 'bottom') receive(value);
+  };
+  const unlisten = await listen<unknown>('companion:anchor', ({ payload }) =>
+    valid(payload),
+  );
+  try {
+    valid(await invoke<unknown>('companion_anchor'));
+  } catch (error) {
+    unlisten();
+    throw error;
+  }
+  return unlisten;
 }
 
 /** Reports the optional speech model download and its later changes. */

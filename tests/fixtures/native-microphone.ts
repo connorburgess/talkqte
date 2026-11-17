@@ -259,6 +259,11 @@ async function say(text: string, question?: string) {
   });
 }
 
+/** The edge the native companion keeps; a test may set it before loading
+ * with `window.standInEdge`. */
+let companionEdge: 'top' | 'bottom' =
+  (window as typeof window & { standInEdge?: 'top' | 'bottom' }).standInEdge ??
+  'top';
 mockIPC(
   async (command, args) => {
     calls.push(command);
@@ -323,6 +328,8 @@ mockIPC(
       }
       case 'snapshot':
         return structuredClone(session);
+      case 'companion_anchor':
+        return companionEdge;
       case 'microphone_snapshot':
         return delayed
           ? new Promise<MicrophoneSnapshot>((resolve) => {
@@ -672,7 +679,10 @@ window.liveTest = {
   publish,
   setCue: (cue) => publish({ cue }),
   setQuestionSize: (questionSize) => publish({ questionSize }),
-  anchor: (edge) => emit('companion:anchor', edge),
+  anchor: (edge) => {
+    companionEdge = edge;
+    return emit('companion:anchor', edge);
+  },
   // Development builds only: the cue snapshot marks a session fed by an
   // application alone.
   setSourceSession: (sourceSession: boolean) =>
