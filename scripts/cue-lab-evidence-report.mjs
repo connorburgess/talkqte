@@ -858,6 +858,50 @@ function cloudSummary(events, m) {
     },
   };
 }
+/**
+ * Whether the native capture source held: every source problem (with
+ * ScreenCaptureKit's -3815 "source_gone" told apart from TalkQTE's own
+ * "lab_source_lost") and every identity-check transition. It held only if
+ * there was no problem, no check ended it, and every check that went
+ * failing later recovered.
+ */
+export function summarizeSourceHealth(events) {
+  const problems = events
+    .filter((e) => e.stage === 'source.problem')
+    .map((e) => ({
+      eventId: e.eventId,
+      problem: e.payload.sourceProblem,
+      osCode: e.payload.osCode ?? null,
+    }));
+  const checks = events
+    .filter((e) => e.stage === 'source.check')
+    .map((e) => ({
+      eventId: e.eventId,
+      state: e.payload.checkState,
+      check: e.payload.check,
+      afterMs: e.payload.afterMs,
+    }));
+  const open = new Set();
+  for (const c of checks) {
+    if (c.state === 'failing') open.add(c.check);
+    else open.delete(c.check);
+  }
+  return {
+    problems,
+    checks,
+    unrecovered: [...open],
+    held:
+      problems.length === 0 &&
+      !checks.some((c) => c.state === 'ended') &&
+      open.size === 0,
+  };
+}
+/** The same summary straight from parsed native timing rows. */
+export function sourceHealthFromNativeRows(rows, { runId }) {
+  return summarizeSourceHealth(
+    importNativeRows(rows, { runId, artifactId: 'native', clockId: 'native' }),
+  );
+}
 export function buildEvidenceReport(
   manifest,
   input,
@@ -969,29 +1013,7 @@ export function buildEvidenceReport(
     };
   });
   const cloudTranscription = cloudSummary(events, m);
-  // Whether the native capture source held: every source problem (with
-  // ScreenCaptureKit's -3815 "source_gone" told apart from TalkQTE's own
-  // "lab_source_lost") and every identity-check transition.
-  const sourceHealth = {
-    problems: events
-      .filter((e) => e.stage === 'source.problem')
-      .map((e) => ({
-        eventId: e.eventId,
-        problem: e.payload.sourceProblem,
-        osCode: e.payload.osCode ?? null,
-      })),
-    checks: events
-      .filter((e) => e.stage === 'source.check')
-      .map((e) => ({
-        eventId: e.eventId,
-        state: e.payload.checkState,
-        check: e.payload.check,
-        afterMs: e.payload.afterMs,
-      })),
-  };
-  sourceHealth.held =
-    sourceHealth.problems.length === 0 &&
-    !sourceHealth.checks.some((c) => c.state === 'ended');
+  const sourceHealth = summarizeSourceHealth(events);
   const cueRows = [...cues].map(([id, group]) => {
     const published = pick(group, 'cue.published'),
       painted = pick(group, 'video.cue-painted');
@@ -1313,7 +1335,7 @@ export function renderEvidenceMarkdown(r, { recordingHref } = {}) {
     ...(r.cloudTranscription ? cloudMarkdown(r.cloudTranscription) : []),
     '### Capture source',
     '',
-    `Source held to the end: ${r.sourceHealth.held}. Source problems: ${r.sourceHealth.problems.map((p) => `${escape(p.problem)}${p.osCode === null ? '' : ` (${p.osCode})`}`).join(', ') || 'none'}. Identity-check transitions: ${r.sourceHealth.checks.map((c) => `${c.state} ${escape(c.check)} after ${c.afterMs} ms`).join('; ') || 'none'}.`,
+    `Source held to the end: ${r.sourceHealth.held}. Source problems: ${r.sourceHealth.problems.map((p) => `${escape(p.problem)}${p.osCode === null ? '' : ` (${p.osCode})`}`).join(', ') || 'none'}. Unrecovered checks: ${r.sourceHealth.unrecovered.map(escape).join(', ') || 'none'}. Identity-check transitions: ${r.sourceHealth.checks.map((c) => `${c.state} ${escape(c.check)} after ${c.afterMs} ms`).join('; ') || 'none'}.`,
     '',
     '| Transcript event | Heard end → arrival |',
     '| --- | --- |',

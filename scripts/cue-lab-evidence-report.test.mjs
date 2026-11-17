@@ -1260,6 +1260,18 @@ test('source problems and identity-check transitions are reported, with ScreenCa
     },
   ]).sourceHealth;
   assert.equal(held.held, true);
+  // A check that went failing and never recovered did not hold.
+  const unrecovered = report([
+    {
+      event: 'lab_source_check',
+      state: 'failing',
+      check: 'running_application',
+      after_ms: 0,
+      mono_ms: 10,
+    },
+  ]).sourceHealth;
+  assert.equal(unrecovered.held, false);
+  assert.deepEqual(unrecovered.unrecovered, ['running_application']);
   assert.deepEqual(
     held.checks.map((c) => [c.state, c.check, c.afterMs]),
     [
