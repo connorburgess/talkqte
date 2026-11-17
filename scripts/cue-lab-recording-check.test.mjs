@@ -118,6 +118,7 @@ const measure = (rows, frames, durationMs) =>
     path: '/fictional/run/recording.mov',
     frames,
     durationMs,
+    windowsMissing: false,
     exec: () => ffprobeJson(rows),
   });
 
@@ -128,6 +129,7 @@ test('RunB07 launch 2 fails as mostly black, with the stretches named', () => {
     path: '/fictional/run/recording.mov',
     frames: 1991,
     durationMs: 76863,
+    windowsMissing: false,
     exec: (command, args, options) => {
       calls.push({ command, args, options });
       return ffprobeJson(B07);
@@ -178,6 +180,7 @@ test('unusable paths, counts or probe output are refused, never guessed', () => 
         path,
         frames: 1,
         durationMs: 1000,
+        windowsMissing: false,
         exec: () => ffprobeJson(MOVING),
       }),
     );
@@ -193,8 +196,32 @@ test('unusable paths, counts or probe output are refused, never guessed', () => 
         path: '/fictional/r.mov',
         frames: 1,
         durationMs: 1000,
+        windowsMissing: false,
         exec: () => output,
       }),
     );
   assert.throws(() => summarizeRecordingLuma([{ atS: 0, luma: 37 }]));
+});
+
+test('a window closed or gone by the end fails the check, whatever the picture shows', () => {
+  const r = measureRecordingVisibility({
+    probe: '/fictional/ffprobe',
+    path: '/fictional/run/recording.mov',
+    frames: 200,
+    durationMs: 8000,
+    windowsMissing: true,
+    exec: () => ffprobeJson(MOVING),
+  });
+  assert.deepEqual(r.reasons, ['window-missing']);
+  assert.equal(r.ok, false);
+  // An unknown state (an older helper) is refused rather than assumed.
+  assert.throws(() =>
+    measureRecordingVisibility({
+      probe: '/fictional/ffprobe',
+      path: '/fictional/run/recording.mov',
+      frames: 200,
+      durationMs: 8000,
+      exec: () => ffprobeJson(MOVING),
+    }),
+  );
 });

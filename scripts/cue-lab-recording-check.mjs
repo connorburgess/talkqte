@@ -33,7 +33,10 @@ const round = (n) => Math.round(n * 1000) / 1000;
  * changed and, when given, the helper's frame rate. `ok` only if every
  * criterion holds; `reasons` names each that does not.
  */
-export function summarizeRecordingLuma(samples, { frames, durationMs } = {}) {
+export function summarizeRecordingLuma(
+  samples,
+  { frames, durationMs, windowsMissing = false } = {},
+) {
   required(
     Array.isArray(samples) &&
       samples.length > 0 &&
@@ -77,6 +80,9 @@ export function summarizeRecordingLuma(samples, { frames, durationMs } = {}) {
     ...(framesPerSecond !== null && framesPerSecond < MIN_FRAMES_PER_SECOND
       ? ['too-few-frames']
       : []),
+    // A captured window closed or gone by the end: the picture cannot be
+    // trusted to show it, whatever the luma says.
+    ...(windowsMissing === true ? ['window-missing'] : []),
   ];
   return Object.freeze({
     samples: samples.length,
@@ -101,6 +107,7 @@ export function measureRecordingVisibility({
   path,
   frames,
   durationMs,
+  windowsMissing,
   exec = execFileSync,
   environment,
 } = {}) {
@@ -110,7 +117,8 @@ export function measureRecordingVisibility({
       typeof path === 'string' &&
       /^\/[A-Za-z0-9/._-]+$/.test(path) &&
       Number.isSafeInteger(frames) &&
-      Number.isFinite(durationMs),
+      Number.isFinite(durationMs) &&
+      typeof windowsMissing === 'boolean',
   );
   const output = exec(
     probe,
@@ -147,6 +155,6 @@ export function measureRecordingVisibility({
       luma: Number(f?.tags?.['lavfi.signalstats.YAVG']),
       change: Number(f?.tags?.['lavfi.signalstats.YDIF']),
     })),
-    { frames, durationMs },
+    { frames, durationMs, windowsMissing },
   );
 }

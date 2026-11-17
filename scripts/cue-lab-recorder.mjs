@@ -217,7 +217,7 @@ function recorder({
           integer(value.audioBuffers) &&
           // Whether either window moved or resized after the start, when
           // the picture's placement was fixed.
-          ['windowsMoved', 'windowsResized'].every(
+          ['windowsMoved', 'windowsResized', 'windowsMissing'].every(
             (k) => value[k] === undefined || typeof value[k] === 'boolean',
           ),
       );
@@ -290,6 +290,8 @@ function recorder({
             audioBuffers: final.audioBuffers,
             windowsMoved: final.windowsMoved ?? null,
             windowsResized: final.windowsResized ?? null,
+            // A window closed or gone by the end of the run.
+            windowsMissing: final.windowsMissing ?? null,
           })
         : null;
     },
@@ -424,6 +426,7 @@ export function createLabRecorderFixture(options = {}) {
       'normal',
       'partial',
       'moved',
+      'missing',
       'wrong',
       'spawn-only',
       'oversize',

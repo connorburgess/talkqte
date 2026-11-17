@@ -353,6 +353,12 @@ struct Capture {
     let even = { (value: CGFloat) in max(2, Int((value * scale) / 2) * 2) }
     let width = even(union.width)
     let height = even(union.height)
+    // Windows far apart (for example on two displays) make a canvas the
+    // H.264 encoder cannot take; refuse before recording rather than fail
+    // part-way. Keep both windows on one display.
+    guard width <= 8192 && height <= 8192 else {
+      fail("The two windows are too far apart to record together. Put both on one display.", code: 2)
+    }
     func windowConfiguration(_ window: SCWindow) -> SCStreamConfiguration {
       let configuration = SCStreamConfiguration()
       configuration.width = even(window.frame.width)
@@ -456,12 +462,16 @@ struct Capture {
     // moved or changed size since, so a misplaced picture is known.
     var windowsMoved = false
     var windowsResized = false
+    var windowsMissing = false
     if let now = try? await SCShareableContent.excludingDesktopWindows(
       true, onScreenWindowsOnly: false)
     {
       for start in [emulator, companion] {
         guard let current = now.windows.first(where: { $0.windowID == start.windowID })
-        else { continue }
+        else {
+          windowsMissing = true
+          continue
+        }
         if current.frame.origin != start.frame.origin { windowsMoved = true }
         if current.frame.size != start.frame.size { windowsResized = true }
       }
@@ -478,6 +488,7 @@ struct Capture {
       "event": "stopped", "wallMs": wallMs(), "frames": writer.frames,
       "audioBuffers": writer.audioBuffers,
       "windowsMoved": windowsMoved, "windowsResized": windowsResized,
+      "windowsMissing": windowsMissing,
       "status": writer.writer.status == .completed ? "completed" : "failed",
       "problem": writer.problem ?? writer.writer.error?.localizedDescription ?? "",
     ])
