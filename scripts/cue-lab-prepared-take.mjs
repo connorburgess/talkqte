@@ -171,7 +171,17 @@ export function createLabPlaybackSession({
         completionReserveMs <= 3000 &&
         Number.isSafeInteger(tailMs) &&
         tailMs >= 0 &&
-        tailMs <= 15000,
+        tailMs <= 15000 &&
+        // On the API route the take clock restarts at approval, and must
+        // cover everything after it: recorder start, the start budget, the
+        // media, the tail and the completion reserve.
+        (approvalBudgetMs === 0 ||
+          takeMs >=
+            recorderMs +
+              startBudgetMs +
+              media.durationMs +
+              tailMs +
+              completionReserveMs),
     );
   };
   checkSource();
