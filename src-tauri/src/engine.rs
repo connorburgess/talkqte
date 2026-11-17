@@ -1436,28 +1436,37 @@ impl Engine {
             })
             .and_then(|line| {
                 let name = self.state.user_name.as_deref()?;
-                trailing_address(name, &line.text)
+                trailing_address(name, &line.text).map(|lead| (lead, line.id.clone()))
             });
         // The evidence is the text the question was read from, so a question
         // joined across two lines is quoted whole, and shown once.
-        let Some((asked, evidence)) = self.state.user_name.as_deref().and_then(|name| {
-            carried
-                .map(|lead| format!("{lead} {}", segment.text))
-                .and_then(|joined| asked_of(name, &joined).map(|asked| (asked, joined)))
-                .or_else(|| {
-                    asked_of(name, &segment.text[correction.unwrap_or(0)..])
-                        .map(|asked| (asked, segment.text.clone()))
-                })
-        }) else {
+        let Some((asked, evidence, carried_id)) =
+            self.state.user_name.as_deref().and_then(|name| {
+                carried
+                    .and_then(|(lead, id)| {
+                        let joined = format!("{lead} {}", segment.text);
+                        asked_of(name, &joined).map(|asked| (asked, joined, Some(id)))
+                    })
+                    .or_else(|| {
+                        asked_of(name, &segment.text[correction.unwrap_or(0)..])
+                            .map(|asked| (asked, segment.text.clone(), None))
+                    })
+            })
+        else {
             return false;
         };
         if !self.state.cue.as_ref().is_some_and(|cue| cue.held) && now - segment.at_ms < CUE_MS {
+            // Only displayed questions suppress model duplicates. A joined
+            // question was read from both lines, so either citation counts.
+            if let Some(id) = carried_id {
+                self.asked_lines.push(id);
+            }
             self.asked_lines.push(segment.id.clone());
             // A suggestion replaced before it was published was never seen.
             if self.state.cue.take().is_some() {
                 self.forget_unshown();
             }
-            let lifetime = if self.evaluation.is_some() {
+            let lifetime = if self.has_processing_permission() {
                 ASKED_WITH_MODEL_MS
             } else {
                 ASKED_MS
@@ -2166,7 +2175,15 @@ fn asked_of(name: &str, text: &str) -> Option<String> {
                     } else {
                         // And end with "?": "I spoke to Robin, Maya, who said
                         // it's fine." is a relative clause, not a question.
-                        ends_with_mark && (asks(&rest) || asked_before())
+                        // An opening question can name its object before
+                        // an embedded WH clause: "Did you meet the lead,
+                        // Maya, who starts Monday?" Prefer quiet for this
+                        // ambiguous shape unless "could you" immediately
+                        // before the name makes the address explicit.
+                        let before = words_of(&parts[..at].join(","));
+                        ends_with_mark
+                            && (asked_before()
+                                || (asks(&rest) && !opens_question(&before) && !asks(&before)))
                     }
             });
             // No comma: "Robin how many came?" or "So Robin, can you…" said
@@ -5796,6 +5813,9 @@ mod tests {
             "The new lead, Maya, is joining us next week.",
             "I spoke to Robin, Maya, who said it's fine.",
             "Did you invite Alex, Maya, and Sam?",
+            "Did you meet the new lead, Maya, who starts Monday?",
+            "Did you ask our treasurer, Maya, what she needs?",
+            "Didn't you meet the new lead, Maya, who starts Monday?",
             "Maya what a party?",
         ] {
             let e = streamed("Maya", &[(10_000, quiet)]);
@@ -5806,6 +5826,10 @@ mod tests {
         }
         for asked in [
             "The budget is fine, Maya, what's left on the list?",
+            "The schedule changed, Maya, who will cover Monday?",
+            "Maya, who starts Monday?",
+            "Maya, what does the treasurer need?",
+            "Could you, Maya, field the complaints?",
             "Maya what's the plan for Saturday?",
             "The van is booked, Maya, can you drive it?",
             "If it locks anyone out, could you, Maya, field the complaints?",

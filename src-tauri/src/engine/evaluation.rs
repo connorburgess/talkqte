@@ -2858,6 +2858,95 @@ mod tests {
     }
 
     #[test]
+    fn a_resolved_split_question_cannot_return_from_its_first_line_and_fresh_speech() {
+        let mut h = Harness::named("Maya");
+        h.line("Could you, Maya,");
+        h.request();
+        h.reply("quiet", None, &["transcript:line-1"]);
+        h.line("field the complaints?");
+        assert_eq!(
+            h.engine.state.cue.as_ref().unwrap().kind,
+            super::super::ASKED
+        );
+        h.request();
+        h.reply("quiet", None, &["transcript:line-2"]);
+        h.line("Yes, I will handle them.");
+        h.request();
+        h.reply("resolved", None, &["transcript:line-3"]);
+        assert!(h.engine.state.cue.is_none());
+        h.engine.advance(10_000);
+        h.line("The room is booked.");
+        h.request();
+        h.reply(
+            "show",
+            Some("Could you field the complaints?"),
+            &["transcript:line-1", "transcript:line-4"],
+        );
+        assert!(
+            h.engine.state.cue.is_none(),
+            "the shown question must not repeat"
+        );
+    }
+
+    #[test]
+    fn a_split_question_blocked_by_a_held_cue_does_not_suppress_a_later_model_cue() {
+        let mut h = Harness::named("Maya");
+        let held = h.show();
+        h.engine.inspect_cue(&held).unwrap();
+        h.line("Could you, Maya,");
+        h.request();
+        h.reply("quiet", None, &["transcript:line-2"]);
+        h.line("field the complaints?");
+        assert_eq!(h.engine.state.cue.as_ref().unwrap().id, held);
+        h.request();
+        h.reply("quiet", None, &["transcript:line-3"]);
+        h.engine.respond(&held, Response::Dismiss).unwrap();
+        h.engine.advance(10_000);
+        h.line("The room is booked.");
+        h.request();
+        h.reply(
+            "show",
+            Some("Could you field the complaints?"),
+            &["transcript:line-2", "transcript:line-4"],
+        );
+        assert_eq!(
+            h.engine.state.cue.as_ref().unwrap().question,
+            "Could you field the complaints?",
+            "a question never displayed may still be suggested"
+        );
+    }
+
+    #[test]
+    fn asked_lifetime_uses_the_sessions_processing_permission_not_registration() {
+        for mode in ["unapproved", "approved", "revoked"] {
+            let mut h = if mode == "unapproved" {
+                let mut h = Harness::unapproved(fictional_processor(), Duration::from_secs(5));
+                h.engine.set_user_name(Some("Maya".into())).unwrap();
+                h
+            } else {
+                Harness::named("Maya")
+            };
+            if mode == "revoked" {
+                h.engine.revoke_processing();
+            }
+            h.line("Maya, can you check the room?");
+            assert_eq!(
+                h.engine.state.cue.as_ref().unwrap().total_ms,
+                if mode == "approved" { 20_000 } else { 45_000 },
+                "{mode}"
+            );
+            if mode == "approved" {
+                h.request();
+                h.reply("quiet", None, &["transcript:line-1"]);
+            } else {
+                assert!(h.requests.try_recv().is_err());
+            }
+            h.engine.advance(21_000);
+            assert_eq!(h.engine.state.cue.is_some(), mode != "approved", "{mode}");
+        }
+    }
+
+    #[test]
     fn asked_you_takes_the_slot_from_an_unread_model_cue_but_not_a_held_one() {
         let mut h = Harness::named("Curtis");
         h.show();
