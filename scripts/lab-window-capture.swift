@@ -38,8 +38,11 @@ func emit(_ value: [String: Any]) {
   FileHandle.standardOutput.write(Data("\n".utf8))
 }
 
-func fail(_ message: String, code: Int32 = 1) -> Never {
-  emit(["event": "error", "message": message])
+/// Ends the helper with a message for the person running it and a fixed
+/// reason code. The message may name a path or carry macOS's own text, so
+/// the recorder keeps only the reason.
+func fail(_ message: String, code: Int32 = 1, reason: String) -> Never {
+  emit(["event": "error", "reason": reason, "message": message])
   exit(code)
 }
 
@@ -49,7 +52,7 @@ func parseArguments() -> [String: String] {
   var options: [String: String] = [:]
   var iterator = CommandLine.arguments.dropFirst().makeIterator()
   while let argument = iterator.next() {
-    guard argument.hasPrefix("--") else { fail("Unknown argument \(argument).", code: 64) }
+    guard argument.hasPrefix("--") else { fail("Unknown argument \(argument).", code: 64, reason: "unknown-argument") }
     let key = String(argument.dropFirst(2))
     if ["check", "list", "capture", "strict-windows", "probe-window"].contains(key) {
       options[key] = "yes"
@@ -58,10 +61,10 @@ func parseArguments() -> [String: String] {
       "out", "emulator-pid", "emulator-window-id", "companion-pid", "companion-window-id",
       "window-id",
     ].contains(key) {
-      guard let value = iterator.next() else { fail("\(argument) needs a value.", code: 64) }
+      guard let value = iterator.next() else { fail("\(argument) needs a value.", code: 64, reason: "missing-value") }
       options[key] = value
     } else {
-      fail("Unknown argument \(argument).", code: 64)
+      fail("Unknown argument \(argument).", code: 64, reason: "unknown-argument")
     }
   }
   return options
@@ -82,22 +85,37 @@ func usableWindow(_ window: SCWindow, displays: [SCDisplay]) -> Bool {
     && f.height >= 2 && displays.contains(where: { $0.frame.intersects(f) })
 }
 
-/// Runs this program again in --probe-window mode for one window, up to
-/// three seconds. True only if the child built the filter and exited 0.
-func probeIndependentFilter(windowID: CGWindowID) -> Bool {
-  let child = Process()
-  child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
-  child.arguments = ["--probe-window", "--window-id", String(windowID)]
-  child.standardOutput = FileHandle.nullDevice
-  child.standardError = FileHandle.nullDevice
-  let done = DispatchSemaphore(value: 0)
-  child.terminationHandler = { _ in done.signal() }
-  do { try child.run() } catch { return false }
-  if done.wait(timeout: .now() + 3) == .timedOut {
-    child.terminate()
-    return false
+/// Runs this program again in --probe-window mode, one child per window,
+/// all at once, for up to one second in all. For each window, true only if
+/// its child built the filter and exited 0. Both probes share the second so
+/// the recorder's start deadline (3 s to the first accepted frame) holds.
+func probeIndependentFilters(windowIDs: [CGWindowID]) -> [CGWindowID: Bool] {
+  let group = DispatchGroup()
+  var children: [(CGWindowID, Process)] = []
+  for windowID in windowIDs {
+    let child = Process()
+    child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+    child.arguments = ["--probe-window", "--window-id", String(windowID)]
+    child.standardOutput = FileHandle.nullDevice
+    child.standardError = FileHandle.nullDevice
+    group.enter()
+    child.terminationHandler = { _ in group.leave() }
+    do {
+      try child.run()
+      children.append((windowID, child))
+    } catch {
+      group.leave()
+    }
   }
-  return child.terminationReason == .exit && child.terminationStatus == 0
+  if group.wait(timeout: .now() + 1) == .timedOut {
+    for (_, child) in children where child.isRunning { child.terminate() }
+  }
+  var result: [CGWindowID: Bool] = [:]
+  for windowID in windowIDs { result[windowID] = false }
+  for (windowID, child) in children where !child.isRunning {
+    result[windowID] = child.terminationReason == .exit && child.terminationStatus == 0
+  }
+  return result
 }
 
 final class Writer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
@@ -254,7 +272,7 @@ struct Capture {
     guard CGPreflightScreenCaptureAccess() else {
       fail(
         "Screen & System Audio Recording is not allowed for the app that started this. Allow it in System Settings, Privacy & Security, then start that app again.",
-        code: 77)
+        code: 77, reason: "screen-recording-not-allowed")
     }
 
     let content: SCShareableContent
@@ -262,20 +280,20 @@ struct Capture {
       content = try await SCShareableContent.excludingDesktopWindows(
         true, onScreenWindowsOnly: true)
     } catch {
-      fail("Could not list windows: \(error.localizedDescription)")
+      fail("Could not list windows: \(error.localizedDescription)", reason: "list-windows")
     }
 
     if options["list"] != nil {
       // Only the named apps' windows are listed, so nothing else of the
       // owner's appears.
       let apps = Set((options["apps"] ?? "").split(separator: ",").map(String.init))
-      guard !apps.isEmpty else { fail("--list needs --apps.", code: 64) }
+      guard !apps.isEmpty else { fail("--list needs --apps.", code: 64, reason: "list-needs-apps") }
       let strictList = options["strict-windows"] != nil
       var ownedPids = Set<Int32>()
       if strictList {
         guard let playerPid = Int32(options["emulator-pid"] ?? ""), playerPid > 0,
           let nativePid = Int32(options["companion-pid"] ?? ""), nativePid > 0, playerPid != nativePid
-        else { fail("Strict listing needs two exact owned process identities.", code: 64) }
+        else { fail("Strict listing needs two exact owned process identities.", code: 64, reason: "strict-listing") }
         ownedPids = [playerPid, nativePid]
       }
       for window in content.windows
@@ -297,7 +315,7 @@ struct Capture {
     // the capture alive and lets it fall back to a display filter.
     if options["probe-window"] != nil {
       guard let id = UInt32(options["window-id"] ?? ""), id > 0 else {
-        fail("--probe-window needs --window-id.", code: 64)
+        fail("--probe-window needs --window-id.", code: 64, reason: "probe-needs-window")
       }
       guard let fresh = try? await SCShareableContent.excludingDesktopWindows(
         true, onScreenWindowsOnly: false),
@@ -310,13 +328,13 @@ struct Capture {
     }
 
     guard options["capture"] != nil else {
-      fail("Use --check, --list or --capture.", code: 64)
+      fail("Use --check, --list or --capture.", code: 64, reason: "mode")
     }
     guard let emulatorApp = options["emulator-app"], let out = options["out"],
       let secondsText = options["seconds"], let seconds = Double(secondsText), seconds > 0,
       seconds <= 1800
     else {
-      fail("--capture needs --emulator-app, --out and --seconds (up to 1800).", code: 64)
+      fail("--capture needs --emulator-app, --out and --seconds (up to 1800).", code: 64, reason: "capture-arguments")
     }
     let companionApp = options["companion-app"] ?? "TalkQTE"
     let companionTitle = options["companion-title"] ?? "TalkQTE companion"
@@ -340,7 +358,7 @@ struct Capture {
           $0.windowID == companionId && $0.owningApplication?.processID == companionPid
             && $0.owningApplication?.applicationName == companionApp
         })
-      else { fail("Strict recording window identities are unavailable. Nothing was recorded.", code: 2) }
+      else { fail("Strict recording window identities are unavailable. Nothing was recorded.", code: 2, reason: "strict-identities") }
       emulator = exactEmulator
       companion = exactCompanion
       rule = "exact pid/window"
@@ -355,7 +373,7 @@ struct Capture {
           $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
         })
       else {
-        fail("No on-screen window of \(emulatorApp) was found. Nothing was recorded.", code: 2)
+        fail("No on-screen window of \(emulatorApp) was found. Nothing was recorded.", code: 2, reason: "emulator-window-not-found")
       }
       emulator = selectedEmulator
       let companionWindows = visible.filter {
@@ -367,7 +385,7 @@ struct Capture {
       guard companionProcesses.count <= 1 else {
         fail(
           "\(companionProcesses.count) running copies of \(companionApp) have windows on screen. Quit every copy but the one under test. Nothing was recorded.",
-          code: 2)
+          code: 2, reason: "companion-copies")
       }
       var selectedCompanion = companionWindows.first { $0.title == companionTitle }
       if selectedCompanion == nil {
@@ -378,20 +396,18 @@ struct Capture {
         })
       }
       guard let selectedCompanion else {
-        fail("No on-screen window of \(companionApp) was found. Nothing was recorded.", code: 2)
+        fail("No on-screen window of \(companionApp) was found. Nothing was recorded.", code: 2, reason: "companion-window-not-found")
       }
       companion = selectedCompanion
     }
     guard let emulatorOwner = emulator.owningApplication else {
-      fail("The selected emulator has no owner. Nothing was recorded.", code: 2)
+      fail("The selected emulator has no owner. Nothing was recorded.", code: 2, reason: "emulator-owner")
     }
     guard
       let display = content.displays.first(where: { $0.frame.intersects(emulator.frame) })
         ?? content.displays.first
-    else { fail("No display was found.", code: 2) }
+    else { fail("No display was found.", code: 2, reason: "no-display") }
 
-    // The canvas is the two windows' union, whichever displays they are on.
-    let union = emulator.frame.union(companion.frame)
     // Each window on its own, wherever it is: not limited to the active
     // Space and not hidden by other windows.
     // Each window gets a desktop-independent filter (not limited to the
@@ -404,23 +420,35 @@ struct Capture {
     // filtered with a stale rectangle.
     guard let fresh = try? await SCShareableContent.excludingDesktopWindows(
       true, onScreenWindowsOnly: false)
-    else { fail("Could not list windows again.", code: 2) }
-    func chooseFilter(_ window: SCWindow) -> (SCContentFilter, String, SCDisplay?, SCWindow) {
+    else { fail("Could not list windows again.", code: 2, reason: "relist-windows") }
+    func currentWindow(_ window: SCWindow) -> (SCWindow, SCDisplay) {
       guard let current = fresh.windows.first(where: { $0.windowID == window.windowID }),
         usableWindow(current, displays: fresh.displays),
         let onDisplay = fresh.displays.first(where: { $0.frame.intersects(current.frame) })
       else {
-        fail("A selected window is no longer usable (hidden, moving or off every display). Nothing was recorded.", code: 2)
+        fail("A selected window is no longer usable (hidden, moving or off every display). Nothing was recorded.", code: 2, reason: "window-unusable")
       }
-      if probeIndependentFilter(windowID: current.windowID) {
-        return (SCContentFilter(desktopIndependentWindow: current), "independent", nil, current)
-      }
-      return (
-        SCContentFilter(display: onDisplay, including: [current]), "display", onDisplay, current
-      )
+      return (current, onDisplay)
     }
-    let (emulatorFilter, emulatorKind, emulatorDisplay, emulatorNow) = chooseFilter(emulator)
-    let (companionFilter, companionKind, companionDisplay, companionNow) = chooseFilter(companion)
+    let (emulatorNow, emulatorOnDisplay) = currentWindow(emulator)
+    let (companionNow, companionOnDisplay) = currentWindow(companion)
+    let probed = probeIndependentFilters(windowIDs: [emulatorNow.windowID, companionNow.windowID])
+    func chooseFilter(_ current: SCWindow, on onDisplay: SCDisplay) -> (
+      SCContentFilter, String, SCDisplay?
+    ) {
+      if probed[current.windowID] == true {
+        return (SCContentFilter(desktopIndependentWindow: current), "independent", nil)
+      }
+      return (SCContentFilter(display: onDisplay, including: [current]), "display", onDisplay)
+    }
+    let (emulatorFilter, emulatorKind, emulatorDisplay) = chooseFilter(
+      emulatorNow, on: emulatorOnDisplay)
+    let (companionFilter, companionKind, companionDisplay) = chooseFilter(
+      companionNow, on: companionOnDisplay)
+    // From here on, sizes, crops, placement and the canvas use the windows as
+    // just re-read, not as first selected. The canvas is their union,
+    // whichever displays they are on.
+    let union = emulatorNow.frame.union(companionNow.frame)
     let scale = CGFloat(emulatorFilter.pointPixelScale)
     let even = { (value: CGFloat) in max(2, Int((value * scale) / 2) * 2) }
     let width = even(union.width)
@@ -429,7 +457,7 @@ struct Capture {
     // H.264 encoder cannot take; refuse before recording rather than fail
     // part-way. Keep both windows on one display.
     guard width <= 8192 && height <= 8192 else {
-      fail("The two windows are too far apart to record together. Put both on one display.", code: 2)
+      fail("The two windows are too far apart to record together. Put both on one display.", code: 2, reason: "canvas-too-large")
     }
     func windowConfiguration(_ window: SCWindow, display: SCDisplay? = nil) -> SCStreamConfiguration {
       let configuration = SCStreamConfiguration()
@@ -473,12 +501,12 @@ struct Capture {
       "emulator": [
         "app": emulatorApp, "windowId": Int(emulator.windowID),
         "pid": Int(emulator.owningApplication?.processID ?? 0),
-        "frame": frameDictionary(emulator.frame),
+        "frame": frameDictionary(emulatorNow.frame),
       ],
       "companion": [
         "app": companionApp, "windowId": Int(companion.windowID), "rule": rule,
         "pid": Int(companion.owningApplication?.processID ?? 0),
-        "frame": frameDictionary(companion.frame),
+        "frame": frameDictionary(companionNow.frame),
       ],
       "picture": ["width": width, "height": height, "scale": Double(scale)],
     ])
@@ -500,19 +528,19 @@ struct Capture {
       writer = try Writer(url: URL(fileURLWithPath: out), width: width, height: height,
         strictWindows: strictWindows)
     } catch {
-      fail("Could not write \(out): \(error.localizedDescription)")
+      fail("Could not write \(out): \(error.localizedDescription)", reason: "output-write")
     }
     let queue = DispatchQueue(label: "talkqte.lab.capture")
     let emulatorStream = SCStream(
-      filter: emulatorFilter, configuration: windowConfiguration(emulator, display: emulatorDisplay),
+      filter: emulatorFilter, configuration: windowConfiguration(emulatorNow, display: emulatorDisplay),
       delegate: writer)
     let companionStream = SCStream(
       filter: companionFilter,
-      configuration: windowConfiguration(companion, display: companionDisplay), delegate: writer)
+      configuration: windowConfiguration(companionNow, display: companionDisplay), delegate: writer)
     let soundStream = SCStream(filter: soundFilter, configuration: sound, delegate: writer)
     queue.sync {
-      writer.place(emulatorStream, at: placeOf(emulator))
-      writer.place(companionStream, at: placeOf(companion))
+      writer.place(emulatorStream, at: placeOf(emulatorNow))
+      writer.place(companionStream, at: placeOf(companionNow))
     }
     do {
       try emulatorStream.addStreamOutput(writer, type: .screen, sampleHandlerQueue: queue)
@@ -522,7 +550,7 @@ struct Capture {
       try await companionStream.startCapture()
       try await soundStream.startCapture()
     } catch {
-      fail("Could not start recording: \(error.localizedDescription)")
+      fail("Could not start recording: \(error.localizedDescription)", reason: "start-capture")
     }
 
     // Until the time is up, or Ctrl-C.
@@ -557,7 +585,7 @@ struct Capture {
     if let now = try? await SCShareableContent.excludingDesktopWindows(
       true, onScreenWindowsOnly: false)
     {
-      for start in [emulator, companion] {
+      for start in [emulatorNow, companionNow] {
         guard let current = now.windows.first(where: { $0.windowID == start.windowID })
         else {
           windowsMissing = true
