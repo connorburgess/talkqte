@@ -17,6 +17,9 @@ pub use projection::{
 };
 
 const RECENT_LINES: usize = 6;
+const HISTORY_LINES: usize = 24;
+const HISTORY_MS: u64 = 90_000;
+const HISTORY_INPUT_BYTES: usize = 16_384;
 
 /// What a lab decision had not seen when it was applied.
 struct Lag {
@@ -426,6 +429,8 @@ impl Engine {
 
     /// The last six complete transcript lines plus the visible cue's original
     /// sources (at most four), optionally with exactly approved prior notes.
+    /// An explicitly reviewed transcript-only configuration may also supply a
+    /// bounded history suffix; fresh speech still gates every request.
     /// Never include manual notes, focus text, or identity settings. Fail closed
     /// on the worker's per-source and aggregate byte bounds without truncation.
     fn evaluation_request(&self) -> Result<Option<Request>, Failure> {
@@ -499,9 +504,74 @@ impl Engine {
         }) {
             return Ok(None);
         }
-        Request::new(self.generation, self.evaluation_revision, sources, existing)?
+        let make_request = |sources| {
+            Request::new(
+                self.generation,
+                self.evaluation_revision,
+                sources,
+                existing.clone(),
+            )?
             .with_listener(self.state.user_name.clone(), state.earlier.clone())
-            .map(Some)
+        };
+        let mut request = make_request(sources)?;
+        if permission.processor.bounded_history {
+            // Mandatory cue evidence and the current fresh slice are never
+            // truncated. This mode cannot approve notes, even indirectly.
+            if request.sources().len() > HISTORY_LINES
+                || !grant.notes.is_empty()
+                || request.prompt_input()?.len() > HISTORY_INPUT_BYTES
+            {
+                return Err(Failure::InvalidInput);
+            }
+            if request.sources().iter().any(|source| {
+                !self
+                    .state
+                    .transcript
+                    .iter()
+                    .any(|line| matches_source(line, source))
+            }) {
+                return Ok(None);
+            }
+            // Optional history is a content-independent suffix. On pressure,
+            // stop before the oldest optional line; keep mandatory evidence.
+            for line in self
+                .state
+                .transcript
+                .iter()
+                .rev()
+                .filter(|line| {
+                    as_of_ms.saturating_sub(line.at_ms) < HISTORY_MS
+                        && self.cues_after_ms.is_none_or(|after| line.at_ms > after)
+                        && grant.after_ms.is_none_or(|after| line.at_ms > after)
+                })
+                .take(HISTORY_LINES)
+            {
+                if request
+                    .sources()
+                    .iter()
+                    .any(|source| matches_source(line, source))
+                {
+                    continue;
+                }
+                if request.sources().len() == HISTORY_LINES {
+                    break;
+                }
+                let mut trial = request.sources().to_vec();
+                trial.push(transcript_source(line));
+                trial.sort_by_key(source_time);
+                // Existing per-source/count/content limits apply too. Optional
+                // context pressure keeps the shorter suffix, never a partial line.
+                let Ok(next) = make_request(trial) else { break };
+                if next.prompt_input()?.len() > HISTORY_INPUT_BYTES {
+                    break;
+                }
+                request = next;
+            }
+            let mut ordered = request.sources().to_vec();
+            ordered.sort_by_key(source_time);
+            request = make_request(ordered)?;
+        }
+        Ok(Some(request))
     }
 
     /// Only newly accepted eligible speech requests work. Multiple notifications
@@ -632,8 +702,9 @@ impl Engine {
 
     fn poll_pending_evaluation(&mut self) {
         // Compared as of when it was sent: new speech, a changed cue, notes,
-        // name or focus still make the reply stale, but a line passing 18 s
-        // while the model answers does not. Applying it still needs a cited
+        // name or focus still make the reply stale, but a line passing the
+        // fresh/history age boundary while the model answers does not.
+        // Applying it still needs a cited
         // line that is fresh now.
         let sent_at_ms = self
             .evaluation
@@ -1178,6 +1249,7 @@ mod lab_tests;
 
 #[cfg(test)]
 mod tests {
+    mod history_tests;
     use super::*;
     use crate::cue_evaluator::{Cancellation, Evaluator, Failure};
     use std::{
