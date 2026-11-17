@@ -111,7 +111,7 @@ function FloatingQuestion() {
         if (disposed) unlisten();
         else stop = unlisten;
       })
-      // Without an answer the bar stays on top, where it was before.
+      // If the page cannot listen at all, the bar stays on top.
       .catch(() => {});
     return () => {
       disposed = true;
