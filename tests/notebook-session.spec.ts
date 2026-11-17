@@ -361,4 +361,11 @@ test('a live launch says where audio goes in Settings, offers no speech model, a
   await expect(session(page).getByRole('alert')).toHaveText(
     'Transcription by Deepgram stopped: the lab run ended, so audio stopped being sent. The live session ended; nothing fell back to another transcription service.',
   );
+  await publish({
+    status: 'ended',
+    transcription: { provider: 'Deepgram', stopped: 'stalled' },
+  });
+  await expect(session(page).getByRole('alert')).toHaveText(
+    'Transcription by Deepgram stopped: the connection stopped responding. The live session ended; nothing fell back to another transcription service.',
+  );
 });
