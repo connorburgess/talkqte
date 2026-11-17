@@ -382,7 +382,8 @@ fn cloud_feed<A: Access>(runtime: A, session: u64, control: &Control, opener: Op
     let notice = runtime.clone();
     let keep = runtime.clone();
     let dropped = runtime.clone();
-    CloudFeed::new(
+    let reconnected = runtime.clone();
+    let feed = CloudFeed::new(
         session,
         1,
         opener,
@@ -402,6 +403,13 @@ fn cloud_feed<A: Access>(runtime: A, session: u64, control: &Control, opener: Op
     .on_dropped(move || {
         dropped.with(|runtime| runtime.engine.cloud_transcription_dropped(session));
     })
+    .on_reconnect(move |lost_ms| {
+        reconnected.with(|runtime| {
+            runtime
+                .engine
+                .cloud_transcription_reconnected(session, lost_ms)
+        });
+    })
     // The pump then cancels the source, which ends the session; the session
     // keeps the reason for the notebook to show.
     .on_failure(move |failure| {
@@ -410,7 +418,10 @@ fn cloud_feed<A: Access>(runtime: A, session: u64, control: &Control, opener: Op
                 .engine
                 .cloud_transcription_stopped(session, failure.code())
         });
-    })
+    });
+    // One replacement stream at a time after a connection failure, under
+    // the same approval, session and launch budget.
+    feed.with_reopener(crate::transcription::cloud::reopener().ok())
 }
 
 /// Delivers a line only while this source is attached to the session; a

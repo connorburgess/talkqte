@@ -365,6 +365,12 @@ test('a cloud launch says where audio goes in Settings, needs no speech model, a
   const publish = (value: Record<string, unknown>) =>
     page.evaluate((value) => window.liveTest.publish(value as never), value);
   await publish({
+    transcription: { provider: 'Deepgram', reconnects: 1, lostMs: 2_400 },
+  });
+  await expect(session(page)).toContainText(
+    'Transcription by Deepgram reconnected once after a connection problem; about 2 s of speech was not transcribed.',
+  );
+  await publish({
     transcription: { provider: 'Deepgram', droppedAudio: true },
   });
   await expect(session(page)).toContainText(
