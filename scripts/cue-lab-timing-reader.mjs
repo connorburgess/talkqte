@@ -276,6 +276,21 @@ export function watchLabTiming({
         audio_ms: value.audio_ms,
         session: value.session,
       });
+    } else if (value.event === 'user_name_set') {
+      // Whether the app's name setting is in effect for a session (#363):
+      // a session and a boolean only; the name is never in the row.
+      if (
+        typeof value.set !== 'boolean' ||
+        (sourceObservation === 'v1'
+          ? !canonicalSession(value.session)
+          : !Number.isSafeInteger(value.session) || value.session < 0)
+      )
+        throw gateFailure('protocol');
+      onEvent({
+        event: 'user_name_set',
+        session: value.session,
+        set: value.set,
+      });
     } else if (value.event === 'source_problem') {
       // The native source failed (for example the captured application
       // went away). Its fixed label and OS code are passed on so the run can

@@ -1270,6 +1270,35 @@ test("the app's liveness stop is reported as a stalled stream", () => {
   assert.deepEqual([s.stopState, s.stopCode], ['stopped', 'stalled']);
 });
 
+test("the app's name setting row is imported as a boolean, never a name", () => {
+  const rows = cloudRows();
+  rows.splice(1, 0, {
+    event: 'user_name_set',
+    session: '2',
+    set: true,
+    name: 'Fictional Freya',
+    mono_ms: 1001,
+  });
+  const events = importNativeRows(rows, {
+    runId: manifest().runId,
+    artifactId: 'native',
+    clockId: 'audio',
+  });
+  const named = events.filter((e) => e.stage === 'settings.user-name');
+  assert.deepEqual(
+    named.map((e) => e.payload),
+    [{ userNameSet: true }],
+  );
+  assert.equal(JSON.stringify(events).includes('Fictional Freya'), false);
+  assert.equal(
+    JSON.stringify(cloudReport(rows)).includes('Fictional Freya'),
+    false,
+  );
+  const bad = cloudRows();
+  bad.splice(1, 0, { event: 'user_name_set', session: '2', set: 'yes' });
+  assert.throws(() => cloudReport(bad));
+});
+
 test('malformed transcription rows and settings are refused, never guessed', () => {
   for (const row of [
     { event: 'stt_state', session: '2', state: 'paused', audio_ms: 0 },

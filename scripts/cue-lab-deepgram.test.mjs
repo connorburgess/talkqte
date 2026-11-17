@@ -26,6 +26,7 @@ import {
   readDeepgramKeyFile,
 } from './cue-lab-deepgram.mjs';
 import {
+  isLabUserName,
   prepareLabFixtureLauncher,
   removeStaleTranscriptionTokens,
 } from './cue-lab-launcher.mjs';
@@ -210,11 +211,12 @@ async function launchCloud(
   t,
   fixtureCase,
   grant,
-  { minuteCap = 5, reconnect } = {},
+  { minuteCap = 5, reconnect, userName } = {},
 ) {
   const launcher = prepareLabFixtureLauncher({
     fixtureCase,
     selection: apiSelection,
+    ...(userName === undefined ? {} : { userName }),
     transcription: {
       backend: 'deepgram',
       minuteCap,
@@ -367,6 +369,73 @@ for (const [name, fixtureCase, reconnect] of [
     launcher.close();
     assert.equal(existsSync(join(launcher.directory, 'stt-token')), false);
   });
+
+test("the listener's name reaches the app only as its name setting, and the app's row says it was in effect", async (t) => {
+  const api = await fakeGrant();
+  t.after(api.close);
+  const { launcher, owner, seen } = await launchCloud(
+    t,
+    'cloud-transcription',
+    await mint(api),
+    { userName: 'Curtis' },
+  );
+  assert.equal(seen().TALKQTE_DEV_USER_NAME, 'Curtis');
+  assert.equal(seen().args.includes('Curtis'), false);
+  await waitFor(() => launcher.userName.setAtStart !== null);
+  assert.deepEqual(
+    { ...launcher.userName },
+    { requested: true, setAtStart: true, session: 2, changes: 0, held: true },
+  );
+  // Evidence is a boolean, never the name.
+  assert.equal(JSON.stringify(launcher.userName).includes('Curtis'), false);
+  assert.deepEqual(await owner.stop(), { released: true });
+});
+
+test('without a name the launch sets none, and the row says so', async (t) => {
+  const api = await fakeGrant();
+  t.after(api.close);
+  const { launcher, owner, seen } = await launchCloud(
+    t,
+    'cloud-transcription',
+    await mint(api),
+  );
+  assert.equal(Object.hasOwn(seen(), 'TALKQTE_DEV_USER_NAME'), false);
+  await waitFor(() => launcher.userName.setAtStart !== null);
+  assert.deepEqual(
+    { ...launcher.userName },
+    { requested: false, setAtStart: false, session: 2, changes: 0, held: null },
+  );
+  assert.deepEqual(await owner.stop(), { released: true });
+});
+
+test("a name the app's own rule would refuse is refused before launch", () => {
+  for (const userName of [
+    '',
+    ' Curtis',
+    'Curtis ',
+    'Robin<script>',
+    '- -',
+    'x'.repeat(41),
+    7,
+  ])
+    assert.throws(
+      () =>
+        prepareLabFixtureLauncher({
+          fixtureCase: 'normal',
+          selection: apiSelection,
+          transcription: {
+            backend: 'deepgram',
+            minuteCap: 5,
+            grant: { writeTokenFile() {} },
+          },
+          userName,
+        }),
+      undefined,
+      JSON.stringify(userName),
+    );
+  for (const userName of ['Curtis', 'Anne-Marie', "D'Arcy", 'José', 'Mary Ann'])
+    assert.equal(isLabUserName(userName), true, userName);
+});
 
 test('reconnect is only `true` and only on a model run with a grant', () => {
   for (const reconnect of [false, 'yes', 1])
