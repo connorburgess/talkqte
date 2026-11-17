@@ -369,7 +369,8 @@ export function watchLabTiming({
                     if (
                       ((this?.event === 'session' && this.live === true) ||
                         this?.event === 'evaluator' ||
-                        this?.event === 'stt_state') &&
+                        this?.event === 'stt_state' ||
+                        this?.event === 'user_name_set') &&
                       key === 'session'
                     ) {
                       if (!canonicalSession(context?.source))

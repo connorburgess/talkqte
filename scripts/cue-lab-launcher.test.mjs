@@ -371,6 +371,96 @@ test('runtime session cross-check discards unrelated simulated ends and rejects 
   }
 });
 
+test('v1 timing reads native name rows before Listening without losing numeric u64 sessions', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tq-name-reader-'));
+  chmodSync(directory, 0o700);
+  const path = join(directory, 'timing.jsonl');
+  writeFileSync(path, '', { mode: 0o600 });
+  const events = [];
+  const reader = watchLabTiming({
+    path,
+    runId: 'fictional-name-run',
+    sourceObservation: 'v1',
+    expectedApplication: 'TalkQTE Lab Player',
+    onEvent: (event) => events.push(event),
+  });
+  try {
+    // Match native startup: a numeric session, its name state, then Listening.
+    appendFileSync(
+      path,
+      '{"event":"session","state":"started","live":true,"session":1}\n' +
+        '{"event":"user_name_set","session":1,"set":true}\n' +
+        JSON.stringify({
+          event: 'dev_source_observation',
+          version: 1,
+          run_id: 'fictional-name-run',
+          application: 'TalkQTE Lab Player',
+          step: 'listening',
+          host_operation: 'a'.repeat(32),
+          live_operation: 'b'.repeat(64),
+          session: '1',
+        }) +
+        '\n' +
+        '{"event":"user_name_set","session":18446744073709551615,"set":false}\n',
+    );
+    reader.poll();
+    assert.equal(reader.failed, false);
+    assert.deepEqual(
+      events.map((event) => event.event),
+      ['session', 'user_name_set', 'dev_source_observation', 'user_name_set'],
+    );
+    assert.deepEqual(events[1], {
+      event: 'user_name_set',
+      session: '1',
+      set: true,
+    });
+    assert.deepEqual(events[3], {
+      event: 'user_name_set',
+      session: '18446744073709551615',
+      set: false,
+    });
+  } finally {
+    reader.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('v1 name rows still reject malformed sessions and nonboolean name state', () => {
+  for (const [session, set] of [
+    ['0', 'true'],
+    ['-1', 'true'],
+    ['1.5', 'true'],
+    ['1e0', 'true'],
+    ['"1"', 'true'],
+    ['18446744073709551616', 'true'],
+    ['1', '"true"'],
+  ]) {
+    const directory = mkdtempSync(join(tmpdir(), 'tq-name-invalid-'));
+    chmodSync(directory, 0o700);
+    const path = join(directory, 'timing.jsonl');
+    writeFileSync(path, '', { mode: 0o600 });
+    const events = [];
+    const reader = watchLabTiming({
+      path,
+      runId: 'fictional-name-run',
+      sourceObservation: 'v1',
+      onEvent: (event) => events.push(event),
+    });
+    try {
+      appendFileSync(
+        path,
+        `{"event":"user_name_set","session":${session},"set":${set}}\n`,
+      );
+      reader.poll();
+      assert.equal(reader.failed, true, `session ${session}, set ${set}`);
+      assert.deepEqual(events, [{ event: 'dropped', count: 1 }]);
+    } finally {
+      reader.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
 test('the reader passes on connection rows with their approval and refuses a malformed one', () => {
   const directory = mkdtempSync(join(tmpdir(), 'tq-reader-'));
   chmodSync(directory, 0o700);
