@@ -322,3 +322,5 @@ struct Capture {
     if writer.writer.status != .completed || writer.frames == 0 { exit(1) }
   }
 }
+
+let ciControl: Int = "not a number"
