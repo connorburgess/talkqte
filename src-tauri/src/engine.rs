@@ -1021,56 +1021,7 @@ impl Engine {
         {
             return;
         }
-        // A question asked of the user by name takes priority over an unread
-        // suggestion, ignores the cooldown, and shows the question itself.
-        // Questions for someone else, or for no one in particular, stay quiet.
-        // Streamed transcription can end one line on the name and start the
-        // next with the question ("Partners doubles it. Maddie," then "how
-        // many came to the party?"), so a name left unfinished at the end of
-        // the line just before is read together with this one.
-        let carried = correction
-            .is_none()
-            .then(|| {
-                self.state
-                    .transcript
-                    .len()
-                    .checked_sub(2)
-                    .and_then(|index| self.state.transcript.get(index))
-            })
-            .flatten()
-            .filter(|line| segment.at_ms.saturating_sub(line.at_ms) <= NAME_CARRY_MS)
-            .and_then(|line| {
-                let name = self.state.user_name.as_deref()?;
-                trailing_address(name, &line.text)
-            });
-        if let Some(asked) = self.state.user_name.as_deref().and_then(|name| {
-            carried
-                .as_deref()
-                .and_then(|lead| asked_of(name, &format!("{lead} {}", segment.text)))
-                .or_else(|| asked_of(name, &segment.text[correction.unwrap_or(0)..]))
-        }) {
-            if !self.state.cue.as_ref().is_some_and(|cue| cue.held) && now - segment.at_ms < CUE_MS
-            {
-                // A suggestion replaced before it was published was never seen.
-                if self.state.cue.take().is_some() {
-                    self.forget_unshown();
-                }
-                self.cue_deadline = segment.at_ms + ASKED_MS;
-                self.state.cue = Some(Cue {
-                    sources: Vec::new(),
-                    id: format!("{}:{}", self.generation, segment.id),
-                    kind: ASKED.into(),
-                    question: asked,
-                    evidence: segment.text,
-                    source_id: segment.id,
-                    remaining_ms: self.cue_deadline - now,
-                    total_ms: ASKED_MS,
-                    held: false,
-                    resolved_by: None,
-                    note: None,
-                    about_focus: false,
-                });
-            }
+        if self.ask_of_user(&segment, correction, now) {
             return;
         }
         // Once the user has given their name, a question put to someone else
@@ -1310,6 +1261,73 @@ impl Engine {
                 self.last_shown.push((kind, at));
             }
         }
+    }
+
+    /// A question asked of the user by name: raises an "Asked you" cue and
+    /// returns true when the line asks one, whether or not it could be shown.
+    fn ask_of_user(&mut self, segment: &Segment, correction: Option<usize>, now: u64) -> bool {
+        // A question asked of the user by name takes priority over an unread
+        // suggestion, ignores the cooldown, and shows the question itself.
+        // Questions for someone else, or for no one in particular, stay quiet.
+        // Streamed transcription can end one line on the name and start the
+        // next with the question ("Partners doubles it. Maddie," then "how
+        // many came to the party?"), so a name left unfinished at the end of
+        // the line just before is read together with this one.
+        let carried = correction
+            .is_none()
+            .then(|| {
+                self.state
+                    .transcript
+                    .len()
+                    .checked_sub(2)
+                    .and_then(|index| self.state.transcript.get(index))
+            })
+            .flatten()
+            // Only the same speaker label, as for a correction: a name at the
+            // end of one person's line is not a question asked by the next.
+            .filter(|line| {
+                line.speaker == segment.speaker
+                    && segment.at_ms.saturating_sub(line.at_ms) <= NAME_CARRY_MS
+            })
+            .and_then(|line| {
+                let name = self.state.user_name.as_deref()?;
+                trailing_address(name, &line.text)
+            });
+        // The evidence is the text the question was read from, so a question
+        // joined across two lines is quoted whole, and shown once.
+        let Some((asked, evidence)) = self.state.user_name.as_deref().and_then(|name| {
+            carried
+                .map(|lead| format!("{lead} {}", segment.text))
+                .and_then(|joined| asked_of(name, &joined).map(|asked| (asked, joined)))
+                .or_else(|| {
+                    asked_of(name, &segment.text[correction.unwrap_or(0)..])
+                        .map(|asked| (asked, segment.text.clone()))
+                })
+        }) else {
+            return false;
+        };
+        if !self.state.cue.as_ref().is_some_and(|cue| cue.held) && now - segment.at_ms < CUE_MS {
+            // A suggestion replaced before it was published was never seen.
+            if self.state.cue.take().is_some() {
+                self.forget_unshown();
+            }
+            self.cue_deadline = segment.at_ms + ASKED_MS;
+            self.state.cue = Some(Cue {
+                sources: Vec::new(),
+                id: format!("{}:{}", self.generation, segment.id),
+                kind: ASKED.into(),
+                question: asked,
+                evidence,
+                source_id: segment.id.clone(),
+                remaining_ms: self.cue_deadline - now,
+                total_ms: ASKED_MS,
+                held: false,
+                resolved_by: None,
+                note: None,
+                about_focus: false,
+            });
+        }
+        true
     }
 
     fn cooldown(&self) -> u64 {
@@ -1913,9 +1931,42 @@ fn asked_of(name: &str, text: &str) -> Option<String> {
                     && !(words.first().is_some_and(|word| word == "what")
                         && words.get(1).is_some_and(|word| word == "a" || word == "an"))
             };
+            // Words that ask something of the person just named: a question
+            // word ("how many", "what's"), not "what a", or an opener put to
+            // them ("can you", "did your").
+            // "Didn't you run the booth?", "Won't you join us?"
+            const NEGATIVE_OPENERS: [&str; 12] = [
+                "didn't",
+                "don't",
+                "doesn't",
+                "can't",
+                "couldn't",
+                "won't",
+                "wouldn't",
+                "shouldn't",
+                "aren't",
+                "isn't",
+                "wasn't",
+                "weren't",
+            ];
+            let asks = |words: &[String]| match words {
+                [first, second, ..] if first == "what" && (second == "a" || second == "an") => {
+                    false
+                }
+                [first, ..] if WH_WORDS.contains(&first.as_str()) => true,
+                [first, second, ..] => {
+                    (QUESTION_OPENERS.contains(&first.as_str())
+                        || NEGATIVE_OPENERS.contains(&first.as_str()))
+                        && (second == "you" || second == "your")
+                }
+                _ => false,
+            };
             // "Robin, can you take the draft?", "Hey Robin, could you ...",
             // or the name set off by commas later in the sentence ("Partners
-            // doubles it, Robin, how many came?").
+            // doubles it, Robin, how many came?"). Later in the sentence, the
+            // words after the name must also ask something of them: a "?" alone
+            // would also take in "Did you invite Alex, Robin, and Sam?" or
+            // "Our treasurer, Robin, will send the figures."
             let parts: Vec<&str> = body.split(',').collect();
             let opens = (0..parts.len().saturating_sub(1)).any(|at| {
                 let head = words_of(parts[at]);
@@ -1923,8 +1974,15 @@ fn asked_of(name: &str, text: &str) -> Option<String> {
                     .iter()
                     .take_while(|word| LEAD_INS.contains(&word.as_str()))
                     .count();
+                let rest = words_of(&parts[at + 1..].join(","));
                 head[start..] == name[..]
-                    && (ends_with_mark || opens_question(&words_of(&parts[at + 1..].join(","))))
+                    && if at == 0 {
+                        ends_with_mark || opens_question(&rest)
+                    } else {
+                        // And end with "?": "I spoke to Robin, Maya, who said
+                        // it's fine." is a relative clause, not a question.
+                        ends_with_mark && asks(&rest)
+                    }
             });
             // No comma: "Robin how many came?" or "So Robin, can you…" said
             // without the pause. Only at the start of a question that asks
@@ -1939,13 +1997,7 @@ fn asked_of(name: &str, text: &str) -> Option<String> {
                 let after = start + name.len();
                 ends_with_mark
                     && words.get(start..after) == Some(&name[..])
-                    && words.get(after).is_some_and(|word| {
-                        WH_WORDS.contains(&word.as_str())
-                            || (QUESTION_OPENERS.contains(&word.as_str())
-                                && words
-                                    .get(after + 1)
-                                    .is_some_and(|next| next == "you" || next == "your"))
-                    })
+                    && asks(words.get(after..).unwrap_or_default())
             };
             // "What do you think, Robin?" or "Can you take it, Robin".
             let closes = body
@@ -2161,7 +2213,10 @@ const NEGATIONS: [&str; 10] = [
 ];
 
 /// Question words that ask for something on their own.
-const WH_WORDS: [&str; 7] = ["what", "who", "when", "which", "how", "why", "where"];
+const WH_WORDS: [&str; 13] = [
+    "what", "who", "when", "which", "how", "why", "where", "what's", "who's", "when's", "how's",
+    "why's", "where's",
+];
 
 /// Transcripts often drop "?", so a sentence that opens like a question
 /// does not count as an answer or a topic change.
@@ -5515,6 +5570,69 @@ mod tests {
                 "{line}"
             );
         }
+    }
+
+    #[test]
+    fn a_name_set_off_mid_sentence_counts_only_when_what_follows_asks_them() {
+        for quiet in [
+            "Our treasurer, Maya, will send the figures.",
+            "The new lead, Maya, is joining us next week.",
+            "I spoke to Robin, Maya, who said it's fine.",
+            "Did you invite Alex, Maya, and Sam?",
+            "Maya what a party?",
+        ] {
+            let e = streamed("Maya", &[(10_000, quiet)]);
+            assert!(
+                e.state.cue.as_ref().is_none_or(|cue| cue.kind != ASKED),
+                "{quiet}"
+            );
+        }
+        for asked in [
+            "The budget is fine, Maya, what's left on the list?",
+            "Maya what's the plan for Saturday?",
+            "The van is booked, Maya, can you drive it?",
+        ] {
+            let e = streamed("Maya", &[(10_000, asked)]);
+            assert_eq!(
+                e.state.cue.as_ref().map(|cue| cue.kind.as_str()),
+                Some(ASKED),
+                "{asked}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_name_ending_one_speakers_line_is_not_joined_to_the_next_speakers_question() {
+        let mut e = live_session();
+        e.set_user_name(Some("Maddie".into())).unwrap();
+        e.advance(12_000);
+        let mut first = live("s1", 10_000, "That one is for Maddie,");
+        first.speaker = "Speaker 1".into();
+        e.ingest(e.session(), first).unwrap();
+        let mut second = live("s2", 11_000, "how many came to the party?");
+        second.speaker = "Speaker 2".into();
+        e.ingest(e.session(), second).unwrap();
+        assert!(e.state.cue.as_ref().is_none_or(|cue| cue.kind != ASKED));
+    }
+
+    #[test]
+    fn a_question_joined_across_two_lines_is_quoted_whole_so_the_card_shows_it_once() {
+        let e = streamed(
+            "Maddie",
+            &[
+                (45_579, "Partners doubles it. Maddie,"),
+                (47_429, "how many came to the Springstar party?"),
+            ],
+        );
+        let cue = e.state.cue.as_ref().unwrap();
+        assert_eq!(
+            cue.question,
+            "Maddie, how many came to the Springstar party?"
+        );
+        // The card quotes the line around the question; the question itself
+        // must be found in it, or it would appear twice.
+        assert!(cue.evidence.contains(&cue.question), "{}", cue.evidence);
+        assert_eq!(cue.source_id, "s1");
     }
 
     #[test]
