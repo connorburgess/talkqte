@@ -136,6 +136,18 @@ pub enum Event {
         failure: Option<&'static str>,
         elapsed_ms: u64,
     },
+    /// A model's `show` was not displayed: `slot` (a cue was on screen),
+    /// `asked` (it cites a line that already raised "Asked you"),
+    /// `expired_source` (its newest cited line is 18 s old), `cooldown`,
+    /// `focus` (Focused and not about a focus line), `repeat` (the same cue
+    /// within two minutes) or `stale` (no cited line is fresh speech). No
+    /// cue text.
+    CueDropped {
+        session: u64,
+        request: u64,
+        reason: &'static str,
+        elapsed_ms: u64,
+    },
     /// A cue is in the snapshot sent to the companion window. The log cannot
     /// see when the window paints it.
     CuePublished {
@@ -686,6 +698,12 @@ mod tests {
                 failure: Some("timeout"),
                 elapsed_ms: 8_200,
             },
+            Event::CueDropped {
+                session: 3,
+                request: 2,
+                reason: "cooldown",
+                elapsed_ms: 9_000,
+            },
         ]
         .iter()
         .map(|event| serde_json::from_str(&line(event, 1, 2)).unwrap())
@@ -696,6 +714,10 @@ mod tests {
         assert_eq!(lines[1]["through_segment"], "w4");
         assert_eq!(lines[2]["event"], "evaluation_result");
         assert_eq!(lines[2]["failure"], "timeout");
+        assert_eq!(lines[3]["event"], "cue_dropped");
+        assert_eq!(lines[3]["request"], 2);
+        assert_eq!(lines[3]["reason"], "cooldown");
+        assert!(lines[3].get("cue").is_none() && lines[3].get("question").is_none());
         for value in &lines {
             assert_eq!(value["wall_ms"], 1);
             assert_eq!(value["mono_ms"], 2);

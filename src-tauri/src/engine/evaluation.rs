@@ -700,6 +700,9 @@ impl Engine {
             // Prior notes alone cannot raise a cue or establish that the
             // current conversation answered/corrected it. Require a fresh
             // cited speech anchor, not just fresh speech elsewhere in input.
+            if decision.action == Action::Show {
+                self.drop_show(number, "stale");
+            }
             return;
         }
         match decision.action {
@@ -725,15 +728,38 @@ impl Engine {
                         .strip_prefix("transcript:")
                         .is_some_and(|id| self.asked_lines.iter().any(|line| line == id))
                 });
-                if self.state.cue.is_some()
-                    || from_asked_line
-                    || now.saturating_sub(at_ms) >= CUE_MS
-                    || at_ms < self.cooldown_until
-                    || (matches!(self.state.sensitivity, Sensitivity::Focused) && !about_focus)
-                    || self.last_shown.iter().any(|(key, shown)| {
-                        *key == repeat_key && now.saturating_sub(*shown) < REPEAT_MS
+                // A fresh cited line that puts a question to the user by
+                // name, but raised no "Asked you" (a cue was being read),
+                // skips the pause, unless a cue citing it was dismissed.
+                let asked_of_user = request.user_name().is_some_and(|name| {
+                    cited.iter().any(|source| {
+                        source_time(source).is_some_and(|at| now.saturating_sub(at) < CUE_MS)
+                            && !self.dismissed_sources.contains(&source.id)
+                            && super::asked_of(name, &source.text).is_some()
                     })
-                {
+                });
+                // The pause runs from when the last cue ended to now, not to
+                // when the cited line started: a line said just before it
+                // ended may still raise a cue once it is over.
+                let dropped = if self.state.cue.is_some() {
+                    Some("slot")
+                } else if from_asked_line {
+                    Some("asked")
+                } else if now.saturating_sub(at_ms) >= CUE_MS {
+                    Some("expired_source")
+                } else if now < self.model_pause_until && !asked_of_user {
+                    Some("cooldown")
+                } else if matches!(self.state.sensitivity, Sensitivity::Focused) && !about_focus {
+                    Some("focus")
+                } else if self.last_shown.iter().any(|(key, shown)| {
+                    *key == repeat_key && now.saturating_sub(*shown) < REPEAT_MS
+                }) {
+                    Some("repeat")
+                } else {
+                    None
+                };
+                if let Some(reason) = dropped {
+                    self.drop_show(number, reason);
                     return;
                 }
                 // Do not grant a fresh 18 seconds to a late response.
@@ -824,6 +850,7 @@ impl Engine {
                         crate::cue_evaluator::CueEnd::Withdrawn
                     }));
                     self.cooldown_until = self.state.elapsed_ms.saturating_add(self.cooldown());
+                    self.pause_model_after(self.state.elapsed_ms, false);
                 }
             }
         }
@@ -837,6 +864,25 @@ impl Engine {
             },
         );
         self.changed();
+    }
+
+    /// A model's `show` that is not displayed, with a fixed reason and no
+    /// cue text: `slot`, `asked` (it cites a line that raised "Asked you"),
+    /// `expired_source`, `cooldown`, `focus`, `repeat`, or `stale` when no
+    /// cited line was fresh speech.
+    fn drop_show(&mut self, request: u64, reason: &'static str) {
+        #[cfg(test)]
+        {
+            self.last_dropped = Some(reason);
+        }
+        if crate::timing_log::enabled() {
+            crate::timing_log::record(crate::timing_log::Event::CueDropped {
+                session: self.generation,
+                request,
+                reason,
+                elapsed_ms: self.state.elapsed_ms,
+            });
+        }
     }
 
     pub(super) fn reconcile_evaluated_sources(&mut self) -> bool {
@@ -863,6 +909,7 @@ impl Engine {
             self.state.cue = None;
             self.evaluated_cue = None;
             self.cooldown_until = self.state.elapsed_ms.saturating_add(self.cooldown());
+            self.pause_model_after(self.state.elapsed_ms, false);
             return true;
         }
         false
@@ -1058,6 +1105,29 @@ mod tests {
                     },
                 )
                 .unwrap();
+        }
+        /// A line said at `at_ms` that reaches the engine at `arrives_ms`, as a
+        /// streamed final does, a second or more after it began.
+        fn said(&mut self, at_ms: u64, arrives_ms: u64, text: &str) {
+            self.until(arrives_ms);
+            self.next_line += 1;
+            self.engine
+                .ingest(
+                    self.engine.session(),
+                    Segment {
+                        id: format!("line-{}", self.next_line),
+                        at_ms,
+                        speaker: "Speaker".into(),
+                        text: text.into(),
+                    },
+                )
+                .unwrap();
+        }
+        /// Moves the session clock forward to `at_ms`.
+        fn until(&mut self, at_ms: u64) {
+            let now = self.engine.state.elapsed_ms;
+            assert!(at_ms >= now, "the clock only moves forward");
+            self.engine.advance(at_ms - now);
         }
         pub(super) fn request(&self) -> Request {
             self.requests
@@ -2570,6 +2640,136 @@ mod tests {
         h.engine.inspect_cue(&id).unwrap();
         h.line("Curtis, can you check the float?");
         assert_eq!(h.engine.state.cue.as_ref().unwrap().id, id);
+    }
+
+    /// Lab run B12's timeline, in session milliseconds, with fictional
+    /// words: a cue from a line at 34.47 s expires at 52.47 s; the next
+    /// question was said at 50.82 s and reached the engine at 54.42 s; the
+    /// model's show for it came back at 57.34 s.
+    fn b12_until_the_question(h: &mut Harness, dismissed: bool) {
+        h.said(34_470, 36_000, "Drop the prizes at the usual place.");
+        h.request();
+        h.reply(
+            "show",
+            Some("Where is the usual place?"),
+            &["transcript:line-1"],
+        );
+        let first = h.engine.state.cue.as_ref().unwrap().id.clone();
+        if dismissed {
+            h.until(52_000);
+            h.engine.respond(&first, Response::Dismiss).unwrap();
+        } else {
+            h.until(52_471);
+            assert!(h.engine.state.cue.is_none(), "expired");
+        }
+        h.said(
+            50_820,
+            54_420,
+            "Three for ten sells better, didn't you run the booth before?",
+        );
+        h.request();
+        h.until(57_340);
+    }
+
+    #[test]
+    fn after_a_cue_expires_a_question_said_just_before_shows_after_a_short_pause() {
+        let mut h = Harness::new();
+        b12_until_the_question(&mut h, false);
+        h.reply(
+            "show",
+            Some("Did you run the booth?"),
+            &["transcript:line-2"],
+        );
+        // Before: dropped until 62.47 s, because the line began before the
+        // 10 s cooldown ended; shown only at 71.75 s.
+        let cue = h.engine.state.cue.as_ref().expect("shown at request 13");
+        assert_eq!(cue.question, "Did you run the booth?");
+        // Its lifetime still runs from when the line was said.
+        assert_eq!(h.engine.cue_deadline, 50_820 + CUE_MS);
+    }
+
+    #[test]
+    fn after_a_dismissal_the_full_pause_holds_from_when_it_was_dismissed() {
+        let mut h = Harness::new();
+        b12_until_the_question(&mut h, true);
+        h.reply(
+            "show",
+            Some("Did you run the booth?"),
+            &["transcript:line-2"],
+        );
+        assert!(h.engine.state.cue.is_none());
+        assert_eq!(h.engine.last_dropped, Some("cooldown"));
+        // A line said 50 ms before the pause ended, answered after it: shown.
+        h.said(61_950, 64_000, "The caterer wants the menu Friday.");
+        h.request();
+        h.until(66_680);
+        h.reply("show", Some("Who sends the menu?"), &["transcript:line-3"]);
+        assert!(h.engine.state.cue.is_some());
+    }
+
+    #[test]
+    fn a_model_cue_citing_a_question_to_the_user_by_name_skips_the_pause_once() {
+        // With the name set, B12's question raises "Asked you" itself.
+        let mut h = Harness::named("Curtis");
+        h.said(34_470, 36_000, "Drop the prizes at the usual place.");
+        h.request();
+        h.reply(
+            "show",
+            Some("Where is the usual place?"),
+            &["transcript:line-1"],
+        );
+        h.until(52_471);
+        h.said(
+            50_820,
+            54_420,
+            "Three for ten sells better, Curtis, didn't you run the booth before?",
+        );
+        assert_eq!(
+            h.engine.state.cue.as_ref().unwrap().kind,
+            super::super::ASKED
+        );
+        // When a cue being read kept "Asked you" off the screen, the model's
+        // cue from that line skips the pause after it, once.
+        let mut h = Harness::named("Curtis");
+        h.said(40_000, 41_000, "Drop the prizes at the usual place.");
+        h.request();
+        h.reply(
+            "show",
+            Some("Where is the usual place?"),
+            &["transcript:line-1"],
+        );
+        let first = h.engine.state.cue.as_ref().unwrap().id.clone();
+        h.engine.inspect_cue(&first).unwrap();
+        h.said(
+            50_820,
+            54_420,
+            "Three for ten sells better, Curtis, didn't you run the booth before?",
+        );
+        assert_eq!(h.engine.state.cue.as_ref().unwrap().id, first, "held");
+        h.request();
+        h.reply("quiet", None, &["transcript:line-2"]);
+        h.until(55_000);
+        h.engine.respond(&first, Response::Dismiss).unwrap();
+        h.said(55_500, 56_500, "Prices go on the sign.");
+        h.request();
+        h.until(57_340);
+        h.reply(
+            "show",
+            Some("Did you run the booth?"),
+            &["transcript:line-2", "transcript:line-3"],
+        );
+        let shown = h.engine.state.cue.clone().expect("skips the full pause");
+        h.engine.respond(&shown.id, Response::Dismiss).unwrap();
+        h.said(58_000, 59_000, "Tickets are five each.");
+        h.request();
+        h.until(59_780);
+        h.reply(
+            "show",
+            Some("Did you run the booth before?"),
+            &["transcript:line-2", "transcript:line-4"],
+        );
+        assert!(h.engine.state.cue.is_none(), "not again once dismissed");
+        assert_eq!(h.engine.last_dropped, Some("cooldown"));
     }
 
     #[test]
