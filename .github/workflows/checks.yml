@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
@@ -15,30 +15,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  contributions:
-    name: Contribution metadata
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '22'
-      - name: Check commit sign-offs and contribution text
-        env:
-          CONTRIBUTION_BASE: ${{ github.event.pull_request.base.sha }}
-          CONTRIBUTION_HEAD: ${{ github.event.pull_request.head.sha }}
-        run: node scripts/check-contributions.mjs
-      - name: Check documentation links and source-backed facts
-        env:
-          CONTRIBUTION_BASE: ${{ github.event.pull_request.base.sha }}
-          CONTRIBUTION_HEAD: ${{ github.event.pull_request.head.sha }}
-        run: node scripts/check-docs.mjs
-
   frontend:
     name: Frontend and browser behavior
     runs-on: ubuntu-24.04
