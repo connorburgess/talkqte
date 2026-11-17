@@ -38,20 +38,12 @@ pub(crate) fn apply(engine: &mut Engine) {
 
 /// Why a live session cannot start, when the setting was given but cannot
 /// be used, so the lab learns of it before any approval.
-#[cfg(any(
-    feature = "local-whisper",
-    all(target_os = "macos", feature = "native-audio-spike"),
-    test
-))]
+#[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
 pub(crate) fn refusal() -> Option<&'static str> {
     refusal_for(NAME.get())
 }
 
-#[cfg(any(
-    feature = "local-whisper",
-    all(target_os = "macos", feature = "native-audio-spike"),
-    test
-))]
+#[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
 fn refusal_for(setting: Option<&Result<Option<String>, ()>>) -> Option<&'static str> {
     matches!(setting, Some(Err(()))).then_some("The developer name setting is not usable.")
 }
