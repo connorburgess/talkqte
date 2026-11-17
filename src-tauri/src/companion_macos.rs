@@ -24,8 +24,9 @@ pub fn configure(mut context: tauri::Context<tauri::Wry>) -> tauri::Context<taur
 
 /// Where the companion goes on every Space, including over other apps'
 /// full-screen windows: joining all Spaces, as an auxiliary to full-screen
-/// windows, and out of the Cmd-` window cycle. It stays non-activating, so
-/// showing it never takes focus from the app the person is using.
+/// windows, and out of the Cmd-` window cycle. It is an ordinary window
+/// that cannot take focus (`focusable: false`), not a non-activating panel:
+/// showing it is meant not to take focus, but a click may activate TalkQTE.
 const ON_EVERY_SPACE: NSWindowCollectionBehavior = NSWindowCollectionBehavior::CanJoinAllSpaces
     .union(NSWindowCollectionBehavior::FullScreenAuxiliary)
     .union(NSWindowCollectionBehavior::IgnoresCycle);
@@ -66,7 +67,9 @@ pub fn set_frame(
     let primary = window.primary_monitor().ok().flatten().ok_or(())?;
     let primary_height = f64::from(primary.size().height) / primary.scale_factor();
     let rect = appkit_rect(frame, scale, primary_height);
-    // SAFETY: Tauri owns this NSWindow, and `refresh` calls this on the main thread.
+    // Off the main thread, fall back to Tauri's own calls, which dispatch.
+    MainThreadMarker::new().ok_or(())?;
+    // SAFETY: Tauri owns this NSWindow, and this is the main thread.
     let native = unsafe { &*window.ns_window().map_err(|_| ())?.cast::<NSWindow>() };
     native.setFrame_display(rect, true);
     Ok(())
