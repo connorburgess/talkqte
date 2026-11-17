@@ -42,6 +42,9 @@ pub enum SttFailure {
     /// The lab's cue run ended (for example on Pause), which ends the
     /// session's approval in the lab.
     LabEnded,
+    /// The connection stopped keeping up: nothing came back while audio was
+    /// going out, writes took too long, or audio kept being dropped.
+    Stalled,
 }
 
 impl SttFailure {
@@ -57,6 +60,7 @@ impl SttFailure {
             Self::Settings => "settings",
             Self::Withdrawn => "withdrawn",
             Self::LabEnded => "lab_ended",
+            Self::Stalled => "stalled",
         }
     }
 }
@@ -155,6 +159,11 @@ pub struct CloudStats {
 
 type Sink = Box<dyn FnMut(u64, Segment) -> Result<(), String> + Send>;
 
+/// Audio dropped for a full send queue within this window...
+const DROP_WINDOW_MS: u64 = 5_000;
+/// ...that ends the stream as `stalled`.
+const DROP_LIMIT_MS: u64 = 1_000;
+
 /// Feeds one capture source's audio to one stream and its finals to the
 /// engine. Before approval nothing is sent: audio is discarded, not queued.
 pub struct CloudFeed {
@@ -173,6 +182,9 @@ pub struct CloudFeed {
     on_failure: Option<Box<dyn FnMut(SttFailure) + Send>>,
     on_dropped: Option<Box<dyn FnMut() + Send>>,
     keep: Option<Box<dyn FnMut() -> Option<SttFailure> + Send>>,
+    /// Audio dropped for a full queue within the current window of
+    /// `DROP_WINDOW_MS`: (window start on the session clock, ms dropped).
+    drops: (u64, u64),
     pub stats: CloudStats,
 }
 
@@ -198,6 +210,7 @@ impl CloudFeed {
             on_failure: None,
             on_dropped: None,
             keep: None,
+            drops: (0, 0),
             stats: CloudStats::default(),
         }
     }
@@ -300,6 +313,15 @@ impl CloudFeed {
                     }
                 }
                 self.stats.dropped_samples += samples.len() as u64;
+                // A stream that keeps refusing audio is not keeping up: end
+                // it, rather than drop the rest of the meeting silently.
+                if start_ms.saturating_sub(self.drops.0) > DROP_WINDOW_MS {
+                    self.drops = (start_ms, 0);
+                }
+                self.drops.1 += end_ms.saturating_sub(start_ms);
+                if self.drops.1 >= DROP_LIMIT_MS {
+                    return Err(self.fail(SttFailure::Stalled));
+                }
             }
         }
         self.poll()
@@ -865,6 +887,36 @@ mod tests {
         feed.push(1_200, 1_300, &[0.1; 1_600]).unwrap();
         assert_eq!(*script.sent.lock().unwrap(), vec![800, 1_600]);
         assert_eq!(feed.clock.session_ms(0), Some(1_150));
+    }
+
+    #[test]
+    fn a_stream_that_keeps_refusing_audio_ends_as_stalled() {
+        let script = Script {
+            full: true,
+            ..Script::default()
+        };
+        let mut feed = feed(&script, Arc::new(Mutex::new(true))).0;
+        // Nine 100 ms blocks refused within the window: still going.
+        for n in 0..9 {
+            feed.push(n * 100, n * 100 + 100, &[0.1; 1_600]).unwrap();
+        }
+        // The tenth makes a full second dropped within five: it ends.
+        assert_eq!(
+            feed.push(900, 1_000, &[0.1; 1_600]),
+            Err(SttFailure::Stalled)
+        );
+        assert_eq!(feed.failure(), Some(SttFailure::Stalled));
+        // A drop now and then, spread out, does not end a stream.
+        let mut spread = feed_ok_then_full(&script);
+        for n in 0..6 {
+            let at = n * 6_000;
+            spread.push(at, at + 900, &[0.1; 14_400]).unwrap();
+        }
+        assert_eq!(spread.failure(), None);
+    }
+
+    fn feed_ok_then_full(script: &Script) -> CloudFeed {
+        feed(script, Arc::new(Mutex::new(true))).0
     }
 
     #[test]

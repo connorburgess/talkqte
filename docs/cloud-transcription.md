@@ -67,6 +67,9 @@ if none arrives. The queue holds 128 pushes. For the microphone, which pushes
 pushed as it arrives from the system, in smaller blocks, so the queue holds
 less of it, possibly less than the 10 second wait. Audio that does not fit is
 dropped and reported, as described under [what stops it](#what-stops-it).
+Because more than a second of audio dropped within 5 seconds counts as a
+stalled connection, an application-audio session whose token arrives late in
+the wait can end as `stalled` rather than wait it out.
 
 After approval, each capture source opens one WebSocket stream to
 `wss://api.deepgram.com/v1/listen` and sends:
@@ -105,6 +108,7 @@ model, and only the timing log records it.
 | The send queue is full because the connection fell behind | The audio that does not fit is dropped, not sent later. The session continues, and the notebook says "Some audio was not sent to Deepgram because the connection fell behind; lines from it are missing." |
 | Deepgram refuses the token (401 or 403), the account cannot pay (402), or requests are limited (429) | The session ends with a fixed reason. There is no retry. |
 | The connection drops or a reply cannot be read | The session ends with a fixed reason. |
+| The connection stops keeping up: no reply of any kind for 10 s while audio is going out (after one `Finalize` at 5 s asking for one), one 100 ms frame taking more than 3 s to send, or more than 1 s of audio dropped for a full send queue within 5 s | The stream is closed and the session ends with "the connection stopped responding" (code `stalled`). Audio is sent at most a second at a time between reads, so replies and a close are not left unread while audio is backed up. Any reply counts, including results with no words: in one lab measurement (17 November 2026, 20 s of digital silence, one sample per case) Deepgram sent an empty interim result about every second and an empty final about every 3 s, with no gap over 1.4 s, and answered a `Finalize` in 332 ms. Room noise and other network paths were not measured. There is no reconnect yet. |
 
 In every case the notebook shows "Transcription by Deepgram stopped: …
 nothing fell back to another transcription service." No provider message
