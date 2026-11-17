@@ -1024,12 +1024,31 @@ impl Engine {
         // A question asked of the user by name takes priority over an unread
         // suggestion, ignores the cooldown, and shows the question itself.
         // Questions for someone else, or for no one in particular, stay quiet.
-        if let Some(asked) = self
-            .state
-            .user_name
-            .as_deref()
-            .and_then(|name| asked_of(name, &segment.text[correction.unwrap_or(0)..]))
-        {
+        // Streamed transcription can end one line on the name and start the
+        // next with the question ("Partners doubles it. Maddie," then "how
+        // many came to the party?"), so a name left unfinished at the end of
+        // the line just before is read together with this one.
+        let carried = correction
+            .is_none()
+            .then(|| {
+                self.state
+                    .transcript
+                    .len()
+                    .checked_sub(2)
+                    .and_then(|index| self.state.transcript.get(index))
+            })
+            .flatten()
+            .filter(|line| segment.at_ms.saturating_sub(line.at_ms) <= NAME_CARRY_MS)
+            .and_then(|line| {
+                let name = self.state.user_name.as_deref()?;
+                trailing_address(name, &line.text)
+            });
+        if let Some(asked) = self.state.user_name.as_deref().and_then(|name| {
+            carried
+                .as_deref()
+                .and_then(|lead| asked_of(name, &format!("{lead} {}", segment.text)))
+                .or_else(|| asked_of(name, &segment.text[correction.unwrap_or(0)..]))
+        }) {
             if !self.state.cue.as_ref().is_some_and(|cue| cue.held) && now - segment.at_ms < CUE_MS
             {
                 // A suggestion replaced before it was published was never seen.
@@ -1830,6 +1849,31 @@ fn open_question(text: &str) -> Option<String> {
     None
 }
 
+/// How long after a line ending on the user's name a following line may
+/// carry the question to them.
+const NAME_CARRY_MS: u64 = 6_000;
+
+/// The unfinished end of a line, when it ends on the user's name: "Maddie,"
+/// in "Partners doubles it. Maddie,". Only text after the line's last
+/// sentence end counts, and it must end with the whole name.
+fn trailing_address(name: &str, text: &str) -> Option<String> {
+    let tail = text
+        .rsplit_once(['.', '?', '!'])
+        .map_or(text, |(_, tail)| tail)
+        .trim();
+    let words = |part: &str| -> Vec<String> {
+        part.split_whitespace()
+            .map(|word| {
+                word.trim_matches(|character: char| !character.is_alphanumeric())
+                    .to_lowercase()
+            })
+            .filter(|word| !word.is_empty())
+            .collect()
+    };
+    let (tail_words, name_words) = (words(tail), words(name));
+    (!name_words.is_empty() && tail_words.ends_with(&name_words)).then(|| tail.to_string())
+}
+
 /// The cue kind for a question addressed to the user by name.
 pub const ASKED: &str = "Asked you";
 
@@ -1869,15 +1913,40 @@ fn asked_of(name: &str, text: &str) -> Option<String> {
                     && !(words.first().is_some_and(|word| word == "what")
                         && words.get(1).is_some_and(|word| word == "a" || word == "an"))
             };
-            // "Robin, can you take the draft?" or "Hey Robin, could you ...".
-            let opens = body.split_once(',').is_some_and(|(head, rest)| {
-                let head = words_of(head);
+            // "Robin, can you take the draft?", "Hey Robin, could you ...",
+            // or the name set off by commas later in the sentence ("Partners
+            // doubles it, Robin, how many came?").
+            let parts: Vec<&str> = body.split(',').collect();
+            let opens = (0..parts.len().saturating_sub(1)).any(|at| {
+                let head = words_of(parts[at]);
                 let start = head
                     .iter()
                     .take_while(|word| LEAD_INS.contains(&word.as_str()))
                     .count();
-                head[start..] == name[..] && (ends_with_mark || opens_question(&words_of(rest)))
+                head[start..] == name[..]
+                    && (ends_with_mark || opens_question(&words_of(&parts[at + 1..].join(","))))
             });
+            // No comma: "Robin how many came?" or "So Robin, can you…" said
+            // without the pause. Only at the start of a question that asks
+            // something ("how", "what", …) or asks you to ("can you"), so
+            // "Robin can take it?" or "Maybe Robin takes it." do not count.
+            let bare = {
+                let words = words_of(&body);
+                let start = words
+                    .iter()
+                    .take_while(|word| LEAD_INS.contains(&word.as_str()))
+                    .count();
+                let after = start + name.len();
+                ends_with_mark
+                    && words.get(start..after) == Some(&name[..])
+                    && words.get(after).is_some_and(|word| {
+                        WH_WORDS.contains(&word.as_str())
+                            || (QUESTION_OPENERS.contains(&word.as_str())
+                                && words
+                                    .get(after + 1)
+                                    .is_some_and(|next| next == "you" || next == "your"))
+                    })
+            };
             // "What do you think, Robin?" or "Can you take it, Robin".
             let closes = body
                 .trim_end_matches(['?', '.', '!'])
@@ -1885,7 +1954,7 @@ fn asked_of(name: &str, text: &str) -> Option<String> {
                 .is_some_and(|(rest, tail)| {
                     words_of(tail) == name && (ends_with_mark || opens_question(&words_of(rest)))
                 });
-            !name.is_empty() && (opens || closes)
+            !name.is_empty() && (opens || closes || bare)
         })
         .map(|sentence| {
             sentence
@@ -2090,6 +2159,9 @@ fn asked_of_someone(user_name: &str, sentence: &str) -> bool {
 const NEGATIONS: [&str; 10] = [
     "not", "never", "no", "nobody", "nothing", "none", "neither", "nor", "cannot", "wont",
 ];
+
+/// Question words that ask for something on their own.
+const WH_WORDS: [&str; 7] = ["what", "who", "when", "which", "how", "why", "where"];
 
 /// Transcripts often drop "?", so a sentence that opens like a question
 /// does not count as an answer or a topic change.
@@ -5364,6 +5436,111 @@ mod tests {
         )
         .unwrap();
         assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
+    }
+
+    /// A session named `user`, fed fictional streamed lines `(at_ms, text)`
+    /// as a cloud transcriber delivers them: one speaker label, with lines
+    /// split wherever the stream finalized.
+    fn streamed(user: &str, lines: &[(u64, &str)]) -> Engine {
+        let mut e = live_session();
+        e.set_user_name(Some(user.into())).unwrap();
+        for (n, (at, text)) in lines.iter().enumerate() {
+            let now = e.state.elapsed_ms;
+            e.advance((at + 1_000).saturating_sub(now));
+            e.ingest(e.session(), live(&format!("s{n}"), *at, text))
+                .unwrap();
+        }
+        e
+    }
+
+    #[test]
+    fn a_question_split_across_two_streamed_lines_after_the_name_is_asked_of_the_user() {
+        // As in lab RunB10: the stream ended one line on the name and started
+        // the next with the question, under one speaker label.
+        let e = streamed(
+            "Maddie",
+            &[
+                (
+                    39_609,
+                    "A guest list, partners, or just members. We need to pick.",
+                ),
+                (45_579, "Partners doubles it. Maddie,"),
+                (
+                    47_429,
+                    "how many came to the Springstar party? Sorry, Cass on the keyboard.",
+                ),
+            ],
+        );
+        let cue = e.state.cue.as_ref().expect("asked of the user");
+        assert_eq!(cue.kind, ASKED);
+        assert_eq!(
+            cue.question,
+            "Maddie, how many came to the Springstar party?"
+        );
+        // The same name without the comma, or a name far earlier, as well.
+        let bare = streamed(
+            "Maddie",
+            &[
+                (45_579, "Partners doubles it. Maddie"),
+                (47_429, "how many came to the Springstar party?"),
+            ],
+        );
+        assert_eq!(bare.state.cue.as_ref().unwrap().kind, ASKED);
+        let too_late = streamed(
+            "Maddie",
+            &[
+                (45_579, "Partners doubles it. Maddie,"),
+                (52_000, "how many came to the Springstar party?"),
+            ],
+        );
+        assert!(too_late
+            .state
+            .cue
+            .as_ref()
+            .is_none_or(|cue| cue.kind != ASKED));
+    }
+
+    #[test]
+    fn a_question_to_the_user_by_name_mid_sentence_or_without_a_comma_is_asked() {
+        for line in [
+            "So Maddie, how many came to the Springstar party?",
+            "Partners doubles it, Maddie, how many came to the party?",
+            "Maddie how many came to the Springstar party?",
+            "Okay so Maddie can you check the guest list?",
+        ] {
+            let e = streamed("Maddie", &[(10_000, line)]);
+            assert_eq!(
+                e.state.cue.as_ref().map(|cue| cue.kind.as_str()),
+                Some(ASKED),
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_users_name_merely_mentioned_is_not_a_question_to_them() {
+        for lines in [
+            // From RunB10.
+            &[
+                (100_219, "I'm away Friday."),
+                (101_589, "Maybe Maddie takes it."),
+            ][..],
+            &[(10_000, "Maddie can take it?")],
+            &[(10_000, "I think we should ask Maddie how many came?")],
+            // A line ending on the name, then a statement, not a question.
+            &[
+                (10_000, "That's for Maddie"),
+                (11_000, "the van is booked for Saturday."),
+            ],
+            // A misspelling is not matched: names are too easily confused.
+            &[(10_000, "Maddy, how many came to the party?")],
+        ] {
+            let e = streamed("Maddie", lines);
+            assert!(
+                e.state.cue.as_ref().is_none_or(|cue| cue.kind != ASKED),
+                "{lines:?}"
+            );
+        }
     }
 
     fn after(first: &str, second: &str, second_speaker: &str, gap_ms: u64) -> Engine {
