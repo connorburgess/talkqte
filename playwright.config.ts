@@ -9,7 +9,11 @@ export default defineConfig({
   testIgnore: '**/lab-recording.spec.ts',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
+  // On CI a failed test runs once more only to tell a flaky test from a
+  // broken one in the report. A test that fails and then passes still fails
+  // the run: flaky tests are listed and fixed, never retried to green.
   retries: process.env.CI ? 1 : 0,
+  failOnFlakyTests: !!process.env.CI,
   reporter: 'list',
   use: { baseURL, trace: 'retain-on-failure' },
   projects: [
