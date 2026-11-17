@@ -300,6 +300,8 @@ export function createLabEvidenceWriter({
         'startRequestAt',
         'startBudgetMs',
         'mediaDurationMs',
+        // The time the app keeps running after the media ends.
+        'tailMs',
         'completionReserveMs',
         'remainingAtRequestMs',
         'approvalBudgetMs',
@@ -332,6 +334,9 @@ export function createLabEvidenceWriter({
             guard.nativeStartedAt + guard.approvalWaitMs &&
           guard.mediaDurationMs > 0 &&
           guard.mediaDurationMs <= LAB_MEDIA_MAX_MS &&
+          Number.isSafeInteger(guard.tailMs) &&
+          guard.tailMs >= 0 &&
+          guard.tailMs <= 15000 &&
           guard.startRequestAt >= guard.nativeStartedAt &&
           guard.remainingAtRequestMs ===
             guard.sourceDeadline - guard.startRequestAt,
@@ -340,6 +345,7 @@ export function createLabEvidenceWriter({
         guard.remainingAtRequestMs >=
           guard.startBudgetMs +
             guard.mediaDurationMs +
+            guard.tailMs +
             guard.completionReserveMs,
       );
       if (guards.length) {
@@ -352,7 +358,7 @@ export function createLabEvidenceWriter({
                 guard.actualAnchorMs -
                 guard.actualUncertaintyMs &&
             guard.remainingAtAnchorMs >=
-              guard.mediaDurationMs + guard.completionReserveMs,
+              guard.mediaDurationMs + guard.tailMs + guard.completionReserveMs,
         );
       } else required(actual.every((k) => guard[k] === undefined));
       guards.push(structuredClone(guard));
