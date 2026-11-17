@@ -418,6 +418,7 @@ impl Engine {
                 id: cue.id.clone(),
                 text: cue.question.clone(),
                 source_ids: cited.iter().map(|source| source.id.clone()).collect(),
+                asked: cue.kind == super::ASKED,
             })
         } else {
             None
@@ -791,6 +792,12 @@ impl Engine {
                 let Some(cue) = &mut self.state.cue else {
                     return;
                 };
+                // The model may say a question asked of the user was
+                // answered, but not withdraw it: a topic change does not
+                // take back a question someone put to them.
+                if decision.action == Action::Withdraw && cue.kind == super::ASKED {
+                    return;
+                }
                 if request.existing_cue().is_none_or(|old| old.id != cue.id) {
                     return;
                 }
@@ -869,7 +876,7 @@ impl Engine {
     }
 }
 
-fn transcript_source(line: &Segment) -> Source {
+pub(super) fn transcript_source(line: &Segment) -> Source {
     Source {
         id: format!("transcript:{}", line.id),
         revision: 0, // Ingestion is append-only; full text/provenance also compared.
@@ -2538,13 +2545,27 @@ mod tests {
             &["transcript:line-1"],
         );
         assert_eq!(h.engine.state.cue.as_ref().unwrap().id, asked.id);
-        // While it is on screen the model is not asked: nothing it says
-        // could be shown.
-        h.line("Anyway, the menu still needs a look.");
-        drain_without_another_request(&mut h);
+        // With a model connected it lasts 20 s from the line, not 45 s.
+        assert_eq!(asked.total_ms, 20_000);
+        // The model is still asked, with the cue on screen marked as asked.
+        let request = next_scheduled_request(&mut h);
+        let existing = request.existing_cue().expect("the cue on screen");
+        assert!(existing.asked);
+        assert_eq!(existing.id, asked.id);
+        assert_eq!(existing.source_ids, ["transcript:line-2"]);
+        assert!(request
+            .prompt_input()
+            .unwrap()
+            .contains(r#""sourceIds":["transcript:line-2"],"kind":"asked"}"#));
+        // It cannot withdraw it.
+        h.reply("withdraw", None, &["transcript:line-2"]);
         assert_eq!(h.engine.state.cue.as_ref().unwrap().id, asked.id);
-        // Dismissed, it does not come back as the model's cue from that line.
-        h.engine.respond(&asked.id, Response::Dismiss).unwrap();
+        // It can say it was answered; then the cue goes.
+        h.line("Yes, two years running.");
+        assert!(h.request().existing_cue().unwrap().asked);
+        h.reply("resolved", None, &["transcript:line-3"]);
+        assert!(h.engine.state.cue.is_none());
+        // It does not come back as the model's cue from that line.
         h.engine.advance(10_000);
         h.line("Prices are on the sign.");
         h.request();
@@ -2563,7 +2584,11 @@ mod tests {
         h.line("Curtis, can you check the float?");
         let cue = h.engine.state.cue.as_ref().unwrap();
         assert_eq!(cue.kind, super::super::ASKED);
-        assert!(h.engine.evaluated_cue.is_none());
+        assert_eq!(
+            h.engine.evaluated_cue.as_ref().unwrap().0,
+            cue.id,
+            "now the asked cue"
+        );
         // A model cue being read stays.
         let mut h = Harness::named("Curtis");
         let id = h.show();
