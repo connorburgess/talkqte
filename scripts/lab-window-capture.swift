@@ -1,8 +1,10 @@
 // Records exactly two windows, the meeting emulator's and the real TalkQTE
 // companion's, with the emulator app's sound, using ScreenCaptureKit. It
 // never records the whole screen: each window is captured on its own,
-// independently of the active Space and of other windows covering it, and
-// the two are composited at their on-screen positions into one picture.
+// on its own (the player independently of the active Space and of other
+// windows covering it; the companion bar, which stays on the active Space,
+// through a display filter limited to that window), and the two are
+// composited at their on-screen positions into one picture.
 // (A display filter showed only windows on the active Space, so a run
 // recorded black whenever the operator's frontmost app was on another
 // Space; RunB07.) The sound comes from the emulator app alone. If either
@@ -347,8 +349,16 @@ struct Capture {
     let union = emulator.frame.union(companion.frame)
     // Each window on its own, wherever it is: not limited to the active
     // Space and not hidden by other windows.
+    // The player on its own, wherever it is. The TalkQTE companion bar
+    // through a display filter that includes that one window only: creating
+    // a desktop-independent filter for the bar aborted inside macOS
+    // (SkyLight SLGetDisplaysWithRect assert; RunB08). The bar is a floating
+    // panel that stays on the active Space, so it needs no independence.
     let emulatorFilter = SCContentFilter(desktopIndependentWindow: emulator)
-    let companionFilter = SCContentFilter(desktopIndependentWindow: companion)
+    guard
+      let companionDisplay = content.displays.first(where: { $0.frame.intersects(companion.frame) })
+    else { fail("The companion window is on no display.", code: 2) }
+    let companionFilter = SCContentFilter(display: companionDisplay, including: [companion])
     let scale = CGFloat(emulatorFilter.pointPixelScale)
     let even = { (value: CGFloat) in max(2, Int((value * scale) / 2) * 2) }
     let width = even(union.width)
@@ -359,8 +369,13 @@ struct Capture {
     guard width <= 8192 && height <= 8192 else {
       fail("The two windows are too far apart to record together. Put both on one display.", code: 2)
     }
-    func windowConfiguration(_ window: SCWindow) -> SCStreamConfiguration {
+    func windowConfiguration(_ window: SCWindow, display: SCDisplay? = nil) -> SCStreamConfiguration {
       let configuration = SCStreamConfiguration()
+      // A display filter is cropped to the window's own rectangle.
+      if let display {
+        configuration.sourceRect = window.frame.offsetBy(
+          dx: -display.frame.minX, dy: -display.frame.minY)
+      }
       configuration.width = even(window.frame.width)
       configuration.height = even(window.frame.height)
       configuration.showsCursor = false
@@ -417,7 +432,8 @@ struct Capture {
     let emulatorStream = SCStream(
       filter: emulatorFilter, configuration: windowConfiguration(emulator), delegate: writer)
     let companionStream = SCStream(
-      filter: companionFilter, configuration: windowConfiguration(companion), delegate: writer)
+      filter: companionFilter,
+      configuration: windowConfiguration(companion, display: companionDisplay), delegate: writer)
     let soundStream = SCStream(filter: soundFilter, configuration: sound, delegate: writer)
     queue.sync {
       writer.place(emulatorStream, at: placeOf(emulator))
