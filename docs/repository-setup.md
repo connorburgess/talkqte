@@ -12,6 +12,8 @@ The [Checks workflow](../.github/workflows/checks.yml) runs on pull requests and
 - **Frontend and browser behavior:** contribution-check and release pre-flight regression tests, formatting, TypeScript/build, and Playwright checks in Chromium and WebKit.
 - **macOS Rust and desktop build:** Rust formatting, unit tests, Clippy with warnings denied, and an unsigned development app build using the pinned Rust toolchain, a check that the committed [third-party notices](release-path.md#third-party-notices) match the dependencies, and the offline [release pre-flight](release-path.md#pre-flight-script) on that bundle. The workflow holds no signing secret and publishes nothing.
 
+The macOS and Windows jobs restore compiled Rust dependencies from a cache that only runs on `main` save; the project's own crate is always rebuilt and tested.
+
 Native tests currently exercise the engine; the app build is not an automated interactive window test. A successful browser run does not establish macOS focus or screen-sharing behavior.
 
 Dedicated secret scanning and branch-rule enforcement remain to be configured. Public fixtures and build artifacts still require manual privacy review. Once the check names exist, protect `main` against force pushes and deletion and require the applicable checks. Do not require an impossible self-approval while the project has one maintainer.
