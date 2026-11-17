@@ -61,6 +61,17 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium webkit
       - run: npm test
+      # playwright.config.ts keeps a trace for each failed test. Save them so a
+      # failure can be opened with `npx playwright show-trace` instead of being
+      # guessed from the log. Tests use only fictional content.
+      - name: Save traces of failed browser tests
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-traces-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
   macos:
     name: macOS Rust and desktop build
