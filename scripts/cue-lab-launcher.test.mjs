@@ -25,7 +25,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { watchLabTiming } from './cue-lab-timing-reader.mjs';
 import { parseUniqueLabJson } from './cue-lab-strict-json.mjs';
-import { once } from 'node:events';
+import { once, EventEmitter } from 'node:events';
+import { createConnection } from 'node:net';
+import { createLabSourceV1 } from './cue-lab-source-v1.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createLabNativeOwner } from './cue-lab-native-owner.mjs';
 import { createLabRun } from './cue-lab-run.mjs';
@@ -831,6 +833,87 @@ function fakeBuild() {
   };
 }
 
+test('bounded history is explicit API configuration and never inherited session approval', () => {
+  const f = fakeBuild();
+  try {
+    let seen;
+    mock.method(childProcess, 'spawn', (_command, _args, options) => {
+      seen = options.env;
+      return new EventEmitter();
+    });
+    syncBuiltinESMExports();
+    for (const contextPolicy of [undefined, 'fresh-only', 'bounded-history']) {
+      const prepared = prepareLabLauncher({
+        ...f.options,
+        contextPolicy,
+        environment: {
+          TALKQTE_DEV_LAB_CONTEXT: 'bounded-history',
+          TALKQTE_DEV_MODEL_CONNECTION: 'on',
+        },
+      });
+      try {
+        prepared.launch(f.launchOptions);
+        assert.equal(
+          seen.TALKQTE_DEV_LAB_CONTEXT,
+          contextPolicy === 'bounded-history' ? 'bounded-history' : undefined,
+        );
+        assert.equal(
+          Object.hasOwn(seen, 'TALKQTE_DEV_MODEL_CONNECTION'),
+          false,
+        );
+        assert.equal(prepared.transcription.reviewedSession, null);
+        assert.throws(() => prepared.releaseTranscriptionToken());
+      } finally {
+        prepared.close();
+        rmSync(prepared.directory, { recursive: true, force: true });
+      }
+    }
+    for (const contextPolicy of [
+      '',
+      null,
+      false,
+      {},
+      'history',
+      'BOUNDED-HISTORY',
+    ])
+      assert.throws(() => prepareLabLauncher({ ...f.options, contextPolicy }));
+    assert.throws(() =>
+      prepareLabLauncher({
+        ...f.options,
+        contextPolicy: 'bounded-history',
+        mode: 'capture-only',
+        selection: undefined,
+        transcription: { backend: 'deepgram', minuteCap: 5 },
+      }),
+    );
+    assert.throws(() =>
+      prepareLabLauncher({
+        ...f.options,
+        contextPolicy: 'bounded-history',
+        selection,
+      }),
+    );
+    const prepared = prepareLabLauncher(f.options);
+    try {
+      assert.throws(() =>
+        prepared.launch({
+          ...f.launchOptions,
+          environment: {
+            ...f.launchOptions.environment,
+            TALKQTE_DEV_LAB_CONTEXT: 'bounded-history',
+          },
+        }),
+      );
+      assert.equal(prepared.processStarted, false);
+    } finally {
+      prepared.close();
+      rmSync(prepared.directory, { recursive: true, force: true });
+    }
+  } finally {
+    f.close();
+  }
+});
+
 for (const changed of ['resource', 'plist'])
   test(`production final check rejects changed bundle ${changed} with unchanged executable`, () => {
     const f = fakeBuild();
@@ -1219,5 +1302,220 @@ test('a source that native loses is recorded as ended by native, with its fixed 
     assert.ok(f.events.includes('failed'));
   } finally {
     await f.close();
+  }
+});
+
+// Production launcher routing + real SourceV1, owner, run and broker; native
+// rows and the UI review are synthetic. No app, media, device or provider.
+test('bounded-history production routing connects reviewed source to broker HELLO and clean Stop', async () => {
+  const f = fakeBuild();
+  const runId = 'fictional-history-startup';
+  const trace = [];
+  let launcher, run, socket, descriptorPath;
+  let opened = false;
+  try {
+    const child = new EventEmitter();
+    Object.assign(child, {
+      pid: 42,
+      spawnfile: f.launchOptions.executable,
+      exitCode: null,
+      signalCode: null,
+    });
+    const emit = (row) =>
+      appendFileSync(launcher.timingPath, JSON.stringify(row) + '\n');
+    child.kill = (signal) => {
+      assert.equal(signal, 'SIGUSR2');
+      trace.push('stop');
+      for (const step of ['latched', 'stopping', 'released'])
+        emit({ event: 'dev_stop', run_id: runId, step });
+      return true;
+    };
+    mock.method(childProcess, 'spawn', (_command, _args, options) => {
+      assert.equal(options.env.TALKQTE_DEV_LAB_CONTEXT, 'bounded-history');
+      assert.equal(
+        Object.hasOwn(options.env, 'TALKQTE_DEV_MODEL_CONNECTION'),
+        false,
+      );
+      descriptorPath = options.env.TALKQTE_DEV_LAB_DESCRIPTOR;
+      queueMicrotask(() => {
+        emit({ event: 'dev_stop', run_id: runId, step: 'armed' });
+        emit({
+          event: 'dev_source',
+          application: 'QuickTime Player',
+          step: 'acknowledged',
+        });
+        emit({
+          event: 'session',
+          live: true,
+          state: 'started',
+          session: 1,
+          commit: record.commit,
+          features: record.features,
+        });
+        emit({ event: 'user_name_set', session: 1, set: true });
+        emit({
+          event: 'dev_source_observation',
+          version: 1,
+          run_id: runId,
+          application: 'QuickTime Player',
+          step: 'listening',
+          session: '1',
+          host_operation: 'a'.repeat(32),
+          live_operation: 'b'.repeat(64),
+        });
+        emit({
+          event: 'dev_source',
+          application: 'QuickTime Player',
+          step: 'started',
+        });
+      });
+      return child;
+    });
+    syncBuiltinESMExports();
+    launcher = prepareLabLauncher({
+      ...f.options,
+      contextPolicy: 'bounded-history',
+      userName: 'Adrian',
+    });
+    const source = createLabSourceV1({
+      launcher,
+      application: 'QuickTime Player',
+      commit: record.commit,
+      features: record.features,
+      deadlineMs: 2000,
+    });
+    const native = createLabNativeOwner({
+      executable: launcher.executable,
+      launch: launcher.launch,
+      stopAfterS: 120,
+      armingMs: 2000,
+      releaseMs: 2000,
+    });
+    let reviewed;
+    const review = new Promise((yes) => {
+      reviewed = yes;
+    });
+    launcher.subscribeEvaluator((row) => {
+      if (row.approval === 'review' && row.state === 'on') reviewed(row);
+    });
+    run = createLabRun({
+      native,
+      runId,
+      approvalBudgetMs: 180000,
+      startupMs: 3000,
+      releaseMs: 2000,
+      settings: {
+        ...buildSelection,
+        deadlineMs: 30000,
+        execution: 'offline-stand-in',
+        environment: {},
+        openers: {
+          'anthropic-api': async () => {
+            opened = true;
+            trace.push('provider');
+            return {
+              request() {
+                throw Error('No provider dispatch expected');
+              },
+              async close() {},
+            };
+          },
+        },
+      },
+    });
+    const launchDeadline = performance.now() + 2000;
+    while (run.startupDiagnostics.stage !== 'awaiting-approval') {
+      assert.ok(performance.now() < launchDeadline);
+      await delay(1);
+    }
+    const listening = await source.waitListening({ runId });
+    assert.equal(listening.sessionId, '1');
+    run.expectSourceSession(listening.sessionId);
+    assert.equal(opened, false);
+    assert.equal(launcher.transcription.reviewedSession, null);
+    assert.throws(() => launcher.releaseTranscriptionToken());
+    // The app's own expanded-history review/grant is tested natively; this
+    // synthetic row exercises the actual launcher/reader routing afterward.
+    emit({
+      event: 'evaluator',
+      approval: 'review',
+      session: 1,
+      state: 'on',
+      backend: 'lab-api',
+      model: 'claude-opus-5-5',
+      effort: 'low',
+    });
+    assert.equal((await review).session, '1');
+    trace.push('review');
+    await run.approve();
+    launcher.releaseTranscriptionToken();
+    assert.equal(launcher.transcription.released, true);
+    const d = JSON.parse(readFileSync(descriptorPath));
+    socket = createConnection({ path: d.socketPath });
+    socket.on('error', () => {});
+    await once(socket, 'connect');
+    const frame = (type, rest = {}) => ({
+      schema: 'talkqte.lab.v1',
+      type,
+      runId,
+      sessionId: '1',
+      ...rest,
+    });
+    let partial = '';
+    socket.setEncoding('utf8');
+    socket.on('data', (chunk) => {
+      partial += chunk;
+      for (let end; (end = partial.indexOf('\n')) !== -1;) {
+        const value = JSON.parse(partial.slice(0, end));
+        partial = partial.slice(end + 1);
+        if (value.type === 'clock_probe') {
+          trace.push('clock');
+          socket.write(
+            JSON.stringify(
+              frame('clock_sample', {
+                probeId: value.probeId,
+                nativeSessionElapsedMs: 10,
+              }),
+            ) + '\n',
+          );
+        }
+      }
+    });
+    run.acknowledgePlaybackStart({
+      monotonicMs: performance.now(),
+      uncertaintyMs: 0,
+    });
+    trace.push('hello');
+    socket.write(
+      JSON.stringify(
+        frame('hello', {
+          nonce: d.nonce,
+          expectedProvider: 'anthropic-api',
+          expectedModel: 'claude-opus-5-5',
+          expectedEffort: 'low',
+        }),
+      ) + '\n',
+    );
+    await run.ready;
+    trace.push('ready');
+    assert.equal(run.dispatchesUsed, 0);
+    assert.equal(launcher.userName.held, true);
+    await run.close();
+    assert.equal(launcher.sourceReleased, true);
+    assert.deepEqual(trace, [
+      'review',
+      'provider',
+      'hello',
+      'clock',
+      'ready',
+      'stop',
+    ]);
+    source.close();
+  } finally {
+    socket?.destroy();
+    await run?.close().catch(() => {});
+    launcher?.close();
+    if (launcher) rmSync(launcher.directory, { recursive: true, force: true });
+    f.close();
   }
 });
