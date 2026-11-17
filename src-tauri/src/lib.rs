@@ -1232,6 +1232,7 @@ async fn start_live_session(
             let failure_app = handle.clone();
             let keep_app = handle.clone();
             let dropped_app = handle.clone();
+            let reconnect_app = handle.clone();
             let sink_app = handle.clone();
             let sink = move |session, segment| {
                 let state = sink_app.state::<AppState>();
@@ -1301,7 +1302,17 @@ async fn start_live_session(
                                 })
                                 .on_failure(move |failure| {
                                     stop_after_cloud_failure(&failure_app, session, failure)
-                                }),
+                                })
+                                .on_reconnect(move |lost_ms| {
+                                    let state = reconnect_app.state::<AppState>();
+                                    if let Ok(mut runtime) = state.0.lock() {
+                                        runtime
+                                            .engine
+                                            .cloud_transcription_reconnected(session, lost_ms);
+                                        publish(&reconnect_app, &mut runtime);
+                                    };
+                                })
+                                .with_reopener(transcription::cloud::reopener().ok()),
                             ));
                         true
                     });

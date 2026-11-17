@@ -47,6 +47,7 @@ import { useCaptureControl } from './lib/useCaptureControl';
 import {
   transcribedWhere,
   transcriptionDropText,
+  transcriptionReconnectText,
   transcriptionStopText,
 } from './lib/transcription';
 import {
@@ -1212,6 +1213,11 @@ function Notebook() {
                   {transcriptionDropText(state.transcription) && (
                     <p role="status">
                       {transcriptionDropText(state.transcription)}
+                    </p>
+                  )}
+                  {transcriptionReconnectText(state.transcription) && (
+                    <p role="status">
+                      {transcriptionReconnectText(state.transcription)}
                     </p>
                   )}
                 </div>

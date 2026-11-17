@@ -487,6 +487,16 @@ pub struct CloudTranscription {
     /// Some audio was not sent because the connection fell behind.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub dropped_audio: bool,
+    /// Replacement streams opened after connection failures, and the
+    /// session time (ms) of speech lost with the failed streams.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub reconnects: u32,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub lost_ms: u64,
+}
+
+fn is_zero<T: Default + PartialEq>(value: &T) -> bool {
+    *value == T::default()
 }
 
 // The floating window never receives the notebook or full transcript.
@@ -721,6 +731,8 @@ impl Engine {
                 provider: crate::transcription::cloud::PROVIDER.into(),
                 stopped: None,
                 dropped_audio: false,
+                reconnects: 0,
+                lost_ms: 0,
             });
         self.state.status = Status::Running;
         self.changed();
@@ -875,6 +887,19 @@ impl Engine {
             .filter(|transcription| !transcription.dropped_audio)
         {
             transcription.dropped_audio = true;
+            self.changed();
+        }
+    }
+
+    /// Records that `session`'s cloud stream was replaced after a
+    /// connection failure, losing `lost_ms` of speech.
+    pub fn cloud_transcription_reconnected(&mut self, session: u64, lost_ms: u64) {
+        if session != self.generation {
+            return;
+        }
+        if let Some(transcription) = self.state.transcription.as_mut() {
+            transcription.reconnects += 1;
+            transcription.lost_ms += lost_ms;
             self.changed();
         }
     }
@@ -2746,6 +2771,8 @@ mod tests {
             provider: "Deepgram".into(),
             stopped: None,
             dropped_audio: false,
+            reconnects: 0,
+            lost_ms: 0,
         });
         let session = engine.session();
         engine.cloud_transcription_stopped(session + 1, "network");
@@ -2756,7 +2783,14 @@ mod tests {
         let shown = serde_json::to_value(engine.cue_snapshot()).unwrap();
         assert_eq!(shown["transcription"]["provider"], "Deepgram");
         assert_eq!(shown["transcription"]["stopped"], "withdrawn");
-        assert_eq!(engine.state.revision, revision + 1);
+        // A reconnect is counted with the speech it lost; a later session's
+        // is ignored.
+        engine.cloud_transcription_reconnected(session + 1, 900);
+        engine.cloud_transcription_reconnected(session, 2_400);
+        let shown = serde_json::to_value(engine.cue_snapshot()).unwrap();
+        assert_eq!(shown["transcription"]["reconnects"], 1);
+        assert_eq!(shown["transcription"]["lostMs"], 2_400);
+        assert_eq!(engine.state.revision, revision + 2);
     }
 
     fn with_cue() -> Engine {
