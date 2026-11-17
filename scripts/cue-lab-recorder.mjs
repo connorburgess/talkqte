@@ -102,7 +102,7 @@ function recorder({
     // Why the helper stopped, if it failed: its exit code or signal and its
     // last error line (fixed helper text, bounded), for OUTCOME.
     exitStatus = null,
-    lastError = null,
+    errorReason = null,
     accepted = false,
     final = null,
     invalid = false,
@@ -246,12 +246,14 @@ function recorder({
         companion: value.companion.kind,
       });
     } else if (value.event === 'error') {
-      // The helper's own fixed message, kept bounded and without control
-      // characters; the start then fails as before.
-      if (typeof value.message === 'string')
-        lastError = value.message
-          .replace(/[\x00-\x1f\x7f]/g, ' ')
-          .slice(0, 200);
+      // Only the helper's fixed reason code is kept: its message may name
+      // the recording's path or carry macOS's own text. The start then
+      // fails as before.
+      if (
+        typeof value.reason === 'string' &&
+        /^[a-z][a-z-]{0,39}$/.test(value.reason)
+      )
+        errorReason ??= value.reason;
       throw gateFailure('protocol');
     } else if (value.event === 'frame_accepted') {
       requireThat(
@@ -339,12 +341,13 @@ function recorder({
   }
   return Object.freeze({
     // Why the helper stopped, available whether or not it succeeded: exit
-    // code or signal, last error line, and whether it ever accepted a frame.
+    // code or signal, its fixed error reason, and whether it ever accepted
+    // a frame.
     get failureDetail() {
-      return exitStatus || lastError
+      return exitStatus || errorReason
         ? Object.freeze({
             exit: exitStatus,
-            lastError,
+            errorReason,
             frameAccepted: accepted,
             matched,
             filters,
@@ -500,6 +503,7 @@ export function createLabRecorderFixture(options = {}) {
   requireThat(
     [
       'normal',
+      'error',
       'partial',
       'moved',
       'missing',
