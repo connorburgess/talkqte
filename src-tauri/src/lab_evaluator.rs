@@ -102,11 +102,18 @@ struct Settings {
     effort: String,
     /// The per-run spend cap, for the API backend only.
     spend_cap_micro_usd: Option<u64>,
+    /// Selected before registration, never an approval or a provider change.
+    bounded_history: bool,
 }
 impl Settings {
     fn parse(mut get: impl FnMut(&str) -> Option<String>) -> Result<Self, Failure> {
         let backend = Backend::parse(get("TALKQTE_DEV_CUE_BACKEND").as_deref())
             .ok_or(Failure::InvalidInput)?;
+        let bounded_history = match get("TALKQTE_DEV_LAB_CONTEXT").as_deref() {
+            None => false,
+            Some("bounded-history") if backend == Backend::Api => true,
+            _ => return Err(Failure::InvalidInput),
+        };
         let descriptor =
             PathBuf::from(get("TALKQTE_DEV_LAB_DESCRIPTOR").ok_or(Failure::InvalidInput)?);
         let provider = get("TALKQTE_DEV_LAB_PROVIDER").ok_or(Failure::InvalidInput)?;
@@ -143,6 +150,7 @@ impl Settings {
             model,
             effort,
             spend_cap_micro_usd,
+            bounded_history,
         })
     }
     fn label(&self) -> &'static str {
@@ -1158,7 +1166,12 @@ pub(crate) fn initialize_from_environment() {
         selected: std::env::var_os("TALKQTE_DEV_CUE_BACKEND").is_some(),
         backend: Backend::parse(std::env::var("TALKQTE_DEV_CUE_BACKEND").ok().as_deref())
             .unwrap_or(Backend::Subscription),
-        settings: Settings::parse(|k| std::env::var(k).ok()),
+        settings: Settings::parse(|k| match std::env::var(k) {
+            Ok(value) => Some(value),
+            Err(std::env::VarError::NotPresent) => None,
+            // An invalid optional context value must not become the default.
+            Err(std::env::VarError::NotUnicode(_)) => Some(String::new()),
+        }),
         active: Mutex::new(None),
         sampler: Arc::new(Mutex::new(None)),
         fault: Arc::new(AtomicBool::new(false)),
@@ -1176,17 +1189,17 @@ pub(crate) fn set_clock_sampler(sampler: ClockSampler) {
         }
     }
 }
-pub(crate) fn connected_engine() -> Engine {
-    let globals = GLOBALS.get();
-    let settings = globals.and_then(|g| g.settings.clone().ok());
-    let backend = settings
-        .as_ref()
-        .map(|s| s.backend)
-        .or(globals.map(|g| g.backend))
-        .unwrap_or(Backend::Subscription);
-    let (label, service, mut policy) = disclosure(backend, settings.as_ref());
+// Pure configuration preparation shared with offline consent tests. No socket,
+// worker, capture, environment read or grant is created here.
+fn processor_configuration(
+    backend: Backend,
+    settings: Option<&Settings>,
+    transcription_review: Option<String>,
+    audio_destination: Option<String>,
+) -> Result<ProcessorConfiguration, Failure> {
+    let (label, service, mut policy) = disclosure(backend, settings);
     // One review covers both exports when this launch also streams audio.
-    if let Some(transcription) = crate::transcription::cloud::review_sentence() {
+    if let Some(transcription) = transcription_review {
         policy = format!("{policy} {transcription}");
     }
     let processor = ProcessorConfiguration::new(
@@ -1197,9 +1210,9 @@ pub(crate) fn connected_engine() -> Engine {
             .map_or("unavailable".into(), |s| s.model.clone()),
         ProcessingLocation::Hosted { service },
         "fictional-lab-v1".into(),
-        ProcessorDisclosure::new(label.into(), policy).unwrap(),
+        ProcessorDisclosure::new(label.into(), policy).map_err(|_| Failure::InvalidInput)?,
     )
-    .unwrap()
+    .map_err(|_| Failure::InvalidInput)?
     .without_notes()
     .with_effort(
         settings
@@ -1207,9 +1220,40 @@ pub(crate) fn connected_engine() -> Engine {
             .map_or("unavailable".into(), |s| s.effort.clone()),
     );
     // The review names where audio goes beside where lines go.
-    let processor = match crate::transcription::cloud::audio_destination() {
+    let processor = match audio_destination {
         Some(destination) => processor.with_audio_destination(destination),
         None => processor,
+    };
+    if settings.is_some_and(|s| s.bounded_history) {
+        processor
+            .with_bounded_transcript_history()
+            .map_err(|_| Failure::InvalidInput)
+    } else {
+        Ok(processor)
+    }
+}
+
+pub(crate) fn connected_engine() -> Engine {
+    let globals = GLOBALS.get();
+    let settings = globals.and_then(|g| g.settings.clone().ok());
+    let backend = settings
+        .as_ref()
+        .map(|s| s.backend)
+        .or(globals.map(|g| g.backend))
+        .unwrap_or(Backend::Subscription);
+    let processor = match processor_configuration(
+        backend,
+        settings.as_ref(),
+        crate::transcription::cloud::review_sentence(),
+        crate::transcription::cloud::audio_destination(),
+    ) {
+        Ok(processor) => processor,
+        Err(_) => {
+            return unavailable(
+                processor_configuration(backend, None, None, None)
+                    .expect("static unavailable lab disclosure is bounded"),
+            )
+        }
     };
     if let (Some(g), Some(settings)) = (globals, settings) {
         let link = Link::new(settings, g.sampler.clone(), g.fault.clone());

@@ -1719,12 +1719,23 @@ mod lab_clock_tests {
             "TALKQTE_DEV_LAB_PROVIDER",
             "TALKQTE_DEV_LAB_MODEL",
             "TALKQTE_DEV_LAB_EFFORT",
+            "TALKQTE_DEV_LAB_CONTEXT",
+            "TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD",
         ];
-        for case in ["absent", "malformed", "valid"] {
+        for case in [
+            "absent",
+            "malformed",
+            "valid",
+            "api-fresh",
+            "api-history",
+            "api-empty-context",
+            "api-invalid-context",
+            "subscription-history",
+        ] {
             let mut variables = vec![("TALKQTE_TEST_SELECTOR_CASE", case)];
             if case == "malformed" {
                 variables.push(("TALKQTE_DEV_CUE_BACKEND", "fictional-invalid-selector"));
-            } else if case == "valid" {
+            } else if case == "valid" || case == "subscription-history" {
                 variables.extend([
                     ("TALKQTE_DEV_CUE_BACKEND", "lab-subscription"),
                     (
@@ -1735,6 +1746,27 @@ mod lab_clock_tests {
                     ("TALKQTE_DEV_LAB_MODEL", "gpt-6.1-sol"),
                     ("TALKQTE_DEV_LAB_EFFORT", "medium"),
                 ]);
+            }
+            if case.starts_with("api-") {
+                variables.extend([
+                    ("TALKQTE_DEV_CUE_BACKEND", "lab-api"),
+                    (
+                        "TALKQTE_DEV_LAB_DESCRIPTOR",
+                        "/fictional-lab/run/descriptor.json",
+                    ),
+                    ("TALKQTE_DEV_LAB_PROVIDER", "anthropic-api"),
+                    ("TALKQTE_DEV_LAB_MODEL", "claude-opus-5-5"),
+                    ("TALKQTE_DEV_LAB_EFFORT", "low"),
+                    ("TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD", "250000"),
+                ]);
+            }
+            match case {
+                "api-history" | "subscription-history" => {
+                    variables.push(("TALKQTE_DEV_LAB_CONTEXT", "bounded-history"))
+                }
+                "api-empty-context" => variables.push(("TALKQTE_DEV_LAB_CONTEXT", "")),
+                "api-invalid-context" => variables.push(("TALKQTE_DEV_LAB_CONTEXT", "unknown")),
+                _ => {}
             }
             let result =
                 crate::test_isolation::run("lab_clock_tests::selector_child", &variables, &without);
@@ -1774,6 +1806,27 @@ mod lab_clock_tests {
                 assert_eq!(processor.id, "lab-subscription");
                 assert_eq!(processor.model, "gpt-6.1-sol");
                 assert_eq!(snapshot.issue, None);
+            }
+            "api-fresh" | "api-history" => {
+                let processor = snapshot.processor.unwrap();
+                assert_eq!(processor.id, "lab-api");
+                assert_eq!(
+                    processor.data_policy.contains("24 segments"),
+                    case == "api-history"
+                );
+                assert_eq!(snapshot.issue, None);
+            }
+            "api-empty-context" | "api-invalid-context" | "subscription-history" => {
+                assert!(lab_evaluator::selected());
+                assert_eq!(
+                    engine.evaluation_status(),
+                    Some(engine::EvaluationStatus::Unavailable(
+                        engine::EvaluationIssue::LabUnavailable
+                    ))
+                );
+                assert!(engine
+                    .review_processing(engine::ConversationScope::RecentAndNewSpeech, &[])
+                    .is_err());
             }
             _ => panic!("unknown fictional selector case"),
         }
