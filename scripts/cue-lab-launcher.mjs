@@ -264,7 +264,14 @@ function launcher({
         transcription.minuteCap <= 60 &&
         (mode === 'capture-only'
           ? exact(transcription, ['backend', 'minuteCap'])
-          : exact(transcription, ['backend', 'minuteCap', 'grant']) &&
+          : (exact(transcription, ['backend', 'minuteCap', 'grant']) ||
+              (exact(transcription, [
+                'backend',
+                'minuteCap',
+                'grant',
+                'reconnect',
+              ]) &&
+                transcription.reconnect === true)) &&
             typeof transcription.grant?.writeTokenFile === 'function' &&
             mode === 'model-enabled' &&
             selection?.provider === 'anthropic-api')),
@@ -323,12 +330,20 @@ function launcher({
   // placeholder, which the app accepts at session start but cannot use; the
   // take replaces it with the token (atomic rename) only after it has
   // accepted the in-app review row. It is deleted once the stream has
-  // connected, at close, on a failed launch, or at process exit.
+  // connected, at close, on a failed launch, or at process exit. With
+  // `reconnect` (a build that replaces a failed stream, #357, by reading the
+  // file again), it stays until close instead: a valid short-lived token is
+  // then on disk in this owner-only folder for the length of the run.
   const tokenPath = transcription ? join(directory, 'stt-token') : null;
   const tokenNext = transcription ? join(directory, 'stt-token.next') : null;
   let tokenRemoved = true,
     tokenReleased = false,
-    connectedQuery = null;
+    connectedQuery = null,
+    // Replacements of a failed stream seen so far, and whether one is
+    // waiting for its new stream's connected row.
+    reconnects = 0,
+    awaitingReconnect = false;
+  const keepToken = transcription?.reconnect === true;
   const removeToken = () => {
     if (tokenRemoved) return;
     let gone = true;
@@ -526,13 +541,15 @@ function launcher({
                   return;
                 }
                 transcriptionStarted = true;
-              } else if (event.state === 'connected') {
-                // The app has read the token and connected; it never rereads
-                // it, so the file goes now. The query is what it used.
+              } else if (event.state === 'reconnecting') {
+                // A failed stream being replaced (#357): only in a build the
+                // run allowed to reconnect, after the first connection, in
+                // the reviewed session, at most twice.
                 if (
-                  !transcriptionStarted ||
-                  !tokenReleased ||
-                  connectedQuery !== null ||
+                  !keepToken ||
+                  connectedQuery === null ||
+                  awaitingReconnect ||
+                  reconnects >= 2 ||
                   event.session !== reviewedSession
                 ) {
                   onTiming({ event: 'dropped', count: 1 });
@@ -540,8 +557,28 @@ function launcher({
                     listener({ event: 'dropped', count: 1 });
                   return;
                 }
+                reconnects++;
+                awaitingReconnect = true;
+              } else if (event.state === 'connected') {
+                // The app has read the token and connected. Without
+                // reconnect it never rereads it, so the file goes now. A
+                // replacement stream must use the first stream's query.
+                const first = connectedQuery === null;
+                if (
+                  !transcriptionStarted ||
+                  !tokenReleased ||
+                  event.session !== reviewedSession ||
+                  (!first &&
+                    (!awaitingReconnect || event.query !== connectedQuery))
+                ) {
+                  onTiming({ event: 'dropped', count: 1 });
+                  for (const listener of subscribers)
+                    listener({ event: 'dropped', count: 1 });
+                  return;
+                }
+                awaitingReconnect = false;
                 connectedQuery = event.query;
-                removeToken();
+                if (!keepToken) removeToken();
               }
               return;
             }
@@ -666,6 +703,10 @@ function launcher({
             started: transcriptionStarted,
             connectedQuery,
             tokenRemoved,
+            // Whether the token was kept on disk until close for reconnects,
+            // and how many replacement streams the app opened.
+            tokenKeptUntilStop: keepToken,
+            reconnects,
           })
         : null;
     },
@@ -851,6 +892,8 @@ export function prepareLabFixtureLauncher({
       'cloud-transcription',
       'cloud-early',
       'cloud-other-session',
+      'cloud-reconnect',
+      'cloud-reconnect-thrice',
       'capture-only',
       'normal',
       'partial',

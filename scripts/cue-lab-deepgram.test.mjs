@@ -206,11 +206,21 @@ const apiSelection = {
   effort: 'low',
   maxCalls: 2,
 };
-async function launchCloud(t, fixtureCase, grant, { minuteCap = 5 } = {}) {
+async function launchCloud(
+  t,
+  fixtureCase,
+  grant,
+  { minuteCap = 5, reconnect } = {},
+) {
   const launcher = prepareLabFixtureLauncher({
     fixtureCase,
     selection: apiSelection,
-    transcription: { backend: 'deepgram', minuteCap, grant },
+    transcription: {
+      backend: 'deepgram',
+      minuteCap,
+      grant,
+      ...(reconnect === undefined ? {} : { reconnect }),
+    },
   });
   t.after(() => {
     launcher.close();
@@ -297,8 +307,81 @@ test('the app gets only an empty placeholder until the review row; the token fol
     released: true,
     started: true,
     tokenRemoved: true,
+    tokenKeptUntilStop: false,
+    reconnects: 0,
   });
   assert.deepEqual(await owner.stop(), { released: true });
+});
+
+const waitFor = async (check, tries = 200) => {
+  for (let n = 0; n < tries && !check(); n++) await delay(10);
+};
+const reviewThenRelease = async (launcher) => {
+  await waitFor(() => launcher.transcription.reviewedSession !== null);
+  launcher.releaseTranscriptionToken();
+};
+
+test('with reconnect the token stays until Stop, each replacement reconnects with the same query, and close removes it', async (t) => {
+  const api = await fakeGrant();
+  t.after(api.close);
+  const { launcher, owner, failures } = await launchCloud(
+    t,
+    'cloud-reconnect',
+    await mint(api),
+    { reconnect: true },
+  );
+  const tokenFile = join(launcher.directory, 'stt-token');
+  await reviewThenRelease(launcher);
+  await waitFor(() => launcher.transcription.reconnects === 2);
+  await delay(50);
+  assert.equal(launcher.transcription.reconnects, 2);
+  assert.equal(failures.includes('failed'), false);
+  // A valid token is on disk, owner-only, for the length of the run.
+  assert.equal(existsSync(tokenFile), true);
+  assert.equal(lstatSync(tokenFile).mode & 0o777, 0o600);
+  assert.equal(launcher.transcription.tokenKeptUntilStop, true);
+  assert.equal(launcher.transcription.tokenRemoved, false);
+  assert.deepEqual(await owner.stop(), { released: true });
+  launcher.close();
+  assert.equal(existsSync(tokenFile), false);
+  assert.equal(launcher.transcription.tokenRemoved, true);
+});
+
+for (const [name, fixtureCase, reconnect] of [
+  ['a run that did not allow reconnects', 'cloud-reconnect', undefined],
+  ['a third replacement', 'cloud-reconnect-thrice', true],
+])
+  test(`a reconnect in ${name} stops the run`, async (t) => {
+    const api = await fakeGrant();
+    t.after(api.close);
+    const { launcher, owner, failures } = await launchCloud(
+      t,
+      fixtureCase,
+      await mint(api),
+      reconnect ? { reconnect } : {},
+    );
+    await reviewThenRelease(launcher);
+    await waitFor(() => failures.includes('failed'));
+    assert.ok(failures.includes('failed'));
+    await owner.stop().catch(() => {});
+    launcher.close();
+    assert.equal(existsSync(join(launcher.directory, 'stt-token')), false);
+  });
+
+test('reconnect is only `true` and only on a model run with a grant', () => {
+  for (const reconnect of [false, 'yes', 1])
+    assert.throws(() =>
+      prepareLabFixtureLauncher({
+        fixtureCase: 'normal',
+        selection: apiSelection,
+        transcription: {
+          backend: 'deepgram',
+          minuteCap: 5,
+          grant: { writeTokenFile() {} },
+          reconnect,
+        },
+      }),
+    );
 });
 
 test('the token cannot be released before the review row', async (t) => {

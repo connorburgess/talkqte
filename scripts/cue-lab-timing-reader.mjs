@@ -227,6 +227,9 @@ export function watchLabTiming({
           'started',
           'connected',
           'dropping',
+          // A failed stream being replaced (#357), with the failure's code
+          // and the speech lost with it.
+          'reconnecting',
           'finished',
           'ended',
           'stopped',
@@ -248,7 +251,15 @@ export function watchLabTiming({
             'lab_ended',
             'stalled',
           ].includes(value.code)) ||
-        (value.state === 'stopped') !== (value.code !== undefined) ||
+        ['stopped', 'reconnecting'].includes(value.state) !==
+          (value.code !== undefined) ||
+        (value.state === 'reconnecting'
+          ? !['network', 'closed', 'stalled', 'protocol'].includes(
+              value.code,
+            ) ||
+            !Number.isSafeInteger(value.gap_ms) ||
+            value.gap_ms < 0
+          : value.gap_ms !== undefined) ||
         !Number.isSafeInteger(value.audio_ms) ||
         value.audio_ms < 0 ||
         (sourceObservation === 'v1'
@@ -261,6 +272,7 @@ export function watchLabTiming({
         state: value.state,
         ...(value.code !== undefined ? { code: value.code } : {}),
         ...(value.query !== undefined ? { query: value.query } : {}),
+        ...(value.gap_ms !== undefined ? { gap_ms: value.gap_ms } : {}),
         audio_ms: value.audio_ms,
         session: value.session,
       });
