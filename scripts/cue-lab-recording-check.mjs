@@ -38,6 +38,7 @@ export function summarizeRecordingLuma(
   {
     frames,
     durationMs,
+    windowsMissing = false,
     minVisible = MIN_VISIBLE_FRACTION,
     minChanging = MIN_CHANGING_FRACTION,
   } = {},
@@ -85,6 +86,9 @@ export function summarizeRecordingLuma(
     ...(framesPerSecond !== null && framesPerSecond < MIN_FRAMES_PER_SECOND
       ? ['too-few-frames']
       : []),
+    // A captured window closed or gone by the end: the picture cannot be
+    // trusted to show it, whatever the luma says.
+    ...(windowsMissing === true ? ['window-missing'] : []),
   ];
   return Object.freeze({
     samples: samples.length,
@@ -109,6 +113,7 @@ export function measureRecordingVisibility({
   path,
   frames,
   durationMs,
+  windowsMissing,
   region,
   minChanging,
   exec = execFileSync,
@@ -119,11 +124,15 @@ export function measureRecordingVisibility({
       probe.startsWith('/') &&
       typeof path === 'string' &&
       /^\/[A-Za-z0-9/._-]+$/.test(path) &&
-      // A whole recording is judged with the helper's frame count; a region
-      // of it (the player's captions) by its own picture only.
+      // A whole recording is judged with the helper's frame count and
+      // whether a window went missing; a region of it (the player's
+      // captions) by its own picture only.
       (region === undefined
-        ? Number.isSafeInteger(frames) && Number.isFinite(durationMs)
+        ? Number.isSafeInteger(frames) &&
+          Number.isFinite(durationMs) &&
+          typeof windowsMissing === 'boolean'
         : frames === undefined &&
+          windowsMissing === undefined &&
           ['x', 'y', 'width', 'height'].every(
             (k) => Number.isSafeInteger(region[k]) && region[k] >= 0,
           ) &&
@@ -169,7 +178,7 @@ export function measureRecordingVisibility({
       change: Number(f?.tags?.['lavfi.signalstats.YDIF']),
     })),
     {
-      ...(region ? {} : { frames, durationMs }),
+      ...(region ? {} : { frames, durationMs, windowsMissing }),
       ...(minChanging === undefined ? {} : { minChanging }),
     },
   );

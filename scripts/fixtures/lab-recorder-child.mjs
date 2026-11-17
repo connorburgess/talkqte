@@ -36,6 +36,7 @@ process.on('SIGTERM', () => {
     problem: '',
     windowsMoved: mode === 'moved',
     windowsResized: false,
+    windowsMissing: mode === 'missing',
   });
   setTimeout(() => process.exit(mode === 'exit1' ? 1 : 0), 5);
 });

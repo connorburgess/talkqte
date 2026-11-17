@@ -38,7 +38,7 @@ function fixture(mode, extra = {}) {
     close: () => rmSync(directory, { recursive: true, force: true }),
   };
 }
-for (const mode of ['normal', 'partial', 'moved'])
+for (const mode of ['normal', 'partial', 'moved', 'missing'])
   test(
     'real harmless child ' +
       mode +
@@ -61,6 +61,7 @@ for (const mode of ['normal', 'partial', 'moved'])
             audioBuffers: 1,
             windowsMoved: mode === 'moved',
             windowsResized: false,
+            windowsMissing: mode === 'missing',
             geometry: {
               emulator: { x: 100, y: 80, width: 960, height: 568 },
               companion: { x: 700, y: 620, width: 320, height: 76 },
@@ -171,6 +172,12 @@ test('strict Swift source gates exact identities before streams and readiness af
     source,
     /SCContentFilter\(display: display, including: \[emulator, companion\]\)/,
   );
+  // A window gone by the end is reported, never read as unmoved; a canvas
+  // too large for the encoder is refused with the reason.
+  assert.match(source, /windowsMissing = true/);
+  assert.match(source, /"windowsMissing": windowsMissing/);
+  assert.match(source, /guard width <= 8192 && height <= 8192 else \{/);
+  assert.match(source, /Put both on one display\./);
   // A fixed drawing order: the player first, the companion (cue card) last.
   assert.match(source, /for key in order \{/);
   assert.ok(
