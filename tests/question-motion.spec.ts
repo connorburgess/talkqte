@@ -56,9 +56,11 @@ const events = (page: Page) =>
   );
 
 for (const surface of ['notebook', 'companion'] as const) {
-  test(`${surface} cues come in and open sideways once, briefly, without moving focus`, async ({
-    page,
-  }) => {
+  test(`${surface} cues ${
+    surface === 'companion'
+      ? 'grow out of the bar'
+      : 'come in and open sideways'
+  } once, briefly, without moving focus`, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     const { question, focusTarget } = await firstCue(page, surface);
     await expect(focusTarget).toBeFocused();
@@ -72,9 +74,11 @@ for (const surface of ['notebook', 'companion'] as const) {
         ),
       )
       .toBe(true);
-    // The card opens sideways from its left edge: partway through, its
-    // right side is still covered while its full height already shows, and
-    // it ends fully open. Read from what is drawn at each moment.
+    // In the notebook the card opens sideways from its left edge: partway
+    // through, its right side is still covered while its full height
+    // already shows. In the companion it grows down out of the bar: its
+    // lower part is still covered while its full width shows. Either way it
+    // ends fully open. Read from what is drawn at each moment.
     const drawn = (at: number | 'end') =>
       question.evaluate((card, time) => {
         for (const animation of card.getAnimations()) {
@@ -82,18 +86,14 @@ for (const surface of ['notebook', 'companion'] as const) {
           if (time === 'end') animation.finish();
           else animation.currentTime = time;
         }
-        const inset = getComputedStyle(card).clipPath.match(
-          /inset\(([\d.]+)(?:px|%)? ([\d.]+)%? ([\d.]+)(?:px|%)? ([\d.]+)/,
-        );
-        return inset ? inset.slice(1, 5).map(Number) : null;
+        return window.cueInset(card);
       }, at);
+    const growing = surface === 'companion' ? 2 : 1;
     const early = await drawn(20);
-    expect(early).not.toBeNull();
-    const [top, right, bottom, left] = early!;
-    expect([top, bottom, left]).toEqual([0, 0, 0]);
-    expect(right).toBeGreaterThan(20);
-    expect((await drawn(300))![1]).toBeLessThan(right);
-    expect((await drawn('end'))![1]).toBe(0);
+    expect(early.filter((_, side) => side !== growing)).toEqual([0, 0, 0]);
+    expect(early[growing]).toBeGreaterThan(20);
+    expect((await drawn(200))[growing]).toBeLessThan(early[growing]);
+    expect((await drawn('end'))[growing]).toBe(0);
     // The cue's words are there from the first frame, light but readable,
     // and darken in reading order within moments. The purpose and the line
     // the cue came from are at full strength throughout.
@@ -409,31 +409,33 @@ for (const [name, width, cue, needed] of [
         needed,
       );
 
-    // The sideways opening covers the ends of lines only briefly: a fifth
-    // of a second in, every word of the cue is uncovered.
-    const covered = (at: number) =>
-      heading.evaluate((element, time) => {
-        const card = element.closest('.cue-card')!;
-        for (const animation of card.getAnimations({ subtree: true })) {
-          animation.pause();
-          animation.currentTime = time;
-        }
-        const box = card.getBoundingClientRect();
-        const inset = getComputedStyle(card).clipPath.match(
-          /inset\([\d.]+(?:px|%)? ([\d.]+)(px|%)?/,
-        );
-        const hidden = inset
-          ? inset[2] === 'px'
-            ? Number(inset[1])
-            : (Number(inset[1]) / 100) * box.width
-          : 0;
-        const open = box.right - hidden;
-        return [...element.querySelectorAll('span')].filter(
-          (word) => word.getBoundingClientRect().right > open + 0.5,
-        ).length;
-      }, at);
-    expect(await covered(0)).toBeGreaterThan(0);
-    expect(await covered(200)).toBe(0);
+    // The card grows down out of the bar, so the cue at its top is
+    // uncovered first: a tenth of a second in, every word of it shows,
+    // while the source further down may still be covered for a moment.
+    const covered = (at: number, selector: string) =>
+      heading.evaluate(
+        (element, [time, words]) => {
+          const card = element.closest<HTMLElement>('.cue-card')!;
+          for (const animation of card.getAnimations({ subtree: true })) {
+            animation.pause();
+            animation.currentTime = time;
+          }
+          const box = card.getBoundingClientRect();
+          const [, right, bottom] = window.cueInset(card);
+          return [...card.querySelectorAll(words)].filter((word) => {
+            const at = word.getBoundingClientRect();
+            return (
+              at.right > box.right - right + 0.5 ||
+              at.bottom > box.bottom - bottom + 0.5
+            );
+          }).length;
+        },
+        [at, selector] as const,
+      );
+    expect(
+      await covered(0, '.cue-scroll span, .cue-scroll blockquote'),
+    ).toBeGreaterThan(0);
+    expect(await covered(100, 'h2 span')).toBe(0);
   });
 
 test('an answer to a held cue opens in place with a tick, keeps focus, and does not replay for a cue already answered', async ({

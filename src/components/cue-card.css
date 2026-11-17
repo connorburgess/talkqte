@@ -156,6 +156,46 @@
   font-weight: 650;
   color: var(--cue-accent);
 }
+/* Someone asked you by name: the one cue that expects you to answer. It is
+   told apart before any reading by three things that do not rely on colour:
+   an edge down the card's left side, the @ before its label and the label
+   itself. Every other kind shares the calm default, so this one stays
+   meaningful. The edge draws down once as the card arrives, then rests. */
+.cue-card .cue-asked-mark {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  margin-right: 0.18em;
+  vertical-align: -0.06em;
+  stroke-width: 2.6;
+}
+.cue-card .cue-edge {
+  position: absolute;
+  z-index: 2;
+  inset: 0 auto 0 0;
+  width: 6px;
+  background: var(--cue-accent);
+  transform-origin: center top;
+  animation: cue-edge-draw 320ms 40ms var(--cue-ease) both;
+  pointer-events: none;
+}
+@keyframes cue-edge-draw {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: none;
+  }
+}
+.cue-card.is-settled .cue-edge {
+  animation: none;
+}
+@media (forced-colors: active) {
+  .cue-card .cue-edge {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+}
 .question.cue-card .cue-line h2 {
   display: inline;
   padding: 0;
@@ -429,6 +469,69 @@
 }
 .floating-surface .cue-card .cue-line::before {
   height: 38px;
+}
+/* In the companion a cue grows out of the bar above it and folds back into
+   it. The window is already at the cue's size (the native side changes its
+   frame at once), so the card's lower edge moves, not the window's. It
+   opens downward from the bar, quick at the start, so the cue at the top is
+   uncovered first; it does not fade, so every uncovered word is readable
+   from the first frame. The cue settles first and the source follows a
+   beat later, moving only: both are at full strength throughout. */
+.floating-surface .question.cue-card {
+  animation: cue-expand 300ms var(--cue-ease) both;
+}
+@keyframes cue-expand {
+  from {
+    clip-path: inset(0 0 58% 0 round var(--cue-radius));
+  }
+  to {
+    clip-path: inset(0 0 0 0 round var(--cue-radius));
+  }
+}
+.floating-surface .cue-card .cue-line {
+  animation: cue-drop 260ms var(--cue-ease) both;
+}
+.floating-surface .cue-card .cue-source {
+  animation: cue-drop-later 340ms 90ms var(--cue-ease) both;
+}
+@keyframes cue-drop {
+  from {
+    transform: translateY(-6px);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes cue-drop-later {
+  from {
+    transform: translateY(-12px);
+  }
+  to {
+    transform: none;
+  }
+}
+/* Going, it folds back up into the bar: quicker, gathering speed, with no
+   settle at the end. Every way a cue goes shares this one motion. */
+.floating-surface .question.cue-card.is-leaving {
+  animation: cue-collapse 190ms cubic-bezier(0.5, 0, 0.75, 0) both;
+}
+/* Whatever was still arriving inside it stops where it is. */
+.floating-surface .cue-card.is-leaving * {
+  animation: none;
+}
+/* It stays solid while it folds and fades only at the last, so what is
+   seen is the card going back into the bar, not a fade. */
+@keyframes cue-collapse {
+  from {
+    clip-path: inset(0 0 0 0 round var(--cue-radius));
+  }
+  70% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    clip-path: inset(0 0 100% 0 round var(--cue-radius));
+  }
 }
 /* A short cue sits in the middle of the card, with equal room above and
    below; a long one starts at the top and scrolls. */

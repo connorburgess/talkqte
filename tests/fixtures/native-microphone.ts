@@ -703,3 +703,30 @@ window.microphoneTest = {
   releaseStop: () => releaseStop?.(),
 };
 await import('../../src/main');
+
+/** How much of each side of a card its clip covers, in CSS px: top, right,
+ * bottom, left. Reads the computed `inset()` however the browser shortens
+ * it, so a check can tell what is drawn at a moment of an animation. */
+function cueInset(card: Element): [number, number, number, number] {
+  const box = card.getBoundingClientRect();
+  const found = getComputedStyle(card).clipPath.match(/inset\(([^)]*)\)/);
+  if (!found) return [0, 0, 0, 0];
+  const values = found[1].split(' round ')[0].trim().split(/\s+/);
+  const [top, right = top, bottom = top, left = right] = values;
+  const px = (value: string, across: number) =>
+    value.endsWith('%')
+      ? (parseFloat(value) / 100) * across
+      : parseFloat(value);
+  return [
+    px(top, box.height),
+    px(right, box.width),
+    px(bottom, box.height),
+    px(left, box.width),
+  ];
+}
+declare global {
+  interface Window {
+    cueInset: typeof cueInset;
+  }
+}
+window.cueInset = cueInset;
