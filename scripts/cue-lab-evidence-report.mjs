@@ -652,6 +652,8 @@ const STT_CODES = new Set([
   'settings',
   'withdrawn',
   'lab_ended',
+  // No reply from the service for 10 s, or a write held over 3 s (#344).
+  'stalled',
 ]);
 // Native segment identities such as `t1-0-4`; never free text.
 const SEGMENT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
