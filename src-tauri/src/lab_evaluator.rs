@@ -32,6 +32,9 @@ const DEADLINE: Duration = Duration::from_secs(8);
 const IO_SLICE: Duration = Duration::from_millis(20);
 const SETTLEMENT_GRACE: Duration = Duration::from_secs(1);
 const QUEUE: usize = 16;
+// Retired request identities whose late frames are ignored. The broker's
+// dispatch cap is at most 100, so this never drops one in a valid run.
+const RETIRED: usize = 128;
 
 #[derive(Clone, Copy)]
 pub(crate) enum ControlReason {
@@ -329,6 +332,16 @@ impl Link {
         })?;
         loop {
             if cancel.is_cancelled() {
+                if !cancel.is_withdrawn() && self.terminal().is_none() {
+                    // Past the deadline only: the request is retired, not the
+                    // run. The engine settles it as Expired. A result already
+                    // delivered is returned so its action can be logged; the
+                    // engine never applies a reply read after the deadline.
+                    if let Ok(result) = rx.try_recv() {
+                        return result;
+                    }
+                    return Err(Failure::Expired);
+                }
                 self.cancel_reason(ControlReason::TransportFailed);
                 return Err(Failure::Cancelled);
             }
@@ -685,6 +698,20 @@ fn sample_clock(
     Ok(())
 }
 
+// Remembers a retired request so its late frames are ignored, and returns
+// the instant by which the engine must settle it.
+fn retire(
+    retired: &mut std::collections::VecDeque<Identity>,
+    id: &Identity,
+    settle_by: Instant,
+) -> (Identity, Instant) {
+    if retired.len() == RETIRED {
+        retired.pop_front();
+    }
+    retired.push_back(id.clone());
+    (id.clone(), settle_by + SETTLEMENT_GRACE)
+}
+
 fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failure> {
     let Event::Evaluate {
         identity,
@@ -777,10 +804,43 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
     send_eval(&mut stream, &identity, input, until)?;
     let mut active = Some((identity, reply, until));
     let mut awaiting: Option<(Identity, Instant)> = None;
+    // Retired past its deadline; waiting for the engine's Expired settlement
+    // until the instant held here.
+    let mut unsettled: Option<(Identity, Instant)> = None;
+    let mut retired: std::collections::VecDeque<Identity> = Default::default();
+    let same = |a: &Identity, b: &Identity| a.request == b.request && a.context == b.context;
+    let deadline_cancel = |s: &mut UnixStream, id: &Identity| {
+        let mut v = frame("cancel", &d.run_id, session);
+        id.add(&mut v);
+        v["reason"] = json!("deadline");
+        write_frame(s, &v)
+    };
     loop {
         // Drain one outbound event before checking terminal so a Rust failed
         // validation verdict is sent before its terminal cancellation.
         match rx.try_recv() {
+            Ok(Event::Settled(id, Settlement::Expired)) => {
+                // No decision in time. Retire the request and keep the run.
+                if id.session != session {
+                    return Err(Failure::InvalidDecision);
+                }
+                if active.as_ref().is_some_and(|(a, _, _)| same(a, &id)) {
+                    active = None;
+                    retire(&mut retired, &id, Instant::now());
+                    deadline_cancel(&mut stream, &id)?;
+                } else if awaiting.as_ref().is_some_and(|(a, _)| same(a, &id)) {
+                    // The result arrived but the engine read it too late.
+                    awaiting = None;
+                    let mut v = frame("settled", &d.run_id, session);
+                    id.add(&mut v);
+                    v["verdict"] = json!("expired");
+                    write_frame(&mut stream, &v)?;
+                } else if unsettled.as_ref().is_some_and(|(a, _)| same(a, &id)) {
+                    unsettled = None;
+                } else {
+                    return Err(Failure::InvalidDecision);
+                }
+            }
             Ok(Event::Settled(id, verdict)) => {
                 let Some((expected, at)) = awaiting.take() else {
                     return Err(Failure::InvalidDecision);
@@ -798,6 +858,7 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
                     Settlement::Current => "current",
                     Settlement::StaleSuccess => "staleSuccess",
                     Settlement::Failed => "failed",
+                    Settlement::Expired => unreachable!("handled above"),
                 });
                 write_frame(&mut stream, &v)?;
                 if verdict == Settlement::Failed {
@@ -813,7 +874,11 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
                 if link.terminal().is_some() {
                     return Err(Failure::Cancelled);
                 }
-                if active.is_some() || awaiting.is_some() || identity.session != session {
+                if active.is_some()
+                    || awaiting.is_some()
+                    || unsettled.is_some()
+                    || identity.session != session
+                {
                     return Err(Failure::InvalidDecision);
                 }
                 send_eval(&mut stream, &identity, input, until)?;
@@ -842,12 +907,17 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
             let _ = write_frame(&mut stream, &v);
             return Err(f);
         }
-        if active
+        if let Some((id, _, at)) = active.take_if(|(_, _, at)| Instant::now() >= *at) {
+            // Native's deadline: end this request's lease, keep the run.
+            unsettled = Some(retire(&mut retired, &id, at));
+            deadline_cancel(&mut stream, &id)?;
+        }
+        if awaiting
             .as_ref()
-            .is_some_and(|(_, _, at)| Instant::now() >= *at)
-            || awaiting
+            .is_some_and(|(_, at)| at.elapsed() > SETTLEMENT_GRACE)
+            || unsettled
                 .as_ref()
-                .is_some_and(|(_, at)| at.elapsed() > SETTLEMENT_GRACE)
+                .is_some_and(|(_, by)| Instant::now() > *by)
         {
             return Err(Failure::Expired);
         }
@@ -869,11 +939,22 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
                         "usage",
                     ],
                 )?;
-                let (id, reply, _) = active.take().ok_or(Failure::InvalidDecision)?;
-                if !id.matches(&v)
-                    || v["elapsedMs"]
-                        .as_u64()
-                        .is_none_or(|n| n > DEADLINE.as_millis() as u64)
+                if retired.iter().any(|id| id.matches(&v)) {
+                    // A late reply for a retired request is never delivered.
+                    continue;
+                }
+                let (id, reply, until) = active.take().ok_or(Failure::InvalidDecision)?;
+                if !id.matches(&v) {
+                    return Err(Failure::InvalidDecision);
+                }
+                if Instant::now() >= until {
+                    unsettled = Some(retire(&mut retired, &id, until));
+                    deadline_cancel(&mut stream, &id)?;
+                    continue;
+                }
+                if v["elapsedMs"]
+                    .as_u64()
+                    .is_none_or(|n| n > DEADLINE.as_millis() as u64)
                 {
                     return Err(Failure::InvalidDecision);
                 }
@@ -892,10 +973,15 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
                 if text.len() > crate::cue_evaluator::MAX_REPLY_BYTES {
                     return Err(Failure::InvalidDecision);
                 }
-                awaiting = Some((id, Instant::now()));
-                reply
-                    .try_send(Ok(text))
-                    .map_err(|_| Failure::WorkerUnavailable)?;
+                match reply.try_send(Ok(text)) {
+                    Ok(()) => awaiting = Some((id, Instant::now())),
+                    // The caller already gave up at its deadline.
+                    Err(mpsc::TrySendError::Disconnected(_)) if Instant::now() >= until => {
+                        unsettled = Some(retire(&mut retired, &id, until));
+                        deadline_cancel(&mut stream, &id)?;
+                    }
+                    Err(_) => return Err(Failure::WorkerUnavailable),
+                }
             }
             Some("failed") => {
                 check(
@@ -905,10 +991,20 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
                     session,
                     &["requestId", "contextRevision", "code"],
                 )?;
+                if retired.iter().any(|id| id.matches(&v)) {
+                    continue;
+                }
                 if let Some((id, _, _)) = &active {
                     if !id.matches(&v) {
                         return Err(Failure::InvalidDecision);
                     }
+                }
+                if v["code"] == "deadline" {
+                    // The broker's request-scoped deadline: retire this
+                    // request and wait for native's own expiry to settle it.
+                    let (id, _, until) = active.take().ok_or(Failure::InvalidDecision)?;
+                    unsettled = Some(retire(&mut retired, &id, until.max(Instant::now())));
+                    continue;
                 }
                 return Err(code(&v));
             }
@@ -961,7 +1057,7 @@ pub(crate) fn connected_engine() -> Engine {
     } else {
         "Anthropic through the lab's Claude subscription CLI"
     };
-    let policy=format!("Fictional development lab only. Sends recent and new conversation, the optional Your name setting and current/earlier cues to {service}. Never sends audio, prior notes, imported notes or focus lines. Near every transcript line may be sent, a few at a time. Uses an explicitly chosen subscription; no API fallback. The lab shares a CLI-dispatch cap across all roles; underlying provider request count is unobserved. Pause, Dismiss, Off and Stop terminate this strict lab run; Resume does not restart it. Provider retention follows that account's terms. No model cue text is persisted by this client.");
+    let policy=format!("Fictional development lab only. Sends recent and new conversation, the optional Your name setting and current/earlier cues to {service}. Never sends audio, prior notes, imported notes or focus lines. Near every transcript line may be sent, a few at a time. Uses an explicitly chosen subscription; no API fallback. The lab shares a CLI-dispatch cap across all roles; underlying provider request count is unobserved. A cue reflects speech up to 8 s before it appears; newer speech is checked next. A reply later than 8 s shows nothing and the run continues. Pause, Dismiss, Off, Stop and any other failure end the run; Resume does not restart it. Provider retention follows that account's terms. No model cue text is persisted by this client.");
     let processor = ProcessorConfiguration::new(
         "lab-subscription".into(),
         1,

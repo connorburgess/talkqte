@@ -18,6 +18,26 @@ pub use projection::{
 
 const RECENT_LINES: usize = 6;
 
+/// What a lab decision had not seen when it was applied.
+struct Lag {
+    /// The newest transcript line the decision was evaluated through.
+    through_segment: String,
+    /// Lines that arrived after it before the decision was applied.
+    lines: u64,
+    /// The newest of those lines' `at_ms` minus the through line's `at_ms`:
+    /// unseen speech on the session clock, not the reply's latency.
+    ms: u64,
+}
+
+fn action_code(decision: &Decision) -> &'static str {
+    match decision.action {
+        Action::Show => "show",
+        Action::Quiet => "quiet",
+        Action::Resolved => "resolved",
+        Action::Withdraw => "withdraw",
+    }
+}
+
 /// Content-free operational state for a future native controller. An absent
 /// cue is not evidence that an evaluator chose quiet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -294,6 +314,9 @@ impl Engine {
     }
 
     fn fail_evaluation(&mut self, failure: Failure) {
+        // A lab request's own expiry is skipped before this point, once the
+        // link has retired it. A lab link that ended with Expired reaches here
+        // and stops the run as timed out.
         if failure == Failure::Expired && self.evaluation.as_ref().is_none_or(|s| s.lab.is_none()) {
             let state = self.evaluation.as_mut().expect("evaluation failed");
             state.timeouts_in_row = state.timeouts_in_row.saturating_add(1);
@@ -357,6 +380,10 @@ impl Engine {
                         latency_ms: u64::try_from(pending.sent.elapsed().as_millis())
                             .unwrap_or(u64::MAX),
                         failure: None,
+                        action: None,
+                        through_segment: None,
+                        lag_lines: None,
+                        lag_ms: None,
                         elapsed_ms: self.state.elapsed_ms,
                     });
                 }
@@ -596,21 +623,50 @@ impl Engine {
             return;
         };
         let submitted = state.pending.take().expect("pending checked");
+        // A reply that completed before the deadline but was read after it is
+        // never applied; only its action is logged.
+        let late = if result == Err(Failure::Expired) {
+            state.worker.take_late_decision()
+        } else {
+            None
+        };
         self.set_evaluation_status(EvaluationStatus::Idle);
-        let applies = permission_current && current.as_ref() == Some(&submitted.request);
+        // Lab only: a reply to a transcript that has since only grown is
+        // still applied, with its lag logged. Ordinary mode cancels on new
+        // speech and applies only an exact match.
+        let lag = match (
+            &current,
+            self.evaluation.as_ref().is_some_and(|s| s.lab.is_some()),
+        ) {
+            (Some(current), true) if permission_current => {
+                self.lab_lag(&submitted.request, current)
+            }
+            _ => None,
+        };
+        let applies =
+            permission_current && (current.as_ref() == Some(&submitted.request) || lag.is_some());
         if let Some(link) = self.evaluation.as_ref().and_then(|s| s.lab.clone()) {
             use crate::cue_evaluator::Settlement;
-            let verdict = if result.is_err() {
-                Settlement::Failed
-            } else if applies {
-                Settlement::Current
-            } else {
-                Settlement::StaleSuccess
+            let verdict = match &result {
+                Err(Failure::Expired) => Settlement::Expired,
+                Err(_) => Settlement::Failed,
+                Ok(_) if applies => Settlement::Current,
+                Ok(_) => Settlement::StaleSuccess,
             };
             let settlement = link.settle(&submitted.request, verdict);
             if let Err(failure) = result.as_ref() {
-                self.record_result(&submitted, &result, true);
-                self.fail_evaluation(*failure);
+                self.record_result(&submitted, &result, true, late.as_ref(), None);
+                match settlement {
+                    // The link retired only this request: a recorded "no
+                    // decision in time", and the run continues. The session
+                    // call limit and the broker's dispatch cap still bound it.
+                    Ok(()) if *failure == Failure::Expired => {}
+                    // An expiry the link could not retire ends the run.
+                    Err(link_failure) if *failure == Failure::Expired => {
+                        self.fail_evaluation(link_failure)
+                    }
+                    _ => self.fail_evaluation(*failure),
+                }
                 return;
             }
             if let Err(failure) = settlement {
@@ -618,38 +674,84 @@ impl Engine {
                 return;
             }
         }
-        self.record_result(&submitted, &result, applies);
-        if let Some(current) = current {
-            if applies {
-                match result {
-                    Ok(decision) => self.apply_evaluation(&current, decision, submitted.number),
-                    Err(error) => self.fail_evaluation(error),
+        self.record_result(&submitted, &result, applies, late.as_ref(), lag.as_ref());
+        if current.is_some() && applies {
+            // Cited sources resolve against the input the reply was made from;
+            // the guards above keep every one of them in the transcript.
+            match result {
+                Ok(decision) => {
+                    self.apply_evaluation(&submitted.request, decision, submitted.number)
                 }
+                Err(error) => self.fail_evaluation(error),
             }
         }
     }
 
+    /// How far the transcript moved on while a lab reply was pending, if the
+    /// submitted input is still an append-only prefix of the current one:
+    /// same session, existing cue, listener and earlier cues, and every
+    /// submitted line still present with identical id, text and time. Any
+    /// edit, removal or cue change makes the reply stale.
+    fn lab_lag(&self, submitted: &Request, current: &Request) -> Option<Lag> {
+        if submitted.session_id() != current.session_id()
+            || submitted.existing_cue() != current.existing_cue()
+            || submitted.user_name() != current.user_name()
+            || submitted.earlier_cues() != current.earlier_cues()
+            || submitted
+                .sources()
+                .iter()
+                .any(|s| source_time(s).is_none() && !current.sources().contains(s))
+        {
+            return None;
+        }
+        let transcript = &self.state.transcript;
+        let lines: Vec<_> = submitted
+            .sources()
+            .iter()
+            .filter(|s| source_time(s).is_some())
+            .collect();
+        if !lines
+            .iter()
+            .all(|s| transcript.iter().any(|line| matches_source(line, s)))
+        {
+            return None;
+        }
+        let newest = lines.iter().max_by_key(|s| source_time(s))?;
+        let at = transcript
+            .iter()
+            .position(|line| matches_source(line, newest))?;
+        let newer = &transcript[at + 1..];
+        Some(Lag {
+            through_segment: transcript[at].id.clone(),
+            lines: newer.len() as u64,
+            ms: newer
+                .last()
+                .map_or(0, |line| line.at_ms.saturating_sub(transcript[at].at_ms)),
+        })
+    }
+
     /// The development timing log's record of a reply. Ids and codes only.
+    /// A stale reply, or one read after the deadline, keeps its action code
+    /// so the decision is not lost; it is never applied.
     fn record_result(
         &self,
         submitted: &Pending,
         result: &Result<Decision, Failure>,
         applies: bool,
+        late: Option<&Decision>,
+        lag: Option<&Lag>,
     ) {
         if !crate::timing_log::enabled() {
             return;
         }
+        let action = match result {
+            Ok(decision) if !applies => Some(action_code(decision)),
+            Err(Failure::Expired) => late.map(action_code),
+            _ => None,
+        };
         let (outcome, failure) = match result {
             _ if !applies => ("stale", None),
-            Ok(decision) => (
-                match decision.action {
-                    Action::Show => "show",
-                    Action::Quiet => "quiet",
-                    Action::Resolved => "resolved",
-                    Action::Withdraw => "withdraw",
-                },
-                None,
-            ),
+            Ok(decision) => (action_code(decision), None),
             Err(Failure::Cancelled | Failure::Busy) => ("cancelled", None),
             Err(Failure::Stale) => ("stale", None),
             Err(failure) => (
@@ -671,6 +773,10 @@ impl Engine {
             outcome,
             latency_ms: u64::try_from(submitted.sent.elapsed().as_millis()).unwrap_or(u64::MAX),
             failure,
+            action,
+            through_segment: lag.map(|lag| lag.through_segment.clone()),
+            lag_lines: lag.map(|lag| lag.lines),
+            lag_ms: lag.map(|lag| lag.ms),
             elapsed_ms: self.state.elapsed_ms,
         });
     }
@@ -2093,6 +2199,37 @@ mod tests {
         h.engine.advance(1_600);
         let request = h.request();
         assert_eq!(request.sources().last().unwrap().id, "transcript:line-2");
+    }
+
+    #[test]
+    fn ordinary_mode_still_drops_a_reply_to_an_older_transcript() {
+        // The lab's append-only prefix rule does not apply here: new speech
+        // cancels the pending request and its reply is never shown.
+        let mut h = Harness::new();
+        h.line("Who owns the garden checklist?");
+        h.request();
+        h.line("Maya owns it; that is settled.");
+        h.replies
+            .send(
+                serde_json::json!({"action": "show", "cue": "Who owns the checklist?",
+                    "sourceIds": ["transcript:line-1"]})
+                .to_string(),
+            )
+            .unwrap();
+        // Only the newest transcript is evaluated next; the old reply is gone.
+        let until = Instant::now() + Duration::from_secs(2);
+        let latest = loop {
+            h.engine.advance(1);
+            if let Ok(request) = h.requests.try_recv() {
+                break request;
+            }
+            assert!(Instant::now() < until, "latest speech was not evaluated");
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        assert!(latest.sources().iter().any(|s| s.id == "transcript:line-2"));
+        assert!(h.engine.state.cue.is_none());
+        h.reply("quiet", None, &["transcript:line-2"]);
+        assert!(h.engine.state.cue.is_none());
     }
 
     #[test]
