@@ -264,3 +264,9 @@ Before checking off a roadmap item or merging a change to capabilities, setup, u
 At milestone boundaries, also review the whole discover → install → first use → Stop/recovery → update/support journey and any affected website claims. Record inconsistencies and the next release blocker in the milestone evidence. Keep the README a concise entry point and detailed validation in the relevant documents; do not add features or rewrite accurate material merely to complete this review.
 
 The [selected prior context API lab path](selected-context-lab-opt-in.md) adds an explicit versioned selected-source route and empty-note control. Its next blocker is independently reviewed combined native/JS source and hosted native validation plus fake production-route/package evidence; source wiring alone is not a run-ready app or provider/account acceptance.
+
+The selected-context lab's [owned-player admission correction](development-owned-player-source.md#selected-context-composition-and-acceptance)
+restores exact PID/start/executable/bundle binding through setup, source ownership
+and listening/retirement observations. The next blocker is exact-head hosted
+validation and a reviewed fixed-source artifact/package; the failed earlier
+artifact is retained, and no launch or provider success follows from the patch.

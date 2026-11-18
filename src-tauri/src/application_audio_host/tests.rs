@@ -46,6 +46,7 @@ struct Script {
     list_everything: AtomicBool,
     /// Fictional metadata for the strictly named source observation tests.
     quicktime_fixture: AtomicBool,
+    owned_player_fixture: AtomicBool,
     /// macOS refuses the start, as before TalkQTE is reopened after the grant.
     start_needs_reopen: AtomicBool,
     runs: AtomicU64,
@@ -216,6 +217,13 @@ impl Backend for Fake {
         }
         if self.script.list_everything.load(Ordering::SeqCst) {
             return Ok(everything());
+        }
+        if self.script.owned_player_fixture.load(Ordering::SeqCst) {
+            return Ok(vec![Application::new(
+                "fictional-0".into(),
+                "TalkQTE Lab Player".into(),
+            )
+            .unwrap()]);
         }
         if self.script.quicktime_fixture.load(Ordering::SeqCst) {
             return Ok(vec![Application::new(
@@ -1691,6 +1699,102 @@ mod observation_start {
             start: WAIT,
             poll: Duration::from_millis(2),
         }
+    }
+
+    #[test]
+    fn bound_owned_launcher_admission_observation_and_ordinary_stop_compose() {
+        crate::test_isolation::run(
+            "application_audio_host::tests::observation_start::owned_launcher_child",
+            &[("TALKQTE_TEST_OWNED_ADMISSION", "1")],
+            &[],
+        );
+    }
+
+    #[test]
+    #[ignore = "isolated frozen owned-source admission"]
+    fn owned_launcher_child() {
+        if std::env::var("TALKQTE_TEST_OWNED_ADMISSION").as_deref() != Ok("1") {
+            return;
+        }
+        use crate::dev_lab_source::{self, Kind, PLAYER};
+        let launch = Settings::read(|key| match key {
+            dev_start::SOURCE_ENV => Some(PLAYER.into()),
+            dev_start::STOP_AFTER_ENV => Some("1".into()),
+            _ => None,
+        })
+        .unwrap();
+        assert!(
+            !crate::dev_stop::supported_source(Some(&launch)),
+            "a display name alone cannot arm Stop"
+        );
+        dev_lab_source::tests::freeze_launcher_fixture(Some(&launch));
+        assert!(crate::dev_stop::supported_source(Some(&launch)));
+        assert!(!crate::dev_stop::supported_source(None));
+        for application in [
+            PLAYER,
+            "QuickTime Player",
+            "TalkQTE Lab Player Helper",
+            "Other Player",
+        ] {
+            for stop_after in [Ok(None), Err(()), Ok(Some(Duration::from_secs(1)))] {
+                let source = Settings {
+                    application: application.into(),
+                    stop_after,
+                };
+                assert_eq!(
+                    crate::dev_stop::supported_source(Some(&source)),
+                    application == PLAYER && matches!(source.stop_after, Ok(Some(_)))
+                );
+            }
+        }
+        let f = fixture(false);
+        f.script.owned_player_fixture.store(true, Ordering::SeqCst);
+        let outcome = f
+            .host
+            .start_by_setting_observed(&launch, waits(), |operation| {
+                assert!(f.host.0.state.try_lock().is_ok());
+                let candidate = f.host.lab_listening_candidate(operation).unwrap();
+                assert_eq!(candidate.kind, Kind::OwnedPlayer);
+                let identity = crate::dev_source_observation::observe(
+                    &f.runtime,
+                    &candidate,
+                    "fictional-owned-run",
+                    || false,
+                )
+                .unwrap();
+                let listening = serde_json::to_value(identity.event("listening")).unwrap();
+                let runtime = f.runtime.lock().unwrap();
+                assert_eq!(listening["application"], PLAYER);
+                assert_eq!(listening["run_id"], "fictional-owned-run");
+                assert_eq!(listening["session"], runtime.engine.session().to_string());
+                assert_eq!(listening["host_operation"], operation);
+                assert_eq!(
+                    listening["live_operation"],
+                    runtime.live.as_ref().unwrap().operation.as_deref().unwrap()
+                );
+                assert!(runtime.live.as_ref().unwrap().microphone.is_none());
+                assert!(
+                    !runtime.engine.has_processing_permission(),
+                    "capture admission grants no provider permission"
+                );
+                let retired = serde_json::to_value(identity.event("retired")).unwrap();
+                for key in [
+                    "application",
+                    "run_id",
+                    "session",
+                    "host_operation",
+                    "live_operation",
+                ] {
+                    assert_eq!(listening[key], retired[key]);
+                }
+                true
+            });
+        assert_eq!(outcome, Outcome::Started { stopped: true });
+        f.wait_phase(Phase::Off);
+        let operation = f.view().operation;
+        assert!(operation.is_none());
+        assert!(!f.runtime.lock().unwrap().source_session_running());
+        assert_eq!(f.script.runs.load(Ordering::SeqCst), 1);
     }
 
     #[test]

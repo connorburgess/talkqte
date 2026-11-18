@@ -1022,6 +1022,10 @@ pub(crate) mod app {
 
     impl Backend for Native {
         fn begin_session(&mut self, control: &Control) -> Result<Box<dyn FnOnce()>, Failure> {
+            #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+            if !crate::dev_lab_source::current() {
+                return Err(Failure::SourceUnavailable);
+            }
             // The same check the start makes before any native request.
             let recognizer_available = crate::live_unavailable().is_none();
             let controller = self
@@ -1053,6 +1057,8 @@ pub(crate) mod app {
                 self.selections.clear();
                 return Err(Failure::Cancelled);
             }
+            #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+            self.selections.retain(Selection::lab_allowed);
             Ok(self
                 .selections
                 .iter()
@@ -1171,6 +1177,9 @@ pub(crate) mod app {
         // Freeze source and finite Stop settings once, shared by arming and
         // autostart so the approved source cannot change between those steps.
         let settings = DevSettings::read(|name| std::env::var(name).ok());
+        #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+        crate::dev_lab_source::initialize(settings.as_ref(), |name| std::env::var(name).ok())
+            .map_err(std::io::Error::other)?;
         #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
         crate::dev_stop::install(app, host.clone(), settings.as_ref())
             .map_err(std::io::Error::other)?;

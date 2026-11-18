@@ -248,6 +248,22 @@ pub enum Event {
         live_operation: String,
         session: String,
     },
+    /// Development lab only: TalkQTE's own check of the pinned player
+    /// failed transiently (`failing`, with the check's name), passed again
+    /// (`recovered`, after `after_ms`), or ended the source (`ended`, with
+    /// the check that did, after `after_ms` of failing; 0 for a definitive
+    /// change). The source_problem row that follows says `lab_source_lost`.
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    LabSourceCheck {
+        state: &'static str,
+        check: &'static str,
+        after_ms: u64,
+    },
     /// Whether the user's name, used to notice questions asked of them, is
     /// set for this session: at its start and when it changes. Never the name.
     UserNameSet { session: u64, set: bool },
