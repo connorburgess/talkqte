@@ -10,9 +10,12 @@ on:
 permissions:
   contents: read
 
+# A new commit on a pull request replaces that pull request's older run.
+# Every other run (a merge to main, a manual dispatch) has its own group and
+# finishes, so each tree that lands on main gets a complete result.
 concurrency:
-  group: checks-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'pull_request' && format('checks-pr-{0}', github.event.pull_request.number) || format('checks-run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   contributions:
