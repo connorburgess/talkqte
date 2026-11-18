@@ -33,6 +33,8 @@ mod dev_source_observation;
     feature = "lab-evaluator"
 ))]
 mod dev_stop;
+#[cfg(debug_assertions)]
+mod dev_user_name;
 pub mod engine;
 pub mod granola;
 #[cfg(all(
@@ -1451,6 +1453,15 @@ pub fn run() {
             stop_microphone
         ])
         .setup(|app| {
+            // A lab launch may give the user's name; it is set before the
+            // first session, as if typed in Settings.
+            #[cfg(debug_assertions)]
+            {
+                dev_user_name::initialize();
+                if let Ok(mut runtime) = app.state::<AppState>().0.lock() {
+                    dev_user_name::apply(&mut runtime.engine);
+                }
+            }
             #[cfg(all(
                 debug_assertions,
                 any(feature = "claude-cli", feature = "lab-evaluator"),
