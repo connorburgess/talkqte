@@ -149,6 +149,10 @@ export function createLabRun({
     if (root.signal.aborted) throw gateFailure('cancelled');
     provider = await openLabProvider({
       ...config,
+      contextPolicy:
+        config.contextPolicy === 'bounded-history'
+          ? 'fresh-only'
+          : (config.contextPolicy ?? 'fresh-only'),
       signal: root.signal,
       ...(approvalBudgetMs ? { deferOpen: true } : {}),
     });
@@ -156,6 +160,10 @@ export function createLabRun({
     startupStage = 'broker-preparation';
     broker = await openLabBroker({
       provider,
+      contextPolicy:
+        config.contextPolicy === 'bounded-history'
+          ? 'fresh-only'
+          : (config.contextPolicy ?? 'fresh-only'),
       sourceSessionMode,
       runId,
       maxCalls: config.maxCalls,

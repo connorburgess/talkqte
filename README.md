@@ -135,3 +135,5 @@ TalkQTE is **source-available** under the [Sustainable Use License 1.0](LICENSE)
 Using your notes in paid work or connecting a permitted TalkQTE installation to another note-taker does not by itself require a commercial agreement. This is not an OSI-approved open-source license. Previously published Apache-2.0 material keeps its existing permissions.
 
 See the [licensing guide](LICENSING.md) for examples, prior-version rights, and commercial inquiries. The license text governs. The TalkQTE name and logo are covered separately by the [name and logo guide](TRADEMARKS.md).
+
+The developer-only [selected prior context API path](docs/selected-context-lab-opt-in.md) requires explicit session review and a separately verified paired native/JS package. It preserves default note exclusion; source preparation is not a run-ready build or validated live integration.

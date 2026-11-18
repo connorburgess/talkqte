@@ -1,3 +1,4 @@
+import { SELECTED_CONTEXT, selectedIdentity } from './cue-selected-context.mjs';
 // Explicit per-run provider selection. The caller's orchestration gate is
 // still authoritative across participant, judge and app-evaluator operations.
 import { openIsolatedCli, EFFORTS } from './cue-lab.mjs';
@@ -126,8 +127,11 @@ export async function openLabProvider({
   // Direct API route only: return the session now and open the adapter
   // (key file and worker) only on open(), after the owner's in-app approval.
   deferOpen = false,
+  contextPolicy = 'fresh-only',
 } = {}) {
   if (
+    !['fresh-only', SELECTED_CONTEXT].includes(contextPolicy) ||
+    (contextPolicy === SELECTED_CONTEXT && provider !== 'anthropic-api') ||
     !['claude-code', 'codex', 'anthropic-api'].includes(provider) ||
     typeof deferOpen !== 'boolean' ||
     (deferOpen && provider !== 'anthropic-api') ||
@@ -161,6 +165,7 @@ export async function openLabProvider({
     throw failure('ambient-credentials');
   }
   const options = Object.freeze({
+    contextPolicy,
     provider,
     model,
     effort,
@@ -201,6 +206,7 @@ export async function openLabProvider({
   let adapter = deferOpen ? null : await openAdapter();
   let opening = null;
   const metadata = Object.freeze({
+    ...(contextPolicy === SELECTED_CONTEXT ? selectedIdentity() : {}),
     provider,
     model,
     effort,
