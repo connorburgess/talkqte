@@ -16,7 +16,9 @@ retry. Record the workflow commit, native commit, run/attempt/job, artifact ID a
 API digest before downloading. The artifact job must show a thin arm64 binary,
 macOS minimum 14.0, the exact embedded source commit and the locked debug feature
 recipe. Runner architecture, toolchain/Xcode versions and hashes are recorded;
-a hosted rebuild is not expected to be byte-identical to a previous local build.
+Rust version validation and verbose provenance query run from the native source
+checkout, using the same source-selected toolchain as the build.
+A hosted rebuild is not expected to be byte-identical to a previous local build.
 
 The lab features are `cloud-transcription,lab-evaluator,native-audio-spike,timing-log`,
 with `--locked --no-default-features`, no `claude-cli`, and no signing identity.

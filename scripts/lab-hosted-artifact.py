@@ -213,7 +213,7 @@ def pack(source, sha, app, out):
     with open(app / 'Contents/Info.plist', 'rb') as f:
         info = plistlib.load(f)
     require(info.get('CFBundleIdentifier') == 'com.talkqte.desktop' and info.get('LSMinimumSystemVersion') == '14.0', 'bundle identity/minimum OS')
-    require(capture(['rustc', '--version']).startswith('rustc 1.97.1 '), 'Rust toolchain')
+    require(capture(['rustc', '--version'], source).startswith('rustc 1.97.1 '), 'Rust toolchain')
     require(digest(source / 'src-tauri/Entitlements.plist') == 'd70ae7a3f925e53536fe56d205e4bab9bc1df03495738bf8dfdb6cb6dbb53c7d', 'entitlement input changed')
     records = inventory(app)
     require(not out.exists(), 'output already exists')
@@ -245,7 +245,7 @@ def pack(source, sha, app, out):
         'entitlementInputSha256': digest(source / 'src-tauri/Entitlements.plist'),
         'packageLockSha256': digest(source / 'package-lock.json'),
         'cargoLockSha256': digest(source / 'src-tauri/Cargo.lock'),
-        'rustc': capture(['rustc', '-vV']), 'node': capture(['node', '--version']),
+        'rustc': capture(['rustc', '-vV'], source), 'node': capture(['node', '--version']),
         'xcode': capture(['xcodebuild', '-version']),
         'machO': '\n'.join(line.strip() for line in macho.splitlines() if re.match(r'\s*(platform|minos|sdk)\s', line)),
     }

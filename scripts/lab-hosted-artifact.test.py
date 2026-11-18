@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 import json
 import zipfile
+import sys
 
 spec = importlib.util.spec_from_file_location('artifact', Path(__file__).with_name('lab-hosted-artifact.py'))
 artifact = importlib.util.module_from_spec(spec)
@@ -207,8 +208,8 @@ class ArchiveProtocol(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'outer artifact type'):
                 artifact.safe_download(archive, root / 'link', artifact.digest(archive))
 
-    def test_fake_hosted_pack_provenance_and_tamper_detection(self):
-        # Executes only our archive/provenance code; every host tool is mocked.
+    def test_fake_hosted_pack_source_toolchain_provenance_failure_and_tamper(self):
+        # Rust selection uses an actual harmless subprocess; other host tools are mocked.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / 'source'
@@ -216,6 +217,22 @@ class ArchiveProtocol(unittest.TestCase):
             for name in ['Entitlements.plist', 'Cargo.lock']:
                 (source / 'src-tauri' / name).write_text('fixture')
             (source / 'package-lock.json').write_text('fixture')
+            (source / 'rust-toolchain.toml').write_text('1.97.1')
+            # Model rustup's cwd-dependent selection: the workspace/default differs.
+            # This script is not rustc and never compiles or invokes a real toolchain.
+            fake_rustc = root / 'fake-rustc.py'
+            fake_rustc.write_text(
+                'from pathlib import Path\nimport sys\n'
+                'source = Path(sys.argv[1])\n'
+                'version = (source / "rust-toolchain.toml").read_text() if Path.cwd() == source.resolve() else "1.96.0"\n'
+                'print("rustc " + version + " fixture" + ("\\nrelease: " + version if sys.argv[2] == "-vV" else ""))\n'
+            )
+            real_capture = artifact.capture
+            rust_queries = []
+            def rust_command(args, cwd):
+                return real_capture([sys.executable, str(fake_rustc), str(source), *args], cwd)
+            self.assertTrue(rust_command(['--version'], root).startswith('rustc 1.96.0 '))
+            self.assertTrue(rust_command(['--version'], source).startswith('rustc 1.97.1 '))
             app = root / 'TalkQTE.app'
             (app / 'Contents/MacOS').mkdir(parents=True)
             (app / 'Contents/Resources').mkdir()
@@ -237,7 +254,8 @@ class ArchiveProtocol(unittest.TestCase):
                 if argv[0] == 'xcrun':
                     return 'platform MACOS\n minos 14.0\n sdk 26.5\n'
                 if argv[0] == 'rustc':
-                    return 'rustc 1.97.1 fixture'
+                    rust_queries.append((argv[1:], cwd))
+                    return rust_command(argv[1:], cwd)
                 return 'fixture version'
             real_digest = artifact.digest
             def fake_digest(path):
@@ -252,6 +270,15 @@ class ArchiveProtocol(unittest.TestCase):
             self.assertEqual(provenance['sourceCommit'], sha)
             self.assertEqual(provenance['workflowCommit'], workflow)
             self.assertEqual(provenance['features'], artifact.FEATURES)
+            self.assertEqual(provenance['rustc'], 'rustc 1.97.1 fixture\nrelease: 1.97.1')
+            self.assertEqual(rust_queries, [(['--version'], source), (['-vV'], source)])
+            # A wrong SOURCE toolchain still fails before any export directory.
+            (source / 'rust-toolchain.toml').write_text('1.96.9')
+            rejected = root / 'rejected-export'
+            with patch.object(artifact, 'capture', fake_capture), patch.object(artifact, 'digest', fake_digest), patch.dict(artifact.os.environ, env):
+                with self.assertRaisesRegex(ValueError, 'Rust toolchain'):
+                    artifact.pack(source, sha, app, rejected)
+            self.assertFalse(rejected.exists())
             extracted = artifact.safe_extract(out / 'TalkQTE-unsigned.tar.gz', root / 'new', provenance['archiveSha256'])
             artifact.verify_extracted(extracted, out / 'provenance.json', out / 'inventory.json', sha, workflow)
             (extracted / 'Contents/MacOS/talkqte').write_bytes(b'tampered')
