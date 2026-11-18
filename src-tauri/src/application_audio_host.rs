@@ -1038,8 +1038,12 @@ pub(crate) mod app {
         fn begin_session(&mut self, control: &Control) -> Result<Box<dyn FnOnce()>, Failure> {
             // The same check the recognizer load makes first. Whisper builds
             // verify the model again when loading; that can still fail.
-            let recognizer_available = cfg!(feature = "local-whisper")
-                && crate::model_path(&self.app).is_some_and(|(path, _)| path.is_file());
+            let recognizer_available = if crate::transcription::cloud::selected() {
+                crate::transcription::cloud::ready().is_ok()
+            } else {
+                cfg!(feature = "local-whisper")
+                    && crate::model_path(&self.app).is_some_and(|(path, _)| path.is_file())
+            };
             let controller = self
                 .app
                 .state::<crate::microphone::Controller>()
@@ -1087,7 +1091,7 @@ pub(crate) mod app {
                 recognizer(&self.app)
             });
             // Whatever the answer, the listed selections are spent.
-            let (chosen, transcriber) = match ready {
+            let (chosen, recognition) = match ready {
                 Ok(ready) => ready,
                 Err(refused) => {
                     self.selections.clear();
@@ -1100,7 +1104,7 @@ pub(crate) mod app {
             // through the gate, and this is the worker that constructed it.
             // The remaining obligations of NativeOwner::begin are unverified
             // device gates; see docs/native-audio-owner.md.
-            unsafe { native_source::run(access, start, selection, LIMITS, transcriber, monitor) }
+            unsafe { native_source::run(access, start, selection, LIMITS, recognition, monitor) }
         }
     }
 
@@ -1142,9 +1146,23 @@ pub(crate) mod app {
         Ok((chosen, loaded))
     }
 
-    /// A second local recognizer for this source, loaded before any native
-    /// request. Builds without local transcription refuse the start.
-    fn recognizer(app: &tauri::AppHandle) -> Result<Box<dyn Transcriber>, String> {
+    /// How this source is transcribed, decided before any native request:
+    /// a cloud stream when this launch selected one (refused, not replaced,
+    /// when its settings are invalid), otherwise a second local recognizer.
+    /// Builds without either refuse the start.
+    fn recognizer(
+        app: &tauri::AppHandle,
+    ) -> Result<native_source::Recognition<Box<dyn Transcriber>>, String> {
+        if crate::transcription::cloud::selected() {
+            return crate::transcription::cloud::ready()
+                .and_then(|()| crate::transcription::cloud::opener())
+                .map(native_source::Recognition::Cloud)
+                .map_err(|_| "The cloud transcription settings are not usable.".to_string());
+        }
+        local_recognizer(app).map(native_source::Recognition::Local)
+    }
+
+    fn local_recognizer(app: &tauri::AppHandle) -> Result<Box<dyn Transcriber>, String> {
         #[cfg(feature = "local-whisper")]
         {
             let (model, pinned) = crate::model_path(app)

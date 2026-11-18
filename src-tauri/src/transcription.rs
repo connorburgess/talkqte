@@ -4,6 +4,9 @@
 //! parsing, and engine updates happen on the worker thread. Nothing here
 //! records or retains audio, and no recognizer is connected to the app yet.
 
+pub mod cloud;
+#[cfg(feature = "cloud-transcription")]
+pub mod deepgram;
 #[cfg(feature = "local-whisper")]
 pub mod whisper;
 

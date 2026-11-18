@@ -98,6 +98,7 @@ Whisper worker -> transcript segments -> cue evaluator -> cue lifecycle
 - Rust owns prompt expiry, cooldowns, persistence, retention, and session boundaries.
 - React owns rendering, keyboard interactions, and presentation. It accesses native behavior only through narrowly scoped, validated commands.
 - Local Whisper may use whisper.cpp through Rust bindings. This is a Rust application with a native inference dependency, not a promise of an entirely Rust dependency tree.
+- Development builds with `cloud-transcription` can stream a live session's audio to Deepgram through the `StreamingTranscriber` boundary in `transcription/cloud.rs`, over a WebSocket client (`tungstenite` with `rustls`). The capture paths feed it the same 16 kHz mono audio; it sends nothing before the session's processing review is approved, and only finals become segments ([cloud transcription](cloud-transcription.md)).
 - AI cue reasoning has a provider-independent worker and validated contract in `cue_evaluator.rs`, tested with fictional evaluators. It permits one outstanding request, checks source references, and rejects cancelled, expired, or changed-context results. Development constructors connect the worker to the engine; native app commands still use phrase rules. Rust retains lifecycle and permission control. No production runtime is selected. Whisper transcribes speech and does not provide cue reasoning. See the [worker contract and remaining integration](cue-evaluator.md) and [cue intelligence plan](cue-intelligence.md).
 
 ## Future integration boundary

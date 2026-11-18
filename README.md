@@ -81,7 +81,7 @@ Open **Prior context** in the notebook to manage selected notes and the Granola 
 
 ## Live session (developer build)
 
-A live session transcribes your microphone on this Mac and runs the phrase-based questions on what it hears. It is off in ordinary builds. To try it, build with the `local-whisper` feature (needs CMake):
+A live session transcribes your microphone on this Mac and runs the phrase-based questions on what it hears. It is off in ordinary builds. A development build can instead send the session's audio to Deepgram for transcription, after you approve that for the session; see [cloud transcription](#cloud-transcription-development-builds) below. To try it, build with the `local-whisper` feature (needs CMake):
 
 ```sh
 npm run tauri -- dev --features local-whisper
@@ -106,6 +106,10 @@ A separate [development lab evaluator client](docs/development-lab-evaluator.md)
 **Focus** is optional. Leaving the field applies its lines, including edits made while an earlier save is pending. Clear and accepted suggestions use the same ordered saves. Rejected lines stay editable with an inline retry message; delayed replies preserve newer drafts and keyboard focus. See the [Focus recovery checks](docs/focus-save-recovery.md).
 
 **Your name** in Settings is optional and kept only until quit. Enter or leaving the field applies it to phrase-based **Asked you** cues. Later edits survive a slow save; rejected names show an inline error and keep the last applied name unless you have already typed a newer draft. See the [name recovery checks](docs/name-save-recovery.md).
+
+### Cloud transcription (development builds)
+
+A debug build with the `cloud-transcription` feature (switched on by `lab-evaluator`) can transcribe live sessions through Deepgram instead of on this Mac, when the developer selects it before launch with `TALKQTE_DEV_STT_BACKEND=deepgram`, a short-lived token file and a minute cap for the whole launch. It **sends the session's audio off this Mac to Deepgram**, for the microphone and for application audio, but only after you approve cue processing for that session in the app (a launch setting cannot approve it); before that, nothing is transcribed, and audio captured before the approval is never sent. Every request asks Deepgram to opt out of its model improvement program. Only final results become transcript lines. If the stream fails, the cap is reached or processing is turned off, transcription stops, the session ends with a plain reason, and nothing falls back to on-device transcription. TalkQTE does not save the audio. Release builds refuse the feature. This has offline test evidence only; a session against the real service and its latency are unverified. See [cloud transcription](docs/cloud-transcription.md) and [PRIVACY.md](PRIVACY.md).
 
 ## Fictional cue lab
 

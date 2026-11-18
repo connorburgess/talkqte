@@ -47,6 +47,11 @@ import {
 import { microphoneLabel, useMicrophone } from './lib/microphone';
 import { useCaptureControl } from './lib/useCaptureControl';
 import {
+  transcribedWhere,
+  transcriptionDropText,
+  transcriptionStopText,
+} from './lib/transcription';
+import {
   microphoneNotCapturing,
   sourceOnlyApplication,
 } from './lib/processing';
@@ -120,21 +125,47 @@ function FloatingQuestion() {
   const modelProvider = state?.modelProvider ?? 'Claude';
   const modelLinked =
     !state?.cuesPaused && (state?.model === 'on' || state?.model === 'sending');
+  // With cloud transcription, audio leaves the device while the session's
+  // review holds, paused cues included; before that nothing is transcribed.
+  const cloud = state?.transcription;
+  const audioSent =
+    !!cloud &&
+    !cloud.stopped &&
+    (state?.model === 'on' || state?.model === 'sending');
+  const cloudNote = !cloud
+    ? null
+    : cloud.stopped
+      ? 'transcription stopped'
+      : audioSent
+        ? null
+        : 'not transcribing yet';
   const statusText = !state
     ? ''
     : live
       ? mic?.status === 'listening'
         ? state.cuesPaused
-          ? 'Mic still on'
+          ? audioSent
+            ? `Mic still on · audio to ${cloud.provider}`
+            : 'Mic still on'
           : modelLinked
-            ? `Mic on · lines go to ${modelProvider}`
-            : 'Mic on · Local'
+            ? audioSent
+              ? `Mic on · to ${cloud.provider} and ${modelProvider}`
+              : `Mic on · lines go to ${modelProvider}`
+            : cloudNote
+              ? `Mic on · ${cloudNote}`
+              : 'Mic on · Local'
         : state.sourceSession
           ? state.cuesPaused
-            ? 'App audio still on'
+            ? audioSent
+              ? `App audio still on · audio to ${cloud.provider}`
+              : 'App audio still on'
             : modelLinked
-              ? `App audio · lines go to ${modelProvider}`
-              : 'App audio · Local'
+              ? audioSent
+                ? `App audio · to ${cloud.provider} and ${modelProvider}`
+                : `App audio · lines go to ${modelProvider}`
+              : cloudNote
+                ? `App audio · ${cloudNote}`
+                : 'App audio · Local'
           : microphoneLabel(mic)
       : microphoneControl
         ? microphone.stopPending && mic?.status !== 'stopping'
@@ -825,8 +856,10 @@ function Notebook() {
   // tests/fixtures/native-microphone.ts); the desktop engine never sends it,
   // so every `simulated` branch is unreachable in the app.
   const simulated = !!state.simulated && state.status === 'running';
+  // A launch that transcribes in the cloud needs no speech model.
   const modelNeeded =
-    model?.status === 'missing' || model?.status === 'downloading';
+    !liveStatus?.transcription &&
+    (model?.status === 'missing' || model?.status === 'downloading');
   const holdCue = () => {
     if (!state.cue) return;
     void run(() => bridge.command('inspect_cue', { id: state.cue!.id }));
@@ -957,7 +990,7 @@ function Notebook() {
                   <SetupCard
                     name={state.userName}
                     focus={state.focus}
-                    model={model}
+                    model={liveStatus?.transcription ? null : model}
                     items={contextItems}
                     busy={busy}
                     onGoTo={goToSetup}
@@ -1081,6 +1114,7 @@ function Notebook() {
           processingConfigured={!!capture.state?.processor}
           sourceMayBeCapturing={!!capture.state?.source?.mayBeCapturing}
           sourceSession={sourceApp}
+          transcription={state?.transcription}
           action={
             preparing ? (
               <button
@@ -1187,7 +1221,9 @@ function Notebook() {
                   </h1>
                   <p>
                     {preparing
-                      ? 'Local speech model · capture status shown above'
+                      ? liveStatus?.transcription
+                        ? 'Starting · capture status shown above'
+                        : 'Local speech model · capture status shown above'
                       : finishing
                         ? capture.state?.source?.mayBeCapturing &&
                           microphoneNotCapturing(microphone.state)
@@ -1200,8 +1236,8 @@ function Notebook() {
                                 ? 'Application audio and transcript continue. Stop live session to stop listening.'
                                 : 'Microphone and transcript continue. Stop live session to stop listening.'
                               : sourceApp
-                                ? `Audio from ${sourceApp} · transcribed on this device · not saved`
-                                : 'Your microphone · transcribed on this device · not saved'
+                                ? `Audio from ${sourceApp} · ${transcribedWhere(state.transcription)} · not saved${state.transcription ? ' by TalkQTE' : ''}`
+                                : `Your microphone · ${transcribedWhere(state.transcription)} · not saved${state.transcription ? ' by TalkQTE' : ''}`
                             : 'Nothing was saved. The transcript stays here until you start another session or quit and is never exported; your notes stay until you quit and can be exported.'
                           : simulated
                             ? 'Fictional replay · nothing is captured'
@@ -1220,6 +1256,16 @@ function Notebook() {
                                       ? `Nothing is being captured. Cues appear only during a live session. ${liveStatus.reason}`
                                       : 'Nothing is being captured.'}
                   </p>
+                  {transcriptionStopText(state.transcription) && (
+                    <p role="alert">
+                      {transcriptionStopText(state.transcription)}
+                    </p>
+                  )}
+                  {transcriptionDropText(state.transcription) && (
+                    <p role="status">
+                      {transcriptionDropText(state.transcription)}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="session-actions">
@@ -1401,8 +1447,8 @@ function Notebook() {
                       <p className="muted small">
                         {state.live
                           ? sourceApp
-                            ? `Audio from ${sourceApp} · transcribed on this device`
-                            : 'Your microphone · transcribed on this device'
+                            ? `Audio from ${sourceApp} · ${transcribedWhere(state.transcription)}`
+                            : `Your microphone · ${transcribedWhere(state.transcription)}`
                           : 'Fictional replay · not from microphone audio'}
                       </p>
                     )}
@@ -1918,22 +1964,38 @@ function Notebook() {
                 <h2 id="live-transcription" tabIndex={-1}>
                   Live transcription
                 </h2>
-                <p>
-                  Start live session in the notebook to get questions from what
-                  your microphone hears. A speech model transcribes on this
-                  device. Audio is not recorded, and other apps’ audio is not
-                  captured. The transcript stays in memory until you start
-                  another session or close the app; it is never saved, exported,
-                  or sent.
-                </p>
+                {liveStatus?.transcription ? (
+                  <p>
+                    Start live session in the notebook to get questions from
+                    what your microphone hears. This development launch sends
+                    the session’s audio to {liveStatus.transcription} for
+                    transcription once you enable cue processing for that
+                    session; nothing is transcribed on this device, and nothing
+                    is sent before then. TalkQTE does not record audio. The
+                    transcript stays in memory until you start another session
+                    or close the app; it is never saved or exported.
+                  </p>
+                ) : (
+                  <p>
+                    Start live session in the notebook to get questions from
+                    what your microphone hears. A speech model transcribes on
+                    this device. Audio is not recorded, and other apps’ audio is
+                    not captured. The transcript stays in memory until you start
+                    another session or close the app; it is never saved,
+                    exported, or sent.
+                  </p>
+                )}
                 <p className="small muted" role="status">
                   {!liveStatus
                     ? 'Checking…'
                     : liveStatus.available
-                      ? 'Ready on this device.'
+                      ? liveStatus.transcription
+                        ? `Ready. Audio goes to ${liveStatus.transcription} only after you enable cue processing for a session.`
+                        : 'Ready on this device.'
                       : liveStatus.reason}
                 </p>
                 {model &&
+                  !liveStatus?.transcription &&
                   ['missing', 'downloading', 'installed'].includes(
                     model.status,
                   ) && (
@@ -1999,10 +2061,13 @@ function Notebook() {
                 <h2>Your data in this prototype</h2>
                 <p>
                   The optional microphone check retains no audio and does not
-                  transcribe. A live session’s transcript is kept in memory only
-                  and cannot be exported. Notes exist in memory until you close
-                  the app. Exports contain exactly the text you review and are
-                  saved to the location you choose.
+                  transcribe. With cloud transcription or cue processing on,
+                  audio goes to the named transcription service and recent lines
+                  to the cue provider, for that session only. A live session’s
+                  transcript is kept in memory only and cannot be exported.
+                  Notes exist in memory until you close the app. Exports contain
+                  exactly the text you review and are saved to the location you
+                  choose.
                 </p>
               </div>
               <ShieldCheck size={24} />

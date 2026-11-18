@@ -33,7 +33,7 @@ Claude subscription: up to six recent transcript lines and any lines the cue on 
 the cue on screen, up to four earlier cues with how each ended, and your session name if you set \
 one. It sends after each new line, at most once every two seconds and one request at a time, \
 until you turn this off, stop the session, or a failure stops it, so over a session nearly every \
-transcript line is sent, a few at a time. It never sends audio, the \
+transcript line is sent, a few at a time. It never sends Anthropic audio, the \
 full transcript, your notes, imported notes or focus lines. Anthropic handles what is sent under \
 your Claude account's terms and settings, and lines already sent cannot be recalled. A \
 development connection for the owner's own use; it is not a supported product feature.";
@@ -68,7 +68,17 @@ pub fn connected_engine() -> crate::engine::Engine {
     };
     match Choice::from_environment() {
         Ok(choice) => {
-            let config = processor(choice.model_id.clone(), &choice.effort.clone(), DATA_POLICY);
+            // One review covers both exports when this launch also streams audio.
+            let policy = match crate::transcription::cloud::review_sentence() {
+                Some(transcription) => format!("{DATA_POLICY} {transcription}"),
+                None => DATA_POLICY.to_string(),
+            };
+            let config = processor(choice.model_id.clone(), &choice.effort.clone(), &policy);
+            // The review names where audio goes beside where lines go.
+            let config = match crate::transcription::cloud::audio_destination() {
+                Some(destination) => config.with_audio_destination(destination),
+                None => config,
+            };
             let worker = crate::cue_evaluator::Worker::start(
                 ClaudeCli::new(
                     None,

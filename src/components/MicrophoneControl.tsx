@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { desktop } from '../lib/bridge';
+import type { CloudTranscription } from '../lib/transcription';
 import {
   microphoneLabel,
   type Microphone,
@@ -40,6 +41,7 @@ export function MicrophoneControl({
   processingConfigured = false,
   sourceMayBeCapturing = false,
   sourceSession = null,
+  transcription,
 }: {
   microphone: Microphone;
   live?: boolean;
@@ -52,6 +54,8 @@ export function MicrophoneControl({
   /** Development builds only: the application a live session was started
    * for alone, with no microphone. */
   sourceSession?: string | null;
+  /** Development builds that selected cloud transcription only. */
+  transcription?: CloudTranscription;
 }) {
   const { state, error, busy, active, start, stop } = microphone;
   if (live || preparing)
@@ -83,17 +87,23 @@ export function MicrophoneControl({
         {preparing ? (
           <p role="status">
             {cancelling
-              ? 'Start cancelled. Waiting for model preparation to finish before you can start again.'
-              : 'Preparing local transcription. Cancel start to prevent capture.'}
+              ? 'Start cancelled. Waiting for the start to finish before you can start again.'
+              : 'Starting the live session. Cancel start to prevent capture.'}
           </p>
         ) : (
           <p>
-            {sourceSession
-              ? `Audio from ${sourceSession} is transcribed on this device; the microphone is not used. Audio is not recorded.`
-              : 'Your microphone is transcribed on this device. Audio is not recorded.'}
+            {transcription
+              ? sourceSession
+                ? `Audio from ${sourceSession} is sent to ${transcription.provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. The microphone is not used. TalkQTE does not record audio.`
+                : `Your microphone is sent to ${transcription.provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. TalkQTE does not record audio.`
+              : sourceSession
+                ? `Audio from ${sourceSession} is transcribed on this device; the microphone is not used. Audio is not recorded.`
+                : 'Your microphone is transcribed on this device. Audio is not recorded.'}
             {processingConfigured
               ? ' Cue processing has separate permissions below.'
-              : ' The transcript is not saved or sent.'}{' '}
+              : transcription
+                ? ' TalkQTE does not save the transcript.'
+                : ' The transcript is not saved or sent.'}{' '}
             {sourceSession
               ? 'Stop live session to end it.'
               : 'Stop live session to release the microphone.'}

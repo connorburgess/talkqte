@@ -7,7 +7,7 @@
 use crate::{
     audio_tap::Chunker,
     engine::Segment,
-    transcription::{CancelHandle, Stats, Transcriber, Worker},
+    transcription::{cloud::CloudFeed, AudioChunk, CancelHandle, Stats, Transcriber, Worker},
 };
 use std::{
     sync::{
@@ -38,10 +38,64 @@ pub struct Report {
 pub struct LiveSession {
     stop: Arc<AtomicBool>,
     refused: Arc<AtomicU64>,
-    // Lets End cancel the worker before joining the runner that owns it.
-    cancel: CancelHandle,
-    thread: Option<JoinHandle<(Chunker, Worker)>>,
+    // Lets End cancel a local worker before joining the runner that owns it.
+    cancel: Option<CancelHandle>,
+    thread: Option<JoinHandle<(Chunker, Running)>>,
     session_start_ms: u64,
+}
+
+/// What the runner feeds: a local recognizer's worker, or a cloud stream.
+enum Running {
+    Local(Worker),
+    Cloud(Box<CloudFeed>),
+}
+
+impl Running {
+    fn take(&mut self, chunk: AudioChunk, refused: &AtomicU64) {
+        match self {
+            Self::Local(worker) => {
+                if worker.submit(chunk).is_err() {
+                    refused.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            Self::Cloud(feed) => {
+                let end_ms = chunk.start_ms
+                    + (chunk.samples.len() as u64 * 1_000)
+                        / crate::transcription::SAMPLE_RATE as u64;
+                // A failed stream refuses further audio; nothing falls back to
+                // another recognizer. The failure is in the timing log.
+                let _ = feed.push(chunk.start_ms, end_ms, &chunk.samples);
+            }
+        }
+    }
+
+    fn poll(&mut self) {
+        if let Self::Cloud(feed) = self {
+            let _ = feed.poll();
+        }
+    }
+
+    fn finish(self, wait: Duration) -> Stats {
+        match self {
+            Self::Local(worker) => worker.finish(wait),
+            Self::Cloud(feed) => cloud_stats(feed.finish(wait)),
+        }
+    }
+
+    fn stop(self) -> Stats {
+        match self {
+            Self::Local(worker) => worker.stop(),
+            Self::Cloud(feed) => cloud_stats(feed.end()),
+        }
+    }
+}
+
+fn cloud_stats(counts: crate::transcription::cloud::CloudStats) -> Stats {
+    Stats {
+        accepted: counts.accepted,
+        rejected: counts.rejected,
+        ..Stats::default()
+    }
 }
 
 impl LiveSession {
@@ -50,7 +104,7 @@ impl LiveSession {
     /// starts, so segment times line up with its clock. `sink` delivers each
     /// recognized line, normally into `Engine::ingest`.
     pub fn start<T, S>(
-        mut chunker: Chunker,
+        chunker: Chunker,
         session: u64,
         session_start_ms: u64,
         transcriber: T,
@@ -62,6 +116,40 @@ impl LiveSession {
     {
         let worker = Worker::start(session, WORKER_QUEUE, transcriber, sink);
         let cancel = worker.cancel_handle();
+        Self::run(
+            chunker,
+            session,
+            session_start_ms,
+            Running::Local(worker),
+            Some(cancel),
+        )
+    }
+
+    /// Starts moving audio from `chunker` to a cloud stream. The feed sends
+    /// nothing until the session's review is approved, and only its finals
+    /// reach the engine.
+    pub fn start_cloud(
+        chunker: Chunker,
+        session: u64,
+        session_start_ms: u64,
+        feed: CloudFeed,
+    ) -> Self {
+        Self::run(
+            chunker,
+            session,
+            session_start_ms,
+            Running::Cloud(Box::new(feed)),
+            None,
+        )
+    }
+
+    fn run(
+        mut chunker: Chunker,
+        session: u64,
+        session_start_ms: u64,
+        mut running: Running,
+        cancel: Option<CancelHandle>,
+    ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let refused = Arc::new(AtomicU64::new(0));
         let (flag, count) = (stop.clone(), refused.clone());
@@ -76,13 +164,12 @@ impl LiveSession {
                             chunk.start_ms,
                             &chunk.samples,
                         );
-                        if worker.submit(chunk).is_err() {
-                            count.fetch_add(1, Ordering::Relaxed);
-                        }
+                        running.take(chunk, &count);
                     }
+                    running.poll();
                     std::thread::sleep(DRAIN_EVERY);
                 }
-                (chunker, worker)
+                (chunker, running)
             })
             .expect("live session thread starts");
         Self {
@@ -94,26 +181,24 @@ impl LiveSession {
         }
     }
 
-    /// Stops after capture has stopped: hands the remaining audio to the
-    /// worker, then stops the worker. Call without holding the engine lock,
-    /// because delivering lines takes it.
+    /// Stops after capture has stopped: hands the remaining audio on, then
+    /// stops the worker or closes the stream. Call without holding the
+    /// engine lock, because delivering lines takes it.
     pub fn stop(mut self) -> Report {
         self.stop.store(true, Ordering::Release);
         let Some(thread) = self.thread.take() else {
             return Report::default();
         };
-        let Ok((mut chunker, worker)) = thread.join() else {
+        let Ok((mut chunker, mut running)) = thread.join() else {
             return Report::default();
         };
         for chunk in chunker.finish(self.session_start_ms) {
-            if worker.submit(chunk).is_err() {
-                self.refused.fetch_add(1, Ordering::Relaxed);
-            }
+            running.take(chunk, &self.refused);
         }
         Report {
             tap_overruns: chunker.overruns(),
             refused_chunks: self.refused.load(Ordering::Relaxed),
-            worker: worker.finish(FINISH_WAIT),
+            worker: running.finish(FINISH_WAIT),
         }
     }
 
@@ -121,29 +206,33 @@ impl LiveSession {
     /// discarded, and nothing more reaches the engine.
     pub fn end(mut self) -> Report {
         // Cancel first: the runner may still be sleeping between drains.
-        self.cancel.cancel();
+        if let Some(cancel) = &self.cancel {
+            cancel.cancel();
+        }
         self.stop.store(true, Ordering::Release);
         let Some(thread) = self.thread.take() else {
             return Report::default();
         };
-        let Ok((chunker, worker)) = thread.join() else {
+        let Ok((chunker, running)) = thread.join() else {
             return Report::default();
         };
         Report {
             tap_overruns: chunker.overruns(),
             refused_chunks: self.refused.load(Ordering::Relaxed),
-            worker: worker.stop(),
+            worker: running.stop(),
         }
     }
 }
 
 impl Drop for LiveSession {
     fn drop(&mut self) {
-        self.cancel.cancel();
+        if let Some(cancel) = &self.cancel {
+            cancel.cancel();
+        }
         self.stop.store(true, Ordering::Release);
         if let Some(thread) = self.thread.take() {
-            if let Ok((_, worker)) = thread.join() {
-                worker.stop();
+            if let Ok((_, running)) = thread.join() {
+                running.stop();
             }
         }
     }
@@ -155,7 +244,7 @@ mod tests {
     use crate::{
         audio_tap::tap,
         engine::Engine,
-        transcription::{AudioChunk, Recognized, SAMPLE_RATE},
+        transcription::{Recognized, SAMPLE_RATE},
     };
     use std::sync::{mpsc, Mutex};
 
@@ -311,5 +400,65 @@ mod tests {
         let (sink, _) = sink(&engine);
         let live = LiveSession::start(chunker, session, 0, Loudness("unused"), sink);
         drop(live); // must return rather than hang
+    }
+
+    #[test]
+    fn a_cloud_session_delivers_only_finals_and_stop_closes_the_stream() {
+        use crate::transcription::cloud::{Full, StreamingTranscriber, SttEvent};
+        #[derive(Clone, Default)]
+        struct Stream {
+            sent: Arc<AtomicU64>,
+            finished: Arc<AtomicBool>,
+        }
+        impl StreamingTranscriber for Stream {
+            fn push(&mut self, samples: &[f32]) -> Result<(), Full> {
+                self.sent.fetch_add(samples.len() as u64, Ordering::SeqCst);
+                Ok(())
+            }
+            fn poll(&mut self) -> Vec<SttEvent> {
+                if self.sent.load(Ordering::SeqCst) >= SAMPLE_RATE as u64 {
+                    vec![SttEvent::Partial]
+                } else {
+                    vec![]
+                }
+            }
+            fn finish(&mut self, _: Duration) -> Vec<SttEvent> {
+                self.finished.store(true, Ordering::SeqCst);
+                vec![SttEvent::Final {
+                    seq: 1,
+                    text: "Someone can take the first draft.".into(),
+                    start_ms: 200,
+                    end_ms: 900,
+                    untrusted_speaker: Some(0),
+                }]
+            }
+            fn abort(&mut self) {}
+        }
+        let engine = live_engine();
+        let session = engine.lock().unwrap().session();
+        let (mut input, chunker) = tap(16_000, 1, 100);
+        let (sink, outcomes) = sink(&engine);
+        let stream = Stream::default();
+        let opened = stream.clone();
+        let feed = CloudFeed::new(
+            session,
+            2,
+            Box::new(move || Ok(Box::new(opened) as Box<dyn StreamingTranscriber>)),
+            || Some(0),
+            sink,
+        );
+        let live = LiveSession::start_cloud(chunker, session, 0, feed);
+        input.push_interleaved(std::iter::repeat_n(0.3, SAMPLE_RATE * 2));
+        std::thread::sleep(DRAIN_EVERY * 3);
+        // Partials so far: nothing has reached the engine.
+        assert!(outcomes.try_recv().is_err());
+        let report = live.stop();
+        assert!(stream.finished.load(Ordering::SeqCst));
+        assert!(outcomes.recv_timeout(Duration::from_secs(2)).unwrap());
+        assert_eq!(report.worker.accepted, 1);
+        let engine = engine.lock().unwrap();
+        let line = engine.state.transcript.last().unwrap();
+        assert_eq!((line.at_ms, line.speaker.as_str()), (200, "Speaker"));
+        assert!(line.id.starts_with(&format!("c{session}-2-")));
     }
 }

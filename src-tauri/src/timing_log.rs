@@ -154,6 +154,30 @@ pub enum Event {
         lag_ms: Option<u64>,
         elapsed_ms: u64,
     },
+    /// Cloud transcription started (at review approval), finished, ended, or
+    /// stopped with a fixed failure code. `audio_ms` is audio sent so far.
+    SttState {
+        session: u64,
+        state: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<&'static str>,
+        audio_ms: u64,
+        /// On `connected` only: the query string of the URL the connection
+        /// actually used. The token is never in it; it travels in a header.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
+    },
+    /// A cloud transcription final, on the session clock. The provider's
+    /// speaker label is an untrusted guess, recorded here only: it is never
+    /// shown and never sent to a cue model. Its text is in the `segment` row.
+    SttFinal {
+        session: u64,
+        seq: u64,
+        start_ms: u64,
+        end_ms: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        untrusted_speaker: Option<u32>,
+    },
     /// A cue is in the snapshot sent to the companion window. The log cannot
     /// see when the window paints it.
     CuePublished {

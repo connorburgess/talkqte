@@ -273,6 +273,33 @@ test('a model connection shows while lines may be sent, and why it stopped', asy
   await expect(bar.getByRole('status')).toHaveText('Mic on · Local');
 });
 
+test('with cloud transcription, the bar says where audio goes and never says Local', async ({
+  page,
+}) => {
+  const bar = await companion(page);
+  await microphone(page, { status: 'listening', activity: 'quiet' });
+  const publish = (value: Record<string, unknown>) =>
+    page.evaluate((value) => window.liveTest.publish(value as never), value);
+  const status = bar.getByRole('status');
+  // Before the review is approved nothing is transcribed or sent.
+  await publish({ transcription: { provider: 'Deepgram' } });
+  await expect(status).toHaveText('Mic on · not transcribing yet');
+  // Approved: audio goes to the transcription service, lines to the model.
+  await publish({ model: 'on' });
+  await expect(status).toHaveText('Mic on · to Deepgram and Claude');
+  // Paused cues send no lines, but audio is still transcribed.
+  await publish({ cuesPaused: true });
+  await expect(status).toHaveText('Mic still on · audio to Deepgram');
+  await publish({ cuesPaused: false });
+  // A stopped stream is said, and nothing claims to be local.
+  await publish({
+    model: undefined,
+    transcription: { provider: 'Deepgram', stopped: 'network' },
+  });
+  await expect(status).toHaveText('Mic on · transcription stopped');
+  await expect(bar.getByText(/Local/)).toHaveCount(0);
+});
+
 test('Codex lab disclosure uses the selected provider and strict first-timeout policy', async ({
   page,
 }) => {

@@ -575,11 +575,26 @@ fn model_path(app: &tauri::AppHandle) -> Option<(std::path::PathBuf, bool)> {
 struct LiveStatus {
     available: bool,
     reason: Option<&'static str>,
+    /// The cloud service this launch transcribes with, when one is
+    /// selected; absent when speech is transcribed on this device.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transcription: Option<&'static str>,
 }
 
 #[tauri::command]
 fn live_status(app: tauri::AppHandle) -> LiveStatus {
-    let reason = if !cfg!(feature = "local-whisper") {
+    // A launch that selected cloud transcription needs no local model, only
+    // usable settings and a token file that passes its checks.
+    let cloud = transcription::cloud::selected();
+    let reason = if cloud {
+        if !cfg!(feature = "local-whisper") {
+            Some("This build does not include live transcription.")
+        } else if transcription::cloud::ready().is_err() {
+            Some("The cloud transcription settings are not usable.")
+        } else {
+            None
+        }
+    } else if !cfg!(feature = "local-whisper") {
         Some("This build does not include local transcription.")
     } else if !model_path(&app).is_some_and(|(path, pinned)| {
         if pinned {
@@ -596,6 +611,7 @@ fn live_status(app: tauri::AppHandle) -> LiveStatus {
     LiveStatus {
         available: reason.is_none(),
         reason,
+        transcription: cloud.then_some(transcription::cloud::PROVIDER),
     }
 }
 
@@ -808,6 +824,16 @@ fn remove_model(
 /// The longest live chunk, and the shortest that may end at a pause.
 #[cfg(feature = "local-whisper")]
 const LIVE_CHUNK_MS: u64 = 3_000;
+/// Microphone audio handed to a cloud stream, a tenth of a second at a time.
+#[cfg(feature = "local-whisper")]
+const CLOUD_CHUNK_MS: u64 = 100;
+
+/// How a live session's microphone audio is transcribed.
+#[cfg(feature = "local-whisper")]
+enum LiveRecognizer {
+    Local(transcription::whisper::LocalWhisper),
+    Cloud(transcription::cloud::Opener),
+}
 #[cfg(feature = "local-whisper")]
 const LIVE_PAUSE_MIN_MS: u64 = 1_000;
 
@@ -1342,8 +1368,45 @@ fn finish_live(app: &tauri::AppHandle, live: Live, flush: bool) {
     let _ = finished;
 }
 
-/// Starts a live session: the microphone feeds local transcription, and the
-/// cue engine runs on what is said. Nothing is recorded, stored, or sent.
+/// A microphone session's cloud stream ended with a failure: the session
+/// records why and stops, as if Stop were chosen, without flushing to any
+/// other recognizer. Runs off the feeding thread, which the stop joins.
+#[cfg(feature = "local-whisper")]
+fn stop_after_cloud_failure(
+    app: &tauri::AppHandle,
+    session: u64,
+    failure: transcription::cloud::SttFailure,
+) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let live = app
+            .state::<AppState>()
+            .0
+            .lock()
+            .ok()
+            .and_then(|mut runtime| {
+                runtime
+                    .engine
+                    .cloud_transcription_stopped(session, failure.code());
+                let live = runtime
+                    .live
+                    .as_ref()
+                    .is_some_and(|live| live.session == session)
+                    .then(|| runtime.take_live_for_stop())
+                    .flatten();
+                publish(&app, &mut runtime);
+                live
+            });
+        if let Some(live) = live {
+            finish_live(&app, live, false);
+        }
+    });
+}
+
+/// Starts a live session: the microphone feeds transcription, and the cue
+/// engine runs on what is said. Nothing is recorded or stored. With cloud
+/// transcription selected, audio is sent to that provider only after the
+/// session's review is approved; otherwise it is transcribed on this device.
 #[tauri::command]
 async fn start_live_session(
     app: tauri::AppHandle,
@@ -1357,9 +1420,33 @@ async fn start_live_session(
     }
     #[cfg(feature = "local-whisper")]
     {
-        let (model, pinned) = model_path(&app)
-            .filter(|(path, _)| path.is_file())
-            .ok_or("The local speech model is not installed.")?;
+        // A launch that selected cloud transcription uses it or nothing:
+        // invalid settings refuse the start instead of falling back.
+        let cloud = if transcription::cloud::selected() {
+            // The token file is checked now, before anyone is asked to
+            // approve; the token itself is read when the stream opens.
+            transcription::cloud::ready()
+                .map_err(|_| "The cloud transcription settings are not usable.")?;
+            Some(
+                transcription::cloud::opener()
+                    .map_err(|_| "The cloud transcription settings are not usable.")?,
+            )
+        } else {
+            None
+        };
+        let local = match cloud {
+            Some(_) => None,
+            None => Some(
+                model_path(&app)
+                    .filter(|(path, _)| path.is_file())
+                    .ok_or("The local speech model is not installed.")?,
+            ),
+        };
+        let chunk_ms = if cloud.is_some() {
+            CLOUD_CHUNK_MS
+        } else {
+            LIVE_CHUNK_MS
+        };
         let start = state
             .0
             .lock()
@@ -1369,12 +1456,17 @@ async fn start_live_session(
         // here and the microphone never opens for nothing.
         // A downloaded model is checked against its pinned checksum first.
         let (start, recognizer) = tauri::async_runtime::spawn_blocking(move || {
-            start.load(|| {
-                if pinned {
-                    model::verify(&model, &model::TINY_EN)?;
+            start.load(|| match (cloud, local) {
+                (Some(opener), _) => Ok(LiveRecognizer::Cloud(opener)),
+                (None, Some((model, pinned))) => {
+                    if pinned {
+                        model::verify(&model, &model::TINY_EN)?;
+                    }
+                    transcription::whisper::LocalWhisper::load(&model, 4)
+                        .map(LiveRecognizer::Local)
+                        .map_err(|_| "Could not load the local speech model.".to_string())
                 }
-                transcription::whisper::LocalWhisper::load(&model, 4)
-                    .map_err(|_| "Could not load the local speech model.".to_string())
+                (None, None) => Err("The local speech model is not installed.".to_string()),
             })
         })
         .await
@@ -1402,9 +1494,16 @@ async fn start_live_session(
                 })
         });
         let on_tap: microphone::OnTap = Box::new(move |generation, mut chunker| {
-            // Chunks end at the first pause after a second, or at the
-            // longest length, so words are cut less often and arrive sooner.
-            chunker.cut_at_pauses(LIVE_PAUSE_MIN_MS);
+            // Chunks for a local model end at the first pause after a second,
+            // or at the longest length, so words are cut less often and
+            // arrive sooner. A cloud stream takes short fixed chunks.
+            if matches!(recognizer, LiveRecognizer::Local(_)) {
+                chunker.cut_at_pauses(LIVE_PAUSE_MIN_MS);
+            }
+            let approval_app = handle.clone();
+            let failure_app = handle.clone();
+            let keep_app = handle.clone();
+            let dropped_app = handle.clone();
             let sink_app = handle.clone();
             let sink = move |session, segment| {
                 let state = sink_app.state::<AppState>();
@@ -1438,9 +1537,48 @@ async fn start_live_session(
                         return false;
                     };
                     live.microphone = Some(generation);
-                    live.runner = Some(live::LiveSession::start(
-                        chunker, session, started_at, recognizer, sink,
-                    ));
+                    live.runner =
+                        Some(match recognizer {
+                            LiveRecognizer::Local(recognizer) => live::LiveSession::start(
+                                chunker, session, started_at, recognizer, sink,
+                            ),
+                            LiveRecognizer::Cloud(opener) => live::LiveSession::start_cloud(
+                                chunker,
+                                session,
+                                started_at,
+                                transcription::cloud::CloudFeed::new(
+                                    session,
+                                    2,
+                                    opener,
+                                    move || {
+                                        approval_app.state::<AppState>().0.lock().ok().and_then(
+                                            |runtime| runtime.engine.audio_approval(session),
+                                        )
+                                    },
+                                    sink,
+                                )
+                                .stop_sending_when(move || {
+                                    keep_app.state::<AppState>().0.lock().map_or(
+                                        Some(transcription::cloud::SttFailure::Withdrawn),
+                                        |runtime| {
+                                            transcription::cloud::withdrawal(
+                                                runtime.engine.audio_withdrawal(session),
+                                            )
+                                        },
+                                    )
+                                })
+                                .on_dropped(move || {
+                                    let state = dropped_app.state::<AppState>();
+                                    if let Ok(mut runtime) = state.0.lock() {
+                                        runtime.engine.cloud_transcription_dropped(session);
+                                        publish(&dropped_app, &mut runtime);
+                                    };
+                                })
+                                .on_failure(move |failure| {
+                                    stop_after_cloud_failure(&failure_app, session, failure)
+                                }),
+                            ),
+                        });
                     true
                 });
             if !kept {
@@ -1450,7 +1588,7 @@ async fn start_live_session(
         match microphone::start(
             app.clone(),
             controller.clone(),
-            Some((LIVE_CHUNK_MS, on_tap)),
+            Some((chunk_ms, on_tap)),
             Some(on_reserved),
         )
         .await
