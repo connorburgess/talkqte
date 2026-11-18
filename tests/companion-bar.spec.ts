@@ -300,7 +300,7 @@ test('Codex lab disclosure uses the selected provider and strict first-timeout p
   );
   await publish({ modelIssue: 'authentication' });
   await expect(bar.getByText('Cues off', { exact: false })).toContainText(
-    'Codex subscription sign-in',
+    'Codex sign-in or setup for the lab connection',
   );
   await expect(bar.getByText('Cues off', { exact: false })).not.toContainText(
     'Claude',
