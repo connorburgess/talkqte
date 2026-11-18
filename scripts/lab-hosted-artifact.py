@@ -61,11 +61,12 @@ def validate_members(members):
     total = 0
     for m in members:
         p = PurePosixPath(m.name)
-        require(not p.is_absolute() and '..' not in p.parts and p.parts[0] == 'TalkQTE.app', 'unsafe member path')
+        require(bool(p.parts) and not p.is_absolute() and '..' not in p.parts and p.parts[0] == 'TalkQTE.app', 'unsafe member path')
         require(m.name == p.as_posix() and m.name not in names, 'duplicate or noncanonical path')
         names.add(m.name)
         require(m.isfile() or m.isdir() or m.issym(), 'hardlink/device/unsupported type')
         require(not (m.mode & 0o7000), 'special permission bits')
+        require(m.size >= 0, 'negative member size')
         total += m.size
         require(total <= MAX_CONTENT, 'content limit')
         if m.issym():
@@ -112,7 +113,10 @@ def safe_extract(archive, destination, expected_sha):
     # Validate every entry before creating any output. Extraction is implemented
     # here rather than relying on tar's overwrite/link traversal behavior.
     with tarfile.open(archive, 'r:gz') as tar:
-        members = tar.getmembers()
+        members = []
+        for m in tar:
+            require(len(members) < MAX_ENTRIES, 'entry count')
+            members.append(m)
         validate_members(members)
         destination.mkdir(mode=0o700)
         for m in sorted(members, key=lambda v: (len(PurePosixPath(v.name).parts), v.name)):
