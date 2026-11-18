@@ -1,6 +1,8 @@
 # Speech model delivery plan
 
-Status: plan, 9 November 2026; download implemented in Settings for `local-whisper` builds. See [What is implemented](#what-is-implemented) for what is built and what is not.
+**Superseded 16 November 2026:** on-device transcription was removed from the app; this page records the former design and its checks. Current transcription: [cloud transcription](cloud-transcription.md). The app no longer downloads, verifies, reads or removes a speech model, and it no longer touches the models folder at startup. A model downloaded earlier stays on disk at `<app data folder>/models/ggml-tiny.en.bin` (on macOS, `~/Library/Application Support/com.talkqte.desktop/models/`). To remove it, delete that `models` folder yourself.
+
+Former status: plan, 9 November 2026; download implemented in Settings for `local-whisper` builds. See [What is implemented](#what-is-implemented) for what is built and what is not.
 
 ## Decisions
 

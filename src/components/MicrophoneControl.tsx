@@ -58,6 +58,8 @@ export function MicrophoneControl({
   transcription?: CloudTranscription;
 }) {
   const { state, error, busy, active, start, stop } = microphone;
+  // Every live session names its transcription service.
+  const provider = transcription?.provider ?? 'the transcription service';
   if (live || preparing)
     return (
       <section className="microphone-panel" aria-label="Microphone">
@@ -92,18 +94,12 @@ export function MicrophoneControl({
           </p>
         ) : (
           <p>
-            {transcription
-              ? sourceSession
-                ? `Audio from ${sourceSession} is sent to ${transcription.provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. The microphone is not used. TalkQTE does not record audio.`
-                : `Your microphone is sent to ${transcription.provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. TalkQTE does not record audio.`
-              : sourceSession
-                ? `Audio from ${sourceSession} is transcribed on this device; the microphone is not used. Audio is not recorded.`
-                : 'Your microphone is transcribed on this device. Audio is not recorded.'}
+            {sourceSession
+              ? `Audio from ${sourceSession} is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. The microphone is not used. TalkQTE does not record audio.`
+              : `Your microphone is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. TalkQTE does not record audio.`}
             {processingConfigured
               ? ' Cue processing has separate permissions below.'
-              : transcription
-                ? ' TalkQTE does not save the transcript.'
-                : ' The transcript is not saved or sent.'}{' '}
+              : ' TalkQTE does not save the transcript.'}{' '}
             {sourceSession
               ? 'Stop live session to end it.'
               : 'Stop live session to release the microphone.'}

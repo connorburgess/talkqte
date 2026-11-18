@@ -24,14 +24,14 @@ AI is intended to select relevant context, decide whether a cue would help, and 
 
 ## Where it stands today
 
-**Early development.** The app runs from source on macOS, but it does not yet understand a live meeting or generate AI cues. A developer build can transcribe your own microphone on the device and apply the same phrase-based questions; it does not hear the other side of a call. There is no supported public release; the [macOS release path](docs/release-path.md) lists what is configured and what remains.
+**Early development.** The app runs from source on macOS, but it does not yet understand a live meeting or generate AI cues. A development build can send your own microphone to Deepgram for transcription, after you approve that for the session, and apply the same phrase-based questions; it does not hear the other side of a call. TalkQTE does not transcribe on the device, and ordinary builds have no live transcription. There is no supported public release; the [macOS release path](docs/release-path.md) lists what is configured and what remains.
 
 | Working prototype                                                                                                          | Still to build and validate                                                             |
 | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | Phrase-based cues on a live session's transcript (developer build)                                                         | AI-selected context and prompts grounded in the conversation                            |
 | Floating companion, source disclosure, pause, and dismissal                                                                | Useful timing, and semantic suppression of answered questions and stale cues            |
 | Phrase-based withdrawal for answers, corrections, and topic openings; the same question is not repeated within two minutes | Recognizing paraphrased answers, duplicates, and topic changes said in other words      |
-| Opt-in microphone activity check; local live session (dev build)                                                           | Both sides of meeting audio, model setup, and real-meeting accuracy                     |
+| Opt-in microphone activity check; cloud-transcribed live session (dev build, per-session consent)                          | Both sides of meeting audio, real-meeting accuracy, and transcription in ordinary builds |
 | Selected file-note imports, title-match reminders, and a development Granola connection                                    | Account refresh/recovery checks, and evidence that reminders help rather than interrupt |
 | In-memory notes and reviewed Markdown export                                                                               | Reliable meeting use, processing choices, and install/update support                    |
 
@@ -64,7 +64,7 @@ These are development milestones, not announced release dates or current capabil
 
 ## Run the current prototype
 
-The stack is Rust, Tauri 2, React, and TypeScript. Local Whisper transcription is available only in a `local-whisper` developer build, with model setup in Settings or a developer-supplied model path. The AI cue runtime is still being evaluated, and a lab model is not automatically the production choice.
+The stack is Rust, Tauri 2, React, and TypeScript. Live transcription uses Deepgram streaming, only in development builds and only after per-session approval; there is no on-device transcription. The AI cue runtime is still being evaluated, and a lab model is not automatically the production choice.
 
 On macOS, install Node.js 22, Rust 1.97.1, and Xcode Command Line Tools. The app bundle requires macOS 14.0 or later; only macOS 26.4 has been tested. See [Tauri's prerequisites](https://v2.tauri.app/start/prerequisites/).
 
@@ -81,21 +81,26 @@ Open **Prior context** in the notebook to manage selected notes and the Granola 
 
 ## Live session (developer build)
 
-A live session transcribes your microphone on this Mac and runs the phrase-based questions on what it hears. It is off in ordinary builds. A development build can instead send the session's audio to Deepgram for transcription, after you approve that for the session; see [cloud transcription](#cloud-transcription-development-builds) below. To try it, build with the `local-whisper` feature (needs CMake):
+A live session sends your microphone's audio to Deepgram for transcription and runs the phrase-based questions on what comes back. TalkQTE does not transcribe on this Mac. Ordinary and release builds have no live transcription; the notebook and Settings say "This build has no live transcription." Builds before 16 November 2026 could transcribe on the device with a downloaded speech model. That was removed, and a model downloaded then is left where it was: see [what is left on disk](docs/model-delivery.md).
+
+To try it, build a debug build with `cloud-transcription` and a cue backend, because transcription starts only when you approve cue processing for the session. For example, `claude-cli` uses your own Claude subscription:
 
 ```sh
-npm run tauri -- dev --features local-whisper
+TALKQTE_DEV_STT_BACKEND=deepgram \
+TALKQTE_DEV_STT_TOKEN_FILE=/absolute/path/outside/the/repository/stt-token \
+TALKQTE_DEV_STT_MINUTE_CAP=5 \
+npm run tauri -- dev --features claude-cli,cloud-transcription
 ```
 
-Then choose **Download speech model** in Settings; **Set up live session** in the notebook opens it. It fetches the 78 MB `tiny.en` model over HTTPS from the whisper.cpp repository on Hugging Face, at a pinned revision, checks it against a pinned SHA-256, and keeps it in the app's data folder; **Remove model** deletes it. Hugging Face and its download network see your IP address and a file request from TalkQTE; no account, audio, transcript, or notes are sent. A dropped connection resumes with further requests. A developer can instead point `TALKQTE_WHISPER_MODEL` at their own model file, which is not checksum-checked.
+The token file holds a short-lived Deepgram token, not an API key, in an owner-only file and folder; see [cloud transcription](docs/cloud-transcription.md) for the rules and what is sent.
 
-Choose **Start live session** in the notebook and grant microphone permission if asked. **Stop live session**, in the notebook or companion, releases the microphone, finishes transcribing the last few seconds, and ends the session; **Stop microphone** does the same. If microphone access is refused or the device fails, the session ends. Speech is transcribed in chunks of up to 3 seconds, ending early at a pause, so lines appear about 3 seconds after they are spoken in a synthetic replay; the delay on real hardware has not been measured. Audio is not recorded. The transcript stays in memory until you start another session or quit and is never exported. Export is unavailable while a live session runs; after Stop it exports your notes only. Other apps' audio, including the other side of a call, is not captured. Settings shows whether this build and model support a live session. After installation or removal, it shows **Checking…** until the current readiness check finishes; an older reply cannot change that result or the notebook's Start option.
+Choose **Start live session** in the notebook and grant microphone permission if asked. Nothing is transcribed or sent until you review and enable **Cue processing** for the session in the app; a launch setting cannot approve it, and audio captured before the approval is never sent. The notebook says so meanwhile. `TALKQTE_DEV_STT_MINUTE_CAP` caps the audio sent by the whole launch, across sessions. **Stop live session**, in the notebook or companion, releases the microphone, sends the last captured audio, waits up to 10 seconds for the last results, and ends the session; **Stop microphone** does the same. If microphone access is refused, the device fails, the stream fails, the minute cap is reached, or cue processing is turned off, the session ends and the notebook says why. Nothing falls back to another transcription service. Audio is not recorded by TalkQTE. The transcript stays in memory until you start another session or quit and is never exported. Export is unavailable while a live session runs; after Stop it exports your notes only. Other apps' audio, including the other side of a call, is not captured.
 
 **Pause cues**, in the notebook or companion, clears the current suggestion and keeps cues quiet while the microphone, transcript, and session clock continue. **Resume cues** waits for newly spoken lines; delayed speech from the pause does not become a new cue. The companion shows **Cues off / Mic still on** while paused. Use **Stop live session** to stop listening. These controls are [checked headlessly](docs/live-cue-pause.md); native microphone and cross-app acceptance remain separate.
 
-This has been checked with synthetic audio and a scripted recognizer in tests. The download is tested against a simulated server, plus one ranged request to the real source. A first microphone session is recorded in the [native validation notes](docs/native-validation.md#live-session-check); measured latency, Stop/device edge cases, real-meeting accuracy and clean-install first-use acceptance remain open in the [model delivery plan](docs/model-delivery.md).
+This has been checked with synthetic audio and scripted streams in tests only. No session has been run against Deepgram with this code; its latency on real hardware, Stop/device edge cases and real-meeting accuracy remain open. The earlier microphone session in the [native validation notes](docs/native-validation.md#live-session-check) used the former on-device path.
 
-**Cancel start** appears beside microphone status while the local speech model prepares. Cancellation prevents capture even if preparation finishes later; wait for it to finish before starting again. **Stop live session** stays beside microphone status in both Notebook and Settings, independently of pending notebook actions. Microphone status confirms release; the session can keep finishing queued transcription afterward. This [notebook flow is checked headlessly](docs/notebook-capture-controls.md) on fictional IPC, over the [native cancellation race tests](docs/live-start-cancellation.md). Real-device Stop and permission checks remain pending.
+**Cancel start** appears beside microphone status while the session starts. Cancellation prevents capture even if the start finishes later; wait for it to finish before starting again. **Stop live session** stays beside microphone status in both Notebook and Settings, independently of pending notebook actions. Microphone status confirms release; the session can keep finishing queued transcription afterward. This [notebook flow is checked headlessly](docs/notebook-capture-controls.md) on fictional IPC, over the [native cancellation race tests](docs/live-start-cancellation.md). Real-device Stop and permission checks remain pending.
 
 **Cue processing** is available as a status and permission surface in the live notebook and Settings. The normal app has no model connection: it says **No model connection** and "No model cues: this build has no model connection."
 
@@ -106,10 +111,6 @@ A separate [development lab evaluator client](docs/development-lab-evaluator.md)
 **Focus** is optional. Leaving the field applies its lines, including edits made while an earlier save is pending. Clear and accepted suggestions use the same ordered saves. Rejected lines stay editable with an inline retry message; delayed replies preserve newer drafts and keyboard focus. See the [Focus recovery checks](docs/focus-save-recovery.md).
 
 **Your name** in Settings is optional and kept only until quit. Enter or leaving the field applies it to phrase-based **Asked you** cues. Later edits survive a slow save; rejected names show an inline error and keep the last applied name unless you have already typed a newer draft. See the [name recovery checks](docs/name-save-recovery.md).
-
-### Cloud transcription (development builds)
-
-A debug build with the `cloud-transcription` feature (switched on by `lab-evaluator`) can transcribe live sessions through Deepgram instead of on this Mac, when the developer selects it before launch with `TALKQTE_DEV_STT_BACKEND=deepgram`, a short-lived token file and a minute cap for the whole launch. It **sends the session's audio off this Mac to Deepgram**, for the microphone and for application audio, but only after you approve cue processing for that session in the app (a launch setting cannot approve it); before that, nothing is transcribed, and audio captured before the approval is never sent. Every request asks Deepgram to opt out of its model improvement program. Only final results become transcript lines. If the stream fails, the cap is reached or processing is turned off, transcription stops, the session ends with a plain reason, and nothing falls back to on-device transcription. TalkQTE does not save the audio. Release builds refuse the feature. This has offline test evidence only; a session against the real service and its latency are unverified. See [cloud transcription](docs/cloud-transcription.md) and [PRIVACY.md](PRIVACY.md).
 
 ## Fictional cue lab
 

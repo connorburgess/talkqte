@@ -470,10 +470,10 @@ pub struct Snapshot {
     /// the end. Never saved; the companion sees a line only inside that
     /// Still open list.
     pub focus: Vec<String>,
-    /// Development builds that selected cloud transcription only: the
-    /// provider this live session's audio goes to after its review is
-    /// approved, and the fixed code that ended it, if it ended. Absent when
-    /// the session's speech is transcribed on this device.
+    /// The provider this live session's audio goes to after its review is
+    /// approved, and the fixed code that ended it, if it ended. Every live
+    /// session has one, since a launch without cloud transcription cannot
+    /// start a session; absent outside live sessions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transcription: Option<CloudTranscription>,
 }
@@ -600,7 +600,7 @@ impl Engine {
     pub fn live() -> Self {
         Self::from_script(Script {
             title: "Live session".into(),
-            description: "Transcript lines from a local transcription source.".into(),
+            description: "Transcript lines from this session's transcription.".into(),
             duration_ms: u64::MAX,
             segments: vec![],
         })

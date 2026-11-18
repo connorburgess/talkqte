@@ -219,7 +219,7 @@ export function sourceProblem(problem: string | null | undefined) {
     case 'devSettingInvalid':
       return 'TALKQTE_DEV_STOP_AFTER_S must be a whole number of seconds, so the launch setting started nothing.';
     case 'unavailable':
-      return 'Application audio is unavailable. A session from an application needs the speech model installed.';
+      return 'Application audio is unavailable. A session from an application needs live transcription, which this build or launch does not have.';
     default:
       return 'Application audio did not start. Try again.';
   }
