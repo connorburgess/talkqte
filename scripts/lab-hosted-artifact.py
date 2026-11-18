@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Static unsigned lab archive/provenance; never signs or executes an app."""
 import argparse
-from collections import deque
+from contextlib import contextmanager
 import hashlib
+import gzip
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -11,6 +12,7 @@ import re
 import stat
 import subprocess
 import tarfile
+import tempfile
 import zipfile
 
 SHA = re.compile(r'[0-9a-f]{40}\Z')
@@ -57,52 +59,84 @@ def inventory(app):
 def validate_members(members):
     require(0 < len(members) <= MAX_ENTRIES, 'entry count')
     names = set()
-    links = {}
+    spellings = {}
     total = 0
     for m in members:
         p = PurePosixPath(m.name)
+        # The observed app layout is ASCII and link-free. Reject unsupported
+        # forms rather than attempting macOS Unicode/case/link emulation.
+        require(m.name.isascii() and len(m.name) <= 255 and not any(ord(c) < 32 or ord(c) == 127 or c == '\\' for c in m.name), 'unsupported path encoding')
         require(bool(p.parts) and not p.is_absolute() and '..' not in p.parts and p.parts[0] == 'TalkQTE.app', 'unsafe member path')
         require(m.name == p.as_posix() and m.name not in names, 'duplicate or noncanonical path')
+        for i in range(1, len(p.parts) + 1):
+            ancestor = '/'.join(p.parts[:i])
+            key = ancestor.lower()
+            require(key not in spellings or spellings[key] == ancestor, 'case alias including implicit ancestor')
+            spellings[key] = ancestor
         names.add(m.name)
-        require(m.isfile() or m.isdir() or m.issym(), 'hardlink/device/unsupported type')
+        require(m.type in (tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE), 'links/extensions/devices unsupported')
+        require(not m.linkname, 'unexpected link target')
         require(not (m.mode & 0o7000), 'special permission bits')
-        require(m.size >= 0, 'negative member size')
+        require(m.size >= 0 and (m.isfile() or m.size == 0), 'invalid member size')
         total += m.size
         require(total <= MAX_CONTENT, 'content limit')
-        if m.issym():
-            require(m.size == 0 and m.linkname and not PurePosixPath(m.linkname).is_absolute(), 'unsafe symlink')
-            parts = list(p.parent.parts)
-            for part in PurePosixPath(m.linkname).parts:
-                if part == '..':
-                    require(len(parts) > 1, 'escaping symlink')
-                    parts.pop()
-                elif part not in ('.', ''):
-                    parts.append(part)
-            require(parts[0] == 'TalkQTE.app', 'escaping symlink')
-            links[m.name] = m.linkname
     require('TalkQTE.app' in names, 'missing app root')
     types = {m.name: m.isdir() for m in members}
-    for link in links:
-        pending = deque(PurePosixPath(link).parts)
-        resolved = []
-        traversals = 0
-        while pending:
-            part = pending.popleft()
-            if part == '..':
-                require(len(resolved) > 1, 'escaping symlink chain')
-                resolved.pop()
-                continue
-            resolved.append(part)
-            here = '/'.join(resolved)
-            if here in links:
-                traversals += 1
-                require(traversals <= len(links), 'symlink cycle')
-                resolved.pop()
-                pending.extendleft(reversed(PurePosixPath(links[here]).parts))
-        require('/'.join(resolved) in names, 'dangling symlink')
+    require(types['TalkQTE.app'], 'app root must be directory')
     for name in names:
         require(all(types.get(parent.as_posix(), True) for parent in PurePosixPath(name).parents if parent.as_posix() in names), 'member beneath non-directory')
-        require(not any(parent.as_posix() in links for parent in PurePosixPath(name).parents), 'member beneath symlink')
+
+
+def scan_ustar(raw):
+    """Inspect fixed-size headers BEFORE tarfile can parse any extensions."""
+    end = raw.seek(0, 2)
+    raw.seek(0)
+    members = []
+    while True:
+        block = raw.read(512)
+        require(len(block) == 512, 'truncated tar header')
+        if block == bytes(512):
+            require(raw.read(512) == bytes(512), 'missing tar end marker')
+            while rest := raw.read(65536):
+                require(not any(rest), 'trailing nonzero tar data')
+            break
+        require(len(members) < MAX_ENTRIES, 'entry/header count')
+        require(block[257:263] == b'ustar\0' and block[263:265] == b'00', 'only USTAR headers supported')
+        require(block[156:157] in (b'0', b'\0', b'5'), 'PAX/GNU/link/extension header unsupported')
+        try:
+            m = tarfile.TarInfo.frombuf(block, 'ascii', 'strict')
+        except (tarfile.TarError, ValueError) as error:
+            raise ValueError('invalid USTAR header') from error
+        require(0 <= m.size <= MAX_CONTENT, 'member size limit')
+        members.append(m)
+        next_header = raw.tell() + ((m.size + 511) // 512) * 512
+        require(next_header <= end, 'truncated tar content')
+        raw.seek(next_header)
+    validate_members(members)
+    raw.seek(0)
+
+
+@contextmanager
+def bounded_ustar(archive):
+    # Gzip is expanded to a bounded anonymous file in small chunks. No tar
+    # metadata parser runs until the TOTAL decoded stream, including padding
+    # and PAX/GNU metadata, is proven within MAX_CONTENT.
+    with tempfile.TemporaryFile() as raw:
+        total = 0
+        with gzip.open(archive, 'rb') as compressed:
+            while True:
+                block = compressed.read(min(65536, MAX_CONTENT - total + 1))
+                if not block:
+                    break
+                total += len(block)
+                require(total <= MAX_CONTENT, 'decoded tar byte limit')
+                raw.write(block)
+        raw.seek(0)
+        scan_ustar(raw)
+        # The preceding raw scan rejects all extension types; tarfile receives
+        # only bounded, fixed USTAR headers and regular files/directories.
+        with tarfile.open(fileobj=raw, mode='r:') as tar:
+            yield tar
 
 
 def safe_extract(archive, destination, expected_sha):
@@ -110,28 +144,20 @@ def safe_extract(archive, destination, expected_sha):
     require(archive.is_file() and not archive.is_symlink() and archive.stat().st_size <= MAX_ARCHIVE, 'archive limit/type')
     require(digest(archive) == expected_sha, 'archive digest mismatch')
     require(not destination.exists(), 'destination already exists')
-    # Validate every entry before creating any output. Extraction is implemented
-    # here rather than relying on tar's overwrite/link traversal behavior.
-    with tarfile.open(archive, 'r:gz') as tar:
-        members = []
-        for m in tar:
-            require(len(members) < MAX_ENTRIES, 'entry count')
-            members.append(m)
+    with bounded_ustar(archive) as tar:
+        members = tar.getmembers()
         validate_members(members)
         destination.mkdir(mode=0o700)
         for m in sorted(members, key=lambda v: (len(PurePosixPath(v.name).parts), v.name)):
             target = destination.joinpath(*PurePosixPath(m.name).parts)
             if m.isdir():
                 target.mkdir(mode=0o700, exist_ok=True)
-            elif m.isfile():
+            else:
                 target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
                 with tar.extractfile(m) as src, open(target, 'xb') as out:
                     while b := src.read(1024 * 1024):
                         out.write(b)
                 target.chmod(m.mode & 0o777)
-            else:
-                target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-                target.symlink_to(m.linkname)
         for m in sorted(members, key=lambda v: len(PurePosixPath(v.name).parts), reverse=True):
             if m.isdir():
                 destination.joinpath(*PurePosixPath(m.name).parts).chmod(m.mode & 0o777)
@@ -198,11 +224,12 @@ def pack(source, sha, app, out):
         member.uname = member.gname = ''
         # PAX filesystem metadata is unnecessary for a repository-built app.
         member.pax_headers = {}
+        member.mtime = int(member.mtime)
         return member
-    with tarfile.open(archive, 'w:gz', dereference=False) as tar:
+    with tarfile.open(archive, 'w:gz', format=tarfile.USTAR_FORMAT, dereference=False) as tar:
         tar.add(app, arcname='TalkQTE.app', recursive=True, filter=public_header)
     require(archive.stat().st_size <= MAX_ARCHIVE, 'archive limit')
-    with tarfile.open(archive, 'r:gz') as tar:
+    with bounded_ustar(archive) as tar:
         validate_members(tar.getmembers())
     provenance = {
         'schema': 'talkqte.lab.hosted-artifact.v1', 'sourceCommit': sha,

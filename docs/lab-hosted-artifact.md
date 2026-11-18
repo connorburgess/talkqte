@@ -25,7 +25,11 @@ separately recorded workflow checkout. Only the repository-built app, relative
 inventory and public build provenance are uploaded, for three days. Never add
 private media, notes, account information or local evidence to this artifact.
 The archive removes owner names/IDs and filesystem metadata while preserving
-relative paths, modes and symlink targets. Artifact upload/digest support is
+relative paths and modes. The observed app layout is ASCII and link-free;
+only ASCII USTAR regular files/directories are accepted. Links, PAX/GNU metadata,
+Unicode paths and case aliases (including implicit ancestors) stop artifact
+acceptance; they are never renamed, stripped or silently dropped. A future
+bundle needing such entries requires a separately reviewed archive contract. Artifact upload/digest support is
 [documented by GitHub](https://docs.github.com/en/actions/tutorials/store-and-share-data).
 
 ## Local acceptance before any signing
@@ -60,9 +64,17 @@ python3 scripts/lab-hosted-artifact.py verify-extracted \
   --workflow-sha "$LAB_WORKFLOW_SHA"
 ```
 
-Extraction refuses unsafe members before creating output, enforces 256 MiB
-compressed/512 MiB contents/20,000 entries, and never overwrites a destination.
-Verification compares every relative entry/mode/hash/symlink and embedded source.
+Extraction refuses unsafe members before creating output and never overwrites a
+destination. It first streams gzip in at most 64 KiB chunks into a bounded
+anonymous temporary file: at most 512 MiB TOTAL decoded tar bytes, including
+metadata and padding, under the 256 MiB compressed cap. No tar metadata parser
+runs before that whole-stream bound passes. A fixed 512-byte header scan then
+rejects PAX/GNU/extensions/links before `tarfile` parses members, with at most
+20,000 headers/entries and an independent logical-content bound. ASCII-only
+path components are checked case-insensitively for aliases across members and
+implicit ancestors before writes. The exact case-insensitive macOS escape
+reproduction and small compressed oversized metadata cases are offline tests.
+Verification compares every relative entry/mode/hash and embedded source.
 Independently inspect `file`, `lipo -archs`, `xcrun vtool -show-build` and
 Info.plist: require thin arm64, bundle identifier `com.talkqte.desktop` and minimum
 macOS 14.0. Inspect all resource paths and notices. Do not execute the app.
@@ -103,4 +115,6 @@ permission or native runtime behavior; those remain later owner-present checks.
 README is unchanged: this prepares a debug artifact and enables no normal app
 setup path. The next readiness gate is reviewed exact source/build evidence,
 private context/media/package validation and explicit in-app scope consent;
-mock archive tests establish neither capture nor useful assistance.
+mock archive tests establish neither capture nor useful assistance. The current
+observed bundle requires no links or extended metadata; only an actual selected
+build can prove it fits this conservative contract.

@@ -1,5 +1,6 @@
 import importlib.util
 import io
+import gzip
 from pathlib import Path
 import tarfile
 import tempfile
@@ -35,7 +36,7 @@ class ArchiveProtocol(unittest.TestCase):
     def root(self):
         return entry('TalkQTE.app', 'dir', mode=0o755)
 
-    def test_valid_roundtrip_preserves_mode_symlink_and_inventory(self):
+    def test_valid_roundtrip_preserves_mode_and_inventory(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             app = root / 'TalkQTE.app'
@@ -43,14 +44,12 @@ class ArchiveProtocol(unittest.TestCase):
             exe = app / 'Contents/MacOS/talkqte'
             exe.write_bytes(b'not executable fixture')
             exe.chmod(0o755)
-            (app / 'Contents/alias').symlink_to('MacOS/talkqte')
             archive = root / 'app.tar.gz'
-            with tarfile.open(archive, 'w:gz', dereference=False) as t:
+            with tarfile.open(archive, 'w:gz', format=tarfile.USTAR_FORMAT, dereference=False) as t:
                 t.add(app, arcname='TalkQTE.app')
             extracted = artifact.safe_extract(archive, root / 'out', artifact.digest(archive))
             self.assertEqual(artifact.inventory(app), artifact.inventory(extracted))
             self.assertEqual((extracted / 'Contents/MacOS/talkqte').stat().st_mode & 0o777, 0o755)
-            self.assertTrue((extracted / 'Contents/alias').is_symlink())
             with self.assertRaisesRegex(ValueError, 'already exists'):
                 artifact.safe_extract(archive, root / 'out', artifact.digest(archive))
 
@@ -71,7 +70,7 @@ class ArchiveProtocol(unittest.TestCase):
         for index, members in enumerate(cases):
             with self.subTest(index=index), tempfile.TemporaryDirectory() as tmp:
                 archive = Path(tmp) / 'bad.tar.gz'
-                with tarfile.open(archive, 'w:gz') as t:
+                with tarfile.open(archive, 'w:gz', format=tarfile.USTAR_FORMAT) as t:
                     for m in members:
                         t.addfile(m, io.BytesIO(b'abc') if m.isfile() else None)
                 dest = Path(tmp) / 'out'
@@ -82,7 +81,7 @@ class ArchiveProtocol(unittest.TestCase):
     def test_digest_mismatch_and_size_limits_fail_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             archive = Path(tmp) / 'fixture.tar.gz'
-            with tarfile.open(archive, 'w:gz') as t:
+            with tarfile.open(archive, 'w:gz', format=tarfile.USTAR_FORMAT) as t:
                 t.addfile(self.root())
             with self.assertRaisesRegex(ValueError, 'digest mismatch'):
                 artifact.safe_extract(archive, Path(tmp) / 'out', '0' * 64)
@@ -101,6 +100,84 @@ class ArchiveProtocol(unittest.TestCase):
                 entry('TalkQTE.app/d/a', 'symlink', '..'),
                 entry('TalkQTE.app/d/b', 'symlink', 'a/../../escape'),
             ])
+
+    def test_case_and_unicode_aliases_include_implicit_ancestors(self):
+        cases = [
+            [entry('TalkQTE.app/A'), entry('TalkQTE.app/a')],
+            [entry('TalkQTE.app/D/a'), entry('TalkQTE.app/d/b')],
+            [entry('TalkQTE.app/D', 'dir'), entry('TalkQTE.app/d/a')],
+            [entry('TalkQTE.app/é'), entry('TalkQTE.app/e\u0301')],
+            [entry('TalkQTE.app/K'), entry('TalkQTE.app/K')],
+            [entry('TalkQTE.app/Ａ')],
+        ]
+        for members in cases:
+            with self.subTest(names=[m.name for m in members]), self.assertRaises(ValueError):
+                artifact.validate_members([self.root(), *members])
+
+    def test_real_case_insensitive_escape_reproduction_rejected_before_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'CaseProbe').write_bytes(b'fixture')
+            if not (root / 'caseprobe').exists():
+                self.skipTest('requires real case-insensitive filesystem (macOS default)')
+            # Exact reviewer reproduction, entirely under a disposable root.
+            # Old code wrote root/outside/evil through case-alias symlink parents.
+            members = [self.root(), entry('TalkQTE.app/d', 'dir'),
+                       entry('TalkQTE.app/outside', 'dir'),
+                       entry('TalkQTE.app/d/A', 'symlink', '..'),
+                       entry('TalkQTE.app/d/b', 'symlink', 'a/../../outside'),
+                       entry('TalkQTE.app/d/B/evil')]
+            archive = root / 'escape.tar.gz'
+            with tarfile.open(archive, 'w:gz', format=tarfile.USTAR_FORMAT) as t:
+                for m in members:
+                    t.addfile(m, io.BytesIO(b'abc') if m.isfile() else None)
+            dest = root / 'extracted'
+            with self.assertRaises(ValueError):
+                artifact.safe_extract(archive, dest, artifact.digest(archive))
+            self.assertFalse(dest.exists())
+            self.assertFalse((root / 'outside/evil').exists())
+            self.assertFalse((root / 'outside').exists())
+
+    def test_decoded_tar_bound_precedes_all_metadata_parsing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / 'metadata.tar.gz'
+            # Tiny gzip containing a large, highly compressible PAX comment.
+            m = self.root()
+            m.pax_headers = {'comment': 'x' * 65536}
+            with tarfile.open(archive, 'w:gz', format=tarfile.PAX_FORMAT) as t:
+                t.addfile(m)
+            self.assertLess(archive.stat().st_size, 2048)
+            with patch.object(artifact, 'MAX_CONTENT', 1024), patch.object(artifact.tarfile.TarInfo, 'frombuf', side_effect=AssertionError('metadata parser reached')):
+                with self.assertRaisesRegex(ValueError, 'decoded tar byte limit'):
+                    artifact.safe_extract(archive, root / 'out', artifact.digest(archive))
+            self.assertFalse((root / 'out').exists())
+
+    def test_pax_gnu_long_headers_and_header_count_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            variants = [
+                (tarfile.PAX_FORMAT, entry('TalkQTE.app/' + 'x' * 150)),
+                (tarfile.GNU_FORMAT, entry('TalkQTE.app/' + 'x' * 150)),
+                (tarfile.GNU_FORMAT, entry('TalkQTE.app/a', 'symlink', 'x' * 150)),
+            ]
+            for index, (fmt, m) in enumerate(variants):
+                archive = root / str(index)
+                with tarfile.open(archive, 'w:gz', format=fmt) as t:
+                    t.addfile(self.root())
+                    t.addfile(m, io.BytesIO(b'abc') if m.isfile() else None)
+                with self.assertRaises(ValueError):
+                    artifact.safe_extract(archive, root / ('out' + str(index)), artifact.digest(archive))
+                self.assertFalse((root / ('out' + str(index))).exists())
+            archive = root / 'many'
+            with tarfile.open(archive, 'w:gz', format=tarfile.USTAR_FORMAT) as t:
+                t.addfile(self.root())
+                t.addfile(entry('TalkQTE.app/a', 'dir'))
+                t.addfile(entry('TalkQTE.app/b', 'dir'))
+            with patch.object(artifact, 'MAX_ENTRIES', 2):
+                with self.assertRaisesRegex(ValueError, 'entry/header count'):
+                    artifact.safe_extract(archive, root / 'many-out', artifact.digest(archive))
+            self.assertFalse((root / 'many-out').exists())
 
     def test_outer_zip_exact_names_types_and_digest(self):
         with tempfile.TemporaryDirectory() as tmp:
