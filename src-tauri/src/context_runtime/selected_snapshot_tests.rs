@@ -31,6 +31,12 @@ struct Scripted {
 }
 impl Evaluator for Scripted {
     fn evaluate(&mut self, request: &Request, cancel: &Cancellation) -> Result<String, Failure> {
+        // Exercise the inert wire serializer inside the real worker, including
+        // calls held across source/control changes. No provider is invoked.
+        let input = request.selected_snapshot_input()?;
+        let input: serde_json::Value = serde_json::from_str(&input).unwrap();
+        assert_eq!(input["inputContract"], "selected-snapshots-v1");
+        assert_eq!(input["priorNotes"].as_array().unwrap().len(), 1);
         self.calls.send(request.clone()).unwrap();
         let reply = self
             .replies

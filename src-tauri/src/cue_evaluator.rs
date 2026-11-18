@@ -15,6 +15,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod selected_snapshot;
+pub use selected_snapshot::{SELECTED_SNAPSHOT_FRAME_BYTES, SELECTED_SNAPSHOT_INPUT_BYTES};
+
 pub const MAX_SOURCES: usize = 32;
 pub const MAX_SOURCE_BYTES: usize = 4_096;
 pub const MAX_CONTEXT_BYTES: usize = 32_768;
