@@ -1165,6 +1165,7 @@ mod tests {
             id: "c1".into(),
             text: "Who will book the hall?".into(),
             source_ids: vec!["transcript:a".into()],
+            asked: false,
         };
         let with_cue =
             Request::new(7, 1, vec![line("transcript:a", "Book it.")], Some(cue)).unwrap();
