@@ -277,3 +277,10 @@ distinguish metadata readiness, Runtime admission, session creation and recogniz
 load without changing guards or exposing content. Their next acceptance is exact
 review/hosted validation and separately authorized diagnostic runtime evidence;
 the failed run and its cleanup outcome remain preserved.
+
+
+### Local file chooser fallback
+
+A macOS file-panel service initialization timeout was observed before the notes reader ran. **Use a local file path** provides an explicit local-only alternative through the same bounded file reader, preview, selection and import flow; it does not fix the OS panel service. The path is transient and notes remain in memory for that app session. A fresh runner cannot inherit them.
+
+Acceptance still requires the replacement exact-source signed app to list the fictional Markdown via this alternative, import one explicitly selected note in the same running app, and verify that exact selected scope before the owner reviews/enables processing. Source/browser tests do not establish native panel recovery or this end-to-end acceptance. No provider dispatch or paid retry follows from importing a file.

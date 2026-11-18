@@ -37,6 +37,22 @@ const NO_TEXT: &str = "The file has no note text.";
 const UNSUPPORTED: &str = "TalkQTE reads notes from a Markdown (.md) or plain-text (.txt) file, or a TalkQTE JSON notes file. Export or save the notes in one of those formats.";
 const TRANSCRIPT: &str = "That is a transcript or captions file. TalkQTE brings in notes and summaries, not transcripts. Export the summary as Markdown or plain text instead.";
 
+/// Accept only an explicit absolute local path, without shell/URL expansion.
+/// The existing file reader still owns format, size and content validation.
+pub fn explicit_path(value: &str) -> Result<std::path::PathBuf, String> {
+    let path = std::path::Path::new(value);
+    if value.is_empty()
+        || value.len() > 4096
+        || value.chars().any(char::is_control)
+        || !path.is_absolute()
+        || value.starts_with("//")
+        || value.starts_with(r"\\")
+    {
+        return Err("Enter the full local file path, without quotes or a file URL.".into());
+    }
+    Ok(path.to_path_buf())
+}
+
 /// How a picked file is read, decided by its extension alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileKind {

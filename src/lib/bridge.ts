@@ -58,6 +58,12 @@ export async function pickContextFile() {
   return invoke<PickedNotes | null>('pick_context_file');
 }
 
+/** Lists an explicitly entered local file; does not import or grant processing. */
+export async function readContextFilePath(path: string) {
+  if (preview) return (await preview).pickContextFile();
+  return invoke<PickedNotes>('read_context_file_path', { path });
+}
+
 /** Signs in to Granola in the browser and opens a session; desktop only. */
 export async function connectGranola() {
   if (preview) return (await preview).connectGranola();
