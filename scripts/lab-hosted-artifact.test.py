@@ -290,11 +290,12 @@ class ArchiveProtocol(unittest.TestCase):
         workflow = Path(__file__).parents[1] / '.github/workflows/checks.yml'
         text = workflow.read_text()
         normal, job = text.split('  lab-artifact:\n', 1)
-        sha = '6f626d2fef9419a3448b32fe62733bcd6c768038'
+        sha = 'a5a39376ae6da1629a012cd6605359bea3ca9248'
         self.assertNotIn('ref: ${{ inputs.lab_native_sha }}', job)
         self.assertNotIn('          NATIVE_SHA: ${{ inputs.lab_native_sha }}', job)
         self.assertEqual(job.count('NATIVE_SHA: ' + sha), 3)
         self.assertIn('ref: ' + sha + '\n          path: native-source', job)
+        self.assertIn('name: unsigned-lab-' + sha + '-${{ github.run_attempt }}', job)
         self.assertIn('package-manager-cache: false', job)
         self.assertIn('cache: npm', normal)  # Normal frontend caching remains.
         selection = job.split('      - uses:', 1)[0]
