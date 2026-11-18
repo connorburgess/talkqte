@@ -41,3 +41,10 @@ Activation and any bounded fictional provider comparison need separate
 assignments. Imported context is not processing permission. No paid run,
 account, native IPC, useful-assistance or latency acceptance is established.
 Granola identity/refresh/account and Tactiq source mapping remain open.
+
+Selected-mode string policy rejects Unicode Cc controls except LF/TAB in
+text, titles, names and cue metadata. IDs reject every Cc, including LF/TAB.
+Invalid content rejects the exact selection; it is never sanitized. Shared
+positive LF/TAB/astral and negative CR/U+0001/DEL/C1 fixtures check this domain
+against the native constructor-plus-serializer path. Legacy validation is
+unchanged.

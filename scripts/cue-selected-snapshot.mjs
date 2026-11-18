@@ -18,7 +18,7 @@ const text = (v, max) =>
   v.isWellFormed() &&
   v.trim().length > 0 &&
   [...v].length <= max &&
-  !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(v);
+  ![...v].some((c) => /\p{Cc}/u.test(c) && c !== '\n' && c !== '\t');
 const version = (v) =>
   typeof v === 'string' &&
   /^(0|[1-9][0-9]*)$/.test(v) &&
@@ -50,7 +50,7 @@ export function selectedSnapshotInput(input) {
   const ids = new Set();
   let bytes = 0;
   const add = (item) => {
-    check(text(item.id, 160) && !ids.has(item.id));
+    check(text(item.id, 160) && !/\p{Cc}/u.test(item.id) && !ids.has(item.id));
     check(text(item.text, 4096) && Buffer.byteLength(item.text) <= 4096);
     ids.add(item.id);
   };

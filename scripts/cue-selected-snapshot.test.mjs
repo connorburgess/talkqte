@@ -254,3 +254,57 @@ test('UTF8 bytes and scalar character limits include escaping and complete frame
   sized.priorNotes[7].text += 'x';
   assert.throws(() => selectedSnapshotInput(sized));
 });
+
+test('shared selected-mode string domain rejects all Cc except LF/TAB, with stricter IDs', () => {
+  const strings = JSON.parse(
+    readFileSync(
+      new URL('./fixtures/selected-snapshot-strings.json', import.meta.url),
+    ),
+  );
+  const fields = [
+    (v, text) => {
+      v.events[0].text = text;
+    },
+    (v, text) => {
+      v.priorNotes[0].text = text;
+    },
+    (v, text) => {
+      v.priorNotes[0].title = text;
+    },
+    (v, text) => {
+      v.userName = text;
+    },
+    (v, text) => {
+      v.earlierCues = [{ text, state: 'expired' }];
+    },
+    (v, text) => {
+      v.existingCue = { text, sourceIds: ['transcript:current'] };
+    },
+  ];
+  for (const set of fields) {
+    for (const text of strings.positive) {
+      const v = input();
+      set(v, text);
+      assert.deepEqual(JSON.parse(selectedSnapshotInput(v)), v);
+    }
+    for (const text of strings.negative) {
+      rejects((v) => set(v, text));
+      const value = input();
+      set(value, text);
+      let captures = 0;
+      assert.throws(() => {
+        buildSelectedSnapshotAnthropicParams('claude-opus-5-5', value);
+        captures += 1;
+      });
+      assert.equal(captures, 0);
+    }
+  }
+  for (const id of strings.idNegative) {
+    rejects((v) => {
+      v.events[0].id = 'transcript:' + id;
+    });
+    rejects((v) => {
+      v.priorNotes[0].id = 'prior:file:' + id;
+    });
+  }
+});
