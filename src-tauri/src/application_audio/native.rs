@@ -9,7 +9,6 @@ use std::sync::{
     Arc,
 };
 
-mod chunks;
 mod clock;
 mod output;
 pub mod pcm;
@@ -17,7 +16,6 @@ mod position;
 mod select;
 mod stream;
 mod task;
-pub use chunks::{NativeChunk, NativeChunker, MAX_SEGMENTS};
 #[cfg(test)]
 pub(crate) use clock::tests::Feed;
 pub use clock::{ClockBinding, NativeBlock, NativeReader};
