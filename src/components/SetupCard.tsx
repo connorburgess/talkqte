@@ -1,19 +1,18 @@
 import { Check, ChevronRight } from 'lucide-react';
-import type { ContextItem, ModelStatus } from '../lib/types';
+import type { ContextItem } from '../lib/types';
 
 /** What the card can send the person to. */
-export type SetupTarget = 'name' | 'focus' | 'model' | 'context';
+export type SetupTarget = 'name' | 'focus' | 'context';
 
 /**
  * The short path to a first useful session: a name, what matters today,
- * the speech model when the build can use one, and prior notes. Nothing
+ * and prior notes. Nothing
  * here is stored between launches, so the card returns each launch until
  * the person has done the steps or put it away for the session.
  */
 export function SetupCard({
   name,
   focus,
-  model,
   items,
   busy,
   onGoTo,
@@ -21,15 +20,11 @@ export function SetupCard({
 }: {
   name: string | null;
   focus: string[];
-  model: ModelStatus | null;
   items: ContextItem[];
   busy: boolean;
   onGoTo: (target: SetupTarget) => void;
   onDismiss: () => void;
 }) {
-  const modelStep =
-    model && ['missing', 'downloading', 'installed'].includes(model.status);
-  const modelDone = model?.status === 'installed';
   const steps: {
     key: string;
     title: string;
@@ -62,23 +57,6 @@ export function SetupCard({
       onAction: () => onGoTo('focus'),
     },
   ];
-  if (modelStep) {
-    steps.push({
-      key: 'model',
-      title: 'Speech model',
-      done: modelDone,
-      detail: modelDone
-        ? `${model.name} is installed on this device.`
-        : model.status === 'downloading'
-          ? `Downloading, ${Math.round(
-              model.sizeBytes ? (model.received / model.sizeBytes) * 100 : 0,
-            )}%.`
-          : `${Math.round(model.sizeBytes / 1_000_000)} MB, fetched once over HTTPS and kept on this device; needed for a live session.`,
-      // Settings explains the download (size, source, checksum) before it starts.
-      action: 'Set up the speech model',
-      onAction: () => onGoTo('model'),
-    });
-  }
   steps.push({
     key: 'context',
     title: 'Prior notes',
@@ -116,17 +94,16 @@ export function SetupCard({
                 </span>
               </strong>
               <p className="small muted">{step.detail}</p>
-              {!step.done &&
-                !(step.key === 'model' && model?.status === 'downloading') && (
-                  <button
-                    className="text-button"
-                    disabled={busy}
-                    onClick={step.onAction}
-                  >
-                    {step.action}
-                    <ChevronRight size={14} />
-                  </button>
-                )}
+              {!step.done && (
+                <button
+                  className="text-button"
+                  disabled={busy}
+                  onClick={step.onAction}
+                >
+                  {step.action}
+                  <ChevronRight size={14} />
+                </button>
+              )}
             </div>
           </li>
         ))}

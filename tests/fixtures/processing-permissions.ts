@@ -30,7 +30,12 @@ export function fictionalPermissions(
       'set_processing_paused',
       'revoke_processing',
     ],
-    configuration: (hosted = false): Partial<ProcessingSnapshot> => ({
+    // With `audio`, the launch also streams the session's audio to a
+    // fictional transcription service once the review is approved.
+    configuration: (
+      hosted = false,
+      audio = false,
+    ): Partial<ProcessingSnapshot> => ({
       processor: {
         id: 'fictional-processor',
         revision: 1,
@@ -41,6 +46,12 @@ export function fictionalPermissions(
         dataPolicy: hosted
           ? 'Selected context leaves this device for Example service. This fictional policy does not promise immediate deletion by the service.'
           : 'Selected context is processed on this device. Approval is kept in memory for this session.',
+        ...(audio
+          ? {
+              audioDestination:
+                'Example transcription service, for transcription',
+            }
+          : {}),
       },
       notes: [
         {
