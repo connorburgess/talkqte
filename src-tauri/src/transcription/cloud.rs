@@ -572,8 +572,25 @@ pub fn launch_budget(settings: &Settings) -> Budget {
 /// stream opens, so a bad setup is reported before anyone is asked to
 /// approve anything.
 pub fn ready() -> Result<(), SttFailure> {
-    let settings = settings()?;
-    check_token_file(&settings.token_file)
+    readiness().map_err(|_| SttFailure::Settings)
+}
+
+/// Fixed readiness classification; never contains a path, credential or OS error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReadinessFailure {
+    Settings,
+    TokenMetadata,
+}
+
+/// The same metadata-only checks as `ready`, with their boundary retained.
+/// No token content is read and no connection is opened.
+pub fn readiness() -> Result<(), ReadinessFailure> {
+    readiness_for(settings())
+}
+
+fn readiness_for(settings: Result<Settings, SttFailure>) -> Result<(), ReadinessFailure> {
+    let settings = settings.map_err(|_| ReadinessFailure::Settings)?;
+    check_token_file(&settings.token_file).map_err(|_| ReadinessFailure::TokenMetadata)
 }
 
 /// The opener for this launch's selected cloud provider. It reads the token
@@ -1009,6 +1026,60 @@ mod tests {
         ] {
             assert_eq!(parse(backend, file, cap), Err(SttFailure::Settings));
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn readiness_diagnostic_uses_metadata_only_and_preserves_placeholder_acceptance() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("tq-stt-ready-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir(&base).unwrap();
+        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let file = base.join("placeholder");
+        let settings = || {
+            Ok(Settings {
+                token_file: file.clone(),
+                minute_cap: 5,
+            })
+        };
+        assert_eq!(
+            readiness_for(Err(SttFailure::Settings)),
+            Err(ReadinessFailure::Settings)
+        );
+        assert_eq!(
+            readiness_for(settings()),
+            Err(ReadinessFailure::TokenMetadata)
+        );
+        std::fs::write(&file, b"").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(readiness_for(settings()), Ok(()));
+        assert_eq!(check_token_file(&file), Ok(()));
+        assert_eq!(
+            read_token(&file),
+            Err(SttFailure::Settings),
+            "metadata readiness grants no usable token"
+        );
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            readiness_for(settings()),
+            Err(ReadinessFailure::TokenMetadata)
+        );
+        assert_eq!(check_token_file(&file), Err(SttFailure::Settings));
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            readiness_for(settings()),
+            Err(ReadinessFailure::TokenMetadata)
+        );
+        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::remove_file(&file).unwrap();
+        std::os::unix::fs::symlink(base.join("absent"), &file).unwrap();
+        assert_eq!(
+            readiness_for(settings()),
+            Err(ReadinessFailure::TokenMetadata)
+        );
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[cfg(unix)]

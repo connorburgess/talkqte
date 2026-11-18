@@ -577,17 +577,55 @@ struct LiveStatus {
 /// Why a live session cannot start, if it cannot. Transcription is only
 /// through a cloud provider, selected per launch in development builds; a
 /// build without it transcribes nothing and says so.
-pub(crate) fn live_unavailable() -> Option<&'static str> {
-    if !cfg!(feature = "cloud-transcription") {
-        Some("This build has no live transcription.")
-    } else if !transcription::cloud::selected() {
-        Some("Live transcription needs cloud transcription selected for this development launch.")
-    } else if transcription::cloud::ready().is_err() {
-        // The token file is checked too, without reading the token.
-        Some("The cloud transcription settings are not usable.")
-    } else {
-        None
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LiveUnavailable {
+    Build,
+    Selection,
+    Settings,
+    TokenMetadata,
+}
+
+impl LiveUnavailable {
+    fn message(self) -> &'static str {
+        match self {
+            Self::Build => "This build has no live transcription.",
+            Self::Selection => {
+                "Live transcription needs cloud transcription selected for this development launch."
+            }
+            Self::Settings | Self::TokenMetadata => {
+                "The cloud transcription settings are not usable."
+            }
+        }
     }
+}
+
+pub(crate) fn live_availability() -> Result<(), LiveUnavailable> {
+    classify_live_availability(
+        cfg!(feature = "cloud-transcription"),
+        transcription::cloud::selected,
+        transcription::cloud::readiness,
+    )
+}
+
+fn classify_live_availability(
+    compiled: bool,
+    selected: impl FnOnce() -> bool,
+    readiness: impl FnOnce() -> Result<(), transcription::cloud::ReadinessFailure>,
+) -> Result<(), LiveUnavailable> {
+    if !compiled {
+        return Err(LiveUnavailable::Build);
+    }
+    if !selected() {
+        return Err(LiveUnavailable::Selection);
+    }
+    readiness().map_err(|failure| match failure {
+        transcription::cloud::ReadinessFailure::Settings => LiveUnavailable::Settings,
+        transcription::cloud::ReadinessFailure::TokenMetadata => LiveUnavailable::TokenMetadata,
+    })
+}
+
+pub(crate) fn live_unavailable() -> Option<&'static str> {
+    live_availability().err().map(LiveUnavailable::message)
 }
 
 #[tauri::command]
@@ -1976,5 +2014,59 @@ mod session_clock_tests {
         runtime.sync_at(origin + Duration::from_micros(1_500));
         runtime.sync_at(origin + Duration::from_micros(2_000));
         assert_eq!(runtime.engine.state.elapsed_ms, 2);
+    }
+}
+
+#[cfg(test)]
+mod live_readiness_diagnostics_tests {
+    use super::*;
+    use transcription::cloud::ReadinessFailure;
+
+    #[test]
+    fn readiness_preserves_short_circuit_order_and_public_refusals() {
+        assert_eq!(
+            classify_live_availability(
+                false,
+                || panic!("selection read"),
+                || panic!("metadata read")
+            ),
+            Err(LiveUnavailable::Build)
+        );
+        assert_eq!(
+            classify_live_availability(true, || false, || panic!("metadata read")),
+            Err(LiveUnavailable::Selection)
+        );
+        for (ready, expected) in [
+            (
+                Err(ReadinessFailure::Settings),
+                Err(LiveUnavailable::Settings),
+            ),
+            (
+                Err(ReadinessFailure::TokenMetadata),
+                Err(LiveUnavailable::TokenMetadata),
+            ),
+            (Ok(()), Ok(())),
+        ] {
+            assert_eq!(
+                classify_live_availability(true, || true, || ready),
+                expected
+            );
+        }
+        assert_eq!(
+            LiveUnavailable::Build.message(),
+            "This build has no live transcription."
+        );
+        assert_eq!(
+            LiveUnavailable::Selection.message(),
+            "Live transcription needs cloud transcription selected for this development launch."
+        );
+        assert_eq!(
+            LiveUnavailable::Settings.message(),
+            "The cloud transcription settings are not usable."
+        );
+        assert_eq!(
+            LiveUnavailable::TokenMetadata.message(),
+            LiveUnavailable::Settings.message()
+        );
     }
 }

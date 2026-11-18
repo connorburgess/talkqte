@@ -270,3 +270,10 @@ restores exact PID/start/executable/bundle binding through setup, source ownersh
 and listening/retirement observations. The next blocker is exact-head hosted
 validation and a reviewed fixed-source artifact/package; the failed earlier
 artifact is retained, and no launch or provider success follows from the patch.
+
+The corrected artifact's subsequent pre-HELLO `Unavailable` refusal remains
+unresolved. [Fixed startup diagnostics](development-owned-player-source.md#fixed-startup-diagnostics)
+distinguish metadata readiness, Runtime admission, session creation and recognizer
+load without changing guards or exposing content. Their next acceptance is exact
+review/hosted validation and separately authorized diagnostic runtime evidence;
+the failed run and its cleanup outcome remain preserved.

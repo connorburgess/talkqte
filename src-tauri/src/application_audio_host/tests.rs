@@ -1846,3 +1846,229 @@ mod observation_start {
         assert_eq!(f.script.runs.load(Ordering::SeqCst), 1);
     }
 }
+
+#[cfg(all(
+    debug_assertions,
+    target_os = "macos",
+    feature = "native-audio-spike",
+    feature = "lab-evaluator"
+))]
+mod startup_diagnostics {
+    use super::*;
+    use crate::{
+        native_source::Access,
+        timing_log::{SourceStartReason as Reason, SourceStartStage as Stage},
+        LiveUnavailable,
+    };
+    #[derive(Clone)]
+    struct NoAccess;
+    impl Access for NoAccess {
+        fn with<R>(&self, _: impl FnOnce(&mut Runtime) -> R) -> Option<R> {
+            None
+        }
+    }
+    fn reviewed() -> Review {
+        Gate::default()
+            .review(Application::new("fictional-0".into(), "TalkQTE Lab Player".into()).unwrap())
+            .unwrap()
+    }
+    #[test]
+    fn production_session_diagnostics_distinguish_readiness_access_and_start_without_changing_refusals(
+    ) {
+        for (failure, reason) in [
+            (LiveUnavailable::Build, Reason::CloudBuildMissing),
+            (LiveUnavailable::Selection, Reason::CloudNotSelected),
+            (LiveUnavailable::Settings, Reason::CloudSettingsInvalid),
+            (
+                LiveUnavailable::TokenMetadata,
+                Reason::TokenMetadataRejected,
+            ),
+        ] {
+            let runtime = Arc::new(Mutex::new(Runtime::default()));
+            let review = reviewed();
+            let mut events = vec![];
+            let mut microphone_reads = 0;
+            assert_eq!(
+                app::begin_session_checked(
+                    &runtime,
+                    &review.control(),
+                    Err(failure),
+                    || {
+                        microphone_reads += 1;
+                        Some(true)
+                    },
+                    |stage, reason| events.push((stage, reason))
+                ),
+                Err(Failure::Unavailable)
+            );
+            assert_eq!(events, vec![(Stage::CloudReadiness, reason)]);
+            assert_eq!(microphone_reads, 1, "original check order retained");
+            assert!(!runtime.lock().unwrap().source_session_running());
+        }
+        let review = reviewed();
+        let mut events = vec![];
+        assert_eq!(
+            app::begin_session_checked(
+                &NoAccess,
+                &review.control(),
+                Ok(()),
+                || panic!("unavailable Runtime must not inspect microphone"),
+                |s, r| events.push((s, r))
+            ),
+            Err(Failure::Unavailable)
+        );
+        assert_eq!(
+            events,
+            vec![
+                (Stage::CloudReadiness, Reason::Ready),
+                (Stage::RuntimeAccess, Reason::RuntimeUnavailable)
+            ]
+        );
+        for microphone in [None, Some(false)] {
+            let runtime = Arc::new(Mutex::new(Runtime::default()));
+            events.clear();
+            assert_eq!(
+                app::begin_session_checked(
+                    &runtime,
+                    &review.control(),
+                    Ok(()),
+                    || microphone,
+                    |s, r| events.push((s, r))
+                ),
+                Err(Failure::Busy)
+            );
+            assert_eq!(
+                events.last(),
+                Some(&(Stage::RuntimeStart, Reason::MicrophoneBusy))
+            );
+        }
+        let runtime = Arc::new(Mutex::new(Runtime::default()));
+        let cancelled = reviewed();
+        cancelled.control().cancel();
+        events.clear();
+        assert_eq!(
+            app::begin_session_checked(
+                &runtime,
+                &cancelled.control(),
+                Ok(()),
+                || Some(true),
+                |s, r| events.push((s, r))
+            ),
+            Err(Failure::Cancelled)
+        );
+        assert_eq!(
+            events.last(),
+            Some(&(Stage::RuntimeStart, Reason::RuntimeRefused))
+        );
+        events.clear();
+        let session = app::begin_session_checked(
+            &runtime,
+            &review.control(),
+            Ok(()),
+            || Some(true),
+            |s, r| events.push((s, r)),
+        )
+        .unwrap();
+        assert_eq!(
+            events,
+            vec![
+                (Stage::CloudReadiness, Reason::Ready),
+                (Stage::SessionCreated, Reason::Created)
+            ]
+        );
+        {
+            let state = runtime.lock().unwrap();
+            assert!(state.is_source_session(session));
+            assert!(state.live.as_ref().unwrap().microphone.is_none());
+            assert!(!state.engine.has_processing_permission());
+        }
+        runtime
+            .lock()
+            .unwrap()
+            .attach_live_source(&review.control())
+            .unwrap();
+        for loaded in [false, true] {
+            events.clear();
+            let result = app::before_native_start_observed(
+                &runtime,
+                &review.control(),
+                "fictional-0",
+                &["fictional-0"],
+                || {
+                    if loaded {
+                        Ok(7)
+                    } else {
+                        Err("never logged internal detail".into())
+                    }
+                },
+                |s, r| events.push((s, r)),
+            );
+            assert_eq!(
+                result,
+                if loaded {
+                    Ok((0, 7))
+                } else {
+                    Err(Refused::Start(Failure::Unavailable))
+                }
+            );
+            assert_eq!(
+                events,
+                vec![(
+                    Stage::RecognizerLoad,
+                    if loaded {
+                        Reason::Ready
+                    } else {
+                        Reason::LoadRefused
+                    }
+                )]
+            );
+        }
+        review.control().cancel();
+        events.clear();
+        assert_eq!(
+            app::before_native_start_observed(
+                &runtime,
+                &review.control(),
+                "fictional-0",
+                &["fictional-0"],
+                || panic!("cancelled load"),
+                |s, r| events.push((s, r))
+            ),
+            Err::<(usize, ()), _>(Refused::Start(Failure::Cancelled))
+        );
+        assert!(events.is_empty());
+        runtime.lock().unwrap().end_source_session(session);
+    }
+    #[test]
+    fn raw_diagnostic_schema_is_fixed_bounded_and_content_free() {
+        for (stage, reason) in [
+            (Stage::CloudReadiness, Reason::TokenMetadataRejected),
+            (Stage::RuntimeAccess, Reason::RuntimeUnavailable),
+            (Stage::RuntimeStart, Reason::RuntimeRefused),
+            (Stage::SessionCreated, Reason::Created),
+            (Stage::RecognizerLoad, Reason::LoadRefused),
+        ] {
+            let event = crate::timing_log::Event::LabSourceStartup {
+                version: 1,
+                stage,
+                reason,
+            };
+            let encoded = serde_json::to_string(&event).unwrap();
+            assert!(encoded.len() < 256);
+            let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(
+                value
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<std::collections::BTreeSet<_>>(),
+                ["event", "reason", "stage", "version"]
+                    .into_iter()
+                    .collect()
+            );
+            assert_eq!(value["event"], "lab_source_startup");
+            assert_eq!(value["version"], 1);
+        }
+    }
+}

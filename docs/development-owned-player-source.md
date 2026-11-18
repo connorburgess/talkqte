@@ -129,3 +129,45 @@ selected API contract. A newly signed artifact and lab package preflight are
 required before any separately authorized launch. Device/SCK source identity,
 render clock, microphone exclusion, permission delivery and ordinary release
 remain native acceptance gates; offline tests are not a successful paired run.
+
+## Fixed startup diagnostics
+
+A later corrected-artifact attempt armed Stop and acknowledged the owned player,
+then reported `source_ended` / `unavailable` before any Listening or broker HELLO.
+This is distinct from the earlier setup refusal. Retained evidence does not locate
+the exact `Unavailable` call site: no startup token-placeholder metadata or child
+stderr was retained. Cleanup-time absence of that file cannot establish its
+startup state. The launcher creates an empty private placeholder before spawn;
+native readiness checks its metadata, accepting zero bytes without reading a
+credential. No deterministic mismatch in that contract has been identified.
+
+A debug macOS lab build now prepares raw private `lab_source_startup` version 1
+rows with only closed `stage` and `reason` enums:
+
+| Stage | Reasons |
+| --- | --- |
+| `cloud_readiness` | `ready`, `cloud_build_missing`, `cloud_not_selected`, `cloud_settings_invalid`, `token_metadata_rejected` |
+| `runtime_access` | `runtime_unavailable` |
+| `runtime_start` | `runtime_refused`, `microphone_busy` |
+| `session_created` | `created` |
+| `recognizer_load` | `ready`, `load_refused` |
+
+The same production checks run once in the same order; their original errors,
+admission, permissions, source ownership and Stop behavior remain unchanged.
+Readiness classification checks only launch configuration and file metadata. It
+opens no provider connection and reads no token contents. No path, name, OS error,
+internal error string, environment value, token or header enters these rows.
+Runtime creation does not mean capture or provider approval. Recognizer-load
+readiness does not establish a current source session; the existing post-load
+session fence still decides that.
+
+Existing JavaScript timing readers ignore this distinct event and still treat
+`source_ended` / `dev_source` failures as terminal. The raw log remains the retained
+diagnostic. Rows are lossy, so an absent row is not success or proof of a specific
+failure. These diagnostics do not fix the observed failure, relax a guard, extend
+a timeout or authorize another attempt. Inert tests exercise the actual production
+admission/load helpers with scripted Runtime access, preserved refusal behavior,
+and real temporary placeholder metadata; no Tauri/SCK app is created. Local Rust
+execution remains unrun under the capacity floor. Exact source review and hosted
+validation, followed by a separately approved diagnostic artifact and attempt,
+remain required before new runtime evidence can resolve the failing gate.
