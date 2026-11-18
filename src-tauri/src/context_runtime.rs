@@ -7,6 +7,20 @@ use crate::context_refresh::{CheckError, CheckStatus, Fetched, Report, Ticket};
 use crate::Runtime;
 
 impl Runtime {
+    /// Remove the copy and retire its review/evaluation evidence together,
+    /// under the same runtime lock as importing and processing commands.
+    pub(crate) fn remove_imported_note(
+        &mut self,
+        provider: Provider,
+        source_id: &str,
+    ) -> Option<bool> {
+        if !self.context.remove(provider, source_id) {
+            return None;
+        }
+        self.refresh.forget(provider, source_id);
+        Some(self.sync_prior_notes())
+    }
+
     /// Gives the engine the notes a reminder may quote, with their
     /// warnings, and the kept notes that are held back. Returns whether a
     /// visible cue changed, so both windows are told.
@@ -66,6 +80,9 @@ impl Runtime {
         (report, changed)
     }
 }
+
+#[cfg(test)]
+mod selected_snapshot_tests;
 
 #[cfg(test)]
 mod tests {
