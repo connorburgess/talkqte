@@ -6,6 +6,12 @@ use serde_json::{json, Value};
 pub const SELECTED_SNAPSHOT_INPUT_BYTES: usize = 16_384;
 pub const SELECTED_SNAPSHOT_FRAME_BYTES: usize = 65_536;
 
+fn selected_text(value: &str) -> bool {
+    !value
+        .chars()
+        .any(|c| c.is_control() && c != '\n' && c != '\t')
+}
+
 impl Request {
     /// Serialize only the immutable sources the native permission bridge gave
     /// this request. Revision strings are opaque local versions, not a claim
@@ -14,6 +20,9 @@ impl Request {
         let mut events = Vec::new();
         let mut notes = Vec::new();
         for source in &self.sources {
+            if source.id.chars().any(char::is_control) || !selected_text(&source.text) {
+                return Err(Failure::InvalidInput);
+            }
             match &source.provenance {
                 Provenance::Transcript { .. } => {
                     if source.revision != 0
@@ -32,10 +41,11 @@ impl Request {
                     title,
                 } => {
                     let prefix = format!("prior:{}:", provider.id());
-                    if source
-                        .id
-                        .strip_prefix(prefix.as_str())
-                        .is_none_or(str::is_empty)
+                    if !selected_text(title)
+                        || source
+                            .id
+                            .strip_prefix(prefix.as_str())
+                            .is_none_or(str::is_empty)
                         || !crate::context::valid_date(date)
                         || source.text.chars().count() > crate::context::MAX_EXCERPT_CHARS
                     {
@@ -50,6 +60,21 @@ impl Request {
             }
         }
         if events.is_empty() || notes.is_empty() || notes.len() > crate::context::MAX_ITEMS {
+            return Err(Failure::InvalidInput);
+        }
+        if self
+            .user_name
+            .as_deref()
+            .is_some_and(|name| !selected_text(name))
+            || self
+                .earlier_cues
+                .iter()
+                .any(|cue| !selected_text(&cue.text))
+            || self
+                .existing_cue
+                .as_ref()
+                .is_some_and(|cue| !selected_text(&cue.text))
+        {
             return Err(Failure::InvalidInput);
         }
         let cue = self.existing_cue.as_ref().map(|cue| {
@@ -130,6 +155,79 @@ mod tests {
             None,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn selected_mode_shared_control_policy_uses_real_request_construction() {
+        use crate::cue_evaluator::{CueEnd, EarlierCue, ExistingCue};
+        let corpus: Value = serde_json::from_str(include_str!(
+            "../../../scripts/fixtures/selected-snapshot-strings.json"
+        ))
+        .unwrap();
+        for (group, allowed) in [("positive", true), ("negative", false)] {
+            for value in corpus[group].as_array().unwrap() {
+                let text = value.as_str().unwrap();
+                for field in ["speech", "note", "title", "name", "earlier", "cue"] {
+                    let base = request(7);
+                    let mut sources = base.sources;
+                    match field {
+                        "speech" => sources[0].text = text.into(),
+                        "note" => sources[1].text = text.into(),
+                        "title" => {
+                            if let Provenance::PriorNote { title, .. } = &mut sources[1].provenance
+                            {
+                                *title = text.into();
+                            }
+                        }
+                        _ => {}
+                    }
+                    let existing = (field == "cue").then(|| ExistingCue {
+                        id: "current-cue".into(),
+                        text: text.into(),
+                        source_ids: vec!["transcript:current".into()],
+                        asked: false,
+                    });
+                    let constructed = Request::new(1, 1, sources, existing).and_then(|r| {
+                        r.with_listener(
+                            (field == "name").then(|| text.into()),
+                            if field == "earlier" {
+                                vec![EarlierCue {
+                                    text: text.into(),
+                                    state: CueEnd::Expired,
+                                }]
+                            } else {
+                                vec![]
+                            },
+                        )
+                    });
+                    if !allowed && matches!(field, "speech" | "note") {
+                        assert!(
+                            constructed.is_ok(),
+                            "legacy source text domain stays unchanged"
+                        );
+                    } else {
+                        assert_eq!(constructed.is_ok(), allowed, "constructor field {field}");
+                    }
+                    let serialized = constructed.and_then(|r| r.selected_snapshot_input());
+                    assert_eq!(serialized.is_ok(), allowed, "selected field {field}");
+                    if let Ok(serialized) = serialized {
+                        assert!(serialized.contains("selected-snapshots-v1"));
+                    }
+                }
+            }
+        }
+        for value in corpus["idNegative"].as_array().unwrap() {
+            for (index, prefix) in [(0, "transcript:"), (1, "prior:file:")] {
+                let mut sources = request(7).sources;
+                sources[index].id = format!("{prefix}{}", value.as_str().unwrap());
+                let result =
+                    Request::new(1, 1, sources, None).and_then(|r| r.selected_snapshot_input());
+                assert!(
+                    result.is_err(),
+                    "control in source identifier must never serialize"
+                );
+            }
+        }
     }
 
     #[test]

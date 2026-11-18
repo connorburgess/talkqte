@@ -35,3 +35,10 @@ contract is a separate change on a distinct source baseline. No real account,
 provider effectiveness, native IPC delivery, latency or listening outcome is
 established by these inert helpers. Granola identity/refresh/account acceptance
 and Tactiq source mapping remain open. See [the processing handoff](selected-context-handoff.md).
+
+Selected-mode strings reject Unicode Cc controls except LF/TAB in text,
+titles, names and cue metadata; IDs reject all Cc. Invalid content is rejected
+atomically, never sanitized. Shared LF/TAB/astral positive and
+CR/U+0001/DEL/C1 negative fixtures distinguish real Request construction
+(metadata) from new serializer rejection (source text). Legacy validators
+are unchanged.
