@@ -27,12 +27,13 @@ After exact review approval, `NativeOwner::begin` compares the approved identity
 to that retained selection before constructing a filter. It uses positive
 one-application inclusion with no window exceptions, never an all-app exclusion
 filter. It registers only audio output, requests 16 kHz mono and excludes this
-process's audio. ScreenCaptureKit has no audio-only stream: it always produces
-screen frames too, and with only an audio output attached it drops them. The
-configuration therefore asks for the least video the API allows (2x2 pixels, at
-most one frame a second, no cursor), instead of the default full-display frames
-at up to 60 a second. Nothing reads or stores those frames. This configuration is
-not proof that delivered buffers have the requested format or that native
+process's audio. The stream configuration also requests 2x2 video dimensions,
+a one-second minimum frame interval and no cursor. No screen output is attached,
+and this code does not read or store video frames. These are requested settings,
+not measured output or a claim about the API's minimum supported dimensions.
+Acceptance of the settings on supported hardware, actual frame cadence, capture
+indicator behavior and CPU impact remain unverified. This configuration is not
+proof that delivered audio buffers have the requested format or that native
 filtering meets the intended scope.
 
 The constructor installs its own source-bound audio output on a dedicated serial

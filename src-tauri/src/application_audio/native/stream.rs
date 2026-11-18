@@ -341,12 +341,11 @@ impl Driver for Stream {
     }
 }
 
-/// Audio, 16 kHz mono, of the selected application only. ScreenCaptureKit
-/// always produces screen frames as well; nothing here reads them (only an
-/// audio output is attached, so it drops them), so they are asked for at
-/// the smallest size and rate: 2x2 pixels, at most one a second, without
-/// the cursor. Left at the defaults, it would capture the full display at
-/// up to 60 frames a second for nothing.
+/// Request 16 kHz mono audio for the selected application. Only an audio
+/// output is attached; this code does not read or store video frames.
+/// Video settings request 2x2 dimensions, a one-second minimum frame interval
+/// and no cursor. Actual hardware acceptance, cadence and CPU impact are
+/// unverified; these settings are not a claim about the API's minimums.
 fn audio_only_configuration() -> objc2::rc::Retained<SCStreamConfiguration> {
     // SAFETY: plain property setters on a new, unshared configuration.
     unsafe {
@@ -363,9 +362,9 @@ fn audio_only_configuration() -> objc2::rc::Retained<SCStreamConfiguration> {
     }
 }
 
-/// The smallest video ScreenCaptureKit is asked for, since none is used.
+/// Requested video dimensions; no screen output is attached.
 const UNUSED_VIDEO_SIZE: usize = 2;
-/// At most one unused video frame a second.
+/// Requested minimum interval between video frames.
 const UNUSED_VIDEO_INTERVAL: objc2_core_media::CMTime = objc2_core_media::CMTime {
     value: 1,
     timescale: 1,
@@ -378,7 +377,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_stream_asks_for_audio_only_and_the_least_video_the_api_allows() {
+    fn the_stream_requests_audio_and_bounded_unused_video_settings() {
         // A memory-only configuration object; no stream, capture or permission.
         let config = audio_only_configuration();
         let interval = unsafe { config.minimumFrameInterval() };
@@ -387,7 +386,7 @@ mod tests {
             assert!(config.excludesCurrentProcessAudio());
             assert_eq!(config.sampleRate(), 16_000);
             assert_eq!(config.channelCount(), 1);
-            // Not the full display at the default rate: 2x2, one a second.
+            // Assert the requested properties, not delivered frame behavior.
             assert_eq!((config.width(), config.height()), (2, 2));
             assert!(!config.showsCursor());
         }
