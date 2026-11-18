@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       lab_native_sha:
-        description: Must equal reviewed b64cbf6172ed54938a2bfd22353b797c978a1aa8 for its unsigned artifact; empty runs normal checks
+        description: Must equal reviewed 6e9b1c32ed0e593f8feccc0c9bfa6b86ab23d846 for its unsigned artifact; empty runs normal checks
         required: false
         default: ''
         type: string
@@ -139,7 +139,7 @@ jobs:
     steps:
       - name: Validate reviewed commit selection
         env:
-          NATIVE_SHA: b64cbf6172ed54938a2bfd22353b797c978a1aa8
+          NATIVE_SHA: 6e9b1c32ed0e593f8feccc0c9bfa6b86ab23d846
           REQUESTED_NATIVE_SHA: ${{ inputs.lab_native_sha }}
         run: |
           test "$REQUESTED_NATIVE_SHA" = "$NATIVE_SHA"
@@ -150,7 +150,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: b64cbf6172ed54938a2bfd22353b797c978a1aa8
+          ref: 6e9b1c32ed0e593f8feccc0c9bfa6b86ab23d846
           path: native-source
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -162,7 +162,7 @@ jobs:
       - name: Build exact unsigned lab app without activation
         working-directory: native-source
         env:
-          NATIVE_SHA: b64cbf6172ed54938a2bfd22353b797c978a1aa8
+          NATIVE_SHA: 6e9b1c32ed0e593f8feccc0c9bfa6b86ab23d846
         run: |
           test "$(git rev-parse HEAD)" = "$NATIVE_SHA"
           test -z "$(git status --porcelain)"
@@ -178,7 +178,7 @@ jobs:
           test -z "$(git status --porcelain)"
       - name: Verify static provenance and archive app
         env:
-          NATIVE_SHA: b64cbf6172ed54938a2bfd22353b797c978a1aa8
+          NATIVE_SHA: 6e9b1c32ed0e593f8feccc0c9bfa6b86ab23d846
         run: |
           python3 artifact-tools/scripts/lab-hosted-artifact.py pack \
             --source native-source --sha "$NATIVE_SHA" \
@@ -186,7 +186,7 @@ jobs:
             --out "$RUNNER_TEMP/lab-export"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: unsigned-lab-b64cbf6172ed54938a2bfd22353b797c978a1aa8-${{ github.run_attempt }}
+          name: unsigned-lab-6e9b1c32ed0e593f8feccc0c9bfa6b86ab23d846-${{ github.run_attempt }}
           path: ${{ runner.temp }}/lab-export/
           if-no-files-found: error
           retention-days: 3

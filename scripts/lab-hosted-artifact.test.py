@@ -290,7 +290,7 @@ class ArchiveProtocol(unittest.TestCase):
         workflow = Path(__file__).parents[1] / '.github/workflows/checks.yml'
         text = workflow.read_text()
         normal, job = text.split('  lab-artifact:\n', 1)
-        sha = 'b64cbf6172ed54938a2bfd22353b797c978a1aa8'
+        sha = '6e9b1c32ed0e593f8feccc0c9bfa6b86ab23d846'
         self.assertNotIn('ref: ${{ inputs.lab_native_sha }}', job)
         self.assertNotIn('          NATIVE_SHA: ${{ inputs.lab_native_sha }}', job)
         self.assertEqual(job.count('NATIVE_SHA: ' + sha), 3)
