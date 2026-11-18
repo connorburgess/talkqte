@@ -167,6 +167,7 @@ fn prefix_lag_is_measured_and_a_changed_existing_cue_is_stale() {
             id: "fictional-cue".into(),
             text: "Who owns the checklist?".into(),
             source_ids: vec!["transcript:line-1".into()],
+            asked: false,
         }),
     )
     .unwrap();
