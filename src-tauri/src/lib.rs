@@ -33,6 +33,8 @@ mod dev_source_observation;
     feature = "lab-evaluator"
 ))]
 mod dev_stop;
+#[cfg(debug_assertions)]
+mod dev_user_name;
 pub mod engine;
 pub mod granola;
 #[cfg(all(
@@ -46,7 +48,6 @@ pub mod live;
 mod live_control;
 mod live_source;
 mod microphone;
-pub mod model;
 #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
 mod native_session_clock;
 #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
@@ -369,7 +370,7 @@ fn snapshot(
 /// feature it registers the Claude Code backend, which sends nothing until
 /// the person turns it on; otherwise the plain engine with no cue backend.
 #[cfg(any(
-    feature = "local-whisper",
+    feature = "cloud-transcription",
     all(target_os = "macos", feature = "native-audio-spike"),
     test
 ))]
@@ -393,7 +394,7 @@ pub(crate) fn live_engine() -> Engine {
 
 /// A fresh engine that keeps the person's display choices and notes.
 #[cfg(any(
-    feature = "local-whisper",
+    feature = "cloud-transcription",
     all(target_os = "macos", feature = "native-audio-spike"),
     test
 ))]
@@ -555,261 +556,46 @@ async fn export_markdown(
     .map_err(|_| "Could not open the save dialog.")?
 }
 
-/// The app's own folder for downloaded models.
-fn models_dir(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
-    app.path().app_data_dir().ok().map(|dir| dir.join("models"))
-}
-
-/// Where the local speech model is loaded from: `TALKQTE_WHISPER_MODEL`, a
-/// developer-supplied file that is not checksum-checked, or the downloaded
-/// model in the app's data folder, which is.
-fn model_path(app: &tauri::AppHandle) -> Option<(std::path::PathBuf, bool)> {
-    if let Some(path) = std::env::var_os("TALKQTE_WHISPER_MODEL") {
-        return Some((path.into(), false));
-    }
-    models_dir(app).map(|dir| (model::installed_path(&dir, &model::TINY_EN), true))
-}
-
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LiveStatus {
     available: bool,
     reason: Option<&'static str>,
+    /// The cloud service this launch transcribes with, when one is
+    /// selected; absent otherwise, and then nothing is transcribed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transcription: Option<&'static str>,
+}
+
+/// Why a live session cannot start, if it cannot. Transcription is only
+/// through a cloud provider, selected per launch in development builds; a
+/// build without it transcribes nothing and says so.
+pub(crate) fn live_unavailable() -> Option<&'static str> {
+    if !cfg!(feature = "cloud-transcription") {
+        Some("This build has no live transcription.")
+    } else if !transcription::cloud::selected() {
+        Some("Live transcription needs cloud transcription selected for this development launch.")
+    } else if transcription::cloud::ready().is_err() {
+        // The token file is checked too, without reading the token.
+        Some("The cloud transcription settings are not usable.")
+    } else {
+        None
+    }
 }
 
 #[tauri::command]
-fn live_status(app: tauri::AppHandle) -> LiveStatus {
-    let reason = if !cfg!(feature = "local-whisper") {
-        Some("This build does not include local transcription.")
-    } else if !model_path(&app).is_some_and(|(path, pinned)| {
-        if pinned {
-            path.parent()
-                .is_some_and(|dir| model::is_installed(dir, &model::TINY_EN))
-        } else {
-            path.is_file()
-        }
-    }) {
-        Some("The local speech model is not installed.")
-    } else {
-        None
-    };
+fn live_status() -> LiveStatus {
+    let reason = live_unavailable();
     LiveStatus {
         available: reason.is_none(),
         reason,
+        transcription: transcription::cloud::selected().then_some(transcription::cloud::PROVIDER),
     }
 }
 
-/// What the notebook shows about the optional model download.
-#[derive(Clone, Debug, Default, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelStatus {
-    revision: u64,
-    /// `unavailable`, `developer`, `missing`, `downloading`, or `installed`.
-    status: &'static str,
-    name: &'static str,
-    size_bytes: u64,
-    needed_bytes: u64,
-    received: u64,
-    message: Option<String>,
-}
-
-#[derive(Default)]
-pub struct ModelDownload {
-    status: Mutex<ModelStatus>,
-    cancel: Arc<AtomicBool>,
-}
-
-impl ModelDownload {
-    /// The status, even after a panic while it was held: the guard in the
-    /// download thread must always be able to reset it.
-    fn lock(&self) -> std::sync::MutexGuard<'_, ModelStatus> {
-        self.status
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-}
-
-fn model_status_now(app: &tauri::AppHandle, revision: u64) -> ModelStatus {
-    let spec = model::TINY_EN;
-    let status = if !cfg!(feature = "local-whisper") {
-        "unavailable"
-    } else if std::env::var_os("TALKQTE_WHISPER_MODEL").is_some() {
-        "developer"
-    } else if models_dir(app).is_some_and(|dir| model::is_installed(&dir, &spec)) {
-        "installed"
-    } else {
-        "missing"
-    };
-    ModelStatus {
-        revision,
-        status,
-        name: spec.name,
-        size_bytes: spec.bytes,
-        needed_bytes: spec.bytes + model::SPACE_MARGIN,
-        received: 0,
-        message: None,
-    }
-}
-
-/// Updates the download status and tells the main window.
-fn set_model_status(app: &tauri::AppHandle, update: impl FnOnce(&mut ModelStatus)) {
-    let download = app.state::<ModelDownload>();
-    let mut status = download.lock();
-    update(&mut status);
-    status.revision += 1;
-    let _ = app.emit_to("main", "model:changed", status.clone());
-}
-
-#[tauri::command]
-fn model_status(app: tauri::AppHandle, download: tauri::State<ModelDownload>) -> ModelStatus {
-    let mut status = download.lock().clone();
-    if status.status != "downloading" {
-        let message = status.message.take();
-        status = ModelStatus {
-            message,
-            ..model_status_now(&app, status.revision)
-        };
-    }
-    status
-}
-
-/// Puts the download status back to what is on disk when the download
-/// thread ends for any reason, including a panic.
-#[cfg(feature = "local-whisper")]
-struct DownloadDone {
-    app: tauri::AppHandle,
-    message: Option<String>,
-}
-
-#[cfg(feature = "local-whisper")]
-impl Drop for DownloadDone {
-    fn drop(&mut self) {
-        let message = self.message.take().or_else(|| {
-            std::thread::panicking()
-                .then(|| "The download stopped unexpectedly. Nothing was installed.".into())
-        });
-        let app = self.app.clone();
-        set_model_status(&self.app, |status| {
-            let revision = status.revision;
-            *status = ModelStatus {
-                message,
-                ..model_status_now(&app, revision)
-            };
-        });
-    }
-}
-
-/// Downloads the pinned speech model after the person chose to. The request
-/// carries no account, audio, or transcript; the file is checked against
-/// its pinned SHA-256 before it is installed.
-#[tauri::command]
-fn download_model(
-    app: tauri::AppHandle,
-    download: tauri::State<ModelDownload>,
-) -> Result<(), String> {
-    #[cfg(not(feature = "local-whisper"))]
-    {
-        let _ = (app, download);
-        Err("This build does not include local transcription.".into())
-    }
-    #[cfg(feature = "local-whisper")]
-    {
-        let dir = models_dir(&app).ok_or("The app's storage folder is unavailable.")?;
-        {
-            // Checked and set under one lock, so two downloads never overlap.
-            let mut status = download.lock();
-            if status.status == "downloading" {
-                return Err("The model is already downloading.".into());
-            }
-            let revision = status.revision;
-            *status = ModelStatus {
-                status: "downloading",
-                ..model_status_now(&app, revision)
-            };
-            download.cancel.store(false, Ordering::Release);
-        }
-        set_model_status(&app, |_| {});
-        let cancel = download.cancel.clone();
-        let thread_app = app.clone();
-        let spawned = std::thread::Builder::new()
-            .name("talkqte-model-download".into())
-            .spawn(move || {
-                let app = thread_app;
-                let mut done = DownloadDone {
-                    app: app.clone(),
-                    message: None,
-                };
-                let mut last_percent = 0;
-                let result = model::download(
-                    &dir,
-                    &model::TINY_EN,
-                    &model::Https,
-                    model::available_space,
-                    |received, total| {
-                        let percent = received * 100 / total.max(1);
-                        if percent != last_percent {
-                            last_percent = percent;
-                            set_model_status(&app, |status| status.received = received);
-                        }
-                    },
-                    &cancel,
-                );
-                done.message = result.err().map(|failure| failure.message());
-            });
-        if spawned.is_err() {
-            set_model_status(&app, |status| {
-                let revision = status.revision;
-                *status = model_status_now(&app, revision);
-            });
-            return Err("Could not start the download.".into());
-        }
-        Ok(())
-    }
-}
-
-/// Asks a running download to stop. It stops at its next read, within the
-/// fetcher's time limits, and then reports that nothing was installed.
-#[tauri::command]
-fn cancel_model_download(app: tauri::AppHandle, download: tauri::State<ModelDownload>) {
-    download.cancel.store(true, Ordering::Release);
-    set_model_status(&app, |status| {
-        if status.status == "downloading" {
-            status.message = Some("Cancelling…".into());
-        }
-    });
-}
-
-/// Deletes the downloaded model; a live session must be stopped first.
-#[tauri::command]
-fn remove_model(
-    app: tauri::AppHandle,
-    state: tauri::State<AppState>,
-    download: tauri::State<ModelDownload>,
-) -> Result<(), String> {
-    if state.0.lock().is_ok_and(|runtime| {
-        runtime.live.is_some()
-            || (runtime.engine.state.live && runtime.engine.state.status == engine::Status::Running)
-    }) {
-        return Err("Stop the live session before removing the model.".into());
-    }
-    let dir = models_dir(&app).ok_or("The app's storage folder is unavailable.")?;
-    // Held throughout, so a download cannot start while the file is removed.
-    let mut status = download.lock();
-    if status.status == "downloading" {
-        return Err("Cancel the download before removing the model.".into());
-    }
-    model::remove(&dir, &model::TINY_EN).map_err(|_| "The model could not be removed.")?;
-    let revision = status.revision + 1;
-    *status = model_status_now(&app, revision);
-    let _ = app.emit_to("main", "model:changed", status.clone());
-    Ok(())
-}
-
-/// The longest live chunk, and the shortest that may end at a pause.
-#[cfg(feature = "local-whisper")]
-const LIVE_CHUNK_MS: u64 = 3_000;
-#[cfg(feature = "local-whisper")]
-const LIVE_PAUSE_MIN_MS: u64 = 1_000;
+/// Microphone audio handed to a cloud stream, a tenth of a second at a time.
+#[cfg(feature = "cloud-transcription")]
+const CLOUD_CHUNK_MS: u64 = 100;
 
 /// What the notebook shows about prior notes picked from a file.
 #[derive(serde::Serialize)]
@@ -1342,43 +1128,77 @@ fn finish_live(app: &tauri::AppHandle, live: Live, flush: bool) {
     let _ = finished;
 }
 
-/// Starts a live session: the microphone feeds local transcription, and the
-/// cue engine runs on what is said. Nothing is recorded, stored, or sent.
+/// A microphone session's cloud stream ended with a failure: the session
+/// records why and stops, as if Stop were chosen, without flushing to any
+/// other recognizer. Runs off the feeding thread, which the stop joins.
+#[cfg(feature = "cloud-transcription")]
+fn stop_after_cloud_failure(
+    app: &tauri::AppHandle,
+    session: u64,
+    failure: transcription::cloud::SttFailure,
+) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let live = app
+            .state::<AppState>()
+            .0
+            .lock()
+            .ok()
+            .and_then(|mut runtime| {
+                runtime
+                    .engine
+                    .cloud_transcription_stopped(session, failure.code());
+                let live = runtime
+                    .live
+                    .as_ref()
+                    .is_some_and(|live| live.session == session)
+                    .then(|| runtime.take_live_for_stop())
+                    .flatten();
+                publish(&app, &mut runtime);
+                live
+            });
+        if let Some(live) = live {
+            finish_live(&app, live, false);
+        }
+    });
+}
+
+/// Starts a live session: the microphone feeds cloud transcription, and the
+/// cue engine runs on what is said. Nothing is recorded or stored. Audio is
+/// sent to the provider only after the session's review is approved. A build
+/// or launch without cloud transcription refuses the start; nothing is
+/// transcribed on this device.
 #[tauri::command]
 async fn start_live_session(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     microphone: tauri::State<'_, microphone::Controller>,
 ) -> Result<(), String> {
-    #[cfg(not(feature = "local-whisper"))]
+    #[cfg(not(feature = "cloud-transcription"))]
     {
         let _ = (app, state, microphone);
-        Err("This build does not include local transcription.".into())
+        Err(live_unavailable()
+            .unwrap_or("This build has no live transcription.")
+            .into())
     }
-    #[cfg(feature = "local-whisper")]
+    #[cfg(feature = "cloud-transcription")]
     {
-        let (model, pinned) = model_path(&app)
-            .filter(|(path, _)| path.is_file())
-            .ok_or("The local speech model is not installed.")?;
+        if let Some(reason) = live_unavailable() {
+            return Err(reason.into());
+        }
+        let opener = transcription::cloud::opener()
+            .map_err(|_| "The cloud transcription settings are not usable.")?;
         let start = state
             .0
             .lock()
             .map_err(|_| "The session is unavailable.")?
             .begin_live_start()?;
-        // Load the model before capture starts, so a bad file is reported
-        // here and the microphone never opens for nothing.
-        // A downloaded model is checked against its pinned checksum first.
-        let (start, recognizer) = tauri::async_runtime::spawn_blocking(move || {
-            start.load(|| {
-                if pinned {
-                    model::verify(&model, &model::TINY_EN)?;
-                }
-                transcription::whisper::LocalWhisper::load(&model, 4)
-                    .map_err(|_| "Could not load the local speech model.".to_string())
-            })
-        })
-        .await
-        .map_err(|_| "Could not load the local speech model.")??;
+        // Nothing is opened here: the stream opens once the review is
+        // approved. The start can still be cancelled before capture.
+        let (start, opener) =
+            tauri::async_runtime::spawn_blocking(move || start.load(|| Ok(opener)))
+                .await
+                .map_err(|_| "Could not start the live session.")??;
         let session = {
             let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
             runtime.sync();
@@ -1401,10 +1221,12 @@ async fn start_live_session(
                     runtime.reserve_live_microphone(&start_guard, session, generation)
                 })
         });
-        let on_tap: microphone::OnTap = Box::new(move |generation, mut chunker| {
-            // Chunks end at the first pause after a second, or at the
-            // longest length, so words are cut less often and arrive sooner.
-            chunker.cut_at_pauses(LIVE_PAUSE_MIN_MS);
+        let on_tap: microphone::OnTap = Box::new(move |generation, chunker| {
+            // The cloud stream takes short fixed chunks.
+            let approval_app = handle.clone();
+            let failure_app = handle.clone();
+            let keep_app = handle.clone();
+            let dropped_app = handle.clone();
             let sink_app = handle.clone();
             let sink = move |session, segment| {
                 let state = sink_app.state::<AppState>();
@@ -1415,34 +1237,69 @@ async fn start_live_session(
                 result
             };
             // Attach the runner only to the session that asked for it.
-            let kept = handle
-                .state::<AppState>()
-                .0
-                .lock()
-                .is_ok_and(|mut runtime| {
-                    runtime.sync();
-                    let engine = &runtime.engine;
-                    if !(engine.state.live
-                        && engine.session() == session
-                        && engine.state.status == engine::Status::Running)
-                    {
-                        return false;
-                    }
-                    // Line times count from when capture began on the session clock.
-                    let started_at = engine.state.elapsed_ms;
-                    let Some(live) = runtime
-                        .live
-                        .as_mut()
-                        .filter(|live| live.session == session && live.runner.is_none())
-                    else {
-                        return false;
-                    };
-                    live.microphone = Some(generation);
-                    live.runner = Some(live::LiveSession::start(
-                        chunker, session, started_at, recognizer, sink,
-                    ));
-                    true
-                });
+            let kept =
+                handle
+                    .state::<AppState>()
+                    .0
+                    .lock()
+                    .is_ok_and(|mut runtime| {
+                        runtime.sync();
+                        let engine = &runtime.engine;
+                        if !(engine.state.live
+                            && engine.session() == session
+                            && engine.state.status == engine::Status::Running)
+                        {
+                            return false;
+                        }
+                        // Line times count from when capture began on the session clock.
+                        let started_at = engine.state.elapsed_ms;
+                        let Some(live) = runtime
+                            .live
+                            .as_mut()
+                            .filter(|live| live.session == session && live.runner.is_none())
+                        else {
+                            return false;
+                        };
+                        live.microphone = Some(generation);
+                        live.runner =
+                            Some(live::LiveSession::start_cloud(
+                                chunker,
+                                session,
+                                started_at,
+                                transcription::cloud::CloudFeed::new(
+                                    session,
+                                    2,
+                                    opener,
+                                    move || {
+                                        approval_app.state::<AppState>().0.lock().ok().and_then(
+                                            |runtime| runtime.engine.audio_approval(session),
+                                        )
+                                    },
+                                    sink,
+                                )
+                                .stop_sending_when(move || {
+                                    keep_app.state::<AppState>().0.lock().map_or(
+                                        Some(transcription::cloud::SttFailure::Withdrawn),
+                                        |runtime| {
+                                            transcription::cloud::withdrawal(
+                                                runtime.engine.audio_withdrawal(session),
+                                            )
+                                        },
+                                    )
+                                })
+                                .on_dropped(move || {
+                                    let state = dropped_app.state::<AppState>();
+                                    if let Ok(mut runtime) = state.0.lock() {
+                                        runtime.engine.cloud_transcription_dropped(session);
+                                        publish(&dropped_app, &mut runtime);
+                                    };
+                                })
+                                .on_failure(move |failure| {
+                                    stop_after_cloud_failure(&failure_app, session, failure)
+                                }),
+                            ));
+                        true
+                    });
             if !kept {
                 microphone::stop_blocking(&handle, stopper, generation);
             }
@@ -1450,7 +1307,7 @@ async fn start_live_session(
         match microphone::start(
             app.clone(),
             controller.clone(),
-            Some((LIVE_CHUNK_MS, on_tap)),
+            Some((CLOUD_CHUNK_MS, on_tap)),
             Some(on_reserved),
         )
         .await
@@ -1551,7 +1408,6 @@ pub fn run() {
         .manage(AppState(Mutex::new(Runtime::default())))
         .manage(companion::WindowState::default())
         .manage(microphone::Controller::default())
-        .manage(ModelDownload::default())
         .invoke_handler(tauri::generate_handler![
             #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
             application_audio_host::app::application_audio,
@@ -1576,7 +1432,6 @@ pub fn run() {
             export_preview,
             export_markdown,
             live_status,
-            model_status,
             pick_context_file,
             import_context_notes,
             cancel_context_import,
@@ -1591,9 +1446,6 @@ pub fn run() {
             suggest_granola_focus,
             check_granola_updates,
             stop_granola_update_check,
-            download_model,
-            cancel_model_download,
-            remove_model,
             start_live_session,
             stop_live_session,
             microphone::microphone_snapshot,
@@ -1601,6 +1453,15 @@ pub fn run() {
             stop_microphone
         ])
         .setup(|app| {
+            // A lab launch may give the user's name; it is set before the
+            // first session, as if typed in Settings.
+            #[cfg(debug_assertions)]
+            {
+                dev_user_name::initialize();
+                if let Ok(mut runtime) = app.state::<AppState>().0.lock() {
+                    dev_user_name::apply(&mut runtime.engine);
+                }
+            }
             #[cfg(all(
                 debug_assertions,
                 any(feature = "claude-cli", feature = "lab-evaluator"),
@@ -1625,10 +1486,6 @@ pub fn run() {
             companion_macos::hide_controls(app)?;
             #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
             application_audio_host::install(app.handle())?;
-            // A download interrupted by quitting never counts as installed.
-            if let Some(dir) = models_dir(app.handle()) {
-                model::clean_partials(&dir);
-            }
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let mut last_placement = Instant::now();
