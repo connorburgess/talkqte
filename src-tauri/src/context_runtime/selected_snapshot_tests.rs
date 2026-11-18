@@ -5,8 +5,7 @@ use crate::{
     cue_evaluator::{Cancellation, Evaluator, Failure, Provenance, Request, Worker},
     engine::{
         CaptureState, ConversationScope, Engine, EvaluationOutcome, EvaluationStatus,
-        NoteSelection, ProcessingLocation, ProcessorConfiguration, ProcessorDisclosure, Scope,
-        Segment,
+        NoteSelection, Scope, Segment,
     },
     notes_file::FileSource,
     processing_commands::{Error, ExpectedScope},
@@ -33,9 +32,9 @@ impl Evaluator for Scripted {
     fn evaluate(&mut self, request: &Request, cancel: &Cancellation) -> Result<String, Failure> {
         // Exercise the inert wire serializer inside the real worker, including
         // calls held across source/control changes. No provider is invoked.
-        let input = request.selected_snapshot_input()?;
+        let input = request.selected_prior_context_input()?;
         let input: serde_json::Value = serde_json::from_str(&input).unwrap();
-        assert_eq!(input["inputContract"], "selected-snapshots-v1");
+        assert_eq!(input["inputContract"], "selected-prior-context-v2");
         assert_eq!(input["priorNotes"].as_array().unwrap().len(), 1);
         self.calls.send(request.clone()).unwrap();
         let reply = self
@@ -59,19 +58,32 @@ impl Harness {
         let (calls_tx, calls) = mpsc::channel();
         let (replies, replies_rx) = mpsc::channel();
         let (returned_tx, returned) = mpsc::channel();
-        let processor = ProcessorConfiguration::new(
+        #[cfg(not(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        )))]
+        let processor = crate::engine::ProcessorConfiguration::new(
             "fictional-context-worker".into(),
             1,
             "scripted".into(),
-            ProcessingLocation::OnDevice,
+            crate::engine::ProcessingLocation::OnDevice,
             "fictional-policy".into(),
-            ProcessorDisclosure::new(
+            crate::engine::ProcessorDisclosure::new(
                 "Fictional context worker".into(),
                 "In-memory scripted test; no external processing.".into(),
             )
             .unwrap(),
         )
         .unwrap();
+        #[cfg(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        ))]
+        let processor = crate::lab_evaluator::selected_fixture_processor();
         let mut runtime = Runtime {
             engine: Engine::live_with_evaluator(
                 Worker::start(

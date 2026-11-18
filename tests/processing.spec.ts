@@ -795,3 +795,30 @@ test('strict subscription lab names Codex and discloses terminal controls in the
       .filter({ hasText: 'a deadline ended the lab connection' }),
   ).not.toContainText('twice');
 });
+
+test('selected API identity keeps lab billing and launch-approval guidance', async ({
+  page,
+}) => {
+  await open(page, '?hosted');
+  await send(page, {
+    processor: {
+      id: 'lab-api-selected-prior-v2',
+      revision: 1,
+      name: 'Claude',
+      model: 'Fictional model',
+      location: 'hosted',
+      destination: 'Example service',
+      dataPolicy: 'Fictional selected snapshots only after review.',
+    },
+    issue: 'devSettings',
+  });
+  await expect(
+    page.getByText(
+      /launch-time approval.*not accepted for the API lab backend/,
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Uses the lab owner's Anthropic API key, billed per token/),
+  ).toBeVisible();
+  expect(await calls(page, 'approve_processing_scope')).toEqual([]);
+});

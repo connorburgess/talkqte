@@ -56,7 +56,11 @@ export const issueText = {
 };
 /** The development lab's processors: a subscription CLI or the paid API. */
 function isLabProcessor(id: string | undefined): boolean {
-  return id === 'lab-subscription' || id === 'lab-api';
+  return id === 'lab-subscription' || isLabApi(id);
+}
+
+function isLabApi(id: string | undefined): boolean {
+  return id === 'lab-api' || id === 'lab-api-selected-prior-v2';
 }
 
 const apiLaunchApproval =
@@ -500,7 +504,7 @@ export function ProcessingControl({
             snapshot.issue,
             snapshot.processor?.name,
             isLabProcessor(snapshot.processor?.id),
-            snapshot.processor?.id === 'lab-api',
+            isLabApi(snapshot.processor?.id),
           )}
         </p>
       )}
@@ -510,7 +514,7 @@ export function ProcessingControl({
           appears; newer speech is checked next. A reply later than 8 s shows no
           cue and the run continues. Pause, Dismiss, Off, Stop and any other
           failure end the run; Resume does not restart it.{' '}
-          {snapshot?.processor?.id === 'lab-api'
+          {isLabApi(snapshot?.processor?.id)
             ? "Uses the lab owner's Anthropic API key, billed per token; the lab caps requests and spending per run."
             : 'The lab shares a CLI-dispatch budget across roles; underlying provider request count is unobserved.'}
         </p>

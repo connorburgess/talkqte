@@ -27,6 +27,7 @@ impl Fixture {
             dir,
             listener,
             settings: Settings {
+                selected_prior: false,
                 backend: Backend::Subscription,
                 spend_cap_micro_usd: None,
                 descriptor,
@@ -861,6 +862,7 @@ fn the_ready_frame_must_match_the_backend_budget_and_cap() {
     }
     // A subscription backend never accepts spend fields.
     let codex = Settings {
+        selected_prior: false,
         backend: Backend::Subscription,
         spend_cap_micro_usd: None,
         descriptor: "/fictional/private/descriptor".into(),
@@ -930,4 +932,190 @@ fn an_unconfirmed_refusal_is_terminal() {
         Err(Failure::Refused)
     );
     assert_eq!(job.join().unwrap(), Err(Failure::Expired));
+}
+
+pub(super) fn selected_settings() -> Settings {
+    let mut settings = api_settings(Some("1000000"), "claude-opus-5-5", "low").unwrap();
+    settings.selected_prior = true;
+    settings
+}
+
+#[test]
+fn selected_registration_disclosure_is_bounded_and_defaults_still_refuse_notes() {
+    let settings = selected_settings();
+    // Exact current cloud review sentence with its largest allowed minute cap.
+    let audio="Audio: this approval also sends the live audio of the session's capture source (the microphone, or the selected application) to Deepgram (US, model Nova-3) for transcription. Each request asks Deepgram to opt out of its Model Improvement Program; what Deepgram keeps is set by its terms (https://deepgram.com/terms). Audio captured before this approval is never sent. At most 10 minutes of audio for this whole launch, across sessions and sources. If transcription stops, nothing is transcribed and nothing falls back to another service.";
+    let selected = processor_configuration(
+        Backend::Api,
+        Some(&settings),
+        Some(audio.into()),
+        Some("Deepgram".into()),
+    )
+    .unwrap();
+    let mut engine = Engine::live_with_evaluator(
+        Worker::start(Adapter(Fixture::new().link(Some(sample()))), DEADLINE).unwrap(),
+        selected,
+    );
+    engine.start().unwrap();
+    // Empty selected review is explicit permission, not import or launch.
+    let review = engine
+        .review_processing(crate::engine::ConversationScope::NewSpeechOnly, &[])
+        .unwrap();
+    engine.approve_processing(review).unwrap();
+    assert!(engine.has_processing_permission());
+    assert!(
+        processor_configuration(Backend::Api, Some(&settings), Some("x".repeat(2048)), None)
+            .is_err()
+    );
+    let legacy = api_settings(Some("1000000"), "claude-opus-5-5", "low").unwrap();
+    let (_, _, policy) = disclosure(Backend::Api, Some(&legacy));
+    assert!(policy.contains("Never sends the cue provider audio, prior notes"));
+    let (_, _, policy) = disclosure(Backend::Api, Some(&settings));
+    assert!(policy.contains("Approving no notes sends none"));
+}
+
+#[test]
+fn selected_settings_and_ready_identity_fail_closed() {
+    let values = [
+        ("TALKQTE_DEV_CUE_BACKEND", "lab-api"),
+        (
+            "TALKQTE_DEV_LAB_DESCRIPTOR",
+            "/fictional/private/descriptor",
+        ),
+        ("TALKQTE_DEV_LAB_PROVIDER", "anthropic-api"),
+        ("TALKQTE_DEV_LAB_MODEL", "claude-opus-5-5"),
+        ("TALKQTE_DEV_LAB_EFFORT", "low"),
+        ("TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD", "1000000"),
+    ];
+    for mode in [SELECTED_CONTEXT, "bounded-history", "unknown"] {
+        let parsed = Settings::parse(|key| {
+            if key == "TALKQTE_DEV_LAB_CONTEXT" {
+                Some(mode.into())
+            } else {
+                values
+                    .iter()
+                    .find(|(k, _)| *k == key)
+                    .map(|(_, v)| v.to_string())
+            }
+        });
+        assert_eq!(parsed.is_ok(), mode == SELECTED_CONTEXT);
+    }
+    assert!(Settings::parse(|key| if key == "TALKQTE_DEV_LAB_CONTEXT" {
+        Some(SELECTED_CONTEXT.into())
+    } else {
+        None
+    })
+    .is_err());
+    let settings = selected_settings();
+    let mut ready = settings.frame("ready", "fictional-run", 7);
+    ready.as_object_mut().unwrap().extend(json!({"provider":"anthropic-api","model":"claude-opus-5-5","effort":"low","dispatchBudgetKind":"apiRequests","dispatchLimit":40,"dispatchesUsed":0,"spendCapMicroUsd":1000000,"spendUsedMicroUsd":0}).as_object().unwrap().clone());
+    assert!(ready_matches_settings(&ready, "fictional-run", 7, &settings).is_err());
+    ready
+        .as_object_mut()
+        .unwrap()
+        .extend(settings.identity().as_object().unwrap().clone());
+    assert_eq!(
+        ready_matches_settings(&ready, "fictional-run", 7, &settings),
+        Ok(())
+    );
+    for key in [
+        "contextPolicy",
+        "inputContract",
+        "policyRevision",
+        "promptSha256",
+        "schema",
+    ] {
+        let mut bad = ready.clone();
+        bad[key] = json!("wrong");
+        assert!(ready_matches_settings(&bad, "fictional-run", 7, &settings).is_err());
+    }
+}
+
+#[test]
+fn selected_real_link_worker_projects_native_v2_and_retires_on_stop() {
+    use crate::cue_evaluator::{Provenance, Source};
+    for notes in [false, true] {
+        let mut f = Fixture::new();
+        let path = f.settings.descriptor.clone();
+        f.settings = selected_settings();
+        f.settings.descriptor = path.clone();
+        let mut descriptor: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        descriptor["schema"] = json!("talkqte.lab.selected.descriptor.v2");
+        fs::write(&path, descriptor.to_string()).unwrap();
+        let link = f.link(Some(sample()));
+        let mut worker = Worker::start(Adapter(link.clone()), DEADLINE).unwrap();
+        let mut sources = vec![Source {
+            id: "transcript:current".into(),
+            revision: 0,
+            provenance: Provenance::Transcript {
+                at_ms: 10,
+                speaker: "Maya".into(),
+            },
+            text: "Can we send the pack Friday?".into(),
+        }];
+        if notes {
+            sources.push(Source {
+                id: "prior:file:a".into(),
+                revision: u64::MAX,
+                provenance: Provenance::PriorNote {
+                    provider: crate::context::Provider::File,
+                    date: "2026-11-01".into(),
+                    title: "Welcome pack review".into(),
+                },
+                text: "Review needs two days.".into(),
+            });
+        }
+        let request = Request::new(7, 3, sources, None).unwrap();
+        worker.submit(request.clone()).unwrap();
+        let mut socket = f.accept();
+        let mut reader = Reader::default();
+        let hello = read(&mut reader, &mut socket);
+        assert_eq!(hello["schema"], SELECTED_SCHEMA);
+        for (key, value) in f.settings.identity().as_object().unwrap() {
+            assert_eq!(&hello[key], value);
+        }
+        let mut ready = f.settings.frame("ready", "fictional-run", 7);
+        ready
+            .as_object_mut()
+            .unwrap()
+            .extend(f.settings.identity().as_object().unwrap().clone());
+        ready.as_object_mut().unwrap().extend(json!({"provider":"anthropic-api","model":"claude-opus-5-5","effort":"low","dispatchBudgetKind":"apiRequests","dispatchLimit":40,"dispatchesUsed":0,"spendCapMicroUsd":1000000,"spendUsedMicroUsd":0}).as_object().unwrap().clone());
+        write_frame(&mut socket, &ready).unwrap();
+        let mut probe = f.settings.frame("clock_probe", "fictional-run", 7);
+        probe["probeId"] = json!("selected-probe");
+        write_frame(&mut socket, &probe).unwrap();
+        assert_eq!(read(&mut reader, &mut socket)["schema"], SELECTED_SCHEMA);
+        let evaluation = read(&mut reader, &mut socket);
+        let expected: Value =
+            serde_json::from_str(&request.selected_prior_context_input().unwrap()).unwrap();
+        assert_eq!(evaluation["input"], expected);
+        assert_eq!(
+            evaluation["input"]["priorNotes"].as_array().unwrap().len(),
+            usize::from(notes)
+        );
+        if notes {
+            let fixture: Value = serde_json::from_str(include_str!(
+                "../../scripts/fixtures/selected-context-input.json"
+            ))
+            .unwrap();
+            assert_eq!(evaluation["input"], fixture);
+        }
+        // Stop while the fake reply is held; a reply already in flight cannot apply.
+        link.cancel_reason(ControlReason::Stop);
+        let mut late = f.settings.frame("result", "fictional-run", 7);
+        id(1, 3).add(&mut late);
+        late["elapsedMs"] = json!(1);
+        late["value"] = json!({"action":"quiet","cue":null,"sourceIds":["transcript:current"]});
+        let _ = write_frame(&mut socket, &late);
+        let end = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(reply) = worker.poll_submitted() {
+                assert!(reply.is_err());
+                break;
+            }
+            assert!(Instant::now() < end);
+            thread::sleep(Duration::from_millis(5));
+        }
+        drop(worker);
+    }
 }

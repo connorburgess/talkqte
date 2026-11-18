@@ -26,6 +26,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+const SELECTED_CONTEXT: &str = "selected-prior-v2";
+const SELECTED_INPUT: &str = "selected-prior-context-v2";
+const SELECTED_POLICY: &str = "fictional-lab-selected-prior-v2";
+const SELECTED_PROMPT: &str = "440a3a947d1cf1842a0e844bf447132463d74f4a1d0ab7ab2efd94211c02b636";
+const SELECTED_SCHEMA: &str = "talkqte.lab.selected.v2";
 const SCHEMA: &str = "talkqte.lab.v1";
 const FRAME_LIMIT: usize = 65_536;
 const DEADLINE: Duration = Duration::from_secs(8);
@@ -95,6 +100,7 @@ const MAX_SPEND_CAP_MICRO_USD: u64 = 1_000_000;
 
 #[derive(Clone)]
 struct Settings {
+    selected_prior: bool,
     backend: Backend,
     descriptor: PathBuf,
     provider: String,
@@ -107,6 +113,11 @@ impl Settings {
     fn parse(mut get: impl FnMut(&str) -> Option<String>) -> Result<Self, Failure> {
         let backend = Backend::parse(get("TALKQTE_DEV_CUE_BACKEND").as_deref())
             .ok_or(Failure::InvalidInput)?;
+        let selected_prior = match get("TALKQTE_DEV_LAB_CONTEXT").as_deref() {
+            None => false,
+            Some(SELECTED_CONTEXT) if backend == Backend::Api => true,
+            _ => return Err(Failure::InvalidInput),
+        };
         let descriptor =
             PathBuf::from(get("TALKQTE_DEV_LAB_DESCRIPTOR").ok_or(Failure::InvalidInput)?);
         let provider = get("TALKQTE_DEV_LAB_PROVIDER").ok_or(Failure::InvalidInput)?;
@@ -137,6 +148,7 @@ impl Settings {
             return Err(Failure::InvalidInput);
         }
         Ok(Self {
+            selected_prior,
             backend,
             descriptor,
             provider,
@@ -144,6 +156,31 @@ impl Settings {
             effort,
             spend_cap_micro_usd,
         })
+    }
+    fn schema(&self) -> &'static str {
+        if self.selected_prior {
+            SELECTED_SCHEMA
+        } else {
+            SCHEMA
+        }
+    }
+    fn frame(&self, kind: &str, run: &str, session: u64) -> Value {
+        let mut value = frame(kind, run, session);
+        value["schema"] = json!(self.schema());
+        value
+    }
+    fn check(
+        &self,
+        v: &Value,
+        kind: &str,
+        run: &str,
+        session: u64,
+        extra: &[&str],
+    ) -> Result<(), Failure> {
+        check_schema(v, kind, run, session, extra, self.schema())
+    }
+    fn identity(&self) -> Value {
+        json!({"contextPolicy":SELECTED_CONTEXT,"inputContract":SELECTED_INPUT,"policyRevision":SELECTED_POLICY,"promptSha256":SELECTED_PROMPT})
     }
     fn label(&self) -> &'static str {
         if self.provider == "codex" {
@@ -222,7 +259,12 @@ fn descriptor(settings: &Settings) -> Result<Descriptor, Failure> {
         return Err(Failure::Credentials);
     }
     let d: Descriptor = serde_json::from_slice(&bytes).map_err(|_| Failure::InvalidInput)?;
-    if d.schema != "talkqte.lab.descriptor.v1"
+    if d.schema
+        != if settings.selected_prior {
+            "talkqte.lab.selected.descriptor.v2"
+        } else {
+            "talkqte.lab.descriptor.v1"
+        }
         || !identifier(&d.run_id)
         || d.nonce.len() != 64
         || !d
@@ -374,8 +416,12 @@ impl Link {
             context: request.context_revision(),
             request: number,
         };
-        let input =
-            serde_json::from_str(&request.prompt_input()?).map_err(|_| Failure::InvalidInput)?;
+        let input = serde_json::from_str(&if self.settings.selected_prior {
+            request.selected_prior_context_input()?
+        } else {
+            request.prompt_input()?
+        })
+        .map_err(|_| Failure::InvalidInput)?;
         {
             let mut pending = self
                 .pending
@@ -623,10 +669,21 @@ impl Reader {
         }
     }
 }
+#[cfg(test)]
 fn check(v: &Value, kind: &str, run: &str, session: u64, extra: &[&str]) -> Result<(), Failure> {
+    check_schema(v, kind, run, session, extra, SCHEMA)
+}
+fn check_schema(
+    v: &Value,
+    kind: &str,
+    run: &str,
+    session: u64,
+    extra: &[&str],
+    schema: &str,
+) -> Result<(), Failure> {
     let keys = ["schema", "type", "runId", "sessionId"];
     let obj = v.as_object().ok_or(Failure::InvalidDecision)?;
-    if v["schema"] != SCHEMA
+    if v["schema"] != schema
         || v["type"] != kind
         || v["runId"] != run
         || !decimal_id(&v["sessionId"], session)
@@ -675,11 +732,29 @@ fn ready_matches_settings(
         "dispatchesUsed",
     ];
     const SPEND: [&str; 2] = ["spendCapMicroUsd", "spendUsedMicroUsd"];
-    let keys: Vec<&str> = match settings.spend_cap_micro_usd {
+    let mut keys: Vec<&str> = match settings.spend_cap_micro_usd {
         Some(_) => BASE.iter().chain(SPEND.iter()).copied().collect(),
         None => BASE.to_vec(),
     };
-    check(v, "ready", run, session, &keys)?;
+    if settings.selected_prior {
+        keys.extend([
+            "contextPolicy",
+            "inputContract",
+            "policyRevision",
+            "promptSha256",
+        ]);
+    }
+    settings.check(v, "ready", run, session, &keys)?;
+    if settings.selected_prior
+        && settings
+            .identity()
+            .as_object()
+            .unwrap()
+            .iter()
+            .any(|(key, value)| &v[key] != value)
+    {
+        return Err(Failure::InvalidDecision);
+    }
     let spend_ok = match settings.spend_cap_micro_usd {
         Some(cap) => {
             v["spendCapMicroUsd"].as_u64() == Some(cap)
@@ -791,7 +866,8 @@ fn sample_clock(
     run: &str,
     session: u64,
 ) -> Result<(), Failure> {
-    check(v, "clock_probe", run, session, &["probeId"])?;
+    link.settings
+        .check(v, "clock_probe", run, session, &["probeId"])?;
     let probe = v["probeId"]
         .as_str()
         .filter(|p| identifier(p))
@@ -810,7 +886,7 @@ fn sample_clock(
     {
         return Err(Failure::InvalidDecision);
     }
-    let mut out = frame("clock_sample", run, session);
+    let mut out = link.settings.frame("clock_sample", run, session);
     out["probeId"] = json!(probe);
     out["nativeSessionElapsedMs"] = json!(sample.elapsed_ms);
     write_frame(stream, &out)?;
@@ -853,11 +929,17 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
     stream
         .set_write_timeout(Some(IO_SLICE))
         .map_err(|_| Failure::Unreachable)?;
-    let mut hello = frame("hello", &d.run_id, identity.session);
+    let mut hello = link.settings.frame("hello", &d.run_id, identity.session);
     hello["nonce"] = json!(d.nonce);
     hello["expectedProvider"] = json!(link.settings.provider);
     hello["expectedModel"] = json!(link.settings.model);
     hello["expectedEffort"] = json!(link.settings.effort);
+    if link.settings.selected_prior {
+        hello
+            .as_object_mut()
+            .unwrap()
+            .extend(link.settings.identity().as_object().unwrap().clone());
+    }
     write_frame(&mut stream, &hello)?;
     let mut reader = Reader::default();
     loop {
@@ -885,7 +967,7 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
         if remaining == 0 {
             return Err(Failure::Expired);
         }
-        let mut v = frame("evaluate", &d.run_id, id.session);
+        let mut v = link.settings.frame("evaluate", &d.run_id, id.session);
         id.add(&mut v);
         v["budgetMs"] = json!(remaining);
         v["input"] = input;
@@ -913,7 +995,7 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
     let mut retired: std::collections::VecDeque<Identity> = Default::default();
     let same = |a: &Identity, b: &Identity| a.request == b.request && a.context == b.context;
     let deadline_cancel = |s: &mut UnixStream, id: &Identity| {
-        let mut v = frame("cancel", &d.run_id, session);
+        let mut v = link.settings.frame("cancel", &d.run_id, session);
         id.add(&mut v);
         v["reason"] = json!("deadline");
         write_frame(s, &v)
@@ -941,7 +1023,7 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
                 } else if awaiting.as_ref().is_some_and(|(a, _)| same(a, &id)) {
                     // The result arrived but the engine read it too late.
                     awaiting = None;
-                    let mut v = frame("settled", &d.run_id, session);
+                    let mut v = link.settings.frame("settled", &d.run_id, session);
                     id.add(&mut v);
                     v["verdict"] = json!("expired");
                     write_frame(&mut stream, &v)?;
@@ -962,7 +1044,7 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
                 {
                     return Err(Failure::InvalidDecision);
                 }
-                let mut v = frame("settled", &d.run_id, session);
+                let mut v = link.settings.frame("settled", &d.run_id, session);
                 id.add(&mut v);
                 v["verdict"] = json!(match verdict {
                     Settlement::Current => "current",
@@ -995,7 +1077,7 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
                 active = Some((identity, reply, until));
             }
             Ok(Event::Observation(observation)) => {
-                let mut v = frame("cue_state", &d.run_id, session);
+                let mut v = link.settings.frame("cue_state", &d.run_id, session);
                 v["observation"] = observation;
                 write_frame(&mut stream, &v)?;
             }
@@ -1003,7 +1085,7 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
             Err(TryRecvError::Empty) => {}
         }
         if let Some(f) = link.terminal() {
-            let mut v = frame("cancel", &d.run_id, session);
+            let mut v = link.settings.frame("cancel", &d.run_id, session);
             if let Some((id, _, _)) = &active {
                 id.add(&mut v);
             } else if let Some((id, _)) = &awaiting {
@@ -1036,7 +1118,7 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
         };
         match v["type"].as_str() {
             Some("result") => {
-                check(
+                link.settings.check(
                     &v,
                     "result",
                     &d.run_id,
@@ -1094,7 +1176,7 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
                 }
             }
             Some("failed") => {
-                check(
+                link.settings.check(
                     &v,
                     "failed",
                     &d.run_id,
@@ -1135,7 +1217,8 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
                 return Err(code(&v));
             }
             Some("terminal") => {
-                check(&v, "terminal", &d.run_id, session, &["code", "reason"])?;
+                link.settings
+                    .check(&v, "terminal", &d.run_id, session, &["code", "reason"])?;
                 return Err(code(&v));
             }
             _ => return Err(Failure::InvalidDecision),
@@ -1155,7 +1238,8 @@ struct Globals {
 static GLOBALS: OnceLock<Globals> = OnceLock::new();
 pub(crate) fn initialize_from_environment() {
     GLOBALS.get_or_init(|| Globals {
-        selected: std::env::var_os("TALKQTE_DEV_CUE_BACKEND").is_some(),
+        selected: std::env::var_os("TALKQTE_DEV_CUE_BACKEND").is_some()
+            || std::env::var_os("TALKQTE_DEV_LAB_CONTEXT").is_some(),
         backend: Backend::parse(std::env::var("TALKQTE_DEV_CUE_BACKEND").ok().as_deref())
             .unwrap_or(Backend::Subscription),
         settings: Settings::parse(|k| std::env::var(k).ok()),
@@ -1176,6 +1260,53 @@ pub(crate) fn set_clock_sampler(sampler: ClockSampler) {
         }
     }
 }
+fn processor_configuration(
+    backend: Backend,
+    settings: Option<&Settings>,
+    transcription: Option<String>,
+    audio_destination: Option<String>,
+) -> Result<ProcessorConfiguration, crate::engine::ProcessingError> {
+    let (label, service, mut policy) = disclosure(backend, settings);
+    // One review covers both exports when this launch also streams audio.
+    if let Some(transcription) = transcription {
+        policy = format!("{policy} {transcription}");
+    }
+    let processor = ProcessorConfiguration::new(
+        if settings.is_some_and(|s| s.selected_prior) {
+            "lab-api-selected-prior-v2".into()
+        } else {
+            backend.id().into()
+        },
+        1,
+        settings
+            .as_ref()
+            .map_or("unavailable".into(), |s| s.model.clone()),
+        ProcessingLocation::Hosted { service },
+        if settings.is_some_and(|s| s.selected_prior) {
+            SELECTED_POLICY.into()
+        } else {
+            "fictional-lab-v1".into()
+        },
+        ProcessorDisclosure::new(label.into(), policy)?,
+    )?
+    .with_effort(
+        settings
+            .as_ref()
+            .map_or("unavailable".into(), |s| s.effort.clone()),
+    );
+    let processor = if settings.is_some_and(|s| s.selected_prior) {
+        processor
+    } else {
+        processor.without_notes()
+    };
+    // The review names where audio goes beside where lines go.
+    let processor = match audio_destination {
+        Some(destination) => processor.with_audio_destination(destination),
+        None => processor,
+    };
+    Ok(processor)
+}
+
 pub(crate) fn connected_engine() -> Engine {
     let globals = GLOBALS.get();
     let settings = globals.and_then(|g| g.settings.clone().ok());
@@ -1184,32 +1315,27 @@ pub(crate) fn connected_engine() -> Engine {
         .map(|s| s.backend)
         .or(globals.map(|g| g.backend))
         .unwrap_or(Backend::Subscription);
-    let (label, service, mut policy) = disclosure(backend, settings.as_ref());
-    // One review covers both exports when this launch also streams audio.
-    if let Some(transcription) = crate::transcription::cloud::review_sentence() {
-        policy = format!("{policy} {transcription}");
-    }
-    let processor = ProcessorConfiguration::new(
-        backend.id().into(),
-        1,
-        settings
-            .as_ref()
-            .map_or("unavailable".into(), |s| s.model.clone()),
-        ProcessingLocation::Hosted { service },
-        "fictional-lab-v1".into(),
-        ProcessorDisclosure::new(label.into(), policy).unwrap(),
-    )
-    .unwrap()
-    .without_notes()
-    .with_effort(
-        settings
-            .as_ref()
-            .map_or("unavailable".into(), |s| s.effort.clone()),
-    );
-    // The review names where audio goes beside where lines go.
-    let processor = match crate::transcription::cloud::audio_destination() {
-        Some(destination) => processor.with_audio_destination(destination),
-        None => processor,
+    let Ok(processor) = processor_configuration(
+        backend,
+        settings.as_ref(),
+        crate::transcription::cloud::review_sentence(),
+        crate::transcription::cloud::audio_destination(),
+    ) else {
+        let processor = ProcessorConfiguration::new(
+            "lab-unavailable".into(),
+            1,
+            "unavailable".into(),
+            ProcessingLocation::OnDevice,
+            "unavailable".into(),
+            ProcessorDisclosure::new(
+                "Lab unavailable".into(),
+                "Invalid processing disclosure; no content is sent.".into(),
+            )
+            .expect("fixed bounded disclosure"),
+        )
+        .expect("fixed bounded configuration")
+        .without_notes();
+        return unavailable(processor);
     };
     if let (Some(g), Some(settings)) = (globals, settings) {
         let link = Link::new(settings, g.sampler.clone(), g.fault.clone());
@@ -1250,6 +1376,10 @@ fn disclosure(backend: Backend, settings: Option<&Settings>) -> (&'static str, S
             let cap = settings
                 .and_then(|s| s.spend_cap_micro_usd)
                 .map_or("an unset".into(), dollars);
+            if settings.is_some_and(|s| s.selected_prior) {
+                let policy = format!("Fictional development lab only. Sends approved recent/new conversation, optional Your name and current/earlier cues to the Anthropic API. Sends only exact prior-note snapshots approved below: excerpts, titles, source labels, dates and opaque snapshot versions. Snapshots are not verified current. Approving no notes sends none. Import/selection is not processing permission. Changing/removing an approved note requires review. Off/Stop prevent future requests but cannot recall sent requests. No audio or focus lines go to the cue provider. Near every transcript line may be sent, a few at a time. Owner's API key, billed per token; per-run cap {cap}. Broker holds the key and enforces cap/request limit; one request/check, no retries, other model or subscription fallback. App rejects different cap/overspend reports but cannot observe requests. {TIMING} Retention follows API organisation settings. No model cue text persisted by this client.");
+                return ("Claude", service.into(), policy);
+            }
             let policy = format!("Fictional development lab only. Sends recent and new conversation, the optional Your name setting and current/earlier cues to {service}. {NEVER} Uses the owner's Anthropic API key, billed per token, with a per-run spend cap of {cap}. The lab broker, not this app, holds the key, sends one request per check with no retries or other model, and enforces the cap and the per-run request limit; this app refuses a broker that reports a different cap or more spend than the cap, but cannot see the requests themselves. No subscription fallback. {TIMING} Provider retention follows the API organisation's settings. No model cue text is persisted by this client.");
             ("Claude", service.into(), policy)
         }
@@ -1292,3 +1422,9 @@ pub(crate) fn cancel_active(reason: ControlReason) {
 #[cfg(test)]
 #[path = "lab_evaluator_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+pub(crate) fn selected_fixture_processor() -> ProcessorConfiguration {
+    let settings = tests::selected_settings();
+    processor_configuration(Backend::Api, Some(&settings), None, None).unwrap()
+}
