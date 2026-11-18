@@ -1,3 +1,5 @@
+import { createConnection } from 'node:net';
+import { readFile } from 'node:fs/promises';
 import { openLabBroker } from './cue-lab-broker.mjs';
 import { openLabProvider } from './cue-lab-provider.mjs';
 import assert from 'node:assert/strict';
@@ -9,6 +11,7 @@ import { worstCaseMicroUsd } from './cue-lab-anthropic-core.mjs';
 import { selectedSnapshotInput } from './cue-selected-snapshot.mjs';
 import {
   SELECTED_CONTEXT,
+  SELECTED_FRAME,
   SELECTED_INPUT,
   SELECTED_PROMPT,
   selectedIdentity,
@@ -257,4 +260,205 @@ test('selected broker/provider require trusted matching API identity before any 
     openLabProvider({ provider: 'codex', contextPolicy: SELECTED_CONTEXT }),
   );
   assert.equal(calls, 0);
+});
+
+async function selectedPeer(rawValue) {
+  const captured = [];
+  const providerErrors = [];
+  const provider = await openLabProvider({
+    provider: 'anthropic-api',
+    model,
+    effort: 'low',
+    maxCalls: 3,
+    deadlineMs: 30000,
+    contextPolicy: SELECTED_CONTEXT,
+    execution: 'offline-stand-in',
+    environment: { PATH: process.env.PATH },
+    openers: {
+      'anthropic-api': async () => ({
+        request: async (request) => {
+          captured.push(request);
+          return { value: rawValue, elapsedMs: 1 };
+        },
+        close: async () => {},
+      }),
+    },
+  });
+  const broker = await openLabBroker({
+    provider: {
+      metadata: provider.metadata,
+      close: () => provider.close(),
+      request: async (request) => {
+        try {
+          return await provider.request(request);
+        } catch (error) {
+          providerErrors.push(error.category);
+          throw error;
+        }
+      },
+    },
+    maxCalls: 3,
+    contextPolicy: SELECTED_CONTEXT,
+  });
+  broker.expectSourceSession('7');
+  const descriptor = JSON.parse(await readFile(broker.descriptorPath, 'utf8'));
+  const socket = createConnection({ path: descriptor.socketPath });
+  await new Promise((resolve, reject) => {
+    socket.once('connect', resolve);
+    socket.once('error', reject);
+  });
+  const queued = [],
+    waiters = [];
+  let partial = '';
+  socket.setEncoding('utf8');
+  socket.on('data', (chunk) => {
+    partial += chunk;
+    for (let end; (end = partial.indexOf('\n')) !== -1;) {
+      const frame = JSON.parse(partial.slice(0, end));
+      partial = partial.slice(end + 1);
+      const waiter = waiters.findIndex((w) => w.type === frame.type);
+      if (waiter < 0) queued.push(frame);
+      else waiters.splice(waiter, 1)[0].resolve(frame);
+    }
+  });
+  const next = (type) => {
+    const found = queued.findIndex((f) => f.type === type);
+    if (found >= 0) return Promise.resolve(queued.splice(found, 1)[0]);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`missing fictional ${type}`)),
+        2500,
+      );
+      waiters.push({
+        type,
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+      });
+    });
+  };
+  const send = (type, fields = {}) =>
+    socket.write(
+      JSON.stringify({
+        schema: SELECTED_FRAME,
+        type,
+        runId: descriptor.runId,
+        sessionId: '7',
+        ...fields,
+      }) + '\n',
+    );
+  send('hello', {
+    nonce: descriptor.nonce,
+    expectedProvider: 'anthropic-api',
+    expectedModel: model,
+    expectedEffort: 'low',
+    ...selectedIdentity(),
+  });
+  await next('ready');
+  await broker.ready;
+  const calibration = broker.calibrateClock();
+  const probe = await next('clock_probe');
+  send('clock_sample', {
+    probeId: probe.probeId,
+    nativeSessionElapsedMs: 1000,
+  });
+  await calibration;
+  broker.acknowledgePlaybackStart({
+    monotonicMs: performance.now(),
+    uncertaintyMs: 0,
+  });
+  return {
+    broker,
+    provider,
+    captured,
+    providerErrors,
+    next,
+    send,
+    close: async () => {
+      socket.destroy();
+      await broker.close();
+    },
+  };
+}
+
+test('actual provider raw validation preserves broker occupied-show and asked-withdraw settlement', async () => {
+  const ids = [input().events[0].id, input().priorNotes[0].id];
+  for (const [kind, action, counter] of [
+    ['ordinary', 'show', 'showWithCue'],
+    ['asked', 'withdraw', 'askedKept'],
+  ]) {
+    const raw = {
+      action,
+      cue: action === 'show' ? 'Will review finish in time?' : null,
+      sourceIds: ids,
+    };
+    const peer = await selectedPeer(raw);
+    try {
+      const current = input();
+      current.existingCue = {
+        text: 'Will review finish in time?',
+        sourceIds: [ids[0]],
+        ...(kind === 'asked' ? { kind: 'asked' } : {}),
+      };
+      peer.send('evaluate', {
+        requestId: '1',
+        contextRevision: '1',
+        budgetMs: 5000,
+        input: current,
+      });
+      const settled = await peer.next('result');
+      assert.deepEqual(settled.value, {
+        action: 'quiet',
+        cue: null,
+        sourceIds: ids,
+      });
+      assert.equal(peer.captured.length, 1);
+      assert.equal(peer.broker.evaluationSummary[counter], 1);
+      assert.equal(peer.broker.evaluationSummary.invalidReplies, 0);
+      peer.send('settled', {
+        requestId: '1',
+        contextRevision: '1',
+        verdict: 'current',
+      });
+    } finally {
+      await peer.close();
+    }
+  }
+});
+
+test('actual provider rejects malformed union IDs before broker settlement can hide them', async () => {
+  for (const [kind, action] of [
+    ['ordinary', 'show'],
+    ['asked', 'withdraw'],
+  ]) {
+    const peer = await selectedPeer({
+      action,
+      cue: action === 'show' ? 'Will review finish in time?' : null,
+      sourceIds: ['prior:file:unselected'],
+    });
+    try {
+      const current = input();
+      current.existingCue = {
+        text: 'Will review finish in time?',
+        sourceIds: [current.events[0].id],
+        ...(kind === 'asked' ? { kind: 'asked' } : {}),
+      };
+      peer.send('evaluate', {
+        requestId: '1',
+        contextRevision: '1',
+        budgetMs: 5000,
+        input: current,
+      });
+      // Existing gate maps the provider's raw-schema failure to unavailable.
+      assert.equal((await peer.next('terminal')).reason, 'unavailable');
+      assert.deepEqual(peer.providerErrors, ['schema']);
+      assert.equal(peer.broker.evaluationSummary.resultsSent, 0);
+      assert.equal(peer.broker.evaluationSummary.showWithCue, 0);
+      assert.equal(peer.broker.evaluationSummary.askedKept, 0);
+      assert.equal(peer.captured.length, 1);
+    } finally {
+      await peer.close();
+    }
+  }
 });

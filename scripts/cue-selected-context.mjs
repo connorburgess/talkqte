@@ -46,10 +46,17 @@ export function buildSelectedContextParams(model, input) {
 }
 export function selectedContextRequest(input) {
   selectedPriorContextInput(input);
+  // openLabProvider validates this raw envelope before broker settlement.
+  // Keep membership/max-four strict; final state constraints apply afterward.
+  const schema = selectedPriorContextSchema(input);
+  schema.properties.action.enum = ['show', 'quiet', 'resolved', 'withdraw'];
+  schema.properties.cue = {
+    anyOf: [{ type: 'string', minLength: 1, maxLength: 240 }, { type: 'null' }],
+  };
   return {
     role: 'cue-evaluator',
     instructions: selectedSystemPrompt(),
     input: structuredClone(input),
-    schema: selectedPriorContextSchema(input),
+    schema,
   };
 }
