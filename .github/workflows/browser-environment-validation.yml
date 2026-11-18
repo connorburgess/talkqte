@@ -32,11 +32,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Trust the checked-out workspace for Git-based checks
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - name: Verify linked-script Git checks in the corrected setup
+        run: node --test scripts/is-main.test.mjs
       - name: Record container browser environment
         run: |
           cat /etc/os-release
