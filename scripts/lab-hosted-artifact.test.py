@@ -9,6 +9,7 @@ from unittest.mock import patch
 import json
 import zipfile
 import sys
+import subprocess
 
 spec = importlib.util.spec_from_file_location('artifact', Path(__file__).with_name('lab-hosted-artifact.py'))
 artifact = importlib.util.module_from_spec(spec)
@@ -284,6 +285,37 @@ class ArchiveProtocol(unittest.TestCase):
             (extracted / 'Contents/MacOS/talkqte').write_bytes(b'tampered')
             with self.assertRaisesRegex(ValueError, 'inventory mismatch'):
                 artifact.verify_extracted(extracted, out / 'provenance.json', out / 'inventory.json', sha, workflow)
+
+    def test_manual_workflow_rejects_unreviewed_input_before_literal_checkout(self):
+        workflow = Path(__file__).parents[1] / '.github/workflows/checks.yml'
+        text = workflow.read_text()
+        normal, job = text.split('  lab-artifact:\n', 1)
+        sha = '6f626d2fef9419a3448b32fe62733bcd6c768038'
+        self.assertNotIn('ref: ${{ inputs.lab_native_sha }}', job)
+        self.assertNotIn('          NATIVE_SHA: ${{ inputs.lab_native_sha }}', job)
+        self.assertEqual(job.count('NATIVE_SHA: ' + sha), 3)
+        self.assertIn('ref: ' + sha + '\n          path: native-source', job)
+        self.assertIn('package-manager-cache: false', job)
+        self.assertIn('cache: npm', normal)  # Normal frontend caching remains.
+        selection = job.split('      - uses:', 1)[0]
+        script = selection.split('        run: |\n', 1)[1]
+        script = '\n'.join(line[10:] for line in script.splitlines())
+        # Execute the actual gate before the host-architecture query. Wrong
+        # inputs must stop before reaching even that harmless fixture command.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            marker = root / 'queried-host'
+            uname = root / 'uname'
+            uname.write_text('#!/bin/sh\nprintf queried > "$HOST_MARKER"\nprintf arm64\n')
+            uname.chmod(0o755)
+            for requested in [sha, '', 'a' * 40, sha.upper(), sha + ';echo bad']:
+                marker.unlink(missing_ok=True)
+                result = subprocess.run(['/bin/bash', '-e', '-c', script], env={
+                    'PATH': str(root), 'HOST_MARKER': str(marker),
+                    'NATIVE_SHA': sha, 'REQUESTED_NATIVE_SHA': requested,
+                }, capture_output=True)
+                self.assertEqual(result.returncode == 0, requested == sha)
+                self.assertEqual(marker.exists(), requested == sha)
 
     def test_pack_rejects_bad_commit_before_any_command_or_output(self):
         with tempfile.TemporaryDirectory() as tmp:

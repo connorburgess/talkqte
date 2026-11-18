@@ -1,7 +1,12 @@
 # Unsigned hosted lab artifact preparation
 
-The manual `Checks` input `lab_native_sha` selects one exact reviewed commit for
-an unsigned debug arm64 lab bundle. Empty input preserves normal manual checks;
+The manual `Checks` input `lab_native_sha` confirms the single workflow-owned reviewed native commit
+`6f626d2fef9419a3448b32fe62733bcd6c768038` for an unsigned debug arm64 lab bundle.
+Any other nonempty input fails before checkout. The executable checkout, build
+and provenance use trusted literal pins, never the input value. Changing the
+native source requires an ordinary reviewed workflow change; this is not an
+arbitrary-SHA build service. Automatic Node package-manager caching is explicitly
+disabled only in the artifact job. Empty input preserves normal manual checks;
 push and pull-request checks never build this artifact. The nonempty manual path
 runs only the isolated artifact job, with read-only repository permission, no
 signing secret and no application, player, capture or provider execution.

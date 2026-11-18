@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       lab_native_sha:
-        description: Exact reviewed native commit for an unsigned lab artifact; empty runs normal checks
+        description: Must equal reviewed 6f626d2fef9419a3448b32fe62733bcd6c768038 for its unsigned artifact; empty runs normal checks
         required: false
         default: ''
         type: string
@@ -139,9 +139,10 @@ jobs:
     steps:
       - name: Validate reviewed commit selection
         env:
-          NATIVE_SHA: ${{ inputs.lab_native_sha }}
+          NATIVE_SHA: 6f626d2fef9419a3448b32fe62733bcd6c768038
+          REQUESTED_NATIVE_SHA: ${{ inputs.lab_native_sha }}
         run: |
-          [[ "$NATIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$REQUESTED_NATIVE_SHA" = "$NATIVE_SHA"
           test "$(uname -m)" = arm64
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -149,18 +150,19 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.lab_native_sha }}
+          ref: 6f626d2fef9419a3448b32fe62733bcd6c768038
           path: native-source
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
+          package-manager-cache: false
       - name: Install pinned build toolchain
         run: rustup toolchain install 1.97.1 --profile minimal --target aarch64-apple-darwin
       - name: Build exact unsigned lab app without activation
         working-directory: native-source
         env:
-          NATIVE_SHA: ${{ inputs.lab_native_sha }}
+          NATIVE_SHA: 6f626d2fef9419a3448b32fe62733bcd6c768038
         run: |
           test "$(git rev-parse HEAD)" = "$NATIVE_SHA"
           test -z "$(git status --porcelain)"
@@ -176,7 +178,7 @@ jobs:
           test -z "$(git status --porcelain)"
       - name: Verify static provenance and archive app
         env:
-          NATIVE_SHA: ${{ inputs.lab_native_sha }}
+          NATIVE_SHA: 6f626d2fef9419a3448b32fe62733bcd6c768038
         run: |
           python3 artifact-tools/scripts/lab-hosted-artifact.py pack \
             --source native-source --sha "$NATIVE_SHA" \
@@ -184,7 +186,7 @@ jobs:
             --out "$RUNNER_TEMP/lab-export"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: unsigned-lab-${{ inputs.lab_native_sha }}-${{ github.run_attempt }}
+          name: unsigned-lab-6f626d2fef9419a3448b32fe62733bcd6c768038-${{ github.run_attempt }}
           path: ${{ runner.temp }}/lab-export/
           if-no-files-found: error
           retention-days: 3
