@@ -555,6 +555,15 @@ pub struct Engine {
     /// Lines that asked the user a question by name this session. A model
     /// cue citing one would repeat the "Asked you" cue, so it is not shown.
     asked_lines: Vec<String>,
+    /// Until when a model's `show` waits after the last cue ended: the full
+    /// cooldown after the user dismissed it, a short pause otherwise.
+    model_pause_until: u64,
+    /// Lines cited by cues the user dismissed this session. A question to
+    /// the user by name from one of them gets no second cue past the pause.
+    dismissed_sources: Vec<String>,
+    /// The last reason a model's `show` was dropped, for tests.
+    #[cfg(test)]
+    last_dropped: Option<&'static str>,
     /// Ignore delayed transcription from before the most recent cue resume.
     cues_after_ms: Option<u64>,
     /// The user's name for this app session, used to recognize questions
@@ -648,6 +657,10 @@ impl Engine {
             cue_deadline: 0,
             cooldown_until: 0,
             asked_lines: vec![],
+            model_pause_until: 0,
+            dismissed_sources: vec![],
+            #[cfg(test)]
+            last_dropped: None,
             cues_after_ms: None,
             last_shown: vec![],
             focus_terms: vec![],
@@ -721,6 +734,8 @@ impl Engine {
         self.next_segment = 0;
         self.cooldown_until = 0;
         self.asked_lines.clear();
+        self.model_pause_until = 0;
+        self.dismissed_sources.clear();
         self.state.elapsed_ms = 0;
         self.state.transcript.clear();
         self.state.cue = None;
@@ -838,6 +853,7 @@ impl Engine {
                 self.evaluated_cue = None;
                 if !quote {
                     self.cooldown_until = self.cue_deadline + self.cooldown();
+                    self.pause_model_after(self.cue_deadline, false);
                 }
             }
         }
@@ -1456,6 +1472,20 @@ impl Engine {
         }
     }
 
+    /// The pause before a model's next cue, from when the last one ended.
+    /// After a dismissal it is the full cooldown: the user said no. After a
+    /// cue expired, was resolved or withdrawn, or lost its source, nothing
+    /// was rejected, so the pause is short (`AFTER_UNREJECTED_MS`, longer in
+    /// Quiet). The phrase rules keep `cooldown_until` unchanged.
+    fn pause_model_after(&mut self, ended_at: u64, dismissed: bool) {
+        let pause = match (dismissed, self.state.sensitivity) {
+            (true, _) => self.cooldown(),
+            (false, Sensitivity::Quiet) => AFTER_UNREJECTED_QUIET_MS,
+            (false, _) => AFTER_UNREJECTED_MS,
+        };
+        self.model_pause_until = ended_at.saturating_add(pause);
+    }
+
     pub fn respond(&mut self, id: &str, response: Response) -> Result<(), String> {
         // Dismiss is the only response: an unused suggestion is let go, never
         // kept as a note or an action item.
@@ -1470,9 +1500,13 @@ impl Engine {
             == SAID;
         self.invalidate_evaluation();
         self.evaluated_cue = None;
-        self.state.cue = None;
+        if let Some(cue) = self.state.cue.take() {
+            self.dismissed_sources
+                .extend(cue.sources.into_iter().map(|source| source.id));
+        }
         if !quote {
             self.cooldown_until = self.state.elapsed_ms + self.cooldown();
+            self.pause_model_after(self.state.elapsed_ms, true);
         }
         self.changed();
         Ok(())
@@ -1587,6 +1621,7 @@ impl Engine {
             self.state.cue = None;
             self.evaluated_cue = None;
             self.cooldown_until = self.state.elapsed_ms + self.cooldown();
+            self.pause_model_after(self.state.elapsed_ms, false);
             self.changed();
         } else {
             // Same note, different standing: keep the reminder, even held
@@ -1721,16 +1756,7 @@ impl Engine {
             .map(|name| name.trim().to_string())
             .filter(|name| !name.is_empty());
         if let Some(name) = &name {
-            // Letters, combining accents, and name punctuation, with at least
-            // one letter.
-            let valid = name.chars().count() <= 40
-                && name.chars().any(char::is_alphabetic)
-                && name.chars().all(|character| {
-                    character.is_alphabetic()
-                        || ('\u{0300}'..='\u{036F}').contains(&character)
-                        || " '-’".contains(character)
-                });
-            if !valid {
+            if !valid_user_name(name) {
                 return Err(
                     "Use letters, spaces, apostrophes, or hyphens, up to 40 characters.".into(),
                 );
@@ -1984,6 +2010,24 @@ fn open_question(text: &str) -> Option<String> {
         });
     }
     None
+}
+
+/// The pause before a model's next cue after one ended without the user
+/// dismissing it (expired, resolved, withdrawn), in Balanced and Focused.
+const AFTER_UNREJECTED_MS: u64 = 3_000;
+/// The same pause in Quiet, whose full cooldown is 30 seconds.
+const AFTER_UNREJECTED_QUIET_MS: u64 = 10_000;
+
+/// Letters, combining accents, and name punctuation, with at least one
+/// letter, up to 40 characters: what Settings accepts as the user's name.
+pub(crate) fn valid_user_name(name: &str) -> bool {
+    name.chars().count() <= 40
+        && name.chars().any(char::is_alphabetic)
+        && name.chars().all(|character| {
+            character.is_alphabetic()
+                || ('\u{0300}'..='\u{036F}').contains(&character)
+                || " '-’".contains(character)
+        })
 }
 
 /// How long after a line ending on the user's name a following line may

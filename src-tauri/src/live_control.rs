@@ -216,6 +216,10 @@ impl Runtime {
         if crate::dev_stop::requested() {
             return Err(CANCELLED.into());
         }
+        #[cfg(debug_assertions)]
+        if let Some(refusal) = crate::dev_user_name::refusal() {
+            return Err(refusal.into());
+        }
         if self.live.is_some()
             || matches!(
                 self.engine.state.status,

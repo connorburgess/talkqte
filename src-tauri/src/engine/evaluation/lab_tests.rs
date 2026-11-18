@@ -141,6 +141,8 @@ fn an_edited_or_removed_line_makes_the_reply_stale() {
             *link.verdicts.lock().unwrap(),
             vec![Settlement::StaleSuccess]
         );
+        // A discarded show is logged as such.
+        assert_eq!(h.engine.last_dropped, Some("stale_request"));
         h.engine.revoke_processing();
         reply(&h, "quiet", None);
     }
