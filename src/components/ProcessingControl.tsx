@@ -741,6 +741,12 @@ export function ProcessingControl({
                 ? `Sent to ${review.processor.destination}`
                 : 'On this device'}
             </dd>
+            {review.processor.audioDestination && (
+              <>
+                <dt>Audio</dt>
+                <dd>Sent to {review.processor.audioDestination}</dd>
+              </>
+            )}
             <dt>Conversation</dt>
             <dd>{conversationLabel(review.scope)}</dd>
             <dt>Prior notes</dt>

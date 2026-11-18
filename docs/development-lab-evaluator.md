@@ -11,6 +11,9 @@ selection and its existing speech-cancellation/two-timeout policy stay unchanged
 Native selection is restricted to a macOS debug build with
 `native-audio-spike` and `lab-evaluator`, outside all release builds. The release
 builder refuses `lab-evaluator`, including indirect/configuration feature requests.
+`lab-evaluator` also switches on `cloud-transcription`, which since 16 November
+2026 is the app's only live transcription; it is selected separately per launch
+([cloud transcription](cloud-transcription.md)).
 Selection is explicit: `TALKQTE_DEV_CUE_BACKEND=lab-subscription`, with an exact
 `TALKQTE_DEV_LAB_PROVIDER` (`codex` or `claude-code`),
 `TALKQTE_DEV_LAB_MODEL`, `TALKQTE_DEV_LAB_EFFORT` and absolute

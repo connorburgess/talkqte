@@ -1184,7 +1184,11 @@ pub(crate) fn connected_engine() -> Engine {
         .map(|s| s.backend)
         .or(globals.map(|g| g.backend))
         .unwrap_or(Backend::Subscription);
-    let (label, service, policy) = disclosure(backend, settings.as_ref());
+    let (label, service, mut policy) = disclosure(backend, settings.as_ref());
+    // One review covers both exports when this launch also streams audio.
+    if let Some(transcription) = crate::transcription::cloud::review_sentence() {
+        policy = format!("{policy} {transcription}");
+    }
     let processor = ProcessorConfiguration::new(
         backend.id().into(),
         1,
@@ -1202,6 +1206,11 @@ pub(crate) fn connected_engine() -> Engine {
             .as_ref()
             .map_or("unavailable".into(), |s| s.effort.clone()),
     );
+    // The review names where audio goes beside where lines go.
+    let processor = match crate::transcription::cloud::audio_destination() {
+        Some(destination) => processor.with_audio_destination(destination),
+        None => processor,
+    };
     if let (Some(g), Some(settings)) = (globals, settings) {
         let link = Link::new(settings, g.sampler.clone(), g.fault.clone());
         let Ok(mut active) = g.active.try_lock() else {
@@ -1224,7 +1233,7 @@ pub(crate) fn connected_engine() -> Engine {
 /// it names the destination, what is sent, the billing and the spend cap.
 fn disclosure(backend: Backend, settings: Option<&Settings>) -> (&'static str, String, String) {
     const TIMING: &str = "A cue reflects speech up to 8 s before it appears; newer speech is checked next. A reply later than 8 s shows nothing and the run continues. Pause, Dismiss, Off, Stop and any other failure end the run; Resume does not restart it.";
-    const NEVER: &str = "Never sends audio, prior notes, imported notes or focus lines. Near every transcript line may be sent, a few at a time.";
+    const NEVER: &str = "Never sends the cue provider audio, prior notes, imported notes or focus lines. Near every transcript line may be sent, a few at a time.";
     match backend {
         Backend::Subscription => {
             let label = settings.map_or("Lab subscription", Settings::label);

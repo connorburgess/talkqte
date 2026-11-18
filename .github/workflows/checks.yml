@@ -16,9 +16,12 @@ on:
 permissions:
   contents: read
 
+# A new commit on a pull request replaces that pull request's older run.
+# Every other run (a merge to main, a manual dispatch) has its own group and
+# finishes, so each tree that lands on main gets a complete result.
 concurrency:
-  group: checks-${{ github.event_name == 'workflow_dispatch' && inputs.lab_native_sha != '' && format('lab-{0}', inputs.lab_native_sha) || github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'pull_request' && format('checks-pr-{0}', github.event.pull_request.number) || format('checks-run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   contributions:
@@ -74,6 +77,17 @@ jobs:
       - run: npm run format:check
       - run: npm run build
       - run: npm test
+      # playwright.config.ts keeps a trace for each failed test. Save them so a
+      # failure can be opened with `npx playwright show-trace` instead of being
+      # guessed from the log. Tests use only fictional content.
+      - name: Save traces of failed browser tests
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-traces-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
   macos:
     if: github.event_name != 'workflow_dispatch' || inputs.lab_native_sha == ''

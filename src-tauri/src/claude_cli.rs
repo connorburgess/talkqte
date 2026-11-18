@@ -33,7 +33,7 @@ Claude subscription: up to six recent transcript lines and any lines the cue on 
 the cue on screen, up to four earlier cues with how each ended, and your session name if you set \
 one. It sends after each new line, at most once every two seconds and one request at a time, \
 until you turn this off, stop the session, or a failure stops it, so over a session nearly every \
-transcript line is sent, a few at a time. It never sends audio, the \
+transcript line is sent, a few at a time. It never sends Anthropic audio, the \
 full transcript, your notes, imported notes or focus lines. Anthropic handles what is sent under \
 your Claude account's terms and settings, and lines already sent cannot be recalled. A \
 development connection for the owner's own use; it is not a supported product feature.";
@@ -68,7 +68,17 @@ pub fn connected_engine() -> crate::engine::Engine {
     };
     match Choice::from_environment() {
         Ok(choice) => {
-            let config = processor(choice.model_id.clone(), &choice.effort.clone(), DATA_POLICY);
+            // One review covers both exports when this launch also streams audio.
+            let policy = match crate::transcription::cloud::review_sentence() {
+                Some(transcription) => format!("{DATA_POLICY} {transcription}"),
+                None => DATA_POLICY.to_string(),
+            };
+            let config = processor(choice.model_id.clone(), &choice.effort.clone(), &policy);
+            // The review names where audio goes beside where lines go.
+            let config = match crate::transcription::cloud::audio_destination() {
+                Some(destination) => config.with_audio_destination(destination),
+                None => config,
+            };
             let worker = crate::cue_evaluator::Worker::start(
                 ClaudeCli::new(
                     None,
@@ -798,13 +808,23 @@ mod tests {
         cli: ClaudeCli,
         request: &Request,
     ) -> Result<crate::cue_evaluator::Decision, Failure> {
+        timed_evaluate(cli, request).0
+    }
+
+    /// Also returns how long the call took once it could start. Waiting for
+    /// `SERIAL` behind other tests' calls is not part of the call.
+    fn timed_evaluate(
+        cli: ClaudeCli,
+        request: &Request,
+    ) -> (Result<crate::cue_evaluator::Decision, Failure>, Duration) {
         let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let started = std::time::Instant::now();
         let mut worker = Worker::start(cli, MAX_BUDGET).unwrap();
         worker.submit(request.clone()).unwrap();
         let until = std::time::Instant::now() + Duration::from_secs(10);
         loop {
             if let Some(result) = worker.poll(request) {
-                return result;
+                return (result, started.elapsed());
             }
             assert!(std::time::Instant::now() < until, "fake CLI did not finish");
             thread::sleep(Duration::from_millis(5));
@@ -1034,10 +1054,14 @@ mod tests {
                 wrapper("claude-opus-5-5", reply)
             ),
         );
-        // The helper keeps the output open, yet the reply arrives in time.
-        let started = std::time::Instant::now();
-        evaluate(backend(path, &[]), &request()).unwrap();
-        assert!(started.elapsed() < Duration::from_secs(5));
+        // The helper keeps the output open for 30 s, yet the reply arrives
+        // well before that. Only the call is timed, not the wait for SERIAL.
+        let (result, took) = timed_evaluate(backend(path, &[]), &request());
+        result.unwrap();
+        assert!(
+            took < Duration::from_secs(5),
+            "waited for the helper: {took:?}"
+        );
         let helper: i32 = std::fs::read_to_string(dir.join("helper"))
             .unwrap()
             .trim()
@@ -1055,8 +1079,10 @@ mod tests {
         let request = request();
         let mut worker = Worker::start(backend(path, &[]), MAX_BUDGET).unwrap();
         worker.submit(request.clone()).unwrap();
-        // Wait for the call itself to start, after the checks.
-        let until = std::time::Instant::now() + Duration::from_secs(5);
+        // Wait for the call itself to start, after the checks. This is setup,
+        // not the property under test: three spawns of a freshly written
+        // script can take seconds on a heavily loaded machine.
+        let until = std::time::Instant::now() + Duration::from_secs(20);
         while !dir.join("input").exists() {
             assert!(std::time::Instant::now() < until, "the call never started");
             thread::sleep(Duration::from_millis(10));

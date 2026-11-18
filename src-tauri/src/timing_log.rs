@@ -154,6 +154,43 @@ pub enum Event {
         lag_ms: Option<u64>,
         elapsed_ms: u64,
     },
+    /// Cloud transcription started (at review approval), finished, ended, or
+    /// stopped with a fixed failure code. `audio_ms` is audio sent so far.
+    SttState {
+        session: u64,
+        state: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<&'static str>,
+        audio_ms: u64,
+        /// On `connected` only: the query string of the URL the connection
+        /// actually used. The token is never in it; it travels in a header.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
+    },
+    /// A cloud transcription final, on the session clock. The provider's
+    /// speaker label is an untrusted guess, recorded here only: it is never
+    /// shown and never sent to a cue model. Its text is in the `segment` row.
+    SttFinal {
+        session: u64,
+        seq: u64,
+        start_ms: u64,
+        end_ms: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        untrusted_speaker: Option<u32>,
+    },
+    /// A model's `show` was not displayed: `slot` (a cue was on screen),
+    /// `asked` (it cites a line that already raised "Asked you"),
+    /// `expired_source` (its newest cited line is 18 s old), `cooldown`,
+    /// `focus` (Focused and not about a focus line), `repeat` (the same cue
+    /// within two minutes), `stale` (no cited line is fresh speech) or
+    /// `stale_request` (the context changed while the model answered). No
+    /// cue text.
+    CueDropped {
+        session: u64,
+        request: u64,
+        reason: &'static str,
+        elapsed_ms: u64,
+    },
     /// A cue is in the snapshot sent to the companion window. The log cannot
     /// see when the window paints it.
     CuePublished {
@@ -179,12 +216,12 @@ pub enum Event {
         detail: Option<String>,
     },
     /// An application source's run ended: why, if anything went wrong, and
-    /// how many chunks of its audio were transcribed.
+    /// how many final results its cloud stream returned.
     SourceEnded {
         application: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         problem: Option<String>,
-        recognized_chunks: Option<u64>,
+        transcribed_finals: Option<u64>,
     },
     /// Development builds only: the launch setting naming an application
     /// source acted. `step` is `acknowledged` (the setting stands for the
@@ -472,7 +509,7 @@ pub fn commit() -> &'static str {
 /// The Cargo features this build has, among those that change capture.
 pub fn features() -> Vec<&'static str> {
     [
-        ("local-whisper", cfg!(feature = "local-whisper")),
+        ("cloud-transcription", cfg!(feature = "cloud-transcription")),
         ("native-audio-spike", cfg!(feature = "native-audio-spike")),
         ("timing-log", cfg!(feature = "timing-log")),
         ("claude-cli", cfg!(feature = "claude-cli")),
@@ -632,7 +669,7 @@ impl Runtime {
     /// Its callers are the live sinks, which only some builds compile.
     #[cfg_attr(
         not(any(
-            feature = "local-whisper",
+            feature = "cloud-transcription",
             all(target_os = "macos", feature = "native-audio-spike"),
             test
         )),
@@ -720,6 +757,12 @@ mod tests {
                 lag_ms: Some(6_000),
                 elapsed_ms: 15_000,
             },
+            Event::CueDropped {
+                session: 3,
+                request: 2,
+                reason: "cooldown",
+                elapsed_ms: 9_000,
+            },
         ]
         .iter()
         .map(|event| serde_json::from_str(&line(event, 1, 2)).unwrap())
@@ -735,6 +778,10 @@ mod tests {
         assert_eq!(lines[3]["through_segment"], "w4");
         assert_eq!(lines[3]["lag_lines"], 2);
         assert_eq!(lines[3]["lag_ms"], 6_000);
+        assert_eq!(lines[4]["event"], "cue_dropped");
+        assert_eq!(lines[4]["request"], 2);
+        assert_eq!(lines[4]["reason"], "cooldown");
+        assert!(lines[4].get("cue").is_none() && lines[4].get("question").is_none());
         for value in &lines {
             assert_eq!(value["wall_ms"], 1);
             assert_eq!(value["mono_ms"], 2);
