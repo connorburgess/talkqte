@@ -6,12 +6,18 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
+    inputs:
+      lab_native_sha:
+        description: Exact reviewed native commit for an unsigned lab artifact; empty runs normal checks
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: checks-${{ github.event.pull_request.number || github.ref }}
+  group: checks-${{ github.event_name == 'workflow_dispatch' && inputs.lab_native_sha != '' && format('lab-{0}', inputs.lab_native_sha) || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -40,6 +46,7 @@ jobs:
         run: node scripts/check-docs.mjs
 
   frontend:
+    if: github.event_name != 'workflow_dispatch' || inputs.lab_native_sha == ''
     name: Frontend and browser behavior
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -54,6 +61,7 @@ jobs:
       - run: npm ci
       - run: npm run test:contributions
       - run: npm run test:cue-lab
+      - run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/lab-hosted-artifact.test.py
       - run: npm run test:cue-cases
       - run: npm run test:docs
       - run: npm run test:release
@@ -63,6 +71,7 @@ jobs:
       - run: npm test
 
   macos:
+    if: github.event_name != 'workflow_dispatch' || inputs.lab_native_sha == ''
     name: macOS Rust and desktop build
     runs-on: macos-15
     timeout-minutes: 35
@@ -89,6 +98,7 @@ jobs:
         run: node scripts/release-preflight.mjs src-tauri/target/debug/bundle/macos/TalkQTE.app
 
   windows:
+    if: github.event_name != 'workflow_dispatch' || inputs.lab_native_sha == ''
     name: Windows Arm Rust and desktop build
     runs-on: windows-11-arm
     timeout-minutes: 45
@@ -115,3 +125,62 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
       - run: npm run tauri -- build --debug --ci
+
+  lab-artifact:
+    name: Unsigned exact-source lab artifact
+    if: github.event_name == 'workflow_dispatch' && inputs.lab_native_sha != ''
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - name: Validate reviewed commit selection
+        env:
+          NATIVE_SHA: ${{ inputs.lab_native_sha }}
+        run: |
+          [[ "$NATIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(uname -m)" = arm64
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: artifact-tools
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.lab_native_sha }}
+          path: native-source
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - name: Install pinned build toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal --target aarch64-apple-darwin
+      - name: Build exact unsigned lab app without activation
+        working-directory: native-source
+        env:
+          NATIVE_SHA: ${{ inputs.lab_native_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$NATIVE_SHA"
+          test -z "$(git status --porcelain)"
+          env -i PATH="$PATH" HOME="$HOME" TMPDIR="$TMPDIR" \
+            npm ci
+          env -i PATH="$PATH" HOME="$HOME" TMPDIR="$TMPDIR" \
+            TALKQTE_COMMIT="$NATIVE_SHA" MACOSX_DEPLOYMENT_TARGET=14.0 \
+            CARGO_TARGET_DIR="$RUNNER_TEMP/lab-target" \
+            npm run tauri -- build --debug --ci --no-sign --bundles app \
+            --target aarch64-apple-darwin \
+            --features cloud-transcription,lab-evaluator,native-audio-spike,timing-log \
+            -- --locked --no-default-features
+          test -z "$(git status --porcelain)"
+      - name: Verify static provenance and archive app
+        env:
+          NATIVE_SHA: ${{ inputs.lab_native_sha }}
+        run: |
+          python3 artifact-tools/scripts/lab-hosted-artifact.py pack \
+            --source native-source --sha "$NATIVE_SHA" \
+            --app "$RUNNER_TEMP/lab-target/aarch64-apple-darwin/debug/bundle/macos/TalkQTE.app" \
+            --out "$RUNNER_TEMP/lab-export"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unsigned-lab-${{ inputs.lab_native_sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/lab-export/
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
