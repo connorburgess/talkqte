@@ -1,0 +1,104 @@
+name: Disposable browser environment validation
+
+on:
+  push:
+    branches: [cb/ci-playwright-container-validation]
+
+permissions:
+  contents: read
+
+jobs:
+  host-fonts:
+    name: Host font baseline (no dependency installation)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Record host font resolution
+        run: |
+          cat /etc/os-release
+          fc-match Arial
+          fc-match sans-serif
+          fc-match system-ui
+          fc-list | sort | sha256sum
+
+  environment:
+    name: Container repeat and expected failure
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:9beb546099e11f52d62e505537914870e01a67e0e6b00ae41da4775324e73dbe
+      options: --init --ipc=host
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Record container browser environment
+        run: |
+          cat /etc/os-release
+          node --version
+          npm --version
+          npx --no-install playwright --version
+          node -e 'const { chromium, webkit } = require("playwright"); console.log({ node: process.version, executable: process.execPath, chromium: chromium.executablePath(), webkit: webkit.executablePath() })'
+          fc-match Arial
+          fc-match sans-serif
+          fc-match system-ui
+          fc-list | sort | sha256sum
+          node -e 'const p = require("./package-lock.json"); for (const n of ["@playwright/test", "playwright", "playwright-core"]) console.log(n, p.packages["node_modules/" + n].version)'
+      - name: Prepare disposable fictional browser smoke
+        run: |
+          cat > tests/ci-environment.validation.spec.ts <<'EOF'
+          import { expect, test } from '@playwright/test';
+          test('fictional page renders in the installed browser', async ({ page, browser }, testInfo) => {
+            await page.setContent('<main style="font-family: Arial, sans-serif"><h1>Fictional project meeting</h1><p>No capture or provider connection.</p></main>');
+            await expect(page.getByRole('heading', { name: 'Fictional project meeting' })).toBeVisible();
+            console.log(JSON.stringify({ project: testInfo.project.name, browser: browser.version(), text: await page.locator('main').evaluate(el => ({ font: getComputedStyle(el).fontFamily, width: el.getBoundingClientRect().width })) }));
+          });
+          EOF
+      - name: First browser launch in this container
+        run: npm test -- tests/ci-environment.validation.spec.ts
+      - name: Repeat on the same runner and container
+        run: npm test -- tests/ci-environment.validation.spec.ts
+      - name: Prepare disposable negative control
+        run: |
+          cat > tests/ci-failure.validation.spec.ts <<'EOF'
+          import { expect, test } from '@playwright/test';
+          test('intentional assertion failure reaches npm', async ({ page }) => {
+            await page.setContent('<p>Fictional failure control</p>');
+            await expect(page.getByText('Fictional failure control')).toBeVisible();
+            expect(1).toBe(2);
+          });
+          EOF
+      - name: Expected npm failure (disposable validation only)
+        id: negative
+        continue-on-error: true
+        run: npm --silent test -- tests/ci-failure.validation.spec.ts --reporter=json > negative.json
+      - name: Require both intentional failures and a failed raw step
+        if: always()
+        env:
+          NEGATIVE_OUTCOME: ${{ steps.negative.outcome }}
+        run: |
+          node --input-type=module <<'EOF'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          assert.equal(process.env.NEGATIVE_OUTCOME, 'failure');
+          const report = JSON.parse(fs.readFileSync('negative.json', 'utf8'));
+          console.log(JSON.stringify(report.stats));
+          assert.equal(report.errors.length, 0);
+          assert.equal(report.stats.unexpected, 2);
+          const tests = report.suites.flatMap(suite => suite.specs.flatMap(spec => spec.tests));
+          assert.deepEqual(tests.map(test => test.projectName).sort(), ['chromium', 'webkit']);
+          for (const test of tests) {
+            assert.equal(test.status, 'unexpected');
+            assert.equal(test.results.length, 2);
+            for (const result of test.results) {
+              assert.equal(result.status, 'failed');
+              assert.ok(result.errors.some(error => error.message.includes('toBe')));
+            }
+          }
+          console.log('Both browser assertions failed on both attempts, and npm propagated failure to the raw Actions step.');
+          EOF
