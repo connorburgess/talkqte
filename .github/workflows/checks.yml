@@ -43,6 +43,10 @@ jobs:
     name: Frontend and browser behavior
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    container:
+      # Match the Playwright version resolved in package-lock.json.
+      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:9beb546099e11f52d62e505537914870e01a67e0e6b00ae41da4775324e73dbe
+      options: --init --ipc=host
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -59,7 +63,6 @@ jobs:
       - run: npm run test:release
       - run: npm run format:check
       - run: npm run build
-      - run: npx playwright install --with-deps chromium webkit
       - run: npm test
 
   macos:
