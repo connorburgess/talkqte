@@ -93,7 +93,7 @@ impl ProcessorConfiguration {
 
     /// An explicit diagnostic count, displayed before the owner prepares review.
     #[cfg(any(
-        test,
+        all(test, unix),
         all(
             debug_assertions,
             target_os = "macos",
