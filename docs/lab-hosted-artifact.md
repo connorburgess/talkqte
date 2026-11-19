@@ -1,7 +1,7 @@
 # Unsigned hosted lab artifact preparation
 
 The manual `Checks` input `lab_native_sha` confirms the single workflow-owned reviewed native commit
-`77529b3c0f465df3726066eb284d64117a8d7d18` for an unsigned debug arm64 lab bundle.
+`15f26c0d9f7c3657c4a4c0b9cd1f632f6e96415c` for an unsigned debug arm64 lab bundle.
 Any other nonempty input fails before checkout. The executable checkout, build
 and provenance use trusted literal pins, never the input value. Changing the
 native source requires an ordinary reviewed workflow change; this is not an
