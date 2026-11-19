@@ -46,6 +46,7 @@ pub struct ProcessorConfiguration {
     effort: Option<String>,
     /// Whether this backend may be sent approved prior notes.
     pub(super) accepts_notes: bool,
+    pub(super) required_note_count: Option<usize>,
     /// Where the session's audio goes for transcription once this review is
     /// approved, when a cloud transcription service is selected. Part of the
     /// reviewed configuration, so the review names it as a destination.
@@ -78,6 +79,7 @@ impl ProcessorConfiguration {
             disclosure,
             effort: None,
             accepts_notes: true,
+            required_note_count: None,
             audio_destination: None,
         })
     }
@@ -86,6 +88,18 @@ impl ProcessorConfiguration {
     /// is refused, so the review cannot say a note will be sent.
     pub fn without_notes(mut self) -> Self {
         self.accepts_notes = false;
+        self
+    }
+
+    /// An explicit diagnostic count, displayed before the owner prepares review.
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    pub(crate) fn with_required_note_count(mut self, count: Option<usize>) -> Self {
+        self.required_note_count = count;
         self
     }
 

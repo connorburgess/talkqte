@@ -822,3 +822,48 @@ test('selected API identity keeps lab billing and launch-approval guidance', asy
   ).toBeVisible();
   expect(await calls(page, 'approve_processing_scope')).toEqual([]);
 });
+
+test('required diagnostic note count is explicit and never selects or approves notes automatically', async ({
+  page,
+}) => {
+  await open(page, '?hosted');
+  const initial = await page.evaluate(() => window.processingTest.snapshot());
+  await send(page, {
+    processor: { ...initial.processor!, requiredNoteCount: 1 },
+  });
+  await page
+    .getByRole('button', { name: 'Review processing', exact: true })
+    .click();
+  await expect(
+    page.getByText('This diagnostic requires exactly one approved prior note.'),
+  ).toBeVisible();
+  const button = page.getByRole('button', { name: 'Review selected sources' });
+  await expect(button).toBeDisabled();
+  expect(await calls(page, 'review_processing_scope')).toEqual([]);
+  await page.getByRole('checkbox', { name: /supplier review/ }).check();
+  await expect(button).toBeEnabled();
+  await page.getByRole('checkbox', { name: /watering plan/ }).check();
+  await expect(button).toBeDisabled();
+  expect(await calls(page, 'approve_processing_scope')).toEqual([]);
+});
+
+test('explicit zero-note control still requires owner review and rejects selecting a note', async ({
+  page,
+}) => {
+  await open(page, '?hosted');
+  const initial = await page.evaluate(() => window.processingTest.snapshot());
+  await send(page, {
+    processor: { ...initial.processor!, requiredNoteCount: 0 },
+  });
+  await page
+    .getByRole('button', { name: 'Review processing', exact: true })
+    .click();
+  await expect(
+    page.getByText('This control requires no prior notes.'),
+  ).toBeVisible();
+  const button = page.getByRole('button', { name: 'Review selected sources' });
+  await expect(button).toBeEnabled();
+  await page.getByRole('checkbox', { name: /supplier review/ }).check();
+  await expect(button).toBeDisabled();
+  expect(await calls(page, 'approve_processing_scope')).toEqual([]);
+});

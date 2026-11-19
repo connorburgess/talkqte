@@ -678,7 +678,18 @@ export function ProcessingControl({
           ) : (
             <>
               <fieldset disabled={!!busy || !!status?.failed}>
-                <legend>Prior notes · optional</legend>
+                <legend>
+                  {snapshot?.processor?.requiredNoteCount === undefined
+                    ? 'Prior notes · optional'
+                    : 'Prior notes'}
+                </legend>
+                {snapshot?.processor?.requiredNoteCount !== undefined && (
+                  <p>
+                    {snapshot.processor.requiredNoteCount === 1
+                      ? 'This diagnostic requires exactly one approved prior note.'
+                      : 'This control requires no prior notes.'}
+                  </p>
+                )}
                 <p>Importing a note does not approve it for processing.</p>
                 {snapshot?.notes.length ? (
                   <div className="processing-notes">
@@ -706,8 +717,9 @@ export function ProcessingControl({
                   </div>
                 ) : (
                   <p>
-                    No prior notes imported. You can continue with new speech
-                    only.
+                    {snapshot?.processor?.requiredNoteCount === 1
+                      ? 'Import a prior note before preparing this review.'
+                      : 'No prior notes imported. You can continue with new speech only.'}
                   </p>
                 )}
               </fieldset>
@@ -716,7 +728,12 @@ export function ProcessingControl({
           <div className="processing-actions">
             <button
               className="primary-button"
-              disabled={!!busy || !!status?.failed}
+              disabled={
+                !!busy ||
+                !!status?.failed ||
+                (snapshot?.processor?.requiredNoteCount !== undefined &&
+                  selected.length !== snapshot.processor.requiredNoteCount)
+              }
               type="submit"
             >
               {busy === 'review'

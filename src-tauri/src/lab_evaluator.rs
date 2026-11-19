@@ -1482,6 +1482,7 @@ fn processor_configuration(
         },
         ProcessorDisclosure::new(label.into(), policy)?,
     )?
+    .with_required_note_count(settings.and_then(|s| s.attested.as_ref().map(|(_, count)| *count)))
     .with_effort(
         settings
             .as_ref()

@@ -1147,6 +1147,10 @@ fn attested_engine(f: &Fixture) -> (Engine, Arc<Link>, crate::context::ContextIt
         elapsed_ms: 10,
     }));
     let config = processor_configuration(Backend::Api, Some(&f.settings), None, None).unwrap();
+    assert_eq!(
+        crate::engine::ProcessorSummary::from(&config).required_note_count,
+        Some(f.settings.attested.as_ref().unwrap().1)
+    );
     let mut e = Engine::live_with_evaluator(
         Worker::start(Adapter(link.clone()), DEADLINE).unwrap(),
         config,
