@@ -1,7 +1,7 @@
 # Unsigned hosted lab artifact preparation
 
 The manual `Checks` input `lab_native_sha` confirms the single workflow-owned reviewed native commit
-`7dfaf336014466bc40b35a3acc38f80a484cf107` for an unsigned debug arm64 lab bundle.
+`5a817dbec89e80b64a6114305018ce50c74d8e63` for an unsigned debug arm64 lab bundle.
 Any other nonempty input fails before checkout. The executable checkout, build
 and provenance use trusted literal pins, never the input value. Changing the
 native source requires an ordinary reviewed workflow change; this is not an
@@ -14,7 +14,8 @@ This workflow is preparation, not a release or permission to process anything.
 
 The workflow ref and native source SHA are separate pins. Dispatch the reviewed
 workflow ref through the existing `checks.yml` workflow ID only after the exact
-native source review and required tests pass. A new standalone workflow cannot
+native source review and focused workflow security gates pass. The isolated job
+executes the required native validation before it may produce an accepted app. A new standalone workflow cannot
 be assumed dispatchable before it exists on the default branch. Use no moving
 branch as the native input, no synthetic pull-request merge SHA, and no automated
 retry. Record the workflow commit, native commit, run/attempt/job, artifact ID and
@@ -29,7 +30,8 @@ The lab features are `cloud-transcription,lab-evaluator,native-audio-spike,timin
 with `--locked --no-default-features`, no `claude-cli`, and no signing identity.
 The source checkout remains clean and the workflow's helper comes from the
 separately recorded workflow checkout. Only the repository-built app, relative
-inventory and public build provenance are uploaded, for three days. Never add
+inventory, public build provenance and synthetic native validation logs are
+uploaded, for three days. Never add
 private media, notes, account information or local evidence to this artifact.
 The archive removes owner names/IDs and filesystem metadata while preserving
 relative paths and modes. The observed app layout is ASCII and link-free;
@@ -38,6 +40,36 @@ Unicode paths and case aliases (including implicit ancestors) stop artifact
 acceptance; they are never renamed, stripped or silently dropped. A future
 bundle needing such entries requires a separately reviewed archive contract. Artifact upload/digest support is
 [documented by GitHub](https://docs.github.com/en/actions/tutorials/store-and-share-data).
+
+## Combined native validation gate
+
+The artifact job uses one isolated source checkout and target directory for locked
+macOS arm64 default tests/Clippy and no-default-feature tests/Clippy with exactly
+`cloud-transcription,lab-evaluator,native-audio-spike,timing-log`. Rustfmt also
+checks the source. Each shell pipeline uses `pipefail`; a failed command prevents
+build/pack. Tests use two harness threads. The 60-minute artifact-only limit
+covers both validation matrices and the unsigned debug build; normal job limits
+and public required checks are unchanged.
+
+Before build, `validate-native` requires positive passed-test summaries and each
+named attestation codec, Engine/Link/Worker lifecycle, generated-production-ACL
+IPC, local-path/FIFO reader and readiness test to report `ok`. The runtime matrix
+additionally requires the owned-player admission and startup diagnostics cases.
+Ignored tests or a zero-test run do not satisfy these requirements. Count-UI
+configuration assertions are inside the three attested lifecycle tests. Clippy
+must finish successfully in both matrices. These are substituted OS/transport
+fixtures, not native UI consent, live capture, provider or usefulness proof.
+
+Four fixed UTF-8 logs are bounded at 16 MiB each before parsing. `pack` independently
+revalidates them and embeds their hashes, byte counts, source/workflow identity,
+required test names and exact feature tuple in `provenance.json.nativeValidation`.
+A separate `native-validation-SHA-attempt` Actions artifact retains those logs and
+the report for three days, including partial failure evidence. Missing logs on a
+failed job do not turn that failure into success. The app artifact retains its
+existing exact three-member outer ZIP contract; extraction rules are unchanged.
+Local acceptance must retrieve the same run/attempt validation artifact, compare
+all four log hashes to the digest-verified app provenance and independently check
+the named test evidence. An upload alone is not proof of executed tests.
 
 ## Local acceptance before any signing
 

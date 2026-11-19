@@ -192,6 +192,61 @@ def capture(argv, cwd=None):
     return subprocess.check_output(argv, cwd=cwd, text=True, timeout=30).strip()
 
 
+
+# Suffixes permit the default offline facade and the actual runtime module to
+# differ in prefix, but every named test must be reported as executed, not ignored.
+REQUIRED_NATIVE_TESTS = [
+    'shared_complete_envelope_bytes_and_hmac_match_exactly',
+    'observed_scope_mutation_and_empty_selected_are_refused',
+    'attested_real_review_link_handshake_and_worker_preserve_exact_note_before_audio_and_request',
+    'attested_pending_and_ready_scope_cannot_survive_source_removal_revoke_or_stop',
+    'attested_control_zero_refuses_note_selection_and_approves_empty_without_audio_before_ready',
+    'selected_real_link_worker_projects_native_v2_and_retires_on_stop',
+    'selected_registration_disclosure_is_bounded_and_defaults_still_refuse_notes',
+    'native_path_invoke_uses_generated_acl_and_real_command_main_only',
+    'explicit_file_read_lists_without_import_and_canceled_or_replaced_reads_cannot_win',
+    'explicit_file_pipeline_refuses_missing_wrong_format_oversize_and_invalid_text_without_import',
+    'explicit_file_path_rejects_expansion_urls_controls_and_unbounded_arguments',
+    'writerless_fifo_directory_and_device_are_refused_without_blocking_and_regular_symlinks_work',
+    'readiness_preserves_short_circuit_order_and_public_refusals',
+]
+REQUIRED_RUNTIME_TESTS = [
+    'bound_owned_launcher_admission_observation_and_ordinary_stop_compose',
+    'production_session_diagnostics_distinguish_readiness_access_and_start_without_changing_refusals',
+    'raw_diagnostic_schema_is_fixed_bounded_and_content_free',
+]
+VALIDATION_LOGS = ['default-tests.log', 'default-clippy.log', 'runtime-tests.log', 'runtime-clippy.log']
+MAX_VALIDATION_LOG = 16 * 1024 * 1024
+
+
+def native_validation(logs, sha):
+    require(SHA.fullmatch(sha), 'validation source shape')
+    workflow = os.environ.get('GITHUB_WORKFLOW_SHA', '')
+    require(SHA.fullmatch(workflow), 'validation workflow shape')
+    records = []
+    for name in VALIDATION_LOGS:
+        path = logs / name
+        require(path.is_file() and not path.is_symlink() and 0 < path.stat().st_size <= MAX_VALIDATION_LOG, 'validation log shape/size')
+        data = path.read_bytes()
+        require(len(data) <= MAX_VALIDATION_LOG, 'validation log size')
+        text = data.decode('utf-8')
+        require('test result: FAILED' not in text and not re.search(r'^error(?:\[|:)', text, re.M), 'native validation failure')
+        if name.endswith('tests.log'):
+            summaries = re.findall(r'^test result: ok\. ([0-9]+) passed; 0 failed;', text, re.M)
+            require(any(int(n) > 0 for n in summaries), 'native tests did not execute')
+            required = REQUIRED_NATIVE_TESTS + (REQUIRED_RUNTIME_TESTS if name == 'runtime-tests.log' else [])
+            for test in required:
+                require(re.search(r'^test (?:[A-Za-z0-9_]+::)*' + re.escape(test) + r' \.\.\. ok$', text, re.M), 'missing executed native test: ' + test)
+        else:
+            require(re.search(r'^\s*Finished `dev` profile', text, re.M), 'Clippy did not finish')
+        records.append({'name': name, 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()})
+    return {'schema': 'talkqte.lab.native-validation.v1', 'sourceCommit': sha,
+            'workflowCommit': workflow, 'runtimeFeatures': FEATURES,
+            'target': 'aarch64-apple-darwin', 'locked': True,
+            'logs': records, 'requiredDefaultTests': REQUIRED_NATIVE_TESTS,
+            'requiredRuntimeTests': REQUIRED_NATIVE_TESTS + REQUIRED_RUNTIME_TESTS}
+
+
 def pack(source, sha, app, out):
     require(SHA.fullmatch(sha), 'source commit shape')
     require(capture(['git', 'rev-parse', 'HEAD'], source) == sha, 'source commit mismatch')
@@ -215,6 +270,7 @@ def pack(source, sha, app, out):
     require(info.get('CFBundleIdentifier') == 'com.talkqte.desktop' and info.get('LSMinimumSystemVersion') == '14.0', 'bundle identity/minimum OS')
     require(capture(['rustc', '--version'], source).startswith('rustc 1.97.1 '), 'Rust toolchain')
     require(digest(source / 'src-tauri/Entitlements.plist') == 'd70ae7a3f925e53536fe56d205e4bab9bc1df03495738bf8dfdb6cb6dbb53c7d', 'entitlement input changed')
+    validation = native_validation(Path(os.environ.get('LAB_VALIDATION_DIR', '')), sha)
     records = inventory(app)
     require(not out.exists(), 'output already exists')
     out.mkdir(mode=0o700)
@@ -233,6 +289,7 @@ def pack(source, sha, app, out):
         validate_members(tar.getmembers())
     provenance = {
         'schema': 'talkqte.lab.hosted-artifact.v1', 'sourceCommit': sha,
+        'nativeValidation': validation,
         'workflowCommit': workflow_sha, 'workflow': os.environ.get('GITHUB_WORKFLOW_REF'),
         'runId': os.environ['GITHUB_RUN_ID'], 'runAttempt': os.environ['GITHUB_RUN_ATTEMPT'],
         'job': os.environ.get('GITHUB_JOB'), 'runnerImage': os.environ.get('ImageOS'),
@@ -278,6 +335,9 @@ def main():
     p = sub.add_parser('pack')
     for key in ['source', 'sha', 'app', 'out']:
         p.add_argument('--' + key, required=True)
+    p = sub.add_parser('validate-native')
+    p.add_argument('--logs', required=True)
+    p.add_argument('--sha', required=True)
     p = sub.add_parser('verify-download')
     for key in ['archive', 'sha256', 'destination']:
         p.add_argument('--' + key, required=True)
@@ -290,6 +350,10 @@ def main():
     a = parser.parse_args()
     if a.command == 'pack':
         pack(Path(a.source), a.sha, Path(a.app), Path(a.out))
+    elif a.command == 'validate-native':
+        logs = Path(a.logs)
+        report = native_validation(logs, a.sha)
+        (logs / 'native-validation.json').write_bytes(canonical(report) + b'\n')
     elif a.command == 'verify-download':
         safe_download(Path(a.archive), Path(a.destination), a.sha256)
     elif a.command == 'extract':

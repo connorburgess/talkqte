@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       lab_native_sha:
-        description: Must equal reviewed 7dfaf336014466bc40b35a3acc38f80a484cf107 for its unsigned artifact; empty runs normal checks
+        description: Must equal reviewed 5a817dbec89e80b64a6114305018ce50c74d8e63 for its unsigned artifact; empty runs normal checks
         required: false
         default: ''
         type: string
@@ -149,11 +149,11 @@ jobs:
     name: Unsigned exact-source lab artifact
     if: github.event_name == 'workflow_dispatch' && inputs.lab_native_sha != ''
     runs-on: macos-15
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - name: Validate reviewed commit selection
         env:
-          NATIVE_SHA: 7dfaf336014466bc40b35a3acc38f80a484cf107
+          NATIVE_SHA: 5a817dbec89e80b64a6114305018ce50c74d8e63
           REQUESTED_NATIVE_SHA: ${{ inputs.lab_native_sha }}
         run: |
           test "$REQUESTED_NATIVE_SHA" = "$NATIVE_SHA"
@@ -164,7 +164,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 7dfaf336014466bc40b35a3acc38f80a484cf107
+          ref: 5a817dbec89e80b64a6114305018ce50c74d8e63
           path: native-source
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -172,16 +172,51 @@ jobs:
           node-version: '22'
           package-manager-cache: false
       - name: Install pinned build toolchain
-        run: rustup toolchain install 1.97.1 --profile minimal --target aarch64-apple-darwin
-      - name: Build exact unsigned lab app without activation
+        run: rustup toolchain install 1.97.1 --profile minimal --component clippy --component rustfmt --target aarch64-apple-darwin
+      - name: Validate exact source and install locked frontend dependencies
         working-directory: native-source
         env:
-          NATIVE_SHA: 7dfaf336014466bc40b35a3acc38f80a484cf107
+          NATIVE_SHA: 5a817dbec89e80b64a6114305018ce50c74d8e63
         run: |
           test "$(git rev-parse HEAD)" = "$NATIVE_SHA"
           test -z "$(git status --porcelain)"
-          env -i PATH="$PATH" HOME="$HOME" TMPDIR="$TMPDIR" \
-            npm ci
+          env -i PATH="$PATH" HOME="$HOME" TMPDIR="$TMPDIR" npm ci
+      - name: Test and lint default and exact runtime feature matrices
+        working-directory: native-source
+        env:
+          NATIVE_SHA: 5a817dbec89e80b64a6114305018ce50c74d8e63
+        run: |
+          set -euo pipefail
+          mkdir -m 700 "$RUNNER_TEMP/lab-validation"
+          native_cargo() {
+            env -i PATH="$PATH" HOME="$HOME" TMPDIR="$TMPDIR" \
+              TALKQTE_COMMIT="$NATIVE_SHA" MACOSX_DEPLOYMENT_TARGET=14.0 \
+              CARGO_TARGET_DIR="$RUNNER_TEMP/lab-target" CARGO_TERM_COLOR=never \
+              cargo "$@"
+          }
+          native_cargo fmt --manifest-path src-tauri/Cargo.toml --check
+          native_cargo test --manifest-path src-tauri/Cargo.toml --locked \
+            --target aarch64-apple-darwin -- --test-threads=2 2>&1 | tee "$RUNNER_TEMP/lab-validation/default-tests.log"
+          native_cargo clippy --manifest-path src-tauri/Cargo.toml --locked \
+            --target aarch64-apple-darwin --all-targets -- -D warnings 2>&1 | tee "$RUNNER_TEMP/lab-validation/default-clippy.log"
+          native_cargo test --manifest-path src-tauri/Cargo.toml --locked \
+            --target aarch64-apple-darwin --no-default-features \
+            --features cloud-transcription,lab-evaluator,native-audio-spike,timing-log \
+            -- --test-threads=2 2>&1 | tee "$RUNNER_TEMP/lab-validation/runtime-tests.log"
+          native_cargo clippy --manifest-path src-tauri/Cargo.toml --locked \
+            --target aarch64-apple-darwin --no-default-features \
+            --features cloud-transcription,lab-evaluator,native-audio-spike,timing-log \
+            --all-targets -- -D warnings 2>&1 | tee "$RUNNER_TEMP/lab-validation/runtime-clippy.log"
+          python3 ../artifact-tools/scripts/lab-hosted-artifact.py validate-native \
+            --logs "$RUNNER_TEMP/lab-validation" --sha "$NATIVE_SHA"
+          test -z "$(git status --porcelain)"
+      - name: Build exact unsigned lab app without activation
+        working-directory: native-source
+        env:
+          NATIVE_SHA: 5a817dbec89e80b64a6114305018ce50c74d8e63
+        run: |
+          test "$(git rev-parse HEAD)" = "$NATIVE_SHA"
+          test -z "$(git status --porcelain)"
           env -i PATH="$PATH" HOME="$HOME" TMPDIR="$TMPDIR" \
             TALKQTE_COMMIT="$NATIVE_SHA" MACOSX_DEPLOYMENT_TARGET=14.0 \
             CARGO_TARGET_DIR="$RUNNER_TEMP/lab-target" \
@@ -192,7 +227,8 @@ jobs:
           test -z "$(git status --porcelain)"
       - name: Verify static provenance and archive app
         env:
-          NATIVE_SHA: 7dfaf336014466bc40b35a3acc38f80a484cf107
+          LAB_VALIDATION_DIR: ${{ runner.temp }}/lab-validation
+          NATIVE_SHA: 5a817dbec89e80b64a6114305018ce50c74d8e63
         run: |
           python3 artifact-tools/scripts/lab-hosted-artifact.py pack \
             --source native-source --sha "$NATIVE_SHA" \
@@ -200,8 +236,17 @@ jobs:
             --out "$RUNNER_TEMP/lab-export"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: unsigned-lab-7dfaf336014466bc40b35a3acc38f80a484cf107-${{ github.run_attempt }}
+          name: unsigned-lab-5a817dbec89e80b64a6114305018ce50c74d8e63-${{ github.run_attempt }}
           path: ${{ runner.temp }}/lab-export/
           if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+      - name: Retain bounded native validation logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-validation-5a817dbec89e80b64a6114305018ce50c74d8e63-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/lab-validation/
+          if-no-files-found: warn
           retention-days: 3
           compression-level: 0

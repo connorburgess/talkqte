@@ -34,6 +34,17 @@ def entry(name, kind='file', target=None, mode=0o644):
     return m
 
 
+def validation_fixture(root):
+    root.mkdir(exist_ok=True)
+    for matrix in ['default', 'runtime']:
+        names = artifact.REQUIRED_NATIVE_TESTS + (artifact.REQUIRED_RUNTIME_TESTS if matrix == 'runtime' else [])
+        (root / (matrix + '-tests.log')).write_text(''.join(
+            'test fixture::' + name + ' ... ok\n' for name in names) +
+            'test result: ok. 20 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1s\n')
+        (root / (matrix + '-clippy.log')).write_text('    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1s\n')
+
+
+
 class ArchiveProtocol(unittest.TestCase):
     def root(self):
         return entry('TalkQTE.app', 'dir', mode=0o755)
@@ -264,6 +275,9 @@ class ArchiveProtocol(unittest.TestCase):
                     return 'd70ae7a3f925e53536fe56d205e4bab9bc1df03495738bf8dfdb6cb6dbb53c7d'
                 return real_digest(path)
             env = {'GITHUB_ACTIONS': 'true', 'GITHUB_WORKFLOW_SHA': workflow, 'GITHUB_RUN_ID': '1', 'GITHUB_RUN_ATTEMPT': '1'}
+            logs = root / 'logs'
+            validation_fixture(logs)
+            env['LAB_VALIDATION_DIR'] = str(logs)
             out = root / 'export'
             with patch.object(artifact, 'capture', fake_capture), patch.object(artifact, 'digest', fake_digest), patch.dict(artifact.os.environ, env):
                 artifact.pack(source, sha, app, out)
@@ -290,10 +304,10 @@ class ArchiveProtocol(unittest.TestCase):
         workflow = Path(__file__).parents[1] / '.github/workflows/checks.yml'
         text = workflow.read_text()
         normal, job = text.split('  lab-artifact:\n', 1)
-        sha = '7dfaf336014466bc40b35a3acc38f80a484cf107'
+        sha = '5a817dbec89e80b64a6114305018ce50c74d8e63'
         self.assertNotIn('ref: ${{ inputs.lab_native_sha }}', job)
         self.assertNotIn('          NATIVE_SHA: ${{ inputs.lab_native_sha }}', job)
-        self.assertEqual(job.count('NATIVE_SHA: ' + sha), 3)
+        self.assertEqual(job.count('NATIVE_SHA: ' + sha), 5)
         self.assertIn('ref: ' + sha + '\n          path: native-source', job)
         self.assertIn('name: unsigned-lab-' + sha + '-${{ github.run_attempt }}', job)
         self.assertIn('package-manager-cache: false', job)
@@ -317,6 +331,53 @@ class ArchiveProtocol(unittest.TestCase):
                 }, capture_output=True)
                 self.assertEqual(result.returncode == 0, requested == sha)
                 self.assertEqual(marker.exists(), requested == sha)
+
+    def test_native_validation_requires_executed_named_tests_and_finished_clippy(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(artifact.os.environ, {'GITHUB_WORKFLOW_SHA': 'b' * 40}):
+            root = Path(tmp)
+            validation_fixture(root)
+            report = artifact.native_validation(root, 'a' * 40)
+            self.assertEqual(report['sourceCommit'], 'a' * 40)
+            self.assertEqual(report['runtimeFeatures'], artifact.FEATURES)
+            self.assertEqual(len(report['logs']), 4)
+            log = root / 'runtime-tests.log'
+            original = log.read_text()
+            target = artifact.REQUIRED_RUNTIME_TESTS[0]
+            for changed in [original.replace(target + ' ... ok', target + ' ... ignored'),
+                            original.replace(target, 'other_test'),
+                            original.replace('20 passed', '0 passed'),
+                            original + 'test result: FAILED. 1 passed; 1 failed;\n']:
+                log.write_text(changed)
+                with self.assertRaises(ValueError):
+                    artifact.native_validation(root, 'a' * 40)
+            log.write_text(original)
+            lint = root / 'default-clippy.log'
+            for changed in ['', 'Checking only\n', 'error: fixture\nFinished `dev` profile\n']:
+                lint.write_text(changed)
+                with self.assertRaises(ValueError):
+                    artifact.native_validation(root, 'a' * 40)
+            validation_fixture(root)
+            with patch.object(artifact, 'MAX_VALIDATION_LOG', 5):
+                with self.assertRaisesRegex(ValueError, 'shape/size'):
+                    artifact.native_validation(root, 'a' * 40)
+            lint.unlink()
+            lint.symlink_to(root / 'runtime-clippy.log')
+            with self.assertRaisesRegex(ValueError, 'shape/size'):
+                artifact.native_validation(root, 'a' * 40)
+
+    def test_validation_precedes_build_and_preserves_exact_runtime_features(self):
+        workflow = (Path(__file__).parents[1] / '.github/workflows/checks.yml').read_text()
+        job = workflow.split('  lab-artifact:\n', 1)[1]
+        self.assertLess(job.index('Test and lint default'), job.index('Build exact unsigned'))
+        self.assertLess(job.index('validate-native'), job.index('Build exact unsigned'))
+        self.assertIn('set -euo pipefail', job)
+        self.assertIn('    timeout-minutes: 35', workflow.split('  lab-artifact:\n', 1)[0])
+        self.assertIn('    timeout-minutes: 60', job)
+        self.assertEqual(job.count('--features ' + ','.join(artifact.FEATURES)), 3)
+        self.assertNotIn('claude-cli', job)
+        self.assertIn('LAB_VALIDATION_DIR: ${{ runner.temp }}/lab-validation', job)
+        self.assertIn('if: always()', job)
+        self.assertIn('retention-days: 3', job)
 
     def test_pack_rejects_bad_commit_before_any_command_or_output(self):
         with tempfile.TemporaryDirectory() as tmp:
