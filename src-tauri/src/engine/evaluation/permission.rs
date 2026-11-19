@@ -92,11 +92,14 @@ impl ProcessorConfiguration {
     }
 
     /// An explicit diagnostic count, displayed before the owner prepares review.
-    #[cfg(all(
-        debug_assertions,
-        target_os = "macos",
-        feature = "native-audio-spike",
-        feature = "lab-evaluator"
+    #[cfg(any(
+        test,
+        all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        )
     ))]
     pub(crate) fn with_required_note_count(mut self, count: Option<usize>) -> Self {
         self.required_note_count = count;
