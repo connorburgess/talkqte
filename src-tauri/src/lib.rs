@@ -62,6 +62,16 @@ mod native_source;
 pub mod notes_file;
 mod processing_commands;
 pub mod processing_reviews;
+#[cfg(any(
+    test,
+    all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "lab-evaluator",
+        feature = "native-audio-spike"
+    )
+))]
+mod selected_attestation;
 pub mod timing_log;
 pub mod transcription;
 

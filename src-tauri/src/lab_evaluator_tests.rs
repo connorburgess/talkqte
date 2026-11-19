@@ -28,6 +28,7 @@ impl Fixture {
             listener,
             settings: Settings {
                 selected_prior: false,
+                attested: None,
                 backend: Backend::Subscription,
                 spend_cap_micro_usd: None,
                 descriptor,
@@ -863,6 +864,7 @@ fn the_ready_frame_must_match_the_backend_budget_and_cap() {
     // A subscription backend never accepts spend fields.
     let codex = Settings {
         selected_prior: false,
+        attested: None,
         backend: Backend::Subscription,
         spend_cap_micro_usd: None,
         descriptor: "/fictional/private/descriptor".into(),
@@ -1118,4 +1120,176 @@ fn selected_real_link_worker_projects_native_v2_and_retires_on_stop() {
         }
         drop(worker);
     }
+}
+
+fn attested_fixture(count: usize) -> Fixture {
+    let mut f = Fixture::new();
+    f.settings = selected_settings();
+    f.settings.descriptor = f.dir.join("d");
+    let authority = f.dir.join("authority");
+    fs::write(&authority,json!({"schema":"talkqte.lab.scope-authority.v1","runId":"fictional-run","expectedCount":count,"key":"07".repeat(32)}).to_string()).unwrap();
+    fs::set_permissions(&authority, fs::Permissions::from_mode(0o600)).unwrap();
+    f.settings.attested = Some((authority, count));
+    fs::write(&f.settings.descriptor,json!({"schema":crate::selected_attestation::DESCRIPTOR,"runId":"fictional-run","socketPath":f.dir.join("s"),"nonce":"a".repeat(64)}).to_string()).unwrap();
+    f
+}
+fn attested_engine(f: &Fixture) -> (Engine, Arc<Link>, crate::context::ContextItem) {
+    let item = crate::context::ContextItem {
+        provider: crate::context::Provider::File,
+        source_id: "fixture-note".into(),
+        title: "Fictional workshop".into(),
+        source_date: "2026-10-20".into(),
+        excerpt: "The room cannot open before nine.".into(),
+        revision: 1,
+    };
+    let link = f.link(Some(ClockSample {
+        session_id: 1,
+        elapsed_ms: 10,
+    }));
+    let config = processor_configuration(Backend::Api, Some(&f.settings), None, None).unwrap();
+    let mut e = Engine::live_with_evaluator(
+        Worker::start(Adapter(link.clone()), DEADLINE).unwrap(),
+        config,
+    )
+    .with_lab_lifecycle(link.clone());
+    e.start().unwrap();
+    e.set_notes(vec![item.clone()]);
+    (e, link, item)
+}
+fn accept_attested_scope(f: &Fixture, session: u64) -> (UnixStream, Reader, Value) {
+    let mut stream = f.accept();
+    let mut reader = Reader::default();
+    let hello = read(&mut reader, &mut stream);
+    assert_eq!(hello["type"], "hello");
+    assert_eq!(hello["contextPolicy"], crate::selected_attestation::CONTEXT);
+    let mut ready = f.settings.frame("ready", "fictional-run", session);
+    ready
+        .as_object_mut()
+        .unwrap()
+        .extend(f.settings.identity().as_object().unwrap().clone());
+    ready.as_object_mut().unwrap().extend(json!({"provider":"anthropic-api","model":"claude-opus-5-5","effort":"low","dispatchBudgetKind":"apiRequests","dispatchLimit":40,"dispatchesUsed":0,"spendCapMicroUsd":1000000,"spendUsedMicroUsd":0}).as_object().unwrap().clone());
+    write_frame(&mut stream, &ready).unwrap();
+    let grant = read(&mut reader, &mut stream);
+    assert_eq!(grant["type"], "scope_approval");
+    (stream, reader, grant)
+}
+#[test]
+fn attested_real_review_link_handshake_and_worker_preserve_exact_note_before_audio_and_request() {
+    let f = attested_fixture(1);
+    let (mut engine, link, item) = attested_engine(&f);
+    assert!(engine
+        .review_processing(crate::engine::ConversationScope::NewSpeechOnly, &[])
+        .is_err());
+    assert!(!engine.has_processing_permission());
+    assert!(engine.audio_approval(1).is_none());
+    let review = engine
+        .review_processing(
+            crate::engine::ConversationScope::NewSpeechOnly,
+            &[(item.provider, item.source_id.clone(), item.revision)],
+        )
+        .unwrap();
+    engine.approve_processing(review).unwrap();
+    assert!(engine.audio_approval(1).is_none());
+    let (mut stream, mut reader, grant) = accept_attested_scope(&f, 1);
+    let proof: crate::selected_attestation::Scope =
+        serde_json::from_value(grant["scope"].clone()).unwrap();
+    assert_eq!(proof.note_count, 1);
+    let mut ack = grant;
+    ack["type"] = json!("scope_ready");
+    write_frame(&mut stream, &ack).unwrap();
+    let current = read(&mut reader, &mut stream);
+    assert_eq!(current["type"], "scope_current");
+    assert!(link.scope_ready());
+    assert!(engine.audio_approval(1).is_some());
+    let mut probe = f.settings.frame("clock_probe", "fictional-run", 1);
+    probe["probeId"] = json!("scope-probe");
+    write_frame(&mut stream, &probe).unwrap();
+    assert_eq!(read(&mut reader, &mut stream)["type"], "clock_sample");
+    engine.advance(10);
+    engine
+        .ingest(
+            1,
+            crate::engine::Segment {
+                id: "current".into(),
+                at_ms: 10,
+                speaker: "Adrian".into(),
+                text: "Should we plan setup for half eight?".into(),
+            },
+        )
+        .unwrap();
+    let request = read(&mut reader, &mut stream);
+    assert_eq!(request["type"], "evaluate");
+    assert_eq!(request["input"]["priorNotes"][0]["text"], item.excerpt);
+    assert_eq!(request["scope"], ack["scope"]);
+    let authority =
+        crate::selected_attestation::read(&f.settings.attested.as_ref().unwrap().0).unwrap();
+    assert_eq!(
+        authority
+            .commitment(&proof, &request["input"]["priorNotes"])
+            .unwrap(),
+        proof.commitment
+    );
+    engine.revoke_processing();
+    assert!(!link.scope_ready());
+    assert!(engine.audio_approval(1).is_none());
+    let cancel = read(&mut reader, &mut stream);
+    assert_eq!(cancel["type"], "cancel");
+}
+#[test]
+fn attested_pending_and_ready_scope_cannot_survive_source_removal_revoke_or_stop() {
+    for ready in [false, true] {
+        for control in ["remove", "revoke", "stop"] {
+            let f = attested_fixture(1);
+            let (mut e, link, item) = attested_engine(&f);
+            let review = e
+                .review_processing(
+                    crate::engine::ConversationScope::NewSpeechOnly,
+                    &[(item.provider, item.source_id, item.revision)],
+                )
+                .unwrap();
+            e.approve_processing(review).unwrap();
+            let (mut stream, mut reader, mut grant) = accept_attested_scope(&f, 1);
+            if ready {
+                grant["type"] = json!("scope_ready");
+                write_frame(&mut stream, &grant).unwrap();
+                assert_eq!(read(&mut reader, &mut stream)["type"], "scope_current");
+                assert!(link.scope_ready());
+            }
+            match control {
+                "remove" => e.set_notes(vec![]),
+                "revoke" => e.revoke_processing(),
+                _ => {
+                    e.begin_live_stop();
+                }
+            }
+            assert!(!link.scope_ready());
+            assert!(e.audio_approval(1).is_none());
+            assert!(link
+                .scope
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|s| !s.current.load(Ordering::Acquire)));
+            // Dropping the peer also retires any handshake/clock wait; no evaluator exists before speech.
+            drop(stream);
+        }
+    }
+}
+#[test]
+fn attested_control_zero_refuses_note_selection_and_approves_empty_without_audio_before_ready() {
+    let f = attested_fixture(0);
+    let (mut e, link, item) = attested_engine(&f);
+    assert!(e
+        .review_processing(
+            crate::engine::ConversationScope::NewSpeechOnly,
+            &[(item.provider, item.source_id, item.revision)]
+        )
+        .is_err());
+    let review = e
+        .review_processing(crate::engine::ConversationScope::NewSpeechOnly, &[])
+        .unwrap();
+    e.approve_processing(review).unwrap();
+    assert!(!link.scope_ready());
+    assert!(e.audio_approval(1).is_none());
+    e.revoke_processing();
 }

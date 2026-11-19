@@ -101,6 +101,7 @@ const MAX_SPEND_CAP_MICRO_USD: u64 = 1_000_000;
 #[derive(Clone)]
 struct Settings {
     selected_prior: bool,
+    attested: Option<(PathBuf, usize)>,
     backend: Backend,
     descriptor: PathBuf,
     provider: String,
@@ -113,9 +114,27 @@ impl Settings {
     fn parse(mut get: impl FnMut(&str) -> Option<String>) -> Result<Self, Failure> {
         let backend = Backend::parse(get("TALKQTE_DEV_CUE_BACKEND").as_deref())
             .ok_or(Failure::InvalidInput)?;
-        let selected_prior = match get("TALKQTE_DEV_LAB_CONTEXT").as_deref() {
+        let context = get("TALKQTE_DEV_LAB_CONTEXT");
+        let attested = if context.as_deref() == Some(crate::selected_attestation::CONTEXT) {
+            let count = match get("TALKQTE_DEV_LAB_REQUIRED_NOTES").as_deref() {
+                Some("0") => 0,
+                Some("1") => 1,
+                _ => return Err(Failure::InvalidInput),
+            };
+            Some((
+                PathBuf::from(get("TALKQTE_DEV_LAB_SCOPE_AUTHORITY").ok_or(Failure::InvalidInput)?),
+                count,
+            ))
+        } else {
+            None
+        };
+        let selected_prior = match context.as_deref() {
             None => false,
-            Some(SELECTED_CONTEXT) if backend == Backend::Api => true,
+            Some(SELECTED_CONTEXT | crate::selected_attestation::CONTEXT)
+                if backend == Backend::Api =>
+            {
+                true
+            }
             _ => return Err(Failure::InvalidInput),
         };
         let descriptor =
@@ -149,6 +168,7 @@ impl Settings {
         }
         Ok(Self {
             selected_prior,
+            attested,
             backend,
             descriptor,
             provider,
@@ -158,7 +178,9 @@ impl Settings {
         })
     }
     fn schema(&self) -> &'static str {
-        if self.selected_prior {
+        if self.attested.is_some() {
+            crate::selected_attestation::WIRE
+        } else if self.selected_prior {
             SELECTED_SCHEMA
         } else {
             SCHEMA
@@ -180,7 +202,11 @@ impl Settings {
         check_schema(v, kind, run, session, extra, self.schema())
     }
     fn identity(&self) -> Value {
-        json!({"contextPolicy":SELECTED_CONTEXT,"inputContract":SELECTED_INPUT,"policyRevision":SELECTED_POLICY,"promptSha256":SELECTED_PROMPT})
+        let mut value = json!({"contextPolicy":if self.attested.is_some() {crate::selected_attestation::CONTEXT} else {SELECTED_CONTEXT},"inputContract":SELECTED_INPUT,"policyRevision":if self.attested.is_some() {crate::selected_attestation::POLICY} else {SELECTED_POLICY},"promptSha256":SELECTED_PROMPT});
+        if let Some((_, count)) = &self.attested {
+            value["requiredNoteCount"] = json!(count);
+        }
+        value
     }
     fn label(&self) -> &'static str {
         if self.provider == "codex" {
@@ -260,7 +286,9 @@ fn descriptor(settings: &Settings) -> Result<Descriptor, Failure> {
     }
     let d: Descriptor = serde_json::from_slice(&bytes).map_err(|_| Failure::InvalidInput)?;
     if d.schema
-        != if settings.selected_prior {
+        != if settings.attested.is_some() {
+            crate::selected_attestation::DESCRIPTOR
+        } else if settings.selected_prior {
             "talkqte.lab.selected.descriptor.v2"
         } else {
             "talkqte.lab.descriptor.v1"
@@ -301,7 +329,20 @@ struct Pending {
     request: Request,
     identity: Identity,
 }
+struct ScopeApproval {
+    session: u64,
+    notes: Value,
+    current: AtomicBool,
+    ready: AtomicBool,
+    proof: Mutex<
+        Option<(
+            crate::selected_attestation::Authority,
+            crate::selected_attestation::Scope,
+        )>,
+    >,
+}
 enum Event {
+    Scope(Arc<ScopeApproval>),
     Evaluate {
         identity: Identity,
         input: Value,
@@ -313,6 +354,7 @@ enum Event {
 }
 struct Link {
     settings: Settings,
+    scope: Mutex<Option<Arc<ScopeApproval>>>,
     tx: SyncSender<Event>,
     terminal: AtomicU8,
     reason: Mutex<ControlReason>,
@@ -353,6 +395,7 @@ impl Link {
         let (tx, rx) = mpsc::sync_channel(QUEUE);
         let link = Arc::new(Self {
             settings,
+            scope: Mutex::new(None),
             tx,
             terminal: AtomicU8::new(0),
             reason: Mutex::new(ControlReason::TransportFailed),
@@ -394,6 +437,12 @@ impl Link {
         })
     }
     fn cancel_reason(&self, reason: ControlReason) {
+        if let Ok(slot) = self.scope.try_lock() {
+            if let Some(scope) = slot.as_ref() {
+                scope.current.store(false, Ordering::Release);
+                scope.ready.store(false, Ordering::Release);
+            }
+        }
         if self.terminal.load(Ordering::Acquire) != 0 {
             return;
         }
@@ -497,6 +546,63 @@ impl Link {
     }
 }
 impl EvaluationLifecycle for Link {
+    fn required_note_count(&self) -> Option<usize> {
+        self.settings.attested.as_ref().map(|(_, n)| *n)
+    }
+    fn approve_notes(
+        &self,
+        session: u64,
+        notes: &[crate::cue_evaluator::Source],
+    ) -> Result<(), Failure> {
+        if self.settings.attested.is_none() {
+            return Ok(());
+        }
+        let scope = Arc::new(ScopeApproval {
+            session,
+            notes: crate::selected_attestation::projection(notes),
+            current: AtomicBool::new(true),
+            ready: AtomicBool::new(false),
+            proof: Mutex::new(None),
+        });
+        if scope.notes.as_array().map(Vec::len) != self.required_note_count() {
+            return Err(Failure::InvalidInput);
+        }
+        let mut slot = self
+            .scope
+            .try_lock()
+            .map_err(|_| Failure::WorkerUnavailable)?;
+        if slot.is_some() {
+            return Err(Failure::InvalidInput);
+        }
+        *slot = Some(scope.clone());
+        self.session.store(session, Ordering::Release);
+        self.started.store(true, Ordering::Release);
+        self.send(Event::Scope(scope))
+    }
+    fn scope_ready(&self) -> bool {
+        self.settings.attested.is_none()
+            || self
+                .scope
+                .try_lock()
+                .ok()
+                .and_then(|s| s.clone())
+                .is_some_and(|s| {
+                    s.current.load(Ordering::Acquire)
+                        && s.ready.load(Ordering::Acquire)
+                        && self.terminal().is_none()
+                })
+    }
+    fn retire_scope(&self) {
+        if self.settings.attested.is_some() {
+            if let Ok(slot) = self.scope.try_lock() {
+                if let Some(s) = slot.as_ref() {
+                    s.current.store(false, Ordering::Release);
+                    s.ready.store(false, Ordering::Release);
+                }
+            }
+            self.cancel_reason(ControlReason::EligibilityChange);
+        }
+    }
     fn terminal(&self) -> Option<Failure> {
         if self.fault.load(Ordering::Acquire) {
             if let Ok(mut pending) = self.pending.try_lock() {
@@ -736,6 +842,9 @@ fn ready_matches_settings(
         Some(_) => BASE.iter().chain(SPEND.iter()).copied().collect(),
         None => BASE.to_vec(),
     };
+    if settings.attested.is_some() {
+        keys.push("requiredNoteCount");
+    }
     if settings.selected_prior {
         keys.extend([
             "contextPolicy",
@@ -909,14 +1018,24 @@ fn retire(
 }
 
 fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failure> {
-    let Event::Evaluate {
-        identity,
-        input,
-        until,
-        reply,
-    } = first
-    else {
-        return Err(Failure::InvalidInput);
+    let (identity, until, initial, scope) = match first {
+        Event::Evaluate {
+            identity,
+            input,
+            until,
+            reply,
+        } => (identity, until, Some((input, reply)), None),
+        Event::Scope(scope) => (
+            Identity {
+                session: scope.session,
+                request: 0,
+                context: 0,
+            },
+            Instant::now() + DEADLINE,
+            None,
+            Some(scope),
+        ),
+        _ => return Err(Failure::InvalidInput),
     };
     if link.terminal().is_some() {
         return Err(Failure::Cancelled);
@@ -962,6 +1081,47 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
         }
     }
     let session = identity.session;
+    if let Some(scope) = &scope {
+        let (path, count) = link
+            .settings
+            .attested
+            .as_ref()
+            .ok_or(Failure::InvalidInput)?;
+        let authority = crate::selected_attestation::read(path)?;
+        if authority.run_id != d.run_id
+            || authority.expected_count != *count
+            || !scope.current.load(Ordering::Acquire)
+        {
+            return Err(Failure::InvalidInput);
+        }
+        let proof = authority.scope(session, &scope.notes)?;
+        let mut out = link.settings.frame("scope_approval", &d.run_id, session);
+        out["scope"] = serde_json::to_value(&proof).map_err(|_| Failure::InvalidInput)?;
+        write_frame(&mut stream, &out)?;
+        loop {
+            if Instant::now() >= until
+                || link.terminal().is_some()
+                || !scope.current.load(Ordering::Acquire)
+            {
+                return Err(Failure::Cancelled);
+            }
+            if let Some(v) = reader.read(&mut stream)? {
+                link.settings
+                    .check(&v, "scope_ready", &d.run_id, session, &["scope"])?;
+                if v["scope"] != out["scope"] {
+                    return Err(Failure::InvalidDecision);
+                }
+                break;
+            }
+        }
+        *scope.proof.lock().map_err(|_| Failure::WorkerUnavailable)? = Some((authority, proof));
+        if link.terminal().is_some() || !scope.current.load(Ordering::Acquire) {
+            return Err(Failure::Cancelled);
+        }
+        scope.ready.store(true, Ordering::Release);
+        out["type"] = json!("scope_current");
+        write_frame(&mut stream, &out)?;
+    }
     let send_eval = |s: &mut UnixStream, id: &Identity, input: Value, until: Instant| {
         let remaining = until.saturating_duration_since(Instant::now()).as_millis() as u64;
         if remaining == 0 {
@@ -970,6 +1130,27 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
         let mut v = link.settings.frame("evaluate", &d.run_id, id.session);
         id.add(&mut v);
         v["budgetMs"] = json!(remaining);
+        if link.settings.attested.is_some() {
+            let scope = link
+                .scope
+                .try_lock()
+                .map_err(|_| Failure::WorkerUnavailable)?
+                .clone()
+                .ok_or(Failure::InvalidInput)?;
+            if !scope.current.load(Ordering::Acquire) || !scope.ready.load(Ordering::Acquire) {
+                return Err(Failure::Cancelled);
+            }
+            let slot = scope
+                .proof
+                .try_lock()
+                .map_err(|_| Failure::WorkerUnavailable)?;
+            let (authority, proof) = slot.as_ref().ok_or(Failure::InvalidInput)?;
+            let commitment = authority.commitment(proof, &input["priorNotes"])?;
+            if !crate::selected_attestation::equivalent(&commitment, &proof.commitment) {
+                return Err(Failure::InvalidInput);
+            }
+            v["scope"] = serde_json::to_value(proof).map_err(|_| Failure::InvalidInput)?;
+        }
         v["input"] = input;
         write_frame(s, &v)
     };
@@ -986,8 +1167,12 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
     if link.terminal().is_some() {
         return Err(Failure::Cancelled);
     }
-    send_eval(&mut stream, &identity, input, until)?;
-    let mut active = Some((identity, reply, until));
+    let mut active = if let Some((input, reply)) = initial {
+        send_eval(&mut stream, &identity, input, until)?;
+        Some((identity, reply, until))
+    } else {
+        None
+    };
     let mut awaiting: Option<(Identity, Instant)> = None;
     // Retired past its deadline; waiting for the engine's Expired settlement
     // until the instant held here.
@@ -1076,6 +1261,7 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
                 send_eval(&mut stream, &identity, input, until)?;
                 active = Some((identity, reply, until));
             }
+            Ok(Event::Scope(_)) => return Err(Failure::InvalidInput),
             Ok(Event::Observation(observation)) => {
                 let mut v = link.settings.frame("cue_state", &d.run_id, session);
                 v["observation"] = observation;
@@ -1267,12 +1453,17 @@ fn processor_configuration(
     audio_destination: Option<String>,
 ) -> Result<ProcessorConfiguration, crate::engine::ProcessingError> {
     let (label, service, mut policy) = disclosure(backend, settings);
+    if let Some((_, count)) = settings.and_then(|s| s.attested.as_ref()) {
+        policy=format!("{policy} Diagnostic scope requires exactly {count} approved prior notes. Private local count and keyed equality receipts compare this approval with SDK input; they do not prove model use.");
+    }
     // One review covers both exports when this launch also streams audio.
     if let Some(transcription) = transcription {
         policy = format!("{policy} {transcription}");
     }
     let processor = ProcessorConfiguration::new(
-        if settings.is_some_and(|s| s.selected_prior) {
+        if settings.is_some_and(|s| s.attested.is_some()) {
+            "lab-api-selected-prior-attested-v1".into()
+        } else if settings.is_some_and(|s| s.selected_prior) {
             "lab-api-selected-prior-v2".into()
         } else {
             backend.id().into()
@@ -1282,7 +1473,9 @@ fn processor_configuration(
             .as_ref()
             .map_or("unavailable".into(), |s| s.model.clone()),
         ProcessingLocation::Hosted { service },
-        if settings.is_some_and(|s| s.selected_prior) {
+        if settings.is_some_and(|s| s.attested.is_some()) {
+            crate::selected_attestation::POLICY.into()
+        } else if settings.is_some_and(|s| s.selected_prior) {
             SELECTED_POLICY.into()
         } else {
             "fictional-lab-v1".into()

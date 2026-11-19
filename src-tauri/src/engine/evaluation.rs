@@ -170,7 +170,10 @@ impl Engine {
         self.evaluation.as_ref().is_some_and(|s| {
             matches!(
                 s.permission.processor.id.as_str(),
-                "lab-subscription" | "lab-api" | "lab-api-selected-prior-v2"
+                "lab-subscription"
+                    | "lab-api"
+                    | "lab-api-selected-prior-v2"
+                    | "lab-api-selected-prior-attested-v1"
             )
         })
     }
@@ -189,7 +192,7 @@ impl Engine {
         self.evaluation.as_ref().is_some_and(|s| {
             matches!(
                 s.permission.processor.id.as_str(),
-                "lab-api" | "lab-api-selected-prior-v2"
+                "lab-api" | "lab-api-selected-prior-v2" | "lab-api-selected-prior-attested-v1"
             )
         })
     }

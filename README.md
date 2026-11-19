@@ -144,3 +144,7 @@ Using your notes in paid work or connecting a permitted TalkQTE installation to 
 See the [licensing guide](LICENSING.md) for examples, prior-version rights, and commercial inquiries. The license text governs. The TalkQTE name and logo are covered separately by the [name and logo guide](TRADEMARKS.md).
 
 The developer-only [selected prior context API path](docs/selected-context-lab-opt-in.md) requires explicit session review and a separately verified paired native/JS package. It preserves default note exclusion; source preparation is not a run-ready build or validated live integration.
+
+### Selected-note diagnostic verification
+
+The opt-in fictional lab [selected-note attestation](docs/selected-note-attestation.md) distinguishes imported availability from actual processing approval and compares the approved note projection with SDK input. It requires a reviewed replacement build and runner; it is not enabled by import or launch and does not establish model use or usefulness.

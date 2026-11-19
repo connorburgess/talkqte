@@ -287,3 +287,7 @@ Acceptance still requires the replacement exact-source signed app to list the fi
 
 
 The first signed fallback build refused `read_context_file_path` before parsing because the handler was absent from the build-time command manifest and main-window capability. The correction adds both narrowly scoped declarations. A native IPC regression must use the generated production ACL and real command, accept a main-window local preview, reject companion/remote requests, and retain explicit import/processing separation. Browser preview success alone does not validate this boundary. Same-process signed-app import acceptance remains required after the corrected artifact is built.
+
+### Selected-note dispatch verification
+
+The [attested diagnostic path](selected-note-attestation.md) requires an exact one-note grant (or explicit zero-note control), credential-free scope readiness, and private note-projection equality at SDK entry. Offline source/tests do not establish native execution or model use. Next blocker: independent exact-delta review, named hosted Rust execution, reviewed native/JS/runner artifact composition, then separately authorized same-process source review and diagnostic acceptance. Earlier import-only screenshots remain insufficient evidence of processing inclusion.

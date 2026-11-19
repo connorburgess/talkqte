@@ -60,7 +60,11 @@ function isLabProcessor(id: string | undefined): boolean {
 }
 
 function isLabApi(id: string | undefined): boolean {
-  return id === 'lab-api' || id === 'lab-api-selected-prior-v2';
+  return (
+    id === 'lab-api' ||
+    id === 'lab-api-selected-prior-v2' ||
+    id === 'lab-api-selected-prior-attested-v1'
+  );
 }
 
 const apiLaunchApproval =
