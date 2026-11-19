@@ -2124,6 +2124,96 @@ mod context_file_path_tests {
     use super::*;
 
     #[test]
+    fn native_path_invoke_uses_generated_acl_and_real_command_main_only() {
+        use tauri::Manager;
+        // Use the actual generated application manifest/capabilities, not an
+        // empty mock ACL or a test-granted permission. Only the window runtime
+        // is substituted; this invokes the real command through Tauri IPC.
+        let mut context = tauri::generate_context!();
+        context.config_mut().app.windows.clear();
+        let app = tauri::test::mock_builder()
+            .manage(AppState(Mutex::new(Runtime::default())))
+            .invoke_handler(tauri::generate_handler![read_context_file_path])
+            .build(context)
+            .unwrap();
+        let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let cue = tauri::WebviewWindowBuilder::new(&app, "cue", Default::default())
+            .build()
+            .unwrap();
+        let invoke =
+            |window: &tauri::WebviewWindow<tauri::test::MockRuntime>, path: &str, url: &str| {
+                tauri::test::get_ipc_response(
+                    window,
+                    tauri::webview::InvokeRequest {
+                        cmd: "read_context_file_path".into(),
+                        callback: tauri::ipc::CallbackFn(0),
+                        error: tauri::ipc::CallbackFn(1),
+                        url: url.parse().unwrap(),
+                        body: tauri::ipc::InvokeBody::Json(serde_json::json!({"path":path})),
+                        headers: Default::default(),
+                        invoke_key: tauri::test::INVOKE_KEY.into(),
+                    },
+                )
+            };
+        let local = "http://127.0.0.1:1420";
+        let rejected = invoke(&main, "relative.md", local).unwrap_err();
+        assert!(
+            rejected.as_str().unwrap().contains("full local file path"),
+            "{rejected}"
+        );
+        let path = std::env::temp_dir().join(format!("talkqte-path-ipc-{}.md", std::process::id()));
+        std::fs::write(
+            &path,
+            "---\ntitle: Fictional IPC plan\ndate: 2026-10-20\n---\nFictional whole note.",
+        )
+        .unwrap();
+        let response = invoke(&main, path.to_str().unwrap(), local)
+            .unwrap()
+            .deserialize::<serde_json::Value>()
+            .unwrap();
+        assert_eq!(response["notes"].as_array().unwrap().len(), 1);
+        assert_eq!(response["notes"][0]["title"], "Fictional IPC plan");
+        assert!(app
+            .state::<AppState>()
+            .0
+            .lock()
+            .unwrap()
+            .context
+            .items()
+            .is_empty());
+        assert!(app
+            .state::<AppState>()
+            .0
+            .lock()
+            .unwrap()
+            .pending_import
+            .is_some());
+        for (window, url) in [(&cue, local), (&main, "https://example.invalid/")] {
+            let denied = invoke(window, path.to_str().unwrap(), url).unwrap_err();
+            assert!(denied.as_str().unwrap().contains("not allowed"), "{denied}");
+        }
+        // Both denied invocations leave the earlier user preview intact.
+        assert!(app
+            .state::<AppState>()
+            .0
+            .lock()
+            .unwrap()
+            .pending_import
+            .is_some());
+        assert!(app
+            .state::<AppState>()
+            .0
+            .lock()
+            .unwrap()
+            .context
+            .items()
+            .is_empty());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn explicit_file_read_lists_without_import_and_canceled_or_replaced_reads_cannot_win() {
         let state = AppState(Mutex::new(Runtime::default()));
         let path =
