@@ -1490,8 +1490,12 @@ async fn stop_microphone(
     }
 }
 
+fn application_context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
+}
+
 pub fn run() {
-    let context = tauri::generate_context!();
+    let context = application_context();
     #[cfg(target_os = "macos")]
     let context = companion_macos::configure(context);
     tauri::Builder::default()
@@ -2129,7 +2133,7 @@ mod context_file_path_tests {
         // Use the actual generated application manifest/capabilities, not an
         // empty mock ACL or a test-granted permission. Only the window runtime
         // is substituted; this invokes the real command through Tauri IPC.
-        let mut context = tauri::generate_context!();
+        let mut context = application_context();
         context.config_mut().app.windows.clear();
         let app = tauri::test::mock_builder()
             .manage(AppState(Mutex::new(Runtime::default())))
