@@ -2127,6 +2127,7 @@ mod live_readiness_diagnostics_tests {
 mod context_file_path_tests {
     use super::*;
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn native_path_invoke_uses_generated_acl_and_real_command_main_only() {
         use tauri::Manager;
