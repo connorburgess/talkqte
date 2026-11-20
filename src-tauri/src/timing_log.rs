@@ -36,11 +36,50 @@ pub const ENV: &str = "TALKQTE_TIMING_LOG";
 #[cfg(feature = "timing-log")]
 const QUEUE: usize = 1024;
 
+/// Closed development-source diagnostic vocabulary. No caller-supplied text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceStartStage {
+    CloudReadiness,
+    RuntimeAccess,
+    RuntimeStart,
+    SessionCreated,
+    RecognizerLoad,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceStartReason {
+    Ready,
+    CloudBuildMissing,
+    CloudNotSelected,
+    CloudSettingsInvalid,
+    TokenMetadataRejected,
+    RuntimeUnavailable,
+    RuntimeRefused,
+    MicrophoneBusy,
+    Created,
+    LoadRefused,
+}
+
 /// One timed event. Times named `*_ms` without `wall` or `mono` are on the
 /// engine's session clock.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
+    /// Raw private diagnostic only; existing lifecycle readers ignore this new
+    /// event. It never grants readiness, permission, identity or release.
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    LabSourceStartup {
+        version: u8,
+        stage: SourceStartStage,
+        reason: SourceStartReason,
+    },
     /// Owned development process Stop handshake. Receipt is not release.
     DevStop { run_id: String, step: &'static str },
     /// A session started or ended, with its clock at that moment. Anchors
@@ -166,6 +205,10 @@ pub enum Event {
         /// actually used. The token is never in it; it travels in a header.
         #[serde(skip_serializing_if = "Option::is_none")]
         query: Option<String>,
+        /// On `reconnecting` only: session time (ms) whose speech was lost
+        /// with the failed stream, between its last line and its last audio.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        gap_ms: Option<u64>,
     },
     /// A cloud transcription final, on the session clock. The provider's
     /// speaker label is an untrusted guess, recorded here only: it is never
@@ -247,6 +290,22 @@ pub enum Event {
         host_operation: String,
         live_operation: String,
         session: String,
+    },
+    /// Development lab only: TalkQTE's own check of the pinned player
+    /// failed transiently (`failing`, with the check's name), passed again
+    /// (`recovered`, after `after_ms`), or ended the source (`ended`, with
+    /// the check that did, after `after_ms` of failing; 0 for a definitive
+    /// change). The source_problem row that follows says `lab_source_lost`.
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    LabSourceCheck {
+        state: &'static str,
+        check: &'static str,
+        after_ms: u64,
     },
     /// Whether the user's name, used to notice questions asked of them, is
     /// set for this session: at its start and when it changes. Never the name.
