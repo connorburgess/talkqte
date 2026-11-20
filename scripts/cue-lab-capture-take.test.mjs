@@ -24,6 +24,11 @@ function fixture({
   syncRecorderStop = false,
   foreignPlayer = false,
   wrongSource = false,
+  observe,
+  guardSink,
+  playerFails = false,
+  signal,
+  takeMs,
 } = {}) {
   const trace = [],
     counts = {
@@ -127,6 +132,7 @@ function fixture({
       counts.play++;
       trace.push('play');
       entered();
+      if (playerFails) throw Error('fictional player failure');
       if (lateAtStart) delta = 7000;
       onStarted({
         sha256: media.sha256,
@@ -195,8 +201,14 @@ function fixture({
     recorder,
     media,
     nativeReleaseMs: 20,
+    signal,
+    ...(takeMs === undefined ? {} : { takeMs }),
     processEvents,
-    onGuard: (receipt) => guardReceipts.push(receipt),
+    onGuard: (receipt) => {
+      guardReceipts.push(receipt);
+      guardSink?.(receipt);
+    },
+    observe,
     // An attempted provider hook is deliberately never part of this API.
     settings: {
       openers: {
@@ -339,4 +351,173 @@ test('numeric source guard receipts preserve actual Start timing and full-media 
   assert.equal(result.guard, actual);
   assert.equal(f.take.guard, actual);
   assert.ok(Object.isFrozen(actual));
+});
+
+test('core capture evidence preserves measured start versus receipt-only stages', async () => {
+  const events = [];
+  const f = fixture({ observe: (event) => events.push(event) });
+  await f.take.done;
+  assert.deepEqual(
+    events.map((e) => e.stage),
+    [
+      'run.started',
+      'source.listening',
+      'recorder.frame-accepted',
+      'speech.render-start',
+      'speech.render-end',
+      'run.ended',
+    ],
+  );
+  assert.equal(events[1].ids.sessionId, '1');
+  assert.equal(events[3].timing.basis, 'event');
+  assert.equal(events[4].timing.basis, 'receipt');
+  assert.ok(
+    events
+      .filter((e) => e.stage !== 'speech.render-start')
+      .every((e) => e.timing.basis === 'receipt'),
+  );
+  assert.ok(events.every((e) => !e.stage.startsWith('video.') && !e.payload));
+});
+test('evidence observer failure stops the take but cannot skip cleanup', async () => {
+  const f = fixture({
+    observe(event) {
+      if (event.stage === 'source.listening')
+        throw Error('fictional evidence failure');
+    },
+  });
+  await assert.rejects(f.take.done);
+  assert.equal(f.counts.play, 0);
+  assert.equal(f.counts.nativeStop, 1);
+  assert.equal(f.counts.recordStop, 1);
+  assert.equal(f.counts.playerStop, 1);
+  assert.ok(f.trace.includes('launcher-close'));
+});
+test('capture stand-in writes bounded core events and numeric guard receipts through real writer files', async (t) => {
+  const fs = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { createLabEvidenceWriter } =
+    await import('./cue-lab-evidence-writer.mjs');
+  const parent = fs.realpathSync(
+    fs.mkdtempSync(join(tmpdir(), 'tq-take-evidence-')),
+  );
+  t.after(() => fs.rmSync(parent, { recursive: true, force: true }));
+  const writer = createLabEvidenceWriter({
+    parentDirectory: parent,
+    runId: 'fictional-run',
+    fictional: true,
+  });
+  t.after(() => writer.close());
+  writer.addClock({ id: 'node', kind: 'monotonic' });
+  const f = fixture({
+    observe(e) {
+      assert.equal(writer.emit(e), true);
+    },
+    guardSink: (g) => writer.recordGuard(g),
+  });
+  await f.take.done;
+  const { manifestPath } = writer.close();
+  const manifest = JSON.parse(fs.readFileSync(manifestPath));
+  assert.equal(manifest.writer.failed, false);
+  assert.equal(manifest.writer.events, 6);
+  assert.equal(manifest.guards.length, 2);
+  assert.equal(manifest.guards[1].actualAnchorMs, f.take.guard.actualAnchorMs);
+  assert.equal(manifest.runtime.node, process.version);
+  assert.equal(manifest.clocks[0].anchor, undefined);
+});
+
+for (const mode of [
+  'sourceFails',
+  'playerFails',
+  'lateBeforeStart',
+  'wrongSource',
+  'observer',
+  'guard',
+])
+  test(`runtime ${mode} remains failure evidence after successful cleanup`, async () => {
+    const events = [];
+    const f = fixture({
+      ...(['observer', 'guard'].includes(mode) ? {} : { [mode]: true }),
+      observe(event) {
+        if (mode === 'observer' && event.stage === 'source.listening')
+          throw Error('fictional observer failure');
+        events.push(event);
+      },
+      guardSink() {
+        if (mode === 'guard') throw Error('fictional guard failure');
+      },
+    });
+    try {
+      await assert.rejects(f.take.done, (e) => e.category === 'protocol');
+      await assert.rejects(f.take.stop(), (e) => e.category === 'protocol');
+      assert.equal(events.at(-1).stage, 'run.ended');
+      assert.equal(events.at(-1).outcome, 'failure');
+      assert.equal(f.take.phase, 'failed');
+      assert.equal(f.counts.nativeStop, 1);
+      assert.equal(f.counts.recordStop, 1);
+      assert.equal(f.counts.playerStop, 1);
+      assert.ok(events.every((e) => !e.payload));
+    } finally {
+      mock.restoreAll();
+    }
+  });
+for (const mode of ['stop', 'SIGINT', 'SIGTERM', 'external'])
+  test(`explicit ${mode} remains cancelled evidence despite subsequent aborted work`, async () => {
+    const events = [],
+      external = new AbortController();
+    const f = fixture({
+      holdPlayback: true,
+      signal: external.signal,
+      observe: (e) => events.push(e),
+    });
+    await f.playEntered;
+    if (mode === 'stop') void f.take.stop().catch(() => {});
+    else if (mode === 'external') external.abort();
+    else f.processEvents.emit(mode);
+    await assert.rejects(f.take.done, (e) => e.category === 'cancelled');
+    assert.equal(events.at(-1).outcome, 'cancelled');
+    assert.equal(f.take.phase, 'stopped');
+    assert.equal(f.counts.nativeStop, 1);
+    assert.equal(f.counts.recordStop, 1);
+  });
+test('deadline is failure evidence rather than cancellation', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const events = [];
+  const f = fixture({
+    holdPlayback: true,
+    takeMs: 10,
+    observe: (e) => events.push(e),
+  });
+  await f.playEntered;
+  t.mock.timers.tick(10);
+  await assert.rejects(f.take.done, (e) => e.category === 'deadline');
+  assert.equal(events.at(-1).outcome, 'failure');
+  assert.equal(f.take.phase, 'failed');
+});
+test('adapter terminal notification remains failure after later user Stop', async () => {
+  const events = [];
+  const f = fixture({ holdPlayback: true, observe: (e) => events.push(e) });
+  await f.playEntered;
+  f.failSource();
+  await Promise.resolve();
+  void f.take.stop().catch(() => {});
+  await assert.rejects(f.take.done, (e) => e.category === 'protocol');
+  assert.equal(events.at(-1).outcome, 'failure');
+  assert.equal(f.counts.nativeStop, 1);
+});
+test('cleanup failure remains independent and dominates cancelled outcome', async () => {
+  const events = [];
+  const f = fixture({
+    holdPlayback: true,
+    syncRecorderStop: true,
+    observe: (e) => events.push(e),
+  });
+  await f.playEntered;
+  void f.take.stop().catch(() => {});
+  await assert.rejects(f.take.done, (e) => e.category === 'cleanup');
+  assert.equal(events.at(-1).outcome, 'failure');
+  assert.equal(f.take.phase, 'failed-cleanup');
+  assert.equal(f.counts.nativeStop, 1);
+  assert.equal(f.counts.playerStop, 1);
+  assert.equal(f.counts.recordStop, 1);
 });

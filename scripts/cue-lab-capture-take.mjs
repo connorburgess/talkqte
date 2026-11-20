@@ -20,9 +20,11 @@ export function createLabCaptureTake({
   nativeReleaseMs = 6000,
   processEvents = process,
   onGuard,
+  observe,
 } = {}) {
   required(
     (onGuard === undefined || typeof onGuard === 'function') &&
+      (observe === undefined || typeof observe === 'function') &&
       player?.identity &&
       launcher?.playerSource === player.identity &&
       recorder?.playerSource === player.identity &&
@@ -63,10 +65,24 @@ export function createLabCaptureTake({
       completionReserveMs >= 1000 &&
       completionReserveMs <= 3000,
   );
+  const report = (stage, outcome = 'observed', ids = {}, timing) =>
+    observe?.({
+      stage,
+      outcome,
+      ids,
+      timing: timing ?? {
+        clockId: 'node',
+        atMs: performance.now(),
+        uncertaintyMs: 0,
+        basis: 'receipt',
+      },
+    });
   const root = new AbortController(),
     subscriptions = [];
   let phase = 'starting',
-    failure = false,
+    terminalCause = signal?.aborted
+      ? { outcome: 'cancelled', category: 'cancelled' }
+      : null,
     normal = false,
     closing = null,
     work,
@@ -140,16 +156,30 @@ export function createLabCaptureTake({
         failed = true;
       }
       clearTimeout(timer);
-      signal?.removeEventListener('abort', fail);
-      processEvents.off('SIGINT', fail);
-      processEvents.off('SIGTERM', fail);
+      signal?.removeEventListener('abort', cancel);
+      processEvents.off('SIGINT', cancel);
+      processEvents.off('SIGTERM', cancel);
       phase = failed
         ? 'failed-cleanup'
-        : normal && !failure
+        : normal && !terminalCause
           ? 'completed'
-          : 'stopped';
+          : terminalCause?.outcome === 'failure'
+            ? 'failed'
+            : 'stopped';
+      try {
+        report(
+          'run.ended',
+          failed
+            ? 'failure'
+            : (terminalCause?.outcome ?? (normal ? 'observed' : 'cancelled')),
+        );
+      } catch {
+        failed = true;
+        phase = 'failed-cleanup';
+      }
       if (failed) throw gateFailure('cleanup');
-      if (failure || !normal) throw gateFailure('cancelled');
+      if (terminalCause || !normal)
+        throw gateFailure(terminalCause?.category ?? 'cancelled');
       return Object.freeze({
         completed: true,
         captureOnly: true,
@@ -162,26 +192,31 @@ export function createLabCaptureTake({
     })().then(resolve, reject);
     return closing;
   };
-  const fail = () => {
+  const fail = (category = 'protocol') => {
     if (closing) return;
-    failure = true;
+    terminalCause ??= { outcome: 'failure', category };
     void close().catch(() => {});
   };
-  const timer = setTimeout(fail, takeMs);
-  signal?.addEventListener('abort', fail, { once: true });
-  processEvents.on('SIGINT', fail);
-  processEvents.on('SIGTERM', fail);
+  const cancel = () => {
+    if (closing) return;
+    terminalCause ??= { outcome: 'cancelled', category: 'cancelled' };
+    void close().catch(() => {});
+  };
+  const timer = setTimeout(() => fail('deadline'), takeMs);
+  signal?.addEventListener('abort', cancel, { once: true });
+  processEvents.on('SIGINT', cancel);
+  processEvents.on('SIGTERM', cancel);
   try {
     for (const adapter of [owner, source, player, recorder]) {
-      const unsubscribe = adapter.subscribe(() => queueMicrotask(fail));
+      const unsubscribe = adapter.subscribe(() => queueMicrotask(() => fail()));
       required(typeof unsubscribe === 'function');
       subscriptions.push(unsubscribe);
     }
   } catch {
     clearTimeout(timer);
-    signal?.removeEventListener('abort', fail);
-    processEvents.off('SIGINT', fail);
-    processEvents.off('SIGTERM', fail);
+    signal?.removeEventListener('abort', cancel);
+    processEvents.off('SIGINT', cancel);
+    processEvents.off('SIGTERM', cancel);
     for (const unsubscribe of subscriptions)
       try {
         unsubscribe();
@@ -201,6 +236,7 @@ export function createLabCaptureTake({
         launcher.playerSource === player.identity &&
         recorder.playerSource === player.identity,
     );
+    report('run.started');
     nativeStartedAt = performance.now();
     await owner.start({ runId, signal: root.signal });
     const listening = await source.waitListening({
@@ -213,7 +249,8 @@ export function createLabCaptureTake({
         listening.listening === true &&
         listening.source?.application === 'TalkQTE Lab Player',
     );
-    const recordDeadline = setTimeout(fail, recorderMs);
+    report('source.listening', 'observed', { sessionId: listening.sessionId });
+    const recordDeadline = setTimeout(() => fail('deadline'), recorderMs);
     try {
       const recording = await recorder.start({
         runId,
@@ -221,6 +258,7 @@ export function createLabCaptureTake({
         signal: root.signal,
       });
       required(recording?.started === true);
+      report('recorder.frame-accepted');
     } finally {
       clearTimeout(recordDeadline);
     }
@@ -277,6 +315,17 @@ export function createLabCaptureTake({
               sourceDeadline - anchor.monotonicMs - anchor.uncertaintyMs,
           });
           onGuard?.(guard);
+          report(
+            'speech.render-start',
+            'observed',
+            {},
+            {
+              clockId: 'node',
+              atMs: anchor.monotonicMs,
+              uncertaintyMs: anchor.uncertaintyMs,
+              basis: 'event',
+            },
+          );
         } catch {
           fail();
         }
@@ -288,18 +337,23 @@ export function createLabCaptureTake({
         result?.completed === true &&
         result.sha256 === media.sha256,
     );
+    report('speech.render-end'); // Receipt of validated completion, not an exact final sample timestamp.
     normal = true;
   });
-  const done = work.then(close, () => {
-    failure = true;
+  const done = work.then(close, (error) => {
+    terminalCause ??= {
+      outcome: 'failure',
+      category: error?.category === 'deadline' ? 'deadline' : 'protocol',
+    };
     return close();
   });
   done.catch(() => {});
-  if (signal?.aborted) queueMicrotask(fail);
+  if (signal?.aborted) queueMicrotask(cancel);
   return Object.freeze({
     done,
     stop() {
-      failure = true;
+      if (!closing)
+        terminalCause ??= { outcome: 'cancelled', category: 'cancelled' };
       return close();
     },
     get phase() {
