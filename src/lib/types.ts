@@ -71,8 +71,9 @@ export interface CueSnapshot {
   /** Development builds only: the running session is fed by a selected
    * application alone, with no microphone. */
   sourceSession?: boolean;
-  /** Development builds that selected cloud transcription only. Absent when
-   * speech is transcribed on this device. */
+  /** Where a live session's audio is transcribed: present for every live
+   * session, which only a development build with cloud transcription can
+   * start. */
   transcription?: import('./transcription').CloudTranscription;
 }
 export interface Snapshot extends CueSnapshot {
@@ -101,9 +102,6 @@ export type Commands = {
   set_overlay: { enabled: boolean };
   start_live_session: undefined;
   stop_live_session: undefined;
-  download_model: undefined;
-  cancel_model_download: undefined;
-  remove_model: undefined;
   cancel_context_import: undefined;
   remove_context_item: { provider: ContextItem['provider']; sourceId: string };
   cancel_granola_sign_in: undefined;
@@ -190,15 +188,6 @@ export interface MergeOutcome {
   unchanged: number;
   overLimit: number;
   rejected: number;
-}
-export interface ModelStatus {
-  revision: number;
-  status: 'unavailable' | 'developer' | 'missing' | 'downloading' | 'installed';
-  name: string;
-  sizeBytes: number;
-  neededBytes: number;
-  received: number;
-  message: string | null;
 }
 export interface LiveStatus {
   available: boolean;

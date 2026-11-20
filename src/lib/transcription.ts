@@ -1,5 +1,5 @@
-/** Development builds that selected cloud transcription only: where a live
- * session's audio is transcribed, and the fixed code that ended it. */
+/** Where a live session's audio is transcribed, and the fixed code that
+ * ended it. Only a development build with cloud transcription has one. */
 export interface CloudTranscription {
   provider: string;
   stopped?: string;
@@ -62,7 +62,5 @@ export function transcriptionStopText(
 export function transcribedWhere(
   transcription: CloudTranscription | undefined,
 ): string {
-  return transcription
-    ? `transcribed by ${transcription.provider} once cue processing is enabled`
-    : 'transcribed on this device';
+  return `transcribed by ${transcription?.provider ?? 'the transcription service'} once cue processing is enabled`;
 }

@@ -808,13 +808,23 @@ mod tests {
         cli: ClaudeCli,
         request: &Request,
     ) -> Result<crate::cue_evaluator::Decision, Failure> {
+        timed_evaluate(cli, request).0
+    }
+
+    /// Also returns how long the call took once it could start. Waiting for
+    /// `SERIAL` behind other tests' calls is not part of the call.
+    fn timed_evaluate(
+        cli: ClaudeCli,
+        request: &Request,
+    ) -> (Result<crate::cue_evaluator::Decision, Failure>, Duration) {
         let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let started = std::time::Instant::now();
         let mut worker = Worker::start(cli, MAX_BUDGET).unwrap();
         worker.submit(request.clone()).unwrap();
         let until = std::time::Instant::now() + Duration::from_secs(10);
         loop {
             if let Some(result) = worker.poll(request) {
-                return result;
+                return (result, started.elapsed());
             }
             assert!(std::time::Instant::now() < until, "fake CLI did not finish");
             thread::sleep(Duration::from_millis(5));
@@ -1044,10 +1054,14 @@ mod tests {
                 wrapper("claude-opus-5-5", reply)
             ),
         );
-        // The helper keeps the output open, yet the reply arrives in time.
-        let started = std::time::Instant::now();
-        evaluate(backend(path, &[]), &request()).unwrap();
-        assert!(started.elapsed() < Duration::from_secs(5));
+        // The helper keeps the output open for 30 s, yet the reply arrives
+        // well before that. Only the call is timed, not the wait for SERIAL.
+        let (result, took) = timed_evaluate(backend(path, &[]), &request());
+        result.unwrap();
+        assert!(
+            took < Duration::from_secs(5),
+            "waited for the helper: {took:?}"
+        );
         let helper: i32 = std::fs::read_to_string(dir.join("helper"))
             .unwrap()
             .trim()
@@ -1065,8 +1079,10 @@ mod tests {
         let request = request();
         let mut worker = Worker::start(backend(path, &[]), MAX_BUDGET).unwrap();
         worker.submit(request.clone()).unwrap();
-        // Wait for the call itself to start, after the checks.
-        let until = std::time::Instant::now() + Duration::from_secs(5);
+        // Wait for the call itself to start, after the checks. This is setup,
+        // not the property under test: three spawns of a freshly written
+        // script can take seconds on a heavily loaded machine.
+        let until = std::time::Instant::now() + Duration::from_secs(20);
         while !dir.join("input").exists() {
             assert!(std::time::Instant::now() < until, "the call never started");
             thread::sleep(Duration::from_millis(10));
@@ -1175,6 +1191,7 @@ mod tests {
             id: "c1".into(),
             text: "Who will book the hall?".into(),
             source_ids: vec!["transcript:a".into()],
+            asked: false,
         };
         let with_cue =
             Request::new(7, 1, vec![line("transcript:a", "Book it.")], Some(cue)).unwrap();

@@ -69,6 +69,8 @@ export function ContextNotes({
   const [chosen, setChosen] = useState<string[]>([]);
   // Dates the person entered for file notes that have none of their own.
   const [dates, setDates] = useState<Record<string, string>>({});
+  const [filePathOpen, setFilePathOpen] = useState(false);
+  const [filePath, setFilePath] = useState('');
   const [working, setWorking] = useState(false);
   const [importing, setImporting] = useState(false);
   const [pickError, setPickError] = useState('');
@@ -160,6 +162,19 @@ export function ContextNotes({
       setPickedFrom('file');
       setPicked(result);
     });
+  const readPath = () => {
+    const path = filePath;
+    setFilePath('');
+    setFilePathOpen(false);
+    void run(async () => {
+      const result = await bridge.readContextFilePath(path);
+      returnFocus.current = true;
+      setChosen([]);
+      setDates({});
+      setPickedFrom('file');
+      setPicked(result);
+    });
+  };
   const cancel = () =>
     void run(async () => {
       await bridge.command('cancel_context_import');
@@ -302,6 +317,16 @@ export function ContextNotes({
               <FileText size={15} />
               Add notes from a file
             </button>
+            <button
+              className="text-button"
+              disabled={busy || working}
+              onClick={() => {
+                setFilePath('');
+                setFilePathOpen(true);
+              }}
+            >
+              Use a local file path
+            </button>
             {bridge.desktop &&
               (granola.connected ? (
                 <>
@@ -341,6 +366,47 @@ export function ContextNotes({
               ))}
           </div>
         </div>
+        {filePathOpen && (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              readPath();
+            }}
+          >
+            <p className="muted small">
+              If the system file chooser is unavailable, enter the full local
+              path. This only lists notes for selection; nothing is imported
+              yet.
+            </p>
+            <label>
+              Local notes file path
+              <input
+                value={filePath}
+                autoFocus
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) => setFilePath(event.target.value)}
+              />
+            </label>
+            <button
+              type="submit"
+              className="secondary-button"
+              disabled={busy || working || !filePath}
+            >
+              Read notes file
+            </button>
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => {
+                setFilePath('');
+                setFilePathOpen(false);
+              }}
+            >
+              Cancel file path
+            </button>
+          </form>
+        )}
         {granola.connected && (
           <p className="muted small connection-terms" role="status">
             Granola connected as you.{' '}

@@ -161,11 +161,13 @@ test('failed cancellation is retryable, and a genuine model failure remains visi
   await page.evaluate(() => window.captureTest.releaseStart());
   await expect(start(page)).toBeEnabled();
   await page.evaluate(() =>
-    window.captureTest.failStart('Could not load the local speech model.'),
+    window.captureTest.failStart(
+      'The cloud transcription settings are not usable.',
+    ),
   );
   await start(page).click();
   await expect(page.getByRole('alert')).toContainText(
-    'Could not load the local speech model.',
+    'The cloud transcription settings are not usable.',
   );
   await expect(start(page)).toBeEnabled();
 });

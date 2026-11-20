@@ -55,6 +55,24 @@ impl Selection {
         })
     }
 
+    #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+    pub(crate) fn lab_allowed(&self) -> bool {
+        self.lab_check() == crate::dev_lab_source::Check::Current
+    }
+
+    /// `lab_allowed`, naming a failed check and whether it is definitive.
+    #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+    pub(crate) fn lab_check(&self) -> crate::dev_lab_source::Check {
+        // Plain retained SCK property reads plus process inspection, only on
+        // this selection's owner thread. No filter mutation or reacquisition.
+        crate::dev_lab_source::selection_check(
+            unsafe { self.application.processID() },
+            &unsafe { self.application.bundleIdentifier() }.to_string(),
+            self.source.name(),
+            self.helpers.len(),
+        )
+    }
+
     pub fn application(&self) -> &Application {
         &self.source
     }
@@ -96,6 +114,10 @@ impl NativeOwner {
         if start.lease.control.0.application != selection.source {
             return Err(Failure::ReviewChanged);
         }
+        #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+        if !selection.lab_allowed() {
+            return Err(Failure::SourceUnavailable);
+        }
         let pcm = pcm::PcmReader::from_first_sample();
         let (input, reader) = start
             .handoff(Format::new(16_000, 1).unwrap(), MAX_BLOCKS)
@@ -123,11 +145,7 @@ impl NativeOwner {
                 &applications,
                 &exceptions,
             );
-            let config = SCStreamConfiguration::new();
-            config.setCapturesAudio(true);
-            config.setExcludesCurrentProcessAudio(true);
-            config.setSampleRate(16_000);
-            config.setChannelCount(1);
+            let config = audio_only_configuration();
             let stream = SCStream::initWithFilter_configuration_delegate(
                 SCStream::alloc(),
                 &filter,
@@ -299,6 +317,10 @@ fn stop_completion(slot: Arc<AtomicU8>) -> RcBlock<dyn Fn(*mut NSError)> {
 
 impl Driver for Stream {
     fn consumer_closed(&self) -> bool {
+        #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+        self.delegate
+            .ivars()
+            .inspect_lab_source(std::time::Instant::now(), || self._selection.lab_check());
         self.consumer_closed.load(Ordering::Acquire)
     }
     fn stream_failed(&self) -> bool {
@@ -311,6 +333,10 @@ impl Driver for Stream {
         self.delegate.ivars().code.load(Ordering::Acquire)
     }
     fn stream_detail(&self) -> Option<String> {
+        #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+        if let Some(detail) = self.delegate.ivars().lab_detail() {
+            return Some(detail);
+        }
         self.delegate.ivars().refused_detail()
     }
     fn start(&mut self, slot: Arc<AtomicU8>) {
@@ -345,9 +371,182 @@ impl Driver for Stream {
     }
 }
 
+/// Request 16 kHz mono audio for the selected application. Only an audio
+/// output is attached; this code does not read or store video frames.
+/// Video settings request 2x2 dimensions, a one-second minimum frame interval
+/// and no cursor. Actual hardware acceptance, cadence and CPU impact are
+/// unverified; these settings are not a claim about the API's minimums.
+fn audio_only_configuration() -> objc2::rc::Retained<SCStreamConfiguration> {
+    // SAFETY: plain property setters on a new, unshared configuration.
+    unsafe {
+        let config = SCStreamConfiguration::new();
+        config.setCapturesAudio(true);
+        config.setExcludesCurrentProcessAudio(true);
+        config.setSampleRate(16_000);
+        config.setChannelCount(1);
+        config.setWidth(UNUSED_VIDEO_SIZE);
+        config.setHeight(UNUSED_VIDEO_SIZE);
+        config.setMinimumFrameInterval(UNUSED_VIDEO_INTERVAL);
+        config.setShowsCursor(false);
+        config
+    }
+}
+
+/// Requested video dimensions; no screen output is attached.
+const UNUSED_VIDEO_SIZE: usize = 2;
+/// Requested minimum interval between video frames.
+const UNUSED_VIDEO_INTERVAL: objc2_core_media::CMTime = objc2_core_media::CMTime {
+    value: 1,
+    timescale: 1,
+    flags: objc2_core_media::CMTimeFlags::Valid,
+    epoch: 0,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+    #[test]
+    fn active_identity_loss_cancels_but_prior_or_concurrent_stop_dominates() {
+        use crate::application_audio::Gate;
+        let gate = Gate::default();
+        let review = gate
+            .review(
+                Application::new(
+                    "fictional-player".into(),
+                    crate::dev_lab_source::PLAYER.into(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let control = review.control();
+        let fault = StreamFault::new(control.clone());
+        fault.inspect_lab_source(std::time::Instant::now(), || {
+            crate::dev_lab_source::Check::Gone("process_gone")
+        });
+        assert!(control.is_cancelled());
+        assert!(fault.failed.load(Ordering::Acquire));
+        // TalkQTE's own code, not ScreenCaptureKit's -3815, and the check named.
+        assert_eq!(
+            fault.code.load(Ordering::Acquire),
+            super::super::LAB_SOURCE_LOST
+        );
+        assert_eq!(
+            fault.lab_detail().as_deref(),
+            Some("lab source check process_gone failed: the player is gone or was replaced")
+        );
+        drop(review);
+        for concurrent in [false, true] {
+            let review = gate
+                .review(
+                    Application::new(
+                        "fictional-next".into(),
+                        crate::dev_lab_source::PLAYER.into(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+            let control = review.control();
+            let fault = StreamFault::new(control.clone());
+            if !concurrent {
+                control.cancel();
+            }
+            let mut inspected = false;
+            fault.inspect_lab_source(std::time::Instant::now(), || {
+                inspected = true;
+                control.cancel();
+                crate::dev_lab_source::Check::Gone("process_gone")
+            });
+            assert_eq!(inspected, concurrent);
+            assert!(!fault.failed.load(Ordering::Acquire));
+            assert_eq!(fault.code.load(Ordering::Acquire), NO_CODE);
+        }
+    }
+
+    /// A lab source checked every 20 ms for two minutes, as the owner loop
+    /// does. At 110 s an application switch makes the check fail for half a
+    /// second; the source must carry on. Only a failure that lasts the grace
+    /// period ends it, with TalkQTE's own code and the check named.
+    #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+    #[test]
+    fn a_transient_identity_failure_past_110_s_does_not_end_the_source_but_a_lasting_one_does() {
+        use crate::application_audio::Gate;
+        use crate::dev_lab_source::Check;
+        use std::time::{Duration, Instant};
+        let gate = Gate::default();
+        let review = gate
+            .review(
+                Application::new(
+                    "fictional-player".into(),
+                    crate::dev_lab_source::PLAYER.into(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let control = review.control();
+        let fault = StreamFault::new(control.clone());
+        let start = Instant::now();
+        let poll = Duration::from_millis(20);
+        let mut at = Duration::ZERO;
+        while at < Duration::from_secs(120) {
+            let switching = at >= Duration::from_secs(110) && at < Duration::from_millis(110_500);
+            fault.inspect_lab_source(start + at, || {
+                if switching {
+                    Check::Transient("running_application")
+                } else {
+                    Check::Current
+                }
+            });
+            assert!(!control.is_cancelled(), "ended at {at:?}");
+            at += poll;
+        }
+        assert!(!fault.failed.load(Ordering::Acquire));
+        assert_eq!(fault.code.load(Ordering::Acquire), NO_CODE);
+        // The same failure, lasting: it ends the source once the grace is spent.
+        let lasting = at;
+        while at < lasting + super::super::LAB_SOURCE_GRACE + poll * 2 {
+            fault.inspect_lab_source(start + at, || Check::Transient("bundle_identifier"));
+            let spent = at - lasting >= super::super::LAB_SOURCE_GRACE;
+            assert_eq!(control.is_cancelled(), spent, "at {:?}", at - lasting);
+            at += poll;
+        }
+        assert_eq!(
+            fault.code.load(Ordering::Acquire),
+            super::super::LAB_SOURCE_LOST
+        );
+        assert_eq!(
+            fault.lab_detail().as_deref(),
+            Some("lab source check bundle_identifier kept failing for 2 s")
+        );
+        // The log's label tells it apart from ScreenCaptureKit's own source_gone.
+        let code = fault.code.load(Ordering::Acquire);
+        let problem = super::super::classify(code, Problem::StreamFailed);
+        assert_eq!(super::super::label(problem, code), "lab_source_lost");
+        let macos = SCStreamErrorCode::NoCaptureSource.0 as i64;
+        let problem = super::super::classify(macos, Problem::StreamFailed);
+        assert_eq!(super::super::label(problem, macos), "source_gone");
+    }
+
+    #[test]
+    fn the_stream_requests_audio_and_bounded_unused_video_settings() {
+        // A memory-only configuration object; no stream, capture or permission.
+        let config = audio_only_configuration();
+        let interval = unsafe { config.minimumFrameInterval() };
+        unsafe {
+            assert!(config.capturesAudio());
+            assert!(config.excludesCurrentProcessAudio());
+            assert_eq!(config.sampleRate(), 16_000);
+            assert_eq!(config.channelCount(), 1);
+            // Assert the requested properties, not delivered frame behavior.
+            assert_eq!((config.width(), config.height()), (2, 2));
+            assert!(!config.showsCursor());
+        }
+        assert_eq!((interval.value, interval.timescale), (1, 1));
+        assert!(interval
+            .flags
+            .contains(objc2_core_media::CMTimeFlags::Valid));
+    }
 
     #[test]
     fn a_start_completion_records_only_its_first_result_and_the_first_error_code() {

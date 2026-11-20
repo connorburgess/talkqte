@@ -78,23 +78,23 @@ for (const size of ['standard', 'large'] as const)
       size,
     );
     await page.evaluate((value) => window.liveTest.setCue(value), cue);
-    for (const width of [360, 420]) {
+    for (const width of [320]) {
       await page.setViewportSize({
         width,
-        height: size === 'large' ? 420 : 340,
+        height: size === 'large' ? 276 : 232,
       });
       // Capture is on: a microphone glyph with its dot, and no words.
       const dot = bar.getByRole('img', { name: 'Signal detected' });
       await expect(dot).toBeInViewport({ ratio: 1 });
       await expect(bar.locator('.companion-capture')).toHaveAttribute(
         'title',
-        'Mic on · Local',
+        'Mic on · not transcribing yet',
       );
       // The words stay for assistive technology, out of sight.
       const status = bar.getByRole('status');
-      await expect(status).toHaveText('Mic on · Local');
+      await expect(status).toHaveText('Mic on · not transcribing yet');
       expect((await status.boundingBox())!.width).toBeLessThanOrEqual(1);
-      await expect(bar).toHaveText('Mic on · Local');
+      await expect(bar).toHaveText('Mic on · not transcribing yet');
 
       // Three controls, each an icon with a name and the same tooltip.
       const controls = bar.getByRole('button');
@@ -192,7 +192,7 @@ test('the bar never shows capture that is not happening, and spells out any stat
   await expect(
     bar.getByRole('img', { name: 'Application audio on' }),
   ).toBeVisible();
-  await expect(status).toHaveText('App audio · Local');
+  await expect(status).toHaveText('App audio · not transcribing yet');
   await expect(
     bar.getByRole('img', { name: /Signal detected|Quiet input/ }),
   ).toHaveCount(0);
@@ -250,7 +250,7 @@ test('a model connection shows while lines may be sent, and why it stopped', asy
     bar.getByRole('img', { name: 'Model cues on: recent lines go to Claude' }),
   ).toBeVisible();
   await expect(bar.getByRole('status')).toHaveText(
-    'Mic on · lines go to Claude',
+    'Mic on · to Deepgram and Claude',
   );
   await publish({ model: 'sending' });
   await expect(
@@ -270,7 +270,9 @@ test('a model connection shows while lines may be sent, and why it stopped', asy
   await expect(off).toContainText(
     'your Claude usage or rate limit was reached',
   );
-  await expect(bar.getByRole('status')).toHaveText('Mic on · Local');
+  await expect(bar.getByRole('status')).toHaveText(
+    'Mic on · not transcribing yet',
+  );
 });
 
 test('with cloud transcription, the bar says where audio goes and never says Local', async ({
@@ -313,7 +315,7 @@ test('Codex lab disclosure uses the selected provider and strict first-timeout p
     page.evaluate((value) => window.liveTest.publish(value as never), value);
   await publish({ model: 'sending', modelProvider: 'Codex', modelLab: true });
   await expect(bar.getByRole('status')).toHaveText(
-    'Mic on · lines go to Codex',
+    'Mic on · to Deepgram and Codex',
   );
   await expect(
     bar.getByRole('img', { name: 'Sending recent lines to Codex' }),

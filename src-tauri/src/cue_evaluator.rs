@@ -15,6 +15,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod selected_snapshot;
+pub use selected_snapshot::{SELECTED_SNAPSHOT_FRAME_BYTES, SELECTED_SNAPSHOT_INPUT_BYTES};
+
 pub const MAX_SOURCES: usize = 32;
 pub const MAX_SOURCE_BYTES: usize = 4_096;
 pub const MAX_CONTEXT_BYTES: usize = 32_768;
@@ -60,6 +63,9 @@ pub struct ExistingCue {
     pub id: String,
     pub text: String,
     pub source_ids: Vec<String>,
+    /// The engine's own "Asked you" cue, a question put to the user by name:
+    /// the model may say it was answered, never withdraw or replace it.
+    pub asked: bool,
 }
 
 /// Immutable input. The context revision must change for topic, focus, pause,
@@ -242,12 +248,14 @@ impl Request {
                 Provenance::PriorNote { .. } => return Err(Failure::InvalidInput),
             }
         }
-        // Built by hand to keep the lab's field order: text, then sourceIds.
+        // Built by hand to keep the lab's field order: text, sourceIds, then
+        // kind, which only an "Asked you" cue has.
         let cue = self.existing_cue.as_ref().map(|cue| {
             format!(
-                "{{\"text\":{},\"sourceIds\":{}}}",
+                "{{\"text\":{},\"sourceIds\":{}{}}}",
                 serde_json::Value::from(cue.text.as_str()),
-                serde_json::Value::from(cue.source_ids.clone())
+                serde_json::Value::from(cue.source_ids.clone()),
+                if cue.asked { ",\"kind\":\"asked\"" } else { "" }
             )
         });
         let mut text = format!(
@@ -423,6 +431,16 @@ pub(crate) enum Settlement {
 }
 
 pub(crate) trait EvaluationLifecycle: Send + Sync {
+    fn required_note_count(&self) -> Option<usize> {
+        None
+    }
+    fn approve_notes(&self, _session: u64, _notes: &[Source]) -> Result<(), Failure> {
+        Ok(())
+    }
+    fn scope_ready(&self) -> bool {
+        true
+    }
+    fn retire_scope(&self) {}
     fn terminal(&self) -> Option<Failure>;
     fn cancel(&self);
     fn settle(&self, request: &Request, verdict: Settlement) -> Result<(), Failure>;
@@ -728,6 +746,7 @@ mod tests {
                 id: "cue-1".into(),
                 text: "Who will send the garden checklist?".into(),
                 source_ids: vec!["e1".into()],
+                asked: false,
             }),
         )
         .unwrap()
