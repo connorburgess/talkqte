@@ -115,7 +115,7 @@ function FloatingQuestion() {
         if (disposed) unlisten();
         else stop = unlisten;
       })
-      // Without an answer the bar stays on top, where it was before.
+      // If the page cannot listen at all, the bar stays on top.
       .catch(() => {});
     return () => {
       disposed = true;
@@ -1766,7 +1766,15 @@ function Notebook() {
                   }}
                   onBlur={saveName}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') saveName();
+                    // Enter that confirms an input-method composition is not
+                    // a submission. Safari reports it as keyCode 229 after
+                    // compositionend.
+                    if (
+                      e.key === 'Enter' &&
+                      !e.nativeEvent.isComposing &&
+                      e.keyCode !== 229
+                    )
+                      saveName();
                   }}
                 />
                 {nameError && (

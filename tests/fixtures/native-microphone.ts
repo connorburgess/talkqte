@@ -244,6 +244,14 @@ async function say(text: string, question?: string) {
 let companionEdge: 'top' | 'bottom' =
   (window as typeof window & { standInEdge?: 'top' | 'bottom' }).standInEdge ??
   'top';
+/** How the native side answers the page's read of that edge: at once, held
+ * until a test releases it, or with an error. Set with
+ * `window.standInEdgeReply` before loading. */
+const edgeReply = (
+  window as typeof window & { standInEdgeReply?: 'hold' | 'fail' }
+).standInEdgeReply;
+let releaseEdge: ((edge: 'top' | 'bottom') => void) | null = null;
+let edgeAsked = false;
 mockIPC(
   async (command, args) => {
     calls.push(command);
@@ -309,6 +317,13 @@ mockIPC(
       case 'snapshot':
         return structuredClone(session);
       case 'companion_anchor':
+        edgeAsked = true;
+        if (edgeReply === 'fail')
+          throw new Error('The session is unavailable.');
+        if (edgeReply === 'hold')
+          return new Promise((resolve) => {
+            releaseEdge = resolve;
+          });
         return companionEdge;
       case 'microphone_snapshot':
         return delayed
@@ -538,6 +553,12 @@ declare global {
       setQuestionSize: (size: Snapshot['questionSize']) => Promise<void>;
       /** The edge the native companion window keeps when it grows. */
       anchor: (edge: 'top' | 'bottom') => Promise<void>;
+      /** Whether the page has asked for the edge; it listens first. */
+      edgeAsked: () => boolean;
+      /** Whether the page's read of the edge is waiting for an answer. */
+      edgePending: () => boolean;
+      /** Answers a held read with this edge. */
+      releaseEdge: (edge: 'top' | 'bottom') => void;
       setSourceSession: (sourceSession: boolean) => Promise<void>;
       rejectNextPause: () => void;
     };
@@ -621,6 +642,12 @@ window.liveTest = {
   anchor: (edge) => {
     companionEdge = edge;
     return emit('companion:anchor', edge);
+  },
+  edgeAsked: () => edgeAsked,
+  edgePending: () => !!releaseEdge,
+  releaseEdge: (edge) => {
+    releaseEdge?.(edge);
+    releaseEdge = null;
   },
   // Development builds only: the cue snapshot marks a session fed by an
   // application alone.

@@ -520,3 +520,45 @@ test('a companion that loads while kept by its bottom edge has its bar at the bo
   const below = (await bar.boundingBox())!;
   expect(card.y + card.height).toBeLessThanOrEqual(below.y);
 });
+
+test('a move reported while the page is still reading the edge wins over the older answer', async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    Object.assign(window, { standInEdgeReply: 'hold' }),
+  );
+  const { bar, question } = await companion(page, 'reduce');
+  await expect
+    .poll(() => page.evaluate(() => window.liveTest.edgePending()))
+    .toBe(true);
+  // The window moves and keeps its bottom edge; then the read answers with
+  // what was true before the move.
+  await page.evaluate(() => window.liveTest.anchor('bottom'));
+  await page.evaluate(() => window.liveTest.releaseEdge('top'));
+  await show(page, first);
+  await expect(question.getByRole('heading')).toHaveText(first.question);
+  const card = (await question.boundingBox())!;
+  expect(card.y + card.height).toBeLessThanOrEqual(
+    (await bar.boundingBox())!.y,
+  );
+});
+
+test('when the page cannot read the edge it still follows the next move', async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    Object.assign(window, { standInEdgeReply: 'fail' }),
+  );
+  const { bar, question } = await companion(page, 'reduce');
+  // The read has failed; the window moves afterwards.
+  await expect
+    .poll(() => page.evaluate(() => window.liveTest.edgeAsked()))
+    .toBe(true);
+  await page.evaluate(() => window.liveTest.anchor('bottom'));
+  await show(page, first);
+  await expect(question.getByRole('heading')).toHaveText(first.question);
+  const card = (await question.boundingBox())!;
+  expect(card.y + card.height).toBeLessThanOrEqual(
+    (await bar.boundingBox())!.y,
+  );
+});

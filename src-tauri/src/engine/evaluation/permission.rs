@@ -46,6 +46,7 @@ pub struct ProcessorConfiguration {
     effort: Option<String>,
     /// Whether this backend may be sent approved prior notes.
     pub(super) accepts_notes: bool,
+    pub(super) required_note_count: Option<usize>,
     /// Where the session's audio goes for transcription once this review is
     /// approved, when a cloud transcription service is selected. Part of the
     /// reviewed configuration, so the review names it as a destination.
@@ -80,6 +81,7 @@ impl ProcessorConfiguration {
             disclosure,
             effort: None,
             accepts_notes: true,
+            required_note_count: None,
             audio_destination: None,
             bounded_history: false,
         })
@@ -89,6 +91,21 @@ impl ProcessorConfiguration {
     /// is refused, so the review cannot say a note will be sent.
     pub fn without_notes(mut self) -> Self {
         self.accepts_notes = false;
+        self
+    }
+
+    /// An explicit diagnostic count, displayed before the owner prepares review.
+    #[cfg(any(
+        all(test, unix),
+        all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        )
+    ))]
+    pub(crate) fn with_required_note_count(mut self, count: Option<usize>) -> Self {
+        self.required_note_count = count;
         self
     }
 
@@ -245,7 +262,12 @@ impl Engine {
         if state.misconfigured || state.lab_terminal || self.model_calls_exhausted() {
             return Err(ProcessingError::Unavailable);
         }
-        if notes.len() > crate::context::MAX_ITEMS
+        if state
+            .lab
+            .as_ref()
+            .and_then(|lab| lab.required_note_count())
+            .is_some_and(|count| count != notes.len())
+            || notes.len() > crate::context::MAX_ITEMS
             || (!notes.is_empty() && !state.permission.processor.accepts_notes)
         {
             return Err(ProcessingError::InvalidScope);
@@ -343,6 +365,15 @@ impl Engine {
             return Err(ProcessingError::Unavailable);
         }
         let notes = self.reviewed_sources(&review)?;
+        if self
+            .evaluation
+            .as_ref()
+            .and_then(|s| s.lab.as_ref())
+            .and_then(|lab| lab.required_note_count())
+            .is_some_and(|count| count != notes.len())
+        {
+            return Err(ProcessingError::InvalidScope);
+        }
         self.revoke_processing();
         if self.evaluation.as_ref().is_some_and(|s| s.lab_terminal) {
             return Err(ProcessingError::Unavailable);
@@ -355,8 +386,14 @@ impl Engine {
                 ConversationScope::NewSpeechOnly => Some(self.state.elapsed_ms),
                 ConversationScope::RecentAndNewSpeech => None,
             },
-            notes,
+            notes: notes.clone(),
         });
+        if let Some(lab) = self.evaluation.as_ref().and_then(|s| s.lab.as_ref()) {
+            if lab.approve_notes(self.generation, &notes).is_err() {
+                self.revoke_processing();
+                return Err(ProcessingError::Unavailable);
+            }
+        }
         // A new grant starts afresh: no run of timeouts, and no earlier cues
         // drawn from speech the new grant may not cover.
         if let Some(state) = &mut self.evaluation {
@@ -407,6 +444,11 @@ impl Engine {
             .evaluation
             .as_ref()
             .is_some_and(|state| state.permission.grant.is_some());
+        if was_on {
+            if let Some(lab) = self.evaluation.as_ref().and_then(|s| s.lab.as_ref()) {
+                lab.retire_scope();
+            }
+        }
         self.invalidate_evaluation();
         self.evaluation.as_mut().unwrap().permission.revoke();
         if was_on {
@@ -437,6 +479,9 @@ impl Engine {
             return None;
         }
         let state = self.evaluation.as_ref()?;
+        if state.lab.as_ref().is_some_and(|lab| !lab.scope_ready()) {
+            return None;
+        }
         if state.approval_by_setting {
             return None;
         }

@@ -36,11 +36,50 @@ pub const ENV: &str = "TALKQTE_TIMING_LOG";
 #[cfg(feature = "timing-log")]
 const QUEUE: usize = 1024;
 
+/// Closed development-source diagnostic vocabulary. No caller-supplied text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceStartStage {
+    CloudReadiness,
+    RuntimeAccess,
+    RuntimeStart,
+    SessionCreated,
+    RecognizerLoad,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceStartReason {
+    Ready,
+    CloudBuildMissing,
+    CloudNotSelected,
+    CloudSettingsInvalid,
+    TokenMetadataRejected,
+    RuntimeUnavailable,
+    RuntimeRefused,
+    MicrophoneBusy,
+    Created,
+    LoadRefused,
+}
+
 /// One timed event. Times named `*_ms` without `wall` or `mono` are on the
 /// engine's session clock.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
+    /// Raw private diagnostic only; existing lifecycle readers ignore this new
+    /// event. It never grants readiness, permission, identity or release.
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    LabSourceStartup {
+        version: u8,
+        stage: SourceStartStage,
+        reason: SourceStartReason,
+    },
     /// Owned development process Stop handshake. Receipt is not release.
     DevStop { run_id: String, step: &'static str },
     /// A session started or ended, with its clock at that moment. Anchors
