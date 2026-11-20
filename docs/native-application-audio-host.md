@@ -112,18 +112,23 @@ The command takes one action at a time and returns the current status.
 2. `review`, naming one listed application. Nothing is requested of the OS. A
    later review replaces this one, and the earlier approval is worthless.
 3. `start`, naming that review. Only the application under review can start.
-   The worker loads a second local recognizer, checks that the live session is
-   still the one that was running when it began loading, accepts the session
-   clock, which attaches the source to that session, and only then begins the
-   native stream for that one application. A start stopped while it waited
-   loads nothing.
+   Before any native request the worker takes the source's cloud
+   transcription from this launch's settings, refusing the start if there is
+   none ([cloud transcription](cloud-transcription.md)). It then checks that
+   the live session is still the one that was running when it began, accepts
+   the session clock, which attaches the source to that session, and only then
+   begins the native stream for that one application. The source's own stream
+   to Deepgram opens only once the session's cue processing review is
+   approved. A start stopped while it waited starts nothing. (Until 16
+   November 2026 the worker loaded a second local recognizer here; on-device
+   transcription has since been removed.)
 4. `stop`, naming the review or operation. A request for another operation is
    refused as changed. The live session's own Stop also ends the source.
 5. `retryCleanup`, naming the operation, after the status has shown a failed
    cleanup. Otherwise it is refused as nothing to retry.
 
 A start needs a running live session with no other application source. If
-there is none, or the build has no local transcription, the start ends before
+there is none, or the build or launch has no usable cloud transcription, the start ends before
 any native request and the status says why.
 
 ### A session for one application alone
@@ -133,17 +138,17 @@ own instead of joining one. This is the plan's first step: one application's
 audio, with no microphone.
 
 - The worker begins the live session itself, through the same startup gate as
-  Start live session, but loads no model for the session and opens no
-  microphone. The source's worker loads its own recognizer, as before. It is
+  Start live session, but opens no microphone. The source's worker sets up
+  its own cloud transcription, as above. It is
   refused, with nothing started and nothing cleared, while another live
   session, a live start or the demo runs, and while the microphone may be
   capturing: open in any way (an activity check, for example), failed with its
   cleanup still pending, or behind a controller that cannot be read. The
   status then says `sessionBusy`. A microphone that failed and has released
   its device, for example after a denied permission, does not block it. It is also refused, as `unavailable`, when
-  the build has no local transcription or no installed model, so it never
-  clears the previous session only to end at once. A model that is present but
-  fails its checksum is still found only when the source's worker loads it.
+  the build has no live transcription, or the launch has not selected cloud
+  transcription with usable settings, so it never clears the previous session
+  only to end at once.
 - The microphone check and the session cannot overlap in either order: the
   session checks the microphone under the runtime lock, and a standalone
   microphone check is refused while any live session runs, both before it
@@ -162,8 +167,8 @@ audio, with no microphone.
   the source's own Stop, a stream failure, a failed cleanup or an abandoned
   worker. Nothing could be delivered any more. A failed or abandoned cleanup
   still reads as possibly capturing after the session has ended. A source
-  stopped before it attached, for example by its own Stop while its recognizer
-  loads, ends the session on the next sync too. If the source never attaches
+  stopped before it attached, for example by its own Stop during its start,
+  ends the session on the next sync too. If the source never attaches
   and is not stopped, the worker ends the session when its run ends, also
   while unwinding.
 - A session stopped before its source began ends Off with no problem.
@@ -204,10 +209,11 @@ has lasted five seconds. That number is host wording policy, not a measured
 release time, and nothing is forced, retried or reported Off when it passes. `canRetry` is true only in `cleanupFailed`. The status also carries the
 application name, an opaque operation identifier, the listed choices, a
 problem label and the scope notice. After a released operation it also carries
-that run's counts: chunks recognized, lines accepted and refused, lines timed
-outside their audio, chunks withheld or refused, recognizer failures, whether
-the transcription worker had to be detached, and the width of the accepted
-clock read. It carries no audio, transcript or native identifier.
+that run's counts: milliseconds of audio sent to the cloud stream, final
+results it returned, lines accepted and refused, samples dropped because the
+send queue was full, and the width of the accepted clock read. (Before 16
+November 2026 the record counted the former local recognizer's chunks and
+failures instead.) It carries no audio, transcript or native identifier.
 
 The event is published by a 200 ms refresh, so `application-audio:changed`
 can trail the state by up to that long. The command's own reply is current.
@@ -295,8 +301,8 @@ the native request, and two are table checks:
   no problem and no native request.
 - It is refused, as `sessionBusy` and with nothing started, beside another
   live session, which is left running.
-- It is refused with the microphone open (`sessionBusy`) or with no
-  recognizer (`unavailable`), installing no session and leaving the previous
+- It is refused with the microphone open (`sessionBusy`) or with no live
+  transcription (`unavailable`), installing no session and leaving the previous
   one as it was.
 - The source-session flag is absent before the session has begun and from
   Stop on.
@@ -318,10 +324,12 @@ the native request, and two are table checks:
   accepted, however long it stays unanswered.
 - A listing cancelled, or overtaken by an exit request, while the worker is
   still busy is answered as cancelled and the backend is not asked again.
-- Before the native request, in order: a stopped start loads no recognizer; a
-  source that is not one of the listed selections is refused; no live session
-  is refused; a recognizer that cannot load is refused; and a live session
-  replaced while the recognizer loads is refused. This runs the same function
+- Before the native request, in order: a stopped start sets up no
+  transcription; a source that is not one of the listed selections is
+  refused; no live session is refused; a start whose transcription cannot be
+  set up is refused; and a live session replaced meanwhile is refused. (These
+  were written for the former local recognizer and now run with scripted
+  cloud streams.) This runs the same function
   the app uses, with a shared runtime in place of the app's.
 - A Stop completion that never arrives reads `stopping`, then `stalled`, an
   hour later still not Off, with no retry offered, also after an exit request.
@@ -391,13 +399,14 @@ the session, as above. Once Stop is under way, or cleanup failed or was
 abandoned, it is not offered; the line says how cleanup is going.
 
 In a session for an application alone, the microphone panel says the
-application's audio is transcribed on this device and that the microphone is
-not used, and Stop live session ends the session. The session strip, the cue
+application's audio is transcribed by Deepgram once cue processing is enabled
+and that the microphone is not used, and Stop live session ends the session. The session strip, the cue
 pause hint and the Transcript tab credit the application instead of the
 microphone. The finishing line names application audio only while the source
 may still be capturing. The companion, which has no processing snapshot, reads a
-metadata-only flag on its cue snapshot: it shows "App audio · Local" (or "App
-audio still on" with cues paused) instead of a bare "Off", and its pause hint
+metadata-only flag on its cue snapshot: it shows "App audio" with where its
+audio goes, such as "App audio · not transcribing yet" before approval (or
+"App audio still on" with cues paused), instead of a bare "Off", and its pause hint
 names application audio. The flag is absent from every other snapshot, and
 from all of them in a default build.
 
@@ -405,11 +414,11 @@ from all of them in a default build.
 
 The app wiring was compiled with the feature and never executed: the command,
 its permission added at startup, the status event, the exit hook and the real
-enumeration. The second recognizer's loading code exists only when
-`local-whisper` is enabled as well, which is the one configuration that can
-actually start a source. That pair was compiled and linted locally for this
-change; CI compiles `native-audio-spike` alone, where a start is refused for
-lack of local transcription. Treat all of it as unverified until a development
+enumeration. A source can start only when `cloud-transcription` (switched on
+by `lab-evaluator`) is enabled as well and the launch selects it. Until 16
+November 2026 that role was played by `local-whisper`, which was compiled and
+linted locally with this feature; CI compiles `native-audio-spike` alone,
+where a start is refused for lack of live transcription. Treat all of it as unverified until a development
 build is run on a device.
 
 Against the [selected-application acceptance gates](system-audio-plan.md):
@@ -445,7 +454,7 @@ Against the [selected-application acceptance gates](system-audio-plan.md):
   transcript quality must not be judged through this host. The refused-line
   count in the run's record shows how many of the source's lines were lost
   this way, not the microphone's.
-- **Performance: open.** A second recognizer is loaded for the source; its
+- **Performance: open.** The source has its own cloud stream; its network,
   memory and CPU cost against the budgets is unmeasured.
 
 Also open: handing the listed content object from the framework's queue to the
