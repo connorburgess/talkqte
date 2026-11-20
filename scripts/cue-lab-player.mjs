@@ -466,6 +466,19 @@ function playerController({
     stderrBytes = 0,
     preparationProgress = null,
     preparationProgressCount = 0,
+    transport = Object.freeze({
+      lastStep: null,
+      bytesRead: 0,
+      parsedCommands: 0,
+      appliedCommands: 0,
+      clockProbeQueued: false,
+      clockProbeParsed: false,
+      clockProbeApplied: false,
+      clockSampleReceived: false,
+      stoppedAcknowledged: false,
+    }),
+    parsedControl = [],
+    transportFrames = 0,
     partial = Buffer.alloc(0),
     bytes = 0,
     partialTimer,
@@ -522,6 +535,8 @@ function playerController({
         child.stdin.writableLength + Buffer.byteLength(raw) <= 16384,
     );
     child.stdin.write(raw);
+    if (type === 'clock_probe')
+      transport = Object.freeze({ ...transport, clockProbeQueued: true });
   };
   const receive = (frame) => {
     required(
@@ -531,6 +546,70 @@ function playerController({
         frame.generation === '1' &&
         frame.mediaSha256 === LAB_PLAYER_MEDIA_SHA256,
     );
+    if (frame.type === 'transport_progress') {
+      required(
+        exact(frame, [
+          ...BASE,
+          'step',
+          'command',
+          'commandIndex',
+          'bytesRead',
+        ]) &&
+          ++transportFrames <= 10 &&
+          integer(frame.bytesRead, 0, 4 * 16384) &&
+          integer(frame.commandIndex, 0, 4) &&
+          [
+            'read',
+            'parsed',
+            'applied',
+            'eof',
+            'read-error',
+            'protocol-error',
+          ].includes(frame.step),
+      );
+      if (frame.step === 'read')
+        required(
+          transport.lastStep === null &&
+            frame.command === 'none' &&
+            frame.commandIndex === 0 &&
+            frame.bytesRead > 0,
+        );
+      else if (frame.step === 'parsed') {
+        required(
+          ['clock_probe', 'start', 'stop', 'retire'].includes(frame.command) &&
+            frame.commandIndex === parsedControl.length + 1,
+        );
+        parsedControl.push(frame.command);
+      } else if (frame.step === 'applied')
+        required(
+          frame.commandIndex === transport.appliedCommands + 1 &&
+            parsedControl[frame.commandIndex - 1] === frame.command,
+        );
+      else
+        required(
+          frame.command === 'none' &&
+            frame.commandIndex === parsedControl.length,
+        );
+      transport = Object.freeze({
+        ...transport,
+        lastStep: frame.step,
+        lastCommand: frame.command,
+        commandIndex: frame.commandIndex,
+        clockProbeParsed:
+          transport.clockProbeParsed ||
+          (frame.step === 'parsed' && frame.command === 'clock_probe'),
+        clockProbeApplied:
+          transport.clockProbeApplied ||
+          (frame.step === 'applied' && frame.command === 'clock_probe'),
+        bytesRead: Math.max(transport.bytesRead, frame.bytesRead),
+        parsedCommands: parsedControl.length,
+        appliedCommands:
+          frame.step === 'applied'
+            ? frame.commandIndex
+            : transport.appliedCommands,
+      });
+      return;
+    }
     if (frame.type === 'failed') {
       required(
         exact(frame, [
@@ -565,6 +644,7 @@ function playerController({
           frame.engineRunning === false &&
           typeof frame.completed === 'boolean',
       );
+      transport = Object.freeze({ ...transport, stoppedAcknowledged: true });
       stopped.resolve(frame);
       return;
     }
@@ -688,6 +768,7 @@ function playerController({
       };
       required(bridge.receivedMs - sentMs <= 100);
       labPlayerClockOffset({ ...bridge, continuousTicks: bridge.hostTicks });
+      transport = Object.freeze({ ...transport, clockSampleReceived: true });
       clock.resolve();
     } else if (frame.type === 'started') {
       required(playing && !started && frame.totalFrames === totalFrames);
@@ -829,6 +910,7 @@ function playerController({
         stderrBytes: Math.min(stderrBytes, 128 * 1024),
         preparationProgress,
         preparationProgressCount,
+        transport,
         prepared,
         started,
         audioCompleted: !!audioCompletion,
@@ -921,7 +1003,7 @@ function playerController({
         });
         const decoder = new TextDecoder('utf-8', { fatal: true });
         child.stdout.on('data', (chunk) => {
-          if (closing && failed) return;
+          // Stop/transport acknowledgements still belong to this process after failure.
           try {
             bytes += chunk.length;
             required(bytes <= 128 * 1024);
@@ -1060,6 +1142,8 @@ export function createLabPlayerFixture({
       'progress-duplicate',
       'progress-unknown',
       'wrong-pcm-format',
+      'no-clock',
+      'bad-transport',
       'missing-video',
       'wrong-pid',
       'wrong-run',
