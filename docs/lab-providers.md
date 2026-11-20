@@ -160,3 +160,15 @@ A take on this route allows 40 calls, against 20 for Codex. Four limits apply: t
 **Evidence:** per call, content-free receipts keep the time to first byte and first token, the stop reason, a refusal category, token usage and the computed cost. The run's estimated total spend is available beside the receipts. No prompt, reply or key text is kept.
 
 Tests drive the adapter with a fake fetch or a loopback stand-in endpoint and a dummy key; no test reaches the network.
+
+### Parent enforcement of API worker cleanup
+
+The parent independently watches each API request's adapter deadline. At that
+ceiling, or on a request abort, root abort or close, it asks the worker to abort.
+A cooperative scoped abort can keep the worker usable. If the worker does not
+settle within one second, the parent ends the session and retires its owned
+process group, using the existing bounded TERM/KILL confirmation. During that
+forced retirement, an exit or late reply cannot settle the request before group confirmation;
+unconfirmed retirement remains a cleanup failure. An incomplete call keeps its
+original abort cause and is charged the existing estimated worst case. No new
+request or provider budget is allowed during this cleanup.
