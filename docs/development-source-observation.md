@@ -1,6 +1,6 @@
 # Development selected-source observation
 
-An armed development QuickTime source run can emit versioned, content-free
+An armed development QuickTime or [identity-pinned owned player](development-owned-player-source.md) source run can emit versioned, content-free
 identity observations on its existing private timing channel. This is a narrow
 addition to the [owned-process Stop handshake](development-lab-evaluator.md#stop-for-an-owned-development-process),
 not a new Start/control interface. It requires the same macOS debug,
