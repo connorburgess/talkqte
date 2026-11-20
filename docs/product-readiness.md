@@ -6,6 +6,12 @@ TalkQTE should help people stay grounded and respond during a conversation throu
 
 The current public objective is to explain the idea with a clearly labeled fictional concept preview and invite people to follow development. Downloads, tester recruitment, and a broad launch are not current calls to action. The pilot and distribution stages below remain preparation for later decisions. Saving and note-taking are secondary use cases; a successful preview or first experience need not end in a saved artifact.
 
+## Current provider checkpoint — 20 November 2026
+
+Deepgram streaming and the Anthropic API are the selected development direction. The cloud implementation is merged; optional development features and session review still gate processing. Ordinary and release builds have no live transcription. Earlier dated checkpoints below describe the source and observations at their recorded dates, including the former local Whisper path; they are not current setup instructions. See [cloud transcription](cloud-transcription.md) and the [current provider release blocker](#cloud-providers-for-a-shipped-product).
+
+No roadmap item is completed by this reconciliation. The next technical blocker is a separately authorized synthetic call proving both sides, cloud latency and native Stop/recovery (**T2**, **T5**). A fictional showcase or lab response is not a production release or evidence of participation benefit; the human comparison (**V5**–**V7**) and shipped operating model remain separate gates.
+
 ## Areas every release must account for
 
 | Area                                  | What readiness means                                                                                        | Next evidence to collect                                                                                                                                                           |
@@ -15,7 +21,7 @@ The current public objective is to explain the idea with a clearly labeled ficti
 | Compatibility and accessibility       | Explicit supported OS, hardware, meeting apps, languages, and assistive setups                              | Native focus, Spaces, full-screen, sharing, keyboard, VoiceOver, and permission-denial checks; unsupported cases remain visible                                                    |
 | Integrations                          | Supported, scoped connections with provenance, understandable errors, and independent core operation        | After the recorded basic native import/removal, verify source/date, selection exclusion, refresh, disconnect/reconnect and data lifecycle on the authorized account                |
 | Privacy, security, and data lifecycle | Clear input/processing state, protected credentials, chosen retention, reliable deletion, and safe exports  | Follow data from capture/import through storage, logs, diagnostics, deletion, and export; test boundaries and failure cases against [PRIVACY.md](../PRIVACY.md)                    |
-| Installation, models, and updates     | An ordinary user can install, try, upgrade, recover, and uninstall without a development environment        | Clean-machine install and upgrade tests; interrupted model downloads, integrity checks, low disk space, compatible model versions, and recovery without losing saved work          |
+| Installation, provider setup, and updates     | An ordinary user can install, try, upgrade, recover, and uninstall without a development environment        | Clean-machine install and upgrade tests; provider credential setup, low disk space, compatible app versions, and recovery without losing saved work          |
 | Discovery and onboarding              | Explain the concept and invite following development now; prepare a short path to supported first use later | Review whether the fictional preview communicates timely context without implying live functionality; later, observe supported setup and record time, abandonment, and help needed |
 | Support and operation                 | Known limitations, release notes, troubleshooting, a support route, and a response plan for failed releases | Rehearse a failed update/provider outage; offer user-reviewed diagnostics without meeting content; assign a release/support owner                                                  |
 | Sustainability                        | A viable cost and maintenance model as usage grows                                                          | Estimate artifact bandwidth, storage, signing/release operations, per-minute transcription and per-request cue costs (a core cost, not an optional one), and support effort; review dependency and provider terms before distribution    |
@@ -183,7 +189,7 @@ Acceptance for this blocker, for each provider:
 - the owner chooses an operating model, and it is built;
 - the provider's terms and data handling are reviewed, and [PRIVACY.md](../PRIVACY.md) links the reviewed terms without stating the provider's retention as fact;
 - every request carries the agreed settings, checked by a test (for Deepgram, the model-improvement opt-out);
-- nothing is sent before consent, after Stop or after the person turns it off;
+- nothing is sent before consent or after processing is disabled; Stop releases capture and prevents new cue work, with the microphone's already-captured audio allowed only its documented bounded transcription drain ([Stop behavior](cloud-transcription.md#what-stops-it));
 - a fresh build connects as the chosen arrangement requires, on a clean Mac;
 - latency is measured against the [budgets](budgets.md), speech to transcript line for Deepgram and the cue round trip for the Anthropic API, and cue quality on the lab's cases, before any real conversation.
 
@@ -239,7 +245,7 @@ The roadmap's full future feature set need not block a clearly scoped pilot. Eac
 
 At each planning pass, read the current product goal, roadmap, research notes, and this plan. Identify the most important unmet readiness condition for the next milestone, then choose a small task with observable evidence. Record which area it advances, the acceptance check, dependencies, and remaining gap in the relevant PR or roadmap entry. A feature PR need not solve every area; consequential gaps must become named follow-up work.
 
-The support matrix and resource targets, Granola connection decision, and installation/update plans already exist. The next evidence is native source selection and Stop/recovery, the remaining Granola account checks, native accessibility, and—when distribution is authorized—clean installation and upgrade recovery. Human-cued participation/listening validation remains a separate gate; a production cue provider is still unselected. Review coverage across all areas at milestone boundaries. Add another component, tool or integration only when it resolves a named failure or is needed for the next acceptance check; do not extend preparation merely because native or participant evidence is waiting.
+The support matrix and resource targets, Granola connection decision, and installation/update plans already exist. The next evidence is native source selection and Stop/recovery, the remaining Granola account checks, native accessibility, and—when distribution is authorized—clean installation and upgrade recovery. Human-cued participation/listening validation remains a separate gate; the Anthropic API is selected, while its shipped operating model and production acceptance remain open. Review coverage across all areas at milestone boundaries. Add another component, tool or integration only when it resolves a named failure or is needed for the next acceptance check; do not extend preparation merely because native or participant evidence is waiting.
 
 ### Capability and documentation review
 

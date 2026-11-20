@@ -9,7 +9,7 @@ Status: first estimate, 9 November 2026. It separates what was measured from wha
 | App bundle               | 15.3 MiB on disk, 4.7 MB zipped | `npm run tauri -- build --bundles app --features local-whisper`, ad-hoc signed, Apple silicon (arm64) only, compressed with `ditto -c -k` |
 | Speech model (`tiny.en`) | 77.7 MB (77,704,715 bytes)      | The pinned file in [model delivery](model-delivery.md); gzip shrinks it only to 70.5 MB, so compressing it for delivery saves little      |
 
-Derived from these: a first download is about 82 MB (4.7 MB app plus 77.7 MB model), and about 94 MB on disk once installed. The model is optional and only needed for live sessions. Local transcription was removed on 16 November 2026, so the model and its bandwidth on this page no longer apply and the first download is the app alone. The app bundle above was measured with the former `local-whisper` feature; a build without it has not been measured for download size.
+Derived from these: a first download is about 82 MB (4.7 MB app plus 77.7 MB model), and about 94 MB on disk once installed. At the time of that measurement, the model was optional and needed only for live sessions. Local transcription was removed on 16 November 2026, so the model and its bandwidth on this page no longer apply and the first download is the app alone. The app bundle above was measured with the former `local-whisper` feature; a build without it has not been measured for download size.
 
 A debug bundle without the speech feature or a Developer ID signature measured 46.0 MiB (48,270,947 bytes) on 13 November 2026 ([release path](release-path.md#what-the-debug-bundle-contains)); it is a development artifact, not a download size.
 
