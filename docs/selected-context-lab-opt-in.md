@@ -1,0 +1,25 @@
+# Selected prior context: explicit development API mode
+
+This source path is a development-only connection, not a supported account integration or a completed live experiment. Native and JS changes have separate parent chains: native serializer parent #381, JS serializer parent #382. They require an explicitly reviewed paired build/package; neither checkout alone establishes that package. Historical runtime pins are unchanged.
+
+## Scope and approval
+
+The explicit `selected-prior-v2` context policy is valid only for the Anthropic API lab. The launcher sanitizes it into `TALKQTE_DEV_LAB_CONTEXT`; it supplies no notes or permission. Native processing review binds exact existing selected-source fingerprints, speech scope, destination and the selected processor/policy identity. Importing or selecting context does not approve processing. The review says snapshots are not verified current, includes their labels/date/title and opaque versions, and names API billing, cap, request limits, retention, timing and any separate audio destination.
+
+Both comparison arms use this policy, the same selected prompt/model/settings and fresh-six conversation scope. The control approves zero note fingerprints and sends `priorNotes: []`. The note arm approves exact stored snapshots. Sessions, reviews, grants and attempts are separate. No bounded-history composition, auto-selection, injected launch notes or content edits are introduced.
+
+The new input contract is `selected-prior-context-v2`; only it allows zero notes. The inert `selected-snapshots-v1` helpers still require a note. Legacy API/CLI prompt bytes, 10-word glance rule, grammars and default `without_notes()` registrations remain unchanged. Selected processor `lab-api-selected-prior-v2` and policy `fictional-lab-selected-prior-v2` use selected-only descriptor/frame versions and an authenticated hello/ready identity. Worker mode is fixed at trusted initialization, never chosen by an input field alone.
+
+## Input and reply boundaries
+
+Native Request sources are the authority. Event/prior IDs must match immutable source provenance/provider namespaces; fingerprints remain native-only. Versions are canonical decimal u64 strings, preserving native zero and unknown Granola one without freshness inference. Provider freshness is always `not_verified`. Reject Unicode Cc except LF/TAB in text/title/name/cues, all Cc in IDs; never sanitize. Preserve source/citation membership, total source limits and all-or-nothing selection. Actual UTF8 JSON in the API user message is capped at 16 KiB; the whole newline-delimited frame is capped at 64 KiB. These byte bounds are not provider token or spend bounds.
+
+Both arms use the exact legacy API system plus the existing selected-snapshot rule: SHA256 `440a3a947d1cf1842a0e844bf447132463d74f4a1d0ab7ab2efd94211c02b636`. The real worker constructs selected parameters, and spend reservation includes that complete system prompt. Existing model settings, output reservation, no retries/fallback and cap enforcement remain. The provider grammar keeps stable string IDs; broker checks union membership, uniqueness/max-four, state and 10-word reply constraints after existing occupied-show/asked-withdraw settlement. Native independently requires a fresh cited speech anchor for every state change and rechecks current session/grant/source identity. Notes alone cannot establish a current question, answer or commitment.
+
+Changing/removing approved notes invalidates review, grant, pending replies and held evidence. Stop/Off/replacement reject late replies; prior newer-revision rollback protection remains. Already sent requests cannot be recalled.
+
+## Verification and remaining readiness
+
+Offline source tests cover actual native Request projection, selected configuration/permission lifecycle and Link/Worker socket routing; fake production API tests drive the actual parent/worker/SDK through a loopback stream with dummy credentials. A shared fixture is asserted against native projection. Independent lab integration must exercise selected broker authentication, API routing, settlement and Stop, and distinguish replayed native fixtures from an actually running native process.
+
+Targeted offline Rust checks have since run on a prospective composed tree: 47 tests with the reviewed four-feature tuple (history, selected snapshots, ownership/Stop and reconnect) and 13 selected-snapshot tests with default features passed. Those checks do not establish a full exact-head build, Clippy, native IPC, or a paired public JS package. The native source here and public JS source have distinct ancestry and must be reviewed and validated together before activation; exact-head hosted checks and independent review remain required. No real provider/account, launch, capture, live UI or usefulness acceptance is established. A verified combined artifact, full fake-route evidence, source/media provenance, paired-package preflight and explicit in-app approval remain launch gates. The Granola identity/refresh/account acceptance gates are unchanged; this path does not verify a real provider snapshot or add a Tactiq connection.
