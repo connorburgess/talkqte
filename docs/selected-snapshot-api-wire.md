@@ -4,7 +4,8 @@ The v1 helpers in `scripts/cue-selected-snapshot.mjs` remain pure versioned
 validators, local citation checkers and API parameter constructors. The module
 never invokes an SDK or reads a credential. Explicit selected-context v2 wiring
 now imports it through `cue-selected-context.mjs` in broker, worker and launcher
-paths; `cue-lab-anthropic-core.mjs` also imports it directly. The opt-in v2 path
+paths; the API core also reaches it through `cue-selected-context.mjs`.
+The opt-in v2 path
 constructs selected API parameters; the v1 helpers alone do not activate a route.
 Legacy serializers, 10-word prompts, API state grammars and real
 `without_notes()` defaults remain unchanged. The standalone CLI is not extended.
