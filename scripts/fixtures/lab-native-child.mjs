@@ -1,6 +1,14 @@
 // Harmless launcher fixture: writes synthetic control evidence only. It never
-// opens an app, media device, model, credential or network connection.
-import { appendFileSync, writeFileSync, renameSync } from 'node:fs';
+// opens an app, media device, model, credential or network connection. The
+// descriptor-peer case alone connects to the test's own local broker socket.
+import {
+  appendFileSync,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+} from 'node:fs';
+import { createConnection } from 'node:net';
+import { dirname } from 'node:path';
 const path = process.env.TALKQTE_TIMING_LOG;
 const run = process.env.TALKQTE_DEV_LAB_RUN_ID;
 const mode = process.env.TALKQTE_FIXTURE_CASE;
@@ -97,4 +105,52 @@ if (mode === 'rotate')
 if (mode === 'oversize')
   setTimeout(() => appendFileSync(path, 'x'.repeat(9 * 1024 * 1024)), 80);
 if (mode === 'exit') setTimeout(() => process.exit(0), 80);
-setTimeout(() => process.exit(0), 1500); // Fixture only; never evidence of release.
+if (mode === 'descriptor-peer') {
+  // Mirrors the native descriptor reader: the socket must be a lexical sibling
+  // of the descriptor path received, compared before any connection attempt.
+  const path = process.env.TALKQTE_DEV_LAB_DESCRIPTOR;
+  const descriptor = JSON.parse(readFileSync(path, 'utf8'));
+  if (dirname(descriptor.socketPath) !== dirname(path)) process.exit(4);
+  const socket = createConnection({ path: descriptor.socketPath });
+  const send = (type, fields) =>
+    socket.write(
+      JSON.stringify({
+        schema: 'talkqte.lab.v1',
+        type,
+        runId: run,
+        sessionId: '7',
+        ...fields,
+      }) + '\n',
+    );
+  socket.once('connect', () =>
+    send('hello', {
+      nonce: descriptor.nonce,
+      expectedProvider: process.env.TALKQTE_DEV_LAB_PROVIDER,
+      expectedModel: process.env.TALKQTE_DEV_LAB_MODEL,
+      expectedEffort: process.env.TALKQTE_DEV_LAB_EFFORT,
+    }),
+  );
+  let partial = '';
+  socket.setEncoding('utf8');
+  socket.on('data', (chunk) => {
+    partial += chunk;
+    for (let end; (end = partial.indexOf('\n')) !== -1;) {
+      const frame = JSON.parse(partial.slice(0, end));
+      partial = partial.slice(end + 1);
+      if (frame.type === 'clock_probe')
+        send('clock_sample', {
+          probeId: frame.probeId,
+          nativeSessionElapsedMs: 1000,
+        });
+    }
+  });
+  // Only a failed connection ends the child; a reset during owned Stop must
+  // not pre-empt the release steps written by the USR2 handler.
+  let connected = false;
+  socket.once('connect', () => (connected = true));
+  socket.on('error', () => {
+    if (!connected) process.exit(5);
+  });
+}
+// Fixture only; never evidence of release.
+setTimeout(() => process.exit(0), mode === 'descriptor-peer' ? 5000 : 1500);

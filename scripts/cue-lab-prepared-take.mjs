@@ -502,5 +502,8 @@ export function createLabPlaybackSession({
     get clockCalibration() {
       return run.clockCalibration;
     },
+    get startupDiagnostics() {
+      return run.startupDiagnostics;
+    },
   });
 }
