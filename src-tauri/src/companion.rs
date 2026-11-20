@@ -299,6 +299,7 @@ pub fn refresh(app: &tauri::AppHandle) {
             }
             return;
         }
+        let mut scale = 1.0;
         let layout = if mode == Mode::Hidden {
             None
         } else {
@@ -309,6 +310,7 @@ pub fn refresh(app: &tauri::AppHandle) {
                 .or_else(|| window.primary_monitor().ok().flatten());
             let Some(monitor) = monitor else { return };
             let area = monitor.work_area();
+            scale = monitor.scale_factor();
             Some(frame_at(
                 (area.position.x, area.position.y),
                 (area.size.width, area.size.height),
@@ -324,14 +326,7 @@ pub fn refresh(app: &tauri::AppHandle) {
         }
         placement.expected = layout.map(|frame| ((frame.x, frame.y), Instant::now()));
         let result = if let Some(frame) = layout {
-            // Move before the resize so a window that is about to get wider
-            // is never off the display's edge in between, and again after
-            // it, because a resize keeps the bottom edge in place.
-            window
-                .set_position(PhysicalPosition::new(frame.x, frame.y))
-                .and_then(|_| window.set_size(PhysicalSize::new(frame.width, frame.height)))
-                .and_then(|_| window.set_position(PhysicalPosition::new(frame.x, frame.y)))
-                .and_then(|_| window.show())
+            set_frame(&window, frame, scale).and_then(|_| window.show())
         } else {
             window.hide()
         };
@@ -339,6 +334,29 @@ pub fn refresh(app: &tauri::AppHandle) {
             placement.applied = Some((mode, layout));
         }
     });
+}
+
+/// Moves and resizes the companion as one change on macOS, so no
+/// transitional frame exists between them.
+#[cfg(target_os = "macos")]
+fn set_frame(window: &tauri::WebviewWindow, frame: Frame, scale: f64) -> tauri::Result<()> {
+    crate::companion_macos::set_frame(window, (frame.x, frame.y, frame.width, frame.height), scale)
+        .or_else(|()| set_frame_in_steps(window, frame))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_frame(window: &tauri::WebviewWindow, frame: Frame, _: f64) -> tauri::Result<()> {
+    set_frame_in_steps(window, frame)
+}
+
+/// Move before the resize so a window that is about to get wider is never
+/// off the display's edge in between, and again after it, because a resize
+/// keeps the bottom edge in place.
+fn set_frame_in_steps(window: &tauri::WebviewWindow, frame: Frame) -> tauri::Result<()> {
+    window
+        .set_position(PhysicalPosition::new(frame.x, frame.y))
+        .and_then(|_| window.set_size(PhysicalSize::new(frame.width, frame.height)))
+        .and_then(|_| window.set_position(PhysicalPosition::new(frame.x, frame.y)))
 }
 
 #[cfg(test)]

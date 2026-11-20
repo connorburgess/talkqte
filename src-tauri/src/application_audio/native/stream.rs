@@ -123,11 +123,7 @@ impl NativeOwner {
                 &applications,
                 &exceptions,
             );
-            let config = SCStreamConfiguration::new();
-            config.setCapturesAudio(true);
-            config.setExcludesCurrentProcessAudio(true);
-            config.setSampleRate(16_000);
-            config.setChannelCount(1);
+            let config = audio_only_configuration();
             let stream = SCStream::initWithFilter_configuration_delegate(
                 SCStream::alloc(),
                 &filter,
@@ -345,9 +341,60 @@ impl Driver for Stream {
     }
 }
 
+/// Request 16 kHz mono audio for the selected application. Only an audio
+/// output is attached; this code does not read or store video frames.
+/// Video settings request 2x2 dimensions, a one-second minimum frame interval
+/// and no cursor. Actual hardware acceptance, cadence and CPU impact are
+/// unverified; these settings are not a claim about the API's minimums.
+fn audio_only_configuration() -> objc2::rc::Retained<SCStreamConfiguration> {
+    // SAFETY: plain property setters on a new, unshared configuration.
+    unsafe {
+        let config = SCStreamConfiguration::new();
+        config.setCapturesAudio(true);
+        config.setExcludesCurrentProcessAudio(true);
+        config.setSampleRate(16_000);
+        config.setChannelCount(1);
+        config.setWidth(UNUSED_VIDEO_SIZE);
+        config.setHeight(UNUSED_VIDEO_SIZE);
+        config.setMinimumFrameInterval(UNUSED_VIDEO_INTERVAL);
+        config.setShowsCursor(false);
+        config
+    }
+}
+
+/// Requested video dimensions; no screen output is attached.
+const UNUSED_VIDEO_SIZE: usize = 2;
+/// Requested minimum interval between video frames.
+const UNUSED_VIDEO_INTERVAL: objc2_core_media::CMTime = objc2_core_media::CMTime {
+    value: 1,
+    timescale: 1,
+    flags: objc2_core_media::CMTimeFlags::Valid,
+    epoch: 0,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_stream_requests_audio_and_bounded_unused_video_settings() {
+        // A memory-only configuration object; no stream, capture or permission.
+        let config = audio_only_configuration();
+        let interval = unsafe { config.minimumFrameInterval() };
+        unsafe {
+            assert!(config.capturesAudio());
+            assert!(config.excludesCurrentProcessAudio());
+            assert_eq!(config.sampleRate(), 16_000);
+            assert_eq!(config.channelCount(), 1);
+            // Assert the requested properties, not delivered frame behavior.
+            assert_eq!((config.width(), config.height()), (2, 2));
+            assert!(!config.showsCursor());
+        }
+        assert_eq!((interval.value, interval.timescale), (1, 1));
+        assert!(interval
+            .flags
+            .contains(objc2_core_media::CMTimeFlags::Valid));
+    }
 
     #[test]
     fn a_start_completion_records_only_its_first_result_and_the_first_error_code() {
