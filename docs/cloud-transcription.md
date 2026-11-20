@@ -107,8 +107,38 @@ model, and only the timing log records it.
 | The minute cap is reached | The stream is closed and the session ends ("this launch's transcription minute limit was reached"). The cap counts all sessions and both sources of the launch. |
 | The send queue is full because the connection fell behind | The audio that does not fit is dropped, not sent later. The session continues, and the notebook says "Some audio was not sent to Deepgram because the connection fell behind; lines from it are missing." |
 | Deepgram refuses the token (401 or 403), the account cannot pay (402), or requests are limited (429) | The session ends with a fixed reason. There is no retry. |
-| The connection drops or a reply cannot be read | The session ends with a fixed reason. |
-| The connection stops keeping up: no reply of any kind for 10 s while audio is going out (after one `Finalize` at 5 s asking for one), one 100 ms frame taking more than 3 s to send, or more than 1 s of audio dropped for a full send queue within 5 s | The stream is closed and the session ends with "the connection stopped responding" (code `stalled`). Audio is sent at most a second at a time between reads, so replies and a close are not left unread while audio is backed up. Any reply counts, including results with no words: in one lab measurement (17 November 2026, 20 s of digital silence, one sample per case) Deepgram sent an empty interim result about every second and an empty final about every 3 s, with no gap over 1.4 s, and answered a `Finalize` in 332 ms. Room noise and other network paths were not measured. There is no reconnect yet. |
+| The connection drops, closes, or a reply cannot be read | The stream is replaced, as described under [reconnecting](#reconnecting). If it cannot be, the session ends with a fixed reason. |
+| The connection stops keeping up: no reply of any kind for 10 s while audio is going out (after one `Finalize` at 5 s asking for one), one 100 ms frame taking more than 3 s to send, or more than 1 s of audio dropped for a full send queue within 5 s | The stream is closed (code `stalled`) and replaced, as described under [reconnecting](#reconnecting). If it cannot be, the session ends with "the connection stopped responding". Audio is sent at most a second at a time between reads, so replies and a close are not left unread while audio is backed up. Any reply counts, including results with no words: in one lab measurement (17 November 2026, 20 s of digital silence, one sample per case) Deepgram sent an empty interim result about every second and an empty final about every 3 s, with no gap over 1.4 s, and answered a `Finalize` in 332 ms. Room noise and other network paths were not measured. |
+
+### Reconnecting
+
+A stream that fails for a network reason (lost, closed, `stalled`, or an
+unreadable reply) is replaced by a new one, under the same approval, the same
+session and the launch's same minute budget, at most twice per session for each
+capture source. A refused token, a spent budget, rate limiting, a withdrawn
+review and the end of a lab run are not retried.
+
+- Speech the failed stream had been sent but had not yet returned as a line is
+  lost: it is not sent again. The time between its last line and its last audio
+  is recorded as the gap.
+- Audio captured after the failure goes to the new stream, so the transcript
+  carries on from there. Line numbers continue, so line ids stay unique.
+- Only a replacement's confirmed connection reports a successful reconnect;
+  starting its worker does not. A pending or refused connection cannot report
+  success. Loss across failed pending attempts is included when a later
+  replacement connects. A retired approval or Stop cannot publish a late success.
+- The notebook says "Transcription by Deepgram reconnected once after a
+  connection problem. About N s of speech was not transcribed." A positive
+  subsecond gap is described as less than one second; a zero or unavailable
+  measurement leaves the amount unknown instead of inventing a one-second loss.
+- The timing log writes `stt_state` `reconnecting` with the failure's code and
+  `gap_ms`, then `connected` for the new stream.
+- The new stream reads the token file again, so the token must still be there.
+  For a lab run that means the launcher keeps the short-lived token in the
+  owner-only run folder until Stop, rather than deleting it once connected.
+  That is a trade: a valid token on disk, in a 0700 folder, for the length of
+  the run, in exchange for surviving a network drop.
+- A third failure in the same session ends it, as before.
 
 In every case the notebook shows "Transcription by Deepgram stopped: …
 nothing fell back to another transcription service." No provider message

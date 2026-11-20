@@ -77,3 +77,6 @@ objc2-core-audio-types = { version = "=0.3.2", optional = true, default-features
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std"] }
+
+# Exercise the macOS import regression against the generated production ACL.
+tauri = { version = "2", features = ["test"] }
