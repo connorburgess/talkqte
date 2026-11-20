@@ -6,11 +6,13 @@ Bootstrap project instructions, docs, and tooling on `main`. Subsequent work use
 
 ## Automated checks
 
-The [Checks workflow](../.github/workflows/checks.yml) runs on pull requests and updates to `main`, with read-only repository permissions and pinned action revisions. It defines:
+The [Checks workflow](../.github/workflows/checks.yml) runs on pull request commits and updates to `main`. The [Contributions workflow](../.github/workflows/contributions.yml) runs on pull request commits and on edits to a pull request's title or body, so an edit re-checks the text without restarting the builds. Both use read-only repository permissions and pinned action revisions. They define:
 
-- **Contribution metadata:** every PR commit needs a sign-off trailer matching its author. Common tool-attribution credits in commits and PR text are rejected, including after PR text edits. The check does not verify a human's legal identity or acceptance of the contributor agreement; the maintainer must review each contributor's acceptance before merging.
-- **Frontend and browser behavior:** contribution-check and release pre-flight regression tests, formatting, TypeScript/build, and Playwright checks in Chromium and WebKit.
-- **macOS Rust and desktop build:** Rust formatting, unit tests, Clippy with warnings denied, and an unsigned development app build using the pinned Rust toolchain, a check that the committed [third-party notices](release-path.md#third-party-notices) match the dependencies, and the offline [release pre-flight](release-path.md#pre-flight-script) on that bundle. The workflow holds no signing secret and publishes nothing.
+- **Contribution metadata** (Contributions workflow): every PR commit needs a sign-off trailer matching its author. Common tool-attribution credits in commits and PR text are rejected, including after PR text edits. The check does not verify a human's legal identity or acceptance of the contributor agreement; the maintainer must review each contributor's acceptance before merging.
+- **Frontend and browser behavior:** contribution-check and release pre-flight regression tests, formatting, TypeScript/build, and Playwright checks in Chromium and WebKit. When a browser test fails, its trace is kept as a run artifact for 7 days.
+- **macOS Rust and desktop build:** Rust formatting, unit tests, Clippy with warnings denied, and an unsigned development app build using the pinned Rust toolchain, a check that the committed [third-party notices](release-path.md#third-party-notices) match the dependencies, and the offline [release pre-flight](release-path.md#pre-flight-script) on that bundle. It also compiles the lab's window-capture helper (`scripts/lab-window-capture.swift`) with the lab's own build function, without running it. The workflow holds no signing secret and performs no signing or release publication.
+
+The macOS and Windows jobs restore compiled Rust dependencies from a cache that only runs on `main` save; the project's own crate is always rebuilt and tested.
 
 Native tests currently exercise the engine; the app build is not an automated interactive window test. A successful browser run does not establish macOS focus or screen-sharing behavior.
 

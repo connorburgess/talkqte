@@ -105,13 +105,14 @@ test('every way of asking for a development feature is refused', () => {
     'timing-log',
     'claude-cli',
     'lab-evaluator',
+    'cloud-transcription',
   ]) {
     const refused = (args, env = {}, files = {}) =>
       requestedDevelopmentFeatures(args, env, (path) => files[path]);
     for (const args of [
       ['--features', feature],
-      ['--features', 'local-whisper', feature],
-      ['--features', `local-whisper,${feature}`],
+      ['--features', 'fictional-extra', feature],
+      ['--features', `fictional-extra,${feature}`],
       [`--features=${feature}`],
       ['-f', feature],
       ['--bundles', 'app', '--', '--features', feature],
@@ -151,7 +152,7 @@ test('ordinary release arguments, and look-alike names, are not refused', () => 
   const refused = (args, env = {}) =>
     requestedDevelopmentFeatures(args, env, () => undefined);
   assert.deepEqual(
-    refused(['--bundles', 'app,dmg', '--features', 'local-whisper']),
+    refused(['--bundles', 'app,dmg', '--features', 'fictional-extra']),
     [],
   );
   assert.deepEqual(refused(['--features', 'native-audio-spike-free']), []);
@@ -177,13 +178,13 @@ test('the build script refuses before building anything', (t) => {
       '--bundles',
       'app',
       '--features',
-      'local-whisper,native-audio-spike',
+      'fictional-extra,native-audio-spike',
     ],
     { encoding: 'utf8', env },
   );
   assert.equal(result.status, 2, result.stdout + result.stderr);
   assert.match(
     result.stderr,
-    /refusing to build a release with a development feature \(native-audio-spike, timing-log, claude-cli, lab-evaluator\):\n {2}argument 4 names native-audio-spike/,
+    /refusing to build a release with a development feature \(native-audio-spike, timing-log, claude-cli, lab-evaluator, cloud-transcription\):\n {2}argument 4 names native-audio-spike/,
   );
 });
