@@ -650,7 +650,15 @@ test('actual harmless capture-only launch receives no provider/model/backend/des
     releaseMs: 1000,
   });
   try {
+    assert.equal(launcher.timingFileIdentity, null);
     await owner.start({ runId: 'capture-only-fixture' });
+    const timingStat = statSync(launcher.timingPath, { bigint: true });
+    assert.deepEqual(launcher.timingFileIdentity, {
+      dev: timingStat.dev.toString(),
+      ino: timingStat.ino.toString(),
+      runId: 'capture-only-fixture',
+    });
+    assert.ok(Object.isFrozen(launcher.timingFileIdentity));
     assert.equal(launcher.mode, 'capture-only');
     assert.deepEqual(await owner.stop(), { released: true });
   } finally {
