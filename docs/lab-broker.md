@@ -91,12 +91,16 @@ tools or executable names. The broker constructs the shared compact/glance promp
 and source-ID response schema. It validates action/cue/source membership and the
 10-word cue bound. Rust independently validates its immutable request, source
 references, processing permission, current session, cue identity and freshness
-before applying a decision. In the lab arm, freshness is bounded: a decision is
-still applied when the transcript has only grown since the request (every
-submitted line unchanged, newer lines appended, same existing cue, inside the
-native deadline). Such a cue can reflect speech up to the deadline before it
-appears. Any other change makes the result stale: it is discarded and
-acknowledged `staleSuccess`. Provider and schema errors remain terminal.
+before applying a decision. In the lab arm, freshness is bounded: a reply in
+time is still applied when the transcript it was evaluated on has only grown
+since (same session and permission, the same existing cue, listener name and
+earlier cues, and every submitted line still present with identical id, text and
+time). Such a cue reflects speech up to the 8 s deadline before it appears and
+can concern something newer speech already answered; the next request carries
+it as the existing cue so the model can resolve or withdraw it. Any edited or
+removed line, cue change or permission change makes the result stale: it is
+discarded and acknowledged `staleSuccess`. Provider and schema errors remain
+terminal, even when the original speech is stale.
 
 `result` is sent only after provider cleanup. The evaluator lease stays held
 until the request is settled or retired. `current` is a Rust validation verdict,
@@ -124,6 +128,12 @@ that request; the run, provider and dispatch budget continue.
 After a `result` is sent, native may settle or retire the request until one
 second after the request's deadline (the broker allows a further 250 ms for
 transit). Silence after that is terminal.
+
+Before the first `evaluate`, there is no per-request retirement: a deadline that
+expires during HELLO, `ready` or the clock probe ends the run. If native's engine
+does not confirm an expiry within one second of a request's deadline, native ends
+the run by closing the socket without a `cancel`; the broker treats that as a
+disconnect.
 
 Late frames are ignored for a request already retired by a deadline: a deadline
 `cancel` that crosses the broker's own `failed`. A frame for any other unknown
@@ -153,8 +163,11 @@ native) and settlement `verdicts`.
 **Native timing fields.** In lab mode, native's `evaluation_result` log row
 carries an optional `action` only on a `stale` result or a `failed` timeout whose
 decision was not applied, and the trio `through_segment` (segment id),
-`lag_lines` and `lag_ms` (unsigned integers, `lag_ms` 0 when `lag_lines` is 0)
-on every applied decision. They never appear together. The
+`lag_lines` (lines that arrived after that line before the decision was applied)
+and `lag_ms` (the newest of those lines' `at_ms` minus the through line's
+`at_ms` on the session clock, 0 when `lag_lines` is 0) on every applied
+decision. `lag_ms` measures how much speech the decision had not seen, not how
+late the reply was. They never appear together. The
 [evidence report](lab-evidence-report.md) shows them per evaluation and per cue.
 
 ## Observed cues and clocks
