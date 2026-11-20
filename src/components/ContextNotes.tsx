@@ -16,7 +16,8 @@ import './context-date.css';
 
 /**
  * Prior notes the user imported from a file for this session. They are shown
- * apart from the conversation, never feed a cue yet, and are never exported.
+ * apart from the conversation and excluded from Markdown exports. Sending them
+ * to a cue provider requires a separate processing review and approval.
  */
 export function ContextNotes({
   items,
@@ -283,7 +284,9 @@ export function ContextNotes({
           <div>
             <span className="muted small">
               Notes you chose from a file or from Granola · not from this
-              conversation · kept in memory, never exported
+              conversation · kept in memory · excluded from Markdown exports.
+              Sending selected prior notes to a cue provider requires a separate
+              processing review and approval.
             </span>
           </div>
           <div className="context-actions">
@@ -368,6 +371,7 @@ export function ContextNotes({
         </div>
         {filePathOpen && (
           <form
+            className="context-path-form"
             onSubmit={(event) => {
               event.preventDefault();
               readPath();
@@ -388,23 +392,25 @@ export function ContextNotes({
                 onChange={(event) => setFilePath(event.target.value)}
               />
             </label>
-            <button
-              type="submit"
-              className="secondary-button"
-              disabled={busy || working || !filePath}
-            >
-              Read notes file
-            </button>
-            <button
-              type="button"
-              className="text-button"
-              onClick={() => {
-                setFilePath('');
-                setFilePathOpen(false);
-              }}
-            >
-              Cancel file path
-            </button>
+            <div className="context-actions">
+              <button
+                type="submit"
+                className="secondary-button"
+                disabled={busy || working || !filePath}
+              >
+                Read notes file
+              </button>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => {
+                  setFilePath('');
+                  setFilePathOpen(false);
+                }}
+              >
+                Cancel file path
+              </button>
+            </div>
           </form>
         )}
         {granola.connected && (
