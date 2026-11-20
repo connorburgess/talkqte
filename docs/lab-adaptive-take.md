@@ -128,3 +128,9 @@ source identity/launcher integration and real native audio-capture verification.
 Actual Listening, output, transcription, evaluator cue/silence, companion paint
 and release still need the separately reviewed bounded fictional take. This
 internal scheduler changes no public app journey or release capability.
+
+The current prepared fixed-source path refuses an adaptive body, and the direct
+API adapter accepts cue-evaluator requests only, not cast/listener/judge work.
+This injected scheduler does not create either integration. Its subscription
+dispatch accounting, operation deadlines and cleanup ownership remain unchanged;
+no API, source, player or artifact migration is selected by adding its module.
