@@ -101,6 +101,8 @@ const MAX_SPEND_CAP_MICRO_USD: u64 = 1_000_000;
 #[derive(Clone)]
 struct Settings {
     selected_prior: bool,
+    /// Selected before registration, never approval or a provider change.
+    bounded_history: bool,
     attested: Option<(PathBuf, usize)>,
     backend: Backend,
     descriptor: PathBuf,
@@ -115,6 +117,7 @@ impl Settings {
         let backend = Backend::parse(get("TALKQTE_DEV_CUE_BACKEND").as_deref())
             .ok_or(Failure::InvalidInput)?;
         let context = get("TALKQTE_DEV_LAB_CONTEXT");
+        let bounded_history = context.as_deref() == Some("bounded-history");
         let attested = if context.as_deref() == Some(crate::selected_attestation::CONTEXT) {
             let count = match get("TALKQTE_DEV_LAB_REQUIRED_NOTES").as_deref() {
                 Some("0") => 0,
@@ -130,6 +133,7 @@ impl Settings {
         };
         let selected_prior = match context.as_deref() {
             None => false,
+            Some("bounded-history") if backend == Backend::Api => false,
             Some(SELECTED_CONTEXT | crate::selected_attestation::CONTEXT)
                 if backend == Backend::Api =>
             {
@@ -168,6 +172,7 @@ impl Settings {
         }
         Ok(Self {
             selected_prior,
+            bounded_history,
             attested,
             backend,
             descriptor,
@@ -1428,7 +1433,12 @@ pub(crate) fn initialize_from_environment() {
             || std::env::var_os("TALKQTE_DEV_LAB_CONTEXT").is_some(),
         backend: Backend::parse(std::env::var("TALKQTE_DEV_CUE_BACKEND").ok().as_deref())
             .unwrap_or(Backend::Subscription),
-        settings: Settings::parse(|k| std::env::var(k).ok()),
+        settings: Settings::parse(|k| match std::env::var(k) {
+            Ok(value) => Some(value),
+            Err(std::env::VarError::NotPresent) => None,
+            // Invalid optional context must not silently become fresh-only.
+            Err(std::env::VarError::NotUnicode(_)) => Some(String::new()),
+        }),
         active: Mutex::new(None),
         sampler: Arc::new(Mutex::new(None)),
         fault: Arc::new(AtomicBool::new(false)),
@@ -1498,7 +1508,11 @@ fn processor_configuration(
         Some(destination) => processor.with_audio_destination(destination),
         None => processor,
     };
-    Ok(processor)
+    if settings.is_some_and(|s| s.bounded_history) {
+        processor.with_bounded_transcript_history()
+    } else {
+        Ok(processor)
+    }
 }
 
 pub(crate) fn connected_engine() -> Engine {

@@ -101,7 +101,7 @@ The next release dependency is an explicit processing/provider path and permissi
 
 ## Opt-in bounded transcript history (offline implementation)
 
-The trusted Rust `ProcessorConfiguration::with_bounded_transcript_history()` builder adds a transcript-only context policy. Existing constructors keep the last-six/fresh-only projection. No app command, environment flag, provider registration or lab launcher enables this option. It is not whole-call memory, a fact extractor, a summary, or evidence of useful conflict detection.
+The trusted Rust `ProcessorConfiguration::with_bounded_transcript_history()` builder adds a transcript-only context policy. Existing constructors keep the last-six/fresh-only projection. Ordinary registrations keep this default. A separately selected debug-only API lab can request this policy through the [explicit lab history setting](development-lab-evaluator.md#explicit-api-lab-history-selection), with expanded in-app disclosure and approval. It is not whole-call memory, a fact extractor, a summary, or evidence of useful conflict detection.
 
 The option appends its bounds to the processor's review disclosure and is part of the immutable configuration bound by the opaque review/grant. Changing it invalidates old reviews and grants. It refuses prior-note selection. Existing launch-setting approval is refused for this mode; a future activation must provide explicit expanded-context consent instead of reusing fresh-only launch acknowledgement. Manual approval still chooses new speech only or recent and new speech; new-speech-only excludes buffered lines at or before approval even if they fall within the history window.
 
@@ -113,7 +113,7 @@ Both fresh and history age selection use the submitted send-time cutoff when rec
 
 Fictional Rust regressions in `engine/evaluation/tests/history_tests.rs` verify a pair 20 positions and about 68 seconds apart reaches the same request, accepted correction/acceptance text is retained verbatim, line/age/escaped-byte bounds, mandatory refusal before dispatch, explicit consent and configuration binding, Stop/regrant/reset, stale and evicted sources, send/apply time boundaries, and held model/Asked you coexistence. Injected replies verify lifecycle only. They do not establish model detection, correction understanding, participant usefulness, actual latency or cost. Older unrelated speech inside the bounds is deliberately included, and facts outside the suffix remain unavailable.
 
-The next gate is independent native review and exact-head validation, followed by separately authorized semantic evaluation of both-side citations, accepted-correction quiet controls and active-discussion/deferral quiet controls. README and this guidance describe a dormant Rust option; provider/runtime activation, broader consent UI and paid comparisons remain separate work.
+The next gate is independent native review and exact-head validation, followed by separately authorized semantic evaluation of both-side citations, accepted-correction quiet controls and active-discussion/deferral quiet controls. README and this guidance describe a default-off Rust option with one explicit API lab selection path; combined-run native approval acceptance, broader activation and paid comparisons remain separate work.
 
 ## Session processing permission
 
