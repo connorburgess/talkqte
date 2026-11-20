@@ -123,6 +123,24 @@ The Granola adapter, OAuth flow, and fictional listing fixtures now exist. Rust 
 
 An integration is ready only after a user can connect, understand access, select context, recover from a failure, disconnect, and manage imported copies. A mock is preparation; account-level validation and the full user flow are separate release gates. Any writeback needs a verified endpoint plus reviewed content and destination.
 
+### Selected context processing handoff — offline acceptance
+
+The [selected-snapshot handoff](selected-context-handoff.md) now has a fictional
+runtime regression suite spanning selected import, processing review/approval,
+the evaluator worker and source disclosure. It checks exclusion of unselected
+notes and pre-approval speech, cancellation on note changes/removal and
+Stop/revocation, and refusal to roll back known newer revisions. Single-note
+removal shares the tested Runtime operation with its native command. This is
+an offline contract, with test results to be recorded on the reviewed commit;
+it establishes no account, native IPC or useful-cue acceptance.
+
+The next concrete blocker is the real processor's prior-context contract and
+disclosure: CLI and lab configurations still reject prior notes through
+`without_notes()`. Keep that restriction until a separate reviewed change and
+explicit processing approval cover the exact context. Granola identity,
+refresh and account acceptance remain open; Tactiq import, live input and
+writeback remain separate capabilities. No roadmap item is checked off here.
+
 ### Connected workflow direction
 
 The primary Granola integration goal is to make TalkQTE's timely cues available in the user's Granola workflow without requiring a second notebook. Verify a documented extension or presentation surface before promising cues inside Granola. A separate companion alongside Granola may be useful, but is not an embedded integration. Cue display is distinct from writing to the meeting record; unused suggestions must not become notes or action items automatically.
