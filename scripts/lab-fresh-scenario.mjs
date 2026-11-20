@@ -621,8 +621,8 @@ export const GENERATION_ROUTES = [
 ];
 export const VOICE_RENDERERS = ['say', 'deepgram'];
 // Query names a voice renderer may record, each with a plain value. Anything
-// else (and any field named like a credential) is refused, so a manifest can
-// never carry a key or a secret-bearing query.
+// else (and any field named like a credential) is refused. Plain metadata
+// strings are not a general secret detector; credentials must stay outside it.
 const RENDERER_QUERY_NAMES = new Set([
   'model',
   'encoding',
