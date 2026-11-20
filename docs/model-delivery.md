@@ -1,6 +1,8 @@
 # Speech model delivery plan
 
-Status: plan, 9 November 2026; download implemented in Settings for `local-whisper` builds. See [What is implemented](#what-is-implemented) for what is built and what is not.
+**Superseded 16 November 2026:** on-device transcription was removed from the app; this page records the former design and its checks. Current transcription: [cloud transcription](cloud-transcription.md). The app no longer downloads, verifies, reads or removes a speech model, and it no longer touches the models folder at startup. A model downloaded earlier stays on disk at `<app data folder>/models/ggml-tiny.en.bin` (on macOS, `~/Library/Application Support/com.talkqte.desktop/models/`). To remove it, delete that `models` folder yourself.
+
+Former status: plan, 9 November 2026; download implemented in Settings for `local-whisper` builds. See [What is implemented](#what-is-implemented) for what is built and what is not.
 
 ## Decisions
 
@@ -37,7 +39,7 @@ The transcription worker already accepts any recognizer through its `Transcriber
 - **The user's own key:** the key belongs to the user. It is stored in the macOS Keychain, never in logs, files, or the interface, and the user can remove it at any time. TalkQTE never supplies or shares a key.
 - **Disclosure:** before enabling it, the app says plainly that meeting audio leaves the Mac and goes to the named provider, and links that provider's data terms.
 - **No silent fallback:** if the key fails or the service is unavailable, transcription stops with a message.
-- **No paid runs in development:** no paid API is called during development or testing without the owner's explicit approval.
+- **Paid calls in development:** paid provider calls run only with the owner's explicit approval during development, under a per-run cap; none run in CI or tests.
 
 Comparable meeting tools process audio in the cloud. Granola's help center says it sends microphone and system audio to its transcription provider ([Granola transcription docs](https://docs.granola.ai/help-center/taking-notes/transcription)). Neither Granola nor Fireflies publishes its speech-to-text vendor in the sources reviewed. Local transcription by default, with an optional own-key cloud path, is a deliberate difference to validate with users, not an established advantage.
 

@@ -376,3 +376,20 @@ test('launch consent is disclosed and a session call cap stops model cues with a
   await expect(review(page)).toHaveCount(0);
   await expect(stop(page)).toBeEnabled();
 });
+
+test('the review names where audio goes beside where lines go, and only when audio will be sent', async ({
+  page,
+}) => {
+  await open(page, '?live&processor&hosted&audio');
+  await prepare(page);
+  const details = panel(page).locator('dl');
+  await expect(details).toContainText(
+    'Processing locationSent to Example service',
+  );
+  await expect(details).toContainText(
+    'AudioSent to Example transcription service, for transcription',
+  );
+  await open(page, '?live&processor&hosted');
+  await prepare(page);
+  await expect(panel(page).locator('dl')).not.toContainText('Audio');
+});
