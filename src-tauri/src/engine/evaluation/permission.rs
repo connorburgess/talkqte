@@ -51,6 +51,8 @@ pub struct ProcessorConfiguration {
     /// approved, when a cloud transcription service is selected. Part of the
     /// reviewed configuration, so the review names it as a destination.
     pub(super) audio_destination: Option<String>,
+    /// Opt-in transcript-only projection, bound to this reviewed configuration.
+    pub(super) bounded_history: bool,
 }
 
 impl ProcessorConfiguration {
@@ -81,6 +83,7 @@ impl ProcessorConfiguration {
             accepts_notes: true,
             required_note_count: None,
             audio_destination: None,
+            bounded_history: false,
         })
     }
 
@@ -104,6 +107,22 @@ impl ProcessorConfiguration {
     pub(crate) fn with_required_note_count(mut self, count: Option<usize>) -> Self {
         self.required_note_count = count;
         self
+    }
+
+    /// Opt into bounded transcript history for a transcript-only adapter.
+    /// This changes the complete reviewed configuration and its disclosure;
+    /// existing grants/reviews cannot authorize it. No app flag calls this.
+    pub fn with_bounded_transcript_history(mut self) -> Result<Self, ProcessingError> {
+        const DISCLOSURE: &str = " Transcript context: up to 24 segments from the last 90 seconds, subject to a 16384-byte serialized input limit and the approved speech scope. Visible cue evidence may be older. No prior notes.";
+        if !self.bounded_history {
+            self.disclosure.data_policy.push_str(DISCLOSURE);
+        }
+        if !valid_label(&self.disclosure.data_policy, 2_048) {
+            return Err(ProcessingError::InvalidScope);
+        }
+        self.bounded_history = true;
+        self.accepts_notes = false;
+        Ok(self)
     }
 
     /// Names the service the session's audio is sent to for transcription
@@ -337,6 +356,11 @@ impl Engine {
         review: ProcessingReview,
         by_setting: bool,
     ) -> Result<(), ProcessingError> {
+        // Existing launch settings acknowledge only the current fresh slice.
+        // History requires an explicit review; no old setting can widen it.
+        if by_setting && review.processor.bounded_history {
+            return Err(ProcessingError::InvalidScope);
+        }
         if self.model_calls_exhausted() {
             return Err(ProcessingError::Unavailable);
         }
