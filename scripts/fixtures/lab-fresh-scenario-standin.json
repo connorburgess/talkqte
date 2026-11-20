@@ -1,0 +1,116 @@
+{
+  "note": "Hand-written synthetic conversation for offline tests. Not model output. Each speaker is an index into a brief's participants.",
+  "speakers": 3,
+  "lines": [
+    {
+      "speaker": 1,
+      "beat": "normal",
+      "text": "Okay, I think we're all here. Can we sort out Saturday quickly?"
+    },
+    {
+      "speaker": 2,
+      "beat": "quick",
+      "text": "Yeah, go."
+    },
+    {
+      "speaker": 1,
+      "beat": "normal",
+      "text": "So the market opens at eight, and we need to be set up before then."
+    },
+    {
+      "speaker": 0,
+      "beat": "pause",
+      "text": "Hmm. Did they say we can drive in from seven, or half seven?"
+    },
+    {
+      "speaker": 1,
+      "beat": "quick",
+      "text": "Seven. It was in the email from last week."
+    },
+    {
+      "speaker": 0,
+      "beat": "quick",
+      "text": "Right, seven. Thanks."
+    },
+    {
+      "speaker": 2,
+      "beat": "normal",
+      "text": "And someone needs to pick up the float from the other place before that."
+    },
+    {
+      "speaker": 1,
+      "beat": "normal",
+      "text": "Oh, and the gazebo. We're still borrowing the green one, aren't we?"
+    },
+    {
+      "speaker": 2,
+      "beat": "pause",
+      "text": "I think so. Or was it the blue one this time? I can't remember who said."
+    },
+    {
+      "speaker": 0,
+      "beat": "normal",
+      "text": "Whichever one doesn't have the bent leg, honestly."
+    },
+    {
+      "speaker": 1,
+      "beat": "quick",
+      "text": "Ha, fair."
+    },
+    {
+      "speaker": 2,
+      "beat": "normal",
+      "text": "We said we'd return it by Monday, so that's fine either way."
+    },
+    {
+      "speaker": 1,
+      "beat": "normal",
+      "text": "Monday, or Sunday evening? I thought they needed it Sunday."
+    },
+    {
+      "speaker": 0,
+      "beat": "pause",
+      "text": "Anyway, did you see the jar that fell off the table last week?"
+    },
+    {
+      "speaker": 2,
+      "beat": "quick",
+      "text": "The one that rolled under the cheese van? Yes."
+    },
+    {
+      "speaker": 0,
+      "beat": "quick",
+      "text": "It didn't even break. I want that jar on the poster."
+    },
+    {
+      "speaker": 1,
+      "beat": "normal",
+      "text": "We are not putting a jar on the poster."
+    },
+    {
+      "speaker": 2,
+      "beat": "pause",
+      "text": "Oh, before I forget. The card reader battery is nearly dead."
+    },
+    {
+      "speaker": 1,
+      "beat": "quick",
+      "text": "Is the charger in the cash box?"
+    },
+    {
+      "speaker": 2,
+      "beat": "normal",
+      "text": "No, I checked. I'll grab a new one on the way, it's cheap."
+    },
+    {
+      "speaker": 0,
+      "beat": "normal",
+      "text": "Okay. So Saturday at seven, and we'll sort the rest on the day?"
+    },
+    {
+      "speaker": 1,
+      "beat": "normal",
+      "text": "Sounds good. See you both then."
+    }
+  ]
+}
