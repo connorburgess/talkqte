@@ -38,6 +38,7 @@ fn main() {
             "stop_microphone",
             "live_status",
             "model_status",
+            "companion_anchor",
             "pick_context_file",
             "import_context_notes",
             "cancel_context_import",

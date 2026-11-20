@@ -52,6 +52,31 @@ export async function liveStatus() {
   return invoke<LiveStatus>('live_status');
 }
 
+/** The edge of the companion window that stays put when it grows for a
+ * cue, as the native side places it: read when the page loads, then sent
+ * before each move. Nothing is sent in the browser. */
+export async function watchAnchor(receive: (edge: 'top' | 'bottom') => void) {
+  if (preview) return () => {};
+  const valid = (value: unknown): value is 'top' | 'bottom' =>
+    value === 'top' || value === 'bottom';
+  // An event is sent just before a move, so it is newer than any answer to
+  // the read below that was worked out before it.
+  let moved = false;
+  const unlisten = await listen<unknown>('companion:anchor', ({ payload }) => {
+    if (!valid(payload)) return;
+    moved = true;
+    receive(payload);
+  });
+  // Without an answer the page keeps listening and waits for the next move.
+  try {
+    const edge = await invoke<unknown>('companion_anchor');
+    if (!moved && valid(edge)) receive(edge);
+  } catch {
+    // Nothing to read now; the next move says which edge it is.
+  }
+  return unlisten;
+}
+
 /** Opens the file chooser and lists a notes file; null if none was chosen. */
 export async function pickContextFile() {
   if (preview) return (await preview).pickContextFile();
