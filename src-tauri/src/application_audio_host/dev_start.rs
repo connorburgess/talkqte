@@ -121,7 +121,7 @@ impl Host {
             || !active.session_started.load(Ordering::Acquire)
             || active.stop_requested
             || active.control.is_cancelled()
-            || active.application.name() != "QuickTime Player"
+            || !crate::dev_lab_source::supports(active.application.name())
             || active.ended.try_lock().ok()?.is_some()
         {
             return None;
@@ -129,6 +129,7 @@ impl Host {
         Some(crate::dev_source_observation::Candidate {
             host_operation: active.id.clone(),
             control: active.control.clone(),
+            kind: crate::dev_lab_source::Kind::from_name(active.application.name())?,
         })
     }
 
