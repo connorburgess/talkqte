@@ -12,6 +12,9 @@ pub use evaluation::{
 const CUE_MS: u64 = 18_000;
 /// A question asked of the user stays long enough for them to answer.
 const ASKED_MS: u64 = 45_000;
+/// The same with a model connected, which may also mark it answered: long
+/// enough to answer, short enough not to hold the one cue slot for long.
+const ASKED_WITH_MODEL_MS: u64 = 20_000;
 /// A question type shown within this window is not asked again.
 const REPEAT_MS: u64 = 120_000;
 const MAX_NOTE_CHARS: usize = 20_000;
@@ -467,6 +470,36 @@ pub struct Snapshot {
     /// the end. Never saved; the companion sees a line only inside that
     /// Still open list.
     pub focus: Vec<String>,
+    /// The provider this live session's audio goes to after its review is
+    /// approved, and the fixed code that ended it, if it ended. Every live
+    /// session has one, since a launch without cloud transcription cannot
+    /// start a session; absent outside live sessions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcription: Option<CloudTranscription>,
+}
+
+/// Where a live session's audio is transcribed, when that is not this device.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudTranscription {
+    pub provider: String,
+    /// A fixed failure code, `withdrawn` when the review was turned off
+    /// after audio began to be sent. Nothing falls back to another path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stopped: Option<String>,
+    /// Some audio was not sent because the connection fell behind.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub dropped_audio: bool,
+    /// Replacement streams opened after connection failures, and the
+    /// session time (ms) of speech lost with the failed streams.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub reconnects: u32,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub lost_ms: u64,
+}
+
+fn is_zero<T: Default + PartialEq>(value: &T) -> bool {
+    *value == T::default()
 }
 
 // The floating window never receives the notebook or full transcript.
@@ -499,6 +532,8 @@ pub struct CueSnapshot {
     pub model_provider: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub model_lab: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcription: Option<CloudTranscription>,
 }
 
 /// The companion's indicator for a model connection.
@@ -527,6 +562,18 @@ pub struct Engine {
     next_segment: usize,
     cue_deadline: u64,
     cooldown_until: u64,
+    /// Lines that asked the user a question by name this session. A model
+    /// cue citing one would repeat the "Asked you" cue, so it is not shown.
+    asked_lines: Vec<String>,
+    /// Until when a model's `show` waits after the last cue ended: the full
+    /// cooldown after the user dismissed it, a short pause otherwise.
+    model_pause_until: u64,
+    /// Lines cited by cues the user dismissed this session. A question to
+    /// the user by name from one of them gets no second cue past the pause.
+    dismissed_sources: Vec<String>,
+    /// The last reason a model's `show` was dropped, for tests.
+    #[cfg(test)]
+    last_dropped: Option<&'static str>,
     /// Ignore delayed transcription from before the most recent cue resume.
     cues_after_ms: Option<u64>,
     /// The user's name for this app session, used to recognize questions
@@ -572,7 +619,7 @@ impl Engine {
     pub fn live() -> Self {
         Self::from_script(Script {
             title: "Live session".into(),
-            description: "Transcript lines from a local transcription source.".into(),
+            description: "Transcript lines from this session's transcription.".into(),
             duration_ms: u64::MAX,
             segments: vec![],
         })
@@ -608,6 +655,7 @@ impl Engine {
                 cues_paused: false,
                 user_name: None,
                 focus: vec![],
+                transcription: None,
             },
             script,
             generation: 0,
@@ -618,6 +666,11 @@ impl Engine {
             next_segment: 0,
             cue_deadline: 0,
             cooldown_until: 0,
+            asked_lines: vec![],
+            model_pause_until: 0,
+            dismissed_sources: vec![],
+            #[cfg(test)]
+            last_dropped: None,
             cues_after_ms: None,
             last_shown: vec![],
             focus_terms: vec![],
@@ -661,6 +714,7 @@ impl Engine {
             model_issue: self.processing_issue(),
             model_provider: self.model_provider(),
             model_lab: self.is_lab_evaluator(),
+            transcription: self.state.transcription.clone(),
         }
     }
 
@@ -689,9 +743,20 @@ impl Engine {
         self.still_open_shown = false;
         self.next_segment = 0;
         self.cooldown_until = 0;
+        self.asked_lines.clear();
+        self.model_pause_until = 0;
+        self.dismissed_sources.clear();
         self.state.elapsed_ms = 0;
         self.state.transcript.clear();
         self.state.cue = None;
+        self.state.transcription = (self.state.live && crate::transcription::cloud::selected())
+            .then(|| CloudTranscription {
+                provider: crate::transcription::cloud::PROVIDER.into(),
+                stopped: None,
+                dropped_audio: false,
+                reconnects: 0,
+                lost_ms: 0,
+            });
         self.state.status = Status::Running;
         self.changed();
         Ok(())
@@ -800,6 +865,7 @@ impl Engine {
                 self.evaluated_cue = None;
                 if !quote {
                     self.cooldown_until = self.cue_deadline + self.cooldown();
+                    self.pause_model_after(self.cue_deadline, false);
                 }
             }
         }
@@ -830,6 +896,53 @@ impl Engine {
     /// an earlier session is rejected instead of reviving it.
     pub fn session(&self) -> u64 {
         self.generation
+    }
+
+    /// Records that `session`'s cloud stream dropped audio it had no room
+    /// to send, so the notebook can say so.
+    pub fn cloud_transcription_dropped(&mut self, session: u64) {
+        if session != self.generation {
+            return;
+        }
+        if let Some(transcription) = self
+            .state
+            .transcription
+            .as_mut()
+            .filter(|transcription| !transcription.dropped_audio)
+        {
+            transcription.dropped_audio = true;
+            self.changed();
+        }
+    }
+
+    /// Records that `session`'s cloud stream was replaced after a
+    /// connection failure, losing `lost_ms` of speech.
+    pub fn cloud_transcription_reconnected(&mut self, session: u64, lost_ms: u64) {
+        if session != self.generation {
+            return;
+        }
+        if let Some(transcription) = self.state.transcription.as_mut() {
+            transcription.reconnects += 1;
+            transcription.lost_ms += lost_ms;
+            self.changed();
+        }
+    }
+
+    /// Records why `session`'s cloud transcription ended. The first code
+    /// stays; a later session is not affected.
+    pub fn cloud_transcription_stopped(&mut self, session: u64, code: &str) {
+        if session != self.generation {
+            return;
+        }
+        if let Some(transcription) = self
+            .state
+            .transcription
+            .as_mut()
+            .filter(|transcription| transcription.stopped.is_none())
+        {
+            transcription.stopped = Some(code.into());
+            self.changed();
+        }
     }
 
     /// Accepts one transcript segment from a live source for the running
@@ -922,6 +1035,37 @@ impl Engine {
             return;
         }
         if self.evaluation.is_some() {
+            // A question put to the user by name is not left to the model:
+            // the same rule raises "Asked you" ahead of any model cue and
+            // past the pause. The model still hears the line, but its reply
+            // cannot replace, clear or repeat that cue.
+            let correction = corrects(&segment.text);
+            // The model is still asked while the cue is up, with it as the
+            // cue on screen, so it can say the question was answered.
+            if self.ask_of_user(&segment, correction, now) {
+                if let Some(cue) = self
+                    .state
+                    .cue
+                    .as_ref()
+                    .filter(|cue| cue.kind == ASKED && cue.source_id == segment.id)
+                {
+                    // Its sources: this line, and the line before when the
+                    // question was read across both.
+                    let mut sources = vec![evaluation::transcript_source(&segment)];
+                    if cue.evidence != segment.text {
+                        if let Some(previous) = self
+                            .state
+                            .transcript
+                            .len()
+                            .checked_sub(2)
+                            .and_then(|index| self.state.transcript.get(index))
+                        {
+                            sources.insert(0, evaluation::transcript_source(previous));
+                        }
+                    }
+                    self.evaluated_cue = Some((cue.id.clone(), sources));
+                }
+            }
             self.submit_evaluation();
             return;
         }
@@ -1021,37 +1165,7 @@ impl Engine {
         {
             return;
         }
-        // A question asked of the user by name takes priority over an unread
-        // suggestion, ignores the cooldown, and shows the question itself.
-        // Questions for someone else, or for no one in particular, stay quiet.
-        if let Some(asked) = self
-            .state
-            .user_name
-            .as_deref()
-            .and_then(|name| asked_of(name, &segment.text[correction.unwrap_or(0)..]))
-        {
-            if !self.state.cue.as_ref().is_some_and(|cue| cue.held) && now - segment.at_ms < CUE_MS
-            {
-                // A suggestion replaced before it was published was never seen.
-                if self.state.cue.take().is_some() {
-                    self.forget_unshown();
-                }
-                self.cue_deadline = segment.at_ms + ASKED_MS;
-                self.state.cue = Some(Cue {
-                    sources: Vec::new(),
-                    id: format!("{}:{}", self.generation, segment.id),
-                    kind: ASKED.into(),
-                    question: asked,
-                    evidence: segment.text,
-                    source_id: segment.id,
-                    remaining_ms: self.cue_deadline - now,
-                    total_ms: ASKED_MS,
-                    held: false,
-                    resolved_by: None,
-                    note: None,
-                    about_focus: false,
-                });
-            }
+        if self.ask_of_user(&segment, correction, now) {
             return;
         }
         // Once the user has given their name, a question put to someone else
@@ -1293,11 +1407,108 @@ impl Engine {
         }
     }
 
+    /// A question asked of the user by name: raises an "Asked you" cue and
+    /// returns true when the line asks one, whether or not it could be shown.
+    /// Runs in every live session, with or without a model connected.
+    fn ask_of_user(&mut self, segment: &Segment, correction: Option<usize>, now: u64) -> bool {
+        // A question asked of the user by name takes priority over an unread
+        // suggestion, ignores the cooldown, and shows the question itself.
+        // Questions for someone else, or for no one in particular, stay quiet.
+        // Streamed transcription can end one line on the name and start the
+        // next with the question ("Partners doubles it. Maddie," then "how
+        // many came to the party?"), so a name left unfinished at the end of
+        // the line just before is read together with this one.
+        let carried = correction
+            .is_none()
+            .then(|| {
+                self.state
+                    .transcript
+                    .len()
+                    .checked_sub(2)
+                    .and_then(|index| self.state.transcript.get(index))
+            })
+            .flatten()
+            // Only the same speaker label, as for a correction: a name at the
+            // end of one person's line is not a question asked by the next.
+            .filter(|line| {
+                line.speaker == segment.speaker
+                    && segment.at_ms.saturating_sub(line.at_ms) <= NAME_CARRY_MS
+            })
+            .and_then(|line| {
+                let name = self.state.user_name.as_deref()?;
+                trailing_address(name, &line.text).map(|lead| (lead, line.id.clone()))
+            });
+        // The evidence is the text the question was read from, so a question
+        // joined across two lines is quoted whole, and shown once.
+        let Some((asked, evidence, carried_id)) =
+            self.state.user_name.as_deref().and_then(|name| {
+                carried
+                    .and_then(|(lead, id)| {
+                        let joined = format!("{lead} {}", segment.text);
+                        asked_of(name, &joined).map(|asked| (asked, joined, Some(id)))
+                    })
+                    .or_else(|| {
+                        asked_of(name, &segment.text[correction.unwrap_or(0)..])
+                            .map(|asked| (asked, segment.text.clone(), None))
+                    })
+            })
+        else {
+            return false;
+        };
+        if !self.state.cue.as_ref().is_some_and(|cue| cue.held) && now - segment.at_ms < CUE_MS {
+            // Only displayed questions suppress model duplicates. A joined
+            // question was read from both lines, so either citation counts.
+            if let Some(id) = carried_id {
+                self.asked_lines.push(id);
+            }
+            self.asked_lines.push(segment.id.clone());
+            // A suggestion replaced before it was published was never seen.
+            if self.state.cue.take().is_some() {
+                self.forget_unshown();
+            }
+            let lifetime = if self.has_processing_permission() {
+                ASKED_WITH_MODEL_MS
+            } else {
+                ASKED_MS
+            };
+            self.cue_deadline = segment.at_ms + lifetime;
+            self.state.cue = Some(Cue {
+                sources: Vec::new(),
+                id: format!("{}:{}", self.generation, segment.id),
+                kind: ASKED.into(),
+                question: asked,
+                evidence,
+                source_id: segment.id.clone(),
+                remaining_ms: self.cue_deadline - now,
+                total_ms: lifetime,
+                held: false,
+                resolved_by: None,
+                note: None,
+                about_focus: false,
+            });
+        }
+        true
+    }
+
     fn cooldown(&self) -> u64 {
         match self.state.sensitivity {
             Sensitivity::Balanced | Sensitivity::Focused => 10_000,
             Sensitivity::Quiet => 30_000,
         }
+    }
+
+    /// The pause before a model's next cue, from when the last one ended.
+    /// After a dismissal it is the full cooldown: the user said no. After a
+    /// cue expired, was resolved or withdrawn, or lost its source, nothing
+    /// was rejected, so the pause is short (`AFTER_UNREJECTED_MS`, longer in
+    /// Quiet). The phrase rules keep `cooldown_until` unchanged.
+    fn pause_model_after(&mut self, ended_at: u64, dismissed: bool) {
+        let pause = match (dismissed, self.state.sensitivity) {
+            (true, _) => self.cooldown(),
+            (false, Sensitivity::Quiet) => AFTER_UNREJECTED_QUIET_MS,
+            (false, _) => AFTER_UNREJECTED_MS,
+        };
+        self.model_pause_until = ended_at.saturating_add(pause);
     }
 
     pub fn respond(&mut self, id: &str, response: Response) -> Result<(), String> {
@@ -1314,9 +1525,13 @@ impl Engine {
             == SAID;
         self.invalidate_evaluation();
         self.evaluated_cue = None;
-        self.state.cue = None;
+        if let Some(cue) = self.state.cue.take() {
+            self.dismissed_sources
+                .extend(cue.sources.into_iter().map(|source| source.id));
+        }
         if !quote {
             self.cooldown_until = self.state.elapsed_ms + self.cooldown();
+            self.pause_model_after(self.state.elapsed_ms, true);
         }
         self.changed();
         Ok(())
@@ -1431,6 +1646,7 @@ impl Engine {
             self.state.cue = None;
             self.evaluated_cue = None;
             self.cooldown_until = self.state.elapsed_ms + self.cooldown();
+            self.pause_model_after(self.state.elapsed_ms, false);
             self.changed();
         } else {
             // Same note, different standing: keep the reminder, even held
@@ -1565,16 +1781,7 @@ impl Engine {
             .map(|name| name.trim().to_string())
             .filter(|name| !name.is_empty());
         if let Some(name) = &name {
-            // Letters, combining accents, and name punctuation, with at least
-            // one letter.
-            let valid = name.chars().count() <= 40
-                && name.chars().any(char::is_alphabetic)
-                && name.chars().all(|character| {
-                    character.is_alphabetic()
-                        || ('\u{0300}'..='\u{036F}').contains(&character)
-                        || " '-’".contains(character)
-                });
-            if !valid {
+            if !valid_user_name(name) {
                 return Err(
                     "Use letters, spaces, apostrophes, or hyphens, up to 40 characters.".into(),
                 );
@@ -1830,6 +2037,49 @@ fn open_question(text: &str) -> Option<String> {
     None
 }
 
+/// The pause before a model's next cue after one ended without the user
+/// dismissing it (expired, resolved, withdrawn), in Balanced and Focused.
+const AFTER_UNREJECTED_MS: u64 = 3_000;
+/// The same pause in Quiet, whose full cooldown is 30 seconds.
+const AFTER_UNREJECTED_QUIET_MS: u64 = 10_000;
+
+/// Letters, combining accents, and name punctuation, with at least one
+/// letter, up to 40 characters: what Settings accepts as the user's name.
+pub(crate) fn valid_user_name(name: &str) -> bool {
+    name.chars().count() <= 40
+        && name.chars().any(char::is_alphabetic)
+        && name.chars().all(|character| {
+            character.is_alphabetic()
+                || ('\u{0300}'..='\u{036F}').contains(&character)
+                || " '-’".contains(character)
+        })
+}
+
+/// How long after a line ending on the user's name a following line may
+/// carry the question to them.
+const NAME_CARRY_MS: u64 = 6_000;
+
+/// The unfinished end of a line, when it ends on the user's name: "Maddie,"
+/// in "Partners doubles it. Maddie,". Only text after the line's last
+/// sentence end counts, and it must end with the whole name.
+fn trailing_address(name: &str, text: &str) -> Option<String> {
+    let tail = text
+        .rsplit_once(['.', '?', '!'])
+        .map_or(text, |(_, tail)| tail)
+        .trim();
+    let words = |part: &str| -> Vec<String> {
+        part.split_whitespace()
+            .map(|word| {
+                word.trim_matches(|character: char| !character.is_alphanumeric())
+                    .to_lowercase()
+            })
+            .filter(|word| !word.is_empty())
+            .collect()
+    };
+    let (tail_words, name_words) = (words(tail), words(name));
+    (!name_words.is_empty() && tail_words.ends_with(&name_words)).then(|| tail.to_string())
+}
+
 /// The cue kind for a question addressed to the user by name.
 pub const ASKED: &str = "Asked you";
 
@@ -1869,15 +2119,88 @@ fn asked_of(name: &str, text: &str) -> Option<String> {
                     && !(words.first().is_some_and(|word| word == "what")
                         && words.get(1).is_some_and(|word| word == "a" || word == "an"))
             };
-            // "Robin, can you take the draft?" or "Hey Robin, could you ...".
-            let opens = body.split_once(',').is_some_and(|(head, rest)| {
-                let head = words_of(head);
+            // Words that ask something of the person just named: a question
+            // word ("how many", "what's"), not "what a", or an opener put to
+            // them ("can you", "did your").
+            // "Didn't you run the booth?", "Won't you join us?"
+            const NEGATIVE_OPENERS: [&str; 12] = [
+                "didn't",
+                "don't",
+                "doesn't",
+                "can't",
+                "couldn't",
+                "won't",
+                "wouldn't",
+                "shouldn't",
+                "aren't",
+                "isn't",
+                "wasn't",
+                "weren't",
+            ];
+            let asks = |words: &[String]| match words {
+                [first, second, ..] if first == "what" && (second == "a" || second == "an") => {
+                    false
+                }
+                [first, ..] if WH_WORDS.contains(&first.as_str()) => true,
+                [first, second, ..] => {
+                    (QUESTION_OPENERS.contains(&first.as_str())
+                        || NEGATIVE_OPENERS.contains(&first.as_str()))
+                        && (second == "you" || second == "your")
+                }
+                _ => false,
+            };
+            // "Robin, can you take the draft?", "Hey Robin, could you ...",
+            // or the name set off by commas later in the sentence ("Partners
+            // doubles it, Robin, how many came?"). Later in the sentence, the
+            // words after the name must also ask something of them: a "?" alone
+            // would also take in "Did you invite Alex, Robin, and Sam?" or
+            // "Our treasurer, Robin, will send the figures."
+            let parts: Vec<&str> = body.split(',').collect();
+            let opens = (0..parts.len().saturating_sub(1)).any(|at| {
+                let head = words_of(parts[at]);
                 let start = head
                     .iter()
                     .take_while(|word| LEAD_INS.contains(&word.as_str()))
                     .count();
-                head[start..] == name[..] && (ends_with_mark || opens_question(&words_of(rest)))
+                let rest = words_of(&parts[at + 1..].join(","));
+                // "Could you, Robin, field the complaints?": the asking words
+                // come just before the name.
+                let asked_before = || {
+                    let before = words_of(parts[at - 1]);
+                    before.len() >= 2 && asks(&before[before.len() - 2..])
+                };
+                head[start..] == name[..]
+                    && if at == 0 {
+                        ends_with_mark || opens_question(&rest)
+                    } else {
+                        // And end with "?": "I spoke to Robin, Maya, who said
+                        // it's fine." is a relative clause, not a question.
+                        // An opening question can name its object before
+                        // an embedded WH clause: "Did you meet the lead,
+                        // Maya, who starts Monday?" Prefer quiet for this
+                        // ambiguous shape unless "could you" immediately
+                        // before the name makes the address explicit.
+                        let before = words_of(&parts[..at].join(","));
+                        ends_with_mark
+                            && (asked_before()
+                                || (asks(&rest) && !opens_question(&before) && !asks(&before)))
+                    }
             });
+            // No comma: "Robin how many came?" or "So Robin, can you…" said
+            // without the pause. Only at the start of a question that asks
+            // something ("how", "what", …) or asks you to ("can you"), so
+            // "Robin can take it?" or "Maybe Robin takes it." do not count.
+            let bare = {
+                let words = words_of(&body);
+                let start = words
+                    .iter()
+                    .take_while(|word| LEAD_INS.contains(&word.as_str()))
+                    .count();
+                let after = start + name.len();
+                ends_with_mark
+                    && words.get(start..after) == Some(&name[..])
+                    && asks(words.get(after..).unwrap_or_default())
+            };
             // "What do you think, Robin?" or "Can you take it, Robin".
             let closes = body
                 .trim_end_matches(['?', '.', '!'])
@@ -1885,7 +2208,7 @@ fn asked_of(name: &str, text: &str) -> Option<String> {
                 .is_some_and(|(rest, tail)| {
                     words_of(tail) == name && (ends_with_mark || opens_question(&words_of(rest)))
                 });
-            !name.is_empty() && (opens || closes)
+            !name.is_empty() && (opens || closes || bare)
         })
         .map(|sentence| {
             sentence
@@ -2089,6 +2412,12 @@ fn asked_of_someone(user_name: &str, sentence: &str) -> bool {
 /// cue or change the topic.
 const NEGATIONS: [&str; 10] = [
     "not", "never", "no", "nobody", "nothing", "none", "neither", "nor", "cannot", "wont",
+];
+
+/// Question words that ask for something on their own.
+const WH_WORDS: [&str; 13] = [
+    "what", "who", "when", "which", "how", "why", "where", "what's", "who's", "when's", "how's",
+    "why's", "where's",
 ];
 
 /// Transcripts often drop "?", so a sentence that opens like a question
@@ -2671,6 +3000,38 @@ fn resolves_with(kind: &str, text: &str, tasks: &[&str]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cloud_transcription_stop_is_kept_once_for_its_own_session_only() {
+        let mut engine = Engine::live();
+        engine.start().unwrap();
+        // Test builds never select cloud transcription from the environment.
+        assert_eq!(engine.state.transcription, None);
+        engine.state.transcription = Some(CloudTranscription {
+            provider: "Deepgram".into(),
+            stopped: None,
+            dropped_audio: false,
+            reconnects: 0,
+            lost_ms: 0,
+        });
+        let session = engine.session();
+        engine.cloud_transcription_stopped(session + 1, "network");
+        assert_eq!(engine.state.transcription.as_ref().unwrap().stopped, None);
+        let revision = engine.state.revision;
+        engine.cloud_transcription_stopped(session, "withdrawn");
+        engine.cloud_transcription_stopped(session, "network");
+        let shown = serde_json::to_value(engine.cue_snapshot()).unwrap();
+        assert_eq!(shown["transcription"]["provider"], "Deepgram");
+        assert_eq!(shown["transcription"]["stopped"], "withdrawn");
+        // A reconnect is counted with the speech it lost; a later session's
+        // is ignored.
+        engine.cloud_transcription_reconnected(session + 1, 900);
+        engine.cloud_transcription_reconnected(session, 2_400);
+        let shown = serde_json::to_value(engine.cue_snapshot()).unwrap();
+        assert_eq!(shown["transcription"]["reconnects"], 1);
+        assert_eq!(shown["transcription"]["lostMs"], 2_400);
+        assert_eq!(engine.state.revision, revision + 2);
+    }
 
     fn with_cue() -> Engine {
         let mut engine = Engine::fictional();
@@ -5364,6 +5725,182 @@ mod tests {
         )
         .unwrap();
         assert_eq!(e.state.cue.as_ref().unwrap().kind, ASKED);
+    }
+
+    /// A session named `user`, fed fictional streamed lines `(at_ms, text)`
+    /// as a cloud transcriber delivers them: one speaker label, with lines
+    /// split wherever the stream finalized.
+    fn streamed(user: &str, lines: &[(u64, &str)]) -> Engine {
+        let mut e = live_session();
+        e.set_user_name(Some(user.into())).unwrap();
+        for (n, (at, text)) in lines.iter().enumerate() {
+            let now = e.state.elapsed_ms;
+            e.advance((at + 1_000).saturating_sub(now));
+            e.ingest(e.session(), live(&format!("s{n}"), *at, text))
+                .unwrap();
+        }
+        e
+    }
+
+    #[test]
+    fn a_question_split_across_two_streamed_lines_after_the_name_is_asked_of_the_user() {
+        // As in lab RunB10: the stream ended one line on the name and started
+        // the next with the question, under one speaker label.
+        let e = streamed(
+            "Maddie",
+            &[
+                (
+                    39_609,
+                    "A guest list, partners, or just members. We need to pick.",
+                ),
+                (45_579, "Partners doubles it. Maddie,"),
+                (
+                    47_429,
+                    "how many came to the Springstar party? Sorry, Cass on the keyboard.",
+                ),
+            ],
+        );
+        let cue = e.state.cue.as_ref().expect("asked of the user");
+        assert_eq!(cue.kind, ASKED);
+        assert_eq!(
+            cue.question,
+            "Maddie, how many came to the Springstar party?"
+        );
+        // The same name without the comma, or a name far earlier, as well.
+        let bare = streamed(
+            "Maddie",
+            &[
+                (45_579, "Partners doubles it. Maddie"),
+                (47_429, "how many came to the Springstar party?"),
+            ],
+        );
+        assert_eq!(bare.state.cue.as_ref().unwrap().kind, ASKED);
+        let too_late = streamed(
+            "Maddie",
+            &[
+                (45_579, "Partners doubles it. Maddie,"),
+                (52_000, "how many came to the Springstar party?"),
+            ],
+        );
+        assert!(too_late
+            .state
+            .cue
+            .as_ref()
+            .is_none_or(|cue| cue.kind != ASKED));
+    }
+
+    #[test]
+    fn a_question_to_the_user_by_name_mid_sentence_or_without_a_comma_is_asked() {
+        for line in [
+            "So Maddie, how many came to the Springstar party?",
+            "Partners doubles it, Maddie, how many came to the party?",
+            "Maddie how many came to the Springstar party?",
+            "Okay so Maddie can you check the guest list?",
+        ] {
+            let e = streamed("Maddie", &[(10_000, line)]);
+            assert_eq!(
+                e.state.cue.as_ref().map(|cue| cue.kind.as_str()),
+                Some(ASKED),
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_name_set_off_mid_sentence_counts_only_when_what_follows_asks_them() {
+        for quiet in [
+            "Our treasurer, Maya, will send the figures.",
+            "The new lead, Maya, is joining us next week.",
+            "I spoke to Robin, Maya, who said it's fine.",
+            "Did you invite Alex, Maya, and Sam?",
+            "Did you meet the new lead, Maya, who starts Monday?",
+            "Did you ask our treasurer, Maya, what she needs?",
+            "Didn't you meet the new lead, Maya, who starts Monday?",
+            "Maya what a party?",
+        ] {
+            let e = streamed("Maya", &[(10_000, quiet)]);
+            assert!(
+                e.state.cue.as_ref().is_none_or(|cue| cue.kind != ASKED),
+                "{quiet}"
+            );
+        }
+        for asked in [
+            "The budget is fine, Maya, what's left on the list?",
+            "The schedule changed, Maya, who will cover Monday?",
+            "Maya, who starts Monday?",
+            "Maya, what does the treasurer need?",
+            "Could you, Maya, field the complaints?",
+            "Maya what's the plan for Saturday?",
+            "The van is booked, Maya, can you drive it?",
+            "If it locks anyone out, could you, Maya, field the complaints?",
+        ] {
+            let e = streamed("Maya", &[(10_000, asked)]);
+            assert_eq!(
+                e.state.cue.as_ref().map(|cue| cue.kind.as_str()),
+                Some(ASKED),
+                "{asked}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_name_ending_one_speakers_line_is_not_joined_to_the_next_speakers_question() {
+        let mut e = live_session();
+        e.set_user_name(Some("Maddie".into())).unwrap();
+        e.advance(12_000);
+        let mut first = live("s1", 10_000, "That one is for Maddie,");
+        first.speaker = "Speaker 1".into();
+        e.ingest(e.session(), first).unwrap();
+        let mut second = live("s2", 11_000, "how many came to the party?");
+        second.speaker = "Speaker 2".into();
+        e.ingest(e.session(), second).unwrap();
+        assert!(e.state.cue.as_ref().is_none_or(|cue| cue.kind != ASKED));
+    }
+
+    #[test]
+    fn a_question_joined_across_two_lines_is_quoted_whole_so_the_card_shows_it_once() {
+        let e = streamed(
+            "Maddie",
+            &[
+                (45_579, "Partners doubles it. Maddie,"),
+                (47_429, "how many came to the Springstar party?"),
+            ],
+        );
+        let cue = e.state.cue.as_ref().unwrap();
+        assert_eq!(
+            cue.question,
+            "Maddie, how many came to the Springstar party?"
+        );
+        // The card quotes the line around the question; the question itself
+        // must be found in it, or it would appear twice.
+        assert!(cue.evidence.contains(&cue.question), "{}", cue.evidence);
+        assert_eq!(cue.source_id, "s1");
+    }
+
+    #[test]
+    fn the_users_name_merely_mentioned_is_not_a_question_to_them() {
+        for lines in [
+            // From RunB10.
+            &[
+                (100_219, "I'm away Friday."),
+                (101_589, "Maybe Maddie takes it."),
+            ][..],
+            &[(10_000, "Maddie can take it?")],
+            &[(10_000, "I think we should ask Maddie how many came?")],
+            // A line ending on the name, then a statement, not a question.
+            &[
+                (10_000, "That's for Maddie"),
+                (11_000, "the van is booked for Saturday."),
+            ],
+            // A misspelling is not matched: names are too easily confused.
+            &[(10_000, "Maddy, how many came to the party?")],
+        ] {
+            let e = streamed("Maddie", lines);
+            assert!(
+                e.state.cue.as_ref().is_none_or(|cue| cue.kind != ASKED),
+                "{lines:?}"
+            );
+        }
     }
 
     fn after(first: &str, second: &str, second_speaker: &str, gap_ms: u64) -> Engine {

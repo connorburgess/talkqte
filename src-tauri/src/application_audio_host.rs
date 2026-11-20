@@ -101,20 +101,15 @@ struct View {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Evidence {
-    /// Chunks the recognizer processed.
-    recognized_chunks: u64,
+    /// Milliseconds of audio sent to the cloud stream.
+    audio_sent_ms: u64,
+    /// Final results the stream returned.
+    finals: u64,
     accepted_lines: u64,
     /// Lines the sink or the engine refused, for example as out of order.
     refused_lines: u64,
-    /// Lines whose time fell outside their audio.
-    out_of_range_lines: u64,
-    /// Chunks withheld because the source had stopped.
-    stale_chunks: u64,
-    /// Chunks the transcription queue had no room for.
-    refused_chunks: u64,
-    recognizer_failures: u64,
-    /// The transcription worker did not stop in time; counts are incomplete.
-    worker_detached: bool,
+    /// Samples dropped because the send queue was full.
+    dropped_samples: u64,
     /// Width of the accepted host-clock read.
     clock_read_micros: u64,
 }
@@ -122,14 +117,11 @@ pub(crate) struct Evidence {
 impl Evidence {
     fn of(report: &Report) -> Self {
         Self {
-            recognized_chunks: report.worker.chunks,
-            accepted_lines: report.worker.accepted,
-            refused_lines: report.worker.rejected,
-            out_of_range_lines: report.worker.out_of_range,
-            stale_chunks: report.worker.stale,
-            refused_chunks: report.refused_chunks,
-            recognizer_failures: report.worker.failures,
-            worker_detached: report.worker.detached,
+            audio_sent_ms: report.transcription.sent_ms,
+            finals: report.transcription.finals,
+            accepted_lines: report.transcription.accepted,
+            refused_lines: report.transcription.rejected,
+            dropped_samples: report.transcription.dropped_samples,
             clock_read_micros: u64::try_from(report.bracket_width.as_micros()).unwrap_or(u64::MAX),
         }
     }
@@ -679,13 +671,7 @@ impl Host {
             return false;
         };
         self.settle(&mut state);
-        state.lab_stop_closed
-            && state.active.is_none()
-            && state.listing.is_none()
-            && !state
-                .last_run
-                .as_ref()
-                .is_some_and(|run| run.worker_detached)
+        state.lab_stop_closed && state.active.is_none() && state.listing.is_none()
     }
 
     /// Take a finished operation out, keeping why it ended.
@@ -725,8 +711,9 @@ impl Host {
             Some(Ended::Unwound) | None => return,
         };
         if crate::timing_log::enabled() {
-            let recognized_chunks = match &*active.ended.lock().unwrap_or_else(|e| e.into_inner()) {
-                Some(Ended::Released(report)) => Some(report.worker.chunks),
+            let transcribed_finals = match &*active.ended.lock().unwrap_or_else(|e| e.into_inner())
+            {
+                Some(Ended::Released(report)) => Some(report.transcription.finals),
                 _ => None,
             };
             crate::timing_log::record(crate::timing_log::Event::SourceEnded {
@@ -736,7 +723,7 @@ impl Host {
                         .ok()
                         .and_then(|value| value.as_str().map(str::to_owned))
                 }),
-                recognized_chunks,
+                transcribed_finals,
             });
         }
         state.problem = problem;
@@ -918,7 +905,7 @@ fn active_phase(abandoned: bool, stage: Option<Stage>, cancelled: bool) -> Phase
     }
 }
 
-/// Before a session for the source alone begins: a recognizer must be
+/// Before a session for the source alone begins: transcription must be
 /// available, or the session would end as soon as it began after clearing the
 /// previous one; and the microphone must read off, since the session says it
 /// is not used. A microphone that cannot be read counts as not off.
@@ -999,7 +986,6 @@ pub(crate) mod app {
     use crate::{
         application_audio::native::{shareable_applications, Selection},
         native_source::{self, Access, Limits},
-        transcription::Transcriber,
         AppState, Runtime,
     };
     use tauri::{Emitter, Manager};
@@ -1036,24 +1022,25 @@ pub(crate) mod app {
 
     impl Backend for Native {
         fn begin_session(&mut self, control: &Control) -> Result<Box<dyn FnOnce()>, Failure> {
-            // The same check the recognizer load makes first. Whisper builds
-            // verify the model again when loading; that can still fail.
-            let recognizer_available = cfg!(feature = "local-whisper")
-                && crate::model_path(&self.app).is_some_and(|(path, _)| path.is_file());
+            #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+            if !crate::dev_lab_source::current() {
+                return Err(Failure::SourceUnavailable);
+            }
+            // The same check the start makes before any native request.
+            let availability = crate::live_availability();
             let controller = self
                 .app
                 .state::<crate::microphone::Controller>()
                 .inner()
                 .clone();
             let access = AppAccess(self.app.clone());
-            let session = access
-                .with(|runtime| {
-                    // Under the runtime lock, which a standalone microphone
-                    // start also consults, so the two cannot interleave.
-                    session_preflight(controller.try_not_capturing(), recognizer_available)?;
-                    runtime.begin_source_session(control)
-                })
-                .ok_or(Failure::Unavailable)??;
+            let session = begin_session_checked(
+                &access,
+                control,
+                availability,
+                || controller.try_not_capturing(),
+                record_startup,
+            )?;
             Ok(Box::new(move || {
                 access.with(|runtime| runtime.end_source_session(session));
             }))
@@ -1069,6 +1056,8 @@ pub(crate) mod app {
                 self.selections.clear();
                 return Err(Failure::Cancelled);
             }
+            #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+            self.selections.retain(Selection::lab_allowed);
             Ok(self
                 .selections
                 .iter()
@@ -1087,7 +1076,7 @@ pub(crate) mod app {
                 recognizer(&self.app)
             });
             // Whatever the answer, the listed selections are spent.
-            let (chosen, transcriber) = match ready {
+            let (chosen, opener) = match ready {
                 Ok(ready) => ready,
                 Err(refused) => {
                     self.selections.clear();
@@ -1100,8 +1089,75 @@ pub(crate) mod app {
             // through the gate, and this is the worker that constructed it.
             // The remaining obligations of NativeOwner::begin are unverified
             // device gates; see docs/native-audio-owner.md.
-            unsafe { native_source::run(access, start, selection, LIMITS, transcriber, monitor) }
+            unsafe { native_source::run(access, start, selection, LIMITS, opener, monitor) }
         }
+    }
+
+    fn record_startup(
+        stage: crate::timing_log::SourceStartStage,
+        reason: crate::timing_log::SourceStartReason,
+    ) {
+        #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+        crate::timing_log::record(crate::timing_log::Event::LabSourceStartup {
+            version: 1,
+            stage,
+            reason,
+        });
+        #[cfg(not(all(debug_assertions, feature = "lab-evaluator")))]
+        let _ = (stage, reason);
+    }
+
+    // This is the production admission sequence; tests substitute Runtime access
+    // and metadata results, never a successful permission or a native stream.
+    pub(in crate::application_audio_host) fn begin_session_checked<A: Access>(
+        access: &A,
+        control: &Control,
+        availability: Result<(), crate::LiveUnavailable>,
+        microphone: impl FnOnce() -> Option<bool>,
+        mut report: impl FnMut(
+            crate::timing_log::SourceStartStage,
+            crate::timing_log::SourceStartReason,
+        ),
+    ) -> Result<u64, Failure> {
+        use crate::timing_log::{SourceStartReason as Reason, SourceStartStage as Stage};
+        report(
+            Stage::CloudReadiness,
+            match availability {
+                Ok(()) => Reason::Ready,
+                Err(crate::LiveUnavailable::Build) => Reason::CloudBuildMissing,
+                Err(crate::LiveUnavailable::Selection) => Reason::CloudNotSelected,
+                Err(crate::LiveUnavailable::Settings) => Reason::CloudSettingsInvalid,
+                Err(crate::LiveUnavailable::TokenMetadata) => Reason::TokenMetadataRejected,
+            },
+        );
+        let result = access.with(|runtime| {
+            // Preserve the existing check order, including reading microphone
+            // state under Runtime even when transcription is unavailable.
+            if let Err(failure) = session_preflight(microphone(), availability.is_ok()) {
+                if failure == Failure::Busy {
+                    report(Stage::RuntimeStart, Reason::MicrophoneBusy);
+                }
+                return Err(failure);
+            }
+            let result = runtime.begin_source_session(control);
+            report(
+                if result.is_ok() {
+                    Stage::SessionCreated
+                } else {
+                    Stage::RuntimeStart
+                },
+                if result.is_ok() {
+                    Reason::Created
+                } else {
+                    Reason::RuntimeRefused
+                },
+            );
+            result
+        });
+        if result.is_none() {
+            report(Stage::RuntimeAccess, Reason::RuntimeUnavailable);
+        }
+        result.ok_or(Failure::Unavailable)?
     }
 
     /// Everything decided before the native request, in order: a start that
@@ -1116,6 +1172,20 @@ pub(crate) mod app {
         source: &str,
         listed: &[&str],
         load: impl FnOnce() -> Result<T, String>,
+    ) -> Result<(usize, T), Refused> {
+        before_native_start_observed(access, control, source, listed, load, record_startup)
+    }
+
+    pub(in crate::application_audio_host) fn before_native_start_observed<A: Access, T>(
+        access: &A,
+        control: &Control,
+        source: &str,
+        listed: &[&str],
+        load: impl FnOnce() -> Result<T, String>,
+        mut report: impl FnMut(
+            crate::timing_log::SourceStartStage,
+            crate::timing_log::SourceStartReason,
+        ),
     ) -> Result<(usize, T), Refused> {
         if control.is_cancelled() {
             return Err(Refused::Start(Failure::Cancelled));
@@ -1135,33 +1205,33 @@ pub(crate) mod app {
                 .ok_or(Refused::Clock(TimingError::SessionChanged))
         };
         let approved_in = session()?;
-        let loaded = load().map_err(|_| Refused::Start(Failure::Unavailable))?;
+        let loaded = load().map_err(|_| {
+            report(
+                crate::timing_log::SourceStartStage::RecognizerLoad,
+                crate::timing_log::SourceStartReason::LoadRefused,
+            );
+            Refused::Start(Failure::Unavailable)
+        })?;
+        report(
+            crate::timing_log::SourceStartStage::RecognizerLoad,
+            crate::timing_log::SourceStartReason::Ready,
+        );
         if session()? != approved_in {
             return Err(Refused::Clock(TimingError::SessionChanged));
         }
         Ok((chosen, loaded))
     }
 
-    /// A second local recognizer for this source, loaded before any native
-    /// request. Builds without local transcription refuse the start.
-    fn recognizer(app: &tauri::AppHandle) -> Result<Box<dyn Transcriber>, String> {
-        #[cfg(feature = "local-whisper")]
-        {
-            let (model, pinned) = crate::model_path(app)
-                .filter(|(path, _)| path.is_file())
-                .ok_or("The local speech model is not installed.")?;
-            if pinned {
-                crate::model::verify(&model, &crate::model::TINY_EN)?;
-            }
-            let loaded = crate::transcription::whisper::LocalWhisper::load(&model, 4)
-                .map_err(|_| "Could not load the local speech model.".to_string())?;
-            Ok(Box::new(loaded))
+    /// How this source is transcribed, decided before any native request:
+    /// the cloud stream this launch selected. A build or launch without one,
+    /// or with unusable settings, refuses the start; nothing is transcribed
+    /// on this device.
+    fn recognizer(_app: &tauri::AppHandle) -> Result<crate::transcription::cloud::Opener, String> {
+        if let Some(reason) = crate::live_unavailable() {
+            return Err(reason.into());
         }
-        #[cfg(not(feature = "local-whisper"))]
-        {
-            let _ = app;
-            Err("This build does not include local transcription.".into())
-        }
+        crate::transcription::cloud::opener()
+            .map_err(|_| "The cloud transcription settings are not usable.".to_string())
     }
 
     /// The single command for this development surface, main window only.
@@ -1197,6 +1267,9 @@ pub(crate) mod app {
         // Freeze source and finite Stop settings once, shared by arming and
         // autostart so the approved source cannot change between those steps.
         let settings = DevSettings::read(|name| std::env::var(name).ok());
+        #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+        crate::dev_lab_source::initialize(settings.as_ref(), |name| std::env::var(name).ok())
+            .map_err(std::io::Error::other)?;
         #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
         crate::dev_stop::install(app, host.clone(), settings.as_ref())
             .map_err(std::io::Error::other)?;

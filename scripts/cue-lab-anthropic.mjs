@@ -34,6 +34,8 @@ const failure = (category, calls = 0) =>
 // API outcomes that end only the one request (a recorded non-decision): a
 // refusal, or a reply that reached the output bound (thinking shares it).
 const REQUEST_SCOPED = new Set(['refusal', 'output-limit']);
+// Parent-owned bound: a stalled worker cannot enforce its own SDK timer.
+const ABORT_SETTLEMENT_MS = 1000;
 const TERMINAL = {
   'usage-limit': 'usage-limit',
   auth: 'auth',
@@ -107,11 +109,12 @@ export async function openAnthropicLab({
   let exited = false,
     buffer = '',
     pendingReady = null,
-    pending = null;
+    pending = null,
+    retirement = null;
   child.on('exit', () => {
     exited = true;
     pendingReady?.reject(failure('process'));
-    pending?.reject(failure('process'));
+    if (!pending?.retiring) pending?.reject(failure('process'));
   });
   child.stdin.on('error', () => {});
   child.stdout.setEncoding('utf8');
@@ -127,9 +130,9 @@ export async function openAnthropicLab({
       }
       buffer = buffer.slice(end + 1);
       if (frame?.type === 'ready') pendingReady?.resolve();
-      else if (frame?.type === 'result' && pending?.id === frame.id)
-        pending.resolve(frame);
-      else child.kill('SIGKILL');
+      else if (frame?.type === 'result' && pending?.id === frame.id) {
+        if (!pending.retiring) pending.resolve(frame);
+      } else child.kill('SIGKILL');
     }
   });
   const deferred = () => {
@@ -168,30 +171,38 @@ export async function openAnthropicLab({
   const stop = () => {
     terminal = true;
   };
-  signal?.addEventListener('abort', stop, { once: true });
+  const rootAbort = () => {
+    stop();
+    active?.abort();
+  };
+  signal?.addEventListener('abort', rootAbort, { once: true });
 
-  async function retire() {
-    try {
-      child.stdin.end();
-    } catch {}
-    for (let n = 0; n < 50 && !exited; n++) await delay(10);
-    const kill = (sig) => {
+  function retire() {
+    if (retirement) return retirement;
+    retirement = (async () => {
       try {
-        process.kill(-child.pid, sig);
+        child.stdin.end();
       } catch {}
-    };
-    kill('SIGTERM');
-    await delay(100);
-    kill('SIGKILL');
-    for (let n = 0; n < 100; n++) {
-      try {
-        process.kill(-child.pid, 0);
-      } catch (error) {
-        if (error.code === 'ESRCH') return;
+      for (let n = 0; n < 50 && !exited; n++) await delay(10);
+      const kill = (sig) => {
+        try {
+          process.kill(-child.pid, sig);
+        } catch {}
+      };
+      kill('SIGTERM');
+      await delay(100);
+      kill('SIGKILL');
+      for (let n = 0; n < 100; n++) {
+        try {
+          process.kill(-child.pid, 0);
+        } catch (error) {
+          if (error.code === 'ESRCH') return;
+        }
+        await delay(10);
       }
-      await delay(10);
-    }
-    throw failure('cleanup');
+      throw failure('cleanup');
+    })();
+    return retirement;
   }
 
   const request = async ({ role, input, signal: requestSignal } = {}) => {
@@ -235,14 +246,39 @@ export async function openAnthropicLab({
     const id = nextId++;
     const receipt = { call: calls, outcome: null };
     if (receipts.length < 100) receipts.push(receipt);
-    pending = { id, ...deferred() };
-    active = pending;
-    const abort = () => {
+    const operation = { id, ...deferred(), retiring: false, abortCause: null };
+    pending = operation;
+    active = operation;
+    let abortTimer;
+    const abort = (cause = 'cancelled') => {
+      if (operation.abortCause) return;
+      operation.abortCause = cause;
       try {
         child.stdin.write(JSON.stringify({ type: 'abort', id }) + '\n');
       } catch {}
+      abortTimer = setTimeout(() => {
+        // Do not settle from an exit/result before owned-group confirmation.
+        stop();
+        operation.retiring = true;
+        retire().then(
+          () => {
+            receipt.workerRetirement = 'confirmed';
+            operation.reject(failure(operation.abortCause, calls));
+          },
+          () => {
+            receipt.workerRetirement = 'unconfirmed';
+            operation.reject(failure('cleanup', calls));
+          },
+        );
+      }, ABORT_SETTLEMENT_MS);
     };
-    requestSignal?.addEventListener('abort', abort, { once: true });
+    operation.abort = () => abort();
+    const onRequestAbort = () => abort();
+    requestSignal?.addEventListener('abort', onRequestAbort, { once: true });
+    const requestTimer = setTimeout(() => {
+      stop(); // The adapter ceiling remains terminal, unlike a scoped abort.
+      abort('deadline');
+    }, deadlineMs);
     try {
       child.stdin.write(
         JSON.stringify({
@@ -255,11 +291,21 @@ export async function openAnthropicLab({
       );
       let settled;
       try {
-        settled = await pending.promise;
+        settled = await operation.promise;
       } catch (error) {
         // The worker died mid-request: whatever it sent may still be billed.
         spent += worst;
-        Object.assign(receipt, { outcome: 'process', costMicroUsd: worst });
+        stop();
+        Object.assign(receipt, {
+          outcome:
+            error.category === 'cleanup'
+              ? 'cleanup'
+              : (operation.abortCause ?? 'process'),
+          ...(operation.abortCause
+            ? { abortReason: operation.abortCause }
+            : {}),
+          costMicroUsd: worst,
+        });
         if (spent >= cap) capReached = true;
         throw error;
       }
@@ -289,6 +335,11 @@ export async function openAnthropicLab({
         usage,
         costMicroUsd: cost,
       });
+      if (operation.abortCause) {
+        receipt.outcome = operation.abortCause;
+        receipt.abortReason = operation.abortCause;
+        throw failure(operation.abortCause, calls);
+      }
       if (result.outcome === 'decision') {
         let value;
         try {
@@ -318,7 +369,9 @@ export async function openAnthropicLab({
       stop();
       throw failure(TERMINAL[result.outcome] ?? 'provider', calls);
     } finally {
-      requestSignal?.removeEventListener('abort', abort);
+      clearTimeout(requestTimer);
+      clearTimeout(abortTimer);
+      requestSignal?.removeEventListener('abort', onRequestAbort);
       active = null;
       pending = null;
     }
@@ -344,9 +397,12 @@ export async function openAnthropicLab({
     async close() {
       if (!closing) {
         stop();
-        signal?.removeEventListener('abort', stop);
+        signal?.removeEventListener('abort', rootAbort);
         closing = (async () => {
-          if (active) await active.promise.catch(() => {});
+          if (active) {
+            active.abort();
+            await active.promise.catch(() => {});
+          }
           await retire();
         })();
       }

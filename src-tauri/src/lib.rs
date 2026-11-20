@@ -15,6 +15,13 @@ mod context_runtime;
 pub mod cue_evaluator;
 #[cfg(all(
     debug_assertions,
+    target_os = "macos",
+    feature = "native-audio-spike",
+    feature = "lab-evaluator"
+))]
+mod dev_lab_source;
+#[cfg(all(
+    debug_assertions,
     any(feature = "claude-cli", feature = "lab-evaluator"),
     feature = "native-audio-spike"
 ))]
@@ -33,6 +40,8 @@ mod dev_source_observation;
     feature = "lab-evaluator"
 ))]
 mod dev_stop;
+#[cfg(debug_assertions)]
+mod dev_user_name;
 pub mod engine;
 pub mod granola;
 #[cfg(all(
@@ -46,7 +55,6 @@ pub mod live;
 mod live_control;
 mod live_source;
 mod microphone;
-pub mod model;
 #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
 mod native_session_clock;
 #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
@@ -54,6 +62,16 @@ mod native_source;
 pub mod notes_file;
 mod processing_commands;
 pub mod processing_reviews;
+#[cfg(any(
+    test,
+    all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "lab-evaluator",
+        feature = "native-audio-spike"
+    )
+))]
+mod selected_attestation;
 pub mod timing_log;
 pub mod transcription;
 
@@ -97,6 +115,8 @@ struct Runtime {
     context: context::ContextStore,
     /// A listed note source kept for selection, retry, or cancellation.
     pending_import: Option<context_import::PendingImport>,
+    /// Identity of the latest explicit file read; cancellation/replacement wins.
+    pending_file_pick: Option<Arc<()>>,
     /// The explicit Granola update check and what it last found.
     refresh: context_refresh::Refresh,
     /// The Granola session for this app run, once the person has signed in.
@@ -128,6 +148,7 @@ impl Default for Runtime {
             processing_status: engine::ProcessingTracker::default(),
             context: context::ContextStore::default(),
             pending_import: None,
+            pending_file_pick: None,
             refresh: context_refresh::Refresh::default(),
             granola: None,
             granola_sign_in: None,
@@ -369,7 +390,7 @@ fn snapshot(
 /// feature it registers the Claude Code backend, which sends nothing until
 /// the person turns it on; otherwise the plain engine with no cue backend.
 #[cfg(any(
-    feature = "local-whisper",
+    feature = "cloud-transcription",
     all(target_os = "macos", feature = "native-audio-spike"),
     test
 ))]
@@ -393,7 +414,7 @@ pub(crate) fn live_engine() -> Engine {
 
 /// A fresh engine that keeps the person's display choices and notes.
 #[cfg(any(
-    feature = "local-whisper",
+    feature = "cloud-transcription",
     all(target_os = "macos", feature = "native-audio-spike"),
     test
 ))]
@@ -555,261 +576,84 @@ async fn export_markdown(
     .map_err(|_| "Could not open the save dialog.")?
 }
 
-/// The app's own folder for downloaded models.
-fn models_dir(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
-    app.path().app_data_dir().ok().map(|dir| dir.join("models"))
-}
-
-/// Where the local speech model is loaded from: `TALKQTE_WHISPER_MODEL`, a
-/// developer-supplied file that is not checksum-checked, or the downloaded
-/// model in the app's data folder, which is.
-fn model_path(app: &tauri::AppHandle) -> Option<(std::path::PathBuf, bool)> {
-    if let Some(path) = std::env::var_os("TALKQTE_WHISPER_MODEL") {
-        return Some((path.into(), false));
-    }
-    models_dir(app).map(|dir| (model::installed_path(&dir, &model::TINY_EN), true))
-}
-
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LiveStatus {
     available: bool,
     reason: Option<&'static str>,
+    /// The cloud service this launch transcribes with, when one is
+    /// selected; absent otherwise, and then nothing is transcribed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transcription: Option<&'static str>,
+}
+
+/// Why a live session cannot start, if it cannot. Transcription is only
+/// through a cloud provider, selected per launch in development builds; a
+/// build without it transcribes nothing and says so.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LiveUnavailable {
+    Build,
+    Selection,
+    Settings,
+    TokenMetadata,
+}
+
+impl LiveUnavailable {
+    fn message(self) -> &'static str {
+        match self {
+            Self::Build => "This build has no live transcription.",
+            Self::Selection => {
+                "Live transcription needs cloud transcription selected for this development launch."
+            }
+            Self::Settings | Self::TokenMetadata => {
+                "The cloud transcription settings are not usable."
+            }
+        }
+    }
+}
+
+pub(crate) fn live_availability() -> Result<(), LiveUnavailable> {
+    classify_live_availability(
+        cfg!(feature = "cloud-transcription"),
+        transcription::cloud::selected,
+        transcription::cloud::readiness,
+    )
+}
+
+fn classify_live_availability(
+    compiled: bool,
+    selected: impl FnOnce() -> bool,
+    readiness: impl FnOnce() -> Result<(), transcription::cloud::ReadinessFailure>,
+) -> Result<(), LiveUnavailable> {
+    if !compiled {
+        return Err(LiveUnavailable::Build);
+    }
+    if !selected() {
+        return Err(LiveUnavailable::Selection);
+    }
+    readiness().map_err(|failure| match failure {
+        transcription::cloud::ReadinessFailure::Settings => LiveUnavailable::Settings,
+        transcription::cloud::ReadinessFailure::TokenMetadata => LiveUnavailable::TokenMetadata,
+    })
+}
+
+pub(crate) fn live_unavailable() -> Option<&'static str> {
+    live_availability().err().map(LiveUnavailable::message)
 }
 
 #[tauri::command]
-fn live_status(app: tauri::AppHandle) -> LiveStatus {
-    let reason = if !cfg!(feature = "local-whisper") {
-        Some("This build does not include local transcription.")
-    } else if !model_path(&app).is_some_and(|(path, pinned)| {
-        if pinned {
-            path.parent()
-                .is_some_and(|dir| model::is_installed(dir, &model::TINY_EN))
-        } else {
-            path.is_file()
-        }
-    }) {
-        Some("The local speech model is not installed.")
-    } else {
-        None
-    };
+fn live_status() -> LiveStatus {
+    let reason = live_unavailable();
     LiveStatus {
         available: reason.is_none(),
         reason,
+        transcription: transcription::cloud::selected().then_some(transcription::cloud::PROVIDER),
     }
 }
 
-/// What the notebook shows about the optional model download.
-#[derive(Clone, Debug, Default, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelStatus {
-    revision: u64,
-    /// `unavailable`, `developer`, `missing`, `downloading`, or `installed`.
-    status: &'static str,
-    name: &'static str,
-    size_bytes: u64,
-    needed_bytes: u64,
-    received: u64,
-    message: Option<String>,
-}
-
-#[derive(Default)]
-pub struct ModelDownload {
-    status: Mutex<ModelStatus>,
-    cancel: Arc<AtomicBool>,
-}
-
-impl ModelDownload {
-    /// The status, even after a panic while it was held: the guard in the
-    /// download thread must always be able to reset it.
-    fn lock(&self) -> std::sync::MutexGuard<'_, ModelStatus> {
-        self.status
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-}
-
-fn model_status_now(app: &tauri::AppHandle, revision: u64) -> ModelStatus {
-    let spec = model::TINY_EN;
-    let status = if !cfg!(feature = "local-whisper") {
-        "unavailable"
-    } else if std::env::var_os("TALKQTE_WHISPER_MODEL").is_some() {
-        "developer"
-    } else if models_dir(app).is_some_and(|dir| model::is_installed(&dir, &spec)) {
-        "installed"
-    } else {
-        "missing"
-    };
-    ModelStatus {
-        revision,
-        status,
-        name: spec.name,
-        size_bytes: spec.bytes,
-        needed_bytes: spec.bytes + model::SPACE_MARGIN,
-        received: 0,
-        message: None,
-    }
-}
-
-/// Updates the download status and tells the main window.
-fn set_model_status(app: &tauri::AppHandle, update: impl FnOnce(&mut ModelStatus)) {
-    let download = app.state::<ModelDownload>();
-    let mut status = download.lock();
-    update(&mut status);
-    status.revision += 1;
-    let _ = app.emit_to("main", "model:changed", status.clone());
-}
-
-#[tauri::command]
-fn model_status(app: tauri::AppHandle, download: tauri::State<ModelDownload>) -> ModelStatus {
-    let mut status = download.lock().clone();
-    if status.status != "downloading" {
-        let message = status.message.take();
-        status = ModelStatus {
-            message,
-            ..model_status_now(&app, status.revision)
-        };
-    }
-    status
-}
-
-/// Puts the download status back to what is on disk when the download
-/// thread ends for any reason, including a panic.
-#[cfg(feature = "local-whisper")]
-struct DownloadDone {
-    app: tauri::AppHandle,
-    message: Option<String>,
-}
-
-#[cfg(feature = "local-whisper")]
-impl Drop for DownloadDone {
-    fn drop(&mut self) {
-        let message = self.message.take().or_else(|| {
-            std::thread::panicking()
-                .then(|| "The download stopped unexpectedly. Nothing was installed.".into())
-        });
-        let app = self.app.clone();
-        set_model_status(&self.app, |status| {
-            let revision = status.revision;
-            *status = ModelStatus {
-                message,
-                ..model_status_now(&app, revision)
-            };
-        });
-    }
-}
-
-/// Downloads the pinned speech model after the person chose to. The request
-/// carries no account, audio, or transcript; the file is checked against
-/// its pinned SHA-256 before it is installed.
-#[tauri::command]
-fn download_model(
-    app: tauri::AppHandle,
-    download: tauri::State<ModelDownload>,
-) -> Result<(), String> {
-    #[cfg(not(feature = "local-whisper"))]
-    {
-        let _ = (app, download);
-        Err("This build does not include local transcription.".into())
-    }
-    #[cfg(feature = "local-whisper")]
-    {
-        let dir = models_dir(&app).ok_or("The app's storage folder is unavailable.")?;
-        {
-            // Checked and set under one lock, so two downloads never overlap.
-            let mut status = download.lock();
-            if status.status == "downloading" {
-                return Err("The model is already downloading.".into());
-            }
-            let revision = status.revision;
-            *status = ModelStatus {
-                status: "downloading",
-                ..model_status_now(&app, revision)
-            };
-            download.cancel.store(false, Ordering::Release);
-        }
-        set_model_status(&app, |_| {});
-        let cancel = download.cancel.clone();
-        let thread_app = app.clone();
-        let spawned = std::thread::Builder::new()
-            .name("talkqte-model-download".into())
-            .spawn(move || {
-                let app = thread_app;
-                let mut done = DownloadDone {
-                    app: app.clone(),
-                    message: None,
-                };
-                let mut last_percent = 0;
-                let result = model::download(
-                    &dir,
-                    &model::TINY_EN,
-                    &model::Https,
-                    model::available_space,
-                    |received, total| {
-                        let percent = received * 100 / total.max(1);
-                        if percent != last_percent {
-                            last_percent = percent;
-                            set_model_status(&app, |status| status.received = received);
-                        }
-                    },
-                    &cancel,
-                );
-                done.message = result.err().map(|failure| failure.message());
-            });
-        if spawned.is_err() {
-            set_model_status(&app, |status| {
-                let revision = status.revision;
-                *status = model_status_now(&app, revision);
-            });
-            return Err("Could not start the download.".into());
-        }
-        Ok(())
-    }
-}
-
-/// Asks a running download to stop. It stops at its next read, within the
-/// fetcher's time limits, and then reports that nothing was installed.
-#[tauri::command]
-fn cancel_model_download(app: tauri::AppHandle, download: tauri::State<ModelDownload>) {
-    download.cancel.store(true, Ordering::Release);
-    set_model_status(&app, |status| {
-        if status.status == "downloading" {
-            status.message = Some("Cancelling…".into());
-        }
-    });
-}
-
-/// Deletes the downloaded model; a live session must be stopped first.
-#[tauri::command]
-fn remove_model(
-    app: tauri::AppHandle,
-    state: tauri::State<AppState>,
-    download: tauri::State<ModelDownload>,
-) -> Result<(), String> {
-    if state.0.lock().is_ok_and(|runtime| {
-        runtime.live.is_some()
-            || (runtime.engine.state.live && runtime.engine.state.status == engine::Status::Running)
-    }) {
-        return Err("Stop the live session before removing the model.".into());
-    }
-    let dir = models_dir(&app).ok_or("The app's storage folder is unavailable.")?;
-    // Held throughout, so a download cannot start while the file is removed.
-    let mut status = download.lock();
-    if status.status == "downloading" {
-        return Err("Cancel the download before removing the model.".into());
-    }
-    model::remove(&dir, &model::TINY_EN).map_err(|_| "The model could not be removed.")?;
-    let revision = status.revision + 1;
-    *status = model_status_now(&app, revision);
-    let _ = app.emit_to("main", "model:changed", status.clone());
-    Ok(())
-}
-
-/// The longest live chunk, and the shortest that may end at a pause.
-#[cfg(feature = "local-whisper")]
-const LIVE_CHUNK_MS: u64 = 3_000;
-#[cfg(feature = "local-whisper")]
-const LIVE_PAUSE_MIN_MS: u64 = 1_000;
+/// Microphone audio handed to a cloud stream, a tenth of a second at a time.
+#[cfg(feature = "cloud-transcription")]
+const CLOUD_CHUNK_MS: u64 = 100;
 
 /// What the notebook shows about prior notes picked from a file.
 #[derive(serde::Serialize)]
@@ -846,6 +690,7 @@ async fn pick_context_file(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<PickedNotes>, String> {
+    let ticket = begin_file_pick(&state)?;
     let picker = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
         picker
@@ -863,6 +708,34 @@ async fn pick_context_file(
     let Some(path) = picked.transpose()? else {
         return Ok(None);
     };
+    read_context_file(&state, ticket, path).await.map(Some)
+}
+
+/// An explicit local path avoids the system chooser when its service is unavailable.
+/// It lists a file only; selection/import and processing approval stay separate.
+#[tauri::command]
+async fn read_context_file_path(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<PickedNotes, String> {
+    let path = notes_file::explicit_path(&path)?;
+    let ticket = begin_file_pick(&state)?;
+    read_context_file(&state, ticket, path).await
+}
+
+fn begin_file_pick(state: &AppState) -> Result<Arc<()>, String> {
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    let ticket = Arc::new(());
+    runtime.pending_file_pick = Some(ticket.clone());
+    runtime.pending_import = None;
+    Ok(ticket)
+}
+
+async fn read_context_file(
+    state: &AppState,
+    ticket: Arc<()>,
+    path: std::path::PathBuf,
+) -> Result<PickedNotes, String> {
     let file_name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -873,18 +746,31 @@ async fn pick_context_file(
     let notes = source.summaries();
     let skipped = source.skipped;
     let asks_for_dates = context::NoteSource::asks_for_dates(&source);
-    // A new pick replaces any file still waiting for a selection.
-    state
-        .0
-        .lock()
-        .map_err(|_| "The notebook is unavailable.")?
-        .pending_import = Some(context_import::PendingImport::new(Box::new(source)));
-    Ok(Some(PickedNotes {
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    finish_file_pick(&mut runtime, &ticket, source)?;
+    Ok(PickedNotes {
         file_name,
         notes,
         skipped,
         asks_for_dates,
-    }))
+    })
+}
+
+fn finish_file_pick(
+    runtime: &mut Runtime,
+    ticket: &Arc<()>,
+    source: notes_file::FileSource,
+) -> Result<(), String> {
+    if !runtime
+        .pending_file_pick
+        .as_ref()
+        .is_some_and(|current| Arc::ptr_eq(current, ticket))
+    {
+        return Err("The file selection changed. Choose notes again.".into());
+    }
+    runtime.pending_file_pick = None;
+    runtime.pending_import = Some(context_import::PendingImport::new(Box::new(source)));
+    Ok(())
 }
 
 /// Imports the selected notes from the file read by `pick_context_file`.
@@ -954,6 +840,7 @@ async fn import_context_notes(
 fn cancel_context_import(state: tauri::State<AppState>) {
     if let Ok(mut runtime) = state.0.lock() {
         runtime.pending_import = None;
+        runtime.pending_file_pick = None;
     }
 }
 
@@ -975,11 +862,10 @@ fn remove_context_item(
     source_id: String,
 ) -> Result<(), String> {
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-    if !runtime.context.remove(provider, &source_id) {
+    let Some(cue_changed) = runtime.remove_imported_note(provider, &source_id) else {
         return Err("That note is no longer imported.".into());
-    }
-    runtime.refresh.forget(provider, &source_id);
-    publish_context(&app, &mut runtime);
+    };
+    emit_context(&app, &mut runtime, cue_changed);
     Ok(())
 }
 
@@ -1167,6 +1053,7 @@ async fn list_granola_notes(state: tauri::State<'_, AppState>) -> Result<PickedN
     if !shared.is_current(runtime.granola.as_ref()) {
         return Err("The Granola connection changed. Choose notes again.".into());
     }
+    runtime.pending_file_pick = None;
     runtime.pending_import = Some(context_import::PendingImport::new(Box::new(shared)));
     Ok(PickedNotes {
         file_name: "Granola · the last 30 days".into(),
@@ -1342,43 +1229,77 @@ fn finish_live(app: &tauri::AppHandle, live: Live, flush: bool) {
     let _ = finished;
 }
 
-/// Starts a live session: the microphone feeds local transcription, and the
-/// cue engine runs on what is said. Nothing is recorded, stored, or sent.
+/// A microphone session's cloud stream ended with a failure: the session
+/// records why and stops, as if Stop were chosen, without flushing to any
+/// other recognizer. Runs off the feeding thread, which the stop joins.
+#[cfg(feature = "cloud-transcription")]
+fn stop_after_cloud_failure(
+    app: &tauri::AppHandle,
+    session: u64,
+    failure: transcription::cloud::SttFailure,
+) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let live = app
+            .state::<AppState>()
+            .0
+            .lock()
+            .ok()
+            .and_then(|mut runtime| {
+                runtime
+                    .engine
+                    .cloud_transcription_stopped(session, failure.code());
+                let live = runtime
+                    .live
+                    .as_ref()
+                    .is_some_and(|live| live.session == session)
+                    .then(|| runtime.take_live_for_stop())
+                    .flatten();
+                publish(&app, &mut runtime);
+                live
+            });
+        if let Some(live) = live {
+            finish_live(&app, live, false);
+        }
+    });
+}
+
+/// Starts a live session: the microphone feeds cloud transcription, and the
+/// cue engine runs on what is said. Nothing is recorded or stored. Audio is
+/// sent to the provider only after the session's review is approved. A build
+/// or launch without cloud transcription refuses the start; nothing is
+/// transcribed on this device.
 #[tauri::command]
 async fn start_live_session(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     microphone: tauri::State<'_, microphone::Controller>,
 ) -> Result<(), String> {
-    #[cfg(not(feature = "local-whisper"))]
+    #[cfg(not(feature = "cloud-transcription"))]
     {
         let _ = (app, state, microphone);
-        Err("This build does not include local transcription.".into())
+        Err(live_unavailable()
+            .unwrap_or("This build has no live transcription.")
+            .into())
     }
-    #[cfg(feature = "local-whisper")]
+    #[cfg(feature = "cloud-transcription")]
     {
-        let (model, pinned) = model_path(&app)
-            .filter(|(path, _)| path.is_file())
-            .ok_or("The local speech model is not installed.")?;
+        if let Some(reason) = live_unavailable() {
+            return Err(reason.into());
+        }
+        let opener = transcription::cloud::opener()
+            .map_err(|_| "The cloud transcription settings are not usable.")?;
         let start = state
             .0
             .lock()
             .map_err(|_| "The session is unavailable.")?
             .begin_live_start()?;
-        // Load the model before capture starts, so a bad file is reported
-        // here and the microphone never opens for nothing.
-        // A downloaded model is checked against its pinned checksum first.
-        let (start, recognizer) = tauri::async_runtime::spawn_blocking(move || {
-            start.load(|| {
-                if pinned {
-                    model::verify(&model, &model::TINY_EN)?;
-                }
-                transcription::whisper::LocalWhisper::load(&model, 4)
-                    .map_err(|_| "Could not load the local speech model.".to_string())
-            })
-        })
-        .await
-        .map_err(|_| "Could not load the local speech model.")??;
+        // Nothing is opened here: the stream opens once the review is
+        // approved. The start can still be cancelled before capture.
+        let (start, opener) =
+            tauri::async_runtime::spawn_blocking(move || start.load(|| Ok(opener)))
+                .await
+                .map_err(|_| "Could not start the live session.")??;
         let session = {
             let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
             runtime.sync();
@@ -1401,10 +1322,13 @@ async fn start_live_session(
                     runtime.reserve_live_microphone(&start_guard, session, generation)
                 })
         });
-        let on_tap: microphone::OnTap = Box::new(move |generation, mut chunker| {
-            // Chunks end at the first pause after a second, or at the
-            // longest length, so words are cut less often and arrive sooner.
-            chunker.cut_at_pauses(LIVE_PAUSE_MIN_MS);
+        let on_tap: microphone::OnTap = Box::new(move |generation, chunker| {
+            // The cloud stream takes short fixed chunks.
+            let approval_app = handle.clone();
+            let failure_app = handle.clone();
+            let keep_app = handle.clone();
+            let dropped_app = handle.clone();
+            let reconnect_app = handle.clone();
             let sink_app = handle.clone();
             let sink = move |session, segment| {
                 let state = sink_app.state::<AppState>();
@@ -1415,34 +1339,79 @@ async fn start_live_session(
                 result
             };
             // Attach the runner only to the session that asked for it.
-            let kept = handle
-                .state::<AppState>()
-                .0
-                .lock()
-                .is_ok_and(|mut runtime| {
-                    runtime.sync();
-                    let engine = &runtime.engine;
-                    if !(engine.state.live
-                        && engine.session() == session
-                        && engine.state.status == engine::Status::Running)
-                    {
-                        return false;
-                    }
-                    // Line times count from when capture began on the session clock.
-                    let started_at = engine.state.elapsed_ms;
-                    let Some(live) = runtime
-                        .live
-                        .as_mut()
-                        .filter(|live| live.session == session && live.runner.is_none())
-                    else {
-                        return false;
-                    };
-                    live.microphone = Some(generation);
-                    live.runner = Some(live::LiveSession::start(
-                        chunker, session, started_at, recognizer, sink,
-                    ));
-                    true
-                });
+            let kept =
+                handle
+                    .state::<AppState>()
+                    .0
+                    .lock()
+                    .is_ok_and(|mut runtime| {
+                        runtime.sync();
+                        let engine = &runtime.engine;
+                        if !(engine.state.live
+                            && engine.session() == session
+                            && engine.state.status == engine::Status::Running)
+                        {
+                            return false;
+                        }
+                        // Line times count from when capture began on the session clock.
+                        let started_at = engine.state.elapsed_ms;
+                        let Some(live) = runtime
+                            .live
+                            .as_mut()
+                            .filter(|live| live.session == session && live.runner.is_none())
+                        else {
+                            return false;
+                        };
+                        live.microphone = Some(generation);
+                        live.runner =
+                            Some(live::LiveSession::start_cloud(
+                                chunker,
+                                session,
+                                started_at,
+                                transcription::cloud::CloudFeed::new(
+                                    session,
+                                    2,
+                                    opener,
+                                    move || {
+                                        approval_app.state::<AppState>().0.lock().ok().and_then(
+                                            |runtime| runtime.engine.audio_approval(session),
+                                        )
+                                    },
+                                    sink,
+                                )
+                                .stop_sending_when(move || {
+                                    keep_app.state::<AppState>().0.lock().map_or(
+                                        Some(transcription::cloud::SttFailure::Withdrawn),
+                                        |runtime| {
+                                            transcription::cloud::withdrawal(
+                                                runtime.engine.audio_withdrawal(session),
+                                            )
+                                        },
+                                    )
+                                })
+                                .on_dropped(move || {
+                                    let state = dropped_app.state::<AppState>();
+                                    if let Ok(mut runtime) = state.0.lock() {
+                                        runtime.engine.cloud_transcription_dropped(session);
+                                        publish(&dropped_app, &mut runtime);
+                                    };
+                                })
+                                .on_failure(move |failure| {
+                                    stop_after_cloud_failure(&failure_app, session, failure)
+                                })
+                                .on_reconnect(move |lost_ms| {
+                                    let state = reconnect_app.state::<AppState>();
+                                    if let Ok(mut runtime) = state.0.lock() {
+                                        runtime
+                                            .engine
+                                            .cloud_transcription_reconnected(session, lost_ms);
+                                        publish(&reconnect_app, &mut runtime);
+                                    };
+                                })
+                                .with_reopener(transcription::cloud::reopener().ok()),
+                            ));
+                        true
+                    });
             if !kept {
                 microphone::stop_blocking(&handle, stopper, generation);
             }
@@ -1450,7 +1419,7 @@ async fn start_live_session(
         match microphone::start(
             app.clone(),
             controller.clone(),
-            Some((LIVE_CHUNK_MS, on_tap)),
+            Some((CLOUD_CHUNK_MS, on_tap)),
             Some(on_reserved),
         )
         .await
@@ -1542,8 +1511,12 @@ async fn stop_microphone(
     }
 }
 
+fn application_context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
+}
+
 pub fn run() {
-    let context = tauri::generate_context!();
+    let context = application_context();
     #[cfg(target_os = "macos")]
     let context = companion_macos::configure(context);
     tauri::Builder::default()
@@ -1551,7 +1524,6 @@ pub fn run() {
         .manage(AppState(Mutex::new(Runtime::default())))
         .manage(companion::WindowState::default())
         .manage(microphone::Controller::default())
-        .manage(ModelDownload::default())
         .invoke_handler(tauri::generate_handler![
             #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
             application_audio_host::app::application_audio,
@@ -1576,8 +1548,9 @@ pub fn run() {
             export_preview,
             export_markdown,
             live_status,
-            model_status,
+            companion::companion_anchor,
             pick_context_file,
+            read_context_file_path,
             import_context_notes,
             cancel_context_import,
             context_items,
@@ -1591,9 +1564,6 @@ pub fn run() {
             suggest_granola_focus,
             check_granola_updates,
             stop_granola_update_check,
-            download_model,
-            cancel_model_download,
-            remove_model,
             start_live_session,
             stop_live_session,
             microphone::microphone_snapshot,
@@ -1601,6 +1571,15 @@ pub fn run() {
             stop_microphone
         ])
         .setup(|app| {
+            // A lab launch may give the user's name; it is set before the
+            // first session, as if typed in Settings.
+            #[cfg(debug_assertions)]
+            {
+                dev_user_name::initialize();
+                if let Ok(mut runtime) = app.state::<AppState>().0.lock() {
+                    dev_user_name::apply(&mut runtime.engine);
+                }
+            }
             #[cfg(all(
                 debug_assertions,
                 any(feature = "claude-cli", feature = "lab-evaluator"),
@@ -1625,10 +1604,6 @@ pub fn run() {
             companion_macos::hide_controls(app)?;
             #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
             application_audio_host::install(app.handle())?;
-            // A download interrupted by quitting never counts as installed.
-            if let Some(dir) = models_dir(app.handle()) {
-                model::clean_partials(&dir);
-            }
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let mut last_placement = Instant::now();
@@ -1843,12 +1818,26 @@ mod lab_clock_tests {
             "TALKQTE_DEV_LAB_PROVIDER",
             "TALKQTE_DEV_LAB_MODEL",
             "TALKQTE_DEV_LAB_EFFORT",
+            "TALKQTE_DEV_LAB_CONTEXT",
+            "TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD",
         ];
-        for case in ["absent", "malformed", "valid"] {
+        for case in [
+            "absent",
+            "malformed",
+            "valid",
+            "api-fresh",
+            "api-history",
+            "api-empty-context",
+            "api-invalid-context",
+            "subscription-history",
+            "orphan-history",
+            "orphan-empty",
+            "orphan-unknown",
+        ] {
             let mut variables = vec![("TALKQTE_TEST_SELECTOR_CASE", case)];
             if case == "malformed" {
                 variables.push(("TALKQTE_DEV_CUE_BACKEND", "fictional-invalid-selector"));
-            } else if case == "valid" {
+            } else if case == "valid" || case == "subscription-history" {
                 variables.extend([
                     ("TALKQTE_DEV_CUE_BACKEND", "lab-subscription"),
                     (
@@ -1860,8 +1849,69 @@ mod lab_clock_tests {
                     ("TALKQTE_DEV_LAB_EFFORT", "medium"),
                 ]);
             }
+            if case.starts_with("api-") {
+                variables.extend([
+                    ("TALKQTE_DEV_CUE_BACKEND", "lab-api"),
+                    (
+                        "TALKQTE_DEV_LAB_DESCRIPTOR",
+                        "/fictional-lab/run/descriptor.json",
+                    ),
+                    ("TALKQTE_DEV_LAB_PROVIDER", "anthropic-api"),
+                    ("TALKQTE_DEV_LAB_MODEL", "claude-opus-5-5"),
+                    ("TALKQTE_DEV_LAB_EFFORT", "low"),
+                    ("TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD", "250000"),
+                ]);
+            }
+            match case {
+                "api-history" | "subscription-history" | "orphan-history" => {
+                    variables.push(("TALKQTE_DEV_LAB_CONTEXT", "bounded-history"))
+                }
+                "api-empty-context" | "orphan-empty" => {
+                    variables.push(("TALKQTE_DEV_LAB_CONTEXT", ""))
+                }
+                "api-invalid-context" | "orphan-unknown" => {
+                    variables.push(("TALKQTE_DEV_LAB_CONTEXT", "unknown"))
+                }
+                _ => {}
+            }
             let result =
                 crate::test_isolation::run("lab_clock_tests::selector_child", &variables, &without);
+            assert!(result.left.is_empty(), "constructor wrote a file");
+        }
+        use std::os::unix::ffi::OsStringExt;
+        let invalid = std::ffi::OsString::from_vec(vec![0xff]);
+        for case in ["orphan-nonunicode", "api-nonunicode"] {
+            let mut variables = vec![
+                ("TALKQTE_TEST_SELECTOR_CASE", std::ffi::OsStr::new(case)),
+                ("TALKQTE_DEV_LAB_CONTEXT", invalid.as_os_str()),
+            ];
+            if case == "api-nonunicode" {
+                variables.extend([
+                    ("TALKQTE_DEV_CUE_BACKEND", std::ffi::OsStr::new("lab-api")),
+                    (
+                        "TALKQTE_DEV_LAB_DESCRIPTOR",
+                        std::ffi::OsStr::new("/fictional-lab/run/descriptor.json"),
+                    ),
+                    (
+                        "TALKQTE_DEV_LAB_PROVIDER",
+                        std::ffi::OsStr::new("anthropic-api"),
+                    ),
+                    (
+                        "TALKQTE_DEV_LAB_MODEL",
+                        std::ffi::OsStr::new("claude-opus-5-5"),
+                    ),
+                    ("TALKQTE_DEV_LAB_EFFORT", std::ffi::OsStr::new("low")),
+                    (
+                        "TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD",
+                        std::ffi::OsStr::new("250000"),
+                    ),
+                ]);
+            }
+            let result = crate::test_isolation::run_os(
+                "lab_clock_tests::selector_child",
+                &variables,
+                &without,
+            );
             assert!(result.left.is_empty(), "constructor wrote a file");
         }
     }
@@ -1898,6 +1948,34 @@ mod lab_clock_tests {
                 assert_eq!(processor.id, "lab-subscription");
                 assert_eq!(processor.model, "gpt-6.1-sol");
                 assert_eq!(snapshot.issue, None);
+            }
+            "api-fresh" | "api-history" => {
+                let processor = snapshot.processor.unwrap();
+                assert_eq!(processor.id, "lab-api");
+                assert_eq!(
+                    processor.data_policy.contains("24 segments"),
+                    case == "api-history"
+                );
+                assert_eq!(snapshot.issue, None);
+            }
+            "api-empty-context"
+            | "api-invalid-context"
+            | "subscription-history"
+            | "orphan-history"
+            | "orphan-empty"
+            | "orphan-unknown"
+            | "orphan-nonunicode"
+            | "api-nonunicode" => {
+                assert!(lab_evaluator::selected());
+                assert_eq!(
+                    engine.evaluation_status(),
+                    Some(engine::EvaluationStatus::Unavailable(
+                        engine::EvaluationIssue::LabUnavailable
+                    ))
+                );
+                assert!(engine
+                    .review_processing(engine::ConversationScope::RecentAndNewSpeech, &[])
+                    .is_err());
             }
             _ => panic!("unknown fictional selector case"),
         }
@@ -2113,5 +2191,250 @@ mod session_clock_tests {
         runtime.sync_at(origin + Duration::from_micros(1_500));
         runtime.sync_at(origin + Duration::from_micros(2_000));
         assert_eq!(runtime.engine.state.elapsed_ms, 2);
+    }
+}
+
+#[cfg(test)]
+mod live_readiness_diagnostics_tests {
+    use super::*;
+    use transcription::cloud::ReadinessFailure;
+
+    #[test]
+    fn readiness_preserves_short_circuit_order_and_public_refusals() {
+        assert_eq!(
+            classify_live_availability(
+                false,
+                || panic!("selection read"),
+                || panic!("metadata read")
+            ),
+            Err(LiveUnavailable::Build)
+        );
+        assert_eq!(
+            classify_live_availability(true, || false, || panic!("metadata read")),
+            Err(LiveUnavailable::Selection)
+        );
+        for (ready, expected) in [
+            (
+                Err(ReadinessFailure::Settings),
+                Err(LiveUnavailable::Settings),
+            ),
+            (
+                Err(ReadinessFailure::TokenMetadata),
+                Err(LiveUnavailable::TokenMetadata),
+            ),
+            (Ok(()), Ok(())),
+        ] {
+            assert_eq!(
+                classify_live_availability(true, || true, || ready),
+                expected
+            );
+        }
+        assert_eq!(
+            LiveUnavailable::Build.message(),
+            "This build has no live transcription."
+        );
+        assert_eq!(
+            LiveUnavailable::Selection.message(),
+            "Live transcription needs cloud transcription selected for this development launch."
+        );
+        assert_eq!(
+            LiveUnavailable::Settings.message(),
+            "The cloud transcription settings are not usable."
+        );
+        assert_eq!(
+            LiveUnavailable::TokenMetadata.message(),
+            LiveUnavailable::Settings.message()
+        );
+    }
+}
+
+#[cfg(test)]
+mod context_file_path_tests {
+    use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_path_invoke_uses_generated_acl_and_real_command_main_only() {
+        use tauri::Manager;
+        // Use the actual generated application manifest/capabilities, not an
+        // empty mock ACL or a test-granted permission. Only the window runtime
+        // is substituted; this invokes the real command through Tauri IPC.
+        let mut context = application_context();
+        context.config_mut().app.windows.clear();
+        let app = tauri::test::mock_builder()
+            .manage(AppState(Mutex::new(Runtime::default())))
+            .invoke_handler(tauri::generate_handler![read_context_file_path])
+            .build(context)
+            .unwrap();
+        let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let cue = tauri::WebviewWindowBuilder::new(&app, "cue", Default::default())
+            .build()
+            .unwrap();
+        let invoke =
+            |window: &tauri::WebviewWindow<tauri::test::MockRuntime>, path: &str, url: &str| {
+                tauri::test::get_ipc_response(
+                    window,
+                    tauri::webview::InvokeRequest {
+                        cmd: "read_context_file_path".into(),
+                        callback: tauri::ipc::CallbackFn(0),
+                        error: tauri::ipc::CallbackFn(1),
+                        url: url.parse().unwrap(),
+                        body: tauri::ipc::InvokeBody::Json(serde_json::json!({"path":path})),
+                        headers: Default::default(),
+                        invoke_key: tauri::test::INVOKE_KEY.into(),
+                    },
+                )
+            };
+        let local = "http://127.0.0.1:1420";
+        let rejected = invoke(&main, "relative.md", local).unwrap_err();
+        assert!(
+            rejected.as_str().unwrap().contains("full local file path"),
+            "{rejected}"
+        );
+        let path = std::env::temp_dir().join(format!("talkqte-path-ipc-{}.md", std::process::id()));
+        std::fs::write(
+            &path,
+            "---\ntitle: Fictional IPC plan\ndate: 2026-10-20\n---\nFictional whole note.",
+        )
+        .unwrap();
+        let response = invoke(&main, path.to_str().unwrap(), local)
+            .unwrap()
+            .deserialize::<serde_json::Value>()
+            .unwrap();
+        assert_eq!(response["notes"].as_array().unwrap().len(), 1);
+        assert_eq!(response["notes"][0]["title"], "Fictional IPC plan");
+        assert!(app
+            .state::<AppState>()
+            .0
+            .lock()
+            .unwrap()
+            .context
+            .items()
+            .is_empty());
+        assert!(app
+            .state::<AppState>()
+            .0
+            .lock()
+            .unwrap()
+            .pending_import
+            .is_some());
+        for (window, url) in [(&cue, local), (&main, "https://example.invalid/")] {
+            let denied = invoke(window, path.to_str().unwrap(), url).unwrap_err();
+            assert!(denied.as_str().unwrap().contains("not allowed"), "{denied}");
+        }
+        // Both denied invocations leave the earlier user preview intact.
+        assert!(app
+            .state::<AppState>()
+            .0
+            .lock()
+            .unwrap()
+            .pending_import
+            .is_some());
+        assert!(app
+            .state::<AppState>()
+            .0
+            .lock()
+            .unwrap()
+            .context
+            .items()
+            .is_empty());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn explicit_file_read_lists_without_import_and_canceled_or_replaced_reads_cannot_win() {
+        let state = AppState(Mutex::new(Runtime::default()));
+        let path =
+            std::env::temp_dir().join(format!("talkqte-path-fallback-{}.md", std::process::id()));
+        std::fs::write(
+            &path,
+            "---\ntitle: Fictional plan\ndate: 2026-10-20\n---\nReview the fictional plan.",
+        )
+        .unwrap();
+        let initial = begin_file_pick(&state).unwrap();
+        let listed =
+            tauri::async_runtime::block_on(read_context_file(&state, initial, path.clone()))
+                .unwrap();
+        assert_eq!(listed.notes.len(), 1);
+        assert_eq!(listed.notes[0].title, "Fictional plan");
+        assert!(state.0.lock().unwrap().context.items().is_empty());
+        let first = begin_file_pick(&state).unwrap();
+        let second = begin_file_pick(&state).unwrap();
+        let read = || {
+            notes_file::FileSource::read(
+                &notes_file::explicit_path(path.to_str().unwrap()).unwrap(),
+            )
+            .unwrap()
+        };
+        let mut runtime = state.0.lock().unwrap();
+        assert!(finish_file_pick(&mut runtime, &first, read()).is_err());
+        assert!(runtime.pending_import.is_none());
+        finish_file_pick(&mut runtime, &second, read()).unwrap();
+        assert!(runtime.pending_import.is_some());
+        assert!(runtime.context.items().is_empty());
+        // Cancel uses this same invalidation before any delayed read can install.
+        runtime.pending_file_pick = None;
+        assert!(finish_file_pick(&mut runtime, &second, read()).is_err());
+        assert!(runtime.context.items().is_empty());
+        drop(runtime);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn explicit_file_pipeline_refuses_missing_wrong_format_oversize_and_invalid_text_without_import(
+    ) {
+        let state = AppState(Mutex::new(Runtime::default()));
+        let root =
+            std::env::temp_dir().join(format!("talkqte-path-refusals-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        for (name, bytes) in [
+            ("unsupported.pdf", b"fictional".to_vec()),
+            ("invalid.txt", vec![0xff]),
+            (
+                "large.txt",
+                vec![b'x'; (notes_file::MAX_FILE_BYTES + 1) as usize],
+            ),
+        ] {
+            let path = root.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            let ticket = begin_file_pick(&state).unwrap();
+            assert!(
+                tauri::async_runtime::block_on(read_context_file(&state, ticket, path)).is_err()
+            );
+            assert!(state.0.lock().unwrap().pending_import.is_none());
+            assert!(state.0.lock().unwrap().context.items().is_empty());
+        }
+        let ticket = begin_file_pick(&state).unwrap();
+        assert!(tauri::async_runtime::block_on(read_context_file(
+            &state,
+            ticket,
+            root.join("missing.md")
+        ))
+        .is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn explicit_file_path_rejects_expansion_urls_controls_and_unbounded_arguments() {
+        for value in [
+            "",
+            "relative.md",
+            "~/notes.md",
+            "file:///notes.md",
+            "https://example.test/notes.md",
+            "//host/notes.md",
+            "/notes\n.md",
+            "/notes\0.md",
+        ] {
+            assert!(notes_file::explicit_path(value).is_err());
+        }
+        assert!(notes_file::explicit_path(&format!("/{}", "a".repeat(4096))).is_err());
+        let absolute = std::env::temp_dir().join("fictional notes.md");
+        assert_eq!(
+            notes_file::explicit_path(absolute.to_str().unwrap()).unwrap(),
+            absolute
+        );
     }
 }
