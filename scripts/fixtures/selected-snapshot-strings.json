@@ -1,0 +1,10 @@
+{
+  "positive": ["Review\ntest", "Review\ttest", "Review 🌱 test"],
+  "negative": [
+    "Review\rtest",
+    "Review\u0001test",
+    "Review\u007ftest",
+    "Review\u0085test"
+  ],
+  "idNegative": ["a\nb", "a\tb", "a\rb", "a\u0001b", "a\u007fb", "a\u0085b"]
+}

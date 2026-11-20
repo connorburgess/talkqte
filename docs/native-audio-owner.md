@@ -27,8 +27,14 @@ After exact review approval, `NativeOwner::begin` compares the approved identity
 to that retained selection before constructing a filter. It uses positive
 one-application inclusion with no window exceptions, never an all-app exclusion
 filter. It registers only audio output, requests 16 kHz mono and excludes this
-process's audio. This configuration is not proof that delivered buffers have the
-requested format or that native filtering meets the intended scope.
+process's audio. The stream configuration also requests 2x2 video dimensions,
+a one-second minimum frame interval and no cursor. No screen output is attached,
+and this code does not read or store video frames. These are requested settings,
+not measured output or a claim about the API's minimum supported dimensions.
+Acceptance of the settings on supported hardware, actual frame cadence, capture
+indicator behavior and CPU impact remain unverified. This configuration is not
+proof that delivered audio buffers have the requested format or that native
+filtering meets the intended scope.
 
 The constructor installs its own source-bound audio output on a dedicated serial
 queue. It accepts an explicit host-clock/session `ClockBinding` and returns a
