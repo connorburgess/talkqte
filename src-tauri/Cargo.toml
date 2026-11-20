@@ -1,7 +1,7 @@
 [package]
 name = "talkqte"
 version = "0.1.0"
-description = "A privacy-focused meeting companion for timely questions and clearer notes"
+description = "A meeting companion that surfaces the right cue at the right moment to help keep meetings on target"
 edition = "2021"
 license-file = "../LICENSE"
 rust-version = "1.97.1"
