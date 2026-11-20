@@ -2,13 +2,15 @@
 
 # TalkQTE
 
-**AI cues that help you stay grounded and respond in the moment.**
+**The right cue at the right moment, to help keep meetings on target.**
 
 ⭐ **Star the repo to follow development.** It is early, built in public, and not yet something to install for real meetings.
 
-TalkQTE is a small meeting companion being built to follow the conversation and surface useful context while it still matters. That might be a reminder of an earlier constraint, a point worth clarifying, or a prompt to help you respond. The aim is to help you keep up without pulling you away from listening.
+TalkQTE is an early prototype being built to help keep meetings on target with a timely cue. The intended experience is to follow the conversation and offer useful context while it still matters: a reminder of an earlier constraint, a point worth clarifying, or a prompt to help you respond while continuing to listen. Useful timing and participation benefits remain unproven. The app runs on your own machine beside the call rather than joining the meeting.
 
 One cue appears in a quiet floating window. It says what it is and quotes the line or note it came from. You can hold it, dismiss it, or let it pass. There is no Save step or queue of questions to manage. Your existing note-taker can remain the record of what was actually said.
+
+Deepgram streaming transcription is merged as a development-only path, enabled through an explicit launch selection and per-session processing approval. The Anthropic API is the chosen cue provider and exists as a development lab backend. Ordinary and release builds have no live transcription; the shipped key and billing arrangement, native reliability and useful timing remain unverified. The former on-device transcription path was removed.
 
 ## The experience we are working toward
 
