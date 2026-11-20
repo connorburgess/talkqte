@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import Anthropic from '@anthropic-ai/sdk';
 import {
   ANTHROPIC_CUE_ON_SCREEN_SCHEMA,
@@ -496,6 +496,113 @@ test('a scoped abort retires only that request and the worker stays usable', asy
     await api.close();
   }
 });
+
+// Stop only the exact worker created by this test process, never an app or CLI.
+for (const mode of [
+  'deadline',
+  'scoped-abort',
+  'root-abort',
+  'close',
+  'unconfirmed',
+]) {
+  test(
+    'parent bounds a stopped API worker during ' + mode,
+    { skip: process.platform === 'win32' },
+    async () => {
+      const api = await fakeApi([{ hold: true }]);
+      const root = new AbortController();
+      const session = await open(api, {
+        deadlineMs: mode === 'deadline' ? 50 : 5000,
+        signal: root.signal,
+      });
+      const pids = execFileSync('pgrep', ['-P', String(process.pid)], {
+        encoding: 'utf8',
+      })
+        .trim()
+        .split('\n')
+        .map(Number);
+      assert.equal(pids.length, 1);
+      const pid = pids[0];
+      let timer, killMock;
+      try {
+        process.kill(pid, 'SIGSTOP'); // The worker's own event-loop timer cannot run.
+        const controller = new AbortController();
+        const pending = session.request(request({ signal: controller.signal }));
+        const rejected = assert.rejects(pending, {
+          category:
+            mode === 'deadline'
+              ? 'deadline'
+              : mode === 'unconfirmed'
+                ? 'cleanup'
+                : 'cancelled',
+        });
+        if (mode === 'scoped-abort' || mode === 'unconfirmed')
+          controller.abort();
+        if (mode === 'root-abort') root.abort();
+        if (mode === 'unconfirmed') {
+          const kill = process.kill.bind(process);
+          killMock = mock.method(process, 'kill', (target, signal) => {
+            if (target === -pid && signal === 0)
+              throw Object.assign(new Error('fictional unconfirmed group'), {
+                code: 'EPERM',
+              });
+            return kill(target, signal);
+          });
+        }
+        const closing = mode === 'close' ? session.close() : null;
+        const completed = (async () => {
+          await rejected;
+          if (mode === 'unconfirmed')
+            await assert.rejects(session.close(), { category: 'cleanup' });
+          else await (closing ?? session.close());
+        })();
+        await Promise.race([
+          completed,
+          new Promise((_, reject) => {
+            timer = setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    'parent worker cleanup did not settle within bound',
+                  ),
+                ),
+              4000,
+            );
+          }),
+        ]);
+        if (killMock) {
+          killMock.mock.restore();
+          killMock = null;
+        }
+        assert.throws(() => process.kill(-pid, 0), { code: 'ESRCH' });
+        assert.equal(api.requests.length, 0);
+        assert.equal(session.calls, 1);
+        const worst = worstCaseMicroUsd('claude-opus-5-5', input);
+        assert.equal(session.spentMicroUsd, worst);
+        assert.equal(session.receipts[0].costMicroUsd, worst);
+        assert.equal(
+          session.receipts[0].abortReason,
+          mode === 'deadline' ? 'deadline' : 'cancelled',
+        );
+        assert.equal(
+          session.receipts[0].workerRetirement,
+          mode === 'unconfirmed' ? 'unconfirmed' : 'confirmed',
+        );
+        await assert.rejects(session.request(request()), {
+          category: 'terminal',
+        });
+      } finally {
+        clearTimeout(timer);
+        killMock?.mock.restore();
+        try {
+          process.kill(pid, 'SIGCONT');
+        } catch {}
+        await session.close().catch(() => {});
+        await api.close();
+      }
+    },
+  );
+}
 
 test('the spend cap is enforced before dispatch and ends the run as a usage limit', async () => {
   // The first reply's usage leaves the Opus run about $0.01 under its $1 cap.

@@ -118,8 +118,11 @@ dispatch budget continue, subject to the route and validation conditions below.
 - **Settled `expired`:** the result reached native in time but was read after
   its deadline; it is never applied.
 - **Broker deadline:** the request's `budgetMs` passed before a result. The
-  broker aborts that provider call, waits for its process group to be confirmed
-  gone and sends `failed` with code `deadline` for that request only.
+  broker aborts that provider call and sends `failed` with code `deadline` for
+  that request only. It holds the lease until the provider work settles; a new
+  evaluator may queue but cannot dispatch before then. Unconfirmed provider
+  process-group retirement ends the run as a cleanup failure. The failure frame
+  alone is not confirmation of provider cleanup.
 - **Native deadline:** native sends `cancel` with reason `deadline` and the
   request identity, while the provider runs or while a sent result awaits
   settlement. The broker retires the request without a reply.
