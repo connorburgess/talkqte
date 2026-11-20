@@ -59,7 +59,7 @@ func parseArguments() -> [String: String] {
     } else if [
       "apps", "emulator-app", "emulator-title", "companion-app", "companion-title", "seconds",
       "out", "emulator-pid", "emulator-window-id", "companion-pid", "companion-window-id",
-      "window-id",
+      "window-id", "owner-pid", "owner-app", "owner-bundle",
     ].contains(key) {
       guard let value = iterator.next() else { fail("\(argument) needs a value.", code: 64, reason: "missing-value") }
       options[key] = value
@@ -77,6 +77,34 @@ func frameDictionary(_ rect: CGRect) -> [String: Double] {
   ]
 }
 
+// Pure identity boundary, shared by refresh and the child probe. A reused
+// window ID cannot widen the two selected owners; absent metadata fails closed.
+struct LabWindowIdentity: Equatable {
+  let windowID: UInt32
+  let ownerPID: Int32
+  let app: String
+  let bundle: String
+
+  init?(windowID: UInt32, ownerPID: Int32?, app: String?, bundle: String?) {
+    guard windowID > 0, let ownerPID, ownerPID > 0,
+      let app, !app.isEmpty, let bundle, !bundle.isEmpty else { return nil }
+    self.windowID = windowID; self.ownerPID = ownerPID
+    self.app = app; self.bundle = bundle
+  }
+}
+
+func matchesSelectedWindow(_ expected: LabWindowIdentity?, _ actual: LabWindowIdentity?) -> Bool {
+  guard let expected, let actual else { return false }
+  return expected == actual
+}
+
+func windowIdentity(_ window: SCWindow) -> LabWindowIdentity? {
+  LabWindowIdentity(windowID: window.windowID,
+    ownerPID: window.owningApplication?.processID,
+    app: window.owningApplication?.applicationName,
+    bundle: window.owningApplication?.bundleIdentifier)
+}
+
 /// A window that can be captured: on screen, a finite size of at least 2x2,
 /// and on at least one display.
 func usableWindow(_ window: SCWindow, displays: [SCDisplay]) -> Bool {
@@ -89,13 +117,17 @@ func usableWindow(_ window: SCWindow, displays: [SCDisplay]) -> Bool {
 /// all at once, for up to one second in all. For each window, true only if
 /// its child built the filter and exited 0. Both probes share the second so
 /// the recorder's start deadline (3 s to the first accepted frame) holds.
-func probeIndependentFilters(windowIDs: [CGWindowID]) -> [CGWindowID: Bool] {
+func probeIndependentFilters(identities: [LabWindowIdentity]) -> [CGWindowID: Bool] {
+  let windowIDs = identities.map { $0.windowID }
   let group = DispatchGroup()
   var children: [(CGWindowID, Process)] = []
-  for windowID in windowIDs {
+  for identity in identities {
+    let windowID = identity.windowID
     let child = Process()
     child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
-    child.arguments = ["--probe-window", "--window-id", String(windowID)]
+    child.arguments = ["--probe-window", "--window-id", String(windowID),
+      "--owner-pid", String(identity.ownerPID), "--owner-app", identity.app,
+      "--owner-bundle", identity.bundle]
     child.standardOutput = FileHandle.nullDevice
     child.standardError = FileHandle.nullDevice
     group.enter()
@@ -256,6 +288,33 @@ final class Writer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Senda
   }
 }
 
+#if LAB_WINDOW_IDENTITY_TESTS
+// A pure-memory entrypoint: no permission check, window listing, filter or capture.
+@main
+struct WindowIdentityFixture {
+  static func main() {
+    func verify(_ condition: Bool) {
+      if !condition { print("{\"checks\":0,\"passed\":false}"); exit(1) }
+    }
+    let expected = LabWindowIdentity(windowID: 41, ownerPID: 101,
+      app: "Fictional Player", bundle: "org.example.fictional-player")
+    let same = LabWindowIdentity(windowID: 41, ownerPID: 101,
+      app: "Fictional Player", bundle: "org.example.fictional-player")
+    verify(matchesSelectedWindow(expected, same))
+    for foreign in [
+      LabWindowIdentity(windowID: 41, ownerPID: 202, app: "Fictional Player", bundle: "org.example.fictional-player"),
+      LabWindowIdentity(windowID: 41, ownerPID: 101, app: "Fictional Other", bundle: "org.example.fictional-player"),
+      LabWindowIdentity(windowID: 41, ownerPID: 101, app: "Fictional Player", bundle: "org.example.fictional-other"),
+      LabWindowIdentity(windowID: 42, ownerPID: 101, app: "Fictional Player", bundle: "org.example.fictional-player"),
+      LabWindowIdentity(windowID: 41, ownerPID: nil, app: "Fictional Player", bundle: "org.example.fictional-player"),
+      LabWindowIdentity(windowID: 41, ownerPID: 101, app: nil, bundle: "org.example.fictional-player"),
+      LabWindowIdentity(windowID: 41, ownerPID: 101, app: "Fictional Player", bundle: nil),
+    ] { verify(!matchesSelectedWindow(expected, foreign)) }
+    verify(!matchesSelectedWindow(nil, nil))
+    print("{\"checks\":9,\"passed\":true}")
+  }
+}
+#else
 @main
 struct Capture {
   static func main() async {
@@ -314,12 +373,17 @@ struct Capture {
     // (RunB08), which no Swift code can catch; probing it in a child keeps
     // the capture alive and lets it fall back to a display filter.
     if options["probe-window"] != nil {
-      guard let id = UInt32(options["window-id"] ?? ""), id > 0 else {
-        fail("--probe-window needs --window-id.", code: 64, reason: "probe-needs-window")
+      guard let id = UInt32(options["window-id"] ?? ""),
+        let expected = LabWindowIdentity(windowID: id,
+          ownerPID: Int32(options["owner-pid"] ?? ""),
+          app: options["owner-app"], bundle: options["owner-bundle"])
+      else {
+        fail("--probe-window needs an exact selected owner.", code: 64, reason: "probe-needs-window")
       }
       guard let fresh = try? await SCShareableContent.excludingDesktopWindows(
         true, onScreenWindowsOnly: false),
         let window = fresh.windows.first(where: { $0.windowID == id }),
+        matchesSelectedWindow(expected, windowIdentity(window)),
         usableWindow(window, displays: fresh.displays)
       else { exit(3) }
       _ = SCContentFilter(desktopIndependentWindow: window)
@@ -423,6 +487,7 @@ struct Capture {
     else { fail("Could not list windows again.", code: 2, reason: "relist-windows") }
     func currentWindow(_ window: SCWindow) -> (SCWindow, SCDisplay) {
       guard let current = fresh.windows.first(where: { $0.windowID == window.windowID }),
+        matchesSelectedWindow(windowIdentity(window), windowIdentity(current)),
         usableWindow(current, displays: fresh.displays),
         let onDisplay = fresh.displays.first(where: { $0.frame.intersects(current.frame) })
       else {
@@ -432,7 +497,10 @@ struct Capture {
     }
     let (emulatorNow, emulatorOnDisplay) = currentWindow(emulator)
     let (companionNow, companionOnDisplay) = currentWindow(companion)
-    let probed = probeIndependentFilters(windowIDs: [emulatorNow.windowID, companionNow.windowID])
+    guard let emulatorIdentity = windowIdentity(emulatorNow),
+      let companionIdentity = windowIdentity(companionNow)
+    else { fail("A selected window has no exact owner. Nothing was recorded.", code: 2, reason: "window-owner") }
+    let probed = probeIndependentFilters(identities: [emulatorIdentity, companionIdentity])
     func chooseFilter(_ current: SCWindow, on onDisplay: SCDisplay) -> (
       SCContentFilter, String, SCDisplay?
     ) {
@@ -586,7 +654,8 @@ struct Capture {
       true, onScreenWindowsOnly: false)
     {
       for start in [emulatorNow, companionNow] {
-        guard let current = now.windows.first(where: { $0.windowID == start.windowID })
+        guard let current = now.windows.first(where: { $0.windowID == start.windowID }),
+          matchesSelectedWindow(windowIdentity(start), windowIdentity(current))
         else {
           windowsMissing = true
           continue
@@ -614,3 +683,5 @@ struct Capture {
     if writer.writer.status != .completed || writer.frames == 0 { exit(1) }
   }
 }
+
+#endif
