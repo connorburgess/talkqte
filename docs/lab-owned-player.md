@@ -38,7 +38,11 @@ PCM timestamps/frame counts and bounded decoded memory (128 MiB, at most 105 s).
 It decodes locally without persisting PCM. Video uses an audio-free composition,
 so only the audio engine produces sound. Prepared means the engine is not playing,
 the dedicated window exists and controls are installed, not observed window paint.
-The fixed duration is 102.48 seconds. Idempotent preparation accepts only the same
+The fixed visual/container duration is 102.48 seconds. Audio is validated against
+its own edited track time range (zero-origin required), not the longer asset.
+The preserved MP4 has audio media duration about 101.0403 seconds and an edited
+presentation duration about 101.019 seconds; its remaining visual tail is not
+heard audio. The player neither pads audio nor mutates the file. Idempotent preparation accepts only the same
 file; there is one playback generation and no restart after Stop or failure.
 
 Prepare the player before native source selection. Then require the native
@@ -91,7 +95,31 @@ reaching the entire decoded clip, a prior genuine start and no winning Stop/erro
 The SDK also invokes completion on Stop; callback type alone is insufficient. A
 C11 lock-free atomic store is the callback's only work. An atomic Stop/completion
 claim resolves the race conservatively. Owner-queue code stops the node and engine
-and requires observed engine nonrunning before reporting completion.
+and requires observed engine nonrunning before reporting `audio_completed`.
+Audio completion stops only the audio engine. The existing video keeps playing
+through its tail. A separately registered end notification for that exact video
+item, with its observed current time checked against the asset duration, reports
+`video_completed`. The aggregate `completed` is admitted only after both signals;
+Stop/error cannot synthesize either signal. The original 110-second watchdog
+still bounds the full playback; no deadline is extended. Video completion and
+received audio completion remain receipt evidence, not physical sound or paint.
+
+`play()` returns separate frozen `audioCompletion`, `videoCompletion` and duration
+metadata. Read-only `diagnostics` retains these even across later cleanup failure,
+along with the first fixed failure category/stage, bounded decoded frame and
+track/asset duration values, allowlisted exit signal/code and stderr byte count.
+No stderr contents or arbitrary error description is retained. Preparation stages
+are fixed (`media-identity`, `track-timeline`, `audio-decode`, `audio-duration`,
+`pcm-buffer`, `video-composition`, `engine-prepare`, `window-prepare`); later
+fixed phases describe start/render/tail. A missing exact failed stage remains
+unknown for exits without a valid failure frame. The original failed take and
+its generic diagnostics are not retroactively reclassified as a proven guard.
+
+The first runtime attempt exposed the incompatible whole-asset audio duration
+assumption. Offline regression uses the original numeric track/edit durations
+and a harmless protocol child to test that audio completion cannot close the
+video tail. Compile-only checks do not establish device playback or decode
+success; the corrected signed binary requires separate reviewed approval.
 
 `stop()` latches before queued Start, halts audio/video and reports engine state.
 It deliberately retains the player process/window identity while native capture

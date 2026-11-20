@@ -19,6 +19,7 @@ import {
   verifyLabPlayerBuild,
   mapLabPlayerStart,
   LAB_PLAYER_MEDIA_SHA256,
+  validateLabPlayerDurations,
 } from './cue-lab-player.mjs';
 const bridge = {
   sentMs: 1000,
@@ -374,4 +375,155 @@ test('Swift checks clock discontinuity throughout render and disables AVPlayer s
     swift.indexOf('video.automaticallyWaitsToMinimizeStalling = false') <
       swift.indexOf('video?.setRate'),
   );
+});
+
+test('saved media audio edit duration accepts its natural end without padding to the longer video', () => {
+  const durations = validateLabPlayerDurations({
+    totalFrames: 4848912,
+    audioTrackDurationMs: 101019,
+    assetDurationMs: 102480,
+  });
+  assert.equal(durations.audioDurationMs, 101019);
+  assert.equal(durations.videoOnlyTailMs, 1461);
+  assert.throws(() =>
+    validateLabPlayerDurations({
+      totalFrames: 4848912,
+      audioTrackDurationMs: 102480,
+      assetDurationMs: 102480,
+    }),
+  );
+  assert.throws(() =>
+    validateLabPlayerDurations({
+      totalFrames: 4919040,
+      audioTrackDurationMs: 101019,
+      assetDurationMs: 102480,
+    }),
+  );
+});
+async function waitForAudio(player) {
+  const deadline = performance.now() + 2000;
+  while (!player.diagnostics.audioCompleted) {
+    assert.ok(performance.now() < deadline, 'fixture audio evidence deadline');
+    await new Promise((r) => setTimeout(r, 1));
+  }
+}
+
+test('natural audio completion alone does not resolve play until separate final video evidence', async () => {
+  const player = createLabPlayerFixture({
+    ...fixtureOptions,
+    fixtureCase: 'video-tail',
+  });
+  try {
+    await player.prepare({ media });
+    let resolved = false;
+    const resultPromise = player.play({ media, onStarted() {} }).then((r) => {
+      resolved = true;
+      return r;
+    });
+    // Wait for the actual protocol event, not a manufactured playback timestamp.
+    await waitForAudio(player);
+    assert.equal(resolved, false);
+    assert.equal(player.diagnostics.videoCompleted, false);
+    const result = await resultPromise;
+    assert.equal(result.durations.videoOnlyTailMs, 1461);
+    assert.equal(result.audioCompletion.framesPlayed, 4848912);
+    assert.equal(result.audioCompletion.basis, 'receipt');
+    assert.equal(result.videoCompletion.videoTimeMs, 102480);
+    assert.equal(result.videoCompletion.basis, 'receipt');
+    assert.ok(
+      result.videoCompletion.receivedMonotonicMs >=
+        result.audioCompletion.receivedMonotonicMs,
+    );
+    await player.close({ nativeReleased: true });
+  } finally {
+    await player.close({ nativeReleased: true }).catch(() => {});
+  }
+});
+test('missing video completion stays pending and Stop cannot invent final completion', async () => {
+  const player = createLabPlayerFixture({
+    ...fixtureOptions,
+    fixtureCase: 'missing-video',
+  });
+  try {
+    await player.prepare({ media });
+    const result = player.play({ media, onStarted() {} });
+    const rejected = assert.rejects(result);
+    await waitForAudio(player);
+    await player.stop();
+    await rejected;
+    assert.equal(player.diagnostics.videoCompleted, false);
+    await player.close({ nativeReleased: true });
+  } finally {
+    await player.close({ nativeReleased: true }).catch(() => {});
+  }
+});
+test('fixed failed preparation stage and numeric diagnostics survive Stop/cleanup failure', async () => {
+  const player = createLabPlayerFixture({
+    ...fixtureOptions,
+    fixtureCase: 'prepare-failed',
+  });
+  const controller = new AbortController();
+  await assert.rejects(player.prepare({ media, signal: controller.signal }));
+  controller.abort(); // Later cancellation cannot replace the earlier fixed failed stage.
+  await assert.rejects(player.close({ nativeReleased: true }));
+  assert.deepEqual(player.diagnostics.failure, {
+    category: 'player-failure',
+    stage: 'audio-duration',
+    decodedFrames: 4848912,
+    audioTrackDurationMs: 101019,
+    assetDurationMs: 102480,
+  });
+  assert.equal(player.diagnostics.process.exitCode, 0);
+  assert.equal(player.diagnostics.stderrBytes, 0);
+});
+test('unexpected prepare exit retains only bounded exit/signal/category, never raw stderr', async () => {
+  const player = createLabPlayerFixture({
+    ...fixtureOptions,
+    fixtureCase: 'exit-prepare',
+  });
+  await assert.rejects(player.prepare({ media }));
+  await assert.rejects(player.close({ nativeReleased: true }));
+  assert.equal(player.diagnostics.failure.category, 'process-exit');
+  assert.deepEqual(player.diagnostics.process, { exitCode: 7, signal: null });
+  assert.equal(Object.hasOwn(player.diagnostics, 'stderr'), false);
+});
+
+test('unexpected prepare signal is retained independently of fixed protocol failure', async () => {
+  const player = createLabPlayerFixture({
+    ...fixtureOptions,
+    fixtureCase: 'signal-prepare',
+  });
+  await assert.rejects(player.prepare({ media }));
+  await assert.rejects(player.close({ nativeReleased: true }));
+  assert.equal(player.diagnostics.failure.category, 'process-exit');
+  assert.deepEqual(player.diagnostics.process, {
+    exitCode: null,
+    signal: 'SIGTERM',
+  });
+});
+
+test('caller abort from genuine started observation retains cancelled diagnostics through cleanup', async () => {
+  const player = createLabPlayerFixture(fixtureOptions);
+  const controller = new AbortController();
+  try {
+    await player.prepare({ media, signal: controller.signal });
+    let starts = 0;
+    await assert.rejects(
+      player.play({
+        media,
+        signal: controller.signal,
+        onStarted() {
+          starts++;
+          controller.abort();
+        },
+      }),
+    );
+    assert.equal(starts, 1);
+    await assert.rejects(player.close({ nativeReleased: true }));
+    assert.deepEqual(player.diagnostics.failure, { category: 'cancelled' });
+    assert.equal(player.diagnostics.audioCompleted, false);
+    assert.equal(player.diagnostics.videoCompleted, false);
+  } finally {
+    await player.close({ nativeReleased: true }).catch(() => {});
+  }
 });
