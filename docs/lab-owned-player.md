@@ -141,3 +141,31 @@ Verifier tests mock OS signature checks. Compilation checks do not launch the
 player, establish a signed bundle, verify a device route, prove visible video or
 confirm live capture/transcription/model cues. Those remain separately coordinated
 runtime acceptance using the saved media, with no regeneration or forced cue.
+
+
+## Standard PCM and preparation progress
+
+The engine connection uses standard noninterleaved native-endian Float32 at
+48 kHz/stereo. The reader's interleaved output is copied as raw four-byte sample
+words into separate left/right planes, preserving frame count, sample bits and
+track durations. It does not resample, mix, pad or change media. Plane/channel
+sizes and standard format are checked before connecting the engine. The prior
+attempt's existing OS log identified a format-not-supported exception during
+engine connection before window construction; this correction still needs
+separate device acceptance.
+
+Preparation emits at most twelve fixed progress records from launch through
+media/track/decode/PCM/composition, engine connection/preparation, window/seek and
+verified window visibility. Progress is ordered, bounded and retained separately
+as `diagnostics.preparationProgress` with receipt timing; duplicate, unknown or
+out-of-order stages fail. A progress record never establishes readiness, paint,
+audio start or permission state. The terminal category (deadline, cancellation,
+protocol or a fixed player failure) remains independent of the last reached stage.
+A progress event before a framework call only identifies that boundary; it does
+not prove the call completed. No raw error text or stderr is retained.
+
+The native pure-memory channel/frame/bit-preservation regression is compiled via
+`-D LAB_PLAYER_PCM_TESTS`; it bypasses the application entrypoint. During this
+compile-only correction it was not executed. Node protocol regressions verify
+progress/deadline/first-failure ownership and refuse interleaved prepared metadata.
+None of these establishes live device playback. All existing timeouts are unchanged.
