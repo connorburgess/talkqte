@@ -146,7 +146,18 @@ meet that check. README needs no change for these internal lab modules.
 
 The preflight estimate uses `ceil(UTF-8 bytes / 2) + 1,500` input tokens and the existing output-token ceiling with pinned rates. This byte heuristic is not a proven tokenizer bound. On Opus it estimates about $0.053 for a one-line input and $0.074 for the largest input the broker sends; forty such estimates total about $2.14 to $2.97. The $1.00 local threshold can therefore stop the run first. A completed decision uses its reported usage instead. Exact tokenizer coverage, rate validity and reconciliation with account billing remain separate acceptance checks; no remote token-count or billing request is made by this guard.
 
-**Evidence:** per call, content-free receipts keep the time to first byte and first token, the stop reason, a refusal category, token usage and the computed cost. No prompt, reply or key text is kept.
+**In-app approval and timing:** a recorded take on this route has no launch-time approval. After the source is Listening and before anything plays, the take waits up to 180 s for the native app's connection row (`event` `evaluator`, `state` `on`, `approval` `review`, `backend` `lab-api`, and the launched model). The owner gives that approval in the app with three clicks: Review processing, Review selected sources, Enable for this session.
+
+- **Before approval:** the provider is not opened. The key file is not read, no worker starts and nothing is sent.
+- **No approval in time:** the take stops through ordinary Stop with `approval-not-given`, and nothing plays. The wait also ends early if a later approval could no longer leave room for the recorder and the full media before native Stop.
+- **Faults:** an approval by launch setting, or one naming another backend or model, stops the take as `approval-fault`, also after playback has begun.
+- **At approval:** the provider opens. The run's startup clock and the take's own clock both restart with their full budgets, so the wait itself cannot make a later step time out. The run package records its one attempt only after this point.
+
+Native Stop is set at 320 s: the usual 110 s source window, the 180 s approval budget and a 30 s allowance from native start to Listening. The evidence guard records the approval budget and the time actually waited as separate fields.
+
+A take on this route allows 40 calls, against 20 for Codex. Four limits apply: the native session call limit (40), the adapter's own call cap (40), the per-run spend cap checked before every request, and one request at a time with the 8 s native deadline.
+
+**Evidence:** per call, content-free receipts keep the time to first byte and first token, the stop reason, a refusal category, token usage and the computed cost. The run's estimated total spend is available beside the receipts. No prompt, reply or key text is kept.
 
 Tests drive the adapter with a fake fetch or a loopback stand-in endpoint and a dummy key; no test reaches the network.
 

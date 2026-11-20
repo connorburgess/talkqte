@@ -367,6 +367,56 @@ test('runtime session cross-check discards unrelated simulated ends and rejects 
   }
 });
 
+test('the reader passes on connection rows with their approval and refuses a malformed one', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tq-reader-'));
+  chmodSync(directory, 0o700);
+  const path = join(directory, 'timing.jsonl');
+  writeFileSync(path, '', { mode: 0o600 });
+  const events = [];
+  const reader = watchLabTiming({
+    path,
+    runId: 'fixture-run',
+    sourceObservation: 'v1',
+    onEvent: (event) => events.push(event),
+  });
+  try {
+    // A u64 session larger than a JS number survives as its exact text.
+    appendFileSync(
+      path,
+      '{"event":"evaluator","approval":"review","session":18446744073709551615,"state":"on","backend":"lab-api","model":"claude-opus-5-5","effort":"low","elapsed_ms":9,"wall_ms":1,"mono_ms":2}\n',
+    );
+    reader.poll();
+    assert.deepEqual(events, [
+      {
+        event: 'evaluator',
+        approval: 'review',
+        state: 'on',
+        backend: 'lab-api',
+        model: 'claude-opus-5-5',
+        effort: 'low',
+        session: '18446744073709551615',
+      },
+    ]);
+    appendFileSync(
+      path,
+      JSON.stringify({
+        event: 'evaluator',
+        approval: 'implicit',
+        session: 2,
+        state: 'on',
+        backend: 'lab-api',
+        model: 'claude-opus-5-5',
+      }) + '\n',
+    );
+    reader.poll();
+    assert.equal(reader.failed, true);
+    assert.deepEqual(events.at(-1), { event: 'dropped', count: 1 });
+  } finally {
+    reader.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('a different application acknowledgement fails the QuickTime-only observer', () => {
   const directory = mkdtempSync(join(tmpdir(), 'tq-reader-'));
   chmodSync(directory, 0o700);

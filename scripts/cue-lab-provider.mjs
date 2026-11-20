@@ -123,9 +123,14 @@ export async function openLabProvider({
   signal,
   execution = 'subscription',
   openers,
+  // Direct API route only: return the session now and open the adapter
+  // (key file and worker) only on open(), after the owner's in-app approval.
+  deferOpen = false,
 } = {}) {
   if (
     !['claude-code', 'codex', 'anthropic-api'].includes(provider) ||
+    typeof deferOpen !== 'boolean' ||
+    (deferOpen && provider !== 'anthropic-api') ||
     !Number.isSafeInteger(maxCalls) ||
     maxCalls < 1 ||
     maxCalls > 100 ||
@@ -166,30 +171,35 @@ export async function openLabProvider({
     signal,
     execution,
   });
-  let adapter;
-  try {
-    if (execution === 'offline-stand-in') {
-      if (typeof openers?.[provider] !== 'function')
+  const openAdapter = async () => {
+    let opened;
+    try {
+      if (execution === 'offline-stand-in') {
+        if (typeof openers?.[provider] !== 'function')
+          throw failure('provider-unavailable');
+        opened = await openers[provider](options);
+      } else {
+        opened =
+          provider === 'codex'
+            ? await openCodexLab(options)
+            : provider === 'anthropic-api'
+              ? await openAnthropicLab(options)
+              : await openClaude(options);
+      }
+      if (
+        !opened ||
+        typeof opened.request !== 'function' ||
+        typeof opened.close !== 'function'
+      )
         throw failure('provider-unavailable');
-      adapter = await openers[provider](options);
-    } else {
-      adapter =
-        provider === 'codex'
-          ? await openCodexLab(options)
-          : provider === 'anthropic-api'
-            ? await openAnthropicLab(options)
-            : await openClaude(options);
+      return opened;
+    } catch (error) {
+      await opened?.close?.();
+      throw normalizeFailure(error, 0);
     }
-    if (
-      !adapter ||
-      typeof adapter.request !== 'function' ||
-      typeof adapter.close !== 'function'
-    )
-      throw failure('provider-unavailable');
-  } catch (error) {
-    await adapter?.close?.();
-    throw normalizeFailure(error, 0);
-  }
+  };
+  let adapter = deferOpen ? null : await openAdapter();
+  let opening = null;
   const metadata = Object.freeze({
     provider,
     model,
@@ -257,6 +267,11 @@ export async function openLabProvider({
     if (calls >= maxCalls) {
       stop();
       throw failure('call-cap', calls);
+    }
+    // A deferred session sends nothing before open() has completed.
+    if (!adapter) {
+      stop();
+      throw failure('protocol', calls);
     }
     const controller = new AbortController();
     // The caller's request signal retires only this call (for example a
@@ -355,10 +370,35 @@ export async function openLabProvider({
       return calls;
     },
     get receipts() {
-      return adapter.receipts ?? null;
+      return adapter?.receipts ?? null;
     },
     get spentMicroUsd() {
-      return adapter.spentMicroUsd ?? null;
+      return adapter?.spentMicroUsd ?? null;
+    },
+    get opened() {
+      return adapter !== null;
+    },
+    // Opens a deferred session once; a no-op for one opened at creation.
+    open() {
+      if (adapter) return Promise.resolve();
+      if (terminal || closing)
+        return Promise.reject(failure('terminal', calls));
+      opening ??= openAdapter().then(
+        (opened) => {
+          if (terminal || closing) {
+            // Closed while opening: retire what was just opened.
+            return Promise.resolve(opened.close()).then(() => {
+              throw failure('terminal', calls);
+            });
+          }
+          adapter = opened;
+        },
+        (error) => {
+          stop();
+          throw error;
+        },
+      );
+      return opening;
     },
     close() {
       if (!closing) {
@@ -366,8 +406,9 @@ export async function openLabProvider({
         signal?.removeEventListener('abort', stop);
         closing = (async () => {
           if (active) await active.done.catch(() => {});
+          await opening?.catch(() => {});
           try {
-            await adapter.close();
+            await adapter?.close();
           } catch (error) {
             throw normalizeFailure(error, calls);
           }

@@ -314,6 +314,7 @@ function launcher({
     closed = false;
   let activeRunId = null;
   const subscribers = new Set();
+  const evaluatorSubscribers = new Set();
   const close = () => {
     if (closed) return;
     closed = true;
@@ -321,6 +322,7 @@ function launcher({
     for (const listener of subscribers)
       listener({ event: 'observation_closed' });
     subscribers.clear();
+    evaluatorSubscribers.clear();
   };
   return Object.freeze({
     playerSource,
@@ -343,6 +345,18 @@ function launcher({
       );
       subscribers.add(listener);
       return () => subscribers.delete(listener);
+    },
+    // The native model connection's on/off rows (`evaluator`), for the
+    // approval gate. One listener, attached before launch.
+    subscribeEvaluator(listener) {
+      requireThat(
+        !closed &&
+          !used &&
+          typeof listener === 'function' &&
+          evaluatorSubscribers.size === 0,
+      );
+      evaluatorSubscribers.add(listener);
+      return () => evaluatorSubscribers.delete(listener);
     },
     get identity() {
       return child
@@ -436,6 +450,13 @@ function launcher({
                 requireThat(previous[event.step] === step);
               step = event.step;
               if (step === 'released') released = true;
+            }
+            // Connection rows go only to the approval gate, never to the
+            // lifecycle or source observers, which refuse unknown rows.
+            if (event.event === 'evaluator') {
+              for (const listener of evaluatorSubscribers)
+                listener(Object.freeze({ ...event }));
+              return;
             }
             onTiming(event);
             for (const listener of subscribers)

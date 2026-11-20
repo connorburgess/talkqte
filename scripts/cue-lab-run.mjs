@@ -38,9 +38,15 @@ export function createLabRun({
   releaseMs = 12000,
   sourceSessionMode = 'required',
   runId = randomUUID(),
+  // Direct API route: after native start, wait (untimed here; the take
+  // bounds the wait) for approve(), then open the provider and give the
+  // rest of startup a fresh startupMs.
+  approvalBudgetMs = 0,
 } = {}) {
   if (
     !settings ||
+    ![0, 180000].includes(approvalBudgetMs) ||
+    (approvalBudgetMs > 0 && settings.provider !== 'anthropic-api') ||
     typeof runId !== 'string' ||
     !/^[A-Za-z0-9_-]{1,64}$/.test(runId) ||
     !['required', 'legacy-fixture'].includes(sourceSessionMode) ||
@@ -94,6 +100,16 @@ export function createLabRun({
     });
   };
   const played = new Promise((resolve) => (playbackResolve = resolve));
+  let approveResolve,
+    approveCalled = false,
+    providerOpenedResolve,
+    providerOpenedReject;
+  const approved = new Promise((resolve) => (approveResolve = resolve));
+  const providerOpened = new Promise((resolve, reject) => {
+    providerOpenedResolve = resolve;
+    providerOpenedReject = reject;
+  });
+  providerOpened.catch(() => {});
   let rejectStopped;
   const stopped = new Promise((_, reject) => (rejectStopped = reject));
   stopped.catch(() => {});
@@ -127,7 +143,11 @@ export function createLabRun({
 
   const startup = Promise.resolve().then(async () => {
     if (root.signal.aborted) throw gateFailure('cancelled');
-    provider = await openLabProvider({ ...config, signal: root.signal });
+    provider = await openLabProvider({
+      ...config,
+      signal: root.signal,
+      ...(approvalBudgetMs ? { deferOpen: true } : {}),
+    });
     if (root.signal.aborted) throw gateFailure('cancelled');
     startupStage = 'broker-preparation';
     broker = await openLabBroker({
@@ -156,6 +176,23 @@ export function createLabRun({
       signal: root.signal,
     });
     if (root.signal.aborted) throw gateFailure('cancelled');
+    if (approvalBudgetMs) {
+      // The approval wait is not startup time: pause the startup clock,
+      // then open the provider (key file, worker) only once approved.
+      clearTimeout(timer);
+      startupStage = 'awaiting-approval';
+      await Promise.race([approved, stopped]);
+      startupStage = 'provider-open';
+      timer = setTimeout(() => fail('deadline'), startupMs);
+      try {
+        await Promise.race([provider.open(), stopped]);
+      } catch (error) {
+        providerOpenedReject(gateFailure('cancelled'));
+        throw error;
+      }
+      if (root.signal.aborted) throw gateFailure('cancelled');
+      providerOpenedResolve();
+    }
     phase = 'waiting-for-anchors';
     startupStage = 'awaiting-hello';
     await Promise.race([broker.ready, stopped]);
@@ -174,7 +211,7 @@ export function createLabRun({
     phase = 'ready';
     startupStage = 'ready';
   });
-  const timer = setTimeout(() => fail('deadline'), startupMs);
+  let timer = setTimeout(() => fail('deadline'), startupMs);
   const ready = Promise.race([startup, stopped]).finally(() =>
     clearTimeout(timer),
   );
@@ -270,6 +307,17 @@ export function createLabRun({
       controlCancelled = true;
       return stop(reason);
     },
+    // The owner approved the connection in the app (direct API route only).
+    // Resolves once the provider is open, so nothing can be sent before.
+    approve() {
+      if (!approvalBudgetMs || approveCalled || terminal) {
+        fail('protocol');
+        return Promise.reject(gateFailure('protocol'));
+      }
+      approveCalled = true;
+      approveResolve();
+      return Promise.race([providerOpened, stopped]);
+    },
     close,
     get phase() {
       return phase;
@@ -286,6 +334,10 @@ export function createLabRun({
     },
     get providerReceipts() {
       return provider?.receipts ?? null;
+    },
+    // Estimated direct API spend so far; null for routes without one.
+    get providerSpentMicroUsd() {
+      return provider?.spentMicroUsd ?? null;
     },
     get startupDiagnostics() {
       return Object.freeze({
