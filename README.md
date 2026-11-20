@@ -6,7 +6,7 @@
 
 ⭐ **Star the repo to follow development.** It is early, built in public, and not yet something to install for real meetings.
 
-TalkQTE is a meeting companion, in early prototype, that surfaces the right cue at the right moment to help keep meetings on target. It follows the conversation and offers useful context while it still matters: a reminder of an earlier constraint, a point worth clarifying, or a prompt to help you respond, without pulling you away from listening. It runs on your own machine beside the call rather than joining the meeting.
+TalkQTE is an early prototype being built to help keep meetings on target with a timely cue. The intended experience is to follow the conversation and offer useful context while it still matters: a reminder of an earlier constraint, a point worth clarifying, or a prompt to help you respond while continuing to listen. Useful timing and participation benefits remain unproven. The app runs on your own machine beside the call rather than joining the meeting.
 
 One cue appears in a quiet floating window. It says what it is and quotes the line or note it came from. You can hold it, dismiss it, or let it pass. There is no Save step or queue of questions to manage. Your existing note-taker can remain the record of what was actually said.
 
