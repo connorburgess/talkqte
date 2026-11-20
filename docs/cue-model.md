@@ -16,7 +16,7 @@ It builds on parts that already exist and are tested only with fictional adapter
 2. A development backend that calls the Claude Code CLI with the owner's own subscription, behind an explicit connection, with a visible sending indicator, a development decision log, and disclosure in the app, [PRIVACY.md](../PRIVACY.md) and the README.
 3. Removing the phrase rules, their cues and their tests, and rewriting the documents that describe on-device cue decisions.
 
-The development backend is for the owner's own use and the lab only. A shipped product cannot share one person's subscription among its users, and no production provider is chosen. That release blocker is recorded in the [product readiness plan](product-readiness.md#cloud-providers-for-a-shipped-product).
+The development backend is for the owner's own use and the lab only. A shipped product cannot share one person's subscription among its users. The Anthropic API was selected as the cue provider on 16 November 2026 and exists as a development lab backend; the shipped key and billing arrangement and production acceptance remain open. That release blocker is recorded in the [product readiness plan](product-readiness.md#cloud-providers-for-a-shipped-product).
 
 ## Where it runs
 
