@@ -172,9 +172,10 @@ for (const size of ['standard', 'large'] as const) {
   test(`companion fits ${size} text and keeps controls usable with custom spacing`, async ({
     page,
   }) => {
-    // The native companion's question height: 340 CSS px, 420 with large text.
-    const height = size === 'large' ? 420 : 340;
-    await page.setViewportSize({ width: 420, height });
+    // The native companion's cue window: 320 × 232 CSS px, 276 tall with
+    // large text.
+    const height = size === 'large' ? 276 : 232;
+    await page.setViewportSize({ width: 320, height });
     await standIn(page, '/?window=cue');
     await expect(
       page.getByText(
