@@ -78,12 +78,14 @@ const DEVELOPER_ID_REQUIREMENT =
  * part of the reviewed release, `timing-log` can write transcript text to a
  * file for lab runs, and `claude-cli` can send conversation lines to Anthropic
  * through one person's own subscription. `lab-evaluator` adds an explicitly
- * selected subscription broker client for fictional development runs. */
+ * selected subscription broker client for fictional development runs, and
+ * `cloud-transcription` can stream captured audio to Deepgram. */
 export const DEVELOPMENT_FEATURES = [
   'native-audio-spike',
   'timing-log',
   'claude-cli',
   'lab-evaluator',
+  'cloud-transcription',
 ];
 
 /** The `[features]` table of a Cargo.toml as { feature: [entries] }. */

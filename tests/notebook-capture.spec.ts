@@ -35,7 +35,7 @@ test('pending Start can be cancelled outside the busy queue; late preparation ne
   await page.keyboard.press('Enter');
   await expect(cancel(page)).toBeEnabled();
   await expect(cancel(page)).toBeFocused();
-  await expect(mic(page)).toContainText('Preparing local transcription');
+  await expect(mic(page)).toContainText('Starting the live session');
   await expect(
     page.getByRole('button', { name: 'Start microphone', exact: true }),
   ).toHaveCount(0);
@@ -44,7 +44,7 @@ test('pending Start can be cancelled outside the busy queue; late preparation ne
   );
   await page.keyboard.press('Enter');
   await expect(mic(page)).toContainText(
-    'Start cancelled. Waiting for model preparation',
+    'Start cancelled. Waiting for the start to finish',
   );
   expect(await page.evaluate(() => window.captureTest.targets)).toEqual([
     target,
@@ -161,11 +161,13 @@ test('failed cancellation is retryable, and a genuine model failure remains visi
   await page.evaluate(() => window.captureTest.releaseStart());
   await expect(start(page)).toBeEnabled();
   await page.evaluate(() =>
-    window.captureTest.failStart('Could not load the local speech model.'),
+    window.captureTest.failStart(
+      'The cloud transcription settings are not usable.',
+    ),
   );
   await start(page).click();
   await expect(page.getByRole('alert')).toContainText(
-    'Could not load the local speech model.',
+    'The cloud transcription settings are not usable.',
   );
   await expect(start(page)).toBeEnabled();
 });
