@@ -1022,22 +1022,25 @@ pub(crate) mod app {
 
     impl Backend for Native {
         fn begin_session(&mut self, control: &Control) -> Result<Box<dyn FnOnce()>, Failure> {
+            #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+            if !crate::dev_lab_source::current() {
+                return Err(Failure::SourceUnavailable);
+            }
             // The same check the start makes before any native request.
-            let recognizer_available = crate::live_unavailable().is_none();
+            let availability = crate::live_availability();
             let controller = self
                 .app
                 .state::<crate::microphone::Controller>()
                 .inner()
                 .clone();
             let access = AppAccess(self.app.clone());
-            let session = access
-                .with(|runtime| {
-                    // Under the runtime lock, which a standalone microphone
-                    // start also consults, so the two cannot interleave.
-                    session_preflight(controller.try_not_capturing(), recognizer_available)?;
-                    runtime.begin_source_session(control)
-                })
-                .ok_or(Failure::Unavailable)??;
+            let session = begin_session_checked(
+                &access,
+                control,
+                availability,
+                || controller.try_not_capturing(),
+                record_startup,
+            )?;
             Ok(Box::new(move || {
                 access.with(|runtime| runtime.end_source_session(session));
             }))
@@ -1053,6 +1056,8 @@ pub(crate) mod app {
                 self.selections.clear();
                 return Err(Failure::Cancelled);
             }
+            #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+            self.selections.retain(Selection::lab_allowed);
             Ok(self
                 .selections
                 .iter()
@@ -1088,6 +1093,73 @@ pub(crate) mod app {
         }
     }
 
+    fn record_startup(
+        stage: crate::timing_log::SourceStartStage,
+        reason: crate::timing_log::SourceStartReason,
+    ) {
+        #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+        crate::timing_log::record(crate::timing_log::Event::LabSourceStartup {
+            version: 1,
+            stage,
+            reason,
+        });
+        #[cfg(not(all(debug_assertions, feature = "lab-evaluator")))]
+        let _ = (stage, reason);
+    }
+
+    // This is the production admission sequence; tests substitute Runtime access
+    // and metadata results, never a successful permission or a native stream.
+    pub(in crate::application_audio_host) fn begin_session_checked<A: Access>(
+        access: &A,
+        control: &Control,
+        availability: Result<(), crate::LiveUnavailable>,
+        microphone: impl FnOnce() -> Option<bool>,
+        mut report: impl FnMut(
+            crate::timing_log::SourceStartStage,
+            crate::timing_log::SourceStartReason,
+        ),
+    ) -> Result<u64, Failure> {
+        use crate::timing_log::{SourceStartReason as Reason, SourceStartStage as Stage};
+        report(
+            Stage::CloudReadiness,
+            match availability {
+                Ok(()) => Reason::Ready,
+                Err(crate::LiveUnavailable::Build) => Reason::CloudBuildMissing,
+                Err(crate::LiveUnavailable::Selection) => Reason::CloudNotSelected,
+                Err(crate::LiveUnavailable::Settings) => Reason::CloudSettingsInvalid,
+                Err(crate::LiveUnavailable::TokenMetadata) => Reason::TokenMetadataRejected,
+            },
+        );
+        let result = access.with(|runtime| {
+            // Preserve the existing check order, including reading microphone
+            // state under Runtime even when transcription is unavailable.
+            if let Err(failure) = session_preflight(microphone(), availability.is_ok()) {
+                if failure == Failure::Busy {
+                    report(Stage::RuntimeStart, Reason::MicrophoneBusy);
+                }
+                return Err(failure);
+            }
+            let result = runtime.begin_source_session(control);
+            report(
+                if result.is_ok() {
+                    Stage::SessionCreated
+                } else {
+                    Stage::RuntimeStart
+                },
+                if result.is_ok() {
+                    Reason::Created
+                } else {
+                    Reason::RuntimeRefused
+                },
+            );
+            result
+        });
+        if result.is_none() {
+            report(Stage::RuntimeAccess, Reason::RuntimeUnavailable);
+        }
+        result.ok_or(Failure::Unavailable)?
+    }
+
     /// Everything decided before the native request, in order: a start that
     /// was stopped while it waited loads nothing; the source must be one of
     /// the listed selections; a live session must be running; the recognizer
@@ -1100,6 +1172,20 @@ pub(crate) mod app {
         source: &str,
         listed: &[&str],
         load: impl FnOnce() -> Result<T, String>,
+    ) -> Result<(usize, T), Refused> {
+        before_native_start_observed(access, control, source, listed, load, record_startup)
+    }
+
+    pub(in crate::application_audio_host) fn before_native_start_observed<A: Access, T>(
+        access: &A,
+        control: &Control,
+        source: &str,
+        listed: &[&str],
+        load: impl FnOnce() -> Result<T, String>,
+        mut report: impl FnMut(
+            crate::timing_log::SourceStartStage,
+            crate::timing_log::SourceStartReason,
+        ),
     ) -> Result<(usize, T), Refused> {
         if control.is_cancelled() {
             return Err(Refused::Start(Failure::Cancelled));
@@ -1119,7 +1205,17 @@ pub(crate) mod app {
                 .ok_or(Refused::Clock(TimingError::SessionChanged))
         };
         let approved_in = session()?;
-        let loaded = load().map_err(|_| Refused::Start(Failure::Unavailable))?;
+        let loaded = load().map_err(|_| {
+            report(
+                crate::timing_log::SourceStartStage::RecognizerLoad,
+                crate::timing_log::SourceStartReason::LoadRefused,
+            );
+            Refused::Start(Failure::Unavailable)
+        })?;
+        report(
+            crate::timing_log::SourceStartStage::RecognizerLoad,
+            crate::timing_log::SourceStartReason::Ready,
+        );
         if session()? != approved_in {
             return Err(Refused::Clock(TimingError::SessionChanged));
         }
@@ -1171,6 +1267,9 @@ pub(crate) mod app {
         // Freeze source and finite Stop settings once, shared by arming and
         // autostart so the approved source cannot change between those steps.
         let settings = DevSettings::read(|name| std::env::var(name).ok());
+        #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
+        crate::dev_lab_source::initialize(settings.as_ref(), |name| std::env::var(name).ok())
+            .map_err(std::io::Error::other)?;
         #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
         crate::dev_stop::install(app, host.clone(), settings.as_ref())
             .map_err(std::io::Error::other)?;
