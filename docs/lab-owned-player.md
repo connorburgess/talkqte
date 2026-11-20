@@ -104,6 +104,12 @@ Stop/error cannot synthesize either signal. The original 110-second watchdog
 still bounds the full playback; no deadline is extended. Video completion and
 received audio completion remain receipt evidence, not physical sound or paint.
 
+After both validated track completions, playback releases its caller's abort
+listener before resolving. The capture owner can then abort the shared run to
+begin ordinary Stop and retirement without creating a new playback cancellation.
+Cancellation before that boundary and independent Stop or retirement failures
+remain failures; completed playback does not prove cleanup.
+
 `play()` returns separate frozen `audioCompletion`, `videoCompletion` and duration
 metadata. Read-only `diagnostics` retains these even across later cleanup failure,
 along with the first fixed failure category/stage, bounded decoded frame and
