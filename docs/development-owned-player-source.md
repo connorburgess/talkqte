@@ -171,3 +171,25 @@ and real temporary placeholder metadata; no Tauri/SCK app is created. Local Rust
 execution remains unrun under the capacity floor. Exact source review and hosted
 validation, followed by a separately approved diagnostic artifact and attempt,
 remain required before new runtime evidence can resolve the failing gate.
+
+## Recording acceptance still required
+
+The first capture-only validation should use the already verified fictional
+media, the reviewed signed four-feature TalkQTE build and owned player receipt,
+with model connection disabled. Bound one playback to at most 110 seconds, retain
+only the two approved windows and their fictional audio, stop at the first failure
+or new permission prompt, and check actual render-clock acknowledgement, selected
+source transcription, video frames and independent native/player/recorder cleanup.
+
+The acceptance clock is the observed audio render/media timeline. Measured
+render-to-orchestrator and broker mappings together must fit the 100 ms bound.
+API-reported output presentation latency is a separate estimate with explicit
+limits; it is not proof of physical acoustic arrival or speaker audibility.
+Player schedule/receipt time, elapsed timers and process exit cannot replace an
+actual render-clock start or distinguish natural EOF from cancelled completion.
+
+Only after that bounded capture path is established should a separately recorded
+model-enabled plan enable explicit consent and a fixed shared call cap, bind the
+same source session, and compare evaluator decisions/publication to recorded
+companion paint. Publication is not paint. No app launch, capture, inference,
+recording, clock accuracy or cleanup measurement is established by offline tests.
