@@ -151,4 +151,4 @@ The developer-only [selected prior context API path](docs/selected-context-lab-o
 
 ### Selected-note diagnostic verification
 
-The opt-in fictional lab [selected-note attestation](docs/selected-note-attestation.md) distinguishes imported availability from actual processing approval and compares the approved note projection with SDK input. It requires a reviewed replacement build and runner; it is not enabled by import or launch and does not establish model use or usefulness.
+The native half of the opt-in fictional lab [selected-note attestation](docs/selected-note-attestation.md) binds actual processing approval to an expected SDK note projection. A matching public SDK attestation wire format and projection, and whole public-route acceptance, remain open; the current public JS supports the separate ordinary selected-context path and does not establish paired attestation. The diagnostic requires a separately reviewed matching build and runner; importing or selecting notes does not enable it, and it does not establish model use or usefulness.
