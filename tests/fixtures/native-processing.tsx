@@ -247,6 +247,7 @@ function hostAction(action: ApplicationAudioAction) {
 const control = {
   calls,
   send,
+  snapshot: () => structuredClone(state),
   /** The next application_audio command publishes this before replying. */
   publishBeforeSourceReply: (value: Partial<ProcessingSnapshot>) => {
     sourceStopEvent = value;
