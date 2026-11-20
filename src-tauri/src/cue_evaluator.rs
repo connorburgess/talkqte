@@ -15,6 +15,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod selected_snapshot;
+pub use selected_snapshot::{SELECTED_SNAPSHOT_FRAME_BYTES, SELECTED_SNAPSHOT_INPUT_BYTES};
+
 pub const MAX_SOURCES: usize = 32;
 pub const MAX_SOURCE_BYTES: usize = 4_096;
 pub const MAX_CONTEXT_BYTES: usize = 32_768;
@@ -428,6 +431,16 @@ pub(crate) enum Settlement {
 }
 
 pub(crate) trait EvaluationLifecycle: Send + Sync {
+    fn required_note_count(&self) -> Option<usize> {
+        None
+    }
+    fn approve_notes(&self, _session: u64, _notes: &[Source]) -> Result<(), Failure> {
+        Ok(())
+    }
+    fn scope_ready(&self) -> bool {
+        true
+    }
+    fn retire_scope(&self) {}
     fn terminal(&self) -> Option<Failure>;
     fn cancel(&self);
     fn settle(&self, request: &Request, verdict: Settlement) -> Result<(), Failure>;

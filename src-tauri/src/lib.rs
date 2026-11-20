@@ -62,6 +62,16 @@ mod native_source;
 pub mod notes_file;
 mod processing_commands;
 pub mod processing_reviews;
+#[cfg(any(
+    test,
+    all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "lab-evaluator",
+        feature = "native-audio-spike"
+    )
+))]
+mod selected_attestation;
 pub mod timing_log;
 pub mod transcription;
 
@@ -105,6 +115,8 @@ struct Runtime {
     context: context::ContextStore,
     /// A listed note source kept for selection, retry, or cancellation.
     pending_import: Option<context_import::PendingImport>,
+    /// Identity of the latest explicit file read; cancellation/replacement wins.
+    pending_file_pick: Option<Arc<()>>,
     /// The explicit Granola update check and what it last found.
     refresh: context_refresh::Refresh,
     /// The Granola session for this app run, once the person has signed in.
@@ -136,6 +148,7 @@ impl Default for Runtime {
             processing_status: engine::ProcessingTracker::default(),
             context: context::ContextStore::default(),
             pending_import: None,
+            pending_file_pick: None,
             refresh: context_refresh::Refresh::default(),
             granola: None,
             granola_sign_in: None,
@@ -577,17 +590,55 @@ struct LiveStatus {
 /// Why a live session cannot start, if it cannot. Transcription is only
 /// through a cloud provider, selected per launch in development builds; a
 /// build without it transcribes nothing and says so.
-pub(crate) fn live_unavailable() -> Option<&'static str> {
-    if !cfg!(feature = "cloud-transcription") {
-        Some("This build has no live transcription.")
-    } else if !transcription::cloud::selected() {
-        Some("Live transcription needs cloud transcription selected for this development launch.")
-    } else if transcription::cloud::ready().is_err() {
-        // The token file is checked too, without reading the token.
-        Some("The cloud transcription settings are not usable.")
-    } else {
-        None
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LiveUnavailable {
+    Build,
+    Selection,
+    Settings,
+    TokenMetadata,
+}
+
+impl LiveUnavailable {
+    fn message(self) -> &'static str {
+        match self {
+            Self::Build => "This build has no live transcription.",
+            Self::Selection => {
+                "Live transcription needs cloud transcription selected for this development launch."
+            }
+            Self::Settings | Self::TokenMetadata => {
+                "The cloud transcription settings are not usable."
+            }
+        }
     }
+}
+
+pub(crate) fn live_availability() -> Result<(), LiveUnavailable> {
+    classify_live_availability(
+        cfg!(feature = "cloud-transcription"),
+        transcription::cloud::selected,
+        transcription::cloud::readiness,
+    )
+}
+
+fn classify_live_availability(
+    compiled: bool,
+    selected: impl FnOnce() -> bool,
+    readiness: impl FnOnce() -> Result<(), transcription::cloud::ReadinessFailure>,
+) -> Result<(), LiveUnavailable> {
+    if !compiled {
+        return Err(LiveUnavailable::Build);
+    }
+    if !selected() {
+        return Err(LiveUnavailable::Selection);
+    }
+    readiness().map_err(|failure| match failure {
+        transcription::cloud::ReadinessFailure::Settings => LiveUnavailable::Settings,
+        transcription::cloud::ReadinessFailure::TokenMetadata => LiveUnavailable::TokenMetadata,
+    })
+}
+
+pub(crate) fn live_unavailable() -> Option<&'static str> {
+    live_availability().err().map(LiveUnavailable::message)
 }
 
 #[tauri::command]
@@ -639,6 +690,7 @@ async fn pick_context_file(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<PickedNotes>, String> {
+    let ticket = begin_file_pick(&state)?;
     let picker = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
         picker
@@ -656,6 +708,34 @@ async fn pick_context_file(
     let Some(path) = picked.transpose()? else {
         return Ok(None);
     };
+    read_context_file(&state, ticket, path).await.map(Some)
+}
+
+/// An explicit local path avoids the system chooser when its service is unavailable.
+/// It lists a file only; selection/import and processing approval stay separate.
+#[tauri::command]
+async fn read_context_file_path(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<PickedNotes, String> {
+    let path = notes_file::explicit_path(&path)?;
+    let ticket = begin_file_pick(&state)?;
+    read_context_file(&state, ticket, path).await
+}
+
+fn begin_file_pick(state: &AppState) -> Result<Arc<()>, String> {
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    let ticket = Arc::new(());
+    runtime.pending_file_pick = Some(ticket.clone());
+    runtime.pending_import = None;
+    Ok(ticket)
+}
+
+async fn read_context_file(
+    state: &AppState,
+    ticket: Arc<()>,
+    path: std::path::PathBuf,
+) -> Result<PickedNotes, String> {
     let file_name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -666,18 +746,31 @@ async fn pick_context_file(
     let notes = source.summaries();
     let skipped = source.skipped;
     let asks_for_dates = context::NoteSource::asks_for_dates(&source);
-    // A new pick replaces any file still waiting for a selection.
-    state
-        .0
-        .lock()
-        .map_err(|_| "The notebook is unavailable.")?
-        .pending_import = Some(context_import::PendingImport::new(Box::new(source)));
-    Ok(Some(PickedNotes {
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    finish_file_pick(&mut runtime, &ticket, source)?;
+    Ok(PickedNotes {
         file_name,
         notes,
         skipped,
         asks_for_dates,
-    }))
+    })
+}
+
+fn finish_file_pick(
+    runtime: &mut Runtime,
+    ticket: &Arc<()>,
+    source: notes_file::FileSource,
+) -> Result<(), String> {
+    if !runtime
+        .pending_file_pick
+        .as_ref()
+        .is_some_and(|current| Arc::ptr_eq(current, ticket))
+    {
+        return Err("The file selection changed. Choose notes again.".into());
+    }
+    runtime.pending_file_pick = None;
+    runtime.pending_import = Some(context_import::PendingImport::new(Box::new(source)));
+    Ok(())
 }
 
 /// Imports the selected notes from the file read by `pick_context_file`.
@@ -747,6 +840,7 @@ async fn import_context_notes(
 fn cancel_context_import(state: tauri::State<AppState>) {
     if let Ok(mut runtime) = state.0.lock() {
         runtime.pending_import = None;
+        runtime.pending_file_pick = None;
     }
 }
 
@@ -768,11 +862,10 @@ fn remove_context_item(
     source_id: String,
 ) -> Result<(), String> {
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-    if !runtime.context.remove(provider, &source_id) {
+    let Some(cue_changed) = runtime.remove_imported_note(provider, &source_id) else {
         return Err("That note is no longer imported.".into());
-    }
-    runtime.refresh.forget(provider, &source_id);
-    publish_context(&app, &mut runtime);
+    };
+    emit_context(&app, &mut runtime, cue_changed);
     Ok(())
 }
 
@@ -960,6 +1053,7 @@ async fn list_granola_notes(state: tauri::State<'_, AppState>) -> Result<PickedN
     if !shared.is_current(runtime.granola.as_ref()) {
         return Err("The Granola connection changed. Choose notes again.".into());
     }
+    runtime.pending_file_pick = None;
     runtime.pending_import = Some(context_import::PendingImport::new(Box::new(shared)));
     Ok(PickedNotes {
         file_name: "Granola · the last 30 days".into(),
@@ -1417,8 +1511,12 @@ async fn stop_microphone(
     }
 }
 
+fn application_context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
+}
+
 pub fn run() {
-    let context = tauri::generate_context!();
+    let context = application_context();
     #[cfg(target_os = "macos")]
     let context = companion_macos::configure(context);
     tauri::Builder::default()
@@ -1452,6 +1550,7 @@ pub fn run() {
             live_status,
             companion::companion_anchor,
             pick_context_file,
+            read_context_file_path,
             import_context_notes,
             cancel_context_import,
             context_items,
@@ -2092,5 +2191,250 @@ mod session_clock_tests {
         runtime.sync_at(origin + Duration::from_micros(1_500));
         runtime.sync_at(origin + Duration::from_micros(2_000));
         assert_eq!(runtime.engine.state.elapsed_ms, 2);
+    }
+}
+
+#[cfg(test)]
+mod live_readiness_diagnostics_tests {
+    use super::*;
+    use transcription::cloud::ReadinessFailure;
+
+    #[test]
+    fn readiness_preserves_short_circuit_order_and_public_refusals() {
+        assert_eq!(
+            classify_live_availability(
+                false,
+                || panic!("selection read"),
+                || panic!("metadata read")
+            ),
+            Err(LiveUnavailable::Build)
+        );
+        assert_eq!(
+            classify_live_availability(true, || false, || panic!("metadata read")),
+            Err(LiveUnavailable::Selection)
+        );
+        for (ready, expected) in [
+            (
+                Err(ReadinessFailure::Settings),
+                Err(LiveUnavailable::Settings),
+            ),
+            (
+                Err(ReadinessFailure::TokenMetadata),
+                Err(LiveUnavailable::TokenMetadata),
+            ),
+            (Ok(()), Ok(())),
+        ] {
+            assert_eq!(
+                classify_live_availability(true, || true, || ready),
+                expected
+            );
+        }
+        assert_eq!(
+            LiveUnavailable::Build.message(),
+            "This build has no live transcription."
+        );
+        assert_eq!(
+            LiveUnavailable::Selection.message(),
+            "Live transcription needs cloud transcription selected for this development launch."
+        );
+        assert_eq!(
+            LiveUnavailable::Settings.message(),
+            "The cloud transcription settings are not usable."
+        );
+        assert_eq!(
+            LiveUnavailable::TokenMetadata.message(),
+            LiveUnavailable::Settings.message()
+        );
+    }
+}
+
+#[cfg(test)]
+mod context_file_path_tests {
+    use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_path_invoke_uses_generated_acl_and_real_command_main_only() {
+        use tauri::Manager;
+        // Use the actual generated application manifest/capabilities, not an
+        // empty mock ACL or a test-granted permission. Only the window runtime
+        // is substituted; this invokes the real command through Tauri IPC.
+        let mut context = application_context();
+        context.config_mut().app.windows.clear();
+        let app = tauri::test::mock_builder()
+            .manage(AppState(Mutex::new(Runtime::default())))
+            .invoke_handler(tauri::generate_handler![read_context_file_path])
+            .build(context)
+            .unwrap();
+        let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let cue = tauri::WebviewWindowBuilder::new(&app, "cue", Default::default())
+            .build()
+            .unwrap();
+        let invoke =
+            |window: &tauri::WebviewWindow<tauri::test::MockRuntime>, path: &str, url: &str| {
+                tauri::test::get_ipc_response(
+                    window,
+                    tauri::webview::InvokeRequest {
+                        cmd: "read_context_file_path".into(),
+                        callback: tauri::ipc::CallbackFn(0),
+                        error: tauri::ipc::CallbackFn(1),
+                        url: url.parse().unwrap(),
+                        body: tauri::ipc::InvokeBody::Json(serde_json::json!({"path":path})),
+                        headers: Default::default(),
+                        invoke_key: tauri::test::INVOKE_KEY.into(),
+                    },
+                )
+            };
+        let local = "http://127.0.0.1:1420";
+        let rejected = invoke(&main, "relative.md", local).unwrap_err();
+        assert!(
+            rejected.as_str().unwrap().contains("full local file path"),
+            "{rejected}"
+        );
+        let path = std::env::temp_dir().join(format!("talkqte-path-ipc-{}.md", std::process::id()));
+        std::fs::write(
+            &path,
+            "---\ntitle: Fictional IPC plan\ndate: 2026-10-20\n---\nFictional whole note.",
+        )
+        .unwrap();
+        let response = invoke(&main, path.to_str().unwrap(), local)
+            .unwrap()
+            .deserialize::<serde_json::Value>()
+            .unwrap();
+        assert_eq!(response["notes"].as_array().unwrap().len(), 1);
+        assert_eq!(response["notes"][0]["title"], "Fictional IPC plan");
+        assert!(app
+            .state::<AppState>()
+            .0
+            .lock()
+            .unwrap()
+            .context
+            .items()
+            .is_empty());
+        assert!(app
+            .state::<AppState>()
+            .0
+            .lock()
+            .unwrap()
+            .pending_import
+            .is_some());
+        for (window, url) in [(&cue, local), (&main, "https://example.invalid/")] {
+            let denied = invoke(window, path.to_str().unwrap(), url).unwrap_err();
+            assert!(denied.as_str().unwrap().contains("not allowed"), "{denied}");
+        }
+        // Both denied invocations leave the earlier user preview intact.
+        assert!(app
+            .state::<AppState>()
+            .0
+            .lock()
+            .unwrap()
+            .pending_import
+            .is_some());
+        assert!(app
+            .state::<AppState>()
+            .0
+            .lock()
+            .unwrap()
+            .context
+            .items()
+            .is_empty());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn explicit_file_read_lists_without_import_and_canceled_or_replaced_reads_cannot_win() {
+        let state = AppState(Mutex::new(Runtime::default()));
+        let path =
+            std::env::temp_dir().join(format!("talkqte-path-fallback-{}.md", std::process::id()));
+        std::fs::write(
+            &path,
+            "---\ntitle: Fictional plan\ndate: 2026-10-20\n---\nReview the fictional plan.",
+        )
+        .unwrap();
+        let initial = begin_file_pick(&state).unwrap();
+        let listed =
+            tauri::async_runtime::block_on(read_context_file(&state, initial, path.clone()))
+                .unwrap();
+        assert_eq!(listed.notes.len(), 1);
+        assert_eq!(listed.notes[0].title, "Fictional plan");
+        assert!(state.0.lock().unwrap().context.items().is_empty());
+        let first = begin_file_pick(&state).unwrap();
+        let second = begin_file_pick(&state).unwrap();
+        let read = || {
+            notes_file::FileSource::read(
+                &notes_file::explicit_path(path.to_str().unwrap()).unwrap(),
+            )
+            .unwrap()
+        };
+        let mut runtime = state.0.lock().unwrap();
+        assert!(finish_file_pick(&mut runtime, &first, read()).is_err());
+        assert!(runtime.pending_import.is_none());
+        finish_file_pick(&mut runtime, &second, read()).unwrap();
+        assert!(runtime.pending_import.is_some());
+        assert!(runtime.context.items().is_empty());
+        // Cancel uses this same invalidation before any delayed read can install.
+        runtime.pending_file_pick = None;
+        assert!(finish_file_pick(&mut runtime, &second, read()).is_err());
+        assert!(runtime.context.items().is_empty());
+        drop(runtime);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn explicit_file_pipeline_refuses_missing_wrong_format_oversize_and_invalid_text_without_import(
+    ) {
+        let state = AppState(Mutex::new(Runtime::default()));
+        let root =
+            std::env::temp_dir().join(format!("talkqte-path-refusals-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        for (name, bytes) in [
+            ("unsupported.pdf", b"fictional".to_vec()),
+            ("invalid.txt", vec![0xff]),
+            (
+                "large.txt",
+                vec![b'x'; (notes_file::MAX_FILE_BYTES + 1) as usize],
+            ),
+        ] {
+            let path = root.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            let ticket = begin_file_pick(&state).unwrap();
+            assert!(
+                tauri::async_runtime::block_on(read_context_file(&state, ticket, path)).is_err()
+            );
+            assert!(state.0.lock().unwrap().pending_import.is_none());
+            assert!(state.0.lock().unwrap().context.items().is_empty());
+        }
+        let ticket = begin_file_pick(&state).unwrap();
+        assert!(tauri::async_runtime::block_on(read_context_file(
+            &state,
+            ticket,
+            root.join("missing.md")
+        ))
+        .is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn explicit_file_path_rejects_expansion_urls_controls_and_unbounded_arguments() {
+        for value in [
+            "",
+            "relative.md",
+            "~/notes.md",
+            "file:///notes.md",
+            "https://example.test/notes.md",
+            "//host/notes.md",
+            "/notes\n.md",
+            "/notes\0.md",
+        ] {
+            assert!(notes_file::explicit_path(value).is_err());
+        }
+        assert!(notes_file::explicit_path(&format!("/{}", "a".repeat(4096))).is_err());
+        let absolute = std::env::temp_dir().join("fictional notes.md");
+        assert_eq!(
+            notes_file::explicit_path(absolute.to_str().unwrap()).unwrap(),
+            absolute
+        );
     }
 }

@@ -195,6 +195,8 @@ pub struct CloudFeed {
     reopener: Option<Reopener>,
     on_reconnect: Option<Box<dyn FnMut(u64) + Send>>,
     reconnects: u32,
+    /// Lost speech across attempts awaiting a confirmed replacement connection.
+    pending_reconnect_gap: Option<u64>,
     /// Line numbers continue across reconnects: a new stream counts from 1
     /// again, so its numbers are offset by the last one seen.
     seq_base: u64,
@@ -232,6 +234,7 @@ impl CloudFeed {
             reopener: None,
             on_reconnect: None,
             reconnects: 0,
+            pending_reconnect_gap: None,
             seq_base: 0,
             last_seq: 0,
             last_line_end: 0,
@@ -265,7 +268,7 @@ impl CloudFeed {
         }
     }
 
-    /// Called from the feeding thread after each reconnect, with the
+    /// Called from the feeding thread after a replacement confirms Connected, with the
     /// session time (ms) whose speech was lost in the failed stream.
     pub fn on_reconnect(mut self, notify: impl FnMut(u64) + Send + 'static) -> Self {
         self.on_reconnect = Some(Box::new(notify));
@@ -398,6 +401,7 @@ impl CloudFeed {
     pub fn finish(mut self, wait: Duration) -> CloudStats {
         // Stop sends what is left on this connection; it never opens another.
         self.reopener = None;
+        self.pending_reconnect_gap = None;
         if self.failure.is_none() {
             if let Some(mut stream) = self.stream.take() {
                 let events = stream.finish(wait);
@@ -423,6 +427,19 @@ impl CloudFeed {
             match event {
                 SttEvent::Partial => {}
                 SttEvent::Connected { query } => {
+                    if let Some(gap_ms) = self.pending_reconnect_gap.take() {
+                        // Starting the worker is not a successful connection. Also
+                        // refuse a late confirmation after its approval was retired.
+                        if let Some(reason) = self.stop_reason() {
+                            return Err(self.fail(reason));
+                        }
+                        if (self.approved)() != Some(self.approved_at) {
+                            return Err(self.fail(SttFailure::Withdrawn));
+                        }
+                        if let Some(notify) = self.on_reconnect.as_mut() {
+                            notify(gap_ms);
+                        }
+                    }
                     crate::timing_log::record(crate::timing_log::Event::SttState {
                         session: self.session,
                         state: "connected",
@@ -520,9 +537,11 @@ impl CloudFeed {
                 self.clock = StreamClock::default();
                 self.seq_base = self.last_seq;
                 self.last_line_end = self.last_pushed;
-                if let Some(notify) = self.on_reconnect.as_mut() {
-                    notify(gap_ms);
-                }
+                self.pending_reconnect_gap = Some(
+                    self.pending_reconnect_gap
+                        .unwrap_or(0)
+                        .saturating_add(gap_ms),
+                );
                 Ok(())
             }
             Err(again) => Err(self.fail(again)),
@@ -686,8 +705,25 @@ pub fn launch_budget(settings: &Settings) -> Budget {
 /// stream opens, so a bad setup is reported before anyone is asked to
 /// approve anything.
 pub fn ready() -> Result<(), SttFailure> {
-    let settings = settings()?;
-    check_token_file(&settings.token_file)
+    readiness().map_err(|_| SttFailure::Settings)
+}
+
+/// Fixed readiness classification; never contains a path, credential or OS error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReadinessFailure {
+    Settings,
+    TokenMetadata,
+}
+
+/// The same metadata-only checks as `ready`, with their boundary retained.
+/// No token content is read and no connection is opened.
+pub fn readiness() -> Result<(), ReadinessFailure> {
+    readiness_for(settings())
+}
+
+fn readiness_for(settings: Result<Settings, SttFailure>) -> Result<(), ReadinessFailure> {
+    let settings = settings.map_err(|_| ReadinessFailure::Settings)?;
+    check_token_file(&settings.token_file).map_err(|_| ReadinessFailure::TokenMetadata)
 }
 
 /// The opener for this launch's selected cloud provider. It reads the token
@@ -1087,6 +1123,14 @@ mod tests {
         assert!(*first.aborted.lock().unwrap());
         assert_eq!(feed.failure(), None);
         // The line ended at 600 ms; audio up to 3,000 ms was in flight: lost.
+        assert!(
+            lost.lock().unwrap().is_empty(),
+            "worker start is not connection proof"
+        );
+        second.events.lock().unwrap().push(SttEvent::Connected {
+            query: "fictional".into(),
+        });
+        feed.poll().unwrap();
         assert_eq!(*lost.lock().unwrap(), vec![2_400]);
         // New audio goes to the new stream, timed on the session clock, and
         // its first line is number 2, not a second number 1.
@@ -1101,6 +1145,106 @@ mod tests {
     }
 
     #[test]
+    fn pending_replacement_failure_does_not_report_success_and_keeps_the_gap() {
+        let first = Script::default();
+        let pending = Script::default();
+        let connected = Script::default();
+        let (mut feed, _, lost) =
+            reconnecting(&first, vec![Ok(pending.clone()), Ok(connected.clone())]);
+        feed.push(0, 100, &[0.1; 1_600]).unwrap();
+        first
+            .events
+            .lock()
+            .unwrap()
+            .push(SttEvent::Failed(SttFailure::Network));
+        feed.poll().unwrap();
+        feed.poll().unwrap();
+        assert!(lost.lock().unwrap().is_empty());
+        feed.push(100, 200, &[0.1; 1_600]).unwrap();
+        pending
+            .events
+            .lock()
+            .unwrap()
+            .push(SttEvent::Failed(SttFailure::Network));
+        feed.poll().unwrap();
+        assert!(lost.lock().unwrap().is_empty());
+        connected.events.lock().unwrap().push(SttEvent::Connected {
+            query: "fictional".into(),
+        });
+        feed.poll().unwrap();
+        assert_eq!(*lost.lock().unwrap(), vec![200]);
+        // Repeated connection messages cannot count one replacement twice.
+        connected.events.lock().unwrap().push(SttEvent::Connected {
+            query: "fictional".into(),
+        });
+        feed.poll().unwrap();
+        assert_eq!(*lost.lock().unwrap(), vec![200]);
+    }
+
+    #[test]
+    fn replacement_refusal_or_retired_approval_never_reports_reconnected() {
+        for retired in [false, true] {
+            let first = Script::default();
+            let pending = Script::default();
+            let approved = Arc::new(Mutex::new(true));
+            let (feed, _) = feed(&first, approved.clone());
+            let replacement = pending.clone();
+            let lost = Arc::new(Mutex::new(Vec::new()));
+            let record = lost.clone();
+            let mut feed = feed
+                .reconnect_with(Box::new(move || Ok(Box::new(replacement.clone()))))
+                .on_reconnect(move |ms| record.lock().unwrap().push(ms));
+            feed.push(0, 100, &[0.1; 1_600]).unwrap();
+            first
+                .events
+                .lock()
+                .unwrap()
+                .push(SttEvent::Failed(SttFailure::Network));
+            feed.poll().unwrap();
+            if retired {
+                *approved.lock().unwrap() = false;
+                pending.events.lock().unwrap().push(SttEvent::Connected {
+                    query: "fictional".into(),
+                });
+                assert_eq!(feed.poll(), Err(SttFailure::Withdrawn));
+            } else {
+                pending
+                    .events
+                    .lock()
+                    .unwrap()
+                    .push(SttEvent::Failed(SttFailure::Auth));
+                assert_eq!(feed.poll(), Err(SttFailure::Auth));
+            }
+            assert!(lost.lock().unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn stop_drain_or_end_cannot_report_a_pending_replacement_as_reconnected() {
+        for stop in [true, false] {
+            let first = Script::default();
+            let pending = Script::default();
+            let (mut feed, _, lost) = reconnecting(&first, vec![Ok(pending.clone())]);
+            feed.push(0, 100, &[0.1; 1_600]).unwrap();
+            first
+                .events
+                .lock()
+                .unwrap()
+                .push(SttEvent::Failed(SttFailure::Network));
+            feed.poll().unwrap();
+            pending.events.lock().unwrap().push(SttEvent::Connected {
+                query: "fictional".into(),
+            });
+            if stop {
+                feed.finish(Duration::from_millis(10));
+            } else {
+                feed.end();
+            }
+            assert!(lost.lock().unwrap().is_empty(), "stop: {stop}");
+        }
+    }
+
+    #[test]
     fn reconnects_stop_at_the_cap_and_never_for_a_refusal() {
         let streams: Vec<Script> = (0..3).map(|_| Script::default()).collect();
         let (mut feed, _, lost) = reconnecting(
@@ -1108,6 +1252,9 @@ mod tests {
             vec![Ok(streams[1].clone()), Ok(streams[2].clone())],
         );
         for (n, stream) in streams.iter().enumerate() {
+            stream.events.lock().unwrap().push(SttEvent::Connected {
+                query: "fictional".into(),
+            });
             feed.push(n as u64 * 100, n as u64 * 100 + 100, &[0.1; 1_600])
                 .unwrap();
             stream
@@ -1288,6 +1435,60 @@ mod tests {
         ] {
             assert_eq!(parse(backend, file, cap), Err(SttFailure::Settings));
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn readiness_diagnostic_uses_metadata_only_and_preserves_placeholder_acceptance() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("tq-stt-ready-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir(&base).unwrap();
+        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let file = base.join("placeholder");
+        let settings = || {
+            Ok(Settings {
+                token_file: file.clone(),
+                minute_cap: 5,
+            })
+        };
+        assert_eq!(
+            readiness_for(Err(SttFailure::Settings)),
+            Err(ReadinessFailure::Settings)
+        );
+        assert_eq!(
+            readiness_for(settings()),
+            Err(ReadinessFailure::TokenMetadata)
+        );
+        std::fs::write(&file, b"").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(readiness_for(settings()), Ok(()));
+        assert_eq!(check_token_file(&file), Ok(()));
+        assert_eq!(
+            read_token(&file),
+            Err(SttFailure::Settings),
+            "metadata readiness grants no usable token"
+        );
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            readiness_for(settings()),
+            Err(ReadinessFailure::TokenMetadata)
+        );
+        assert_eq!(check_token_file(&file), Err(SttFailure::Settings));
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            readiness_for(settings()),
+            Err(ReadinessFailure::TokenMetadata)
+        );
+        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::remove_file(&file).unwrap();
+        std::os::unix::fs::symlink(base.join("absent"), &file).unwrap();
+        assert_eq!(
+            readiness_for(settings()),
+            Err(ReadinessFailure::TokenMetadata)
+        );
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[cfg(unix)]

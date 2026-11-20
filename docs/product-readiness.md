@@ -6,6 +6,12 @@ TalkQTE should help people stay grounded and respond during a conversation throu
 
 The current public objective is to explain the idea with a clearly labeled fictional concept preview and invite people to follow development. Downloads, tester recruitment, and a broad launch are not current calls to action. The pilot and distribution stages below remain preparation for later decisions. Saving and note-taking are secondary use cases; a successful preview or first experience need not end in a saved artifact.
 
+## Current provider checkpoint — 20 November 2026
+
+Deepgram streaming and the Anthropic API are the selected development direction. The cloud implementation is merged; optional development features and session review still gate processing. Ordinary and release builds have no live transcription. Earlier dated checkpoints below describe the source and observations at their recorded dates, including the former local Whisper path; they are not current setup instructions. See [cloud transcription](cloud-transcription.md) and the [current provider release blocker](#cloud-providers-for-a-shipped-product).
+
+No roadmap item is completed by this reconciliation. The next technical blocker is a separately authorized synthetic call proving both sides, cloud latency and native Stop/recovery (**T2**, **T5**). A fictional showcase or lab response is not a production release or evidence of participation benefit; the human comparison (**V5**–**V7**) and shipped operating model remain separate gates.
+
 ## Areas every release must account for
 
 | Area                                  | What readiness means                                                                                        | Next evidence to collect                                                                                                                                                           |
@@ -15,18 +21,18 @@ The current public objective is to explain the idea with a clearly labeled ficti
 | Compatibility and accessibility       | Explicit supported OS, hardware, meeting apps, languages, and assistive setups                              | Native focus, Spaces, full-screen, sharing, keyboard, VoiceOver, and permission-denial checks; unsupported cases remain visible                                                    |
 | Integrations                          | Supported, scoped connections with provenance, understandable errors, and independent core operation        | After the recorded basic native import/removal, verify source/date, selection exclusion, refresh, disconnect/reconnect and data lifecycle on the authorized account                |
 | Privacy, security, and data lifecycle | Clear input/processing state, protected credentials, chosen retention, reliable deletion, and safe exports  | Follow data from capture/import through storage, logs, diagnostics, deletion, and export; test boundaries and failure cases against [PRIVACY.md](../PRIVACY.md)                    |
-| Installation, models, and updates     | An ordinary user can install, try, upgrade, recover, and uninstall without a development environment        | Clean-machine install and upgrade tests; interrupted model downloads, integrity checks, low disk space, compatible model versions, and recovery without losing saved work          |
+| Installation, provider setup, and updates     | An ordinary user can install, try, upgrade, recover, and uninstall without a development environment        | Clean-machine install and upgrade tests; provider credential setup, low disk space, compatible app versions, and recovery without losing saved work          |
 | Discovery and onboarding              | Explain the concept and invite following development now; prepare a short path to supported first use later | Review whether the fictional preview communicates timely context without implying live functionality; later, observe supported setup and record time, abandonment, and help needed |
 | Support and operation                 | Known limitations, release notes, troubleshooting, a support route, and a response plan for failed releases | Rehearse a failed update/provider outage; offer user-reviewed diagnostics without meeting content; assign a release/support owner                                                  |
-| Sustainability                        | A viable cost and maintenance model as usage grows                                                          | Estimate artifact/model download bandwidth, storage, signing/release operations, optional provider costs, and support effort; review dependency/model terms before distribution    |
+| Sustainability                        | A viable cost and maintenance model as usage grows                                                          | Estimate artifact bandwidth, storage, signing/release operations, per-minute transcription and per-request cue costs (a core cost, not an optional one), and support effort; review dependency and provider terms before distribution    |
 
 Budgets and minimum supported hardware are [agreed as targets](budgets.md), pending confirmation runs. Release ownership, pricing, and channel targets remain open decisions. Define them for the intended pilot before declaring a candidate ready. More downloads or feature count alone do not prove user value or operational readiness.
 
 ## Production and scaling approach
 
-Keep the accepted [Rust/Tauri boundaries](architecture.md). The core meeting workflow is planned to run locally. Scaling therefore starts with predictable device resource use, a tested compatibility matrix, dependable delivery of app/model files, and manageable support demand.
+Keep the accepted [Rust/Tauri boundaries](architecture.md). Capture and the cue lifecycle run in the app; transcription (Deepgram) and cue decisions (Anthropic API) run on cloud providers after per-session consent. Scaling therefore covers predictable device resource use, a tested compatibility matrix, dependable app delivery, provider rate limits, cost and outages, key custody, and manageable support demand.
 
-Plan bounded buffers, cancellation, backpressure, and recovery where each pipeline stage is introduced. Version persisted data and model interfaces when those features are implemented, with migration and recovery tests. Avoid silent cloud fallback when local processing fails. Measure stable-transcript and still-useful-question latency separately.
+Plan bounded buffers, cancellation, backpressure, and recovery where each pipeline stage is introduced. Version persisted data and model interfaces when those features are implemented, with migration and recovery tests. Avoid silent fallback between providers; a provider failure stops that stage with a message. Measure stable-transcript and still-useful-question latency separately.
 
 Evaluate static release artifacts and update metadata before adding a custom service. Tauri's [updater documentation](https://v2.tauri.app/plugin/updater/) supports static JSON and signed update artifacts; this is a feasible starting candidate, not an implemented updater. Plan update deferral during meetings, key custody, interrupted installation recovery, and a tested route to a known-good release. A code rollback must not assume a data migration is reversible.
 
@@ -77,7 +83,7 @@ Basic native import/removal is already owner-confirmed. The next integration acc
 
 Start planning now. Keep previous-note import, live transcript input, and provider writeback as independent capabilities. A successful read does not validate live input or mutation support.
 
-The first Granola slice should let a user select a small prior-note context, see its source and date, and remove it. Evaluate whether that context helps them stay grounded in the current conversation. It must remain distinguishable from live meeting evidence. Keep the existing note-taker as the primary record; the local core should remain usable when disconnected. Saving generated prompts or writing them back is not required to establish this value.
+The first Granola slice should let a user select a small prior-note context, see its source and date, and remove it. Evaluate whether that context helps them stay grounded in the current conversation. It must remain distinguishable from live meeting evidence. Keep the existing note-taker as the primary record; the core should remain usable when Granola is disconnected. Saving generated prompts or writing them back is not required to establish this value.
 
 The note-taker can record the actual discussion without a second manual saving workflow in TalkQTE. Unused suggestions should expire with their context, not silently become meeting facts, decisions, or action items. Keep prompt lifecycle state separate from the meeting record. A retained cue or provider writeback needs a demonstrated use case; do not treat automatic archiving as the default replacement for a Save button.
 
@@ -117,13 +123,31 @@ The Granola adapter, OAuth flow, and fictional listing fixtures now exist. Rust 
 
 An integration is ready only after a user can connect, understand access, select context, recover from a failure, disconnect, and manage imported copies. A mock is preparation; account-level validation and the full user flow are separate release gates. Any writeback needs a verified endpoint plus reviewed content and destination.
 
+### Selected context processing handoff — offline acceptance
+
+The [selected-snapshot handoff](selected-context-handoff.md) now has a fictional
+runtime regression suite spanning selected import, processing review/approval,
+the evaluator worker and source disclosure. It checks exclusion of unselected
+notes and pre-approval speech, cancellation on note changes/removal and
+Stop/revocation, and refusal to roll back known newer revisions. Single-note
+removal shares the tested Runtime operation with its native command. This is
+an offline contract, with test results to be recorded on the reviewed commit;
+it establishes no account, native IPC or useful-cue acceptance.
+
+The next concrete blocker is the real processor's prior-context contract and
+disclosure: CLI and lab configurations still reject prior notes through
+`without_notes()`. Keep that restriction until a separate reviewed change and
+explicit processing approval cover the exact context. Granola identity,
+refresh and account acceptance remain open; Tactiq import, live input and
+writeback remain separate capabilities. No roadmap item is checked off here.
+
 ### Connected workflow direction
 
 The primary Granola integration goal is to make TalkQTE's timely cues available in the user's Granola workflow without requiring a second notebook. Verify a documented extension or presentation surface before promising cues inside Granola. A separate companion alongside Granola may be useful, but is not an embedded integration. Cue display is distinct from writing to the meeting record; unused suggestions must not become notes or action items automatically.
 
 For someone who prefers the TalkQTE notebook, ongoing refresh of explicitly selected Granola notes is a separate planned capability ([boundary and acceptance plan](selected-note-refresh-plan.md)). The current import/reimport flow is manual. One explicit update check is built and passes fictional-provider checks, but a signed-in Granola connection does not offer it, because the adapter reports no workspace identity for the check to verify. Before adding refresh, verify when edited notes become available, provider limits and permitted access. Show source/date/revision and last successful refresh; handle older replies, missing/deleted or revoked content, offline periods and reconnect without widening the selected scope. Removal must prevent a pending refresh from restoring a copy. Stop refresh and Disconnect must remain reachable, with local copies handled explicitly. No durable retention or new writeback is implied.
 
-Official [Granola MCP documentation](https://docs.granola.ai/help-center/sharing/integrations/mcp), rechecked 12 November 2026, describes listing and reading accessible notes, with Basic-plan access limited to the last 30 days and transcript tools on paid plans. It does not establish a live event feed or a cue-presentation extension. Verify live input, prior-note refresh, cue presentation and writeback independently; do not scrape private app storage or inject unsupported UI to fill those gaps. Local TalkQTE operation remains independent of Granola availability.
+Official [Granola MCP documentation](https://docs.granola.ai/help-center/sharing/integrations/mcp), rechecked 12 November 2026, describes listing and reading accessible notes, with Basic-plan access limited to the last 30 days and transcript tools on paid plans. It does not establish a live event feed or a cue-presentation extension. Verify live input, prior-note refresh, cue presentation and writeback independently; do not scrape private app storage or inject unsupported UI to fill those gaps. TalkQTE operation remains independent of Granola availability.
 
 ### Granola cue-surface check — 13 November 2026
 
@@ -147,7 +171,7 @@ Nothing real was lost with it: every real row and control on that page showed st
 | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | ![Fictional notebook with the Demo / Layout preview switch and navigation entry](assets/layout-preview-removed-before.png) | ![Fictional notebook without the layout preview](assets/layout-preview-removed-after.png) |
 
-The notebook is now the live-session interface, and V4's acceptance applies to it. Still open: a check of the notebook in each of idle, starting, listening, cue shown, paused, stopped and failed as one designed sequence; the notebook against an actual microphone and local transcription; native keyboard and VoiceOver behavior; the desktop window beside a meeting on a real Mac; and whether a person understands it without explanation.
+The notebook is now the live-session interface, and V4's acceptance applies to it. Still open: a check of the notebook in each of idle, starting, listening, cue shown, paused, stopped and failed as one designed sequence; the notebook against an actual microphone and live transcription; native keyboard and VoiceOver behavior; the desktop window beside a meeting on a real Mac; and whether a person understands it without explanation.
 
 ### Native companion checks need a cue source — 14 November 2026
 
@@ -155,32 +179,41 @@ Readiness blocker. Until 14 November 2026 the pending native checks of the compa
 
 What each check needs now:
 
-- **Desktop companion checks** need a `local-whisper` build with its speech model installed, a live session, and a spoken fictional line that a phrase rule matches. That adds a build with CMake, a 78 MB model download and microphone permission to every such check, and it makes the cue depend on local transcription recognising the line.
+- **Desktop companion checks** need a debug build with the `cloud-transcription` feature, an approved cue processing review for the session, a live session, and a spoken fictional line that a phrase rule matches. That adds the owner's Deepgram token, network access, per-minute cost under a minute cap, and microphone permission to every such check, and it makes the cue depend on the transcription recognising the line.
 - **The phone experiment** needs a page that shows the companion with a fictional cue. The browser preview alone no longer provides one.
 
 What would unblock them without a microphone: a development-only way to feed the built app or a served page a fictional, clearly labelled simulated session, as the lab's recording stage already does for the companion in a desktop browser through the browser tests' stand-in. That state must never ship as reachable in an ordinary build, never say Live or claim a microphone, and never read real content. Acceptance: one fictional cue appears in the native companion of a development build with no microphone permission requested, labelled as simulated in the app's own words, and the same build's ordinary configuration cannot reach it. Not built; no decision has been made to build it.
 
-### Model provider for a shipped product
+### Cloud providers for a shipped product
 
-Release blocker, recorded 14 November 2026. At the owner's decision, the real app's cues will come from a model, and the on-device phrase rules will be removed ([design](cue-model.md)). The only backend planned so far calls the Claude Code CLI with the owner's own subscription. It is for the owner's own use and the lab, not for a product:
-- A shipped product cannot share one person's subscription among its users.
-- No production provider is chosen.
+Release blocker, recorded 14 November 2026 and updated 16 November 2026. At the owner's decision, the real app's cues will come from a model, and the phrase rules will be removed ([design](cue-model.md)). On 16 November 2026 the owner chose the providers:
 
-Until one is chosen and verified, a shipped build has no model connection, so it shows no cues at all. No option is chosen here.
+- **Transcription:** Deepgram streaming, with Deepgram's model-improvement opt-out requested on every request. Local Whisper transcription was removed from the app on 16 November 2026.
+- **Cue decisions:** the Anthropic API. The Claude Code CLI backend remains for the owner's own development and lab use; a shipped product cannot share one person's subscription among its users.
 
-| Option | What it would need |
+Both send meeting audio or text off the device only after the person turns them on for that session. Without that consent a session has no transcription and no cues; there is no on-device mode.
+
+**Open: the operating model for a shipped product.** The owner named two candidates on 16 November 2026 and has not chosen between them; neither is committed. Development and lab builds use the owner's keys. A release build has transcription unavailable, and so shows no cues, until one model is built. Provider costs are a core operating cost under either model.
+
+| Candidate operating model | What it needs before it could ship |
 | --- | --- |
-| **Each person signs in with their own Claude subscription**, through an unmodified Claude Code CLI on their Mac | **Terms.** A review of Anthropic's [product integration conditions](https://code.claude.com/docs/en/legal-and-compliance), including any commercial agreement, unmodified binaries, users authenticating for themselves, and not restricting built-in sign-in. **The person's setup.** Each person needs a paid plan and the CLI, and cues use their allowance alongside their other work. **Onboarding and support.** Installation, sign-in and allowance messages, plus support for CLI updates. **Data.** Meeting lines go to Anthropic under each person's consumer account settings and retention, which must be disclosed. |
-| **A TalkQTE-operated service with a commercial API account** (Anthropic's API or a cloud provider) | **The owner's decisions.** Billing and pricing, because each request costs money, and leaving the current no-paid-API preference. **Infrastructure.** A server, so no key ships in the app, with key custody and rate limits; accounts or another way to attribute use; uptime and support. **Data.** Commercial data terms such as retention controls, a privacy review, and disclosure that lines pass through TalkQTE's service. |
-| **Each person supplies their own API key** | **Key handling.** Keychain storage and never logging the key. **Cost.** Plain disclosure, because each person pays per request; no TalkQTE server is needed. **Setup.** Key creation and onboarding are harder than a sign-in. **Data.** The provider's API terms for that person. |
-| **A model on the Mac** | **Quality.** A model that matches the lab's quality and the [latency budget](budgets.md) on the lowest supported Mac, alongside local transcription. **Delivery.** Its size, memory, energy use, download and licence. Whether any such model exists is unknown, and none has been tried. |
-| **Another provider's CLI or API** | The same questions for that provider: terms, allowance or billing, isolation, retention, and a comparison on the lab's cases. No TalkQTE test exists. |
+| **Bring your own keys**: each person supplies their own Deepgram and Anthropic API keys | **Key entry and storage in the app.** A setup step for both keys, Keychain storage, never logging or displaying a key, and removal. **Cost.** Plain disclosure that each person pays each provider per minute and per request; no TalkQTE server is needed. **Setup and support.** Two provider accounts and key creation are harder than a sign-in; key failures need clear messages. **Data.** Each provider's API terms for that person. |
+| **A TalkQTE-run paid service** that holds the keys | **Accounts and billing.** User accounts or another way to attribute use, pricing and payment. **A backend.** A server, so no key ships in the app, with key custody, rate limits, uptime and support. **Provider terms for resale.** Confirmation that Deepgram's and Anthropic's terms permit offering their services inside a paid product, and any commercial agreement they require. **Data.** A privacy review and disclosure that audio and lines pass through TalkQTE's service. |
 
-Acceptance for this blocker:
-- the owner chooses an option;
-- its terms and data handling are reviewed and disclosed;
-- a fresh build signs in or connects as that option requires, on a clean Mac;
-- cue latency and quality are measured on the lab's cases before any real conversation.
+Options considered and not chosen for cue decisions: each person's own Claude subscription through the Claude Code CLI (product integration terms, a paid plan and the CLI for every person); a model on the Mac (no model matching the lab's quality and the [latency budget](budgets.md) on the lowest supported Mac is known, and none has been tried); another provider's CLI or API (no TalkQTE test exists).
+
+Acceptance for this blocker, for each provider:
+
+- the owner chooses an operating model, and it is built;
+- the provider's terms and data handling are reviewed, and [PRIVACY.md](../PRIVACY.md) links the reviewed terms without stating the provider's retention as fact;
+- every request carries the agreed settings, checked by a test (for Deepgram, the model-improvement opt-out);
+- nothing is sent before consent or after processing is disabled; Stop releases capture and prevents new cue work, with the microphone's already-captured audio allowed only its documented bounded transcription drain ([Stop behavior](cloud-transcription.md#what-stops-it));
+- a fresh build connects as the chosen arrangement requires, on a clean Mac;
+- latency is measured against the [budgets](budgets.md), speech to transcript line for Deepgram and the cue round trip for the Anthropic API, and cue quality on the lab's cases, before any real conversation.
+
+### Telling other participants
+
+Readiness item, recorded 16 November 2026. With cloud transcription on, other participants' voices reach a third-party service. TalkQTE does not help the person tell them, and no in-app prompt is planned for now; [PRIVACY.md](../PRIVACY.md) states that telling them is the person's responsibility. Revisit before a pilot: whether a reminder or a ready-made notice helps, without implying that TalkQTE obtains anyone's consent.
 
 ### Voiced practice demo
 
@@ -230,7 +263,7 @@ The roadmap's full future feature set need not block a clearly scoped pilot. Eac
 
 At each planning pass, read the current product goal, roadmap, research notes, and this plan. Identify the most important unmet readiness condition for the next milestone, then choose a small task with observable evidence. Record which area it advances, the acceptance check, dependencies, and remaining gap in the relevant PR or roadmap entry. A feature PR need not solve every area; consequential gaps must become named follow-up work.
 
-The support matrix and resource targets, Granola connection decision, and installation/update plans already exist. The next evidence is native source selection and Stop/recovery, the remaining Granola account checks, native accessibility, and—when distribution is authorized—clean installation and upgrade recovery. Human-cued participation/listening validation remains a separate gate; a production cue provider is still unselected. Review coverage across all areas at milestone boundaries. Add another component, tool or integration only when it resolves a named failure or is needed for the next acceptance check; do not extend preparation merely because native or participant evidence is waiting.
+The support matrix and resource targets, Granola connection decision, and installation/update plans already exist. The next evidence is native source selection and Stop/recovery, the remaining Granola account checks, native accessibility, and—when distribution is authorized—clean installation and upgrade recovery. Human-cued participation/listening validation remains a separate gate; the Anthropic API is selected, while its shipped operating model and production acceptance remain open. Review coverage across all areas at milestone boundaries. Add another component, tool or integration only when it resolves a named failure or is needed for the next acceptance check; do not extend preparation merely because native or participant evidence is waiting.
 
 ### Capability and documentation review
 
@@ -244,3 +277,32 @@ Before checking off a roadmap item or merging a change to capabilities, setup, u
 `npm run check:docs` backs this review in CI: it fails on broken relative links and heading anchors, and on numbers quoted from the source that no longer match it, and it posts a reminder when app source changes without a documentation change. When a document starts quoting a new number from the source, add it to the fact list in `scripts/check-docs.mjs`. The check cannot tell whether prose is still accurate.
 
 At milestone boundaries, also review the whole discover → install → first use → Stop/recovery → update/support journey and any affected website claims. Record inconsistencies and the next release blocker in the milestone evidence. Keep the README a concise entry point and detailed validation in the relevant documents; do not add features or rewrite accurate material merely to complete this review.
+
+The [selected prior context API lab path](selected-context-lab-opt-in.md) adds an explicit versioned selected-source route and empty-note control. Its next blocker is independently reviewed combined native/JS source and hosted native validation plus fake production-route/package evidence; source wiring alone is not a run-ready app or provider/account acceptance.
+
+The selected-context lab's [owned-player admission correction](development-owned-player-source.md#selected-context-composition-and-acceptance)
+restores exact PID/start/executable/bundle binding through setup, source ownership
+and listening/retirement observations. The next blocker is exact-head hosted
+validation and a reviewed fixed-source artifact/package; the failed earlier
+artifact is retained, and no launch or provider success follows from the patch.
+
+The corrected artifact's subsequent pre-HELLO `Unavailable` refusal remains
+unresolved. [Fixed startup diagnostics](development-owned-player-source.md#fixed-startup-diagnostics)
+distinguish metadata readiness, Runtime admission, session creation and recognizer
+load without changing guards or exposing content. Their next acceptance is exact
+review/hosted validation and separately authorized diagnostic runtime evidence;
+the failed run and its cleanup outcome remain preserved.
+
+
+### Local file chooser fallback
+
+A macOS file-panel service initialization timeout was observed before the notes reader ran. **Use a local file path** provides an explicit local-only alternative through the same bounded file reader, preview, selection and import flow; it does not fix the OS panel service. The path is transient and notes remain in memory for that app session. A fresh runner cannot inherit them.
+
+Acceptance still requires the replacement exact-source signed app to list the fictional Markdown via this alternative, import one explicitly selected note in the same running app, and verify that exact selected scope before the owner reviews/enables processing. Source/browser tests do not establish native panel recovery or this end-to-end acceptance. No provider dispatch or paid retry follows from importing a file.
+
+
+The first signed fallback build refused `read_context_file_path` before parsing because the handler was absent from the build-time command manifest and main-window capability. The correction adds both narrowly scoped declarations. A native IPC regression must use the generated production ACL and real command, accept a main-window local preview, reject companion/remote requests, and retain explicit import/processing separation. Browser preview success alone does not validate this boundary. Same-process signed-app import acceptance remains required after the corrected artifact is built.
+
+### Selected-note dispatch verification
+
+The [attested diagnostic path](selected-note-attestation.md) requires an exact one-note grant (or explicit zero-note control), credential-free scope readiness, and private note-projection equality at SDK entry. Offline source/tests do not establish native execution or model use. Next blocker: independent exact-delta review, named hosted Rust execution, reviewed native/JS/runner artifact composition, then separately authorized same-process source review and diagnostic acceptance. Earlier import-only screenshots remain insufficient evidence of processing inclusion.

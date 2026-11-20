@@ -247,11 +247,6 @@ fn missing(why: Missing) -> Check {
     }
 }
 
-/// The process admitted at launch: every read must succeed.
-fn process(pid: i32) -> Option<Process> {
-    admit(&System, pid)
-}
-
 fn admit(reads: &impl Reads, pid: i32) -> Option<Process> {
     if pid <= 0 {
         return None;
@@ -353,9 +348,18 @@ pub(crate) fn initialize(
     source: Option<&crate::application_audio_host::DevSettings>,
     lookup: impl Fn(&str) -> Option<String>,
 ) -> Result<(), &'static str> {
+    initialize_with(source, lookup, &System)
+}
+
+// Shared setup path: only the operating-system reads are substituted in tests.
+fn initialize_with(
+    source: Option<&crate::application_audio_host::DevSettings>,
+    lookup: impl Fn(&str) -> Option<String>,
+    reads: &impl Reads,
+) -> Result<(), &'static str> {
     let pin = expected(source.map(|settings| settings.application.as_str()), lookup)?
         .map(|wanted| {
-            let actual = process(wanted.pid).ok_or("owned player unavailable")?;
+            let actual = admit(reads, wanted.pid).ok_or("owned player unavailable")?;
             if !same_admission(&wanted, &actual) {
                 return Err("owned player identity changed");
             }
@@ -414,7 +418,7 @@ fn selection_matches(pin: &Process, pid: i32, bundle: &str, name: &str, helpers:
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     fn values(key: &str) -> Option<String> {
         Some(
@@ -436,6 +440,9 @@ mod tests {
     #[derive(Clone)]
     struct Fake {
         info: Result<Info, Missing>,
+        /// What the second process-table read returns, if it differs.
+        second_info: Option<Result<Info, Missing>>,
+        reads: std::cell::Cell<u32>,
         path: Option<PathBuf>,
         canonical: Option<PathBuf>,
         file: Option<FileInfo>,
@@ -452,6 +459,8 @@ mod tests {
                     seconds: 1_000,
                     micros: 5,
                 }),
+                second_info: None,
+                reads: std::cell::Cell::new(0),
                 path: Some(EXE.into()),
                 canonical: Some(EXE.into()),
                 file: Some(FileInfo {
@@ -469,7 +478,12 @@ mod tests {
             501
         }
         fn info(&self, _: i32) -> Result<Info, Missing> {
-            self.info
+            let read = self.reads.get() + 1;
+            self.reads.set(read);
+            match self.second_info {
+                Some(second) if read >= 2 => second,
+                _ => self.info,
+            }
         }
         fn path(&self, _: i32) -> Option<PathBuf> {
             self.path.clone()
@@ -483,6 +497,61 @@ mod tests {
         fn running(&self, _: i32) -> Option<(bool, Option<String>)> {
             self.running.clone()
         }
+    }
+
+    /// Used only in an isolated child: freeze through the production setup path.
+    pub(crate) fn freeze_launcher_fixture(
+        source: Option<&crate::application_audio_host::DevSettings>,
+    ) {
+        let lookup = |key: &str| match key {
+            "TALKQTE_DEV_PLAYER_START_SEC" => Some("1000".into()),
+            "TALKQTE_DEV_PLAYER_START_USEC" => Some("5".into()),
+            "TALKQTE_DEV_PLAYER_EXECUTABLE" => Some(EXE.into()),
+            _ => values(key),
+        };
+        // Failures must not freeze a partial identity or make the owned name eligible.
+        for field in FIELDS.into_iter().chain(["TALKQTE_DEV_STOP_SIGNAL"]) {
+            assert!(initialize_with(
+                source,
+                |key| if key == field { None } else { lookup(key) },
+                &Fake::admitted()
+            )
+            .is_err());
+            assert!(!supports(PLAYER));
+        }
+        for bad in [
+            Fake {
+                running: Some((false, Some("com.example.other".into()))),
+                ..Fake::admitted()
+            },
+            Fake {
+                info: Ok(Info {
+                    uid: 502,
+                    seconds: 1000,
+                    micros: 5,
+                }),
+                ..Fake::admitted()
+            },
+            Fake {
+                second_info: Some(Ok(Info {
+                    uid: 501,
+                    seconds: 1001,
+                    micros: 5,
+                })),
+                ..Fake::admitted()
+            },
+            Fake {
+                path: Some("/fictional/Other".into()),
+                ..Fake::admitted()
+            },
+        ] {
+            assert!(initialize_with(source, lookup, &bad).is_err());
+            assert!(!supports(PLAYER));
+        }
+        initialize_with(source, lookup, &Fake::admitted()).unwrap();
+        assert!(supports(PLAYER));
+        assert!(!supports("QuickTime Player"));
+        assert!(initialize_with(source, lookup, &Fake::admitted()).is_err());
     }
 
     #[test]
@@ -575,6 +644,33 @@ mod tests {
         assert_eq!(
             check(|f| f.running = Some((false, None))),
             Check::Transient("bundle_identifier")
+        );
+        // The process is replaced during the reads: everything else matches,
+        // but the closing read of the process table shows a new start time.
+        let replaced_during = Fake {
+            second_info: Some(Ok(Info {
+                uid: 501,
+                seconds: 1_000,
+                micros: 6,
+            })),
+            ..Fake::admitted()
+        };
+        assert_eq!(
+            check_pin_with(&replaced_during, &pin),
+            Check::Gone("start_time")
+        );
+        assert_eq!(
+            replaced_during.reads.get(),
+            2,
+            "the start time is read twice"
+        );
+        let gone_during = Fake {
+            second_info: Some(Err(Missing::Gone)),
+            ..Fake::admitted()
+        };
+        assert_eq!(
+            check_pin_with(&gone_during, &pin),
+            Check::Gone("process_gone")
         );
         // A pid that is not a process at all is gone.
         let no_pid = Process { pid: 0, ..pin };

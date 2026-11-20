@@ -31,12 +31,18 @@ export function transcriptionReconnectText(
   transcription: CloudTranscription | undefined,
 ): string | null {
   if (!transcription?.reconnects || transcription.stopped) return null;
-  const seconds = Math.max(1, Math.round((transcription.lostMs ?? 0) / 1000));
+  const lostMs = transcription.lostMs ?? 0;
+  const gap =
+    lostMs <= 0
+      ? 'The amount of speech not transcribed is unknown.'
+      : lostMs < 1000
+        ? 'Less than 1 s of speech was not transcribed.'
+        : `About ${Math.round(lostMs / 1000)} s of speech was not transcribed.`;
   const times =
     transcription.reconnects === 1
       ? 'once'
       : `${transcription.reconnects} times`;
-  return `Transcription by ${transcription.provider} reconnected ${times} after a connection problem; about ${seconds} s of speech was not transcribed.`;
+  return `Transcription by ${transcription.provider} reconnected ${times} after a connection problem. ${gap}`;
 }
 
 /** Said while a session continues after audio was dropped. */

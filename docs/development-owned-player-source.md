@@ -12,13 +12,13 @@ The owned launcher verifies the approved player bundle/executable hash and
 signature before launch, owns that exact child and freezes these settings for
 TalkQTE:
 
-| Setting | Required value |
-| --- | --- |
-| `TALKQTE_DEV_APPLICATION_SOURCE` | `TalkQTE Lab Player` |
-| `TALKQTE_DEV_PLAYER_PID` | Canonical positive decimal PID in the signed 32-bit range |
-| `TALKQTE_DEV_PLAYER_START_SEC` | Canonical positive decimal u64 process-start seconds |
-| `TALKQTE_DEV_PLAYER_START_USEC` | Canonical decimal process-start microseconds, 0–999999 |
-| `TALKQTE_DEV_PLAYER_EXECUTABLE` | Exact absolute canonical executable path |
+| Setting                          | Required value                                            |
+| -------------------------------- | --------------------------------------------------------- |
+| `TALKQTE_DEV_APPLICATION_SOURCE` | `TalkQTE Lab Player`                                      |
+| `TALKQTE_DEV_PLAYER_PID`         | Canonical positive decimal PID in the signed 32-bit range |
+| `TALKQTE_DEV_PLAYER_START_SEC`   | Canonical positive decimal u64 process-start seconds      |
+| `TALKQTE_DEV_PLAYER_START_USEC`  | Canonical decimal process-start microseconds, 0–999999    |
+| `TALKQTE_DEV_PLAYER_EXECUTABLE`  | Exact absolute canonical executable path                  |
 
 The existing `usr2` Stop opt-in, shared run ID, private timing channel, consent,
 session call cap and finite positive ordinary-Stop guard are also required. The
@@ -59,9 +59,6 @@ Runtime/host locks.
   `NSRunningApplication` entry or bundle identifier, or `isTerminated`. It ends
   the operation only if it keeps failing for two seconds; a check that passes
   again clears it.
-  - In RunB07 (17 November 2026) a single such failure ended capture about
-    0.3 s after the owner switched applications. The player was still running
-    and unchanged.
   - While a transient failure is tolerated, captured audio keeps flowing as
     before: to the engine and, once the session's review is approved, to cloud
     transcription. That can last up to two seconds, where before the operation
@@ -80,7 +77,7 @@ Runtime/host locks.
   recorded as `source_gone` with macOS's `os_code` -3815, so the two are told
   apart by label as well as by code.
 
- Polling and admission checks have TOCTOU
+Polling and admission checks have TOCTOU
 windows: they do not make process lifetime or mutable filesystem state atomic,
 prevent a hostile same-user replacement, or prove continuous source identity.
 No timeout, process exit or name match substitutes for native release.
@@ -100,6 +97,80 @@ the same frozen run, host operation, live operation and canonical session identi
 They remain historical guard-time observations, not atomic readiness or release.
 Consumers must explicitly expect this fixed source, retain terminal observation,
 and bind its session to authenticated hello/calibration before model dispatch.
+
+## Selected-context composition and acceptance
+
+The selected-context native branch previously admitted only QuickTime in its
+Stop guard and did not contain the owned-player identity prerequisites. A bound
+owned-player launch therefore failed setup before broker authentication. The
+forward correction composes only identity, admission, observation and owner-loop
+checks with the selected-context path; it does not replace its source snapshot,
+permission or provider policy. The original failed artifact remains evidence.
+That deterministic refusal does not establish the cause of a separate native
+exception.
+
+The new isolated regression freezes the launch's exact owned-source settings
+through the production initializer with a fictional process table, checks the
+same finite-Stop admission used at setup, then runs the real host list/review/
+source-session/observation/ordinary-Stop route against its scripted backend.
+Missing identity, wrong owner/bundle/start/executable, repeat initialization,
+unpinned name-only admission, alternate sources and missing/invalid guards
+refuse. Listening and retirement retain the same kind, run, operation and session;
+source admission grants no cue-processing permission. Separate identity and owner
+loop regressions cover PID/file replacement, closing start-time reads, transient
+recovery and Stop precedence. These tests do not create an SCK stream or a Tauri
+application.
+
+Local Rust compilation, tests and Clippy remain unrun under the preserved capacity
+floor. Required acceptance is independent exact-delta review, exact-head hosted
+default and feature Rust tests/Clippy plus browser checks, then a separately
+reviewed fixed-source artifact workflow and manifest binding this source with the
+selected API contract. A newly signed artifact and lab package preflight are
+required before any separately authorized launch. Device/SCK source identity,
+render clock, microphone exclusion, permission delivery and ordinary release
+remain native acceptance gates; offline tests are not a successful paired run.
+
+## Fixed startup diagnostics
+
+A later corrected-artifact attempt armed Stop and acknowledged the owned player,
+then reported `source_ended` / `unavailable` before any Listening or broker HELLO.
+This is distinct from the earlier setup refusal. Retained evidence does not locate
+the exact `Unavailable` call site: no startup token-placeholder metadata or child
+stderr was retained. Cleanup-time absence of that file cannot establish its
+startup state. The launcher creates an empty private placeholder before spawn;
+native readiness checks its metadata, accepting zero bytes without reading a
+credential. No deterministic mismatch in that contract has been identified.
+
+A debug macOS lab build now prepares raw private `lab_source_startup` version 1
+rows with only closed `stage` and `reason` enums:
+
+| Stage | Reasons |
+| --- | --- |
+| `cloud_readiness` | `ready`, `cloud_build_missing`, `cloud_not_selected`, `cloud_settings_invalid`, `token_metadata_rejected` |
+| `runtime_access` | `runtime_unavailable` |
+| `runtime_start` | `runtime_refused`, `microphone_busy` |
+| `session_created` | `created` |
+| `recognizer_load` | `ready`, `load_refused` |
+
+The same production checks run once in the same order; their original errors,
+admission, permissions, source ownership and Stop behavior remain unchanged.
+Readiness classification checks only launch configuration and file metadata. It
+opens no provider connection and reads no token contents. No path, name, OS error,
+internal error string, environment value, token or header enters these rows.
+Runtime creation does not mean capture or provider approval. Recognizer-load
+readiness does not establish a current source session; the existing post-load
+session fence still decides that.
+
+Existing JavaScript timing readers ignore this distinct event and still treat
+`source_ended` / `dev_source` failures as terminal. The raw log remains the retained
+diagnostic. Rows are lossy, so an absent row is not success or proof of a specific
+failure. These diagnostics do not fix the observed failure, relax a guard, extend
+a timeout or authorize another attempt. Inert tests exercise the actual production
+admission/load helpers with scripted Runtime access, preserved refusal behavior,
+and real temporary placeholder metadata; no Tauri/SCK app is created. Local Rust
+execution remains unrun under the capacity floor. Exact source review and hosted
+validation, followed by a separately approved diagnostic artifact and attempt,
+remain required before new runtime evidence can resolve the failing gate.
 
 ## Recording acceptance still required
 

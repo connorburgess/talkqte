@@ -120,7 +120,9 @@ fn install_handler() -> Result<(), &'static str> {
     Ok(())
 }
 
-fn supported_source(settings: Option<&crate::application_audio_host::DevSettings>) -> bool {
+pub(crate) fn supported_source(
+    settings: Option<&crate::application_audio_host::DevSettings>,
+) -> bool {
     settings.is_some_and(|s| {
         crate::dev_lab_source::supports(&s.application) && matches!(s.stop_after, Ok(Some(_)))
     })
