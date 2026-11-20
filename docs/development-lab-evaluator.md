@@ -122,6 +122,16 @@ that bind the host operation, live-start operation and exact session/Control.
 These are historical guard-time observations, not atomic current readiness or
 native release. The versioned JavaScript consumer/session join remains separate.
 
+## Explicit API lab history selection
+
+In this macOS debug-only lab path, a valid `lab-api` configuration may additionally set `TALKQTE_DEV_LAB_CONTEXT=bounded-history`. Unset keeps the existing fresh-only projection. Empty, unknown, non-Unicode, orphan (no backend) and subscription-backend context selections fail closed as unavailable; invalid text cannot silently select fresh context or another backend. This setting chooses a reviewed context policy, not consent, a model, a prompt or a larger spend allowance. Ordinary registrations and release builds do not select it.
+
+The generated in-app data policy states: “Transcript context: up to 24 segments from the last 90 seconds, subject to a 16384-byte serialized input limit and the approved speech scope. Visible cue evidence may be older. No prior notes.” It remains beside the API destination, model, billing/cap and transcription disclosure. See the [history selection and source guards](cue-evaluator.md#opt-in-bounded-transcript-history-offline-implementation). The byte cap includes the compact input's escaping, current cue, listener name and earlier cues; a fresh cited source is still required at apply, with the existing 18-second deadline.
+
+Selection does not install a grant or authenticate the broker. The owner must use **Review processing → Review selected sources → Enable for this session** and review the expanded data policy. A new-speech-only grant excludes buffered preapproval lines; a recent-and-new grant can include history within its disclosed bounds. Cancel, stale/replayed review IDs, Stop, session replacement and revocation retain their checks. Existing by-setting launch consent cannot authorize this mode; omit automatic connection approval. The launcher must explicitly map its validated context option to this native setting and must not inherit it from the shell. That separate launcher change and exact native artifact need to be pinned together before any run.
+
+Offline Rust checks cover exact API-only parsing/defaults, generated history/API/audio/cap disclosure, oversized disclosure refusal, opaque review cancellation/replay/explicit approval, no buffered send under new-only approval, and isolated actual registration with valid/invalid context settings. They use fictional adapters and no provider or capture. Expanded-history semantic usefulness, owner-visible native approval and the combined ownership prompt remain separate acceptance gates; no new lab execution, build or spending is implied by the setting's implementation.
+
 ## One request and one newest context
 
 New validated speech coalesces while one immutable evaluation completes. It does
