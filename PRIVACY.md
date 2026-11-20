@@ -1,6 +1,6 @@
 # Privacy design
 
-TalkQTE is an early desktop prototype with an optional microphone activity check and, in developer builds, an optional local live session. One development build, with the `claude-cli` feature, can also send conversation lines off this Mac for cue decisions, and a development build with the `cloud-transcription` feature can send a live session's audio to Deepgram for transcription, both described below. It is not a released meeting recorder. Current behavior and future requirements are separated below.
+TalkQTE is an early desktop prototype with an optional microphone activity check. Ordinary default and release builds have no live transcription, and TalkQTE does not transcribe on this Mac or offer a local Whisper option. A debug build with `cloud-transcription` can stream a live session's audio to Deepgram only after its in-app, per-session processing review is approved; developer cue backends can separately send transcript lines off this Mac for cue decisions, as described below. It is not a released meeting recorder. Current behavior and future requirements are separated below.
 
 ## Current prototype
 
@@ -53,8 +53,8 @@ The runner disables tools, customizations, MCP connections, and session persiste
 
 - Capture begins only after an explicit action. Show whether the microphone, system audio, or both are active.
 - Provide a visible pause/stop control and an accessible shortcut. Stopping capture releases the devices.
-- Transcription runs locally with Whisper. No account, cloud transcription, telemetry, or automatic upload is needed for the initial version.
-- Keep model files and personal data in application-managed storage outside the checkout. The frontend receives only the data it needs.
+- Disclose where transcription runs before it is enabled. Ordinary builds currently have no live transcription; the debug cloud-transcription path sends audio to Deepgram only after the session's in-app processing review is approved. It has no local transcription option or automatic fallback. Provider handling and retention are subject to the provider's terms; a new transcription choice needs its own review and acceptance.
+- Keep credentials and personal data in application-managed storage outside the checkout. The frontend receives only the data it needs.
 - Raw audio is held in a bounded memory buffer and not written to disk by default. Debugging must not silently create recordings or dump transcripts into logs.
 - Sharing is explicit: show the destination and the exact content being exported. Integrations are off until enabled and scoped by the user.
 - No private meeting data belongs in the public development repository, review services, demos, or CI artifacts.
@@ -81,7 +81,7 @@ A private-session option should discard its transcript and temporary analysis wh
 
 ## Screen sharing
 
-The desktop settings include a floating-window toggle. Choosing Hide removes the companion. Capture exclusion is not implemented. Do not assume the overlay is invisible to screen sharing. Cross-app focus, Spaces, full-screen meetings, and different sharing methods still require native testing.
+The desktop settings include a floating-window toggle. Choosing Hide removes the companion. The companion can also ask which edge of its window stays put (top or bottom), so it can draw its bar there; the answer comes from the placement preset and whether the window was dragged, and carries no conversation, notes or screen position. Capture exclusion is not implemented. Do not assume the overlay is invisible to screen sharing. Cross-app focus, Spaces, full-screen meetings, and different sharing methods still require native testing.
 
 ## Optional integrations
 

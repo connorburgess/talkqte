@@ -1537,6 +1537,7 @@ pub fn run() {
             export_preview,
             export_markdown,
             live_status,
+            companion::companion_anchor,
             pick_context_file,
             read_context_file_path,
             import_context_notes,

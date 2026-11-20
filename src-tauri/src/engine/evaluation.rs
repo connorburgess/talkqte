@@ -2306,7 +2306,12 @@ mod tests {
 
     #[test]
     fn turning_the_connection_back_on_starts_afresh() {
-        let mut h = Harness::with_budget(Duration::from_millis(20));
+        // Timeout outcomes are recorded directly, as in
+        // a_single_timeout_is_skipped_and_two_in_a_row_stop_cues: a 20 ms
+        // worker budget also raced the first, in-time reply on a loaded
+        // machine. The worker's own deadline is covered by
+        // expired_or_completed_but_unread_results_never_display.
+        let mut h = Harness::new();
         h.line("Someone should send Dana the lease.");
         h.request();
         h.reply(
@@ -2318,10 +2323,9 @@ mod tests {
         // One timeout, then the person turns processing off and on again.
         h.line("Anyway.");
         h.request();
-        std::thread::sleep(Duration::from_millis(30));
-        h.engine.advance(1);
-        h.replies.send("{}".into()).unwrap();
-        drain_without_another_request(&mut h);
+        h.reply("quiet", None, &["transcript:line-2"]);
+        h.engine.fail_evaluation(Failure::Expired);
+        assert!(h.engine.has_processing_permission());
         h.engine.revoke_processing();
         h.approve_notes();
         // The cue shown before approval is not sent, and the count restarts:
@@ -2329,9 +2333,9 @@ mod tests {
         h.line("A new topic begins.");
         let request = h.request();
         assert!(request.earlier_cues().is_empty());
-        std::thread::sleep(Duration::from_millis(30));
-        h.engine.advance(1);
+        h.engine.fail_evaluation(Failure::Expired);
         assert!(h.engine.has_processing_permission());
+        h.reply("quiet", None, &["transcript:line-3"]);
     }
 
     #[test]

@@ -10,9 +10,12 @@ on:
 permissions:
   contents: read
 
+# A new commit on a pull request replaces that pull request's older run.
+# Every other run (a merge to main, a manual dispatch) has its own group and
+# finishes, so each tree that lands on main gets a complete result.
 concurrency:
-  group: checks-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'pull_request' && format('checks-pr-{0}', github.event.pull_request.number) || format('checks-run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   contributions:
@@ -66,6 +69,17 @@ jobs:
       - run: npm run format:check
       - run: npm run build
       - run: npm test
+      # playwright.config.ts keeps a trace for each failed test. Save them so a
+      # failure can be opened with `npx playwright show-trace` instead of being
+      # guessed from the log. Tests use only fictional content.
+      - name: Save traces of failed browser tests
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-traces-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
   macos:
     name: macOS Rust and desktop build
@@ -92,6 +106,11 @@ jobs:
       - run: npm run tauri -- build --debug --bundles app
       - name: Pre-flight the debug bundle (no signing, no release)
         run: node scripts/release-preflight.mjs src-tauri/target/debug/bundle/macos/TalkQTE.app
+      # The lab's ScreenCaptureKit helper is otherwise compiled only on the
+      # owner's Mac at the start of a recording. Build it the same way here;
+      # it is not run, so nothing is captured.
+      - name: Build the lab window-capture helper (not run)
+        run: node --input-type=module -e "const lab = await import('./scripts/lab-window-record.mjs'); console.log(await lab.ensureHelper());"
 
   windows:
     name: Windows Arm Rust and desktop build

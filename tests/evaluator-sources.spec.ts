@@ -99,7 +99,7 @@ test('mixed resolution keeps its own sources and removal releases every excerpt'
   await expect(resolution).toHaveCount(0);
 });
 
-test('four long sources fit a narrow companion with larger text and usable dismissal', async ({
+test('a companion cue with four long sources shows only the line it cites, with larger text and usable dismissal', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 560 });
@@ -119,11 +119,13 @@ test('four long sources fit a narrow companion with larger text and usable dismi
   });
   await show(page, long);
   await page.evaluate(() => window.liveTest.setQuestionSize('large'));
+  // A small prompt beside the call: no second quote. The notebook keeps
+  // every source.
   await expect(
     page
       .getByRole('list', { name: 'Cue sources', exact: true })
       .getByRole('listitem'),
-  ).toHaveCount(4);
+  ).toHaveCount(1);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

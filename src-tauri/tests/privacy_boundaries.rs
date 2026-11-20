@@ -115,12 +115,15 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
     // Everything the companion may do: read, hold and dismiss the cue,
     // pause, hide, move, and stop. It writes nothing to the notes. A new
     // entry is a privacy decision to make here and in PRIVACY.md, not a
-    // default.
+    // default. `companion_anchor` returns only "top" or "bottom", from the
+    // window's placement preset and whether it was dragged: no
+    // conversation, note or position.
     let companion = set(&[
         "core:event:allow-listen",
         "core:event:allow-unlisten",
         "core:window:allow-start-dragging",
         "allow-snapshot",
+        "allow-companion-anchor",
         "allow-respond-to-cue",
         "allow-inspect-cue",
         "allow-set-overlay",
