@@ -82,9 +82,10 @@ bound; audio is mono with a declared sample rate. `voice.close()` is idempotent
 and joins all owned synthesis/probe work. The scheduler verifies metadata and
 identity, not file contents: a real adapter must hash/validate the actual PCM.
 
-The intended local adapter pins an explicitly installed system voice and rate,
-owns bounded subprocess/file work and terminates on failure. It is not included
-here. Existing batch synthesis may retry to fit a slot and fall back to tones;
+The optional [local file adapter](lab-local-voice.md) pins an explicitly
+installed system voice and rate, owns bounded subprocess/file work and terminates
+on failure. Its source and mocked tests do not establish actual installed-voice
+or synthesis acceptance. Existing batch synthesis may retry to fit a slot and fall back to tones;
 existing hosted TTS requires separate paid-service authorization. Neither behavior
 is inherited by this body. No silent, tone, alternate-voice or hosted fallback is
 permitted for an adaptive speech take.
@@ -120,11 +121,17 @@ bootstrap before lazy authentication, prefix completion before generation and
 zero generation on pre-auth Stop. No actual process, audio, player, app or model
 is launched by these tests.
 
-Next dependencies are an implemented local per-line voice adapter and a verified
-capturable incremental player. Fixed QuickTime MP4 cannot append; the browser's
+Next dependencies are actual installed-voice/synthesis/cleanup acceptance for
+the local file adapter and a verified capturable incremental player. Fixed QuickTime MP4 cannot append; the browser's
 current append path can be silent and reports scheduled playback. A narrowly scoped
 owned native window with local PCM output is a candidate, requiring explicit
 source identity/launcher integration and real native audio-capture verification.
 Actual Listening, output, transcription, evaluator cue/silence, companion paint
 and release still need the separately reviewed bounded fictional take. This
 internal scheduler changes no public app journey or release capability.
+
+The current prepared fixed-source path refuses an adaptive body, and the direct
+API adapter accepts cue-evaluator requests only, not cast/listener/judge work.
+This injected scheduler does not create either integration. Its subscription
+dispatch accounting, operation deadlines and cleanup ownership remain unchanged;
+no API, source, player or artifact migration is selected by adding its module.

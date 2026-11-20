@@ -2,7 +2,7 @@
 
 Status: development tooling, 16 November 2026. `scripts/lab-fresh-scenario.mjs` draws a new fictional meeting brief from a seed, places spoken lines with call-like pacing, checks a rendered mix against what was intended, and defines the manifest that describes the resulting media. The module is offline and deterministic. It does not call a model, speak lines, encode video or change what the lab accepts.
 
-Lab runs currently replay one prepared fictional recording. A product that hears real meetings must cope with any topic, any number of people, a title or none, and conversation that drifts. Replaying one file cannot test that. This module is the reviewed basis for giving each run a freshly generated scenario instead.
+The default lab media remains one prepared fictional recording; the reviewed media loader can also accept a separately approved per-run manifest. This module supplies offline authoring and checking helpers for such a manifest. It generates no conversation or media and grants no playback approval. Fresh fictional scenarios could broaden the cases available for later evaluation, but these helpers establish no coverage of real meetings or useful assistance.
 
 ## Briefs
 
@@ -19,11 +19,11 @@ Nothing downstream may depend on the title or an agenda. The manifest marks the 
 
 `scheduleLines()` takes each line's speaker, beat (`quick`, `normal` or `pause`) and speech length. It places the lines with a lead-in, a gap before each turn and a tail:
 
-| Beat | Gap before the turn |
-| --- | --- |
-| `quick` | 120–320 ms |
-| `normal` | 380–1050 ms |
-| `pause` | 1300–2600 ms |
+| Beat     | Gap before the turn |
+| -------- | ------------------- |
+| `quick`  | 120–320 ms          |
+| `normal` | 380–1050 ms         |
+| `pause`  | 1300–2600 ms        |
 
 A speaker who continues after their own line waits at least 450 ms. The gaps are then scaled together so the total falls inside the window, which defaults to 90–104 s and must lie within 60–120 s. If the gaps would need scaling below 0.6× or above 2.2×, the schedule is refused rather than squeezed or padded. Lines never overlap.
 
@@ -76,6 +76,7 @@ A manifest is refused if any of these is true:
 
 - This module does not decide what the lab plays. The lab's own loader does, with its own checks, and it may be stricter than `validateManifest()`, for example about where files are stored.
 - Generating the conversation and rendering voices are not part of this module.
+- Credential-shaped field names and non-allowlisted query names are refused; plain metadata strings are not a general secret detector. Keep all credentials out of metadata and review fictional content before any separately approved export.
 - A seed fixes the brief and the pacing, not the words a generator writes.
 - The brief space is finite, though large.
 
@@ -92,3 +93,9 @@ A manifest is refused if any of these is true:
 - **Content:** brands and contact details are found in a title or line and reported by line, and list entries are matched literally.
 
 See also the [cue lab batches and simulations](cue-simulation.md).
+
+An offline fixture joins an authored manifest to the real media loader using only
+the existing harmless placeholder bytes. It checks manifest hash approval,
+listener propagation, refusal of a copied unbranded descriptor and the unchanged
+104-second loader cap. It does not decode a codec, regenerate media, select an
+artifact, play anything or prove title independence at runtime.
