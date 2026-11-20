@@ -6,7 +6,7 @@ Planning baseline, 8 November 2026; implementation status refreshed 10 November 
 
 ## 1. Proof of concept
 
-**Current:** the desktop prototype replays fictional dialogue and displays fixed questions from phrase rules. It provides a floating companion, source disclosure, pause, and dismissal. A separate opt-in microphone monitor reports signal activity only. A `local-whisper` developer build also offers Settings model setup and a user-started microphone transcription session using the same phrase rules; it does not capture the other side of a call or generate semantic cues.
+**Current:** the desktop prototype replays fictional dialogue and displays fixed questions from phrase rules. It provides a floating companion, source disclosure, pause, and dismissal. A separate opt-in microphone monitor reports signal activity only. A development build with cloud transcription selected for the launch also offers a user-started microphone session, transcribed by Deepgram only after the person approves cue processing for that session, using the same phrase rules ([cloud transcription](cloud-transcription.md)); no other build has live transcription, and on-device transcription was removed on 16 November 2026; it does not capture the other side of a call or generate semantic cues.
 
 **Purpose:** establish a simple interaction for timely context and prompts. One cue appears, the user can inspect or dismiss it, and unused cues pass quietly. Questions are one possible cue type. Saving generated prompts is not part of this flow.
 
@@ -16,7 +16,7 @@ See the [cue intelligence plan](cue-intelligence.md) for bounded evaluation, run
 
 ## 2. Live AI companion
 
-**Deliver:** a complete macOS path from explicitly enabled meeting audio through transcription and AI cue selection to the floating companion. Keep context inspectable and pause, dismissal, and Stop easy to use. Local transcription and cue reasoning are separate components; the chosen processing path must be clear.
+**Deliver:** a complete macOS path from explicitly enabled meeting audio through transcription and AI cue selection to the floating companion. Keep context inspectable and pause, dismissal, and Stop easy to use. Transcription and cue reasoning are separate components with separate providers and approval; the chosen processing path must be clear.
 
 **Acceptance:**
 
@@ -27,7 +27,7 @@ See the [cue intelligence plan](cue-intelligence.md) for bounded evaluation, run
 - Native focus, Spaces/full-screen, screen sharing, keyboard access, readability, and reduced motion are checked on the supported setup.
 - Meeting-use evaluation considers relevance, timing, missed opportunities, and the ability to keep listening. A passing build or a large number of generated cues is insufficient.
 
-**Current audio boundary:** a `local-whisper` developer build downloads and verifies the pinned speech model in Settings, then starts the Rust transcription worker from **Start live session**. The engine accepts source-linked lines for the active session. Fictional replay checks cover recognized questions/answers and late input after End; the [native validation record](native-validation.md#live-session-check) records a first microphone session, with timing, denial, device changes, Stop and cross-app checks still incomplete. Other apps' audio is not captured.
+**Current audio boundary:** in a development build with cloud transcription selected for the launch, **Start live session** starts capture, and the Rust side streams the audio to Deepgram once the person approves cue processing for that session; until then the audio is thrown away. The engine accepts source-linked lines for the active session. Fictional replay checks cover recognized questions/answers and late input after End; the [native validation record](native-validation.md#live-session-check) records a first microphone session with the former on-device transcription (removed 16 November 2026), with timing, denial, device changes, Stop and cross-app checks still incomplete. Other apps' audio is not captured.
 
 **Next audio acceptance:** on a named Mac and audio setup, measure speech-to-line and cue delay, Stop/device release, denial and device-change recovery. Both sides of a synthetic call require a separately enabled capture adapter; microphone-only success does not prove that capability. Record whole-app resources alongside a call against the [agreed budgets](budgets.md), without storing audio.
 
@@ -54,7 +54,7 @@ Integration feasibility and adapter design can proceed during core development. 
 **Acceptance:**
 
 - Each release names its supported OS, hardware, meeting apps, languages, and limitations.
-- Clean installation, model setup, first use, updates, recovery, and uninstall are tested. Signing and distribution requirements match the advertised delivery route.
+- Clean installation, provider setup, first use, updates, recovery, and uninstall are tested. Signing and distribution requirements match the advertised delivery route.
 - Windows validation begins in Parallels and extends to the physical hardware and architectures claimed by a release. Ubuntu VM evidence informs a separate Linux support decision.
 - New platforms validate capture, background behavior, cue presentation, accessibility, resource use, and permissions independently. A responsive web layout alone does not establish mobile meeting support.
 - Documentation, privacy choices, release notes, troubleshooting, and a feedback/support route are available before widening distribution.
