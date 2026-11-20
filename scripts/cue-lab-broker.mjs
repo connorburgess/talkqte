@@ -4,13 +4,14 @@ import { createServer } from 'node:net';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { chmod, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, relative, sep } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { TextDecoder } from 'node:util';
 import {
   createLabOperationGate,
   gateFailure,
 } from './cue-lab-operation-gate.mjs';
 import { systemPromptFor, validateDecision } from './cue-lab.mjs';
+import { outsideCheckout } from './cue-lab-checkout.mjs';
 
 const SCHEMA = 'talkqte.lab.v1';
 const FRAME = 65536;
@@ -193,15 +194,10 @@ export async function openLabBroker({
   let directory;
   try {
     // A relative temporary root is refused before canonicalization makes it
-    // look absolute. A sibling named like `..cache` is not outside the checkout.
+    // look absolute. The checkout is anchored to the module, not the cwd.
     requireThat(isAbsolute(created));
     directory = await realpath(created);
-    const checkoutRelation = relative(await realpath(process.cwd()), directory);
-    requireThat(
-      checkoutRelation === '..' ||
-        checkoutRelation.startsWith('..' + sep) ||
-        isAbsolute(checkoutRelation),
-    );
+    requireThat(outsideCheckout(directory));
     await chmod(directory, 0o700);
   } catch {
     await rm(created, { recursive: true, force: true });
@@ -764,6 +760,8 @@ export async function openLabBroker({
   } catch {
     socket?.destroy();
     server.close();
+    // Record the setup failure itself before close() would report `closed`.
+    gate.stop('protocol');
     await gate.close();
     await rm(directory, { recursive: true, force: true });
     throw gateFailure('protocol');
