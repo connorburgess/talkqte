@@ -143,7 +143,7 @@ npm run lab:sim -- --set cue-lab --evaluator rules --run --out <directory outsid
 
 What it does, following the app's [evaluator bridge](cue-evaluator.md#transcript-lifecycle-bridge) where one exists:
 
-- A line reaches the evaluator a fixed time after it is said (`--transcript-delay-ms`, 3,000 by default, standing in for local transcription).
+- A line reaches the evaluator a fixed time after it is said (`--transcript-delay-ms`, 3,000 by default, standing in for transcription; the default was set for the former local transcription, removed on 16 November 2026, and [cloud transcription](cloud-transcription.md#latency-and-the-cue-window) delay on real hardware is unmeasured).
 - Each request holds the newest six lines, the lines the cue on screen cites, the listener's name where the conversation has one, and up to four cues this session has already shown with how each ended. Every line has the one label "Speaker", as a live transcript has today; `--input named` adds speaker names, to see what they change.
 - One request at a time. A line that arrives while a request is in flight overtakes it: that decision is dropped, and one catch-up request follows with the latest lines. A bare acknowledgement does not (see below). `--apply-stale` applies overtaken decisions anyway, to see how late they would have been.
 - Evaluations start only on a new line and at least `--min-gap-ms` apart (2,000 by default), so a conversation of N lines makes at most N requests. The dry run prints that bound for each conversation, and every line as a request would carry it.
