@@ -67,7 +67,7 @@ Remaining release checks: confirm one real selected-note import and removal in t
 
 ### What is established (13 November 2026)
 
-An audit compared each promise in [PRIVACY.md](../PRIVACY.md), the README and these notes with the code. It found two inaccurate statements, both since corrected: sign-in requests carried the HTTP library's user agent instead of `TalkQTE`, and the clip replay tool printed cue text that can repeat recognized speech. The lists below record what evidence each remaining promise has. All tests use fictional accounts, notes and credentials on loopback servers; none uses a real account, microphone or model.
+An audit compared each promise in [PRIVACY.md](../PRIVACY.md), the README and these notes with the code. It found two inaccurate statements, both since corrected: sign-in requests carried the HTTP library's user agent instead of `TalkQTE`, and the clip replay tool printed cue text that can repeat recognized speech. (That tool was removed with on-device transcription on 16 November 2026.) The lists below record what evidence each remaining promise has. All tests use fictional accounts, notes and credentials on loopback servers; none uses a real account, microphone or model.
 
 **Established by test**
 
@@ -78,19 +78,18 @@ An audit compared each promise in [PRIVACY.md](../PRIVACY.md), the README and th
 - **Disconnect during sign-in:** a sign-in waiting for the browser ends as cancelled without exchanging a code, and a connection that opens after Disconnect is dropped without another request.
 - **Connection status:** the notebook receives whether a connection is open, the server's tool names, whether an update check is offered, and the state of kept notes. A listing that names the signed-in account and another participant passes neither to the status nor to the chooser.
 - **Files and output:** one whole session (sign-in, listing, a selected note, a focus suggestion, a failed request, disconnect) runs in a child process whose home, app-data and temporary folders point at an empty folder. The folder stays empty and the process prints nothing. With `TALKQTE_GRANOLA_TRACE` set, the trace appears and contains no token, sign-in code, client ID, account, title or note text.
-- **Error messages:** provider failures, a refused sign-in, an unreadable or malformed notes file and a missing or damaged model each produce a fixed message with no path, token, account or file content, even when the failing reply or file contains them.
+- **Error messages:** provider failures, a refused sign-in, an unreadable or malformed notes file and, until its removal on 16 November 2026, a missing or damaged speech model each produce a fixed message with no path, token, account or file content, even when the failing reply or file contains them.
 - **Microphone status:** the snapshot both windows receive has six fields: a revision counter, a coarse status and activity, whether Start is available, a message and a display name. It holds no list of samples, no nested device description and no level.
-- **Model download:** against a fictional loopback file server, a request is a plain `GET` with no query or body, the `TalkQTE` user agent, a range header only when resuming, and no header beyond those any file request carries. The app's own fetcher refuses a plain-HTTP address before connecting.
-- **Live session:** two sessions with a scripted recognizer in place of the speech model (one stopped with a flush, one ended with audio queued) run in the same kind of isolated child process. The folder stays empty and neither the recognized line nor the question it raised is printed.
+- **Model download (removed 16 November 2026 with on-device transcription):** against a fictional loopback file server, a request is a plain `GET` with no query or body, the `TalkQTE` user agent, a range header only when resuming, and no header beyond those any file request carries. The app's own fetcher refuses a plain-HTTP address before connecting.
+- **Live session:** two sessions with a scripted cloud stream in place of Deepgram (one stopped with a flush, one ended with audio queued) run in the same kind of isolated child process. The folder stays empty and neither the recognized line nor the question it raised is printed. (Before 16 November 2026 the same test used a scripted recognizer in place of the local speech model.)
+- **Cloud transcription:** offline tests with a fake socket show that nothing is sent before the session's cue processing is approved; see the [evidence list](cloud-transcription.md#evidence). No session has been run against the real service.
 - **Capture callback:** what the callback runs for each buffer (the activity meter and a live session's audio tap) allocates nothing. Afterwards two different fictional recordings leave identical meter state (a buffer count, a loud flag and a failure flag) and the windows receive the same status from each, so nothing of the audio's content remains beyond whether it was loud. The tap's samples stay in its fixed-size ring until transcribed, as the bounded-buffer tests show.
 - **Update check:** it is not offered for a Granola connection, and keeping a note leaves the status unchanged.
-- **Earlier checks:** disconnect and reconnect, trace masking, note removal, selection-only import, model checksum and partial-download cleanup, microphone stop and release in synthetic tests, and bounded audio buffers.
+- **Earlier checks:** disconnect and reconnect, trace masking, note removal, selection-only import, the former model checksum and partial-download cleanup, microphone stop and release in synthetic tests, and bounded audio buffers.
 
 **Upheld by code, without a test**
 
 - The macOS adapter's callback calls only the meter and the tap, after converting each sample; the test runs the same two calls on fictional buffers, not the operating system's callback.
-- With the real speech model, recognition writes no file: the isolated test replaces the model with a scripted recognizer.
-- whisper.cpp's own logging is routed away from stderr.
 - A notes file or export destination comes only from a native dialog; no command accepts a path from the interface.
 - No telemetry or analytics dependency is present.
 - Release is logical: dropped tokens and removed notes are not overwritten in memory.
@@ -101,7 +100,7 @@ An audit compared each promise in [PRIVACY.md](../PRIVACY.md), the README and th
 - A built app after a real session and after quit: the contents of its data folder, webview storage, and operating-system logs or crash reports.
 - Microphone release, permission and device loss on real hardware, and whether the companion is visible to screen sharing.
 
-Limits of the isolated tests: they cover the Granola adapter and the live session runner, not the native command layer, the operating system's capture callback, the speech model or the webview, and they redirect folders through environment variables, so a write to an unrelated absolute path would go unnoticed. No such write exists in either module's source.
+Limits of the isolated tests: they cover the Granola adapter and the live session runner, not the native command layer, the operating system's capture callback, the real transcription service or the webview, and they redirect folders through environment variables, so a write to an unrelated absolute path would go unnoticed. No such write exists in either module's source.
 
 ## Disconnect while notes are loading
 
