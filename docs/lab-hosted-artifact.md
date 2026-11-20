@@ -5,7 +5,16 @@ The manual `Checks` input `lab_native_sha` confirms the single workflow-owned re
 Any other nonempty input fails before checkout. The executable checkout, build
 and provenance use trusted literal pins, never the input value. Changing the
 native source requires an ordinary reviewed workflow change; this is not an
-arbitrary-SHA build service. Automatic Node package-manager caching is explicitly
+arbitrary-SHA build service.
+
+This literal pin identifies a historical reviewed native source snapshot, not
+current main or the corrected reconnect/history native source and public JS
+package pairing. The workflow does not establish acceptance of that later
+combination. A later native target requires a separate ordinary reviewed pin
+change with exact source, feature tuple and validation evidence; no later target
+is selected here. Existing runtime packages remain unchanged.
+
+Automatic Node package-manager caching is explicitly
 disabled only in the artifact job. Empty input preserves normal manual checks;
 push and pull-request checks never build this artifact. The nonempty manual path
 runs only the isolated artifact job, with read-only repository permission, no
