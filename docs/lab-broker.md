@@ -99,8 +99,10 @@ time). Such a cue reflects speech up to the 8 s deadline before it appears and
 can concern something newer speech already answered; the next request carries
 it as the existing cue so the model can resolve or withdraw it. Any edited or
 removed line, cue change or permission change makes the result stale: it is
-discarded and acknowledged `staleSuccess`. Provider and schema errors remain
-terminal, even when the original speech is stale.
+discarded and acknowledged `staleSuccess`. Adapter-level malformed JSON/schema failures, authentication, provider and
+protocol failures remain terminal, even when the original speech is stale.
+Direct API replies refused by broker validation are handled separately below;
+CLI validation and output failures remain terminal.
 
 `result` is sent only after provider cleanup. The evaluator lease stays held
 until the request is settled or retired. `current` is a Rust validation verdict,
@@ -109,8 +111,8 @@ request preserves that ownership ordering.
 
 ### Request outcomes and what stays terminal
 
-Each `evaluate` ends in exactly one of these ways. The first five retire only
-that request; the run, provider and dispatch budget continue.
+These outcomes can retire one request while the run, provider and existing
+dispatch budget continue, subject to the route and validation conditions below.
 
 - **Settled `current` or `staleSuccess`:** native validated the result in time.
 - **Settled `expired`:** the result reached native in time but was read after
@@ -129,6 +131,17 @@ that request; the run, provider and dispatch budget continue.
   `output_limit` for that request only. Native retires and settles it
   silently and logs `evaluation_result` with outcome `output_limit`; an older
   native build without this code treats it as terminal, which fails safe.
+
+- **Broker validation refusal (direct API route only):** after provider work
+  settles, the first two consecutive refused replies retire their requests with
+  `failed` code `refusal`; the third ends the run. A valid reply resets the
+  count. `invalidReplies` and fixed `invalidReasons` keep the first failed
+  check without reply text; `refusals` counts provider refusals separately.
+  An occupied `show` is normalized to `quiet` on the API route only,
+  retaining the reply's own source IDs. That normalized reply must still pass
+  quiet-state and source-membership validation before `result` is sent.
+  `showWithCue` counts attempted normalizations, not proof of acceptance.
+  CLI invalid replies and output failures still end the run.
 
 Each of these `failed` frames names the active request's `requestId` and
 `contextRevision` and is sent at most once. Nothing is sent for a request the
@@ -168,7 +181,8 @@ native's own session call limit bounds the rest.
 `requested` (evaluates seen), `dispatched` (provider calls started),
 `retiredBeforeDispatch`, `resultsSent` with their fixed actions,
 `deadlineByBroker`, `refusals`, `outputLimits`, `deadlineByNative` (a sent result can later be retired by
-native) and settlement `verdicts`.
+native), `showWithCue`, `invalidReplies`, fixed `invalidReasons` and settlement
+`verdicts`. These counters describe validation and transport events, not cue usefulness.
 
 **Native timing fields.** In lab mode, native's `evaluation_result` log row
 carries an optional `action` only on a `stale` result or a `failed` timeout whose
