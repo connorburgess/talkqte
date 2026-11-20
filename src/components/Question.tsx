@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { Check, X } from 'lucide-react';
+import { AtSign, Check, X } from 'lucide-react';
 import {
   clockTime,
   type Cue,
@@ -209,10 +209,19 @@ function Unconfirmed({ at }: { at: number | null }) {
   );
 }
 
-function Sources({ sources, label }: { sources: CueSource[]; label: string }) {
+function Sources({
+  sources,
+  label,
+  first = false,
+}: {
+  sources: CueSource[];
+  label: string;
+  /** Only the first: the line the cue cites. */
+  first?: boolean;
+}) {
   return (
     <ul className="cue-sources" aria-label={label} role="list">
-      {sources.map((source) => (
+      {(first ? sources.slice(0, 1) : sources).map((source) => (
         <li key={source.id}>
           <span className="cue-source-label">
             {source.provenance.kind === 'priorNote'
@@ -238,6 +247,8 @@ interface QuestionProps {
   onDismiss: () => void;
   /** Holds the cue until it is dismissed; the source is always in view. */
   onHold: () => void;
+  /** The companion's small card: the cited line only, in brief. */
+  compact?: boolean;
 }
 
 export function Question({
@@ -247,6 +258,7 @@ export function Question({
   busy,
   onDismiss,
   onHold,
+  compact = false,
   leaving = false,
   onLeft,
 }: QuestionProps & {
@@ -277,6 +289,7 @@ export function Question({
   }, [leaving]);
   const staysId = useId();
   const said = cue.kind === 'Said';
+  const asked = cue.kind === 'Asked you';
   // An Asked you question stays without a countdown (ROADMAP U4).
   const timed = cue.kind !== 'Asked you';
   const left = cue.totalMs ? Math.min(1, cue.remainingMs / cue.totalMs) : 0;
@@ -291,7 +304,9 @@ export function Question({
     <section
       ref={card}
       className={`question question-${size} cue-card${
-        cue.kind === 'Asked you' ? ' cue-asked' : ''
+        compact ? ' is-compact' : ''
+      }${
+        asked ? ' cue-asked' : ''
       }${scale}${cue.held ? ' is-held' : ''}${settled ? ' is-settled' : ''}${
         fades.start ? ' fades-start' : ''
       }${fades.end ? ' fades-end' : ''}${leaving ? ' is-leaving' : ''}`}
@@ -304,7 +319,10 @@ export function Question({
     >
       <div className="cue-scroll" ref={scroller}>
         <div className="cue-line">
-          <span className="cue-lead">{purpose}</span>{' '}
+          <span className="cue-lead">
+            {asked && <AtSign className="cue-asked-mark" aria-hidden="true" />}
+            {purpose}
+          </span>{' '}
           <h2 aria-live={announce ? 'polite' : undefined}>
             {said && '“'}
             <Words text={cue.question} cap={CUE_WORDS} spoken={said} />
@@ -350,6 +368,7 @@ export function Question({
                 <Sources
                   sources={cue.resolvedBy.sources}
                   label="Resolution sources"
+                  first={compact}
                 />
               ) : (
                 <blockquote className="cue-quote">
@@ -362,11 +381,15 @@ export function Question({
         <div className="cue-source">
           {cue.sources?.length ? (
             <>
-              {hasPriorNotes(cue.sources) && (
+              {!compact && hasPriorNotes(cue.sources) && (
                 <p>Prior notes are not from this conversation.</p>
               )}
-              <Sources sources={cue.sources} label="Cue sources" />
-              {cue.aboutFocus && (
+              <Sources
+                sources={cue.sources}
+                label="Cue sources"
+                first={compact}
+              />
+              {!compact && cue.aboutFocus && (
                 <p>
                   This suggestion cites speech with words from your focus list.
                 </p>
@@ -403,6 +426,7 @@ export function Question({
           )}
         </div>
       </div>
+      {asked && <span className="cue-edge" aria-hidden="true" />}
       {/* Last in reading order; drawn in the corner. */}
       <button
         className="dismiss-question"

@@ -44,3 +44,10 @@ Technical documentation may name a dependency or model when necessary to explain
 - Audio callbacks must not perform inference, disk I/O, or blocking work. Use bounded buffers and worker tasks.
 - Never advertise a privacy, performance, accessibility, or platform guarantee that has not been implemented and checked.
 - Tests should verify user-visible behavior and meaningful failure cases. Do not add tests that merely mirror implementation details.
+
+## Frontend guidance and advisory review
+
+- Use Impeccable for frontend design and interaction review while preserving [DESIGN.md](DESIGN.md) and the product goal. Use [GoogleChrome Modern Web Guidance](https://developer.chrome.com/docs/modern-web-guidance) alongside it for web-platform patterns and compatibility. The default target is **Baseline Widely available**; a newer API needs a scoped compatibility decision and a tested fallback for the supported webviews. Baseline alone does not establish Tauri/WebKit or native accessibility support.
+- Apply this to the existing React/CSS frontend and HTML entry point only. It adds no browser integration, native/lab capability, capture, model connection or deployment authorization.
+- Use the pinned local scanner in [the frontend review guide](docs/frontend-review.md), with telemetry disabled. Do not use unpinned package commands, skill installers, automatic updates, LLM calls or autofixes for this check. Scan findings are provisional: verify the guide's Keep/Drop criteria and actual supported behavior. Turn useful recurring findings into later focused regressions; do not bulk-remediate the app from a report.
+- CI saves an advisory report and distinguishes scanner errors from no findings. This check is initially nonblocking and does not replace frontend/browser tests, rendered review, native acceptance or the release checklist. Review changes before publication or merge; website deployment remains a separate decision.
