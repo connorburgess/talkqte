@@ -3,6 +3,8 @@ import { EventEmitter } from 'node:events';
 import { createConnection } from 'node:net';
 import { readFile } from 'node:fs/promises';
 import { createLabPlaybackSession } from './cue-lab-prepared-take.mjs';
+import { labelLabBootstrapMedia } from './cue-lab-media.mjs';
+import { fictionalTestMedia } from './fixtures/lab-test-media.mjs';
 import { test, after } from 'node:test';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -695,14 +697,10 @@ async function playbackFixture({ abortPrefix = false } = {}) {
       },
     },
     stopAfterS: 10,
-    media: {
-      fictional: true,
-      path: '/fictional/neutral-calibration.wav',
-      purpose: 'neutral-calibration',
-      displayLabel: 'Neutral calibration — outside the scenario',
-      sha256: hash('neutral prefix'),
-      durationMs: 1000,
-    },
+    media: labelLabBootstrapMedia(
+      fictionalTestMedia({ durationMs: 1000 }),
+      'Neutral calibration — outside the scenario',
+    ),
     source: {
       async waitListening({ runId }) {
         trace.push('Listening');
