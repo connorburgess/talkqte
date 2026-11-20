@@ -152,8 +152,8 @@ const FACTS = [
     source: () =>
       capture(
         read('src-tauri/src/companion.rs'),
-        /Mode::Question => (\d+)\.0/,
-        'Mode::Question height in companion.rs',
+        /QUESTION_HEIGHT: f64 = (\d+)\.0/,
+        'QUESTION_HEIGHT in companion.rs',
       ),
   },
   {
