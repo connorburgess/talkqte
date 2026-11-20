@@ -114,6 +114,11 @@ jobs:
       - run: npm run tauri -- build --debug --bundles app
       - name: Pre-flight the debug bundle (no signing, no release)
         run: node scripts/release-preflight.mjs src-tauri/target/debug/bundle/macos/TalkQTE.app
+      # The lab's ScreenCaptureKit helper is otherwise compiled only on the
+      # owner's Mac at the start of a recording. Build it the same way here;
+      # it is not run, so nothing is captured.
+      - name: Build the lab window-capture helper (not run)
+        run: node --input-type=module -e "const lab = await import('./scripts/lab-window-record.mjs'); console.log(await lab.ensureHelper());"
 
   windows:
     name: Windows Arm Rust and desktop build
