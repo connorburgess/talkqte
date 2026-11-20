@@ -10,7 +10,7 @@ use crate::{
     },
     native_session_clock::tests::measure_fictional,
     native_source::{self, Source},
-    transcription::{AudioChunk, Recognized, Transcriber},
+    transcription::cloud::{Full, StreamingTranscriber, SttEvent},
     Runtime,
 };
 use std::sync::atomic::AtomicU64;
@@ -142,11 +142,20 @@ impl Source for Scripted {
     }
 }
 
+/// A cloud stream that returns nothing. The fixture's session is never
+/// approved, so it is never opened either.
 struct Silent;
-impl Transcriber for Silent {
-    fn transcribe(&mut self, _: &AudioChunk) -> Result<Vec<Recognized>, String> {
-        Ok(Vec::new())
+impl StreamingTranscriber for Silent {
+    fn push(&mut self, _: &[f32]) -> Result<(), Full> {
+        Ok(())
     }
+    fn poll(&mut self) -> Vec<SttEvent> {
+        Vec::new()
+    }
+    fn finish(&mut self, _: Duration) -> Vec<SttEvent> {
+        Vec::new()
+    }
+    fn abort(&mut self) {}
 }
 
 struct Fake {
@@ -247,7 +256,7 @@ impl Backend for Fake {
                     script,
                 })
             },
-            Silent,
+            Box::new(|| Ok(Box::new(Silent) as Box<dyn StreamingTranscriber>)),
             monitor,
         )
     }
@@ -502,7 +511,10 @@ fn stop_reads_stopping_until_cleanup_is_confirmed_whoever_asked() {
         // The released run's counts are kept; this one heard nothing.
         let json = serde_json::to_value(&off).unwrap();
         assert_eq!(json["lastRun"]["acceptedLines"], 0);
-        assert_eq!(json["lastRun"]["workerDetached"], false);
+        assert_eq!(
+            json["lastRun"]["audioSentMs"], 0,
+            "never approved, so nothing was sent"
+        );
         assert_eq!(shown(&off), CaptureState::Off);
         assert_eq!(
             fixture.host.0.gate.snapshot().unwrap().phase,

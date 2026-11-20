@@ -246,7 +246,7 @@ test('a live session is labelled live, has no end time, and cannot be exported',
   await expect(strip).toContainText('Live session in progress');
   await expect(strip).not.toContainText('/');
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
-  await expect(panel).toContainText('transcribed on this device');
+  await expect(panel).toContainText('sent to Deepgram for transcription');
   await expect(panel).not.toContainText('Activity check only');
   await expect(
     page.getByRole('button', { name: 'Export', exact: true }),
@@ -279,7 +279,7 @@ test('a live session is labelled live, has no end time, and cannot be exported',
   );
 });
 
-test('without local transcription, the notebook offers no live session and says why', async ({
+test('without live transcription, the notebook offers no live session and says why', async ({
   page,
 }) => {
   await nativePage(page);
@@ -291,7 +291,7 @@ test('without local transcription, the notebook offers no live session and says 
   ).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(
-    page.getByText('This build does not include local transcription.'),
+    page.getByText('This build has no live transcription.'),
   ).toBeVisible();
 });
 
@@ -404,7 +404,9 @@ test('the compact companion can pause cues without hiding microphone state or St
     page.getByRole('img', { name: /Signal detected|Quiet input/ }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Resume cues' }).click();
-  await expect(page.getByRole('status')).toHaveText('Mic on · Local');
+  await expect(page.getByRole('status')).toHaveText(
+    'Mic on · not transcribing yet',
+  );
   await page.getByRole('button', { name: 'Stop live session' }).click();
   expect(await page.evaluate(() => window.microphoneTest.calls)).toContain(
     'stop_live_session',
@@ -422,7 +424,9 @@ test('the companion labels a live session and its Stop ends the session', async 
   await expect(
     page.getByRole('img', { name: /Signal detected|Quiet input/ }),
   ).toBeVisible();
-  await expect(page.getByRole('status')).toHaveText('Mic on · Local');
+  await expect(page.getByRole('status')).toHaveText(
+    'Mic on · not transcribing yet',
+  );
   await expect(
     page.getByRole('button', { name: 'Stop microphone' }),
   ).toHaveCount(0);
@@ -453,83 +457,6 @@ test('your name is applied when you leave the field, and a rejected name explain
   );
   // The field shows the name still in effect, not the rejected one.
   await expect(name).toHaveValue('Sam');
-});
-
-test('the speech model downloads only when chosen, shows progress, and can be cancelled or removed', async ({
-  page,
-}) => {
-  await nativePage(page, '?model');
-  await expect(
-    page.getByRole('button', { name: 'Start live session' }),
-  ).toHaveCount(0);
-  // The notebook points to setup instead of hiding live sessions entirely,
-  // and takes keyboard focus to that section.
-  await page.getByRole('button', { name: 'Set up live session' }).click();
-  const heading = page.getByRole('heading', { name: 'Live transcription' });
-  await expect(heading).toBeFocused();
-  await expect(heading).toBeInViewport();
-  const section = page.locator('.model-download');
-  await expect(section).toContainText('78 MB');
-  await expect(section).toContainText('see your IP address');
-  expect(await page.evaluate(() => window.microphoneTest.calls)).not.toContain(
-    'download_model',
-  );
-  await page.getByRole('button', { name: 'Download speech model' }).click();
-  await expect(
-    page.getByRole('progressbar', { name: 'Model download' }),
-  ).toBeVisible();
-  // While it downloads, the notebook link leads back to the progress.
-  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
-  await page.getByRole('button', { name: 'View download progress' }).click();
-  await expect(
-    page.getByRole('progressbar', { name: 'Model download' }),
-  ).toBeInViewport();
-  await page.getByRole('button', { name: 'Cancel download' }).click();
-  await expect(section.getByRole('alert')).toHaveText(
-    'Download cancelled. Nothing was installed.',
-  );
-  await page.getByRole('button', { name: 'Download speech model' }).click();
-  await page.evaluate(() => window.modelTest.finish());
-  await expect(section).toContainText('is installed on this device');
-  await expect(page.getByText('Ready on this device.')).toBeVisible();
-  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
-  await expect(
-    page.getByRole('button', { name: 'Start live session' }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole('button', { name: 'Set up live session' }),
-  ).toHaveCount(0);
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Remove model' }).click();
-  await expect(
-    page.getByRole('button', { name: 'Download speech model' }),
-  ).toBeVisible();
-});
-
-test('with a model to install, the setup card keeps a speech-model step that leads to Settings', async ({
-  page,
-}) => {
-  await nativePage(page, '?model');
-  await page.locator('.setup-disclosure > summary').press('Enter');
-  const card = page.getByRole('region', { name: 'Before your first meeting' });
-  await expect(card.getByRole('listitem')).toHaveCount(4);
-  await expect(card).toContainText('Speech model, to do');
-  await card.getByRole('button', { name: 'Set up the speech model' }).click();
-  await expect(
-    page.getByRole('heading', { name: 'Live transcription' }),
-  ).toBeFocused();
-  await expect(
-    page.getByRole('button', { name: 'Download speech model' }),
-  ).toBeVisible();
-});
-
-test('the live setup link fits narrow windows', async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 700 });
-  await nativePage(page, '?model');
-  await page.getByRole('button', { name: 'Set up live session' }).waitFor();
-  expect(
-    await page.evaluate(() => document.documentElement.scrollWidth),
-  ).toBeLessThanOrEqual(320);
 });
 
 test('input label follows ordered capture state through stop, failure and explicit restart', async ({
