@@ -132,7 +132,11 @@ export function createLabNativeOwner({
         (mode === 'capture-only'
           ? descriptorPath !== undefined || metadata !== undefined
           : !isAbsolute(descriptorPath ?? '') ||
-            !['codex', 'claude-code'].includes(metadata?.provider) ||
+            !['codex', 'claude-code', 'anthropic-api'].includes(
+              metadata?.provider,
+            ) ||
+            (metadata.provider === 'anthropic-api') !==
+              Number.isSafeInteger(metadata.spendCapMicroUsd) ||
             typeof metadata.model !== 'string' ||
             typeof metadata.effort !== 'string')
       )
@@ -149,11 +153,21 @@ export function createLabNativeOwner({
             TALKQTE_DEV_LAB_RUN_ID: id,
             ...(mode === 'model-enabled'
               ? {
-                  TALKQTE_DEV_CUE_BACKEND: 'lab-subscription',
+                  TALKQTE_DEV_CUE_BACKEND:
+                    metadata.provider === 'anthropic-api'
+                      ? 'lab-api'
+                      : 'lab-subscription',
                   TALKQTE_DEV_LAB_DESCRIPTOR: descriptorPath,
                   TALKQTE_DEV_LAB_PROVIDER: metadata.provider,
                   TALKQTE_DEV_LAB_MODEL: metadata.model,
                   TALKQTE_DEV_LAB_EFFORT: metadata.effort,
+                  ...(metadata.provider === 'anthropic-api'
+                    ? {
+                        TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD: String(
+                          metadata.spendCapMicroUsd,
+                        ),
+                      }
+                    : {}),
                 }
               : {}),
           }),

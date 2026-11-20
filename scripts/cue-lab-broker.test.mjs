@@ -36,17 +36,20 @@ async function setup({
   hello = true,
   armed = true,
   sourceSessionMode = 'legacy-fixture',
+  metadata = {
+    provider: 'codex',
+    model: 'gpt-6.1-sol',
+    effort: 'medium',
+    deadlineMs: 30000,
+  },
+  spentMicroUsd,
 } = {}) {
   const calls = [];
   const broker = await openLabBroker({
     sourceSessionMode,
     provider: {
-      metadata: {
-        provider: 'codex',
-        model: 'gpt-6.1-sol',
-        effort: 'medium',
-        deadlineMs: 30000,
-      },
+      metadata,
+      ...(spentMicroUsd === undefined ? {} : { spentMicroUsd }),
       request: async (req) => {
         calls.push(req);
         return request(req);
@@ -104,9 +107,9 @@ async function setup({
   const greet = (extra = {}) =>
     send('hello', {
       nonce: descriptor.nonce,
-      expectedProvider: 'codex',
-      expectedModel: 'gpt-6.1-sol',
-      expectedEffort: 'medium',
+      expectedProvider: metadata.provider,
+      expectedModel: metadata.model,
+      expectedEffort: metadata.effort,
       ...extra,
     });
   const evaluate = (id = '1', extra = {}) =>
@@ -143,6 +146,8 @@ async function setup({
     descriptor,
     socket,
     calls,
+    // Frames received and not yet taken by next().
+    frames,
     next,
     frame,
     send,
@@ -1380,5 +1385,229 @@ test('a temporary root inside the checkout is refused even when started from ano
   } finally {
     rmSync(inside, { recursive: true, force: true });
     rmSync(elsewhere, { recursive: true, force: true });
+  }
+});
+
+const apiMetadata = {
+  provider: 'anthropic-api',
+  model: 'claude-opus-5-5',
+  effort: 'low',
+  deadlineMs: 30000,
+  spendCapMicroUsd: 1_000_000,
+};
+
+test('the API route declares request budgeting and its spend cap at ready; the CLI route does not', async () => {
+  const api = await setup({
+    hello: false,
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+  });
+  try {
+    api.greet();
+    const ready = await api.next('ready');
+    assert.equal(ready.dispatchBudgetKind, 'apiRequests');
+    assert.equal(ready.spendCapMicroUsd, 1_000_000);
+    assert.equal(ready.spendUsedMicroUsd, 0);
+  } finally {
+    await api.close();
+  }
+  const cli = await setup({ hello: false });
+  try {
+    cli.greet();
+    const ready = await cli.next('ready');
+    assert.equal(ready.dispatchBudgetKind, 'cliDispatchAttempts');
+    assert.equal(Object.hasOwn(ready, 'spendCapMicroUsd'), false);
+    assert.equal(Object.hasOwn(ready, 'spendUsedMicroUsd'), false);
+  } finally {
+    await cli.close();
+  }
+});
+
+test('an API provider without a spend cap, or a CLI provider with one, is refused', async () => {
+  for (const metadata of [
+    { ...apiMetadata, spendCapMicroUsd: undefined },
+    {
+      provider: 'codex',
+      model: 'gpt-6.1-sol',
+      effort: 'medium',
+      deadlineMs: 30000,
+      spendCapMicroUsd: 1,
+    },
+  ])
+    await assert.rejects(
+      openLabBroker({
+        sourceSessionMode: 'legacy-fixture',
+        provider: {
+          metadata,
+          request: async () => ({}),
+          close: async () => {},
+        },
+        maxCalls: 1,
+      }),
+      { category: 'protocol' },
+    );
+});
+
+test('a provider refusal is a request-scoped failed refusal and the next request is evaluated', async () => {
+  let n = 0;
+  const ctx = await setup({
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+    request: async () => {
+      n++;
+      if (n === 1)
+        throw Object.assign(new Error('fictional'), { category: 'refusal' });
+      return { value, elapsedMs: 1, usage: {} };
+    },
+  });
+  try {
+    ctx.evaluate('1');
+    const failed = await ctx.next('failed');
+    assert.deepEqual([failed.requestId, failed.code], ['1', 'refusal']);
+    assert.equal(ctx.broker.gate.terminal, null);
+    ctx.evaluate('2');
+    assert.equal((await ctx.next('result')).requestId, '2');
+    ctx.settle('2');
+    await ctx.broker.gate.waitIdle();
+    assert.equal(ctx.broker.gate.terminal, null);
+    assert.equal(ctx.broker.evaluationSummary.refusals, 1);
+    assert.equal(ctx.broker.gate.dispatchesUsed, 2);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('an API reply at its output bound is a request-scoped failed output_limit and the next request is evaluated', async () => {
+  let n = 0;
+  const ctx = await setup({
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+    request: async () => {
+      n++;
+      if (n === 1)
+        throw Object.assign(new Error('fictional'), {
+          category: 'output-limit',
+        });
+      return { value, elapsedMs: 1, usage: {} };
+    },
+  });
+  try {
+    ctx.evaluate('1');
+    const failed = await ctx.next('failed');
+    assert.deepEqual([failed.requestId, failed.code], ['1', 'output_limit']);
+    assert.equal(ctx.broker.gate.terminal, null);
+    ctx.evaluate('2');
+    assert.equal((await ctx.next('result')).requestId, '2');
+    ctx.settle('2');
+    await ctx.broker.gate.waitIdle();
+    assert.equal(ctx.broker.evaluationSummary.outputLimits, 1);
+    assert.equal(ctx.broker.gate.dispatchesUsed, 2);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('on a subscription route an output limit still ends the run', async () => {
+  const ctx = await setup({
+    request: async () => {
+      throw Object.assign(new Error('fictional'), {
+        category: 'output-limit',
+      });
+    },
+  });
+  try {
+    ctx.evaluate('1');
+    const failed = await ctx.next('failed');
+    assert.notEqual(failed.code, 'output_limit');
+    await terminal(ctx.broker);
+    assert.equal(ctx.broker.evaluationSummary.outputLimits, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+// Native (#341) treats `failed` code refusal as request-scoped only when it
+// names the active request, and as terminal otherwise. The broker therefore
+// sends it exactly once, with the active request's ids, and never for a
+// request it has already retired.
+test('a refusal frame names the active request exactly; a late refusal after retirement sends nothing', async () => {
+  let n = 0;
+  const ctx = await setup({
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+    request: async ({ signal }) => {
+      n++;
+      if (n === 1)
+        throw Object.assign(new Error('fictional'), { category: 'refusal' });
+      if (n === 2)
+        // Outlives its budget, then reports a refusal after retirement.
+        return new Promise((_, reject) =>
+          signal.addEventListener(
+            'abort',
+            () =>
+              setTimeout(
+                () =>
+                  reject(
+                    Object.assign(new Error('fictional'), {
+                      category: 'refusal',
+                    }),
+                  ),
+                20,
+              ),
+            { once: true },
+          ),
+        );
+      return { value, elapsedMs: 1, usage: {} };
+    },
+  });
+  try {
+    ctx.evaluate('1');
+    const refusal = await ctx.next('failed');
+    assert.deepEqual(Object.keys(refusal).sort(), [
+      'code',
+      'contextRevision',
+      'requestId',
+      'runId',
+      'schema',
+      'sessionId',
+      'type',
+    ]);
+    assert.deepEqual(
+      [refusal.requestId, refusal.contextRevision, refusal.code],
+      ['1', '1', 'refusal'],
+    );
+    ctx.evaluate('2', { budgetMs: 50 });
+    const deadline = await ctx.next('failed');
+    assert.deepEqual([deadline.requestId, deadline.code], ['2', 'deadline']);
+    await delay(100);
+    ctx.evaluate('3');
+    assert.equal((await ctx.next('result')).requestId, '3');
+    ctx.settle('3');
+    await ctx.broker.gate.waitIdle();
+    // No second failed frame for request 2, so native never sees an
+    // unmatched refusal.
+    assert.equal(ctx.frames.filter((f) => f.type === 'failed').length, 0);
+    assert.equal(ctx.broker.gate.terminal, null);
+    assert.equal(ctx.broker.evaluationSummary.refusals, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a spend-cap usage limit ends the run with failed usage_limit', async () => {
+  const ctx = await setup({
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+    request: async () => {
+      throw Object.assign(new Error('fictional'), { category: 'usage-limit' });
+    },
+  });
+  try {
+    ctx.evaluate('1');
+    assert.equal((await ctx.next('failed')).code, 'usage_limit');
+    await terminal(ctx.broker);
+    assert.equal(ctx.broker.gate.terminal, 'usage-limit');
+  } finally {
+    await ctx.close();
   }
 });

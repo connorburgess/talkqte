@@ -794,3 +794,63 @@ test('a startup deadline before any peer connection is retained as the first cau
     await f.close();
   }
 });
+
+test('the direct API route launches with lab-api and its spend cap, and without a model-connection approval', async () => {
+  const apiSelection = {
+    provider: 'anthropic-api',
+    model: 'claude-opus-5-5',
+    effort: 'low',
+    maxCalls: 2,
+  };
+  // A model-connection approval is refused for the API route.
+  assert.throws(() =>
+    prepareLabLauncher({
+      ...{
+        selection: apiSelection,
+        mode: 'model-enabled',
+        modelConnection: 'on',
+      },
+    }),
+  );
+  const launcher = prepareLabFixtureLauncher({
+    fixtureCase: 'normal',
+    selection: apiSelection,
+  });
+  const original = childProcess.spawn;
+  let seen;
+  mock.method(childProcess, 'spawn', (command, args, options) => {
+    seen = options.env;
+    return original(command, args, options);
+  });
+  syncBuiltinESMExports();
+  const descriptor = join(launcher.directory, 'descriptor.json');
+  writeFileSync(descriptor, '{}', { mode: 0o600 });
+  const owner = createLabNativeOwner({
+    executable: launcher.executable,
+    launch: launcher.launch,
+    stopAfterS: 120,
+    armingMs: 1200,
+    releaseMs: 300,
+  });
+  try {
+    await owner.start({
+      descriptorPath: descriptor,
+      runId: 'fixture-run',
+      metadata: { ...apiSelection, spendCapMicroUsd: 1_000_000 },
+    });
+    assert.equal(seen.TALKQTE_DEV_CUE_BACKEND, 'lab-api');
+    assert.equal(seen.TALKQTE_DEV_LAB_PROVIDER, 'anthropic-api');
+    assert.equal(seen.TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD, '1000000');
+    assert.equal(Object.hasOwn(seen, 'TALKQTE_DEV_MODEL_CONNECTION'), false);
+    assert.equal(
+      Object.keys(seen).some((k) => /KEY|TOKEN|ANTHROPIC/.test(k)),
+      false,
+    );
+    assert.deepEqual(await owner.stop(), { released: true });
+  } finally {
+    mock.restoreAll();
+    syncBuiltinESMExports();
+    launcher.close();
+    rmSync(launcher.directory, { recursive: true, force: true });
+  }
+});

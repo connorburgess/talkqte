@@ -23,6 +23,10 @@ import { watchLabTiming } from './cue-lab-timing-reader.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
 import { checkLabPlayerSource } from './cue-lab-player.mjs';
 import { outsideCheckout } from './cue-lab-checkout.mjs';
+import {
+  ANTHROPIC_SPEND_CAP_MICRO_USD,
+  isAnthropicModel,
+} from './cue-lab-anthropic-core.mjs';
 
 const FEATURES = [
   'lab-evaluator',
@@ -245,10 +249,16 @@ function launcher({
       (mode === 'capture-only'
         ? selection === undefined
         : exact(selection, ['provider', 'model', 'effort', 'maxCalls']) &&
-          ['codex', 'claude-code'].includes(selection.provider) &&
+          ['codex', 'claude-code', 'anthropic-api'].includes(
+            selection.provider,
+          ) &&
           typeof selection.model === 'string' &&
           selection.model.length <= 100 &&
           ['low', 'medium'].includes(selection.effort) &&
+          // The direct API route runs only its listed models at effort low.
+          (selection.provider !== 'anthropic-api' ||
+            (isAnthropicModel(selection.model) &&
+              selection.effort === 'low')) &&
           Number.isSafeInteger(selection.maxCalls) &&
           selection.maxCalls >= 1 &&
           selection.maxCalls <= 100),
@@ -258,7 +268,9 @@ function launcher({
       ? playerSource === undefined
       : sourceApplication === 'TalkQTE Lab Player' &&
         checkLabPlayerSource(playerSource)) &&
-      (mode === 'capture-only'
+      // The direct API route has no launch approval: the owner approves in
+      // the app's session review, which names the API, model and spend cap.
+      (mode === 'capture-only' || selection?.provider === 'anthropic-api'
         ? modelConnection === undefined
         : modelConnection === 'on') &&
       Number.isSafeInteger(stopAfterS) &&
@@ -355,12 +367,15 @@ function launcher({
           'TALKQTE_DEV_STOP_AFTER_S',
           'TALKQTE_DEV_LAB_RUN_ID',
         ];
+        const viaApi = pinned?.provider === 'anthropic-api';
         const modelKeys = [
           'TALKQTE_DEV_CUE_BACKEND',
           'TALKQTE_DEV_LAB_DESCRIPTOR',
           'TALKQTE_DEV_LAB_PROVIDER',
           'TALKQTE_DEV_LAB_MODEL',
           'TALKQTE_DEV_LAB_EFFORT',
+          // The API route's per-run spend cap, shown before the first request.
+          ...(viaApi ? ['TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD'] : []),
         ];
         requireThat(
           exact(runEnv, [
@@ -374,7 +389,13 @@ function launcher({
         let descriptor;
         if (mode === 'model-enabled') {
           requireThat(
-            runEnv.TALKQTE_DEV_CUE_BACKEND === 'lab-subscription' &&
+            runEnv.TALKQTE_DEV_CUE_BACKEND ===
+              (viaApi ? 'lab-api' : 'lab-subscription') &&
+              (!viaApi ||
+                (runEnv.TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD ===
+                  String(ANTHROPIC_SPEND_CAP_MICRO_USD[pinned.model]) &&
+                  metadata?.spendCapMicroUsd ===
+                    ANTHROPIC_SPEND_CAP_MICRO_USD[pinned.model])) &&
               ['provider', 'model', 'effort', 'maxCalls'].every(
                 (key) => metadata?.[key] === pinned[key],
               ) &&
@@ -441,7 +462,9 @@ function launcher({
           TALKQTE_DEV_APPLICATION_SOURCE: sourceApplication,
           ...(mode === 'model-enabled'
             ? {
-                TALKQTE_DEV_MODEL_CONNECTION: modelConnection,
+                ...(modelConnection
+                  ? { TALKQTE_DEV_MODEL_CONNECTION: modelConnection }
+                  : {}),
                 TALKQTE_DEV_MODEL_CALLS: String(pinned.maxCalls),
               }
             : {}),
@@ -569,7 +592,10 @@ export function prepareLabFixtureLauncher({
     mode,
     stopAfterS,
     sourceApplication: 'QuickTime Player',
-    modelConnection: mode === 'capture-only' ? undefined : 'on',
+    modelConnection:
+      mode === 'capture-only' || selection?.provider === 'anthropic-api'
+        ? undefined
+        : 'on',
     environment,
     fixtureCase,
   });

@@ -142,14 +142,16 @@ const ROLES = new Set([
   'cue-evaluator',
 ]);
 const CREDENTIAL =
-  /(?:API.?KEY|ACCESS.?TOKEN|AUTH.?TOKEN|BASE.?URL|PROXY|GATEWAY|PROVIDER|NODE_OPTIONS|CODEX_HOME|CONFIG_DIR|CUSTOM_HEADERS|^AWS_|GOOGLE_APPLICATION_CREDENTIALS|^AZURE_|CLOUD_ML_REGION|CLAUDE_CODE_(?:USE_|SKIP_))/i;
+  /(?:API.?KEY|ACCESS.?TOKEN|AUTH.?TOKEN|BASE.?URL|PROXY|GATEWAY|PROVIDER|NODE_OPTIONS|CODEX_HOME|CONFIG_DIR|CUSTOM_HEADERS|^AWS_|GOOGLE_APPLICATION_CREDENTIALS|^AZURE_|CLOUD_ML_REGION|CLAUDE_CODE_(?:USE_|SKIP_)|^ANTHROPIC_)/i;
 
 export function assertSubscriptionEnvironment(environment) {
   if (
     !environment ||
     typeof environment !== 'object' ||
     Object.keys(environment).some(
-      (key) => environment[key] && CREDENTIAL.test(key),
+      // An ANTHROPIC_* name counts even when set to an empty string.
+      (key) =>
+        (environment[key] || /^ANTHROPIC_/i.test(key)) && CREDENTIAL.test(key),
     )
   )
     throw codexFailure('ambient-credentials');
