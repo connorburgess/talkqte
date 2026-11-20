@@ -170,7 +170,10 @@ impl Engine {
         self.evaluation.as_ref().is_some_and(|s| {
             matches!(
                 s.permission.processor.id.as_str(),
-                "lab-subscription" | "lab-api"
+                "lab-subscription"
+                    | "lab-api"
+                    | "lab-api-selected-prior-v2"
+                    | "lab-api-selected-prior-attested-v1"
             )
         })
     }
@@ -186,9 +189,12 @@ impl Engine {
         allow(dead_code)
     )]
     pub(crate) fn is_lab_api(&self) -> bool {
-        self.evaluation
-            .as_ref()
-            .is_some_and(|s| s.permission.processor.id == "lab-api")
+        self.evaluation.as_ref().is_some_and(|s| {
+            matches!(
+                s.permission.processor.id.as_str(),
+                "lab-api" | "lab-api-selected-prior-v2" | "lab-api-selected-prior-attested-v1"
+            )
+        })
     }
 
     /// Only accepted speech coalesces. All controls retain their cancellation

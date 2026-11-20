@@ -65,12 +65,12 @@ remains subject to that account's or API organisation's retention terms.
 
 A macOS debug build with `native-audio-spike`, `lab-evaluator` and a private
 `timing-log` channel can explicitly opt into a Stop-only signal handshake for a
-fictional QuickTime application-source session:
+fictional application-source session:
 `TALKQTE_DEV_STOP_SIGNAL=usr2` and `TALKQTE_DEV_LAB_RUN_ID` set to the broker's
 same opaque run ID (1–64 ASCII letters, digits, hyphens or underscores). Settings
 are frozen at setup, together with the exact `TALKQTE_DEV_APPLICATION_SOURCE`
-value `QuickTime Player` and a required finite positive `TALKQTE_DEV_STOP_AFTER_S`.
-Other sources or a missing/invalid guard refuse arming. The microphone must be
+value `QuickTime Player`, or the separately [identity-pinned owned player](development-owned-player-source.md), and a required finite positive `TALKQTE_DEV_STOP_AFTER_S`.
+Other sources, incomplete owned identity or a missing/invalid guard refuse arming. The microphone must be
 unused in this process before arming (no admitted start, capture or cleanup
 pending, and Off). Idle ordinary Stop may advance control generation/revision
 without admitting a microphone start; that alone does not invalidate release. This mode blocks standalone microphone admission and live
