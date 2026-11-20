@@ -172,3 +172,32 @@ for (const [kind, message] of [
     ).toBeEnabled();
   });
 }
+
+test('local path fallback lists notes without importing and clears the transient path', async ({
+  page,
+}) => {
+  await page.goto('/?notes=markdown');
+  await page.locator('.context-disclosure > summary').press('Enter');
+  await panel(page)
+    .getByRole('button', { name: 'Use a local file path' })
+    .click();
+  const input = panel(page).getByLabel('Local notes file path');
+  await expect(panel(page)).toContainText('excluded from Markdown exports');
+  await expect(panel(page)).toContainText(
+    'Sending selected prior notes to a cue provider requires a separate processing review and approval.',
+  );
+  await input.fill('/fictional/notes.md');
+  await panel(page).getByRole('button', { name: 'Cancel file path' }).click();
+  await panel(page)
+    .getByRole('button', { name: 'Use a local file path' })
+    .click();
+  await expect(input).toHaveValue('');
+  await input.fill('/fictional/notes.md');
+  await panel(page).getByRole('button', { name: 'Read notes file' }).click();
+  const dialog = page.getByRole('dialog', { name: /Choose notes/ });
+  await expect(dialog).toContainText('Welcome guide printing.md');
+  await expect(dialog.getByRole('checkbox')).not.toBeChecked();
+  await expect(dialog.getByRole('button', { name: /^Import/ })).toBeDisabled();
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(panel(page).getByRole('listitem')).toHaveCount(0);
+});
