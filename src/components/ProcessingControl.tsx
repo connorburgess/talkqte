@@ -56,7 +56,15 @@ export const issueText = {
 };
 /** The development lab's processors: a subscription CLI or the paid API. */
 function isLabProcessor(id: string | undefined): boolean {
-  return id === 'lab-subscription' || id === 'lab-api';
+  return id === 'lab-subscription' || isLabApi(id);
+}
+
+function isLabApi(id: string | undefined): boolean {
+  return (
+    id === 'lab-api' ||
+    id === 'lab-api-selected-prior-v2' ||
+    id === 'lab-api-selected-prior-attested-v1'
+  );
 }
 
 const apiLaunchApproval =
@@ -500,7 +508,7 @@ export function ProcessingControl({
             snapshot.issue,
             snapshot.processor?.name,
             isLabProcessor(snapshot.processor?.id),
-            snapshot.processor?.id === 'lab-api',
+            isLabApi(snapshot.processor?.id),
           )}
         </p>
       )}
@@ -510,7 +518,7 @@ export function ProcessingControl({
           appears; newer speech is checked next. A reply later than 8 s shows no
           cue and the run continues. Pause, Dismiss, Off, Stop and any other
           failure end the run; Resume does not restart it.{' '}
-          {snapshot?.processor?.id === 'lab-api'
+          {isLabApi(snapshot?.processor?.id)
             ? "Uses the lab owner's Anthropic API key, billed per token; the lab caps requests and spending per run."
             : 'The lab shares a CLI-dispatch budget across roles; underlying provider request count is unobserved.'}
         </p>
@@ -670,7 +678,18 @@ export function ProcessingControl({
           ) : (
             <>
               <fieldset disabled={!!busy || !!status?.failed}>
-                <legend>Prior notes · optional</legend>
+                <legend>
+                  {snapshot?.processor?.requiredNoteCount === undefined
+                    ? 'Prior notes · optional'
+                    : 'Prior notes'}
+                </legend>
+                {snapshot?.processor?.requiredNoteCount !== undefined && (
+                  <p>
+                    {snapshot.processor.requiredNoteCount === 1
+                      ? 'This diagnostic requires exactly one approved prior note.'
+                      : 'This control requires no prior notes.'}
+                  </p>
+                )}
                 <p>Importing a note does not approve it for processing.</p>
                 {snapshot?.notes.length ? (
                   <div className="processing-notes">
@@ -698,8 +717,9 @@ export function ProcessingControl({
                   </div>
                 ) : (
                   <p>
-                    No prior notes imported. You can continue with new speech
-                    only.
+                    {snapshot?.processor?.requiredNoteCount === 1
+                      ? 'Import a prior note before preparing this review.'
+                      : 'No prior notes imported. You can continue with new speech only.'}
                   </p>
                 )}
               </fieldset>
@@ -708,7 +728,12 @@ export function ProcessingControl({
           <div className="processing-actions">
             <button
               className="primary-button"
-              disabled={!!busy || !!status?.failed}
+              disabled={
+                !!busy ||
+                !!status?.failed ||
+                (snapshot?.processor?.requiredNoteCount !== undefined &&
+                  selected.length !== snapshot.processor.requiredNoteCount)
+              }
               type="submit"
             >
               {busy === 'review'

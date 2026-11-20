@@ -142,6 +142,19 @@ mod tests {
     }
 
     #[test]
+    fn selected_api_also_rejects_launch_approval_without_cloud_transcription() {
+        let mut engine = engine_with("lab-api-selected-prior-v2");
+        Settings::parse(Some("on"), None)
+            .unwrap()
+            .apply_with(&mut engine, false);
+        assert!(!engine.has_processing_permission());
+        assert_eq!(
+            serde_json::to_value(engine.processing_issue()).unwrap(),
+            "devSettings"
+        );
+    }
+
+    #[test]
     fn with_cloud_transcription_a_launch_setting_approves_nothing_and_never_opens_audio() {
         // A subscription backend, launch consent on, cloud transcription
         // selected: the setting fails closed instead of approving.

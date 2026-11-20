@@ -40,6 +40,7 @@ fn main() {
             "model_status",
             "companion_anchor",
             "pick_context_file",
+            "read_context_file_path",
             "import_context_notes",
             "cancel_context_import",
             "context_items",
