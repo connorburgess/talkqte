@@ -1,6 +1,7 @@
 {
   "name": "talkqte",
   "version": "0.1.0",
+  "description": "A meeting companion that surfaces the right cue at the right moment to help keep meetings on target. Early prototype.",
   "private": true,
   "type": "module",
   "license": "SEE LICENSE IN LICENSE",
