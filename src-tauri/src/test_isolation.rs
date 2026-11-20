@@ -18,6 +18,19 @@ pub(crate) struct Isolated {
 /// `variables` added to its environment and `without` removed, and fails
 /// unless exactly that test ran and passed.
 pub(crate) fn run(path: &str, variables: &[(&str, &str)], without: &[&str]) -> Isolated {
+    let variables: Vec<_> = variables
+        .iter()
+        .map(|(key, value)| (*key, std::ffi::OsStr::new(value)))
+        .collect();
+    run_os(path, &variables, without)
+}
+
+/// Also accepts invalid-Unicode environment values for fail-closed selector tests.
+pub(crate) fn run_os(
+    path: &str,
+    variables: &[(&str, &std::ffi::OsStr)],
+    without: &[&str],
+) -> Isolated {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let folder = std::env::temp_dir().join(format!(
         "talkqte-isolated-{}-{}",

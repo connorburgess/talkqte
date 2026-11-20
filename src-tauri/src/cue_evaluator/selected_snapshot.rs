@@ -1,5 +1,5 @@
-//! Inert selected-snapshot input format. No processor registration or transport
-//! entry point calls this; legacy prompt_input continues to reject prior notes.
+//! Selected-snapshot projections: v1 remains inert; v2 is used only by the
+//! explicit API lab mode. Legacy prompt_input continues to reject prior notes.
 use super::{Failure, Provenance, Request};
 use serde_json::{json, Value};
 
@@ -17,6 +17,15 @@ impl Request {
     /// this request. Revision strings are opaque local versions, not a claim
     /// that a provider verified the snapshot as current.
     pub fn selected_snapshot_input(&self) -> Result<String, Failure> {
+        self.selected_input(false)
+    }
+
+    /// API-only v2 projection; zero notes is an explicit selected-mode control.
+    pub fn selected_prior_context_input(&self) -> Result<String, Failure> {
+        self.selected_input(true)
+    }
+
+    fn selected_input(&self, v2: bool) -> Result<String, Failure> {
         let mut events = Vec::new();
         let mut notes = Vec::new();
         for source in &self.sources {
@@ -59,7 +68,8 @@ impl Request {
                 }
             }
         }
-        if events.is_empty() || notes.is_empty() || notes.len() > crate::context::MAX_ITEMS {
+        if events.is_empty() || (!v2 && notes.is_empty()) || notes.len() > crate::context::MAX_ITEMS
+        {
             return Err(Failure::InvalidInput);
         }
         if self
@@ -85,7 +95,7 @@ impl Request {
             value
         });
         let mut value = json!({
-            "inputContract":"selected-snapshots-v1", "events":events,
+            "inputContract":if v2 {"selected-prior-context-v2"} else {"selected-snapshots-v1"}, "events":events,
             "priorNotes":notes,"existingCue":cue
         });
         if let Some(name) = &self.user_name {
@@ -158,6 +168,27 @@ mod tests {
     }
 
     #[test]
+    fn selected_v2_empty_control_and_exact_native_projection_preserve_v1() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../scripts/fixtures/selected-context-input.json"
+        ))
+        .unwrap();
+        let mut r = request(u64::MAX);
+        assert_eq!(
+            serde_json::from_str::<Value>(&r.selected_prior_context_input().unwrap()).unwrap(),
+            fixture
+        );
+        r.sources.pop();
+        assert_eq!(r.selected_snapshot_input(), Err(Failure::InvalidInput));
+        let empty: Value =
+            serde_json::from_str(&r.selected_prior_context_input().unwrap()).unwrap();
+        assert_eq!(empty["priorNotes"], json!([]));
+        assert_eq!(empty["inputContract"], "selected-prior-context-v2");
+        r.sources.clear();
+        assert_eq!(r.selected_prior_context_input(), Err(Failure::InvalidInput));
+    }
+
+    #[test]
     fn selected_mode_shared_control_policy_uses_real_request_construction() {
         use crate::cue_evaluator::{CueEnd, EarlierCue, ExistingCue};
         let corpus: Value = serde_json::from_str(include_str!(
@@ -208,6 +239,11 @@ mod tests {
                     } else {
                         assert_eq!(constructed.is_ok(), allowed, "constructor field {field}");
                     }
+                    let v2 = constructed
+                        .as_ref()
+                        .ok()
+                        .map(|r| r.selected_prior_context_input());
+                    assert_eq!(v2.is_some_and(|v| v.is_ok()), allowed, "v2 field {field}");
                     let serialized = constructed.and_then(|r| r.selected_snapshot_input());
                     assert_eq!(serialized.is_ok(), allowed, "selected field {field}");
                     if let Ok(serialized) = serialized {
