@@ -111,7 +111,8 @@ impl ProcessorConfiguration {
 
     /// Opt into bounded transcript history for a transcript-only adapter.
     /// This changes the complete reviewed configuration and its disclosure;
-    /// existing grants/reviews cannot authorize it. No app flag calls this.
+    /// existing grants/reviews cannot authorize it. Default-off explicit API lab
+    /// selection requires expanded session review.
     pub fn with_bounded_transcript_history(mut self) -> Result<Self, ProcessingError> {
         const DISCLOSURE: &str = " Transcript context: up to 24 segments from the last 90 seconds, subject to a 16384-byte serialized input limit and the approved speech scope. Visible cue evidence may be older. No prior notes.";
         if !self.bounded_history {
