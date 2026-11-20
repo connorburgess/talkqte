@@ -32,6 +32,7 @@
     "allow-live-status",
     "allow-model-status",
     "allow-pick-context-file",
+    "allow-read-context-file-path",
     "allow-import-context-notes",
     "allow-cancel-context-import",
     "allow-context-items",
