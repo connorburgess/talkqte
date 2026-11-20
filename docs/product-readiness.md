@@ -277,3 +277,32 @@ Before checking off a roadmap item or merging a change to capabilities, setup, u
 `npm run check:docs` backs this review in CI: it fails on broken relative links and heading anchors, and on numbers quoted from the source that no longer match it, and it posts a reminder when app source changes without a documentation change. When a document starts quoting a new number from the source, add it to the fact list in `scripts/check-docs.mjs`. The check cannot tell whether prose is still accurate.
 
 At milestone boundaries, also review the whole discover → install → first use → Stop/recovery → update/support journey and any affected website claims. Record inconsistencies and the next release blocker in the milestone evidence. Keep the README a concise entry point and detailed validation in the relevant documents; do not add features or rewrite accurate material merely to complete this review.
+
+The [selected prior context API lab path](selected-context-lab-opt-in.md) adds an explicit versioned selected-source route and empty-note control. Its next blocker is independently reviewed combined native/JS source and hosted native validation plus fake production-route/package evidence; source wiring alone is not a run-ready app or provider/account acceptance.
+
+The selected-context lab's [owned-player admission correction](development-owned-player-source.md#selected-context-composition-and-acceptance)
+restores exact PID/start/executable/bundle binding through setup, source ownership
+and listening/retirement observations. The next blocker is exact-head hosted
+validation and a reviewed fixed-source artifact/package; the failed earlier
+artifact is retained, and no launch or provider success follows from the patch.
+
+The corrected artifact's subsequent pre-HELLO `Unavailable` refusal remains
+unresolved. [Fixed startup diagnostics](development-owned-player-source.md#fixed-startup-diagnostics)
+distinguish metadata readiness, Runtime admission, session creation and recognizer
+load without changing guards or exposing content. Their next acceptance is exact
+review/hosted validation and separately authorized diagnostic runtime evidence;
+the failed run and its cleanup outcome remain preserved.
+
+
+### Local file chooser fallback
+
+A macOS file-panel service initialization timeout was observed before the notes reader ran. **Use a local file path** provides an explicit local-only alternative through the same bounded file reader, preview, selection and import flow; it does not fix the OS panel service. The path is transient and notes remain in memory for that app session. A fresh runner cannot inherit them.
+
+Acceptance still requires the replacement exact-source signed app to list the fictional Markdown via this alternative, import one explicitly selected note in the same running app, and verify that exact selected scope before the owner reviews/enables processing. Source/browser tests do not establish native panel recovery or this end-to-end acceptance. No provider dispatch or paid retry follows from importing a file.
+
+
+The first signed fallback build refused `read_context_file_path` before parsing because the handler was absent from the build-time command manifest and main-window capability. The correction adds both narrowly scoped declarations. A native IPC regression must use the generated production ACL and real command, accept a main-window local preview, reject companion/remote requests, and retain explicit import/processing separation. Browser preview success alone does not validate this boundary. Same-process signed-app import acceptance remains required after the corrected artifact is built.
+
+### Selected-note dispatch verification
+
+The [attested diagnostic path](selected-note-attestation.md) requires an exact one-note grant (or explicit zero-note control), credential-free scope readiness, and private note-projection equality at SDK entry. Offline source/tests do not establish native execution or model use. Next blocker: independent exact-delta review, named hosted Rust execution, reviewed native/JS/runner artifact composition, then separately authorized same-process source review and diagnostic acceptance. Earlier import-only screenshots remain insufficient evidence of processing inclusion.

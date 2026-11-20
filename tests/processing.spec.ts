@@ -795,3 +795,75 @@ test('strict subscription lab names Codex and discloses terminal controls in the
       .filter({ hasText: 'a deadline ended the lab connection' }),
   ).not.toContainText('twice');
 });
+
+test('selected API identity keeps lab billing and launch-approval guidance', async ({
+  page,
+}) => {
+  await open(page, '?hosted');
+  await send(page, {
+    processor: {
+      id: 'lab-api-selected-prior-v2',
+      revision: 1,
+      name: 'Claude',
+      model: 'Fictional model',
+      location: 'hosted',
+      destination: 'Example service',
+      dataPolicy: 'Fictional selected snapshots only after review.',
+    },
+    issue: 'devSettings',
+  });
+  await expect(
+    page.getByText(
+      /launch-time approval.*not accepted for the API lab backend/,
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Uses the lab owner's Anthropic API key, billed per token/),
+  ).toBeVisible();
+  expect(await calls(page, 'approve_processing_scope')).toEqual([]);
+});
+
+test('required diagnostic note count is explicit and never selects or approves notes automatically', async ({
+  page,
+}) => {
+  await open(page, '?hosted');
+  const initial = await page.evaluate(() => window.processingTest.snapshot());
+  await send(page, {
+    processor: { ...initial.processor!, requiredNoteCount: 1 },
+  });
+  await page
+    .getByRole('button', { name: 'Review processing', exact: true })
+    .click();
+  await expect(
+    page.getByText('This diagnostic requires exactly one approved prior note.'),
+  ).toBeVisible();
+  const button = page.getByRole('button', { name: 'Review selected sources' });
+  await expect(button).toBeDisabled();
+  expect(await calls(page, 'review_processing_scope')).toEqual([]);
+  await page.getByRole('checkbox', { name: /supplier review/ }).check();
+  await expect(button).toBeEnabled();
+  await page.getByRole('checkbox', { name: /watering plan/ }).check();
+  await expect(button).toBeDisabled();
+  expect(await calls(page, 'approve_processing_scope')).toEqual([]);
+});
+
+test('explicit zero-note control still requires owner review and rejects selecting a note', async ({
+  page,
+}) => {
+  await open(page, '?hosted');
+  const initial = await page.evaluate(() => window.processingTest.snapshot());
+  await send(page, {
+    processor: { ...initial.processor!, requiredNoteCount: 0 },
+  });
+  await page
+    .getByRole('button', { name: 'Review processing', exact: true })
+    .click();
+  await expect(
+    page.getByText('This control requires no prior notes.'),
+  ).toBeVisible();
+  const button = page.getByRole('button', { name: 'Review selected sources' });
+  await expect(button).toBeEnabled();
+  await page.getByRole('checkbox', { name: /supplier review/ }).check();
+  await expect(button).toBeDisabled();
+  expect(await calls(page, 'approve_processing_scope')).toEqual([]);
+});
