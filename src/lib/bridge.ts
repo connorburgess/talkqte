@@ -7,7 +7,6 @@ import type {
   GranolaStatus,
   LiveStatus,
   MergeOutcome,
-  ModelStatus,
   PickedNotes,
   Snapshot,
   UpdateCheckReport,
@@ -74,24 +73,6 @@ export async function watchAnchor(receive: (edge: 'top' | 'bottom') => void) {
     if (!moved && valid(edge)) receive(edge);
   } catch {
     // Nothing to read now; the next move says which edge it is.
-  }
-  return unlisten;
-}
-
-/** Reports the optional speech model download and its later changes. */
-export async function watchModel(receive: (status: ModelStatus) => void) {
-  if (preview) {
-    receive((await preview).modelStatus());
-    return () => {};
-  }
-  const unlisten = await listen<ModelStatus>('model:changed', ({ payload }) =>
-    receive(payload),
-  );
-  try {
-    receive(await invoke<ModelStatus>('model_status'));
-  } catch (error) {
-    unlisten();
-    throw error;
   }
   return unlisten;
 }

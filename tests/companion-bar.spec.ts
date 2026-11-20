@@ -88,13 +88,13 @@ for (const size of ['standard', 'large'] as const)
       await expect(dot).toBeInViewport({ ratio: 1 });
       await expect(bar.locator('.companion-capture')).toHaveAttribute(
         'title',
-        'Mic on · Local',
+        'Mic on · not transcribing yet',
       );
       // The words stay for assistive technology, out of sight.
       const status = bar.getByRole('status');
-      await expect(status).toHaveText('Mic on · Local');
+      await expect(status).toHaveText('Mic on · not transcribing yet');
       expect((await status.boundingBox())!.width).toBeLessThanOrEqual(1);
-      await expect(bar).toHaveText('Mic on · Local');
+      await expect(bar).toHaveText('Mic on · not transcribing yet');
 
       // Three controls, each an icon with a name and the same tooltip.
       const controls = bar.getByRole('button');
@@ -192,7 +192,7 @@ test('the bar never shows capture that is not happening, and spells out any stat
   await expect(
     bar.getByRole('img', { name: 'Application audio on' }),
   ).toBeVisible();
-  await expect(status).toHaveText('App audio · Local');
+  await expect(status).toHaveText('App audio · not transcribing yet');
   await expect(
     bar.getByRole('img', { name: /Signal detected|Quiet input/ }),
   ).toHaveCount(0);
@@ -250,7 +250,7 @@ test('a model connection shows while lines may be sent, and why it stopped', asy
     bar.getByRole('img', { name: 'Model cues on: recent lines go to Claude' }),
   ).toBeVisible();
   await expect(bar.getByRole('status')).toHaveText(
-    'Mic on · lines go to Claude',
+    'Mic on · to Deepgram and Claude',
   );
   await publish({ model: 'sending' });
   await expect(
@@ -270,7 +270,36 @@ test('a model connection shows while lines may be sent, and why it stopped', asy
   await expect(off).toContainText(
     'your Claude usage or rate limit was reached',
   );
-  await expect(bar.getByRole('status')).toHaveText('Mic on · Local');
+  await expect(bar.getByRole('status')).toHaveText(
+    'Mic on · not transcribing yet',
+  );
+});
+
+test('with cloud transcription, the bar says where audio goes and never says Local', async ({
+  page,
+}) => {
+  const bar = await companion(page);
+  await microphone(page, { status: 'listening', activity: 'quiet' });
+  const publish = (value: Record<string, unknown>) =>
+    page.evaluate((value) => window.liveTest.publish(value as never), value);
+  const status = bar.getByRole('status');
+  // Before the review is approved nothing is transcribed or sent.
+  await publish({ transcription: { provider: 'Deepgram' } });
+  await expect(status).toHaveText('Mic on · not transcribing yet');
+  // Approved: audio goes to the transcription service, lines to the model.
+  await publish({ model: 'on' });
+  await expect(status).toHaveText('Mic on · to Deepgram and Claude');
+  // Paused cues send no lines, but audio is still transcribed.
+  await publish({ cuesPaused: true });
+  await expect(status).toHaveText('Mic still on · audio to Deepgram');
+  await publish({ cuesPaused: false });
+  // A stopped stream is said, and nothing claims to be local.
+  await publish({
+    model: undefined,
+    transcription: { provider: 'Deepgram', stopped: 'network' },
+  });
+  await expect(status).toHaveText('Mic on · transcription stopped');
+  await expect(bar.getByText(/Local/)).toHaveCount(0);
 });
 
 test('Codex lab disclosure uses the selected provider and strict first-timeout policy', async ({
@@ -286,21 +315,21 @@ test('Codex lab disclosure uses the selected provider and strict first-timeout p
     page.evaluate((value) => window.liveTest.publish(value as never), value);
   await publish({ model: 'sending', modelProvider: 'Codex', modelLab: true });
   await expect(bar.getByRole('status')).toHaveText(
-    'Mic on · lines go to Codex',
+    'Mic on · to Deepgram and Codex',
   );
   await expect(
     bar.getByRole('img', { name: 'Sending recent lines to Codex' }),
   ).toBeVisible();
   await publish({ model: 'stopped', modelIssue: 'timedOut' });
   await expect(bar.getByText('Cues off', { exact: false })).toContainText(
-    'the model exceeded its deadline',
+    'a deadline ended the lab connection',
   );
   await expect(bar.getByText('Cues off', { exact: false })).not.toContainText(
     'twice',
   );
   await publish({ modelIssue: 'authentication' });
   await expect(bar.getByText('Cues off', { exact: false })).toContainText(
-    'Codex subscription sign-in',
+    'Codex sign-in or setup for the lab connection',
   );
   await expect(bar.getByText('Cues off', { exact: false })).not.toContainText(
     'Claude',
