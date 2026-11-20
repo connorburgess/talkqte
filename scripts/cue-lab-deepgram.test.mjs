@@ -347,9 +347,48 @@ test('with reconnect the token stays until Stop, each replacement reconnects wit
   assert.equal(launcher.transcription.tokenRemoved, true);
 });
 
+test('a failed pending replacement spends the second attempt before Connected without losing the token', async (t) => {
+  const api = await fakeGrant();
+  t.after(api.close);
+  const { launcher, owner, failures } = await launchCloud(
+    t,
+    'cloud-reconnect-pending',
+    await mint(api),
+    { reconnect: true },
+  );
+  await reviewThenRelease(launcher);
+  await waitFor(() => launcher.transcription.reconnects === 2);
+  await delay(50);
+  assert.equal(launcher.transcription.reconnects, 2);
+  assert.equal(failures.includes('failed'), false);
+  const states = readFileSync(launcher.timingPath, 'utf8')
+    .trim()
+    .split('\n')
+    .map(JSON.parse)
+    .filter(
+      (r) =>
+        r.event === 'stt_state' &&
+        ['connected', 'reconnecting'].includes(r.state),
+    );
+  assert.deepEqual(
+    states.map((r) => r.state),
+    ['connected', 'reconnecting', 'reconnecting', 'connected'],
+  );
+  assert.equal(states[0].query, states[3].query);
+  assert.equal(existsSync(join(launcher.directory, 'stt-token')), true);
+  assert.deepEqual(await owner.stop(), { released: true });
+  launcher.close();
+  assert.equal(existsSync(join(launcher.directory, 'stt-token')), false);
+});
+
 for (const [name, fixtureCase, reconnect] of [
   ['a run that did not allow reconnects', 'cloud-reconnect', undefined],
   ['a third replacement', 'cloud-reconnect-thrice', true],
+  ['a third pending replacement', 'cloud-reconnect-pending-thrice', true],
+  ['before the first confirmed query', 'cloud-reconnect-before-first', true],
+  ['another session', 'cloud-reconnect-other-session', true],
+  ['a changed query', 'cloud-reconnect-changed-query', true],
+  ['pending replacements without opt-in', 'cloud-reconnect-pending', undefined],
 ])
   test(`a reconnect in ${name} stops the run`, async (t) => {
     const api = await fakeGrant();

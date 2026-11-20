@@ -161,7 +161,12 @@ if (
   mode === 'cloud-early' ||
   mode === 'cloud-other-session' ||
   mode === 'cloud-reconnect' ||
-  mode === 'cloud-reconnect-thrice'
+  mode === 'cloud-reconnect-thrice' ||
+  mode === 'cloud-reconnect-pending' ||
+  mode === 'cloud-reconnect-pending-thrice' ||
+  mode === 'cloud-reconnect-before-first' ||
+  mode === 'cloud-reconnect-other-session' ||
+  mode === 'cloud-reconnect-changed-query'
 ) {
   // Mirrors the app's cloud transcription settings and token-file rules
   // (#344): at session start the token file exists as an owner-only file in
@@ -228,25 +233,36 @@ if (
       } catch {}
       if (/^[A-Za-z0-9._-]{20,4096}$/.test(token)) {
         clearInterval(poll);
-        const connected = () =>
+        const connected = (changed = false) =>
           row({
             event: 'stt_state',
             session: started.session,
             state: 'connected',
             audio_ms: 0,
             query:
-              'model=nova-3&language=en&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&diarize=true&endpointing=300&utterance_end_ms=1000&vad_events=true&mip_opt_out=true',
+              'model=nova-3&language=' +
+              (changed ? 'fr' : 'en') +
+              '&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&diarize=true&endpointing=300&utterance_end_ms=1000&vad_events=true&mip_opt_out=true',
           });
-        connected();
+        if (mode !== 'cloud-reconnect-before-first') connected();
         // As #357: a stalled stream is replaced by one that reads the token
         // file again; with the file gone, the replacement fails as settings.
         const times =
-          { 'cloud-reconnect': 2, 'cloud-reconnect-thrice': 3 }[mode] ?? 0;
+          {
+            'cloud-reconnect': 2,
+            'cloud-reconnect-thrice': 3,
+            'cloud-reconnect-pending': 2,
+            'cloud-reconnect-pending-thrice': 3,
+            'cloud-reconnect-before-first': 1,
+            'cloud-reconnect-other-session': 1,
+            'cloud-reconnect-changed-query': 1,
+          }[mode] ?? 0;
         for (let n = 1; n <= times; n++)
           setTimeout(() => {
             row({
               event: 'stt_state',
-              session: started.session,
+              session:
+                mode === 'cloud-reconnect-other-session' ? 3 : started.session,
               state: 'reconnecting',
               code: 'stalled',
               gap_ms: 1200,
@@ -256,8 +272,13 @@ if (
             try {
               again = usableFile() ? readFileSync(file, 'utf8').trim() : '';
             } catch {}
-            if (/^[A-Za-z0-9._-]{20,4096}$/.test(again)) connected();
-            else
+            if (/^[A-Za-z0-9._-]{20,4096}$/.test(again)) {
+              const pending =
+                mode === 'cloud-reconnect-pending' ||
+                mode === 'cloud-reconnect-pending-thrice';
+              if (!pending || n === times)
+                connected(mode === 'cloud-reconnect-changed-query');
+            } else
               row({
                 event: 'stt_state',
                 session: started.session,
