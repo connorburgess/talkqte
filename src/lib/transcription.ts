@@ -5,6 +5,10 @@ export interface CloudTranscription {
   stopped?: string;
   /** Some audio was not sent because the connection fell behind. */
   droppedAudio?: boolean;
+  /** Replacement streams opened after connection problems, and the speech
+   * (ms) lost with the failed ones. */
+  reconnects?: number;
+  lostMs?: number;
 }
 
 const STOP_REASONS: Record<string, string> = {
@@ -20,6 +24,26 @@ const STOP_REASONS: Record<string, string> = {
   lab_ended: 'the lab run ended, so audio stopped being sent',
   stalled: 'the connection stopped responding',
 };
+
+/** Said while a session continues after a reconnect. Lost speech is not
+ * sent again, so the transcript has a gap there. */
+export function transcriptionReconnectText(
+  transcription: CloudTranscription | undefined,
+): string | null {
+  if (!transcription?.reconnects || transcription.stopped) return null;
+  const lostMs = transcription.lostMs ?? 0;
+  const gap =
+    lostMs <= 0
+      ? 'The amount of speech not transcribed is unknown.'
+      : lostMs < 1000
+        ? 'Less than 1 s of speech was not transcribed.'
+        : `About ${Math.round(lostMs / 1000)} s of speech was not transcribed.`;
+  const times =
+    transcription.reconnects === 1
+      ? 'once'
+      : `${transcription.reconnects} times`;
+  return `Transcription by ${transcription.provider} reconnected ${times} after a connection problem. ${gap}`;
+}
 
 /** Said while a session continues after audio was dropped. */
 export function transcriptionDropText(
