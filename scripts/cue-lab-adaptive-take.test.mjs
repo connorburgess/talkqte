@@ -735,11 +735,11 @@ test('composition starts neutral speech before lazy auth, waits prefix completio
   const p = await playbackFixture();
   try {
     await Promise.race([
-    p.prefixStarted.promise,
-    p.take.done.then(() => {
-      throw new Error('take completed before the calibration prefix');
-    }),
-  ]);
+      p.prefixStarted.promise,
+      p.take.done.then(() => {
+        throw new Error('take completed before the calibration prefix');
+      }),
+    ]);
     await tick();
     assert.equal(p.f.calls.length, 0);
     assert.deepEqual(p.trace.slice(0, 3), ['Listening', 'recorder', 'prefix']);
