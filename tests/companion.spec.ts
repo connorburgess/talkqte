@@ -33,7 +33,7 @@ async function expectCompanionToFit(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.setViewportSize({ width: 420, height: 420 });
+  await page.setViewportSize({ width: 320, height: 232 });
   await standIn(page, '/?window=cue');
   await expect(
     page.getByText(
@@ -48,7 +48,9 @@ test('companion stays compact between cues and returns to its bar after Dismiss'
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 76 });
-  await expect(page.getByRole('status')).toHaveText('Mic on · Local');
+  await expect(page.getByRole('status')).toHaveText(
+    'Mic on · not transcribing yet',
+  );
   // The controls are icons: each has a name and a tooltip.
   for (const name of ['Stop live session', 'Hide companion']) {
     const control = page.getByRole('button', { name, exact: true });
@@ -67,7 +69,7 @@ test('companion stays compact between cues and returns to its bar after Dismiss'
   }
   await expectCompanionToFit(page);
   await say(page);
-  await page.setViewportSize({ width: 420, height: 420 });
+  await page.setViewportSize({ width: 320, height: 232 });
   await expect(page.getByRole('heading', { name: firstCue })).toBeVisible();
   await expectCompanionToFit(page);
   await page.getByRole('button', { name: 'Dismiss' }).click();
@@ -75,16 +77,18 @@ test('companion stays compact between cues and returns to its bar after Dismiss'
     page.getByRole('region', { name: 'Suggested question' }),
   ).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Pause cues' })).toBeVisible();
-  await expect(page.getByRole('status')).toHaveText('Mic on · Local');
+  await expect(page.getByRole('status')).toHaveText(
+    'Mic on · not transcribing yet',
+  );
 });
 
 test('a question fits the narrow window used on a small display', async ({
   page,
 }) => {
-  // The native window is 360 CSS px wide on a display under 1100 logical px.
-  // Measured without the entrance animation, which scales the card briefly.
+  // The native window is 320 × 232 CSS px for a cue on every display.
+  // Measured without the entrance animation.
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.setViewportSize({ width: 360, height: 340 });
+  await page.setViewportSize({ width: 320, height: 232 });
   await say(page);
   const question = page.getByRole('region', { name: 'Suggested question' });
   await expect(question.getByRole('heading')).toHaveText(firstCue);
@@ -108,9 +112,9 @@ test('a question fits the narrow window used on a small display', async ({
   ).toBeVisible();
   await expectCompanionToFit(page);
   expect(await fitsSideways()).toBe(true);
-  // Large text in the same narrow window: 420 px tall.
+  // Large text in the same narrow window: 276 px tall.
   await page.evaluate(() => window.liveTest.setQuestionSize('large'));
-  await page.setViewportSize({ width: 360, height: 420 });
+  await page.setViewportSize({ width: 320, height: 276 });
   await expectCompanionToFit(page);
   expect(await fitsSideways()).toBe(true);
 });
@@ -182,7 +186,9 @@ test('a cue that passes untouched leaves the bar, with no countdown shown meanwh
   await page.evaluate(() => window.liveTest.setCue(null));
   await expect(question).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Pause cues' })).toBeVisible();
-  await expect(page.getByRole('status')).toHaveText('Mic on · Local');
+  await expect(page.getByRole('status')).toHaveText(
+    'Mic on · not transcribing yet',
+  );
 });
 
 const soon = 'We should have it ready soon, before the next visitors arrive.';
@@ -217,7 +223,9 @@ test('a quoted line is the cue itself, with nothing repeated under it', async ({
   // no control but Hold and Dismiss.
   await expect(question.locator('blockquote')).toHaveCount(0);
   await expect(question.getByRole('button')).toHaveCount(2);
-  await expect(page.getByRole('status')).toHaveText('Mic on · Local');
+  await expect(page.getByRole('status')).toHaveText(
+    'Mic on · not transcribing yet',
+  );
 });
 
 test('an answered question being read stays and shows the answer', async ({
@@ -251,7 +259,7 @@ test('an answered question being read stays and shows the answer', async ({
   );
   await expectCompanionToFit(page);
   await page.evaluate(() => window.liveTest.setQuestionSize('large'));
-  await page.setViewportSize({ width: 420, height: 420 });
+  await page.setViewportSize({ width: 320, height: 232 });
   await expectCompanionToFit(page);
   await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
   await expect(question).toHaveCount(0);
