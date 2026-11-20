@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import { createServer } from 'node:http';
 import {
   CODEX_SUPPORT,
@@ -861,5 +861,140 @@ test('a late reply after a scoped abort is discarded without ending the session'
   release({ stdout: events() });
   await rejects(first, 'cancelled', 1);
   assert.deepEqual((await session.request(request())).value, value);
+  await session.close();
+});
+
+// A harmless fake CLI: prints the given event lines, then stays alive as the
+// real CLI does during its own shutdown, until it is signalled.
+const lingeringCli = (lines) => [
+  '-e',
+  `for (const l of ${JSON.stringify(lines)}) process.stdout.write(l + '\\n');` +
+    'setInterval(() => {}, 1000);',
+];
+const fakeEvents = (extra = []) => [
+  JSON.stringify({ type: 'thread.started', thread_id: 'fictional' }),
+  JSON.stringify({ type: 'turn.started' }),
+  JSON.stringify({
+    type: 'item.completed',
+    item: { type: 'agent_message', text: JSON.stringify(value) },
+  }),
+  ...extra,
+  JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 4 } }),
+];
+// Offline stand-in that supervises the fake CLI exactly as the subscription
+// runner does: event reader, early completion and stage receipts.
+const fakeCliRun =
+  (lines) =>
+  (_request, { signal, onStage }) => {
+    const reader = createCodexEventReader();
+    return runBoundedCodexProcess(process.execPath, lingeringCli(lines), {
+      env: {},
+      signal,
+      deadlineMs: 20000,
+      onStdoutLine: reader.accept,
+      isComplete: () => reader.complete,
+      onStage,
+    });
+  };
+
+test('a decision is returned once turn.completed follows one message, without waiting for the CLI to exit', async () => {
+  const session = await openCodexLab(
+    options({ deadlineMs: 20000, run: fakeCliRun(fakeEvents()) }),
+  );
+  const started = performance.now();
+  const result = await session.request(request());
+  // The fake CLI never exits by itself; only early retirement ends it.
+  assert.ok(performance.now() - started < 5000);
+  assert.deepEqual(result.value, value);
+  const [receipt] = session.receipts;
+  assert.equal(receipt.outcome, 'result');
+  for (const key of ['decisionReadyMs', 'retireRequestedMs', 'groupRetiredMs'])
+    assert.ok(Number.isSafeInteger(receipt[key]), key);
+  assert.ok(receipt.decisionReadyMs <= receipt.retireRequestedMs);
+  assert.ok(receipt.retireRequestedMs <= receipt.groupRetiredMs);
+  assert.deepEqual(Object.keys(receipt).sort(), [
+    'call',
+    'decisionReadyMs',
+    'exitedMs',
+    'firstOutputMs',
+    'groupRetiredMs',
+    'outcome',
+    'retireRequestedMs',
+    'settledMs',
+    'spawnedMs',
+  ]);
+  await session.close();
+});
+
+test('a second message or a turn.completed without a message is still a failure', async () => {
+  const second = JSON.stringify({
+    type: 'item.completed',
+    item: { type: 'agent_message', text: JSON.stringify(value) },
+  });
+  const noMessage = [
+    JSON.stringify({ type: 'thread.started', thread_id: 'fictional' }),
+    JSON.stringify({ type: 'turn.started' }),
+    JSON.stringify({ type: 'turn.completed', usage: {} }),
+  ];
+  for (const lines of [fakeEvents([second]), noMessage]) {
+    const session = await openCodexLab(
+      options({ deadlineMs: 20000, run: fakeCliRun(lines) }),
+    );
+    await rejects(session.request(request()), 'unexpected-event', 1);
+    assert.equal(session.receipts[0].decisionReadyMs, undefined);
+    await session.close();
+  }
+});
+
+test('a process group that survives early retirement is cleanup and ends the session', async () => {
+  const original = process.kill;
+  // The group-presence probe always reports a surviving member; real
+  // signals still reach the fake CLI.
+  mock.method(process, 'kill', (pid, signal) =>
+    pid < 0 && signal === 0 ? true : original.call(process, pid, signal),
+  );
+  try {
+    const session = await openCodexLab(
+      options({ deadlineMs: 20000, run: fakeCliRun(fakeEvents()) }),
+    );
+    await rejects(session.request(request()), 'cleanup', 1);
+    await rejects(session.request(request()), 'terminal', 1);
+    mock.restoreAll();
+    await session.close();
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test('an event arriving in a later chunk during the retire wait is still a failure', async () => {
+  // On TERM, this fake CLI writes one more event before exiting, as a real
+  // CLI might during shutdown; the reader must reject it.
+  const lines = fakeEvents();
+  const run = (_request, { signal, onStage }) => {
+    const reader = createCodexEventReader();
+    return runBoundedCodexProcess(
+      process.execPath,
+      [
+        '-e',
+        `for (const l of ${JSON.stringify(lines)}) process.stdout.write(l + '\\n');` +
+          `process.on('SIGTERM', () => process.stdout.write(${JSON.stringify(
+            JSON.stringify({ type: 'turn.started' }) + '\n',
+          )}, () => process.exit(0)));` +
+          'setInterval(() => {}, 1000);',
+      ],
+      {
+        env: {},
+        signal,
+        deadlineMs: 20000,
+        onStdoutLine: reader.accept,
+        isComplete: () => reader.complete,
+        onStage,
+      },
+    );
+  };
+  const session = await openCodexLab(options({ deadlineMs: 20000, run }));
+  await rejects(session.request(request()), 'unexpected-event', 1);
+  assert.ok(Number.isSafeInteger(session.receipts[0].decisionReadyMs));
+  await rejects(session.request(request()), 'terminal', 1);
   await session.close();
 });

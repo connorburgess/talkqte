@@ -406,7 +406,15 @@ export function createCodexEventReader() {
     }
     return { value, usage };
   };
-  return { accept, finish };
+  return {
+    accept,
+    finish,
+    // True once exactly one agent message has been followed by the single
+    // turn.completed; any later event is still rejected by accept().
+    get complete() {
+      return completed === 1 && text !== null;
+    },
+  };
 }
 
 export function parseCodexEvents(stdout) {
@@ -432,6 +440,7 @@ export function runBoundedCodexProcess(
     maxOutputBytes = MAX_BYTES,
     onStdoutLine,
     onStage,
+    isComplete,
   } = {},
 ) {
   // Content-free lifecycle receipts only: a fixed stage name, never output.
@@ -470,6 +479,7 @@ export function runBoundedCodexProcess(
       bytes = 0,
       partialLine = '',
       problem = null,
+      finished = false,
       killTimer;
     const killGroup = () => {
       if (child.pid)
@@ -488,6 +498,24 @@ export function runBoundedCodexProcess(
         } catch {
           /* already gone */
         }
+      // A failure during an early finish's retire wait replaces its timer.
+      clearTimeout(killTimer);
+      killTimer = setTimeout(killGroup, 100);
+    };
+    // The decision is complete: retire the process group now instead of
+    // waiting for the CLI's own shutdown. Retirement is still confirmed
+    // below before anything is returned.
+    const finishEarly = () => {
+      finished = true;
+      stage('decision-ready');
+      if (child.pid)
+        try {
+          process.kill(-child.pid, 'SIGTERM');
+        } catch {
+          /* already gone */
+        }
+      stage('retire-requested');
+      clearTimeout(killTimer);
       killTimer = setTimeout(killGroup, 100);
     };
     const abort = () => stop('cancelled');
@@ -512,6 +540,7 @@ export function runBoundedCodexProcess(
           } catch {
             stop('unexpected-event');
           }
+          if (!problem && !finished && isComplete?.()) finishEarly();
         }
       } else stderr += stderrDecoder.write(chunk);
     };
@@ -553,6 +582,9 @@ export function runBoundedCodexProcess(
         else stage('group-retired');
       }
       if (problem) return reject(problem);
+      // An early finish ended the CLI on purpose; its exit status is ours.
+      if (finished)
+        return resolve({ stdout, stderr, exitCode: code, finishedEarly: true });
       if (code !== 0) return reject(codexFailure('process'));
       resolve({ stdout, stderr, exitCode: code });
     });
@@ -605,6 +637,7 @@ async function subscriptionRunner(environment, maxOutputBytes, signal) {
         deadlineMs: request.deadlineMs,
         maxOutputBytes,
         onStdoutLine: reader.accept,
+        isComplete: () => reader.complete,
         onStage,
         input: JSON.stringify({
           instructions: request.instructions,
@@ -741,6 +774,8 @@ export async function openCodexLab({
         'first-output': 'firstOutputMs',
         exited: 'exitedMs',
         'group-retired': 'groupRetiredMs',
+        'decision-ready': 'decisionReadyMs',
+        'retire-requested': 'retireRequestedMs',
       }[name];
       if (key && receipt[key] === undefined)
         receipt[key] = Math.round(performance.now() - started);

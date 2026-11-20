@@ -8,6 +8,7 @@ import {
   createPreparedTake,
   createLabPlaybackSession,
   createFixedModelTake,
+  assertFixedModelTakeOptions,
 } from './cue-lab-prepared-take.mjs';
 import {
   createLabPlayerFixture,
@@ -57,6 +58,7 @@ function fixture({
   playerRetirementFails = false,
   playerRetirementUnconfirmed = false,
   fixedModel = false,
+  effort = 'medium',
   ownedPlayer,
   foreignPlayer = false,
   wrongFixedSource = false,
@@ -249,7 +251,7 @@ function fixture({
           nonce: d.nonce,
           expectedProvider: 'codex',
           expectedModel: 'gpt-6.1-sol',
-          expectedEffort: 'medium',
+          expectedEffort: effort,
         }),
       ) + '\n',
     );
@@ -430,7 +432,7 @@ function fixture({
     settings: {
       provider: 'codex',
       model: 'gpt-6.1-sol',
-      effort: 'medium',
+      effort,
       maxCalls: fixedModel ? 20 : 3,
       deadlineMs: 30000,
       execution: 'offline-stand-in',
@@ -1007,4 +1009,57 @@ test('a request deadline during the fixed model take is recorded and the take co
   } finally {
     await player.close({ nativeReleased: true }).catch(() => {});
   }
+});
+
+test('the fixed model take accepts low effort, as the signed native lab build does, and completes', async () => {
+  const player = createLabPlayerFixture({
+    runId: 'fictional-run',
+    prepareMs: 2000,
+    startMs: 100,
+    stopMs: 100,
+  });
+  try {
+    await player.prepare({ media });
+    const f = fixture({
+      fixedModel: true,
+      ownedPlayer: player,
+      recordDelayMs: 25,
+      effort: 'low',
+    });
+    const result = await f.take.done;
+    assert.equal(result.completed, true);
+    assert.equal(result.dispatchesUsed, 1);
+  } finally {
+    await player.close({ nativeReleased: true }).catch(() => {});
+  }
+});
+
+test('the fixed model take refuses any effort the native lab build does not accept, before constructing anything', () => {
+  for (const effort of ['high', 'xhigh', 'max', 'ultra', ''])
+    assert.throws(() => fixture({ fixedModel: true, effort }), {
+      category: 'protocol',
+    });
+});
+
+test('the fixed model take option check is usable on its own and matches construction', () => {
+  const settings = {
+    provider: 'codex',
+    model: 'gpt-6.1-sol',
+    effort: 'low',
+    maxCalls: 20,
+  };
+  const options = { settings, stopAfterS: 110, media };
+  assert.doesNotThrow(() => assertFixedModelTakeOptions(options));
+  for (const changed of [
+    { settings: { ...settings, effort: 'high' } },
+    { settings: { ...settings, maxCalls: 19 } },
+    { stopAfterS: 120 },
+    { media: { ...media, durationMs: 102481 } },
+  ])
+    assert.throws(
+      () => assertFixedModelTakeOptions({ ...options, ...changed }),
+      {
+        category: 'protocol',
+      },
+    );
 });
