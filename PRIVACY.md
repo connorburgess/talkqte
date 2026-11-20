@@ -83,7 +83,7 @@ A private-session option should discard its transcript and temporary analysis wh
 
 ## Screen sharing
 
-The desktop settings include a floating-window toggle. Choosing Hide removes the companion. Capture exclusion is not implemented. Do not assume the overlay is invisible to screen sharing. Cross-app focus, Spaces, full-screen meetings, and different sharing methods still require native testing.
+The desktop settings include a floating-window toggle. Choosing Hide removes the companion. The companion can also ask which edge of its window stays put (top or bottom), so it can draw its bar there; the answer comes from the placement preset and whether the window was dragged, and carries no conversation, notes or screen position. Capture exclusion is not implemented. Do not assume the overlay is invisible to screen sharing. Cross-app focus, Spaces, full-screen meetings, and different sharing methods still require native testing.
 
 ## Optional integrations
 
