@@ -961,6 +961,11 @@ svg {
   padding: 0 6px 0 14px;
   color: #8eaa95;
 }
+/* Kept by its bottom edge, the window has its bar at the bottom. The bar
+   stays first for the keyboard and assistive technology. */
+.companion-shell.is-bottom {
+  flex-direction: column-reverse;
+}
 /* With no cue under it, the bar is the whole window. */
 .companion-bar:last-child {
   flex: 1;
