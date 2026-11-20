@@ -167,7 +167,7 @@ Run this after steps 1 to 6, with the app quit. These commands print only counts
 
 6. Record whether `$HOME/Library/Application Support/com.talkqte.desktop` exists and, if it does, whether it holds anything other than a `models` folder (yes/no).
 
-**Expected:** every count is 0, and the data folder is absent or holds only `models`. TalkQTE keeps notes and the sign-in in memory only; its own code writes no files other than a downloaded speech model and an export you save. The webview and macOS write their own files, which is what this step checks.
+**Expected:** every count is 0, and the data folder is absent or holds only `models`. TalkQTE keeps notes and the sign-in in memory only; its own code writes no files other than an export you save. A `models` folder can only be left over from an earlier development build that downloaded a speech model; TalkQTE no longer reads, writes or deletes it. The webview and macOS write their own files, which is what this step checks.
 
 **Pass if** the control prints 2, every count is 0, and the data folder is absent or holds only `models`. **Fail if** the control does not print 2 (the search is not working; do not count the step), any count is above 0 (report the index and which word, not the matching text), or the data folder holds anything else.
 
