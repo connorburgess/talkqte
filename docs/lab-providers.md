@@ -142,9 +142,9 @@ meet that check. README needs no change for these internal lab modules.
 
 **Key handling:** the key is read only from `~/.config/talkqte-lab/anthropic.env`, a `0600` file in a `0700` directory owned by the current user and outside any repository or temporary directory, holding exactly `TALKQTE_LAB_ANTHROPIC_KEY=` with a Console API key (`sk-ant-api…` or `sk-ant-usr-…`; admin and OAuth credentials are refused). It goes to a per-run worker process over stdin only, never in arguments, environment, logs, evidence or errors. Any `ANTHROPIC_*` variable in the environment is refused as an ambient credential, even one set to an empty string.
 
-**Limits:** one dispatch is exactly one HTTP request, counted by the shared gate against the dispatch cap. Before each request the adapter refuses if the spend so far plus that request's worst case could exceed the per-run cap ($1.00 for Opus, $0.25 for Sonnet and Haiku), which ends the run as a usage limit; spend is computed from the reported token usage with a pinned price table. Only a reply that reaches `message_stop` is charged its reported usage. Any other outcome is charged its full worst case: a cancelled or timed-out request, a provider error, a reply at the output bound, or a worker that exits mid-request. Whatever was generated before the cut-off may still be billed. Once the cap is reached, every later request in the run reports a usage limit. `max_tokens` is 2,048, shared by adaptive thinking on Opus and Haiku and the reply. Two outcomes are recorded non-decisions for that request only, and the run continues: a refusal from the model (`stop_reason: refusal`, sent to native as `failed` code `refusal`), and a reply that reaches the output bound (sent as `failed` code `output_limit`). Authentication errors, rate limits, a reply from a different model and invalid replies end the run.
+**Limits:** one dispatch is exactly one HTTP request, counted by the shared gate against the dispatch cap. Before each request the adapter applies a local estimated-spend guard: it refuses if recorded spend plus the next request's estimate could exceed $1.00 for Opus or $0.25 for Sonnet and Haiku. This ends the run as a usage limit. Recorded spend uses reported token usage with a pinned price table; these local thresholds do not guarantee a maximum provider bill. Only a reply that reaches `message_stop` is charged its reported usage. Any other outcome is charged the same preflight estimate: a cancelled or timed-out request, a provider error, a reply at the output bound, or a worker that exits mid-request. Whatever was generated before the cut-off may still be billed. Once the cap is reached, every later request in the run reports a usage limit. `max_tokens` is 2,048, shared by adaptive thinking on Opus and Haiku and the reply. Two outcomes are recorded non-decisions for that request only, and the run continues: a refusal from the model (`stop_reason: refusal`, sent to native as `failed` code `refusal`), and a reply that reaches the output bound (sent as `failed` code `output_limit`). Authentication errors, rate limits, a reply from a different model and invalid replies end the run.
 
-On Opus, the worst case before a request is about $0.053 for a one-line input and $0.074 for the largest input the broker sends. Forty worst-case calls could therefore reach about $2.14 to $2.97. The $1.00 cap is what binds: the check before each request stops the run before the estimate can pass it. A completed Opus decision is charged its reported usage, typically far below the worst case.
+The preflight estimate uses `ceil(UTF-8 bytes / 2) + 1,500` input tokens and the existing output-token ceiling with pinned rates. This byte heuristic is not a proven tokenizer bound. On Opus it estimates about $0.053 for a one-line input and $0.074 for the largest input the broker sends; forty such estimates total about $2.14 to $2.97. The $1.00 local threshold can therefore stop the run first. A completed decision uses its reported usage instead. Exact tokenizer coverage, rate validity and reconciliation with account billing remain separate acceptance checks; no remote token-count or billing request is made by this guard.
 
 **In-app approval and timing:** a recorded take on this route has no launch-time approval. After the source is Listening and before anything plays, the take waits up to 180 s for the native app's connection row (`event` `evaluator`, `state` `on`, `approval` `review`, `backend` `lab-api`, and the launched model). The owner gives that approval in the app with three clicks: Review processing, Review selected sources, Enable for this session.
 
@@ -155,8 +155,20 @@ On Opus, the worst case before a request is about $0.053 for a one-line input an
 
 Native Stop is set at 320 s: the usual 110 s source window, the 180 s approval budget and a 30 s allowance from native start to Listening. The evidence guard records the approval budget and the time actually waited as separate fields.
 
-A take on this route allows 40 calls, against 20 for Codex. Four limits apply: the native session call limit (40), the adapter's own call cap (40), the per-run spend cap checked before every request, and one request at a time with the 8 s native deadline.
+A take on this route allows 40 calls, against 20 for Codex. Four limits apply: the native session call limit (40), the adapter's own call cap (40), the local estimated-spend guard checked before every request, and one request at a time with the 8 s native deadline.
 
 **Evidence:** per call, content-free receipts keep the time to first byte and first token, the stop reason, a refusal category, token usage and the computed cost. The run's estimated total spend is available beside the receipts. No prompt, reply or key text is kept.
 
 Tests drive the adapter with a fake fetch or a loopback stand-in endpoint and a dummy key; no test reaches the network.
+
+### Parent enforcement of API worker cleanup
+
+The parent independently watches each API request's adapter deadline. At that
+ceiling, or on a request abort, root abort or close, it asks the worker to abort.
+A cooperative scoped abort can keep the worker usable. If the worker does not
+settle within one second, the parent ends the session and retires its owned
+process group, using the existing bounded TERM/KILL confirmation. During that
+forced retirement, an exit or late reply cannot settle the request before group confirmation;
+unconfirmed retirement remains a cleanup failure. An incomplete call keeps its
+original abort cause and is charged the existing estimated worst case. No new
+request or provider budget is allowed during this cleanup.
