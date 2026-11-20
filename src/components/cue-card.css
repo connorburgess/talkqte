@@ -156,6 +156,52 @@
   font-weight: 650;
   color: var(--cue-accent);
 }
+/* Someone asked you by name: the one cue that expects you to answer. It is
+   told apart before any reading by three things that do not rely on colour:
+   an edge down the card's left side, the @ before its label and the label
+   itself. Every other kind shares the calm default, so this one stays
+   meaningful. The edge draws down once as the card arrives, then rests. */
+/* A faint warm tint as well, which says it again where colour is seen.
+   Every text colour keeps at least 4.5:1 on it. Forced colours replace it
+   with the system's own background, and the edge stays. */
+.question.cue-card.cue-asked {
+  --cue-surface: #efebdf;
+}
+.cue-card .cue-asked-mark {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  margin-right: 0.18em;
+  vertical-align: -0.06em;
+  stroke-width: 2.6;
+}
+.cue-card .cue-edge {
+  position: absolute;
+  z-index: 2;
+  inset: 0 auto 0 0;
+  width: 6px;
+  background: var(--cue-accent);
+  transform-origin: center top;
+  animation: cue-edge-draw 320ms 40ms var(--cue-ease) both;
+  pointer-events: none;
+}
+@keyframes cue-edge-draw {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: none;
+  }
+}
+.cue-card.is-settled .cue-edge {
+  animation: none;
+}
+@media (forced-colors: active) {
+  .cue-card .cue-edge {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+}
 .question.cue-card .cue-line h2 {
   display: inline;
   padding: 0;
@@ -430,6 +476,117 @@
 .floating-surface .cue-card .cue-line::before {
   height: 38px;
 }
+/* In the companion a cue grows out of the bar above it and folds back into
+   it. The window is already at the cue's size (the native side changes its
+   frame at once), so the card's lower edge moves, not the window's. It
+   opens downward from the bar, quick at the start, so the cue at the top is
+   uncovered first; it does not fade, so every uncovered word is readable
+   from the first frame. The cue settles first and the source follows a
+   beat later, moving only: both are at full strength throughout. */
+.floating-surface .question.cue-card {
+  animation: cue-expand 300ms var(--cue-ease) both;
+}
+@keyframes cue-expand {
+  from {
+    clip-path: inset(0 0 58% 0 round var(--cue-radius));
+  }
+  to {
+    clip-path: inset(0 0 0 0 round var(--cue-radius));
+  }
+}
+.floating-surface .cue-card .cue-line {
+  animation: cue-drop 260ms var(--cue-ease) both;
+}
+.floating-surface .cue-card .cue-source {
+  animation: cue-drop-later 340ms 90ms var(--cue-ease) both;
+}
+@keyframes cue-drop {
+  from {
+    transform: translateY(-6px);
+  }
+  to {
+    transform: none;
+  }
+}
+/* The source settles from just below, away from the time line above it, so
+   no text overlaps at any moment of the arrival. */
+@keyframes cue-drop-later {
+  from {
+    transform: translateY(6px);
+  }
+  to {
+    transform: none;
+  }
+}
+/* Going, it folds back up into the bar: quicker, gathering speed, with no
+   settle at the end. Every way a cue goes shares this one motion. */
+.floating-surface .question.cue-card.is-leaving {
+  animation: cue-collapse 190ms cubic-bezier(0.5, 0, 0.75, 0) both;
+}
+/* With the window kept by its bottom edge (the default bottom-right
+   placement) the bar is at the bottom, and the card grows up out of it and
+   folds back down into it. */
+.floating-surface .companion-shell.is-bottom .question.cue-card {
+  margin: 4px 4px 0;
+  animation-name: cue-expand-up;
+}
+.floating-surface .companion-shell.is-bottom .question.cue-card.is-leaving {
+  animation-name: cue-collapse-down;
+}
+/* Its words ride up with its top edge, like a drawer, so the cue at the top
+   is in view from the first frame and the source below is what waits. */
+.floating-surface
+  .companion-shell.is-bottom
+  .question.cue-card:not(.is-leaving)
+  .cue-scroll {
+  animation: cue-ride-up 300ms var(--cue-ease) both;
+}
+@keyframes cue-ride-up {
+  from {
+    transform: translateY(30%);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes cue-expand-up {
+  from {
+    clip-path: inset(30% 0 0 0 round var(--cue-radius));
+  }
+  to {
+    clip-path: inset(0 0 0 0 round var(--cue-radius));
+  }
+}
+@keyframes cue-collapse-down {
+  from {
+    clip-path: inset(0 0 0 0 round var(--cue-radius));
+  }
+  70% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    clip-path: inset(100% 0 0 0 round var(--cue-radius));
+  }
+}
+/* Whatever was still arriving inside it stops where it is. */
+.floating-surface .cue-card.is-leaving * {
+  animation: none;
+}
+/* It stays solid while it folds and fades only at the last, so what is
+   seen is the card going back into the bar, not a fade. */
+@keyframes cue-collapse {
+  from {
+    clip-path: inset(0 0 0 0 round var(--cue-radius));
+  }
+  70% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    clip-path: inset(0 0 100% 0 round var(--cue-radius));
+  }
+}
 /* A short cue sits in the middle of the card, with equal room above and
    below; a long one starts at the top and scrolls. */
 .floating-surface .cue-card .cue-scroll::before,
@@ -469,31 +626,83 @@
 .floating-surface .cue-card .dismiss-question {
   z-index: 2;
 }
-/* The 360px window of a small display: a step down in size keeps a cue of
-   ordinary length inside the card with every platform's fonts. */
-@media (max-width: 380px) {
-  .floating-surface .cue-card .cue-line {
-    font-size: 20px;
-  }
-  .floating-surface .cue-card.cue-long .cue-line {
-    font-size: 18px;
-  }
-  .floating-surface .question-standard.cue-card.cue-long .cue-word {
-    --cue-wait: 0.68;
-  }
-  .floating-surface .cue-card.cue-longer .cue-line {
-    font-size: 16px;
-  }
-  .floating-surface .question-large.cue-card .cue-line {
-    font-size: 25px;
-  }
-  .floating-surface .question-large.cue-card.cue-long .cue-line {
-    font-size: 22px;
-  }
-  .floating-surface .question-large.cue-card.cue-longer .cue-line {
-    font-size: 19px;
-  }
-  .floating-surface .question-large.cue-card .cue-source {
-    font-size: 15px;
-  }
+/* The companion's card is a small prompt beside the call, not a second
+   window: its cue is set close to the size of a meeting's own captions, and
+   under it is the one line the cue cites, at most two lines of it. The
+   notebook's card keeps every source. */
+.floating-surface .question.cue-card {
+  --cue-radius: 16px;
+  margin: 0 4px 4px;
+}
+.floating-surface .cue-card .cue-scroll {
+  padding: 8px 14px 10px;
+}
+.floating-surface .cue-card .cue-line {
+  font-size: 17px;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.floating-surface .cue-card .cue-line::before {
+  width: 24px;
+  height: 22px;
+}
+.floating-surface .cue-card.cue-long .cue-line {
+  font-size: 16px;
+}
+.floating-surface .cue-card.cue-longer .cue-line {
+  font-size: 15px;
+}
+.floating-surface .question-large.cue-card .cue-line {
+  font-size: 21px;
+}
+.floating-surface .question-large.cue-card.cue-long .cue-line {
+  font-size: 19px;
+}
+.floating-surface .question-large.cue-card.cue-longer .cue-line {
+  font-size: 18px;
+}
+/* Below 18.66 px bold is not large text, so waiting words keep 4.6:1. */
+.floating-surface .question-standard.cue-card .cue-word,
+.floating-surface .question-large.cue-card.cue-longer .cue-word {
+  --cue-wait: 0.68;
+}
+.floating-surface .cue-card .cue-time {
+  margin-block: -12px;
+}
+.floating-surface .cue-card .cue-source {
+  font-size: 13px;
+  line-height: 1.35;
+}
+.floating-surface .cue-card .cue-source-label,
+.floating-surface .cue-card .question-warning {
+  font-size: 11.5px;
+}
+.floating-surface .question-large.cue-card .cue-source {
+  font-size: 15px;
+}
+.floating-surface .question-large.cue-card .cue-source-label,
+.floating-surface .question-large.cue-card .question-warning {
+  font-size: 13px;
+}
+.floating-surface .cue-card .cue-quote {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+/* An Asked you question has no countdown; here the words saying so give way
+   to a plain rule, and stay for assistive technology. */
+.floating-surface .cue-card .cue-stays {
+  flex: 1;
+  height: 2px;
+  overflow: hidden;
+  font-size: 0;
+  background: var(--cue-rule);
+}
+.floating-surface .cue-card .dismiss-question {
+  top: 0;
+  right: 0;
+  width: 44px;
+  height: 44px;
 }

@@ -761,11 +761,10 @@ fn remove_context_item(
     source_id: String,
 ) -> Result<(), String> {
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-    if !runtime.context.remove(provider, &source_id) {
+    let Some(cue_changed) = runtime.remove_imported_note(provider, &source_id) else {
         return Err("That note is no longer imported.".into());
-    }
-    runtime.refresh.forget(provider, &source_id);
-    publish_context(&app, &mut runtime);
+    };
+    emit_context(&app, &mut runtime, cue_changed);
     Ok(())
 }
 
@@ -1432,6 +1431,7 @@ pub fn run() {
             export_preview,
             export_markdown,
             live_status,
+            companion::companion_anchor,
             pick_context_file,
             import_context_notes,
             cancel_context_import,
