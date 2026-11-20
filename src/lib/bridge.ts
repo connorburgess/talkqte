@@ -7,7 +7,6 @@ import type {
   GranolaStatus,
   LiveStatus,
   MergeOutcome,
-  ModelStatus,
   PickedNotes,
   Snapshot,
   UpdateCheckReport,
@@ -51,24 +50,6 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
 export async function liveStatus() {
   if (preview) return (await preview).liveStatus();
   return invoke<LiveStatus>('live_status');
-}
-
-/** Reports the optional speech model download and its later changes. */
-export async function watchModel(receive: (status: ModelStatus) => void) {
-  if (preview) {
-    receive((await preview).modelStatus());
-    return () => {};
-  }
-  const unlisten = await listen<ModelStatus>('model:changed', ({ payload }) =>
-    receive(payload),
-  );
-  try {
-    receive(await invoke<ModelStatus>('model_status'));
-  } catch (error) {
-    unlisten();
-    throw error;
-  }
-  return unlisten;
 }
 
 /** Opens the file chooser and lists a notes file; null if none was chosen. */

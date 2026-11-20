@@ -5,7 +5,7 @@
 // It adds no signing identity or credential of its own; Tauri signs or
 // notarizes only if the caller's environment already asks it to.
 //
-//   npm run build:release -- --bundles app,dmg --features local-whisper
+//   npm run build:release -- --bundles app,dmg
 //
 // Arguments are passed to `tauri build` unchanged.
 import { execFileSync, spawnSync } from 'node:child_process';

@@ -10,9 +10,12 @@ on:
 permissions:
   contents: read
 
+# A new commit on a pull request replaces that pull request's older run.
+# Every other run (a merge to main, a manual dispatch) has its own group and
+# finishes, so each tree that lands on main gets a complete result.
 concurrency:
-  group: checks-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'pull_request' && format('checks-pr-{0}', github.event.pull_request.number) || format('checks-run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   contributions:
@@ -43,10 +46,16 @@ jobs:
     name: Frontend and browser behavior
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    container:
+      # Match the Playwright version resolved in package-lock.json.
+      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:9beb546099e11f52d62e505537914870e01a67e0e6b00ae41da4775324e73dbe
+      options: --init --ipc=host
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Trust the checked-out workspace for Git-based checks
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
@@ -59,8 +68,18 @@ jobs:
       - run: npm run test:release
       - run: npm run format:check
       - run: npm run build
-      - run: npx playwright install --with-deps chromium webkit
       - run: npm test
+      # playwright.config.ts keeps a trace for each failed test. Save them so a
+      # failure can be opened with `npx playwright show-trace` instead of being
+      # guessed from the log. Tests use only fictional content.
+      - name: Save traces of failed browser tests
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-traces-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
   macos:
     name: macOS Rust and desktop build
