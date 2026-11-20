@@ -31,7 +31,8 @@ operation can enter while cleanup remains outstanding.
 `startupDiagnostics` reports the current fixed startup stage, the first
 pre-readiness failure as `{stage,reason}` and the broker's
 [startup diagnostics](lab-broker.md#local-wire-v1). Later teardown reasons never
-replace the first failure. A take exposes the same value.
+replace the first failure. A take exposes the same value, together with the
+broker's `evaluationSummary` and the provider's content-free `providerReceipts`.
 
 ## Native owner contract
 

@@ -48,8 +48,13 @@ error. Its configured HTTP and stream retry budgets are zero, but that does not
 disable every internal continuation or authentication recovery. A local deadline
 cannot revoke work already submitted to the remote service.
 
-One operation may run at a time. Stop, cancellation, first failure, output overflow
-and deadline are terminal; no retry is attempted. Output bytes are bounded while
+One operation may run at a time. Stop, session cancellation, first failure,
+output overflow and the adapter deadline are terminal; no retry is attempted. An
+abort of one request's own signal (the broker's per-request evaluator deadline)
+retires only that call once its process group is confirmed gone; an unconfirmed
+retirement is terminal. Codex calls keep content-free `receipts`: per call, the
+millisecond offsets of spawn, first output, exit and process-group retirement,
+and a fixed outcome. Output bytes are bounded while
 streaming, including stderr. Cancellation terminates the owned process group,
 escalates to KILL and checks group retirement before returning; unresolved cleanup
 fails closed. Late results are rejected. `close()` awaits runner settlement and

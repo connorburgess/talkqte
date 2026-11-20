@@ -779,3 +779,157 @@ test('snapshot row limit keeps unparsed partial count unknown and row count is c
   await writeFile(f.manifestPath, JSON.stringify(raw), { mode: 0o600 });
   await assert.rejects(loadEvidence(f.manifestPath), /snapshot row count/);
 });
+
+function nativeReport(rows) {
+  const m = manifest();
+  const events = importNativeRows(rows, {
+    runId: m.runId,
+    artifactId: 'native',
+    clockId: 'audio',
+  });
+  m.artifacts.push({
+    id: 'native',
+    kind: 'native-timing',
+    path: 'native.jsonl',
+    clockId: 'audio',
+    bytes: 0,
+    sha256: 'a'.repeat(64),
+  });
+  return buildEvidenceReport(m, events);
+}
+test('an applied lab decision shows how far behind the newest speech it was, per evaluation and per cue', () => {
+  const r = nativeReport([
+    {
+      event: 'evaluation_requested',
+      mono_ms: 100,
+      session: sid,
+      request: 3,
+      through_segment: 't1-0-2',
+    },
+    {
+      event: 'evaluation_result',
+      mono_ms: 6350,
+      session: sid,
+      request: 3,
+      outcome: 'show',
+      latency_ms: 6250,
+      through_segment: 't1-0-4',
+      lag_lines: 2,
+      lag_ms: 6000,
+    },
+    {
+      event: 'cue_decision',
+      mono_ms: 6351,
+      session: sid,
+      request: 3,
+      cue: 7,
+      decider: 'model',
+    },
+    {
+      event: 'evaluation_result',
+      mono_ms: 9000,
+      session: sid,
+      request: 4,
+      outcome: 'stale',
+      latency_ms: 7000,
+      action: 'quiet',
+    },
+  ]);
+  const applied = r.evaluations.find((e) => e.id.endsWith('3'));
+  assert.deepEqual(applied.staleness, {
+    throughSegment: 't1-0-4',
+    lagLines: 2,
+    lagMs: 6000,
+  });
+  assert.equal(applied.unappliedAction, null);
+  const stale = r.evaluations.find((e) => e.id.endsWith('4'));
+  assert.equal(stale.staleness, null);
+  assert.equal(stale.unappliedAction, 'quiet');
+  assert.deepEqual(r.cues[0].staleness, applied.staleness);
+  const md = renderEvidenceMarkdown(r);
+  assert.ok(md.includes('t1-0-4 / 2 / 6000 ms'));
+  assert.ok(md.includes('bounded staleness'));
+});
+test('malformed lab decision fields are refused, never guessed', () => {
+  const base = {
+    event: 'evaluation_result',
+    mono_ms: 1,
+    session: sid,
+    request: 1,
+    latency_ms: 1,
+  };
+  for (const row of [
+    { ...base, outcome: 'show', through_segment: 't1', lag_lines: 1 },
+    {
+      ...base,
+      outcome: 'show',
+      through_segment: 't1',
+      lag_lines: 0,
+      lag_ms: 5,
+    },
+    {
+      ...base,
+      outcome: 'show',
+      through_segment: 't1',
+      lag_lines: -1,
+      lag_ms: 0,
+    },
+    {
+      ...base,
+      outcome: 'stale',
+      through_segment: 't1',
+      lag_lines: 0,
+      lag_ms: 0,
+    },
+    {
+      ...base,
+      outcome: 'stale',
+      action: 'quiet',
+      through_segment: 't1',
+      lag_lines: 0,
+      lag_ms: 0,
+    },
+    { ...base, outcome: 'stale', action: 'explain' },
+  ])
+    assert.throws(() =>
+      importNativeRows([row], {
+        runId: 'fictional-cedar',
+        artifactId: 'native',
+        clockId: 'audio',
+      }),
+    );
+});
+test('an unapplied action is accepted only on stale or timeout results, and segment ids are id-shaped', () => {
+  const load = (row) =>
+    importNativeRows(
+      [
+        {
+          event: 'evaluation_result',
+          mono_ms: 1,
+          session: sid,
+          request: 1,
+          latency_ms: 1,
+          ...row,
+        },
+      ],
+      { runId: 'fictional-cedar', artifactId: 'native', clockId: 'audio' },
+    );
+  assert.equal(
+    load({ outcome: 'failed', failure: 'timeout', action: 'show' })[0].payload
+      .decisionAction,
+    'show',
+  );
+  for (const row of [
+    { outcome: 'show', action: 'show' },
+    { outcome: 'cancelled', action: 'quiet' },
+    { outcome: 'failed', failure: 'unavailable', action: 'quiet' },
+    {
+      outcome: 'show',
+      through_segment: 'a fictional sentence',
+      lag_lines: 0,
+      lag_ms: 0,
+    },
+    { outcome: 'show', through_segment: '', lag_lines: 0, lag_ms: 0 },
+  ])
+    assert.throws(() => load(row));
+});

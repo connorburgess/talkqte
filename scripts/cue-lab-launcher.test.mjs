@@ -168,7 +168,7 @@ test('an actual child timing failure aborts the shared lifecycle before authenti
     native,
     settings: {
       ...selection,
-      deadlineMs: 100,
+      deadlineMs: 30000,
       execution: 'offline-stand-in',
       environment: {},
       openers: {
@@ -684,7 +684,7 @@ function offlineRun(fixtureCase, startupMs = 4000) {
     sourceSessionMode: 'legacy-fixture',
     settings: {
       ...selection,
-      deadlineMs: 100,
+      deadlineMs: 30000,
       execution: 'offline-stand-in',
       environment: {},
       openers: {

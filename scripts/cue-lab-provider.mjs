@@ -229,15 +229,19 @@ export async function openLabProvider({
       throw failure('call-cap', calls);
     }
     const controller = new AbortController();
+    // The caller's request signal retires only this call (for example a
+    // per-request evaluator deadline). The adapter ceiling stays terminal.
+    let scoped = false;
     const cancel = () => {
-      stop();
+      scoped = true;
       controller.abort();
     };
     request.signal?.addEventListener('abort', cancel, { once: true });
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      cancel();
+      stop();
+      controller.abort();
     }, deadlineMs);
     const operation = { controller, done: null };
     active = operation;
@@ -279,7 +283,16 @@ export async function openLabProvider({
       };
     } catch (error) {
       const cancelled = controller.signal.aborted;
+      if (
+        scoped &&
+        !timedOut &&
+        !terminal &&
+        !signal?.aborted &&
+        error?.category === 'cancelled'
+      )
+        throw failure('cancelled', calls);
       stop();
+      if (error?.category === 'cleanup') throw failure('cleanup', calls);
       throw normalizeFailure(
         timedOut
           ? failure('deadline')
@@ -299,6 +312,9 @@ export async function openLabProvider({
     request,
     get calls() {
       return calls;
+    },
+    get receipts() {
+      return adapter.receipts ?? null;
     },
     close() {
       if (!closing) {

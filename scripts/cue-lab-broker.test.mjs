@@ -41,7 +41,12 @@ async function setup({
   const broker = await openLabBroker({
     sourceSessionMode,
     provider: {
-      metadata: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' },
+      metadata: {
+        provider: 'codex',
+        model: 'gpt-6.1-sol',
+        effort: 'medium',
+        deadlineMs: 30000,
+      },
       request: async (req) => {
         calls.push(req);
         return request(req);
@@ -276,16 +281,100 @@ test('failed or mismatched settlement stops all roles and never retries', async 
   }
 });
 
-test('missing settlement acknowledgement is terminal under the fixed grace', async () => {
+test('missing settlement acknowledgement is terminal one second after the request deadline', async () => {
   const ctx = await setup();
   try {
-    ctx.evaluate();
+    ctx.evaluate('1', { budgetMs: 300 });
     await ctx.next('result');
-    await delay(1050);
+    await delay(900);
+    // Still inside deadline + 1 s: native may yet settle or retire it.
+    assert.equal(ctx.broker.gate.terminal, null);
+    await delay(700);
     await terminal(ctx.broker);
+    assert.equal(ctx.broker.gate.terminal, 'deadline');
     assert.equal(ctx.calls.length, 1);
   } finally {
     await ctx.close();
+  }
+});
+
+test('an expired settlement up to one second after the request deadline continues the run', async () => {
+  // Reviewer's probe: budget 300 ms, result at about 250 ms, `expired` 1050 ms later.
+  const ctx = await setup({
+    request: async () => {
+      await delay(250);
+      return { value, elapsedMs: 250 };
+    },
+  });
+  try {
+    ctx.evaluate('1', { budgetMs: 300 });
+    await ctx.next('result');
+    await delay(1050);
+    ctx.settle('1', 'expired');
+    await ctx.broker.gate.waitIdle();
+    assert.equal(ctx.broker.gate.terminal, null);
+    assert.equal(ctx.broker.evaluationSummary.verdicts.expired, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('evaluation summary distinguishes evaluates seen, dispatches spent and retirement before dispatch', async () => {
+  let release;
+  let n = 0;
+  const ctx = await setup({
+    request: (req) => {
+      n++;
+      if (n > 1) return Promise.resolve({ value, elapsedMs: 1, usage: {} });
+      // The first call settles only after an explicit release, after abort.
+      return new Promise((_, reject) =>
+        req.signal.addEventListener('abort', () => {
+          release = () =>
+            reject(Object.assign(new Error('f'), { category: 'cancelled' }));
+        }),
+      );
+    },
+  });
+  try {
+    ctx.evaluate('1', { budgetMs: 30 });
+    assert.equal((await ctx.next('failed')).requestId, '1');
+    // Queued behind the settling first request; retired before dispatch.
+    ctx.evaluate('2', { budgetMs: 30 });
+    assert.equal((await ctx.next('failed')).requestId, '2');
+    release();
+    ctx.evaluate('3');
+    assert.equal((await ctx.next('result')).requestId, '3');
+    ctx.settle('3');
+    await ctx.broker.gate.waitIdle();
+    const s = ctx.broker.evaluationSummary;
+    assert.equal(s.requested, 3);
+    assert.equal(s.dispatched, 2);
+    assert.equal(s.retiredBeforeDispatch, 1);
+    assert.equal(ctx.broker.gate.dispatchesUsed, 2);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('an adapter deadline that cannot outlast a request budget and its settlement is refused', async () => {
+  for (const deadlineMs of [undefined, 100, 11000]) {
+    await assert.rejects(
+      openLabBroker({
+        sourceSessionMode: 'legacy-fixture',
+        provider: {
+          metadata: {
+            provider: 'codex',
+            model: 'gpt-6.1-sol',
+            effort: 'medium',
+            deadlineMs,
+          },
+          request: async () => ({ value }),
+          close: async () => {},
+        },
+        maxCalls: 1,
+      }),
+      { category: 'protocol' },
+    );
   }
 });
 
@@ -697,7 +786,12 @@ for (const connect of [false, true])
     const broker = await openLabBroker({
       sourceSessionMode: 'legacy-fixture',
       provider: {
-        metadata: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' },
+        metadata: {
+          provider: 'codex',
+          model: 'gpt-6.1-sol',
+          effort: 'medium',
+          deadlineMs: 30000,
+        },
         request: ({ signal }) =>
           new Promise((_, reject) => {
             signal.addEventListener(
@@ -884,7 +978,12 @@ test('startup diagnostics stay empty until a peer connects and report a normal c
   const broker = await openLabBroker({
     sourceSessionMode: 'legacy-fixture',
     provider: {
-      metadata: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' },
+      metadata: {
+        provider: 'codex',
+        model: 'gpt-6.1-sol',
+        effort: 'medium',
+        deadlineMs: 30000,
+      },
       request: async () => ({ value }),
       close: async () => {},
     },
@@ -1019,7 +1118,12 @@ test('a calibration rejected for combined uncertainty is not reported as calibra
 });
 
 const fictionalProvider = () => ({
-  metadata: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' },
+  metadata: {
+    provider: 'codex',
+    model: 'gpt-6.1-sol',
+    effort: 'medium',
+    deadlineMs: 30000,
+  },
   request: async () => ({ value }),
   close: async () => {},
 });
@@ -1089,5 +1193,177 @@ test('a failed run-directory permission change removes the canonical directory',
     syncBuiltinESMExports();
     rmSync(root, { recursive: true, force: true });
     rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// Per-request deadline continuation (wire change in the native lab PR).
+const abortable = (req, category = 'cancelled') =>
+  new Promise((_, reject) => {
+    const settle = () =>
+      reject(Object.assign(new Error('fictional'), { category }));
+    if (req.signal?.aborted) settle();
+    else req.signal?.addEventListener('abort', settle, { once: true });
+  });
+function slowThenQuick(category) {
+  let n = 0;
+  return async (req) => {
+    n++;
+    if (n === 1) return abortable(req, category);
+    return { value, elapsedMs: 1, usage: {} };
+  };
+}
+
+test('a broker lease deadline fails only that request and the next request is evaluated', async () => {
+  const ctx = await setup({ request: slowThenQuick() });
+  try {
+    ctx.evaluate('1', { budgetMs: 50 });
+    const failed = await ctx.next('failed');
+    assert.deepEqual(
+      [failed.requestId, failed.contextRevision, failed.code],
+      ['1', '1', 'deadline'],
+    );
+    assert.equal(ctx.broker.gate.terminal, null);
+    ctx.evaluate('2');
+    const result = await ctx.next('result');
+    assert.equal(result.requestId, '2');
+    ctx.settle('2');
+    await ctx.broker.gate.waitIdle();
+    assert.equal(ctx.broker.gate.terminal, null);
+    assert.equal(ctx.broker.gate.dispatchesUsed, 2);
+    const summary = ctx.broker.evaluationSummary;
+    assert.equal(summary.deadlineByBroker, 1);
+    assert.equal(summary.deadlineByNative, 0);
+    assert.equal(summary.resultsSent, 1);
+    assert.equal(summary.resultActions.quiet, 1);
+    assert.equal(summary.verdicts.current, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a native deadline cancel retires the running request without a reply and keeps the run', async () => {
+  const ctx = await setup({ request: slowThenQuick() });
+  try {
+    ctx.evaluate('1');
+    for (let n = 0; n < 100 && ctx.calls.length < 1; n++) await delay(5);
+    ctx.send('cancel', {
+      requestId: '1',
+      contextRevision: '1',
+      reason: 'deadline',
+    });
+    ctx.evaluate('2');
+    const result = await ctx.next('result');
+    assert.equal(result.requestId, '2');
+    ctx.settle('2');
+    await ctx.broker.gate.waitIdle();
+    await assert.rejects(ctx.next('failed'));
+    assert.equal(ctx.broker.gate.terminal, null);
+    assert.equal(ctx.broker.evaluationSummary.deadlineByNative, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a native deadline cancel while awaiting settlement retires that request', async () => {
+  const ctx = await setup();
+  try {
+    ctx.evaluate('1');
+    await ctx.next('result');
+    ctx.send('cancel', {
+      requestId: '1',
+      contextRevision: '1',
+      reason: 'deadline',
+    });
+    ctx.evaluate('2');
+    assert.equal((await ctx.next('result')).requestId, '2');
+    ctx.settle('2');
+    await ctx.broker.gate.waitIdle();
+    assert.equal(ctx.broker.gate.terminal, null);
+    assert.equal(ctx.broker.evaluationSummary.resultsSent, 2);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('an expired settlement verdict is recorded and does not end the run', async () => {
+  const ctx = await setup();
+  try {
+    ctx.evaluate('1');
+    await ctx.next('result');
+    ctx.settle('1', 'expired');
+    await ctx.broker.gate.waitIdle();
+    assert.equal(ctx.broker.gate.terminal, null);
+    assert.equal(ctx.broker.evaluationSummary.verdicts.expired, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a late native deadline cancel for a request the broker already failed is ignored', async () => {
+  const ctx = await setup({ request: slowThenQuick() });
+  try {
+    ctx.evaluate('1', { budgetMs: 50 });
+    await ctx.next('failed');
+    ctx.send('cancel', {
+      requestId: '1',
+      contextRevision: '1',
+      reason: 'deadline',
+    });
+    ctx.evaluate('2');
+    assert.equal((await ctx.next('result')).requestId, '2');
+    ctx.settle('2');
+    await ctx.broker.gate.waitIdle();
+    assert.equal(ctx.broker.gate.terminal, null);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a deadline cancel for an unknown request or without identity is terminal', async () => {
+  for (const fields of [
+    { requestId: '9', contextRevision: '9', reason: 'deadline' },
+    { reason: 'deadline' },
+  ]) {
+    const ctx = await setup({ request: slowThenQuick() });
+    try {
+      ctx.evaluate('1');
+      ctx.send('cancel', fields);
+      await terminal(ctx.broker);
+      assert.equal(ctx.broker.gate.terminal, 'protocol');
+    } finally {
+      await ctx.close();
+    }
+  }
+});
+
+test('unconfirmed provider cleanup after a request deadline stays terminal', async () => {
+  const ctx = await setup({ request: slowThenQuick('cleanup') });
+  try {
+    ctx.evaluate('1', { budgetMs: 50 });
+    await terminal(ctx.broker);
+    assert.notEqual(ctx.broker.gate.terminal, null);
+  } finally {
+    await ctx.close().catch(() => {});
+  }
+});
+
+test('repeated request deadlines still end the run at the dispatch cap', async () => {
+  const ctx = await setup({
+    maxCalls: 2,
+    request: (req) => abortable(req),
+  });
+  try {
+    for (const id of ['1', '2']) {
+      ctx.evaluate(id, { budgetMs: 30 });
+      assert.equal((await ctx.next('failed')).code, 'deadline');
+      await ctx.broker.gate.waitIdle();
+    }
+    assert.equal(ctx.broker.gate.terminal, null);
+    ctx.evaluate('3');
+    assert.equal((await ctx.next('failed')).code, 'dispatch_limit');
+    await terminal(ctx.broker);
+    assert.equal(ctx.broker.gate.dispatchesUsed, 2);
+  } finally {
+    await ctx.close();
   }
 });

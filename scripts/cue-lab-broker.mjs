@@ -14,6 +14,8 @@ import { systemPromptFor, validateDecision } from './cue-lab.mjs';
 
 const SCHEMA = 'talkqte.lab.v1';
 const FRAME = 65536;
+const MAX_BUDGET_MS = 10000;
+const SETTLEMENT_MS = 1000;
 const BASE = ['schema', 'type', 'runId', 'sessionId'];
 const CODES = new Set([
   'authentication',
@@ -170,6 +172,11 @@ export async function openLabBroker({
       ['codex', 'claude-code'].includes(provider.metadata?.provider) &&
       text(provider.metadata.model, 100) &&
       text(provider.metadata.effort, 20) &&
+      // The adapter's own deadline is terminal, so it must outlast the largest
+      // per-request budget plus its settlement window; otherwise one slow call
+      // would end the run instead of retiring that request.
+      Number.isSafeInteger(provider.metadata.deadlineMs) &&
+      provider.metadata.deadlineMs > MAX_BUDGET_MS + SETTLEMENT_MS &&
       /^[A-Za-z0-9_-]{1,64}$/.test(runId) &&
       typeof onTerminal === 'function' &&
       ['required', 'legacy-fixture'].includes(sourceSessionMode),
@@ -229,6 +236,19 @@ export async function openLabBroker({
     startupCause = null;
   const seenRequests = new Set();
   const seenRequestIds = new Set();
+  // Requests retired by a per-request deadline. Late frames for them are
+  // ignored; every count below is content-free.
+  const retiredRequests = new Set();
+  const evaluations = {
+    requested: 0,
+    dispatched: 0,
+    retiredBeforeDispatch: 0,
+    resultsSent: 0,
+    deadlineByBroker: 0,
+    deadlineByNative: 0,
+    verdicts: { current: 0, staleSuccess: 0, expired: 0, failed: 0 },
+    resultActions: { show: 0, quiet: 0, resolved: 0, withdraw: 0 },
+  };
   const clearedCueIds = new Set();
   const send = (type, fields = {}) => {
     requireThat(socket && !socket.destroyed && sessionId !== null);
@@ -300,7 +320,7 @@ export async function openLabBroker({
         seenRequests.size < 100 &&
         Number.isSafeInteger(frame.budgetMs) &&
         frame.budgetMs >= 1 &&
-        frame.budgetMs <= 10000,
+        frame.budgetMs <= MAX_BUDGET_MS,
     );
     const request = evaluatorRequest(frame.input);
     seenRequests.add(key);
@@ -320,13 +340,26 @@ export async function openLabBroker({
       resultSent: false,
       ackReceived: false,
       done: null,
+      controller: new AbortController(),
+      retired: null,
+      nativeCancelled: false,
+      dispatched: false,
     };
     evaluation = operation;
+    evaluations.requested++;
     const started = performance.now();
     operation.done = gate
       .run(
         async () => {
-          const result = await gate.request(request);
+          // The gate counts a dispatch synchronously when the provider call
+          // starts; a request retired before that spends none.
+          const before = gate.dispatchesUsed;
+          const requested = gate.request(request);
+          if (gate.dispatchesUsed > before) {
+            operation.dispatched = true;
+            evaluations.dispatched++;
+          }
+          const result = await requested;
           try {
             validateDecision(result.value, frame.input, { compact: true });
             requireThat(
@@ -338,7 +371,11 @@ export async function openLabBroker({
             throw gateFailure('invalid-reply');
           }
           const elapsedMs = Math.ceil(performance.now() - started);
-          if (elapsedMs > frame.budgetMs) throw gateFailure('deadline');
+          // Over budget by rounding or timer order: retire this request only.
+          if (elapsedMs > frame.budgetMs) {
+            operation.controller.abort();
+            throw gateFailure('cancelled');
+          }
           const usage = Object.fromEntries(
             [
               'input_tokens',
@@ -362,12 +399,22 @@ export async function openLabBroker({
             usage,
           });
           operation.resultSent = true;
+          evaluations.resultsSent++;
+          evaluations.resultActions[result.value.action]++;
           await gate.settle(() => ack, { deadlineMs: 1000 });
           return result;
         },
-        { role: 'cue-evaluator', deadlineMs: frame.budgetMs },
+        {
+          role: 'cue-evaluator',
+          deadlineMs: frame.budgetMs,
+          scoped: true,
+          signal: operation.controller.signal,
+          onRetire: (reason) => retireEvaluation(operation, reason),
+        },
       )
       .catch((error) => {
+        // A per-request retirement was already reported; the run continues.
+        if (error?.scoped && operation.retired && !gate.terminal) return;
         if (authenticated && socket && !socket.destroyed) {
           try {
             send('failed', {
@@ -384,6 +431,32 @@ export async function openLabBroker({
       .finally(() => {
         if (evaluation === operation) evaluation = null;
       });
+  };
+  // Retires one evaluation without ending the run. The broker's own lease
+  // deadline reports a request-scoped failed/deadline frame; native's scoped
+  // deadline cancel needs no reply.
+  const retireEvaluation = (operation, reason) => {
+    if (operation.retired) return;
+    operation.retired = reason;
+    retiredRequests.add(operation.key);
+    if (!operation.dispatched) evaluations.retiredBeforeDispatch++;
+    if (evaluation === operation) evaluation = null;
+    operation.rejectAck(gateFailure(reason));
+    if (operation.nativeCancelled) {
+      evaluations.deadlineByNative++;
+      return;
+    }
+    evaluations.deadlineByBroker++;
+    if (authenticated && socket && !socket.destroyed)
+      try {
+        send('failed', {
+          requestId: operation.requestId,
+          contextRevision: operation.contextRevision,
+          code: 'deadline',
+        });
+      } catch {
+        socket.destroy();
+      }
   };
   const observe = (frame) => {
     requireThat(exact(frame, [...BASE, 'observation']));
@@ -505,6 +578,19 @@ export async function openLabBroker({
       return;
     }
     base(frame);
+    if (frame.type === 'cancel' && frame.reason === 'deadline') {
+      // Native retired one request at its own deadline; not terminal.
+      requireThat(
+        exact(frame, [...BASE, 'reason', 'requestId', 'contextRevision']),
+      );
+      const key = identity(frame);
+      if (gate.terminal || retiredRequests.has(key)) return;
+      requireThat(evaluation && key === evaluation.key);
+      const current = evaluation;
+      current.nativeCancelled = true;
+      current.controller.abort();
+      return;
+    }
     if (frame.type === 'cancel') {
       requireThat(
         exact(frame, [...BASE, 'reason'], ['requestId', 'contextRevision']) &&
@@ -537,11 +623,14 @@ export async function openLabBroker({
           identity(frame) === evaluation.key &&
           evaluation.resultSent &&
           !evaluation.ackReceived &&
-          ['current', 'staleSuccess', 'failed'].includes(frame.verdict) &&
+          ['current', 'staleSuccess', 'expired', 'failed'].includes(
+            frame.verdict,
+          ) &&
           (frame.code === undefined ||
             (frame.verdict === 'failed' && CODES.has(frame.code))),
       );
       evaluation.ackReceived = true;
+      evaluations.verdicts[frame.verdict]++;
       const current = evaluation;
       if (frame.verdict === 'failed')
         current.rejectAck(gateFailure('invalid-reply'));
@@ -682,6 +771,9 @@ export async function openLabBroker({
   return Object.freeze({
     descriptorPath,
     ready,
+    get evaluationSummary() {
+      return structuredClone(evaluations);
+    },
     get startupDiagnostics() {
       return Object.freeze({
         connectionAccepted: connected,

@@ -505,5 +505,11 @@ export function createLabPlaybackSession({
     get startupDiagnostics() {
       return run.startupDiagnostics;
     },
+    get evaluationSummary() {
+      return run.evaluationSummary;
+    },
+    get providerReceipts() {
+      return run.providerReceipts;
+    },
   });
 }
