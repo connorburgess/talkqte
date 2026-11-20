@@ -314,43 +314,65 @@ test('real selected worker cannot hide an unselected citation through occupied-c
   assert.equal(fake.requests.length, 1);
 });
 
-test('Stop during real worker HTTP request suppresses late result and retires descriptor without retry', async () => {
-  let release, entered;
-  const blocked = new Promise((resolve) => {
-    release = resolve;
-  });
-  const requested = new Promise((resolve) => {
-    entered = resolve;
-  });
-  const fake = await fakeApi(async (current) => {
-    entered();
-    await blocked;
-    return {
-      action: 'show',
-      cue: 'Will review finish in time?',
-      sourceIds: [current.events[0].id, current.priorNotes[0].id],
-    };
-  });
-  let peer;
-  try {
-    peer = await route(fake);
-    evaluate(peer, structuredClone(fixture));
-    await requested;
-    peer.send('cancel', { reason: 'stop' });
-    // The public terminal code intentionally redacts cancellation as protocol.
-    assert.equal((await peer.next('terminal')).reason, 'protocol');
-    release();
-    await peer.close();
-    assert.equal(peer.broker.gate.terminal, 'cancelled');
-    assert.equal(peer.broker.evaluationSummary.resultsSent, 0);
-    assert.equal(peer.provider.calls, 1);
-    assert.equal(fake.requests.length, 1);
-    await assert.rejects(access(peer.broker.descriptorPath), {
-      code: 'ENOENT',
+const lifecycleCases = JSON.parse(
+  await readFile(
+    new URL('./fixtures/selected-context-lifecycle.json', import.meta.url),
+    'utf8',
+  ),
+);
+assert.equal(lifecycleCases.schema, 'talkqte.lab.selected.lifecycle-cases.v1');
+for (const lifecycle of lifecycleCases.cases) {
+  test(`shared ordinary selected lifecycle ${lifecycle.id} suppresses late result and retires descriptor without retry`, async () => {
+    let release, entered;
+    const blocked = new Promise((resolve) => {
+      release = resolve;
     });
-  } finally {
-    release();
-    await peer?.close();
-    await fake.close();
-  }
-});
+    const requested = new Promise((resolve) => {
+      entered = resolve;
+    });
+    const fake = await fakeApi(async (current) => {
+      entered();
+      await blocked;
+      return {
+        action: 'show',
+        cue: 'Will review finish in time?',
+        sourceIds: [
+          current.events[0].id,
+          ...current.priorNotes.map((n) => n.id),
+        ],
+      };
+    });
+    let peer;
+    try {
+      peer = await route(fake);
+      assert.ok([0, 1].includes(lifecycle.noteCount));
+      assert.ok(
+        ['revoke', 'remove', 'stop', 'host-stop'].includes(lifecycle.control),
+      );
+      const current = structuredClone(fixture);
+      current.priorNotes = current.priorNotes.slice(0, lifecycle.noteCount);
+      evaluate(peer, current);
+      await requested;
+      assert.equal(
+        JSON.parse(fake.requests[0].messages[0].content).priorNotes.length,
+        lifecycle.noteCount,
+      );
+      peer.send('cancel', { reason: lifecycle.cancelReason });
+      // The public terminal code intentionally redacts cancellation as protocol.
+      assert.equal((await peer.next('terminal')).reason, 'protocol');
+      release();
+      await peer.close();
+      assert.equal(peer.broker.gate.terminal, 'cancelled');
+      assert.equal(peer.broker.evaluationSummary.resultsSent, 0);
+      assert.equal(peer.provider.calls, 1);
+      assert.equal(fake.requests.length, 1);
+      await assert.rejects(access(peer.broker.descriptorPath), {
+        code: 'ENOENT',
+      });
+    } finally {
+      release();
+      await peer?.close();
+      await fake.close();
+    }
+  });
+}
