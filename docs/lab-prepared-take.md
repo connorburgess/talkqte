@@ -12,6 +12,42 @@ decisions. It cannot demonstrate adaptive generated speech responding to cues.
 This driver never regenerates media, asks a participant model, forces a cue,
 injects transcript text into the app or infers companion paint from publication.
 
+## Fixed saved-meeting model recording
+
+`createFixedModelTake(options)` selects the strict prepared path for the existing
+102.48-second fictional file: Codex subscription, `gpt-6.1-sol`, medium effort,
+one shared 20-dispatch budget and a 110-second native ordinary Stop guard. It
+does not count underlying provider requests or enable a fallback. Provider
+deadlines/output bounds remain explicit settings; the native evaluator's
+eight-second request deadline includes admission wait and may expire earlier.
+
+Prepare the exact owned player before constructing the launcher and recorder.
+The strict path requires the same frozen `player.identity` capability on all
+three adapters, checks it again before native launch/after preparation, and
+requires the fixed player application in the source-v1 Listening tuple. The
+authenticated hello and clock calibration must join that exact source session.
+Listening remains a historical native guard-time observation, not an atomic
+current-state or physical audibility claim.
+
+Recorder readiness is bounded to at most three seconds and startup ownership is
+retained through abort settlement. Before Start, the driver reserves the full
+media duration, a one-second Start budget and at least one second for completion
+inside the native guard measured conservatively from before owned spawn. It
+checks the real render anchor and its uncertainty against that budget again.
+An exhausted budget stops before playback. `guard`/`onGuard` expose numeric
+request and actual-anchor receipts for the private manifest.
+The frozen `clockCalibration` receipt retains the authenticated source session,
+native sample, Node midpoint and measured uncertainty; it is available after
+cleanup alongside `dispatchesUsed`. It does not anchor the recording clock.
+
+Optional `observe` receives existing evidence stage envelopes for run, source,
+recorder and speech boundaries. Speech end is a receipt, not an exact heard-sample
+or video time. These hooks do not manufacture model-stage timing or paint.
+Cleanup retains the existing single provider/broker owner, independently stops
+the player, requires native release and recorder finalization before final player
+retirement, and preserves failed cleanup. No additional capture-only recording
+is required by this API; any runtime plan and observer approval remain separate.
+
 ## Composition and startup order
 
 `createPreparedTake({launcher,settings,stopAfterS,media,source,player,recorder,...})`

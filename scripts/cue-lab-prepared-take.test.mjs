@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import { EventEmitter } from 'node:events';
 import { createConnection } from 'node:net';
 import { readFile } from 'node:fs/promises';
@@ -7,7 +7,12 @@ import { setTimeout as delay } from 'node:timers/promises';
 import {
   createPreparedTake,
   createLabPlaybackSession,
+  createFixedModelTake,
 } from './cue-lab-prepared-take.mjs';
+import {
+  createLabPlayerFixture,
+  LAB_PLAYER_MEDIA_SHA256,
+} from './cue-lab-player.mjs';
 
 const deferred = () => {
   let resolve;
@@ -16,10 +21,17 @@ const deferred = () => {
   });
   return { promise, resolve };
 };
+async function waitForTrace(fixture, entry) {
+  const until = performance.now() + 1000;
+  while (!fixture.trace.includes(entry)) {
+    assert.ok(performance.now() < until, `Missing stand-in event ${entry}`);
+    await delay(1);
+  }
+}
 const media = {
   fictional: true,
   path: '/fictional/prepared.mp4',
-  sha256: 'a'.repeat(64),
+  sha256: LAB_PLAYER_MEDIA_SHA256,
   durationMs: 102480,
 };
 function fixture({
@@ -44,7 +56,23 @@ function fixture({
   playerRetirement = false,
   playerRetirementFails = false,
   playerRetirementUnconfirmed = false,
+  fixedModel = false,
+  ownedPlayer,
+  foreignPlayer = false,
+  wrongFixedSource = false,
+  recorderStalls = false,
+  recorderMs,
+  recordDelayMs = 0,
+  guardSink,
+  observe,
+  helloSession = '1',
+  lateBeforeStart = false,
 } = {}) {
+  if (fixedModel) {
+    strictSource = true;
+    preallocatedRunId = 'fictional-run';
+    playerRetirement = true;
+  }
   const selectedMedia = body
     ? {
         ...media,
@@ -56,7 +84,8 @@ function fixture({
     events = new EventEmitter(),
     child = new EventEmitter();
   const activePlay = deferred(),
-    providerClosing = deferred();
+    providerClosing = deferred(),
+    evaluated = deferred();
   let launchOptions,
     socket,
     stopped = false,
@@ -131,7 +160,7 @@ function fixture({
       schema: 'talkqte.lab.v1',
       type,
       runId: d.runId,
-      sessionId: '1',
+      sessionId: helloSession,
       ...extra,
     });
     let partial = '';
@@ -151,6 +180,38 @@ function fixture({
               }),
             ) + '\n',
           );
+          if (fixedModel)
+            socket.write(
+              JSON.stringify(
+                frame('evaluate', {
+                  requestId: '1',
+                  contextRevision: '1',
+                  budgetMs: 1000,
+                  input: {
+                    events: [
+                      {
+                        id: 's1',
+                        speaker: 'Speaker',
+                        text: 'The fictional delivery date is Friday.',
+                      },
+                    ],
+                    existingCue: null,
+                  },
+                }),
+              ) + '\n',
+            );
+        } else if (value.type === 'result' && fixedModel) {
+          trace.push('validated-quiet');
+          socket.write(
+            JSON.stringify(
+              frame('settled', {
+                requestId: value.requestId,
+                contextRevision: value.contextRevision,
+                verdict: 'current',
+              }),
+            ) + '\n',
+          );
+          evaluated.resolve();
         }
       }
     });
@@ -185,6 +246,7 @@ function fixture({
       });
       const ack = {
         sha256: media.sha256,
+        ...(fixedModel ? { basis: 'audio-render' } : {}),
         monotonicMs: performance.now(),
         uncertaintyMs: ackUncertainty,
         ...(body && !missingDisplayLabel
@@ -194,6 +256,8 @@ function fixture({
       if (!missingAck) onStarted(ack);
       if (duplicateAck) onStarted(ack);
       await authenticate();
+      if (fixedModel)
+        await Promise.race([evaluated.promise, activePlay.promise]);
       if (playbackWait) await Promise.race([playbackWait, activePlay.promise]);
       else await delay(10);
       trace.push('play-ended');
@@ -208,11 +272,37 @@ function fixture({
       return { stopped: true };
     },
   };
+  let selectedPlayer = player;
+  if (ownedPlayer) {
+    selectedPlayer = {
+      ...ownedPlayer,
+      async play(options) {
+        const playback = ownedPlayer.play({
+          ...options,
+          onStarted(anchor) {
+            options.onStarted(anchor);
+            void authenticate().catch(() => activePlay.resolve());
+          },
+        });
+        const completed = await playback;
+        const aborted = deferred();
+        const onAbort = () => aborted.resolve();
+        options.signal.addEventListener('abort', onAbort, { once: true });
+        try {
+          if (!options.signal.aborted)
+            await Promise.race([evaluated.promise, aborted.promise]);
+        } finally {
+          options.signal.removeEventListener('abort', onAbort);
+        }
+        return completed;
+      },
+    };
+  }
   if (playerRetirement)
     player.close = async ({ nativeReleased }) => {
       assert.equal(nativeReleased, true);
       trace.push('player-retired');
-      assert.ok(trace.includes('native-released'));
+      assert.ok(!trace.includes('launch') || trace.includes('native-released'));
       assert.ok(trace.includes('recorder-stop'));
       if (playerRetirementFails) throw Error('fictional retirement failure');
       return { closed: !playerRetirementUnconfirmed };
@@ -229,6 +319,12 @@ function fixture({
     async start({ runId }) {
       recorderRunId = runId;
       trace.push('record-ready');
+      if (recordDelayMs) await delay(recordDelayMs);
+      if (recorderStalls) await activePlay.promise;
+      if (lateBeforeStart) {
+        const now = performance.now.bind(performance);
+        mock.method(performance, 'now', () => now() + 6000);
+      }
       if (recorderFails) throw Error('private recorder failure');
       return { started: true };
     },
@@ -268,7 +364,7 @@ function fixture({
     launcher,
     stopAfterS: 110,
     media: selectedMedia,
-    player,
+    player: selectedPlayer,
     recorder,
     source: {
       ...(strictSource
@@ -290,7 +386,17 @@ function fixture({
         return {
           runId,
           listening,
-          ...(strictSource ? { version: 1, sessionId: '1' } : {}),
+          ...(strictSource
+            ? {
+                version: 1,
+                sessionId: '1',
+                source: {
+                  application: wrongFixedSource
+                    ? 'QuickTime Player'
+                    : 'TalkQTE Lab Player',
+                },
+              }
+            : {}),
         };
       },
     },
@@ -298,7 +404,7 @@ function fixture({
       provider: 'codex',
       model: 'gpt-6.1-sol',
       effort: 'medium',
-      maxCalls: 3,
+      maxCalls: fixedModel ? 20 : 3,
       deadlineMs: 100,
       execution: 'offline-stand-in',
       environment: {},
@@ -306,7 +412,12 @@ function fixture({
         codex: async () => ({
           async request() {
             counts.requests++;
-            return { value: { quiet: true }, elapsedMs: 1 };
+            return {
+              value: fixedModel
+                ? { action: 'quiet', cue: null, sourceIds: ['s1'] }
+                : { quiet: true },
+              elapsedMs: 1,
+            };
           },
           async close() {
             counts.providerClose++;
@@ -318,17 +429,34 @@ function fixture({
       },
     },
     processEvents: events,
-    startupMs: 100,
+    startupMs: fixedModel ? 1000 : 100,
     releaseMs: 100,
     armingMs: 50,
     nativeReleaseMs: 50,
-    takeMs: 300,
+    takeMs: fixedModel ? 1500 : 300,
     signal: initialSignal,
     ...(adaptedBody ? { body: adaptedBody } : {}),
+    ...(recorderMs ? { recorderMs } : {}),
+    observe,
+    onGuard: guardSink,
   };
+  if (fixedModel) {
+    if (!ownedPlayer)
+      Object.assign(selectedPlayer, {
+        identity: { runId: preallocatedRunId },
+        startDeadlineMs: 100,
+      });
+    launcher.mode = 'model-enabled';
+    launcher.playerSource = selectedPlayer.identity;
+    recorder.playerSource = foreignPlayer
+      ? { ...selectedPlayer.identity, pid: 999 }
+      : selectedPlayer.identity;
+  }
   const take = adaptedBody
     ? createLabPlaybackSession(options)
-    : createPreparedTake(options);
+    : fixedModel
+      ? createFixedModelTake(options)
+      : createPreparedTake(options);
   return {
     take,
     trace,
@@ -371,6 +499,143 @@ test('prepared speech starts after Listening and recorder readiness but before l
     bodyClose: 0,
     requests: 0,
   });
+});
+
+test('fixed saved meeting composes actual player controller, one model gate, same-session calibration and complete cleanup', async () => {
+  const player = createLabPlayerFixture({
+    runId: 'fictional-run',
+    prepareMs: 2000,
+    startMs: 100,
+    stopMs: 100,
+  });
+  try {
+    await player.prepare({ media });
+    const guards = [],
+      events = [];
+    const f = fixture({
+      fixedModel: true,
+      ownedPlayer: player,
+      recordDelayMs: 25,
+      guardSink: (g) => guards.push(g),
+      observe: (e) => events.push(e),
+    });
+    const result = await f.take.done;
+    assert.equal(result.completed, true);
+    assert.equal(result.nativeReleased, true);
+    assert.equal(result.dispatchesUsed, 1);
+    assert.equal(f.take.dispatchesUsed, 1);
+    assert.equal(result.clockCalibration.sessionId, '1');
+    assert.equal(result.clockCalibration, f.take.clockCalibration);
+    assert.equal(Object.isFrozen(result.clockCalibration), true);
+    assert.ok(
+      result.clockCalibration.uncertaintyMs + guards[1].actualUncertaintyMs <=
+        100,
+    );
+    assert.equal(f.counts.requests, 1);
+    assert.equal(f.counts.providerClose, 1);
+    assert.equal(f.counts.nativeStop, 1);
+    assert.equal(f.counts.recorderStop, 1);
+    assert.ok(
+      f.trace.indexOf('record-ready') < f.trace.indexOf('authenticate'),
+    );
+    assert.ok(f.trace.includes('validated-quiet'));
+    assert.equal(guards.length, 2);
+    assert.ok(guards[1].remainingAtAnchorMs >= media.durationMs + 1000);
+    assert.equal(result.guard, f.take.guard);
+    assert.equal(player.diagnostics.failure, null);
+    assert.equal(player.diagnostics.process.exitCode, 0);
+    assert.equal(player.diagnostics.transport.lastCommand, 'retire');
+    assert.equal(events.at(-1).outcome, 'observed');
+  } finally {
+    await player.close({ nativeReleased: true }).catch(() => {});
+  }
+});
+test('fixed source capability rejects a same-run different player before ownership', () => {
+  assert.throws(() => fixture({ fixedModel: true, foreignPlayer: true }));
+});
+test('wrong fixed Listening source stops before playback or evaluator dispatch', async () => {
+  const f = fixture({ fixedModel: true, wrongFixedSource: true });
+  await assert.rejects(f.take.done);
+  assert.equal(f.counts.requests, 0);
+  assert.equal(f.trace.includes('play'), false);
+  assert.equal(f.counts.nativeStop, 1);
+  assert.equal(f.counts.recorderStop, 1);
+});
+test('recorder readiness expiry aborts and retains startup ownership before cleanup completes', async () => {
+  const f = fixture({ fixedModel: true, recorderStalls: true, recorderMs: 10 });
+  await assert.rejects(f.take.done);
+  assert.equal(f.trace.includes('play'), false);
+  assert.equal(f.counts.requests, 0);
+  assert.equal(f.counts.nativeStop, 1);
+  assert.equal(f.counts.recorderStop, 1);
+});
+test('fixed saved meeting refuses exhausted native budget before Start', async () => {
+  try {
+    const f = fixture({ fixedModel: true, lateBeforeStart: true });
+    await assert.rejects(f.take.done);
+    assert.equal(f.trace.includes('play'), false);
+    assert.equal(f.counts.requests, 0);
+    assert.equal(f.counts.nativeStop, 1);
+  } finally {
+    mock.restoreAll();
+  }
+});
+test('different authenticated session cannot dispatch or complete the strict model take', async () => {
+  const f = fixture({ fixedModel: true, helloSession: '2' });
+  await assert.rejects(f.take.done);
+  assert.equal(f.counts.requests, 0);
+  assert.equal(f.counts.nativeStop, 1);
+  assert.equal(f.counts.providerClose, 1);
+});
+for (const name of ['SIGINT', 'SIGTERM']) {
+  test(`host ${name} after validated quiet remains cancelled with once-only cleanup`, async () => {
+    const records = [];
+    const pendingPlayback = deferred();
+    const f = fixture({
+      fixedModel: true,
+      playbackWait: pendingPlayback.promise,
+      observe: (e) => records.push(e),
+    });
+    await waitForTrace(f, 'validated-quiet');
+    f.events.emit(name);
+    await assert.rejects(f.take.done, { category: 'cancelled' });
+    assert.equal(records.at(-1).outcome, 'cancelled');
+    assert.equal(f.counts.nativeStop, 1);
+    assert.equal(f.counts.playerStop, 1);
+    assert.equal(f.counts.recorderStop, 1);
+    assert.equal(f.counts.providerClose, 1);
+  });
+}
+test('pre-aborted outer signal remains cancelled without model dispatch', async () => {
+  const signal = AbortSignal.abort();
+  const records = [];
+  const f = fixture({
+    fixedModel: true,
+    initialSignal: signal,
+    observe: (e) => records.push(e),
+  });
+  await assert.rejects(f.take.done, { category: 'cancelled' });
+  assert.equal(records.at(-1).outcome, 'cancelled');
+  assert.equal(f.counts.requests, 0);
+  assert.equal(f.counts.playerStop, 1);
+  assert.equal(f.counts.recorderStop, 1);
+});
+test('actual source failure stays first cause when host cancellation follows', async () => {
+  const records = [],
+    pendingPlayback = deferred();
+  const f = fixture({
+    fixedModel: true,
+    playbackWait: pendingPlayback.promise,
+    observe: (e) => records.push(e),
+  });
+  await waitForTrace(f, 'validated-quiet');
+  f.failSource();
+  await delay(0);
+  f.events.emit('SIGINT');
+  await assert.rejects(f.take.done, { category: 'protocol' });
+  assert.equal(records.at(-1).outcome, 'failure');
+  assert.equal(f.counts.nativeStop, 1);
+  assert.equal(f.counts.providerClose, 1);
 });
 
 for (const [name, options] of Object.entries({

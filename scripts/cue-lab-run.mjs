@@ -59,10 +59,12 @@ export function createLabRun({
     closing = null,
     terminal = null,
     expectedSourceSession = null,
+    clockCalibration = null,
     playback = null,
     playbackResolve,
     unsubscribe = () => {},
     initialized = false;
+  let controlCancelled = false;
   const played = new Promise((resolve) => (playbackResolve = resolve));
   let rejectStopped;
   const stopped = new Promise((_, reject) => (rejectStopped = reject));
@@ -77,12 +79,16 @@ export function createLabRun({
   const onNative = (event) => {
     const handle = () => {
       if (!event || !EVENTS.has(event.type)) return fail('protocol');
+      if (event.type === 'stop-requested') controlCancelled = true;
       fail(event.type);
     };
     if (initialized) handle();
     else queueMicrotask(handle);
   };
-  const abort = () => fail('cancelled');
+  const abort = () => {
+    controlCancelled = true;
+    fail('cancelled');
+  };
   // Install these before any provider preflight, broker creation or native start.
   unsubscribe = native.subscribe(onNative);
   if (typeof unsubscribe !== 'function') throw gateFailure('protocol');
@@ -124,6 +130,7 @@ export function createLabRun({
       calibrated.sessionId !== expectedSourceSession
     )
       throw gateFailure('protocol');
+    clockCalibration = Object.freeze({ ...calibrated });
     await Promise.race([played, stopped]);
     if (root.signal.aborted || broker.gate.terminal)
       throw gateFailure('cancelled');
@@ -147,7 +154,9 @@ export function createLabRun({
     terminal ??= 'cancelled';
     phase = 'stopping';
     // This does not depend on native authentication or signal delivery.
-    root.abort();
+    // A fixed reason crosses the owner boundary without conflating provider or
+    // native failure with an explicit owner/host cancellation.
+    root.abort(controlCancelled ? 'cancelled' : 'failed');
     broker?.gate.stop(terminal);
     rejectStopped(gateFailure(terminal));
     (async () => {
@@ -215,13 +224,19 @@ export function createLabRun({
   return Object.freeze({
     signal: root.signal,
     ready,
-    stop,
+    stop(reason) {
+      controlCancelled = true;
+      return stop(reason);
+    },
     close,
     get phase() {
       return phase;
     },
     get dispatchesUsed() {
       return broker?.gate.dispatchesUsed ?? 0;
+    },
+    get clockCalibration() {
+      return clockCalibration;
     },
     expectSourceSession(value) {
       if (
