@@ -20,6 +20,7 @@ import { parseUniqueLabJson } from './cue-lab-strict-json.mjs';
 import { TextDecoder } from 'node:util';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
 import { LAB_MEDIA_MAX_MS } from './cue-lab-media.mjs';
+import { DEEPGRAM_APP_QUERY } from './cue-lab-deepgram.mjs';
 const CHECKOUT = realpathSync(fileURLToPath(new URL('../', import.meta.url)));
 const EVENT = 'talkqte.lab.evidence.event.v1';
 const MANIFEST = 'talkqte.lab.evidence.manifest.v1';
@@ -185,6 +186,7 @@ export function createLabEvidenceWriter({
   const clocks = [],
     guards = [],
     artifacts = [];
+  let transcription = null;
   let bytes = 0,
     count = 0,
     rawRows = 0,
@@ -230,6 +232,29 @@ export function createLabEvidenceWriter({
   };
   const api = {
     directory,
+    // The cloud transcription settings the launcher used, once; never the
+    // token. The app's fixed query is recorded as the request it sends.
+    recordTranscription(settings) {
+      required(
+        !terminal &&
+          !closed &&
+          transcription === null &&
+          exact(settings, ['backend', 'minuteCap', 'grantTtlS']) &&
+          settings.backend === 'deepgram' &&
+          Number.isSafeInteger(settings.minuteCap) &&
+          settings.minuteCap >= 1 &&
+          settings.minuteCap <= 60 &&
+          Number.isSafeInteger(settings.grantTtlS) &&
+          settings.grantTtlS >= 300 &&
+          settings.grantTtlS <= 3600,
+      );
+      transcription = Object.freeze({
+        backend: settings.backend,
+        minuteCap: settings.minuteCap,
+        grantTtlS: settings.grantTtlS,
+        query: DEEPGRAM_APP_QUERY,
+      });
+    },
     addClock(clock) {
       required(
         !terminal &&
@@ -676,6 +701,7 @@ export function createLabEvidenceWriter({
               }
             : {}),
           guards,
+          ...(transcription ? { transcription: { ...transcription } } : {}),
           runtime: {
             node: process.version,
             libuv: process.versions.uv,

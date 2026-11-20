@@ -80,6 +80,11 @@ function fixture({
   noHello = false,
   beforeListening,
   startupMs: startupOverride,
+  // Cloud transcription: the launcher's token release, observed in order.
+  cloud = false,
+  releaseFails = false,
+  // Called while the provider opens (after approval), e.g. to move a clock.
+  onProviderOpen,
 } = {}) {
   if (api) effort = 'low';
   if (fixedModel) {
@@ -155,6 +160,13 @@ function fixture({
       counts.launcherClose++;
     },
   };
+  if (cloud) {
+    launcher.transcription = { backend: 'deepgram' };
+    launcher.releaseTranscriptionToken = () => {
+      trace.push('token-released');
+      if (releaseFails) throw Error('fictional release failure');
+    };
+  }
   let evaluatorHandler;
   if (api)
     launcher.subscribeEvaluator = (handler) => {
@@ -412,6 +424,8 @@ function fixture({
           approvalBudgetMs: 180000,
           onApproval(event) {
             trace.push('approval-' + event.state);
+            if (event.state === 'approved' && cloud)
+              assert.ok(trace.includes('token-released'));
             onApproval?.(event);
             if (event.state === 'waiting')
               for (const row of approvalRows)
@@ -467,7 +481,7 @@ function fixture({
       environment: {},
       openers: {
         [api ? 'anthropic-api' : 'codex']: async () => ({
-          ...(counts.providerOpen++, {}),
+          ...(counts.providerOpen++, onProviderOpen?.(), {}),
           async request({ signal }) {
             counts.requests++;
             if (firstRequestTimesOut && counts.requests === 1)
@@ -1436,4 +1450,58 @@ test('an approval that could no longer fit the media before native Stop is not g
   );
   assert.equal(f.counts.providerOpen, 0);
   assert.equal(f.trace.includes('play'), false);
+});
+
+test('with cloud transcription the token is released after approval and before the approved notice', async (t) => {
+  const { f, approvals } = await apiTake(t, {
+    owned: false,
+    cloud: true,
+    approvalRows: [reviewRow],
+  });
+  const result = await f.take.done;
+  assert.equal(result.completed, true);
+  const at = (entry) => f.trace.indexOf(entry);
+  assert.ok(at('approval-waiting') < at('token-released'));
+  assert.ok(at('token-released') < at('approval-approved'));
+  assert.ok(at('approval-approved') < at('record-ready'));
+  assert.deepEqual(
+    approvals.map((e) => e.state),
+    ['waiting', 'approved'],
+  );
+});
+
+test('a failed token release stops the take before the approved notice', async (t) => {
+  const { f, approvals } = await apiTake(t, {
+    owned: false,
+    cloud: true,
+    releaseFails: true,
+    approvalRows: [reviewRow],
+  });
+  await assert.rejects(f.take.done);
+  assert.deepEqual(
+    approvals.map((e) => e.state),
+    ['waiting'],
+  );
+  assert.equal(f.trace.includes('play'), false);
+});
+
+test('a take that runs out of time while the provider opens stops without releasing the token', async (t) => {
+  const advance = shiftedClock(t);
+  const { f, approvals } = await apiTake(t, {
+    owned: false,
+    cloud: true,
+    approvalRows: [reviewRow],
+    onApproval(event) {
+      if (event.state === 'waiting') advance(170000);
+    },
+    // Opening the provider takes the take past its 180 s approval budget.
+    onProviderOpen: () => advance(15000),
+  });
+  await assert.rejects(f.take.done, { category: 'approval-not-given' });
+  assert.equal(f.counts.providerOpen, 1);
+  assert.equal(f.trace.includes('token-released'), false);
+  assert.deepEqual(
+    approvals.map((e) => e.state),
+    ['waiting'],
+  );
 });

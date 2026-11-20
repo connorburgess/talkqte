@@ -239,6 +239,27 @@ not establish rendered speech. Cue publication does not establish video paint.
 Unknown or unsupported stages are listed as missing; explicit dropped rows remain
 evidence-loss markers. The original artifact remains the source for other rows.
 
+**Cloud transcription rows (#344).** The importer also reads four kinds of row:
+
+- `evaluator` becomes `evaluator.connection`, with its approval, state, backend and engine session.
+- A live `session` start becomes `session.started`, with its session clock reading.
+- `stt_state` becomes `transcription.stream`, with the state (`started`, `connected`, `dropping`, `finished`, `ended` or `stopped`), the fixed stop code (only on `stopped`; `lab_ended` when the lab cue run ends), `audio_ms`, and on `connected` only the query of the URL the app actually used (never the token, which travels in a header). Only the app's own parameter names are accepted there, each once; any other parameter refuses the row.
+- `stt_final` becomes `transcript.finalized`, with its sequence and the start and end of speech on the session clock.
+
+The provider's speaker label is untrusted: it is dropped on import and never reported or scored.
+
+When the manifest records the launcher's `transcription` settings (backend, minute cap, grant TTL and the app's fixed query, never the token), or the rows include a stream, the report adds a cloud transcription section. Per session it gives:
+
+- whether every stream start comes after that session's in-app review row (`approval` `review`, state `on`) in file order;
+- whether it connected, the query it used, and whether that equals the expected query the manifest records;
+- whether the send queue overflowed (`dropping`);
+- the last stop state and code;
+- the most audio sent.
+
+It also gives the total audio sent across the launch, against the minute cap, which covers every session and source.
+
+For each final, it gives the delay from its end of speech to the arrival of its transcript line (`c{session}-{stream}-{seq}`, matched only when exactly one line has that session and sequence). The end of speech is placed on the logger clock through the session's start row. Malformed rows or settings are refused, not guessed. The query comes from the app's own `connected` row, so it records what the app used, not a lab copy of it. A test also checks the lab's expected query against the app's `QUERY` constant when that source is in the checkout.
+
 ## Human product review and private content
 
 `reviews` entries contain `{ids, labels, note?, nextChange?, comparison?}`. Labels

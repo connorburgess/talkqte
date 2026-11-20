@@ -11,6 +11,7 @@ import {
 import { TextDecoder } from 'node:util';
 import { parseUniqueLabJson } from './cue-lab-strict-json.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
+import { isAllowedSttQuery } from './cue-lab-deepgram.mjs';
 
 const canonicalSession = (value) =>
   typeof value === 'string' &&
@@ -218,6 +219,50 @@ export function watchLabTiming({
         ...(value.effort !== undefined ? { effort: value.effort } : {}),
         session: value.session,
       });
+    } else if (value.event === 'stt_state') {
+      // Cloud transcription start and stop, with a fixed code and the
+      // audio sent so far. No provider message is ever in the row.
+      if (
+        ![
+          'started',
+          'connected',
+          'dropping',
+          'finished',
+          'ended',
+          'stopped',
+        ].includes(value.state) ||
+        // Only `connected` carries the query of the URL the app used; it
+        // never holds the token, which travels only in a header.
+        (value.state === 'connected') !== isAllowedSttQuery(value.query) ||
+        (value.code !== undefined &&
+          ![
+            'auth',
+            'quota',
+            'rate_limited',
+            'cap_reached',
+            'network',
+            'protocol',
+            'closed',
+            'settings',
+            'withdrawn',
+            'lab_ended',
+          ].includes(value.code)) ||
+        (value.state === 'stopped') !== (value.code !== undefined) ||
+        !Number.isSafeInteger(value.audio_ms) ||
+        value.audio_ms < 0 ||
+        (sourceObservation === 'v1'
+          ? !canonicalSession(value.session)
+          : !Number.isSafeInteger(value.session) || value.session < 0)
+      )
+        throw gateFailure('protocol');
+      onEvent({
+        event: 'stt_state',
+        state: value.state,
+        ...(value.code !== undefined ? { code: value.code } : {}),
+        ...(value.query !== undefined ? { query: value.query } : {}),
+        audio_ms: value.audio_ms,
+        session: value.session,
+      });
     } else if (value.event === 'source_problem' || value.event === 'dropped')
       throw gateFailure('protocol');
     else if (value.event === 'dev_source') {
@@ -282,7 +327,8 @@ export function watchLabTiming({
                 ? function (key, value, context) {
                     if (
                       ((this?.event === 'session' && this.live === true) ||
-                        this?.event === 'evaluator') &&
+                        this?.event === 'evaluator' ||
+                        this?.event === 'stt_state') &&
                       key === 'session'
                     ) {
                       if (!canonicalSession(context?.source))

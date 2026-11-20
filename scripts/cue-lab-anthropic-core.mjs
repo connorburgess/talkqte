@@ -3,9 +3,8 @@
 // Pure logic; the per-run worker (cue-lab-anthropic-worker.mjs) is the only
 // place a key and an SDK client exist. Tests drive this module with a fake
 // fetch, never the network.
-import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { LAB_KEY_DIR, readLabKeyFile } from './cue-lab-key-file.mjs';
 import { performance } from 'node:perf_hooks';
 import { COMPACT_PROMPT, CONTRACT } from './cue-lab.mjs';
 
@@ -241,79 +240,26 @@ export function anthropicEnvironmentNames(environment) {
   );
 }
 
-export const ANTHROPIC_KEY_DIR = join(
-  process.env.HOME ?? '/nonexistent',
-  '.config',
-  'talkqte-lab',
-);
+export const ANTHROPIC_KEY_DIR = LAB_KEY_DIR;
 export const ANTHROPIC_KEY_FILE = join(ANTHROPIC_KEY_DIR, 'anthropic.env');
-
-class KeyRefused extends Error {
-  constructor(reason) {
-    super(`Lab API key refused: ${reason}.`);
-    this.category = 'credentials';
-  }
-}
-
-function insideRepository(path) {
-  for (let p = path; ; p = dirname(p)) {
-    if (existsSync(join(p, '.git'))) return true;
-    if (dirname(p) === p) return false;
-  }
-}
 
 /**
  * Reads the owner's key file under strict ownership, mode and location
- * checks. Every failure is fixed text; the key value never appears.
+ * checks (cue-lab-key-file.mjs). Every failure is fixed text; the key value
+ * never appears.
  */
 export function readAnthropicKeyFile({
   file = ANTHROPIC_KEY_FILE,
-  forbiddenRoots = [tmpdir(), '/tmp', '/private/tmp'],
+  forbiddenRoots,
 } = {}) {
-  const uid = process.getuid?.();
-  const dir = dirname(file);
-  let d, f;
-  try {
-    d = lstatSync(dir);
-    f = lstatSync(file);
-  } catch {
-    throw new KeyRefused('missing');
-  }
-  if (!d.isDirectory() || d.isSymbolicLink() || d.uid !== uid)
-    throw new KeyRefused('directory');
-  if ((d.mode & 0o777) !== 0o700) throw new KeyRefused('directory mode');
-  if (!f.isFile() || f.isSymbolicLink() || f.uid !== uid)
-    throw new KeyRefused('file');
-  if ((f.mode & 0o777) !== 0o600) throw new KeyRefused('file mode');
-  if (f.size === 0 || f.size > 4096) throw new KeyRefused('size');
-  const real = realpathSync(file);
-  const roots = forbiddenRoots.map((r) => {
-    try {
-      return realpathSync(r);
-    } catch {
-      return r;
-    }
+  return readLabKeyFile({
+    file,
+    name: ANTHROPIC_KEY_NAME,
+    ...(forbiddenRoots ? { forbiddenRoots } : {}),
+    // Console API keys only: classic sk-ant-api… and account-linked
+    // sk-ant-usr-…. Admin, OAuth and every other sk-ant- credential refused.
+    accept: (value) =>
+      (value.startsWith('sk-ant-api') || value.startsWith('sk-ant-usr-')) &&
+      !value.startsWith('sk-ant-admin'),
   });
-  if (roots.some((r) => real === r || real.startsWith(r + '/')))
-    throw new KeyRefused('location');
-  if (insideRepository(dirname(real))) throw new KeyRefused('location');
-  const lines = readFileSync(file, 'utf8')
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith('#'));
-  if (lines.length !== 1) throw new KeyRefused('format');
-  const m = lines[0].match(/^(?:export\s+)?([A-Z0-9_]+)=(.*)$/);
-  if (!m || m[1] !== ANTHROPIC_KEY_NAME) throw new KeyRefused('format');
-  let value = m[2].trim();
-  if (/^(['"]).*\1$/.test(value)) value = value.slice(1, -1);
-  // Console API keys only: classic sk-ant-api… and account-linked
-  // sk-ant-usr-…. Admin, OAuth and every other sk-ant- credential refused.
-  if (
-    !(value.startsWith('sk-ant-api') || value.startsWith('sk-ant-usr-')) ||
-    value.startsWith('sk-ant-admin') ||
-    /\s/.test(value) ||
-    value.length > 512
-  )
-    throw new KeyRefused('kind');
-  return value;
 }

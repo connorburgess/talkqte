@@ -712,6 +712,45 @@ test('the session refuses ambient ANTHROPIC_* settings, other models, other effo
   }
 });
 
+test('the API session refuses TLS or code-loading Node settings, even empty', async () => {
+  const api = await fakeApi([{}]);
+  try {
+    for (const name of [
+      'NODE_TLS_REJECT_UNAUTHORIZED',
+      'NODE_EXTRA_CA_CERTS',
+      'NODE_OPTIONS',
+      'NODE_USE_ENV_PROXY',
+    ])
+      await assert.rejects(
+        open(api, { environment: { PATH: process.env.PATH, [name]: '' } }),
+        { category: 'environment' },
+      );
+    assert.equal(api.requests.length, 0);
+  } finally {
+    await api.close();
+  }
+});
+
+test("the API session checks this process's own environment even when a clean one is passed", async (t) => {
+  const api = await fakeApi([{}]);
+  // Presence is refused even when certificate validation stays enabled.
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '1';
+  t.after(() => delete process.env.NODE_TLS_REJECT_UNAUTHORIZED);
+  let session;
+  try {
+    await assert.rejects(
+      async () => {
+        session = await open(api);
+      },
+      { category: 'environment' },
+    );
+    assert.equal(api.requests.length, 0);
+  } finally {
+    await session?.close();
+    await api.close();
+  }
+});
+
 test('the provider wrapper runs the API route only as api execution at effort low', async () => {
   const base = {
     provider: 'anthropic-api',
