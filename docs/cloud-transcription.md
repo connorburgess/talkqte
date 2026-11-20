@@ -123,8 +123,14 @@ review and the end of a lab run are not retried.
   is recorded as the gap.
 - Audio captured after the failure goes to the new stream, so the transcript
   carries on from there. Line numbers continue, so line ids stay unique.
+- Only a replacement's confirmed connection reports a successful reconnect;
+  starting its worker does not. A pending or refused connection cannot report
+  success. Loss across failed pending attempts is included when a later
+  replacement connects. A retired approval or Stop cannot publish a late success.
 - The notebook says "Transcription by Deepgram reconnected once after a
-  connection problem; about N s of speech was not transcribed."
+  connection problem. About N s of speech was not transcribed." A positive
+  subsecond gap is described as less than one second; a zero or unavailable
+  measurement leaves the amount unknown instead of inventing a one-second loss.
 - The timing log writes `stt_state` `reconnecting` with the failure's code and
   `gap_ms`, then `connected` for the new stream.
 - The new stream reads the token file again, so the token must still be there.
