@@ -27,6 +27,9 @@ impl Fixture {
             dir,
             listener,
             settings: Settings {
+                bounded_history: false,
+                selected_prior: false,
+                attested: None,
                 backend: Backend::Subscription,
                 spend_cap_micro_usd: None,
                 descriptor,
@@ -861,6 +864,9 @@ fn the_ready_frame_must_match_the_backend_budget_and_cap() {
     }
     // A subscription backend never accepts spend fields.
     let codex = Settings {
+        bounded_history: false,
+        selected_prior: false,
+        attested: None,
         backend: Backend::Subscription,
         spend_cap_micro_usd: None,
         descriptor: "/fictional/private/descriptor".into(),
@@ -932,6 +938,376 @@ fn an_unconfirmed_refusal_is_terminal() {
     assert_eq!(job.join().unwrap(), Err(Failure::Expired));
 }
 
+pub(super) fn selected_settings() -> Settings {
+    let mut settings = api_settings(Some("1000000"), "claude-opus-5-5", "low").unwrap();
+    settings.selected_prior = true;
+    settings
+}
+
+#[test]
+fn selected_registration_disclosure_is_bounded_and_defaults_still_refuse_notes() {
+    let settings = selected_settings();
+    // Exact current cloud review sentence with its largest allowed minute cap.
+    let audio="Audio: this approval also sends the live audio of the session's capture source (the microphone, or the selected application) to Deepgram (US, model Nova-3) for transcription. Each request asks Deepgram to opt out of its Model Improvement Program; what Deepgram keeps is set by its terms (https://deepgram.com/terms). Audio captured before this approval is never sent. At most 10 minutes of audio for this whole launch, across sessions and sources. If transcription stops, nothing is transcribed and nothing falls back to another service.";
+    let selected = processor_configuration(
+        Backend::Api,
+        Some(&settings),
+        Some(audio.into()),
+        Some("Deepgram".into()),
+    )
+    .unwrap();
+    let mut engine = Engine::live_with_evaluator(
+        Worker::start(Adapter(Fixture::new().link(Some(sample()))), DEADLINE).unwrap(),
+        selected,
+    );
+    engine.start().unwrap();
+    // Empty selected review is explicit permission, not import or launch.
+    let review = engine
+        .review_processing(crate::engine::ConversationScope::NewSpeechOnly, &[])
+        .unwrap();
+    engine.approve_processing(review).unwrap();
+    assert!(engine.has_processing_permission());
+    assert!(
+        processor_configuration(Backend::Api, Some(&settings), Some("x".repeat(2048)), None)
+            .is_err()
+    );
+    let legacy = api_settings(Some("1000000"), "claude-opus-5-5", "low").unwrap();
+    let (_, _, policy) = disclosure(Backend::Api, Some(&legacy));
+    assert!(policy.contains("Never sends the cue provider audio, prior notes"));
+    let (_, _, policy) = disclosure(Backend::Api, Some(&settings));
+    assert!(policy.contains("Approving no notes sends none"));
+}
+
+#[test]
+fn selected_settings_and_ready_identity_fail_closed() {
+    let values = [
+        ("TALKQTE_DEV_CUE_BACKEND", "lab-api"),
+        (
+            "TALKQTE_DEV_LAB_DESCRIPTOR",
+            "/fictional/private/descriptor",
+        ),
+        ("TALKQTE_DEV_LAB_PROVIDER", "anthropic-api"),
+        ("TALKQTE_DEV_LAB_MODEL", "claude-opus-5-5"),
+        ("TALKQTE_DEV_LAB_EFFORT", "low"),
+        ("TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD", "1000000"),
+    ];
+    for mode in [SELECTED_CONTEXT, "bounded-history", "unknown"] {
+        let parsed = Settings::parse(|key| {
+            if key == "TALKQTE_DEV_LAB_CONTEXT" {
+                Some(mode.into())
+            } else {
+                values
+                    .iter()
+                    .find(|(k, _)| *k == key)
+                    .map(|(_, v)| v.to_string())
+            }
+        });
+        assert_eq!(
+            parsed.is_ok(),
+            matches!(mode, SELECTED_CONTEXT | "bounded-history")
+        );
+        if let Ok(settings) = parsed {
+            assert_eq!(settings.selected_prior, mode == SELECTED_CONTEXT);
+            assert_eq!(settings.bounded_history, mode == "bounded-history");
+            assert!(settings.attested.is_none());
+        }
+    }
+    assert!(Settings::parse(|key| if key == "TALKQTE_DEV_LAB_CONTEXT" {
+        Some(SELECTED_CONTEXT.into())
+    } else {
+        None
+    })
+    .is_err());
+    let settings = selected_settings();
+    let mut ready = settings.frame("ready", "fictional-run", 7);
+    ready.as_object_mut().unwrap().extend(json!({"provider":"anthropic-api","model":"claude-opus-5-5","effort":"low","dispatchBudgetKind":"apiRequests","dispatchLimit":40,"dispatchesUsed":0,"spendCapMicroUsd":1000000,"spendUsedMicroUsd":0}).as_object().unwrap().clone());
+    assert!(ready_matches_settings(&ready, "fictional-run", 7, &settings).is_err());
+    ready
+        .as_object_mut()
+        .unwrap()
+        .extend(settings.identity().as_object().unwrap().clone());
+    assert_eq!(
+        ready_matches_settings(&ready, "fictional-run", 7, &settings),
+        Ok(())
+    );
+    for key in [
+        "contextPolicy",
+        "inputContract",
+        "policyRevision",
+        "promptSha256",
+        "schema",
+    ] {
+        let mut bad = ready.clone();
+        bad[key] = json!("wrong");
+        assert!(ready_matches_settings(&bad, "fictional-run", 7, &settings).is_err());
+    }
+}
+
+#[test]
+fn selected_real_link_worker_projects_native_v2_and_retires_on_stop() {
+    use crate::cue_evaluator::{Provenance, Source};
+    for notes in [false, true] {
+        let mut f = Fixture::new();
+        let path = f.settings.descriptor.clone();
+        f.settings = selected_settings();
+        f.settings.descriptor = path.clone();
+        let mut descriptor: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        descriptor["schema"] = json!("talkqte.lab.selected.descriptor.v2");
+        fs::write(&path, descriptor.to_string()).unwrap();
+        let link = f.link(Some(sample()));
+        let mut worker = Worker::start(Adapter(link.clone()), DEADLINE).unwrap();
+        let mut sources = vec![Source {
+            id: "transcript:current".into(),
+            revision: 0,
+            provenance: Provenance::Transcript {
+                at_ms: 10,
+                speaker: "Maya".into(),
+            },
+            text: "Can we send the pack Friday?".into(),
+        }];
+        if notes {
+            sources.push(Source {
+                id: "prior:file:a".into(),
+                revision: u64::MAX,
+                provenance: Provenance::PriorNote {
+                    provider: crate::context::Provider::File,
+                    date: "2026-11-01".into(),
+                    title: "Welcome pack review".into(),
+                },
+                text: "Review needs two days.".into(),
+            });
+        }
+        let request = Request::new(7, 3, sources, None).unwrap();
+        worker.submit(request.clone()).unwrap();
+        let mut socket = f.accept();
+        let mut reader = Reader::default();
+        let hello = read(&mut reader, &mut socket);
+        assert_eq!(hello["schema"], SELECTED_SCHEMA);
+        for (key, value) in f.settings.identity().as_object().unwrap() {
+            assert_eq!(&hello[key], value);
+        }
+        let mut ready = f.settings.frame("ready", "fictional-run", 7);
+        ready
+            .as_object_mut()
+            .unwrap()
+            .extend(f.settings.identity().as_object().unwrap().clone());
+        ready.as_object_mut().unwrap().extend(json!({"provider":"anthropic-api","model":"claude-opus-5-5","effort":"low","dispatchBudgetKind":"apiRequests","dispatchLimit":40,"dispatchesUsed":0,"spendCapMicroUsd":1000000,"spendUsedMicroUsd":0}).as_object().unwrap().clone());
+        write_frame(&mut socket, &ready).unwrap();
+        let mut probe = f.settings.frame("clock_probe", "fictional-run", 7);
+        probe["probeId"] = json!("selected-probe");
+        write_frame(&mut socket, &probe).unwrap();
+        assert_eq!(read(&mut reader, &mut socket)["schema"], SELECTED_SCHEMA);
+        let evaluation = read(&mut reader, &mut socket);
+        let expected: Value =
+            serde_json::from_str(&request.selected_prior_context_input().unwrap()).unwrap();
+        assert_eq!(evaluation["input"], expected);
+        assert_eq!(
+            evaluation["input"]["priorNotes"].as_array().unwrap().len(),
+            usize::from(notes)
+        );
+        if notes {
+            let fixture: Value = serde_json::from_str(include_str!(
+                "../../scripts/fixtures/selected-context-input.json"
+            ))
+            .unwrap();
+            assert_eq!(evaluation["input"], fixture);
+        }
+        // Stop while the fake reply is held; a reply already in flight cannot apply.
+        link.cancel_reason(ControlReason::Stop);
+        let mut late = f.settings.frame("result", "fictional-run", 7);
+        id(1, 3).add(&mut late);
+        late["elapsedMs"] = json!(1);
+        late["value"] = json!({"action":"quiet","cue":null,"sourceIds":["transcript:current"]});
+        let _ = write_frame(&mut socket, &late);
+        let end = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(reply) = worker.poll_submitted() {
+                assert!(reply.is_err());
+                break;
+            }
+            assert!(Instant::now() < end);
+            thread::sleep(Duration::from_millis(5));
+        }
+        drop(worker);
+    }
+}
+
+fn attested_fixture(count: usize) -> Fixture {
+    let mut f = Fixture::new();
+    f.settings = selected_settings();
+    f.settings.descriptor = f.dir.join("d");
+    let authority = f.dir.join("authority");
+    fs::write(&authority,json!({"schema":"talkqte.lab.scope-authority.v1","runId":"fictional-run","expectedCount":count,"key":"07".repeat(32)}).to_string()).unwrap();
+    fs::set_permissions(&authority, fs::Permissions::from_mode(0o600)).unwrap();
+    f.settings.attested = Some((authority, count));
+    fs::write(&f.settings.descriptor,json!({"schema":crate::selected_attestation::DESCRIPTOR,"runId":"fictional-run","socketPath":f.dir.join("s"),"nonce":"a".repeat(64)}).to_string()).unwrap();
+    f
+}
+fn attested_engine(f: &Fixture) -> (Engine, Arc<Link>, crate::context::ContextItem) {
+    let item = crate::context::ContextItem {
+        provider: crate::context::Provider::File,
+        source_id: "fixture-note".into(),
+        title: "Fictional workshop".into(),
+        source_date: "2026-10-20".into(),
+        excerpt: "The room cannot open before nine.".into(),
+        revision: 1,
+    };
+    let link = f.link(Some(ClockSample {
+        session_id: 1,
+        elapsed_ms: 10,
+    }));
+    let config = processor_configuration(Backend::Api, Some(&f.settings), None, None).unwrap();
+    assert_eq!(
+        crate::engine::ProcessorSummary::from(&config).required_note_count,
+        Some(f.settings.attested.as_ref().unwrap().1)
+    );
+    let mut e = Engine::live_with_evaluator(
+        Worker::start(Adapter(link.clone()), DEADLINE).unwrap(),
+        config,
+    )
+    .with_lab_lifecycle(link.clone());
+    e.start().unwrap();
+    e.set_notes(vec![item.clone()]);
+    (e, link, item)
+}
+fn accept_attested_scope(f: &Fixture, session: u64) -> (UnixStream, Reader, Value) {
+    let mut stream = f.accept();
+    let mut reader = Reader::default();
+    let hello = read(&mut reader, &mut stream);
+    assert_eq!(hello["type"], "hello");
+    assert_eq!(hello["contextPolicy"], crate::selected_attestation::CONTEXT);
+    let mut ready = f.settings.frame("ready", "fictional-run", session);
+    ready
+        .as_object_mut()
+        .unwrap()
+        .extend(f.settings.identity().as_object().unwrap().clone());
+    ready.as_object_mut().unwrap().extend(json!({"provider":"anthropic-api","model":"claude-opus-5-5","effort":"low","dispatchBudgetKind":"apiRequests","dispatchLimit":40,"dispatchesUsed":0,"spendCapMicroUsd":1000000,"spendUsedMicroUsd":0}).as_object().unwrap().clone());
+    write_frame(&mut stream, &ready).unwrap();
+    let grant = read(&mut reader, &mut stream);
+    assert_eq!(grant["type"], "scope_approval");
+    (stream, reader, grant)
+}
+#[test]
+fn attested_real_review_link_handshake_and_worker_preserve_exact_note_before_audio_and_request() {
+    let f = attested_fixture(1);
+    let (mut engine, link, item) = attested_engine(&f);
+    assert!(engine
+        .review_processing(crate::engine::ConversationScope::NewSpeechOnly, &[])
+        .is_err());
+    assert!(!engine.has_processing_permission());
+    assert!(engine.audio_approval(1).is_none());
+    let review = engine
+        .review_processing(
+            crate::engine::ConversationScope::NewSpeechOnly,
+            &[(item.provider, item.source_id.clone(), item.revision)],
+        )
+        .unwrap();
+    engine.approve_processing(review).unwrap();
+    assert!(engine.audio_approval(1).is_none());
+    let (mut stream, mut reader, grant) = accept_attested_scope(&f, 1);
+    let proof: crate::selected_attestation::Scope =
+        serde_json::from_value(grant["scope"].clone()).unwrap();
+    assert_eq!(proof.note_count, 1);
+    let mut ack = grant;
+    ack["type"] = json!("scope_ready");
+    write_frame(&mut stream, &ack).unwrap();
+    let current = read(&mut reader, &mut stream);
+    assert_eq!(current["type"], "scope_current");
+    assert!(link.scope_ready());
+    assert!(engine.audio_approval(1).is_some());
+    let mut probe = f.settings.frame("clock_probe", "fictional-run", 1);
+    probe["probeId"] = json!("scope-probe");
+    write_frame(&mut stream, &probe).unwrap();
+    assert_eq!(read(&mut reader, &mut stream)["type"], "clock_sample");
+    engine.advance(10);
+    engine
+        .ingest(
+            1,
+            crate::engine::Segment {
+                id: "current".into(),
+                at_ms: 10,
+                speaker: "Adrian".into(),
+                text: "Should we plan setup for half eight?".into(),
+            },
+        )
+        .unwrap();
+    let request = read(&mut reader, &mut stream);
+    assert_eq!(request["type"], "evaluate");
+    assert_eq!(request["input"]["priorNotes"][0]["text"], item.excerpt);
+    assert_eq!(request["scope"], ack["scope"]);
+    let authority =
+        crate::selected_attestation::read(&f.settings.attested.as_ref().unwrap().0).unwrap();
+    assert_eq!(
+        authority
+            .commitment(&proof, &request["input"]["priorNotes"])
+            .unwrap(),
+        proof.commitment
+    );
+    engine.revoke_processing();
+    assert!(!link.scope_ready());
+    assert!(engine.audio_approval(1).is_none());
+    let cancel = read(&mut reader, &mut stream);
+    assert_eq!(cancel["type"], "cancel");
+}
+#[test]
+fn attested_pending_and_ready_scope_cannot_survive_source_removal_revoke_or_stop() {
+    for ready in [false, true] {
+        for control in ["remove", "revoke", "stop"] {
+            let f = attested_fixture(1);
+            let (mut e, link, item) = attested_engine(&f);
+            let review = e
+                .review_processing(
+                    crate::engine::ConversationScope::NewSpeechOnly,
+                    &[(item.provider, item.source_id, item.revision)],
+                )
+                .unwrap();
+            e.approve_processing(review).unwrap();
+            let (mut stream, mut reader, mut grant) = accept_attested_scope(&f, 1);
+            if ready {
+                grant["type"] = json!("scope_ready");
+                write_frame(&mut stream, &grant).unwrap();
+                assert_eq!(read(&mut reader, &mut stream)["type"], "scope_current");
+                assert!(link.scope_ready());
+            }
+            match control {
+                "remove" => e.set_notes(vec![]),
+                "revoke" => e.revoke_processing(),
+                _ => {
+                    e.begin_live_stop();
+                }
+            }
+            assert!(!link.scope_ready());
+            assert!(e.audio_approval(1).is_none());
+            assert!(link
+                .scope
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|s| !s.current.load(Ordering::Acquire)));
+            // Dropping the peer also retires any handshake/clock wait; no evaluator exists before speech.
+            drop(stream);
+        }
+    }
+}
+#[test]
+fn attested_control_zero_refuses_note_selection_and_approves_empty_without_audio_before_ready() {
+    let f = attested_fixture(0);
+    let (mut e, link, item) = attested_engine(&f);
+    assert!(e
+        .review_processing(
+            crate::engine::ConversationScope::NewSpeechOnly,
+            &[(item.provider, item.source_id, item.revision)]
+        )
+        .is_err());
+    let review = e
+        .review_processing(crate::engine::ConversationScope::NewSpeechOnly, &[])
+        .unwrap();
+    e.approve_processing(review).unwrap();
+    assert!(!link.scope_ready());
+    assert!(e.audio_approval(1).is_none());
+    e.revoke_processing();
+}
+
 #[test]
 fn descriptor_accepts_canonical_paths_under_a_symlinked_root_and_rejects_mixed_spellings() {
     // Mirrors macOS /var -> /private/var: one real run directory reached
@@ -972,8 +1348,11 @@ fn descriptor_accepts_canonical_paths_under_a_symlinked_root_and_rejects_mixed_s
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
     };
     let settings = |descriptor: PathBuf| Settings {
+        bounded_history: false,
         backend: Backend::Subscription,
         spend_cap_micro_usd: None,
+        selected_prior: false,
+        attested: None,
         descriptor,
         provider: "codex".into(),
         model: "gpt-6.1-sol".into(),
@@ -997,4 +1376,202 @@ fn descriptor_accepts_canonical_paths_under_a_symlinked_root_and_rejects_mixed_s
     assert_eq!(descriptor(&canonical).err(), Some(Failure::InvalidInput));
     // The invariant is lexical: one consistent spelling is still accepted.
     assert!(descriptor(&aliased).is_ok());
+}
+
+fn context_settings(context: Option<&str>, subscription: bool) -> Result<Settings, Failure> {
+    Settings::parse(|key| {
+        match key {
+            "TALKQTE_DEV_CUE_BACKEND" => Some(if subscription {
+                "lab-subscription"
+            } else {
+                "lab-api"
+            }),
+            "TALKQTE_DEV_LAB_DESCRIPTOR" => Some("/fictional/private/descriptor"),
+            "TALKQTE_DEV_LAB_PROVIDER" => Some(if subscription {
+                "codex"
+            } else {
+                "anthropic-api"
+            }),
+            "TALKQTE_DEV_LAB_MODEL" => Some(if subscription {
+                "gpt-6.1-sol"
+            } else {
+                "claude-opus-5-5"
+            }),
+            "TALKQTE_DEV_LAB_EFFORT" => Some("low"),
+            "TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD" => {
+                if subscription {
+                    None
+                } else {
+                    Some("250000")
+                }
+            }
+            "TALKQTE_DEV_LAB_CONTEXT" => context,
+            _ => None,
+        }
+        .map(str::to_string)
+    })
+}
+
+#[test]
+fn lab_context_requires_exact_explicit_api_selection_and_defaults_to_fresh() {
+    assert!(!context_settings(None, false).unwrap().bounded_history);
+    assert!(!context_settings(None, true).unwrap().bounded_history);
+    assert!(
+        context_settings(Some("bounded-history"), false)
+            .unwrap()
+            .bounded_history
+    );
+    assert!(context_settings(Some("bounded-history"), true).is_err());
+    let history = context_settings(Some("bounded-history"), false).unwrap();
+    assert!(!history.selected_prior);
+    assert!(history.attested.is_none());
+    let selected = context_settings(Some(SELECTED_CONTEXT), false).unwrap();
+    assert!(!selected.bounded_history);
+    assert!(selected.selected_prior);
+    for value in [
+        "bounded-history,selected-prior-v2",
+        "selected-prior-v2,bounded-history",
+        "",
+        "fresh-only",
+        "on",
+        "bounded-history ",
+        "BOUNDED-HISTORY",
+        "unknown",
+    ] {
+        assert!(
+            context_settings(Some(value), false).is_err(),
+            "invalid context must not fall back"
+        );
+    }
+}
+
+#[test]
+fn lab_history_disclosure_retains_api_audio_cost_and_expanded_scope_before_approval() {
+    for mode in [None, Some("bounded-history")] {
+        let settings = context_settings(mode, false).unwrap();
+        let p = processor_configuration(
+            Backend::Api,
+            Some(&settings),
+            Some("Fictional audio is sent to the reviewed transcription service.".into()),
+            Some("Fictional transcription service".into()),
+        )
+        .unwrap();
+        let summary = crate::engine::ProcessorSummary::from(&p);
+        assert_eq!(
+            summary.audio_destination.as_deref(),
+            Some("Fictional transcription service")
+        );
+        assert!(summary.data_policy.contains("Anthropic API"));
+        assert!(summary.data_policy.contains("$0.25"));
+        assert!(summary.data_policy.contains("Fictional audio is sent"));
+        assert!(!summary.accepts_notes);
+        assert_eq!(summary.data_policy.contains("24 segments"), mode.is_some());
+        if mode.is_some() {
+            assert!(summary.data_policy.contains("90 seconds"));
+            assert!(summary.data_policy.contains("16384-byte"));
+            assert!(summary
+                .data_policy
+                .contains("Visible cue evidence may be older"));
+        }
+    }
+}
+
+#[test]
+fn lab_history_rejects_unrepresentable_disclosure_instead_of_omitting_it() {
+    let settings = context_settings(Some("bounded-history"), false).unwrap();
+    assert!(
+        processor_configuration(Backend::Api, Some(&settings), Some("x".repeat(2048)), None)
+            .is_err()
+    );
+}
+
+#[test]
+fn lab_history_opaque_review_cancel_replay_and_legacy_grant_never_dispatch() {
+    use crate::engine::{ConversationScope, ProcessingError};
+    struct Fictional(std::sync::mpsc::Sender<Request>);
+    impl Evaluator for Fictional {
+        fn evaluate(&mut self, r: &Request, _: &Cancellation) -> Result<String, Failure> {
+            self.0.send(r.clone()).unwrap();
+            Ok(
+                json!({"action":"quiet","cue":null,"sourceIds":[r.sources().last().unwrap().id]})
+                    .to_string(),
+            )
+        }
+    }
+    let settings = context_settings(Some("bounded-history"), false).unwrap();
+    let processor = processor_configuration(Backend::Api, Some(&settings), None, None).unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut engine = Engine::live_with_evaluator(
+        Worker::start(Fictional(tx), Duration::from_secs(2)).unwrap(),
+        processor,
+    );
+    engine.start().unwrap();
+    engine.advance(1000);
+    engine
+        .ingest(
+            engine.session(),
+            crate::engine::Segment {
+                id: "old".into(),
+                at_ms: 1000,
+                speaker: "Speaker".into(),
+                text: "Earlier workshop detail.".into(),
+            },
+        )
+        .unwrap();
+    assert!(
+        rx.try_recv().is_err(),
+        "selecting history does not approve processing"
+    );
+    let review = engine
+        .review_processing(ConversationScope::NewSpeechOnly, &[])
+        .unwrap();
+    assert_eq!(
+        engine.approve_processing_with_origin(review, true),
+        Err(ProcessingError::InvalidScope)
+    );
+    assert!(!engine.has_processing_permission());
+    let mut reviews = crate::processing_reviews::Reviews::default();
+    let cancelled = reviews
+        .prepare(&engine, ConversationScope::NewSpeechOnly, &[])
+        .unwrap();
+    assert!(reviews.cancel(&cancelled));
+    assert_eq!(
+        reviews.approve(&mut engine, &cancelled),
+        Err(ProcessingError::StaleReview)
+    );
+    assert!(rx.try_recv().is_err());
+    let id = reviews
+        .prepare(&engine, ConversationScope::NewSpeechOnly, &[])
+        .unwrap();
+    reviews.approve(&mut engine, &id).unwrap();
+    assert!(engine.has_processing_permission());
+    assert_eq!(
+        reviews.approve(&mut engine, &id),
+        Err(ProcessingError::StaleReview)
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "new-only review must not send buffered history"
+    );
+    engine.advance(10);
+    engine
+        .ingest(
+            engine.session(),
+            crate::engine::Segment {
+                id: "new".into(),
+                at_ms: 1010,
+                speaker: "Speaker".into(),
+                text: "New workshop detail.".into(),
+            },
+        )
+        .unwrap();
+    let request = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!(request.sources().len(), 1);
+    assert_eq!(request.sources()[0].id, "transcript:new");
+    engine.revoke_processing();
+    assert!(!engine.has_processing_permission());
+    assert_eq!(
+        reviews.approve(&mut engine, &id),
+        Err(ProcessingError::StaleReview)
+    );
 }
