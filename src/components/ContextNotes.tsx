@@ -16,7 +16,8 @@ import './context-date.css';
 
 /**
  * Prior notes the user imported from a file for this session. They are shown
- * apart from the conversation, never feed a cue yet, and are never exported.
+ * apart from the conversation and excluded from Markdown exports. Sending them
+ * to a cue provider requires a separate processing review and approval.
  */
 export function ContextNotes({
   items,
@@ -69,6 +70,8 @@ export function ContextNotes({
   const [chosen, setChosen] = useState<string[]>([]);
   // Dates the person entered for file notes that have none of their own.
   const [dates, setDates] = useState<Record<string, string>>({});
+  const [filePathOpen, setFilePathOpen] = useState(false);
+  const [filePath, setFilePath] = useState('');
   const [working, setWorking] = useState(false);
   const [importing, setImporting] = useState(false);
   const [pickError, setPickError] = useState('');
@@ -160,6 +163,19 @@ export function ContextNotes({
       setPickedFrom('file');
       setPicked(result);
     });
+  const readPath = () => {
+    const path = filePath;
+    setFilePath('');
+    setFilePathOpen(false);
+    void run(async () => {
+      const result = await bridge.readContextFilePath(path);
+      returnFocus.current = true;
+      setChosen([]);
+      setDates({});
+      setPickedFrom('file');
+      setPicked(result);
+    });
+  };
   const cancel = () =>
     void run(async () => {
       await bridge.command('cancel_context_import');
@@ -268,7 +284,9 @@ export function ContextNotes({
           <div>
             <span className="muted small">
               Notes you chose from a file or from Granola · not from this
-              conversation · kept in memory, never exported
+              conversation · kept in memory · excluded from Markdown exports.
+              Sending selected prior notes to a cue provider requires a separate
+              processing review and approval.
             </span>
           </div>
           <div className="context-actions">
@@ -301,6 +319,16 @@ export function ContextNotes({
             >
               <FileText size={15} />
               Add notes from a file
+            </button>
+            <button
+              className="text-button"
+              disabled={busy || working}
+              onClick={() => {
+                setFilePath('');
+                setFilePathOpen(true);
+              }}
+            >
+              Use a local file path
             </button>
             {bridge.desktop &&
               (granola.connected ? (
@@ -341,6 +369,50 @@ export function ContextNotes({
               ))}
           </div>
         </div>
+        {filePathOpen && (
+          <form
+            className="context-path-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              readPath();
+            }}
+          >
+            <p className="muted small">
+              If the system file chooser is unavailable, enter the full local
+              path. This only lists notes for selection; nothing is imported
+              yet.
+            </p>
+            <label>
+              Local notes file path
+              <input
+                value={filePath}
+                autoFocus
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) => setFilePath(event.target.value)}
+              />
+            </label>
+            <div className="context-actions">
+              <button
+                type="submit"
+                className="secondary-button"
+                disabled={busy || working || !filePath}
+              >
+                Read notes file
+              </button>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => {
+                  setFilePath('');
+                  setFilePathOpen(false);
+                }}
+              >
+                Cancel file path
+              </button>
+            </div>
+          </form>
+        )}
         {granola.connected && (
           <p className="muted small connection-terms" role="status">
             Granola connected as you.{' '}

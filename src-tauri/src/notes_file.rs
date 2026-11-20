@@ -37,6 +37,22 @@ const NO_TEXT: &str = "The file has no note text.";
 const UNSUPPORTED: &str = "TalkQTE reads notes from a Markdown (.md) or plain-text (.txt) file, or a TalkQTE JSON notes file. Export or save the notes in one of those formats.";
 const TRANSCRIPT: &str = "That is a transcript or captions file. TalkQTE brings in notes and summaries, not transcripts. Export the summary as Markdown or plain text instead.";
 
+/// Accept only an explicit absolute local path, without shell/URL expansion.
+/// The existing file reader still owns format, size and content validation.
+pub fn explicit_path(value: &str) -> Result<std::path::PathBuf, String> {
+    let path = std::path::Path::new(value);
+    if value.is_empty()
+        || value.len() > 4096
+        || value.chars().any(char::is_control)
+        || !path.is_absolute()
+        || value.starts_with("//")
+        || value.starts_with(r"\\")
+    {
+        return Err("Enter the full local file path, without quotes or a file URL.".into());
+    }
+    Ok(path.to_path_buf())
+}
+
 /// How a picked file is read, decided by its extension alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileKind {
@@ -116,14 +132,28 @@ impl FileSource {
     /// person who picked the file; they never include the file's text.
     pub fn read(path: &Path) -> Result<Self, String> {
         let kind = FileKind::of(path)?;
-        let metadata = std::fs::metadata(path).map_err(|_| UNREADABLE)?;
+        // Do not let a typed path block while opening a FIFO. Validate the
+        // opened handle, so a path replacement cannot turn a pre-open check
+        // into an unbounded special-file read. Ordinary symlinks still follow.
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NONBLOCK);
+        }
+        let file = options.open(path).map_err(|_| UNREADABLE)?;
+        let metadata = file.metadata().map_err(|_| UNREADABLE)?;
+        if !metadata.is_file() {
+            return Err(UNREADABLE.into());
+        }
         if metadata.len() > MAX_FILE_BYTES {
             return Err(TOO_LARGE.into());
         }
         // Read at most one byte past the limit, in case the file grew.
         let mut bytes = Vec::new();
-        std::fs::File::open(path)
-            .and_then(|file| file.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes))
+        file.take(MAX_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)
             .map_err(|_| UNREADABLE)?;
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(TOO_LARGE.into());
@@ -824,6 +854,43 @@ mod tests {
             crate::context::MAX_EXCERPT_CHARS
         );
         assert_eq!(note.title.chars().count(), crate::context::MAX_TITLE_CHARS);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writerless_fifo_directory_and_device_are_refused_without_blocking_and_regular_symlinks_work()
+    {
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::symlink;
+        let folder = folder("special-file-refusal");
+        let fifo = folder.join("writerless.md");
+        let c_path = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        // SAFETY: a live NUL-terminated path; mkfifo creates only this test FIFO.
+        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+        let (send, receive) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            send.send(FileSource::read(&fifo).map(|_| ())).unwrap();
+        });
+        assert_eq!(
+            receive
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .expect("FIFO open must not wait for a writer"),
+            Err(UNREADABLE.into())
+        );
+        worker.join().unwrap();
+        let directory = folder.join("directory.txt");
+        std::fs::create_dir(&directory).unwrap();
+        assert_eq!(FileSource::read(&directory).unwrap_err(), UNREADABLE);
+        let device = folder.join("device.txt");
+        symlink("/dev/null", &device).unwrap();
+        assert_eq!(FileSource::read(&device).unwrap_err(), UNREADABLE);
+        let regular = folder.join("regular.md");
+        std::fs::write(&regular, "Fictional note body.").unwrap();
+        let alias = folder.join("alias.md");
+        symlink(&regular, &alias).unwrap();
+        assert_eq!(FileSource::read(&regular).unwrap().summaries().len(), 1);
+        assert_eq!(FileSource::read(&alias).unwrap().summaries().len(), 1);
+        std::fs::remove_dir_all(folder).unwrap();
     }
 
     #[test]
