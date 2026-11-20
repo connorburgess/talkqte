@@ -496,6 +496,19 @@ pub fn opener(settings: super::cloud::Settings) -> super::cloud::Opener {
     })
 }
 
+/// Opens replacement streams after a connection failure. Each reads the
+/// token file again, so the token must stay there until Stop.
+pub fn reopener(settings: super::cloud::Settings) -> super::cloud::Reopener {
+    Box::new(move || {
+        Ok(Box::new(DeepgramStream::start(
+            Network,
+            ListenRequest::lab(),
+            Token::from_file(settings.token_file.clone()),
+            super::cloud::launch_budget(&settings),
+        )) as Box<dyn StreamingTranscriber>)
+    })
+}
+
 /// How long a stream waits after approval for a valid token.
 const TOKEN_WAIT: Duration = Duration::from_secs(10);
 /// How often it looks.
