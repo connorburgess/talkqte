@@ -2,7 +2,11 @@
 // check and the manifest. Tones stand in for speech; nothing is spoken,
 // encoded or sent.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { lstatSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { dirname, join } from 'node:path';
+import { isLabMedia, loadLabMediaManifest } from './cue-lab-media.mjs';
+import { fictionalTestMedia } from './fixtures/lab-test-media.mjs';
 import { test } from 'node:test';
 import { DENY_LIST } from './cue-dialogue-briefs.mjs';
 import { VOICE_KINDS } from './lab-playable.mjs';
@@ -570,4 +574,38 @@ test('a manifest may name the listener, as one of the speakers', () => {
   refuse({ firstName: '' });
   refuse(null);
   refuse(speaker);
+});
+
+test('authored manifest joins the real media loader without widening approval or duration bounds', () => {
+  const s = scenario();
+  // Existing placeholder bytes only: no media encoding, decoding or playback.
+  const placeholder = fictionalTestMedia({ durationMs: s.plan.totalMs });
+  const media = {
+    ...placeholder,
+    bytes: lstatSync(placeholder.path).size,
+    audioDurationMs: placeholder.durationMs,
+    video: { codec: 'h264', width: 1280, height: 800, fps: 25 },
+    audio: { codec: 'aac', sampleRate: 48000, channels: 1 },
+  };
+  const listener = { firstName: s.plan.rows[0].speaker };
+  const manifest = manifestFor(s, { media, listener });
+  const path = join(dirname(placeholder.path), 'authored-manifest.json');
+  const write = (value) => {
+    const bytes = JSON.stringify(value);
+    writeFileSync(path, bytes, { mode: 0o600 });
+    return createHash('sha256').update(bytes).digest('hex');
+  };
+  const sha256 = write(manifest);
+  const approved = loadLabMediaManifest(path, { sha256 });
+  assert.ok(isLabMedia(approved));
+  assert.equal(approved.path, placeholder.path);
+  assert.equal(approved.listenerFirstName, listener.firstName);
+  assert.equal(isLabMedia({ ...approved }), false);
+  assert.throws(() => loadLabMediaManifest(path, { sha256: '0'.repeat(64) }));
+  const tooLong = manifestFor(s, {
+    media: { ...media, durationMs: 104001, audioDurationMs: 104000 },
+    window: { minMs: 90000, maxMs: 110000 },
+  });
+  assert.equal(tooLong.window.withinCurrentLabCap, false);
+  assert.throws(() => loadLabMediaManifest(path, { sha256: write(tooLong) }));
 });
