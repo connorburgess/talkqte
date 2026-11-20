@@ -475,8 +475,14 @@ test('abort after audio end but before final video remains cancellation, not com
     controller.abort();
     await rejected;
     assert.equal(player.diagnostics.failure.category, 'cancelled');
-    await assert.rejects(player.close({ nativeReleased: true }));
+    // Acknowledged Stop plus applied retire is a stopped player, not a cleanup
+    // failure; the cancellation itself stays the recorded first failure.
+    assert.deepEqual(await player.close({ nativeReleased: true }), {
+      closed: true,
+    });
     assert.equal(player.diagnostics.failure.category, 'cancelled');
+    assert.equal(player.diagnostics.transport.stoppedAcknowledged, true);
+    assert.equal(player.diagnostics.videoCompleted, false);
   } finally {
     await player.close({ nativeReleased: true }).catch(() => {});
   }
@@ -568,8 +574,12 @@ test('caller abort from genuine started observation retains cancelled diagnostic
       }),
     );
     assert.equal(starts, 1);
-    await assert.rejects(player.close({ nativeReleased: true }));
+    assert.deepEqual(await player.stop(), { stopped: true });
+    assert.deepEqual(await player.close({ nativeReleased: true }), {
+      closed: true,
+    });
     assert.deepEqual(player.diagnostics.failure, { category: 'cancelled' });
+    assert.deepEqual(player.diagnostics.process, { exitCode: 0, signal: null });
     assert.equal(player.diagnostics.audioCompleted, false);
     assert.equal(player.diagnostics.videoCompleted, false);
   } finally {
@@ -639,4 +649,58 @@ test('unbounded control diagnostics fail protocol without replacing first failur
   await assert.rejects(player.close({ nativeReleased: true }));
   assert.equal(player.diagnostics.failure.category, 'protocol');
   assert.equal(player.diagnostics.transport.parsedCommands, 0);
+});
+
+// Cancels from the genuine started observation, then retires the player.
+async function cancelDuringPlayback(fixtureCase) {
+  const player = createLabPlayerFixture({ ...fixtureOptions, fixtureCase });
+  const controller = new AbortController();
+  await player.prepare({ media, signal: controller.signal });
+  await assert.rejects(
+    player.play({
+      media,
+      signal: controller.signal,
+      onStarted() {
+        controller.abort();
+      },
+    }),
+  );
+  return player;
+}
+test('a failure reported after the cancellation is retained and makes cleanup fail', async () => {
+  const player = await cancelDuringPlayback('fail-after-cancel');
+  try {
+    await assert.rejects(player.close({ nativeReleased: true }), {
+      category: 'cleanup',
+    });
+    assert.deepEqual(player.diagnostics.failure, { category: 'cancelled' });
+    assert.equal(player.diagnostics.laterFailure, 'player-failure');
+  } finally {
+    await player.close({ nativeReleased: true }).catch(() => {});
+  }
+});
+test('a cancelled playback whose Stop is never acknowledged is failed cleanup', async () => {
+  const player = await cancelDuringPlayback('stop-silent');
+  try {
+    await assert.rejects(player.stop(), { category: 'cleanup' });
+    await assert.rejects(player.close({ nativeReleased: true }), {
+      category: 'cleanup',
+    });
+    assert.equal(player.diagnostics.transport.stoppedAcknowledged, false);
+    assert.deepEqual(player.diagnostics.failure, { category: 'cancelled' });
+  } finally {
+    await player.close({ nativeReleased: true }).catch(() => {});
+  }
+});
+test('a cancelled playback whose retire leaves a process behind is failed cleanup', async () => {
+  const player = await cancelDuringPlayback('held-pipes');
+  try {
+    assert.deepEqual(await player.stop(), { stopped: true });
+    await assert.rejects(player.close({ nativeReleased: true }), {
+      category: 'cleanup',
+    });
+    assert.deepEqual(player.diagnostics.failure, { category: 'cancelled' });
+  } finally {
+    await player.close({ nativeReleased: true }).catch(() => {});
+  }
 });
