@@ -168,7 +168,9 @@ for (const order of ['isComposing', 'keyCode 229 after compositionend']) {
         cancelable: true,
         isComposing: !safari,
       });
-      Object.defineProperty(enter, 'keyCode', { value: 229 });
+      Object.defineProperty(enter, 'keyCode', {
+        value: safari ? 229 : 13,
+      });
       input.dispatchEvent(enter);
     }, order !== 'isComposing');
     await page.evaluate(() => new Promise(requestAnimationFrame));
