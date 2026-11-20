@@ -4,7 +4,7 @@ Development acceptance, 11 November 2026. The optional name in Settings controls
 
 ## Behavior
 
-Pressing Enter or leaving the field submits the trimmed name. A different submission joins the existing command queue even when an earlier save is pending; Enter followed by blur does not send the same pending name twice. Clearing the field removes the name, including while another save is pending.
+Pressing Enter or leaving the field submits the trimmed name. A different submission joins the existing command queue even when an earlier save is pending; Enter followed by blur does not send the same pending name twice. Clearing the field removes the name, including while another save is pending. Enter that confirms an input-method composition, such as converting a Japanese reading, does not submit; the next Enter or leaving the field does.
 
 A delayed response cannot overwrite a newer draft. If the latest submitted name is rejected and its draft has not changed, the field returns to the last successfully saved name. A newer draft remains editable. Rejections appear beside the field with a recovery instruction; a successful retry clears the error. A rejection from a superseded submission cannot leave an error after the newer submission succeeds. Replies do not move keyboard focus or start capture. The name still lives only in memory until quit.
 
@@ -18,6 +18,8 @@ The original regression was reproduced at `7d3dc4b`: submit fictional Robin, typ
 - New submissions follow either a successful or rejected older save, without a duplicate Enter/blur command or stale error.
 - A rejected latest submission returns to the last successful queued name; a subsequent valid edit clears the error.
 - Clearing the name and returning to the previously saved name both survive an older pending save.
+
+Added 16 November 2026: two scenarios (4 checks) dispatch the composition events that Chromium and Safari send when Enter confirms an input method, one with `isComposing` and one with keyCode 229 after `compositionend`. Enter during composition saves nothing and keeps focus; Enter after the converted fictional name saves it once. Both fail on `819f0f0`, which saved the unconverted reading. These are synthetic browser events, not a check with a native macOS input method.
 
 The surrounding name, microphone, notebook capture and notebook checks also pass in Chromium (53 checks). The frontend build, formatting and source design scan pass.
 
