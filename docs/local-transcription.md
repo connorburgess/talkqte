@@ -1,6 +1,8 @@
 # Local transcription check
 
-Status: developer check, 8 November 2026; live session added 9 November 2026. In builds with the `local-whisper` feature, the app's live session routes the microphone to a transcription worker on the device. This page records how the local recognizer is checked and what that check shows.
+**Superseded 16 November 2026:** on-device transcription was removed from the app; this page records the former design and its measurements, which apply to that path only. Current transcription: [cloud transcription](cloud-transcription.md).
+
+Former status: developer check, 8 November 2026; live session added 9 November 2026. In builds with the `local-whisper` feature, the app's live session routes the microphone to a transcription worker on the device. This page records how the local recognizer is checked and what that check shows.
 
 ## What exists
 
