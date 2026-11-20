@@ -16,7 +16,7 @@ It builds on parts that already exist and are tested only with fictional adapter
 2. A development backend that calls the Claude Code CLI with the owner's own subscription, behind an explicit connection, with a visible sending indicator, a development decision log, and disclosure in the app, [PRIVACY.md](../PRIVACY.md) and the README.
 3. Removing the phrase rules, their cues and their tests, and rewriting the documents that describe on-device cue decisions.
 
-The development backend is for the owner's own use and the lab only. A shipped product cannot share one person's subscription among its users, and no production provider is chosen. That release blocker is recorded in the [product readiness plan](product-readiness.md#model-provider-for-a-shipped-product).
+The development backend is for the owner's own use and the lab only. A shipped product cannot share one person's subscription among its users. The Anthropic API was selected as the cue provider on 16 November 2026 and exists as a development lab backend; the shipped key and billing arrangement and production acceptance remain open. That release blocker is recorded in the [product readiness plan](product-readiness.md#cloud-providers-for-a-shipped-product).
 
 ## Where it runs
 
@@ -100,7 +100,7 @@ The CLI's own JSON wrapper is checked before the decision inside it:
 - the result reports success;
 - its model usage names only the requested model, or the reply is refused.
 
-A valid decision is applied only if the request it answers still matches the current session, sources, cue on screen and permission. A reply that has gone stale is dropped and recorded as stale.
+A valid decision is applied only if the request it answers still matches the current session, sources, cue on screen and permission. A reply that has gone stale is dropped and recorded as stale. The development lab backend is the one exception: a reply in time to a transcript that has only grown is still applied, so a lab cue reflects speech up to 8 s before it appears and newer speech is checked next ([details](development-lab-evaluator.md#one-request-and-one-newest-context)).
 
 ## Timeouts and failure
 
@@ -166,7 +166,8 @@ The wording above is what the notebook shows. The companion shows "Cues off", wi
 - `evaluator`: the connection turned on or off, with model, effort, backend and approval origin (`review` or `launchSetting`);
 - `evaluation_stopped`: no further request sent because the session call cap was reached, with failure `call_limit`;
 - `evaluation_requested`: session, request number, the last line covered, the number of lines sent, and whether a cue was on screen;
-- `evaluation_result`: one of `show`, `quiet`, `resolved`, `withdraw`, `failed`, `stale` or `cancelled`, with latency and a fixed failure code;
+- `evaluation_result`: one of `show`, `quiet`, `resolved`, `withdraw`, `failed`, `stale` or `cancelled`, with latency and a fixed failure code. A decision that arrived but was not applied (`stale`, or a `timeout` read after the deadline) keeps its `action` code. An applied lab decision adds `through_segment` (the newest line it was evaluated through), `lag_lines` (lines after that line when it was applied) and `lag_ms` (the newest of those lines' `at_ms` minus the through line's, 0 when there are none; not the reply's latency);
+- `cue_dropped`: a `show` that was not displayed, with its request number and one fixed reason: `slot` (a cue was on screen), `asked` (it cites a line that already raised "Asked you"), `expired_source` (its newest cited line is 18 seconds old), `cooldown`, `focus` (Focused mode and not about a focus line), `repeat` (the same cue within two minutes) `stale` (no cited line is fresh speech) or `stale_request` (the reply came back after new speech or a change to the cue on screen, notes, name or focus; a line passing 18 seconds while the model answers is not such a change). It never holds the cue's words;
 - `cue_decision` with `decider: "model"`, the request number and the first line it cites, recorded where the engine accepts the cue, without the cue's words. Phrase-rule cues carry `decider: "phrase_rule"`.
 
 `evaluation_result` failure codes are `timeout`, `invalid_reply`, `rate_limited`, `input_limit`, `sign_in`, `credentials` and `unavailable`. A request ended by Stop, Pause, turning the connection off or newer speech is recorded as `cancelled`. These events carry ids, counts and fixed codes, never the prompt or the raw reply. A reviewer joins them to the timing log's lines and cue text. Tools such as the dialogue simulation's listener can read the real app's cues from those same events, or from the existing cue snapshot, with no new interface.

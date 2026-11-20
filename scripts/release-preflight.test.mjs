@@ -813,7 +813,7 @@ test('a development feature switched on by the configuration fails', (t) => {
 
   const timingLog = fixture(t, {
     config: (config) => {
-      config.build = { features: ['local-whisper', 'timing-log'] };
+      config.build = { features: ['fictional-extra', 'timing-log'] };
     },
   });
   assert.match(
@@ -823,7 +823,7 @@ test('a development feature switched on by the configuration fails', (t) => {
 
   const modelBackend = fixture(t, {
     config: (config) => {
-      config.build = { features: ['local-whisper', 'claude-cli'] };
+      config.build = { features: ['fictional-extra', 'claude-cli'] };
     },
   });
   assert.match(
@@ -835,7 +835,7 @@ test('a development feature switched on by the configuration fails', (t) => {
   write(
     declaredOnly.root,
     'src-tauri/Cargo.toml',
-    '[package]\nname = "orchard"\nversion = "1.4.2"\n\n[features]\nnative-audio-spike = ["dep:fictional-spike"]\nlocal-whisper = ["dep:fictional-whisper"]\n',
+    '[package]\nname = "orchard"\nversion = "1.4.2"\n\n[features]\nnative-audio-spike = ["dep:fictional-spike"]\nfictional-extra = ["dep:fictional-extra"]\n',
   );
   assert.deepEqual(failures(preflight({ root: declaredOnly.root })), []);
 });
