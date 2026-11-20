@@ -26,12 +26,20 @@ notifies the native owner to abort the shared run.
 **This is historical evidence, not atomic current-operation readiness.** Native
 reads Listening under the host lock and emits `dev_source.started` afterward;
 concurrent Stop/replacement can retire that operation before emission. The event
-contains only application/step, not operation or session identity. Separate lossy
-metadata events cannot repair that missing identity or prove physical audio.
-Observed retirement is rejected, and the lifecycle still requires authenticated
-native clock calibration plus actual player-start evidence before dispatch.
-An identity-bound native contract remains a separate investigation; this adapter
-must not be promoted into a current-operation guarantee. Runtime remains held.
+in this legacy path contains only application/step, not operation or session
+identity. Separate lossy metadata events cannot repair that missing identity or
+prove physical audio. Observed retirement is rejected, and the lifecycle still
+requires authenticated native clock calibration plus actual player-start evidence
+before dispatch.
+
+The native [versioned selected-source observation](development-source-observation.md)
+now supplies explicit host-operation, live-operation and session identity through
+its separate `dev_source_observation` event. That implemented source contract does
+not add identity to legacy `dev_source.started`, and this adapter does not consume
+it. A separately reviewed versioned consumer and its source/session-to-broker join
+are required before using that path. Even the versioned observation is historical
+guard-time evidence, not atomic readiness or proof of device release. This adapter
+keeps `historical:true`; runtime remains held.
 
 ## Strict window recorder
 
@@ -103,7 +111,7 @@ Stop during window discovery. Source checks cover the Swift strict-mode ordering
 they do not compile Swift or establish ScreenCaptureKit/device behavior.
 
 The actual helper still needs reviewed compilation/receipt and opt-in native
-validation. Approved build/disk availability, exact-window discovery, identity-bound
-current source readiness, exact-file QuickTime/audio-clock controls and visible
+validation. Approved build/disk availability, exact-window discovery, integration
+of the versioned source/session join, exact-file QuickTime/audio-clock controls and visible
 companion/model/permission observation remain runtime gaps. No app, audio,
 recording, model or actual code-signature operation was run by these checks.
