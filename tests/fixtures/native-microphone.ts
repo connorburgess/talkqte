@@ -7,12 +7,7 @@ import { mockIPC } from '@tauri-apps/api/mocks';
 import { emit } from '@tauri-apps/api/event';
 import * as preview from '../../src/lib/preview';
 import type { MicrophoneSnapshot } from '../../src/lib/microphone';
-import type {
-  Commands,
-  LiveStatus,
-  ModelStatus,
-  Snapshot,
-} from '../../src/lib/types';
+import type { Commands, LiveStatus, Snapshot } from '../../src/lib/types';
 import type { ProcessingSnapshot, StopTarget } from '../../src/lib/processing';
 
 let microphone: MicrophoneSnapshot = {
@@ -86,6 +81,7 @@ if (new URLSearchParams(location.search).has('processor'))
     ...processing,
     ...permissionFixture.configuration(
       new URLSearchParams(location.search).has('hosted'),
+      new URLSearchParams(location.search).has('audio'),
     ),
   };
 async function completeCaptureStop() {
@@ -152,30 +148,11 @@ let delayQuestionResponse = false;
 let releaseQuestionResponse: (() => void) | undefined;
 const calls: string[] = [];
 const delayed = new URLSearchParams(location.search).has('delay-microphone');
-// With ?live, the build reports local transcription as available.
-const liveAvailable = new URLSearchParams(location.search).has('live');
-// With ?model, the build has local transcription but no model yet.
-const modelBuild = new URLSearchParams(location.search).has('model');
-let model: ModelStatus = {
-  revision: 0,
-  status: modelBuild ? 'missing' : 'unavailable',
-  name: 'tiny.en',
-  sizeBytes: 77_704_715,
-  neededBytes: 77_704_715 + 512 * 1024 * 1024,
-  received: 0,
-  message: null,
-};
-let releaseDownload: ((outcome: 'done' | 'cancelled') => void) | undefined;
-let holdLiveStatus = false;
-const heldLiveStatuses: {
-  value: LiveStatus;
-  resolve: (value: LiveStatus) => void;
-  reject: (error: Error) => void;
-}[] = [];
-async function sendModel(value: Partial<ModelStatus>) {
-  model = { ...model, revision: model.revision + 1, ...value };
-  await emit('model:changed', model);
-}
+// With ?live, the build and launch report live transcription as available.
+// (?cloud is the same: every live transcription is cloud transcription.)
+const liveAvailable = ['live', 'cloud'].some((key) =>
+  new URLSearchParams(location.search).has(key),
+);
 Object.defineProperty(window, 'isTauri', { value: true, configurable: true });
 
 async function send(value: Partial<MicrophoneSnapshot>) {
@@ -183,7 +160,7 @@ async function send(value: Partial<MicrophoneSnapshot>) {
   await emit('microphone:changed', microphone);
 }
 
-// Stands in for the Rust live session: no device, model, or transcription.
+// Stands in for the Rust live session: no device, stream, or transcription.
 async function publish(value: Partial<Snapshot>) {
   session = {
     ...session,
@@ -217,8 +194,11 @@ async function startLive() {
     cuesPaused: false,
     status: 'running',
     title: 'Live session',
-    description: 'Transcript lines from a local transcription source.',
+    description: "Transcript lines from this session's transcription.",
     elapsedMs: 0,
+    // Every live session is transcribed by the launch's cloud provider,
+    // which sends nothing until cue processing is enabled.
+    transcription: { provider: 'Deepgram' },
     // Rust sends u64::MAX for a live session, which has no end.
     durationMs: 18_446_744_073_709_552_000,
     transcript: [],
@@ -259,6 +239,19 @@ async function say(text: string, question?: string) {
   });
 }
 
+/** The edge the native companion keeps; a test may set it before loading
+ * with `window.standInEdge`. */
+let companionEdge: 'top' | 'bottom' =
+  (window as typeof window & { standInEdge?: 'top' | 'bottom' }).standInEdge ??
+  'top';
+/** How the native side answers the page's read of that edge: at once, held
+ * until a test releases it, or with an error. Set with
+ * `window.standInEdgeReply` before loading. */
+const edgeReply = (
+  window as typeof window & { standInEdgeReply?: 'hold' | 'fail' }
+).standInEdgeReply;
+let releaseEdge: ((edge: 'top' | 'bottom') => void) | null = null;
+let edgeAsked = false;
 mockIPC(
   async (command, args) => {
     calls.push(command);
@@ -323,6 +316,15 @@ mockIPC(
       }
       case 'snapshot':
         return structuredClone(session);
+      case 'companion_anchor':
+        edgeAsked = true;
+        if (edgeReply === 'fail')
+          throw new Error('The session is unavailable.');
+        if (edgeReply === 'hold')
+          return new Promise((resolve) => {
+            releaseEdge = resolve;
+          });
+        return companionEdge;
       case 'microphone_snapshot':
         return delayed
           ? new Promise<MicrophoneSnapshot>((resolve) => {
@@ -420,48 +422,13 @@ mockIPC(
         );
         await emit('context:changed', await preview.contextItemsNow());
         return;
-      case 'model_status':
-        return structuredClone(model);
-      case 'download_model':
-        // Stands in for the Rust download: no network or file.
-        await sendModel({ status: 'downloading', received: 0, message: null });
-        await sendModel({ received: 30_000_000 });
-        void new Promise<'done' | 'cancelled'>((resolve) => {
-          releaseDownload = resolve;
-        }).then((outcome) =>
-          sendModel(
-            outcome === 'done'
-              ? { status: 'installed', received: 0 }
-              : {
-                  status: 'missing',
-                  received: 0,
-                  message: 'Download cancelled. Nothing was installed.',
-                },
-          ),
-        );
-        return;
-      case 'cancel_model_download':
-        releaseDownload?.('cancelled');
-        return;
-      case 'remove_model':
-        await sendModel({ status: 'missing', message: null });
-        return;
       case 'live_status': {
-        const value: LiveStatus =
-          liveAvailable || model.status === 'installed'
-            ? { available: true, reason: null }
-            : {
-                available: false,
-                reason: modelBuild
-                  ? 'The local speech model is not installed.'
-                  : 'This build does not include local transcription.',
-              };
-        if (holdLiveStatus) {
-          holdLiveStatus = false;
-          return new Promise<LiveStatus>((resolve, reject) => {
-            heldLiveStatuses.push({ value, resolve, reject });
-          });
-        }
+        const value: LiveStatus = liveAvailable
+          ? { available: true, reason: null, transcription: 'Deepgram' }
+          : {
+              available: false,
+              reason: 'This build has no live transcription.',
+            };
         return value;
       }
       case 'start_live_session':
@@ -584,14 +551,16 @@ declare global {
       publish: typeof publish;
       setCue: (cue: Snapshot['cue']) => Promise<void>;
       setQuestionSize: (size: Snapshot['questionSize']) => Promise<void>;
+      /** The edge the native companion window keeps when it grows. */
+      anchor: (edge: 'top' | 'bottom') => Promise<void>;
+      /** Whether the page has asked for the edge; it listens first. */
+      edgeAsked: () => boolean;
+      /** Whether the page's read of the edge is waiting for an answer. */
+      edgePending: () => boolean;
+      /** Answers a held read with this edge. */
+      releaseEdge: (edge: 'top' | 'bottom') => void;
       setSourceSession: (sourceSession: boolean) => Promise<void>;
       rejectNextPause: () => void;
-    };
-    modelTest: {
-      finish: () => void;
-      holdNextStatus: () => void;
-      pendingStatuses: () => number;
-      releaseStatus: (fail?: boolean) => void;
     };
     microphoneTest: {
       send: typeof send;
@@ -670,24 +639,22 @@ window.liveTest = {
   publish,
   setCue: (cue) => publish({ cue }),
   setQuestionSize: (questionSize) => publish({ questionSize }),
+  anchor: (edge) => {
+    companionEdge = edge;
+    return emit('companion:anchor', edge);
+  },
+  edgeAsked: () => edgeAsked,
+  edgePending: () => !!releaseEdge,
+  releaseEdge: (edge) => {
+    releaseEdge?.(edge);
+    releaseEdge = null;
+  },
   // Development builds only: the cue snapshot marks a session fed by an
   // application alone.
   setSourceSession: (sourceSession: boolean) =>
     publish({ sourceSession } as Partial<Snapshot>),
   rejectNextPause: () => {
     rejectCuePause = true;
-  },
-};
-window.modelTest = {
-  finish: () => releaseDownload?.('done'),
-  holdNextStatus: () => {
-    holdLiveStatus = true;
-  },
-  pendingStatuses: () => heldLiveStatuses.length,
-  releaseStatus: (fail = false) => {
-    const pending = heldLiveStatuses.shift();
-    if (fail) pending?.reject(new Error('Status unavailable.'));
-    else if (pending) pending.resolve(pending.value);
   },
 };
 window.microphoneTest = {
@@ -703,3 +670,30 @@ window.microphoneTest = {
   releaseStop: () => releaseStop?.(),
 };
 await import('../../src/main');
+
+/** How much of each side of a card its clip covers, in CSS px: top, right,
+ * bottom, left. Reads the computed `inset()` however the browser shortens
+ * it, so a check can tell what is drawn at a moment of an animation. */
+function cueInset(card: Element): [number, number, number, number] {
+  const box = card.getBoundingClientRect();
+  const found = getComputedStyle(card).clipPath.match(/inset\(([^)]*)\)/);
+  if (!found) return [0, 0, 0, 0];
+  const values = found[1].split(' round ')[0].trim().split(/\s+/);
+  const [top, right = top, bottom = top, left = right] = values;
+  const px = (value: string, across: number) =>
+    value.endsWith('%')
+      ? (parseFloat(value) / 100) * across
+      : parseFloat(value);
+  return [
+    px(top, box.height),
+    px(right, box.width),
+    px(bottom, box.height),
+    px(left, box.width),
+  ];
+}
+declare global {
+  interface Window {
+    cueInset: typeof cueInset;
+  }
+}
+window.cueInset = cueInset;
