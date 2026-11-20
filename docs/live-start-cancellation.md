@@ -6,7 +6,7 @@ This native prerequisite supports controllable participation cues: a Stop reques
 
 ## Implemented boundary
 
-`start_live_session` reserves one startup ticket before verifying or loading the speech model. The blocking loader owns that ticket until it exits. Stop cancels it; loading already in progress may finish, but its result cannot install a live engine or request capture. Another start is rejected until that loader releases its reservation. Failure, panic and cancellation release ownership for an explicit retry.
+`start_live_session` reserves one startup ticket before its blocking start step. Until 16 November 2026 that step verified and loaded the local speech model; on-device transcription has since been removed, and the step now only hands over the cloud transcription settings checked before it. It opens nothing: the [cloud stream](cloud-transcription.md) opens later, once the session's cue processing is approved. The blocking step owns that ticket until it exits. Stop cancels it; a step already in progress may finish, but its result cannot install a live engine or request capture. Another start is rejected until that step releases its reservation. Failure, panic and cancellation release ownership for an explicit retry.
 
 After installing the live engine, microphone startup records its capture generation in that exact session before requesting permission. A stopped or replaced session rejects the reservation. Stop can therefore retire that generation while permission or device startup is pending; a late device response cannot revive it or stop a newer capture. The callback records ownership without holding the microphone mutex.
 
@@ -24,10 +24,10 @@ Seven fictional regression tests exercise the production runtime and microphone 
 - Stop between engine installation and microphone reservation rejects the permission path.
 - Stop after generation registration retires that start; a late fictional stream is dropped without being played.
 
-Run `cargo test --manifest-path src-tauri/Cargo.toml --locked` for these and the existing lifecycle tests. Compile the actual startup wrapper with `cargo check --manifest-path src-tauri/Cargo.toml --locked --features local-whisper`; compilation performs no inference.
+Run `cargo test --manifest-path src-tauri/Cargo.toml --locked` for these and the existing lifecycle tests. Compile the actual startup wrapper with `cargo check --manifest-path src-tauri/Cargo.toml --locked --features cloud-transcription`; without that feature the command refuses every start. The tests above were written when the gated step loaded a model; they now exercise the same ticket around the cloud settings hand-over.
 
 ## Remaining acceptance
 
-The current notebook serializes commands and disables its actions while Start awaits model loading. This change does **not** expose an interactive Cancel-start action there. [Scoped capture Stop](scoped-capture-stop.md) now carries stable operation ownership across loading and live installation, and the test-mounted controls display distinct loading/cancelling states. Integrating them into the notebook with reachable cancellation is still required; fresh processing approval remains blocked during drain.
+At the time, the notebook serialized commands and disabled its actions while Start awaited model loading. This change does **not** expose an interactive Cancel-start action there. [Scoped capture Stop](scoped-capture-stop.md) now carries stable operation ownership across loading and live installation, and the test-mounted controls display distinct loading/cancelling states. Integrating them into the notebook with reachable cancellation is still required; fresh processing approval remains blocked during drain.
 
 Real microphone permission, device teardown, app shutdown and cross-window operation still need an explicit native check. No real capture or model inference was used for this acceptance. Signed distribution, Granola account import, accessibility and the comparison against no assistance remain separate release gates.
