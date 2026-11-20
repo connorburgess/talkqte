@@ -6,7 +6,6 @@ import type {
   ContextItem,
   LiveStatus,
   MergeOutcome,
-  ModelStatus,
   PickedNotes,
   Snapshot,
   GranolaStatus,
@@ -60,9 +59,6 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
     case 'start_live_session':
     case 'stop_live_session':
     case 'set_live_cues_paused':
-    case 'download_model':
-    case 'cancel_model_download':
-    case 'remove_model':
       throw new Error('Live sessions are available in the desktop app.');
     case 'respond_to_cue':
     case 'inspect_cue':
@@ -358,18 +354,6 @@ export function importContextNotes(
   }
   emitContext();
   return outcome;
-}
-// The preview never downloads anything.
-export function modelStatus(): ModelStatus {
-  return {
-    revision: 0,
-    status: 'unavailable',
-    name: 'tiny.en',
-    sizeBytes: 77_704_715,
-    neededBytes: 77_704_715 + 512 * 1024 * 1024,
-    received: 0,
-    message: null,
-  };
 }
 export function exportPreview() {
   reviewedExport = `# TalkQTE notes\n\n${state.notes}\n`;

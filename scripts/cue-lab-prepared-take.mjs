@@ -185,6 +185,10 @@ export function createLabPlaybackSession({
   // The approved, frozen descriptor itself flows to the player and capture.
   const identity = media;
   const root = new AbortController();
+  // Which step the take is in, and the step it was in when it first
+  // failed, as fixed labels for OUTCOME ("protocol" alone is not enough).
+  let step = 'player-prepare',
+    failedStep = null;
   let phase = 'starting',
     closing = null,
     failure = null,
@@ -263,6 +267,7 @@ export function createLabPlaybackSession({
   const subscriptions = [];
   const fail = (reason = 'protocol') => {
     if (closing) return;
+    failedStep ??= step;
     failure ??= [
       'cancelled',
       'deadline',
@@ -319,6 +324,7 @@ export function createLabPlaybackSession({
   let timer = setTimeout(() => fail('deadline'), takeMs);
   work = Promise.resolve().then(async () => {
     if (root.signal.aborted) throw gateFailure('cancelled');
+    step = 'player-prepare';
     const verified = await player.prepare({
       media: identity,
       signal: root.signal,
@@ -329,8 +335,10 @@ export function createLabPlaybackSession({
       ),
     );
     checkSource();
+    step = 'native-start';
     await armed;
     if (root.signal.aborted) throw gateFailure('cancelled');
+    step = 'listening';
     const listening = await source.waitListening({
       ...launchInfo,
       signal: root.signal,
@@ -367,6 +375,7 @@ export function createLabPlaybackSession({
       );
       const inTime = () => performance.now() <= waitDeadline;
       if (!inTime()) throw gateFailure('approval-not-given');
+      step = 'approval-wait';
       onApproval({ state: 'waiting', budgetMs: approvalBudgetMs });
       let approvalTimer;
       const row = await Promise.race([
@@ -394,13 +403,17 @@ export function createLabPlaybackSession({
       const waitMs = Math.floor(performance.now() - waitStartedAt);
       // Only now is the provider opened (key file, worker). The run's
       // startup clock restarts here with a full startupMs.
+      step = 'provider-open';
       await run.approve();
+      step = 'timing';
       if (root.signal.aborted) throw gateFailure('cancelled');
       // Opening must not have used up the room the media needs.
       if (!inTime()) throw gateFailure('approval-not-given');
       // Cloud transcription: the app has only an empty placeholder until
       // now, so nothing can stream before this accepted, in-time review.
+      step = 'token-release';
       if (launcher.transcription) launcher.releaseTranscriptionToken();
+      step = 'attempt-record';
       approval = Object.freeze({
         budgetMs: approvalBudgetMs,
         waitMs,
@@ -419,6 +432,7 @@ export function createLabPlaybackSession({
     try {
       // On expiry root Stop aborts the adapter; retain ownership of its startup
       // until it settles, rather than detaching a late recorder after a race.
+      step = 'recorder-start';
       recording = await recorder.start({
         media: identity,
         ...launchInfo,
@@ -456,6 +470,7 @@ export function createLabPlaybackSession({
     phase = 'playing';
     // Start the actual voiced file BEFORE lazy native authentication/ready.
     // The adapter reports its actual audio-clock start, never request/receipt time.
+    step = 'player-start';
     const playback = Promise.resolve(
       player.play({
         media: identity,
@@ -523,7 +538,9 @@ export function createLabPlaybackSession({
       );
       report('speech.render-end');
     });
+    step = 'playback';
     await Promise.all([playback, run.ready]);
+    step = 'completion';
     if (root.signal.aborted) throw gateFailure('cancelled');
     if (body) {
       phase = 'body';
@@ -538,6 +555,7 @@ export function createLabPlaybackSession({
   const done = work.then(
     () => close(),
     (error) => {
+      failedStep ??= step;
       failure ??= [
         'deadline',
         'cancelled',
@@ -578,11 +596,19 @@ export function createLabPlaybackSession({
         settle(() => recorder.stop()),
       ]);
       let playerRetirementFailed = false;
+      // A recorder that never accepted a frame and whose process has exited
+      // recorded nothing, so the player may still be retired (RunB08).
+      let neverRecorded = false;
+      try {
+        const detail = recorder.failureDetail;
+        neverRecorded = detail?.frameAccepted === false && detail.exit !== null;
+      } catch {}
       if (typeof player.close === 'function') {
         if (
           results[0].status !== 'fulfilled' ||
-          recorded[0].status !== 'fulfilled' ||
-          recorded[0].value?.stopped !== true
+          (!neverRecorded &&
+            (recorded[0].status !== 'fulfilled' ||
+              recorded[0].value?.stopped !== true))
         )
           playerRetirementFailed = true;
         else
@@ -685,6 +711,10 @@ export function createLabPlaybackSession({
     },
     get providerSpentMicroUsd() {
       return run.providerSpentMicroUsd;
+    },
+    /** The step the take was in when it first failed, or null. */
+    get failedStep() {
+      return failedStep;
     },
     // The take's first failure cause, before any cleanup failure replaces
     // it in the rejection, and the run's own first stop reason.

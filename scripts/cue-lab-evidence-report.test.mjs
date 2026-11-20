@@ -1193,6 +1193,22 @@ test('a send-queue overflow is reported apart from the stop, and a lab run end i
   );
 });
 
+test("the app's liveness stop is reported as a stalled stream", () => {
+  const [s] = cloudReport(
+    cloudRows({
+      stop: {
+        event: 'stt_state',
+        session: '2',
+        state: 'stopped',
+        code: 'stalled',
+        audio_ms: 41000,
+        mono_ms: 9000,
+      },
+    }),
+  ).cloudTranscription.streams;
+  assert.deepEqual([s.stopState, s.stopCode], ['stopped', 'stalled']);
+});
+
 test('malformed transcription rows and settings are refused, never guessed', () => {
   for (const row of [
     { event: 'stt_state', session: '2', state: 'paused', audio_ms: 0 },

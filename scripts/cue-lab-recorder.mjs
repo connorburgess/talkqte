@@ -96,6 +96,13 @@ function recorder({
     used = false,
     matched = false,
     geometry = null,
+    // Which filter each window got (independent of the active Space, or a
+    // single-window display filter), as the helper reported it.
+    filters = null,
+    // Why the helper stopped, if it failed: its exit code or signal and its
+    // last error line (fixed helper text, bounded), for OUTCOME.
+    exitStatus = null,
+    errorReason = null,
     accepted = false,
     final = null,
     invalid = false,
@@ -225,6 +232,29 @@ function recorder({
         });
       }
       matched = true;
+    } else if (value.event === 'filters') {
+      const kind = (k) => ['independent', 'display'].includes(value[k]?.kind);
+      requireThat(
+        matched &&
+          !accepted &&
+          !filters &&
+          kind('emulator') &&
+          kind('companion'),
+      );
+      filters = Object.freeze({
+        emulator: value.emulator.kind,
+        companion: value.companion.kind,
+      });
+    } else if (value.event === 'error') {
+      // Only the helper's fixed reason code is kept: its message may name
+      // the recording's path or carry macOS's own text. The start then
+      // fails as before.
+      if (
+        typeof value.reason === 'string' &&
+        /^[a-z][a-z-]{0,39}$/.test(value.reason)
+      )
+        errorReason ??= value.reason;
+      throw gateFailure('protocol');
     } else if (value.event === 'frame_accepted') {
       requireThat(
         matched &&
@@ -310,6 +340,20 @@ function recorder({
     return stopping;
   }
   return Object.freeze({
+    // Why the helper stopped, available whether or not it succeeded: exit
+    // code or signal, its fixed error reason, and whether it ever accepted
+    // a frame.
+    get failureDetail() {
+      return exitStatus || errorReason
+        ? Object.freeze({
+            exit: exitStatus,
+            errorReason,
+            frameAccepted: accepted,
+            matched,
+            filters,
+          })
+        : null;
+    },
     // The helper's final, content-free report once it stopped: frames and
     // sound buffers written, and whether a window moved or resized.
     get report() {
@@ -322,6 +366,7 @@ function recorder({
             // A window closed or gone by the end of the run.
             windowsMissing: final.windowsMissing ?? null,
             geometry,
+            filters,
           })
         : null;
     },
@@ -404,6 +449,10 @@ function recorder({
         child.stderr.on('data', (data) => chunk(data, false));
         child.once('error', fail);
         child.once('close', (code, termination) => {
+          exitStatus = Object.freeze({
+            code: Number.isSafeInteger(code) ? code : null,
+            signal: typeof termination === 'string' ? termination : null,
+          });
           if (endSettled) return;
           closed = true;
           clearTimeout(startTimer);
@@ -454,6 +503,7 @@ export function createLabRecorderFixture(options = {}) {
   requireThat(
     [
       'normal',
+      'error',
       'partial',
       'moved',
       'missing',
