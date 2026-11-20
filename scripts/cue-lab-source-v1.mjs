@@ -10,9 +10,11 @@ export function createLabSourceV1({
   commit,
   features,
   deadlineMs = 5000,
+  application = 'QuickTime Player',
 } = {}) {
   if (
     typeof launcher?.subscribe !== 'function' ||
+    !['QuickTime Player', 'TalkQTE Lab Player'].includes(application) ||
     !/^[a-f0-9]{40}$/.test(commit ?? '') ||
     !Array.isArray(features) ||
     features.length !== 4 ||
@@ -104,8 +106,7 @@ export function createLabSourceV1({
         return fail();
       session = event.session;
     } else if (event.event === 'dev_source') {
-      if (!sameOwner() || event.application !== 'QuickTime Player')
-        return fail();
+      if (!sameOwner() || event.application !== application) return fail();
       if (event.step === 'acknowledged' && !acknowledged) acknowledged = true;
       // Legacy started is historical only, never readiness in v1.
       else if (event.step === 'started' && acknowledged && !legacyStarted)
@@ -116,7 +117,7 @@ export function createLabSourceV1({
         !sameOwner() ||
         event.version !== 1 ||
         event.run_id !== identity.runId ||
-        event.application !== 'QuickTime Player' ||
+        event.application !== application ||
         !acknowledged ||
         !session ||
         event.session !== session ||

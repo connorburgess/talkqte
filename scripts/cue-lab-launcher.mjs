@@ -21,6 +21,7 @@ import { assertSubscriptionEnvironment } from './cue-lab-codex.mjs';
 import { parseUniqueLabJson } from './cue-lab-strict-json.mjs';
 import { watchLabTiming } from './cue-lab-timing-reader.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
+import { checkLabPlayerSource } from './cue-lab-player.mjs';
 
 const FEATURES = [
   'lab-evaluator',
@@ -241,25 +242,35 @@ function launcher({
   modelConnection,
   environment,
   fixtureCase,
+  mode = 'model-enabled',
+  playerSource,
 }) {
   requireThat(
-    exact(selection, ['provider', 'model', 'effort', 'maxCalls']) &&
-      ['codex', 'claude-code'].includes(selection.provider) &&
-      typeof selection.model === 'string' &&
-      selection.model.length <= 100 &&
-      ['low', 'medium'].includes(selection.effort) &&
-      Number.isSafeInteger(selection.maxCalls) &&
-      selection.maxCalls >= 1 &&
-      selection.maxCalls <= 100,
+    ['capture-only', 'model-enabled'].includes(mode) &&
+      (mode === 'capture-only'
+        ? selection === undefined
+        : exact(selection, ['provider', 'model', 'effort', 'maxCalls']) &&
+          ['codex', 'claude-code'].includes(selection.provider) &&
+          typeof selection.model === 'string' &&
+          selection.model.length <= 100 &&
+          ['low', 'medium'].includes(selection.effort) &&
+          Number.isSafeInteger(selection.maxCalls) &&
+          selection.maxCalls >= 1 &&
+          selection.maxCalls <= 100),
   );
   requireThat(
-    sourceApplication === 'QuickTime Player' &&
-      modelConnection === 'on' &&
+    (sourceApplication === 'QuickTime Player'
+      ? playerSource === undefined
+      : sourceApplication === 'TalkQTE Lab Player' &&
+        checkLabPlayerSource(playerSource)) &&
+      (mode === 'capture-only'
+        ? modelConnection === undefined
+        : modelConnection === 'on') &&
       Number.isSafeInteger(stopAfterS) &&
       stopAfterS > 0,
   );
   assertSubscriptionEnvironment(environment);
-  const pinned = Object.freeze({ ...selection });
+  const pinned = selection ? Object.freeze({ ...selection }) : null;
   const osEnv = Object.fromEntries(
     ['HOME', 'PATH', 'TMPDIR', 'LANG', 'LC_ALL']
       .filter((key) => typeof environment[key] === 'string')
@@ -304,7 +315,9 @@ function launcher({
     subscribers.clear();
   };
   return Object.freeze({
+    playerSource,
     executable: build.executable,
+    mode,
     directory,
     timingPath,
     subscribe(listener) {
@@ -332,10 +345,12 @@ function launcher({
       );
       used = true;
       try {
-        const keys = [
+        const baseKeys = [
           'TALKQTE_DEV_STOP_SIGNAL',
           'TALKQTE_DEV_STOP_AFTER_S',
           'TALKQTE_DEV_LAB_RUN_ID',
+        ];
+        const modelKeys = [
           'TALKQTE_DEV_CUE_BACKEND',
           'TALKQTE_DEV_LAB_DESCRIPTOR',
           'TALKQTE_DEV_LAB_PROVIDER',
@@ -343,29 +358,39 @@ function launcher({
           'TALKQTE_DEV_LAB_EFFORT',
         ];
         requireThat(
-          exact(runEnv, keys) &&
+          exact(runEnv, [
+            ...baseKeys,
+            ...(mode === 'model-enabled' ? modelKeys : []),
+          ]) &&
             runEnv.TALKQTE_DEV_STOP_SIGNAL === 'usr2' &&
             runEnv.TALKQTE_DEV_STOP_AFTER_S === String(stopAfterS) &&
-            /^[A-Za-z0-9_-]{1,64}$/.test(runEnv.TALKQTE_DEV_LAB_RUN_ID) &&
-            runEnv.TALKQTE_DEV_CUE_BACKEND === 'lab-subscription',
+            /^[A-Za-z0-9_-]{1,64}$/.test(runEnv.TALKQTE_DEV_LAB_RUN_ID),
         );
-        requireThat(
-          ['provider', 'model', 'effort', 'maxCalls'].every(
-            (key) => metadata?.[key] === pinned[key],
-          ) &&
-            runEnv.TALKQTE_DEV_LAB_PROVIDER === pinned.provider &&
-            runEnv.TALKQTE_DEV_LAB_MODEL === pinned.model &&
-            runEnv.TALKQTE_DEV_LAB_EFFORT === pinned.effort,
-        );
-        const descriptor = runEnv.TALKQTE_DEV_LAB_DESCRIPTOR;
-        requireThat(
-          isAbsolute(descriptor ?? '') &&
-            lstatSync(descriptor).isFile() &&
-            !lstatSync(descriptor).isSymbolicLink() &&
-            (lstatSync(descriptor).mode & 0o777) === 0o600 &&
-            lstatSync(descriptor).uid === process.getuid?.() &&
-            outside(descriptor),
-        );
+        let descriptor;
+        if (mode === 'model-enabled') {
+          requireThat(
+            runEnv.TALKQTE_DEV_CUE_BACKEND === 'lab-subscription' &&
+              ['provider', 'model', 'effort', 'maxCalls'].every(
+                (key) => metadata?.[key] === pinned[key],
+              ) &&
+              runEnv.TALKQTE_DEV_LAB_PROVIDER === pinned.provider &&
+              runEnv.TALKQTE_DEV_LAB_MODEL === pinned.model &&
+              runEnv.TALKQTE_DEV_LAB_EFFORT === pinned.effort,
+          );
+          descriptor = runEnv.TALKQTE_DEV_LAB_DESCRIPTOR;
+          requireThat(
+            isAbsolute(descriptor ?? '') &&
+              lstatSync(descriptor).isFile() &&
+              !lstatSync(descriptor).isSymbolicLink() &&
+              (lstatSync(descriptor).mode & 0o777) === 0o600 &&
+              lstatSync(descriptor).uid === process.getuid?.() &&
+              outside(descriptor),
+          );
+        } else requireThat(metadata === undefined);
+        if (playerSource) {
+          checkLabPlayerSource(playerSource);
+          requireThat(playerSource.runId === runEnv.TALKQTE_DEV_LAB_RUN_ID);
+        }
         reader = watchLabTiming({
           path: timingPath,
           runId: runEnv.TALKQTE_DEV_LAB_RUN_ID,
@@ -404,11 +429,27 @@ function launcher({
         const env = {
           ...osEnv,
           ...runEnv,
-          TALKQTE_DEV_LAB_DESCRIPTOR: realpathSync(descriptor),
+          ...(descriptor
+            ? { TALKQTE_DEV_LAB_DESCRIPTOR: realpathSync(descriptor) }
+            : {}),
           TALKQTE_TIMING_LOG: timingPath,
           TALKQTE_DEV_APPLICATION_SOURCE: sourceApplication,
-          TALKQTE_DEV_MODEL_CONNECTION: modelConnection,
-          TALKQTE_DEV_MODEL_CALLS: String(pinned.maxCalls),
+          ...(mode === 'model-enabled'
+            ? {
+                TALKQTE_DEV_MODEL_CONNECTION: modelConnection,
+                TALKQTE_DEV_MODEL_CALLS: String(pinned.maxCalls),
+              }
+            : {}),
+          ...(playerSource
+            ? {
+                TALKQTE_DEV_PLAYER_PID: String(playerSource.pid),
+                TALKQTE_DEV_PLAYER_START_SEC: playerSource.processStart.seconds,
+                TALKQTE_DEV_PLAYER_START_USEC: String(
+                  playerSource.processStart.microseconds,
+                ),
+                TALKQTE_DEV_PLAYER_EXECUTABLE: playerSource.executable,
+              }
+            : {}),
           ...(whisperModel ? { TALKQTE_WHISPER_MODEL: whisperModel } : {}),
           ...(fixtureCase ? { TALKQTE_FIXTURE_CASE: fixtureCase } : {}),
         };
@@ -454,11 +495,15 @@ export function prepareLabLauncher({
   stopAfterS,
   whisperModel,
   modelConnection,
+  mode = 'model-enabled',
+  playerSource,
   environment = process.env,
 } = {}) {
   try {
     return launcher({
       build: verifyBuild(manifestFile, approved),
+      mode,
+      playerSource,
       selection,
       sourceApplication,
       stopAfterS,
@@ -476,11 +521,13 @@ export function prepareLabLauncher({
 export function prepareLabFixtureLauncher({
   fixtureCase,
   selection,
+  mode = 'model-enabled',
   stopAfterS = 120,
   environment = {},
 } = {}) {
   requireThat(
     [
+      'capture-only',
       'normal',
       'partial',
       'exit',
@@ -513,9 +560,10 @@ export function prepareLabFixtureLauncher({
       },
     },
     selection,
+    mode,
     stopAfterS,
     sourceApplication: 'QuickTime Player',
-    modelConnection: 'on',
+    modelConnection: mode === 'capture-only' ? undefined : 'on',
     environment,
     fixtureCase,
   });

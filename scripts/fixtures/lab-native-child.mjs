@@ -4,6 +4,13 @@ import { appendFileSync, writeFileSync, renameSync } from 'node:fs';
 const path = process.env.TALKQTE_TIMING_LOG;
 const run = process.env.TALKQTE_DEV_LAB_RUN_ID;
 const mode = process.env.TALKQTE_FIXTURE_CASE;
+if (
+  mode === 'capture-only' &&
+  Object.keys(process.env).some((key) =>
+    /MODEL|PROVIDER|BACKEND|DESCRIPTOR|CODEX|CLAUDE/.test(key),
+  )
+)
+  process.exit(3);
 const frame = (step) =>
   JSON.stringify({
     event: 'dev_stop',

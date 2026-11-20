@@ -18,6 +18,7 @@ export function createPreparedTake(options) {
 export function createLabPlaybackSession({
   launcher,
   settings,
+  runId,
   stopAfterS,
   media,
   source,
@@ -128,6 +129,7 @@ export function createLabPlaybackSession({
     }
     run = createLabRun({
       settings,
+      ...(runId !== undefined ? { runId } : {}),
       sourceSessionMode: source.mode === 'v1' ? 'required' : 'legacy-fixture',
       native,
       signal: root.signal,
@@ -257,7 +259,25 @@ export function createLabPlaybackSession({
       const recorded = await Promise.allSettled([
         settle(() => recorder.stop()),
       ]);
+      let playerRetirementFailed = false;
+      if (typeof player.close === 'function') {
+        if (
+          results[0].status !== 'fulfilled' ||
+          recorded[0].status !== 'fulfilled' ||
+          recorded[0].value?.stopped !== true
+        )
+          playerRetirementFailed = true;
+        else
+          try {
+            required(
+              (await player.close({ nativeReleased: true }))?.closed === true,
+            );
+          } catch {
+            playerRetirementFailed = true;
+          }
+      }
       let cleanupFailed =
+        playerRetirementFailed ||
         results[0].status === 'rejected' ||
         results[3].status === 'rejected' ||
         results[1].status === 'rejected' ||

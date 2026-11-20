@@ -20,9 +20,12 @@ export function createLabRun({
   startupMs = 10000,
   releaseMs = 12000,
   sourceSessionMode = 'required',
+  runId = randomUUID(),
 } = {}) {
   if (
     !settings ||
+    typeof runId !== 'string' ||
+    !/^[A-Za-z0-9_-]{1,64}$/.test(runId) ||
     !['required', 'legacy-fixture'].includes(sourceSessionMode) ||
     (sourceSessionMode === 'legacy-fixture' &&
       settings.execution !== 'offline-stand-in') ||
@@ -49,7 +52,6 @@ export function createLabRun({
       : {}),
   });
   const root = new AbortController();
-  const runId = randomUUID();
   let provider = null,
     broker = null,
     nativeStarted = false,

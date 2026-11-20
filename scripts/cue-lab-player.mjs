@@ -1,7 +1,15 @@
 // Owned fixed-media player only. No desktop controls, fallback or model action.
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync, lstatSync, realpathSync } from 'node:fs';
+import {
+  lstatSync,
+  realpathSync,
+  openSync,
+  closeSync,
+  readSync,
+  fstatSync,
+  constants,
+} from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const FIXTURE = fileURLToPath(
@@ -11,9 +19,15 @@ import { TextDecoder } from 'node:util';
 import { parseUniqueLabJson } from './cue-lab-strict-json.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
 
+export const LAB_PLAYER_RUNTIME = Object.freeze({
+  platform: 'darwin',
+  node: 'v22.23.2',
+  libuv: '1.51.0',
+});
 export const LAB_PLAYER_MEDIA_SHA256 =
   '1faf1c404249bed069065f51262abfce6956fa8a31f237e68bb6e9d06cb893e2';
 const SCHEMA = 'talkqte.lab.player.v1';
+const approvedSources = new WeakMap();
 const BASE = ['schema', 'type', 'runId', 'generation', 'mediaSha256'];
 const CHECKOUT = realpathSync(fileURLToPath(new URL('../', import.meta.url)));
 const required = (ok) => {
@@ -42,10 +56,49 @@ const file = (path, max) => {
   required(s.isFile() && !s.isSymbolicLink() && s.size > 0 && s.size <= max);
   return s;
 };
-const digest = (path) =>
-  createHash('sha256').update(readFileSync(path)).digest('hex');
 const stamp = (s) =>
   [s.dev, s.ino, s.size, s.mtimeMs, s.ctimeMs, s.mode].join(':');
+export function hashLabOwnedFile(path, max = 64 * 1024 * 1024) {
+  required(Number.isSafeInteger(max) && max > 0 && max <= 256 * 1024 * 1024);
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const before = fstatSync(fd);
+    required(before.isFile() && before.size > 0 && before.size <= max);
+    const hash = createHash('sha256'),
+      chunk = Buffer.alloc(65536);
+    let total = 0,
+      count;
+    while ((count = readSync(fd, chunk, 0, chunk.length, null)) > 0) {
+      total += count;
+      required(total <= max);
+      hash.update(chunk.subarray(0, count));
+    }
+    required(total === before.size && stamp(before) === stamp(fstatSync(fd)));
+    return hash.digest('hex');
+  } finally {
+    closeSync(fd);
+  }
+}
+const digest = hashLabOwnedFile;
+const readManifest = (path) => {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const before = fstatSync(fd),
+      buffer = Buffer.alloc(16385);
+    required(before.isFile() && before.size > 0 && before.size <= 16384);
+    let total = 0,
+      count;
+    while (
+      total < buffer.length &&
+      (count = readSync(fd, buffer, total, buffer.length - total, null)) > 0
+    )
+      total += count;
+    required(total === before.size && stamp(before) === stamp(fstatSync(fd)));
+    return buffer.subarray(0, total);
+  } finally {
+    closeSync(fd);
+  }
+};
 const deferred = () => {
   let resolve, reject;
   const promise = new Promise((yes, no) => {
@@ -65,7 +118,7 @@ export function verifyLabPlayerBuild({ manifestFile, approved } = {}) {
         manifestStat.uid === process.getuid?.(),
     );
     required(exact(approved, ['manifestSha256', 'executableSha256', 'commit']));
-    const raw = readFileSync(manifestFile);
+    const raw = readManifest(manifestFile);
     required(
       createHash('sha256').update(raw).digest('hex') ===
         approved.manifestSha256,
@@ -330,7 +383,9 @@ function playerController({
 } = {}) {
   required(
     /^[A-Za-z0-9_-]{1,64}$/.test(runId ?? '') &&
-      [prepareMs, startMs, stopMs].every((n) => integer(n, 1, 15000)),
+      integer(prepareMs, 1, 15000) &&
+      integer(startMs, 1, 3000) &&
+      integer(stopMs, 1, 3000),
   );
 
   let child = null,
@@ -458,6 +513,17 @@ function playerController({
         processStart: Object.freeze({ ...frame.processStart }),
         mediaSha256: LAB_PLAYER_MEDIA_SHA256,
       });
+      if (!fixtureCase)
+        approvedSources.set(identity, () => {
+          required(
+            child.pid === identity.pid &&
+              child.exitCode === null &&
+              child.signalCode === null &&
+              !closing &&
+              !failed,
+          );
+          build.check();
+        });
       ready.resolve();
     } else if (frame.type === 'clock_sample') {
       required(
@@ -577,6 +643,7 @@ function playerController({
     return closing;
   }
   return Object.freeze({
+    startDeadlineMs: startMs,
     get identity() {
       return identity;
     },
@@ -607,7 +674,7 @@ function playerController({
         armAbort(signal);
         if (!fixtureCase) {
           file(media.path, 256 * 1024 * 1024);
-          required(digest(media.path) === media.sha256);
+          required(digest(media.path, 256 * 1024 * 1024) === media.sha256);
         }
         build.check();
         const env = Object.fromEntries(
@@ -754,6 +821,11 @@ function playerController({
 }
 
 export function createLabPlayer(options = {}) {
+  required(
+    process.platform === LAB_PLAYER_RUNTIME.platform &&
+      process.version === LAB_PLAYER_RUNTIME.node &&
+      process.versions.uv === LAB_PLAYER_RUNTIME.libuv,
+  );
   return playerController({ ...options, build: verifyLabPlayerBuild(options) });
 }
 // Explicit harmless protocol fixture: cannot select an app or execute caller code.
@@ -787,4 +859,11 @@ export function createLabPlayerFixture({
       },
     },
   });
+}
+
+export function checkLabPlayerSource(identity) {
+  const check = approvedSources.get(identity);
+  required(typeof check === 'function');
+  check();
+  return identity;
 }
