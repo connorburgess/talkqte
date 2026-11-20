@@ -110,6 +110,9 @@ struct Pending {
     // For the development timing log: the request number and when it left.
     number: u64,
     sent: std::time::Instant,
+    /// The session time it was sent: which lines were fresh is judged as of
+    /// then when its reply comes back, so a line ageing out is no change.
+    sent_at_ms: u64,
 }
 
 impl Engine {
@@ -426,6 +429,12 @@ impl Engine {
     /// Never include manual notes, focus text, or identity settings. Fail closed
     /// on the worker's per-source and aggregate byte bounds without truncation.
     fn evaluation_request(&self) -> Result<Option<Request>, Failure> {
+        self.evaluation_request_as_of(self.state.elapsed_ms)
+    }
+
+    /// The request as it would have been sent at `as_of_ms`: only which lines
+    /// count as fresh depends on it; everything else is as it is now.
+    fn evaluation_request_as_of(&self, as_of_ms: u64) -> Result<Option<Request>, Failure> {
         if self.state.status != Status::Running || self.state.cues_paused || self.live_stopping {
             return Ok(None);
         }
@@ -446,7 +455,7 @@ impl Engine {
             .rev()
             .take(RECENT_LINES)
             .filter(|line| {
-                self.state.elapsed_ms.saturating_sub(line.at_ms) < CUE_MS
+                as_of_ms.saturating_sub(line.at_ms) < CUE_MS
                     && self.cues_after_ms.is_none_or(|after| line.at_ms > after)
                     && grant.after_ms.is_none_or(|after| line.at_ms > after)
             })
@@ -467,6 +476,7 @@ impl Engine {
                 id: cue.id.clone(),
                 text: cue.question.clone(),
                 source_ids: cited.iter().map(|source| source.id.clone()).collect(),
+                asked: cue.kind == super::ASKED,
             })
         } else {
             None
@@ -610,6 +620,7 @@ impl Engine {
                         permission_generation: state.permission.generation,
                         number,
                         sent: std::time::Instant::now(),
+                        sent_at_ms: self.state.elapsed_ms,
                     });
                     self.set_evaluation_status(EvaluationStatus::Pending);
                 }
@@ -620,7 +631,16 @@ impl Engine {
     }
 
     fn poll_pending_evaluation(&mut self) {
-        let current = match self.evaluation_request() {
+        // Compared as of when it was sent: new speech, a changed cue, notes,
+        // name or focus still make the reply stale, but a line passing 18 s
+        // while the model answers does not. Applying it still needs a cited
+        // line that is fresh now.
+        let sent_at_ms = self
+            .evaluation
+            .as_ref()
+            .and_then(|state| state.pending.as_ref())
+            .map_or(self.state.elapsed_ms, |pending| pending.sent_at_ms);
+        let current = match self.evaluation_request_as_of(sent_at_ms) {
             Ok(request) => request,
             Err(error) => {
                 self.fail_evaluation(error);
@@ -706,6 +726,13 @@ impl Engine {
             }
         }
         self.record_result(&submitted, &result, applies, late.as_ref(), lag.as_ref());
+        if !applies
+            && result
+                .as_ref()
+                .is_ok_and(|decision| decision.action == Action::Show)
+        {
+            self.drop_show(submitted.number, "stale_request");
+        }
         if current.is_some() && applies {
             // Cited sources resolve against the input the reply was made from;
             // the guards above keep every one of them in the transcript.
@@ -840,6 +867,9 @@ impl Engine {
             // Prior notes alone cannot raise a cue or establish that the
             // current conversation answered/corrected it. Require a fresh
             // cited speech anchor, not just fresh speech elsewhere in input.
+            if decision.action == Action::Show {
+                self.drop_show(number, "stale");
+            }
             return;
         }
         match decision.action {
@@ -857,14 +887,46 @@ impl Engine {
                     source_time(source).is_some() && self.focus_match(&source.text).is_some()
                 });
                 let repeat_key = format!("Evaluated:{}", question.to_lowercase());
-                if self.state.cue.is_some()
-                    || now.saturating_sub(at_ms) >= CUE_MS
-                    || at_ms < self.cooldown_until
-                    || (matches!(self.state.sensitivity, Sensitivity::Focused) && !about_focus)
-                    || self.last_shown.iter().any(|(key, shown)| {
-                        *key == repeat_key && now.saturating_sub(*shown) < REPEAT_MS
+                // A line that asked the user by name already raised "Asked
+                // you"; a model cue from it would ask them twice.
+                let from_asked_line = cited.iter().any(|source| {
+                    source
+                        .id
+                        .strip_prefix("transcript:")
+                        .is_some_and(|id| self.asked_lines.iter().any(|line| line == id))
+                });
+                // A fresh cited line that puts a question to the user by
+                // name, but raised no "Asked you" (a cue was being read),
+                // skips the pause, unless a cue citing it was dismissed.
+                let asked_of_user = request.user_name().is_some_and(|name| {
+                    cited.iter().any(|source| {
+                        source_time(source).is_some_and(|at| now.saturating_sub(at) < CUE_MS)
+                            && !self.dismissed_sources.contains(&source.id)
+                            && super::asked_of(name, &source.text).is_some()
                     })
-                {
+                });
+                // The pause runs from when the last cue ended to now, not to
+                // when the cited line started: a line said just before it
+                // ended may still raise a cue once it is over.
+                let dropped = if self.state.cue.is_some() {
+                    Some("slot")
+                } else if from_asked_line {
+                    Some("asked")
+                } else if now.saturating_sub(at_ms) >= CUE_MS {
+                    Some("expired_source")
+                } else if now < self.model_pause_until && !asked_of_user {
+                    Some("cooldown")
+                } else if matches!(self.state.sensitivity, Sensitivity::Focused) && !about_focus {
+                    Some("focus")
+                } else if self.last_shown.iter().any(|(key, shown)| {
+                    *key == repeat_key && now.saturating_sub(*shown) < REPEAT_MS
+                }) {
+                    Some("repeat")
+                } else {
+                    None
+                };
+                if let Some(reason) = dropped {
+                    self.drop_show(number, reason);
                     return;
                 }
                 // Do not grant a fresh 18 seconds to a late response.
@@ -922,6 +984,12 @@ impl Engine {
                 let Some(cue) = &mut self.state.cue else {
                     return;
                 };
+                // The model may say a question asked of the user was
+                // answered, but not withdraw it: a topic change does not
+                // take back a question someone put to them.
+                if decision.action == Action::Withdraw && cue.kind == super::ASKED {
+                    return;
+                }
                 if request.existing_cue().is_none_or(|old| old.id != cue.id) {
                     return;
                 }
@@ -955,6 +1023,7 @@ impl Engine {
                         crate::cue_evaluator::CueEnd::Withdrawn
                     }));
                     self.cooldown_until = self.state.elapsed_ms.saturating_add(self.cooldown());
+                    self.pause_model_after(self.state.elapsed_ms, false);
                 }
             }
         }
@@ -968,6 +1037,27 @@ impl Engine {
             },
         );
         self.changed();
+    }
+
+    /// A model's `show` that is not displayed, with a fixed reason and no
+    /// cue text: `slot`, `asked` (it cites a line that raised "Asked you"),
+    /// `expired_source`, `cooldown`, `focus`, `repeat`, `stale` when no
+    /// cited line was fresh speech, or `stale_request` when the context
+    /// changed while the model answered (new speech, the cue on screen,
+    /// notes, name or focus).
+    fn drop_show(&mut self, request: u64, reason: &'static str) {
+        #[cfg(test)]
+        {
+            self.last_dropped = Some(reason);
+        }
+        if crate::timing_log::enabled() {
+            crate::timing_log::record(crate::timing_log::Event::CueDropped {
+                session: self.generation,
+                request,
+                reason,
+                elapsed_ms: self.state.elapsed_ms,
+            });
+        }
     }
 
     pub(super) fn reconcile_evaluated_sources(&mut self) -> bool {
@@ -994,13 +1084,14 @@ impl Engine {
             self.state.cue = None;
             self.evaluated_cue = None;
             self.cooldown_until = self.state.elapsed_ms.saturating_add(self.cooldown());
+            self.pause_model_after(self.state.elapsed_ms, false);
             return true;
         }
         false
     }
 }
 
-fn transcript_source(line: &Segment) -> Source {
+pub(super) fn transcript_source(line: &Segment) -> Source {
     Source {
         id: format!("transcript:{}", line.id),
         revision: 0, // Ingestion is append-only; full text/provenance also compared.
@@ -1156,6 +1247,17 @@ mod tests {
                 next_line: 0,
             }
         }
+        /// Approved after the user's name is set, as a person would.
+        fn named(name: &str) -> Self {
+            let mut h = Self::unapproved(fictional_processor(), Duration::from_secs(5));
+            h.engine.set_user_name(Some(name.into())).unwrap();
+            let review = h
+                .engine
+                .review_processing(ConversationScope::NewSpeechOnly, &[])
+                .unwrap();
+            h.engine.approve_processing(review).unwrap();
+            h
+        }
         fn approve_notes(&mut self) {
             let scope: Vec<_> = self
                 .engine
@@ -1189,6 +1291,29 @@ mod tests {
                     },
                 )
                 .unwrap();
+        }
+        /// A line said at `at_ms` that reaches the engine at `arrives_ms`, as a
+        /// streamed final does, a second or more after it began.
+        fn said(&mut self, at_ms: u64, arrives_ms: u64, text: &str) {
+            self.until(arrives_ms);
+            self.next_line += 1;
+            self.engine
+                .ingest(
+                    self.engine.session(),
+                    Segment {
+                        id: format!("line-{}", self.next_line),
+                        at_ms,
+                        speaker: "Speaker".into(),
+                        text: text.into(),
+                    },
+                )
+                .unwrap();
+        }
+        /// Moves the session clock forward to `at_ms`, if it is not past it.
+        fn until(&mut self, at_ms: u64) {
+            // Settling a reply moves the clock a few milliseconds on its own.
+            let now = self.engine.state.elapsed_ms;
+            self.engine.advance(at_ms.saturating_sub(now));
         }
         pub(super) fn request(&self) -> Request {
             self.requests
@@ -2175,7 +2300,12 @@ mod tests {
 
     #[test]
     fn turning_the_connection_back_on_starts_afresh() {
-        let mut h = Harness::with_budget(Duration::from_millis(20));
+        // Timeout outcomes are recorded directly, as in
+        // a_single_timeout_is_skipped_and_two_in_a_row_stop_cues: a 20 ms
+        // worker budget also raced the first, in-time reply on a loaded
+        // machine. The worker's own deadline is covered by
+        // expired_or_completed_but_unread_results_never_display.
+        let mut h = Harness::new();
         h.line("Someone should send Dana the lease.");
         h.request();
         h.reply(
@@ -2187,10 +2317,9 @@ mod tests {
         // One timeout, then the person turns processing off and on again.
         h.line("Anyway.");
         h.request();
-        std::thread::sleep(Duration::from_millis(30));
-        h.engine.advance(1);
-        h.replies.send("{}".into()).unwrap();
-        drain_without_another_request(&mut h);
+        h.reply("quiet", None, &["transcript:line-2"]);
+        h.engine.fail_evaluation(Failure::Expired);
+        assert!(h.engine.has_processing_permission());
         h.engine.revoke_processing();
         h.approve_notes();
         // The cue shown before approval is not sent, and the count restarts:
@@ -2198,9 +2327,9 @@ mod tests {
         h.line("A new topic begins.");
         let request = h.request();
         assert!(request.earlier_cues().is_empty());
-        std::thread::sleep(Duration::from_millis(30));
-        h.engine.advance(1);
+        h.engine.fail_evaluation(Failure::Expired);
         assert!(h.engine.has_processing_permission());
+        h.reply("quiet", None, &["transcript:line-3"]);
     }
 
     #[test]
@@ -2677,6 +2806,544 @@ mod tests {
         assert!(h.engine.state.cue.is_none());
         assert!(h.engine.state.notes.is_empty());
         assert!(h.engine.evaluated_cue.is_none());
+    }
+
+    #[test]
+    fn asked_you_fires_with_a_model_connected_and_the_model_cannot_replace_or_repeat_it() {
+        let mut h = Harness::named("Curtis");
+        h.line("The raffle tickets are printed.");
+        h.request();
+        // As in lab run B12, with fictional words: the question arrives while
+        // the model is still working on the line before.
+        h.line("Three for ten sells better, Curtis, didn't you run the booth before?");
+        let asked = h.engine.state.cue.clone().expect("asked of the user");
+        assert_eq!(asked.kind, super::super::ASKED);
+        assert!(
+            asked.sources.is_empty(),
+            "the phrase rule's cue, not the model's"
+        );
+        // A show already on its way cannot take the slot.
+        h.reply(
+            "show",
+            Some("Did you run the booth before?"),
+            &["transcript:line-1"],
+        );
+        assert_eq!(h.engine.state.cue.as_ref().unwrap().id, asked.id);
+        // With a model connected it lasts 20 s from the line, not 45 s.
+        assert_eq!(asked.total_ms, 20_000);
+        // The model is still asked, with the cue on screen marked as asked.
+        let request = next_scheduled_request(&mut h);
+        let existing = request.existing_cue().expect("the cue on screen");
+        assert!(existing.asked);
+        assert_eq!(existing.id, asked.id);
+        assert_eq!(existing.source_ids, ["transcript:line-2"]);
+        assert!(request
+            .prompt_input()
+            .unwrap()
+            .contains(r#""sourceIds":["transcript:line-2"],"kind":"asked"}"#));
+        // It cannot withdraw it.
+        h.reply("withdraw", None, &["transcript:line-2"]);
+        assert_eq!(h.engine.state.cue.as_ref().unwrap().id, asked.id);
+        // It can say it was answered; then the cue goes.
+        h.line("Yes, two years running.");
+        assert!(h.request().existing_cue().unwrap().asked);
+        h.reply("resolved", None, &["transcript:line-3"]);
+        assert!(h.engine.state.cue.is_none());
+        // It does not come back as the model's cue from that line.
+        h.engine.advance(10_000);
+        h.line("Prices are on the sign.");
+        h.request();
+        h.reply(
+            "show",
+            Some("Did you run the booth before?"),
+            &["transcript:line-2", "transcript:line-4"],
+        );
+        assert!(h.engine.state.cue.is_none());
+    }
+
+    #[test]
+    fn a_resolved_split_question_cannot_return_from_its_first_line_and_fresh_speech() {
+        let mut h = Harness::named("Maya");
+        h.line("Could you, Maya,");
+        h.request();
+        h.reply("quiet", None, &["transcript:line-1"]);
+        h.line("field the complaints?");
+        assert_eq!(
+            h.engine.state.cue.as_ref().unwrap().kind,
+            super::super::ASKED
+        );
+        h.request();
+        h.reply("quiet", None, &["transcript:line-2"]);
+        h.line("Yes, I will handle them.");
+        h.request();
+        h.reply("resolved", None, &["transcript:line-3"]);
+        assert!(h.engine.state.cue.is_none());
+        h.engine.advance(10_000);
+        h.line("The room is booked.");
+        h.request();
+        h.reply(
+            "show",
+            Some("Could you field the complaints?"),
+            &["transcript:line-1", "transcript:line-4"],
+        );
+        assert!(
+            h.engine.state.cue.is_none(),
+            "the shown question must not repeat"
+        );
+    }
+
+    #[test]
+    fn a_split_question_blocked_by_a_held_cue_does_not_suppress_a_later_model_cue() {
+        let mut h = Harness::named("Maya");
+        let held = h.show();
+        h.engine.inspect_cue(&held).unwrap();
+        h.line("Could you, Maya,");
+        h.request();
+        h.reply("quiet", None, &["transcript:line-2"]);
+        h.line("field the complaints?");
+        assert_eq!(h.engine.state.cue.as_ref().unwrap().id, held);
+        h.request();
+        h.reply("quiet", None, &["transcript:line-3"]);
+        h.engine.respond(&held, Response::Dismiss).unwrap();
+        h.engine.advance(10_000);
+        h.line("The room is booked.");
+        h.request();
+        h.reply(
+            "show",
+            Some("Could you field the complaints?"),
+            &["transcript:line-2", "transcript:line-4"],
+        );
+        assert_eq!(
+            h.engine.state.cue.as_ref().unwrap().question,
+            "Could you field the complaints?",
+            "a question never displayed may still be suggested"
+        );
+    }
+
+    #[test]
+    fn asked_lifetime_uses_the_sessions_processing_permission_not_registration() {
+        for mode in ["unapproved", "approved", "revoked"] {
+            let mut h = if mode == "unapproved" {
+                let mut h = Harness::unapproved(fictional_processor(), Duration::from_secs(5));
+                h.engine.set_user_name(Some("Maya".into())).unwrap();
+                h
+            } else {
+                Harness::named("Maya")
+            };
+            if mode == "revoked" {
+                h.engine.revoke_processing();
+            }
+            h.line("Maya, can you check the room?");
+            assert_eq!(
+                h.engine.state.cue.as_ref().unwrap().total_ms,
+                if mode == "approved" { 20_000 } else { 45_000 },
+                "{mode}"
+            );
+            if mode == "approved" {
+                h.request();
+                h.reply("quiet", None, &["transcript:line-1"]);
+            } else {
+                assert!(h.requests.try_recv().is_err());
+            }
+            h.engine.advance(21_000);
+            assert_eq!(h.engine.state.cue.is_some(), mode != "approved", "{mode}");
+        }
+    }
+
+    #[test]
+    fn asked_you_takes_the_slot_from_an_unread_model_cue_but_not_a_held_one() {
+        let mut h = Harness::named("Curtis");
+        h.show();
+        h.line("Curtis, can you check the float?");
+        let cue = h.engine.state.cue.as_ref().unwrap();
+        assert_eq!(cue.kind, super::super::ASKED);
+        assert_eq!(
+            h.engine.evaluated_cue.as_ref().unwrap().0,
+            cue.id,
+            "now the asked cue"
+        );
+        // A model cue being read stays.
+        let mut h = Harness::named("Curtis");
+        let id = h.show();
+        h.engine.inspect_cue(&id).unwrap();
+        h.line("Curtis, can you check the float?");
+        assert_eq!(h.engine.state.cue.as_ref().unwrap().id, id);
+    }
+
+    /// Lab run B12's timeline, in session milliseconds, with fictional
+    /// words: a cue from a line at 34.47 s expires at 52.47 s; the next
+    /// question was said at 50.82 s and reached the engine at 54.42 s; the
+    /// model's show for it came back at 57.34 s.
+    fn b12_until_the_question(h: &mut Harness, dismissed: bool) {
+        h.said(34_470, 36_000, "Drop the prizes at the usual place.");
+        h.request();
+        h.reply(
+            "show",
+            Some("Where is the usual place?"),
+            &["transcript:line-1"],
+        );
+        let first = h.engine.state.cue.as_ref().unwrap().id.clone();
+        if dismissed {
+            h.until(52_000);
+            h.engine.respond(&first, Response::Dismiss).unwrap();
+        } else {
+            h.until(52_471);
+            assert!(h.engine.state.cue.is_none(), "expired");
+        }
+        h.said(
+            50_820,
+            54_420,
+            "Three for ten sells better, didn't you run the booth before?",
+        );
+        h.request();
+        h.until(57_340);
+    }
+
+    #[test]
+    fn after_a_cue_expires_a_question_said_just_before_shows_after_a_short_pause() {
+        let mut h = Harness::new();
+        b12_until_the_question(&mut h, false);
+        h.reply(
+            "show",
+            Some("Did you run the booth?"),
+            &["transcript:line-2"],
+        );
+        // Before: dropped until 62.47 s, because the line began before the
+        // 10 s cooldown ended; shown only at 71.75 s.
+        let cue = h.engine.state.cue.as_ref().expect("shown at request 13");
+        assert_eq!(cue.question, "Did you run the booth?");
+        // Its lifetime still runs from when the line was said.
+        assert_eq!(h.engine.cue_deadline, 50_820 + CUE_MS);
+    }
+
+    #[test]
+    fn after_a_dismissal_the_full_pause_holds_from_when_it_was_dismissed() {
+        let mut h = Harness::new();
+        b12_until_the_question(&mut h, true);
+        h.reply(
+            "show",
+            Some("Did you run the booth?"),
+            &["transcript:line-2"],
+        );
+        assert!(h.engine.state.cue.is_none());
+        assert_eq!(h.engine.last_dropped, Some("cooldown"));
+        // A line said 50 ms before the pause ended, answered after it: shown.
+        h.said(61_950, 64_000, "The caterer wants the menu Friday.");
+        h.request();
+        h.until(66_680);
+        h.reply("show", Some("Who sends the menu?"), &["transcript:line-3"]);
+        assert!(h.engine.state.cue.is_some());
+    }
+
+    #[test]
+    fn a_model_cue_citing_a_question_to_the_user_by_name_skips_the_pause_once() {
+        // With the name set, B12's question raises "Asked you" itself.
+        let mut h = Harness::named("Curtis");
+        h.said(34_470, 36_000, "Drop the prizes at the usual place.");
+        h.request();
+        h.reply(
+            "show",
+            Some("Where is the usual place?"),
+            &["transcript:line-1"],
+        );
+        h.until(52_471);
+        h.said(
+            50_820,
+            54_420,
+            "Three for ten sells better, Curtis, didn't you run the booth before?",
+        );
+        assert_eq!(
+            h.engine.state.cue.as_ref().unwrap().kind,
+            super::super::ASKED
+        );
+        // When a cue being read kept "Asked you" off the screen, the model's
+        // cue from that line skips the pause after it, once.
+        let mut h = Harness::named("Curtis");
+        h.said(40_000, 41_000, "Drop the prizes at the usual place.");
+        h.request();
+        h.reply(
+            "show",
+            Some("Where is the usual place?"),
+            &["transcript:line-1"],
+        );
+        let first = h.engine.state.cue.as_ref().unwrap().id.clone();
+        h.engine.inspect_cue(&first).unwrap();
+        h.said(
+            50_820,
+            54_420,
+            "Three for ten sells better, Curtis, didn't you run the booth before?",
+        );
+        assert_eq!(h.engine.state.cue.as_ref().unwrap().id, first, "held");
+        h.request();
+        h.reply("quiet", None, &["transcript:line-2"]);
+        h.until(55_000);
+        h.engine.respond(&first, Response::Dismiss).unwrap();
+        h.said(55_500, 56_500, "Prices go on the sign.");
+        h.request();
+        h.until(57_340);
+        h.reply(
+            "show",
+            Some("Did you run the booth?"),
+            &["transcript:line-2", "transcript:line-3"],
+        );
+        let shown = h.engine.state.cue.clone().expect("skips the full pause");
+        h.engine.respond(&shown.id, Response::Dismiss).unwrap();
+        h.said(58_000, 59_000, "Tickets are five each.");
+        h.request();
+        h.until(59_780);
+        h.reply(
+            "show",
+            Some("Did you run the booth before?"),
+            &["transcript:line-2", "transcript:line-4"],
+        );
+        assert!(h.engine.state.cue.is_none(), "not again once dismissed");
+        assert_eq!(h.engine.last_dropped, Some("cooldown"));
+    }
+
+    #[test]
+    fn a_line_passing_18_s_while_the_model_answers_does_not_make_the_reply_stale() {
+        let mut h = Harness::new();
+        h.said(1_000, 2_000, "The hall is booked for the fair.");
+        h.request();
+        h.reply("quiet", None, &["transcript:line-1"]);
+        h.said(15_000, 18_500, "Who is bringing the urn?");
+        let request = h.request();
+        assert_eq!(
+            request.sources().len(),
+            2,
+            "both lines were fresh when sent"
+        );
+        // Line 1 passes 18 s before the reply comes back.
+        h.until(19_500);
+        h.reply("show", Some("Who brings the urn?"), &["transcript:line-2"]);
+        assert!(h.engine.state.cue.is_some(), "{:?}", h.engine.last_dropped);
+        // New speech while it answers still makes a reply stale (the lab
+        // path's log of it is in lab_tests).
+        let mut h = Harness::new();
+        h.said(1_000, 2_000, "Who is bringing the urn?");
+        h.request();
+        h.said(2_500, 3_000, "And the cups.");
+        h.reply("show", Some("Who brings the urn?"), &["transcript:line-1"]);
+        assert!(h.engine.state.cue.is_none());
+    }
+
+    /// Lab scenario B13's fictional conversation, with each line's end on
+    /// the media clock (start = end of the line before, or its labelled
+    /// start), reaching the engine 1.5 s after it ends, a model answering
+    /// 1.9 s after each request, the lab's 2 s gap between requests, and the
+    /// listener named Curtis. The fake model shows a cue for the open
+    /// question (l13) and the time conflict (l23), marks a cue on screen
+    /// resolved when the next line answers it, and is otherwise quiet.
+    #[test]
+    fn b13_timeline_cues_every_moment_on_time() {
+        const LINES: [(u64, u64, &str); 24] = [
+            (
+                6_000,
+                7_675,
+                "Okay, um, this was meant to be the schedule check-in.",
+            ),
+            (7_975, 9_059, "Long day, but yeah."),
+            (
+                9_785,
+                12_605,
+                "Curtis, did the registration confirmation come through?",
+            ),
+            (12_905, 17_330, "Uh, yeah, Monday. It's fine."),
+            (
+                18_803,
+                21_643,
+                "Good, Curtis said the kids were panicking about it.",
+            ),
+            (
+                22_545,
+                26_932,
+                "Right. Build night's still Thursday at six, shop room.",
+            ),
+            (
+                27_232,
+                32_592,
+                "That chat, though. Forty messages arguing tank versus mecanum.",
+            ),
+            (
+                33_978,
+                37_058,
+                "Curtis, can you take the chat and post one calm message?",
+            ),
+            (37_358, 39_260, "Sure. We'll test both Thursday."),
+            (
+                40_537,
+                46_205,
+                "Fine by me. Joan, Curtis and I already leaned tank anyway.",
+            ),
+            (
+                46_505,
+                50_484,
+                "Hang on, let me check who changed the shared design login.",
+            ),
+            (
+                57_206,
+                59_273,
+                "Okay. Changed Tuesday night, from a student laptop.",
+            ),
+            (
+                60_345,
+                63_105,
+                "Does anyone even know who has that password now?",
+            ),
+            (
+                63_405,
+                66_992,
+                "I'll reset it and keep it in the mentor folder.",
+            ),
+            (67_292, 69_090, "Works. Mentors only from now on."),
+            (
+                70_251,
+                73_531,
+                "Tell the kids once, like Curtis suggested. Jack, tonight?",
+            ),
+            (73_831, 74_360, "Yeah, after dinner."),
+            (
+                75_846,
+                78_970,
+                "If it locks anyone out, could you, Curtis, field the complaints?",
+            ),
+            (79_270, 80_808, "Yep, happy to."),
+            (81_108, 84_700, "Speaking of dinner, I ate cereal at four."),
+            (85_000, 85_496, "Ha. Mm-hm, same energy."),
+            (
+                85_796,
+                89_754,
+                "My cat knocked coffee onto the robot manual today.",
+            ),
+            (
+                91_347,
+                94_467,
+                "Okay. See everyone Thursday at seven, shop room.",
+            ),
+            (94_767, 95_496, "See you then."),
+        ];
+        const ARRIVAL_MS: u64 = 1_500;
+        const MODEL_MS: u64 = 1_900;
+        // The fake model, from the newest line in the request.
+        fn decide(request: &Request) -> (&'static str, Option<&'static str>, String) {
+            let newest = request
+                .sources()
+                .iter()
+                .filter_map(|source| source.id.strip_prefix("transcript:line-"))
+                .filter_map(|n| n.parse::<usize>().ok())
+                .max()
+                .unwrap();
+            let id = format!("transcript:line-{newest}");
+            match (request.existing_cue().is_some(), newest) {
+                // Curtis answers l3, l8 and l18; Jack answers l13.
+                (true, 4 | 9 | 14 | 19) => ("resolved", None, id),
+                (false, 13) => ("show", Some("Who has the design password now?"), id),
+                // Seen again with "See you then." after it, if l24 arrives
+                // before the first reply and makes it stale.
+                (false, 23 | 24) => (
+                    "show",
+                    Some("Build night: six or seven?"),
+                    "transcript:line-23".into(),
+                ),
+                _ => ("quiet", None, id),
+            }
+        }
+        let mut h = Harness::named("Curtis");
+        let engine = std::mem::replace(&mut h.engine, Engine::live());
+        h.engine = engine.with_min_gap_ms(2_000);
+        // When each cue first appeared, by id: (line it came from, kind, at).
+        let mut shown: Vec<(String, String, u64)> = Vec::new();
+        let mut on_screen_at_line: Vec<Option<String>> = Vec::new();
+        let mut pending: Option<(Request, u64)> = None;
+        let mut next = 0;
+        let end = 97_604 + 10_000;
+        let note = |h: &Harness, shown: &mut Vec<(String, String, u64)>| {
+            if let Some(cue) = &h.engine.state.cue {
+                if !shown.iter().any(|(id, _, _)| *id == cue.id) {
+                    shown.push((cue.id.clone(), cue.kind.clone(), h.engine.state.elapsed_ms));
+                }
+            }
+        };
+        loop {
+            let line_at = LINES.get(next).map(|(_, end, _)| end + ARRIVAL_MS);
+            let reply_at = pending.as_ref().map(|(_, at)| *at);
+            match (line_at, reply_at) {
+                (Some(at), reply) if reply.is_none_or(|reply| at <= reply) => {
+                    on_screen_at_line.push(h.engine.state.cue.as_ref().map(|c| c.kind.clone()));
+                    let (start, _, text) = LINES[next];
+                    h.said(start, at, text);
+                    next += 1;
+                }
+                (_, Some(at)) => {
+                    h.until(at);
+                    let (request, _) = pending.take().unwrap();
+                    let (action, cue, id) = decide(&request);
+                    h.reply(action, cue, &[id.as_str()]);
+                }
+                _ => break,
+            }
+            note(&h, &mut shown);
+            if pending.is_none() {
+                // A request goes out now or, after the gap, on a clock tick.
+                let next_line_at = LINES.get(next).map_or(end, |(_, end, _)| end + ARRIVAL_MS);
+                let until = (h.engine.state.elapsed_ms + 2_100).min(next_line_at);
+                loop {
+                    if let Ok(request) = h.requests.recv_timeout(Duration::from_millis(20)) {
+                        pending = Some((request, h.engine.state.elapsed_ms + MODEL_MS));
+                        break;
+                    }
+                    if h.engine.state.elapsed_ms >= until {
+                        break;
+                    }
+                    h.engine.advance(100);
+                    note(&h, &mut shown);
+                }
+            }
+        }
+        h.until(end);
+        eprintln!("B13 cues (session ms):");
+        for (id, kind, at) in &shown {
+            eprintln!("  {at:>6}  {kind:<10} {id}");
+        }
+        for (index, kind) in on_screen_at_line.iter().enumerate() {
+            if [5, 10, 16].contains(&(index + 1)) {
+                eprintln!(
+                    "  near-miss l{}: on screen when it arrived: {kind:?}",
+                    index + 1
+                );
+            }
+        }
+        let first = |kind: &str, after: u64| {
+            shown
+                .iter()
+                .find(|(_, k, at)| k == kind && *at >= after)
+                .map(|(_, _, at)| *at)
+        };
+        // Each moment, measured from when its line ended.
+        let asked_3 = first(ASKED, 12_605).expect("l3 asked");
+        let asked_8 = first(ASKED, 37_058).expect("l8 asked");
+        let open_13 = first("Suggestion", 63_105).expect("l13 shown");
+        let asked_18 = first(ASKED, 78_970).expect("l18 asked");
+        let conflict_23 = first("Suggestion", 94_467).expect("l23 shown");
+        eprintln!(
+            "  lateness after the line ended: l3 {} l8 {} l13 {} l18 {} l23 {}",
+            asked_3 - 12_605,
+            asked_8 - 37_058,
+            open_13 - 63_105,
+            asked_18 - 78_970,
+            conflict_23 - 94_467
+        );
+        for late in [asked_3 - 12_605, asked_8 - 37_058, asked_18 - 78_970] {
+            assert!(late <= ARRIVAL_MS + 200, "Asked you on arrival");
+        }
+        for late in [open_13 - 63_105, conflict_23 - 94_467] {
+            assert!(
+                late <= ARRIVAL_MS + MODEL_MS + 2_200,
+                "model cue within a request"
+            );
+        }
+        // The near-misses raised no "Asked you" of their own.
+        assert_eq!(shown.iter().filter(|(_, kind, _)| kind == ASKED).count(), 3);
     }
 
     #[test]

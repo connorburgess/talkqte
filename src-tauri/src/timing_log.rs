@@ -178,6 +178,19 @@ pub enum Event {
         #[serde(skip_serializing_if = "Option::is_none")]
         untrusted_speaker: Option<u32>,
     },
+    /// A model's `show` was not displayed: `slot` (a cue was on screen),
+    /// `asked` (it cites a line that already raised "Asked you"),
+    /// `expired_source` (its newest cited line is 18 s old), `cooldown`,
+    /// `focus` (Focused and not about a focus line), `repeat` (the same cue
+    /// within two minutes), `stale` (no cited line is fresh speech) or
+    /// `stale_request` (the context changed while the model answered). No
+    /// cue text.
+    CueDropped {
+        session: u64,
+        request: u64,
+        reason: &'static str,
+        elapsed_ms: u64,
+    },
     /// A cue is in the snapshot sent to the companion window. The log cannot
     /// see when the window paints it.
     CuePublished {
@@ -235,6 +248,9 @@ pub enum Event {
         live_operation: String,
         session: String,
     },
+    /// Whether the user's name, used to notice questions asked of them, is
+    /// set for this session: at its start and when it changes. Never the name.
+    UserNameSet { session: u64, set: bool },
     /// Lines lost since the last line written, because the queue was full
     /// or a write failed.
     Dropped { count: u64 },
@@ -566,6 +582,8 @@ pub struct Shown {
     pub session: u64,
     pub running: bool,
     pub cue: Option<String>,
+    /// Whether the user's name is set, never the name itself.
+    pub named: bool,
 }
 
 impl Shown {
@@ -574,6 +592,7 @@ impl Shown {
             session: engine.session(),
             running: engine.state.status == Status::Running,
             cue: engine.state.cue.as_ref().map(|cue| cue.id.clone()),
+            named: engine.state.user_name.is_some(),
         }
     }
 }
@@ -603,8 +622,17 @@ pub fn shown_events(before: &Shown, after: &Shown, live: bool, elapsed_ms: u64) 
             });
         }
     }
-    if after.running && (!same_session || !before.running) {
+    let started = after.running && (!same_session || !before.running);
+    if started {
         events.push(session_event(after.session, "started"));
+    }
+    // Whether a name was in effect for the "asked of you" rule: at the start
+    // of each session and whenever it changes during one. Never the name.
+    if after.running && (started || before.named != after.named) {
+        events.push(Event::UserNameSet {
+            session: after.session,
+            set: after.named,
+        });
     }
     if before.cue != after.cue || !same_session {
         if let Some(cue) = &after.cue {
@@ -729,6 +757,12 @@ mod tests {
                 lag_ms: Some(6_000),
                 elapsed_ms: 15_000,
             },
+            Event::CueDropped {
+                session: 3,
+                request: 2,
+                reason: "cooldown",
+                elapsed_ms: 9_000,
+            },
         ]
         .iter()
         .map(|event| serde_json::from_str(&line(event, 1, 2)).unwrap())
@@ -744,6 +778,10 @@ mod tests {
         assert_eq!(lines[3]["through_segment"], "w4");
         assert_eq!(lines[3]["lag_lines"], 2);
         assert_eq!(lines[3]["lag_ms"], 6_000);
+        assert_eq!(lines[4]["event"], "cue_dropped");
+        assert_eq!(lines[4]["request"], 2);
+        assert_eq!(lines[4]["reason"], "cooldown");
+        assert!(lines[4].get("cue").is_none() && lines[4].get("question").is_none());
         for value in &lines {
             assert_eq!(value["wall_ms"], 1);
             assert_eq!(value["mono_ms"], 2);
@@ -789,6 +827,7 @@ mod tests {
             session,
             running,
             cue: cue.map(str::to_owned),
+            named: false,
         }
     }
 
@@ -800,6 +839,7 @@ mod tests {
                 match (&value["event"], &value["state"], &value["cue"]) {
                     (Value::String(name), Value::String(state), _) => format!("{name}:{state}"),
                     (Value::String(name), _, Value::String(cue)) => format!("{name}:{cue}"),
+                    (Value::String(name), _, _) => name.clone(),
                     (name, _, _) => name.to_string(),
                 }
             })
@@ -812,7 +852,7 @@ mod tests {
             (
                 shown(0, false, None),
                 shown(4, true, None),
-                vec!["session:started"],
+                vec!["session:started", "user_name_set"],
             ),
             (
                 shown(4, true, None),
@@ -838,7 +878,12 @@ mod tests {
             (
                 shown(4, true, Some("c")),
                 shown(5, true, None),
-                vec!["session:ended", "cue_cleared:c", "session:started"],
+                vec![
+                    "session:ended",
+                    "cue_cleared:c",
+                    "session:started",
+                    "user_name_set",
+                ],
             ),
         ];
         for (before, after, expected) in steps {
@@ -849,6 +894,51 @@ mod tests {
         let value = serde_json::to_value(started).unwrap();
         assert_eq!(value["commit"], commit());
         assert!(value["features"].is_array());
+    }
+
+    #[test]
+    fn whether_a_name_is_set_is_logged_at_session_start_and_on_change_but_never_the_name() {
+        let named = |session, running| Shown {
+            named: true,
+            ..shown(session, running, None)
+        };
+        let row = |events: Vec<Event>| {
+            events
+                .into_iter()
+                .map(|event| serde_json::to_value(event).unwrap())
+                .find(|value| value["event"] == "user_name_set")
+        };
+        let at_start = row(shown_events(
+            &shown(0, false, None),
+            &named(4, true),
+            true,
+            0,
+        ))
+        .unwrap();
+        assert_eq!(at_start["set"], true);
+        assert_eq!(at_start["session"], 4);
+        let cleared = row(shown_events(
+            &named(4, true),
+            &shown(4, true, None),
+            true,
+            0,
+        ))
+        .unwrap();
+        assert_eq!(cleared["set"], false);
+        // Unchanged, or between sessions: nothing.
+        assert!(row(shown_events(&named(4, true), &named(4, true), true, 0)).is_none());
+        assert!(row(shown_events(
+            &shown(4, false, None),
+            &named(4, false),
+            true,
+            0
+        ))
+        .is_none());
+        // The row holds only its session and a yes or no.
+        let keys: Vec<String> = at_start.as_object().unwrap().keys().cloned().collect();
+        assert!(keys
+            .iter()
+            .all(|key| ["event", "session", "set"].contains(&key.as_str())));
     }
 
     fn segment(id: &str, at_ms: u64, text: &str) -> Segment {

@@ -1,6 +1,6 @@
 # Privacy design
 
-TalkQTE is an early desktop prototype with an optional microphone activity check and, in developer builds, an optional live session. One development build, with the `claude-cli` feature, can also send conversation lines off this Mac for cue decisions, and a development build with the `cloud-transcription` feature can send a live session's audio to Deepgram for transcription, both described below. It is not a released meeting recorder. Current behavior and future requirements are separated below.
+TalkQTE is an early desktop prototype with an optional microphone activity check. Ordinary default and release builds have no live transcription, and TalkQTE does not transcribe on this Mac or offer a local Whisper option. A debug build with `cloud-transcription` can stream a live session's audio to Deepgram only after its in-app, per-session processing review is approved; developer cue backends can separately send transcript lines off this Mac for cue decisions, as described below. It is not a released meeting recorder. Current behavior and future requirements are separated below.
 
 ## Current prototype
 
@@ -52,9 +52,9 @@ The runner disables tools, customizations, MCP connections, and session persiste
 
 - Capture begins only after an explicit action. Show whether the microphone, system audio, or both are active.
 - Provide a visible pause/stop control and an accessible shortcut. Stopping capture releases the devices.
-- Transcription (Deepgram) and cue decisions (Anthropic) run on named cloud providers only after the person turns them on for that session. They are off by default and can be turned off at any time. Every transcription request asks Deepgram to opt out of model improvement. Show which provider receives audio or text while it is sent. Nothing falls back silently to another provider.
+- Transcription (Deepgram) and cue decisions (Anthropic) use named cloud providers only after the person turns them on for that session. They are off by default and can be turned off at any time. Every transcription request asks Deepgram to opt out of model improvement. Disclose which provider receives audio or text; provider handling and retention remain subject to that provider's terms. Nothing falls back silently to another provider. Ordinary builds currently have no live transcription; the debug cloud-transcription path sends audio only after the session's in-app processing review is approved. It has no local transcription option. A new processing choice needs its own review and acceptance.
 - Without that consent a session has no transcription and no cues; there is no on-device transcription mode. No TalkQTE account or telemetry is needed.
-- Keep personal data in application-managed storage outside the checkout. The frontend receives only the data it needs.
+- Keep credentials and personal data in application-managed storage outside the checkout. The frontend receives only the data it needs.
 - Raw audio is held in a bounded memory buffer and not written to disk by default. Debugging must not silently create recordings or dump transcripts into logs.
 - Sharing is explicit: show the destination and the exact content being exported. Integrations are off until enabled and scoped by the user.
 - No private meeting data belongs in the public development repository, review services, demos, or CI artifacts.

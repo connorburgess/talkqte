@@ -254,6 +254,25 @@ open -a ./src-tauri/target/debug/bundle/macos/TalkQTE.app \
 Press play in QuickTime Player only once `dev_source` reads `started`. For an
 unattended run, start the video with the lab's own tooling.
 
+### The user's name without typing
+
+A **debug** build reads `TALKQTE_DEV_USER_NAME` once at launch and sets it as
+the user's name before the first session, as if it had been typed in
+Settings, so a run can check questions asked of the listener by name. Use the
+fictional listener's first name. The name accepts what Settings accepts:
+letters, combining accents, spaces, apostrophes and hyphens, up to 40
+characters, with at least one letter. It stays in memory only, appears in
+Settings, and can still be changed or cleared there. Like a typed name, it is
+sent with model requests when a model is connected
+([data policy](cue-model.md#what-leaves-the-device-and-when)).
+
+- Unset, there is no name, as before.
+- Set but empty, or not a usable name, every live session refuses to start
+  with "The developer name setting is not usable." Correct it and relaunch.
+- The timing log never records the name. Its `user_name_set` row says, at the
+  start of each session and whenever it changes, whether a name is set.
+- Release compilation excludes this setting.
+
 ### Model connection without clicks
 
 Only a **debug** build with **both** `claude-cli` and `native-audio-spike`
@@ -362,6 +381,7 @@ session clock.
 | `audio_received` | `source` (`microphone`/`application`), `session`, `start_ms`, `duration_ms`, `audible` | Captured audio is handed on for transcription, about a second at a time for an application; it is sent only once the review is approved. `start_ms` is its first sample on the session clock. `audible` means some sample reaches about −60 dBFS. |
 | `segment`        | `session`, `id`, `at_ms`, `speaker`, `text`, `accepted`                                | A recognized line reaches the engine.                                                                                                                   |
 | `cue_decision`   | `session`, `cue`, `kind`, `source`, `question`, `source_id`, `elapsed_ms`              | The engine first holds a cue. `source` is `line`, `note`, `focus` or `evaluated`. Only `line` has `question` and `source_id`, the segment it came from. |
+| `user_name_set`  | `session`, `set`                                                                       | A session starts, and whenever the name changes during it: whether Settings holds a name for **Asked you** cues. The name itself is never written.      |
 | `cue_published`  | `session`, `cue`, `elapsed_ms`                                                         | The cue is in the snapshot sent to the companion window.                                                                                                |
 | `cue_cleared`    | `session`, `cue`, `elapsed_ms`                                                         | That cue has left the snapshot sent to the companion window.                                                                                            |
 | `source_problem` | `problem`, `os_code`                                                                   | An application source failed to start or stopped on its own. `os_code` is ScreenCaptureKit's error code, when it gave one.                              |
