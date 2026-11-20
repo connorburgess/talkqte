@@ -1,7 +1,7 @@
 //! Native startup ownership across model loading and microphone reservation.
 //! No device or model is opened here; the same gates accept fictional loaders.
 #[cfg(any(
-    feature = "local-whisper",
+    feature = "cloud-transcription",
     all(target_os = "macos", feature = "native-audio-spike"),
     test
 ))]
@@ -13,7 +13,7 @@ use std::sync::{
 };
 
 #[cfg(any(
-    feature = "local-whisper",
+    feature = "cloud-transcription",
     all(target_os = "macos", feature = "native-audio-spike"),
     test
 ))]
@@ -32,14 +32,14 @@ struct StartState {
 
 #[derive(Clone)]
 #[cfg(any(
-    feature = "local-whisper",
+    feature = "cloud-transcription",
     all(target_os = "macos", feature = "native-audio-spike"),
     test
 ))]
 pub(crate) struct StartGuard(Arc<AtomicBool>);
 
 #[cfg(any(
-    feature = "local-whisper",
+    feature = "cloud-transcription",
     all(target_os = "macos", feature = "native-audio-spike"),
     test
 ))]
@@ -51,7 +51,7 @@ pub(crate) struct StartTicket {
 
 impl StartGate {
     #[cfg(any(
-        feature = "local-whisper",
+        feature = "cloud-transcription",
         all(target_os = "macos", feature = "native-audio-spike"),
         test
     ))]
@@ -134,7 +134,7 @@ impl StartGate {
     }
 
     #[cfg(any(
-        feature = "local-whisper",
+        feature = "cloud-transcription",
         all(target_os = "macos", feature = "native-audio-spike"),
         test
     ))]
@@ -148,7 +148,7 @@ impl StartGate {
     }
 }
 
-#[cfg(any(feature = "local-whisper", test))]
+#[cfg(any(feature = "cloud-transcription", test))]
 impl StartTicket {
     pub(crate) fn guard(&self) -> StartGuard {
         self.guard.clone()
@@ -172,7 +172,7 @@ impl StartTicket {
 }
 
 #[cfg(any(
-    feature = "local-whisper",
+    feature = "cloud-transcription",
     all(target_os = "macos", feature = "native-audio-spike"),
     test
 ))]
@@ -192,7 +192,7 @@ impl Drop for StartTicket {
 
 impl Runtime {
     #[cfg(any(
-        feature = "local-whisper",
+        feature = "cloud-transcription",
         all(target_os = "macos", feature = "native-audio-spike"),
         test
     ))]
@@ -202,7 +202,7 @@ impl Runtime {
     }
 
     #[cfg(any(
-        feature = "local-whisper",
+        feature = "cloud-transcription",
         all(target_os = "macos", feature = "native-audio-spike"),
         test
     ))]
@@ -215,6 +215,10 @@ impl Runtime {
         ))]
         if crate::dev_stop::requested() {
             return Err(CANCELLED.into());
+        }
+        #[cfg(debug_assertions)]
+        if let Some(refusal) = crate::dev_user_name::refusal() {
+            return Err(refusal.into());
         }
         if self.live.is_some()
             || matches!(
@@ -233,7 +237,7 @@ impl Runtime {
     }
 
     #[cfg(any(
-        feature = "local-whisper",
+        feature = "cloud-transcription",
         all(target_os = "macos", feature = "native-audio-spike"),
         test
     ))]
@@ -271,7 +275,7 @@ impl Runtime {
         Ok(session)
     }
 
-    #[cfg(any(feature = "local-whisper", test))]
+    #[cfg(any(feature = "cloud-transcription", test))]
     pub(crate) fn reserve_live_microphone(
         &mut self,
         guard: &StartGuard,
