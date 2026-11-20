@@ -365,12 +365,6 @@ test('a cloud launch says where audio goes in Settings, needs no speech model, a
   const publish = (value: Record<string, unknown>) =>
     page.evaluate((value) => window.liveTest.publish(value as never), value);
   await publish({
-    transcription: { provider: 'Deepgram', reconnects: 1, lostMs: 2_400 },
-  });
-  await expect(session(page)).toContainText(
-    'Transcription by Deepgram reconnected once after a connection problem; about 2 s of speech was not transcribed.',
-  );
-  await publish({
     transcription: { provider: 'Deepgram', droppedAudio: true },
   });
   await expect(session(page)).toContainText(
@@ -390,4 +384,32 @@ test('a cloud launch says where audio goes in Settings, needs no speech model, a
   await expect(session(page).getByRole('alert')).toHaveText(
     'Transcription by Deepgram stopped: the connection stopped responding. The live session ended; nothing fell back to another transcription service.',
   );
+});
+
+test('a continued cloud session discloses reconnect loss until the session stops', async ({
+  page,
+}) => {
+  await standIn(page, '/?cloud&model');
+  await startLive(page);
+  const publish = (value: Record<string, unknown>) =>
+    page.evaluate((value) => window.liveTest.publish(value as never), value);
+  await publish({
+    transcription: { provider: 'Deepgram', reconnects: 1, lostMs: 2_400 },
+  });
+  await expect(session(page)).toContainText(
+    'Transcription by Deepgram reconnected once after a connection problem; about 2 s of speech was not transcribed.',
+  );
+  await publish({
+    status: 'ended',
+    transcription: {
+      provider: 'Deepgram',
+      reconnects: 1,
+      lostMs: 2_400,
+      stopped: 'withdrawn',
+    },
+  });
+  await expect(session(page).getByRole('alert')).toContainText(
+    'Transcription by Deepgram stopped: cue processing was turned off',
+  );
+  await expect(session(page)).not.toContainText('reconnected');
 });
