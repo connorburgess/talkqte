@@ -44,6 +44,7 @@ function fixture({
   closeFailure = false,
   releaseValue = { released: true },
   synchronousNotifications = false,
+  sourceSessionMode = 'legacy-fixture',
 } = {}) {
   const processEvents = new EventEmitter();
   const nativeEvents = new EventEmitter();
@@ -159,6 +160,7 @@ function fixture({
     },
   };
   const run = createLabRun({
+    sourceSessionMode,
     settings,
     native: nativeOverride ?? native,
     processEvents,
@@ -498,3 +500,31 @@ test('owned-child signal delivery failure synchronously notifies once without du
   assert.equal(f.run.phase, 'failed-cleanup');
   assert.equal(f.run.dispatchesUsed, 0);
 });
+
+test('strict lifecycle stores source session before startup and matches lazy hello', async () => {
+  const f = fixture({ sourceSessionMode: 'required' });
+  f.run.expectSourceSession('1');
+  f.run.acknowledgePlaybackStart({
+    monotonicMs: performance.now(),
+    uncertaintyMs: 0,
+  });
+  await bounded(f.run.ready);
+  assert.equal(f.run.phase, 'ready');
+  await f.run.close();
+  assert.equal(f.closed, 1);
+  assert.equal(f.stops, 1);
+});
+for (const mode of ['missing', 'mismatch', 'duplicate']) {
+  test(`strict lifecycle ${mode} source join fails with no dispatch`, async () => {
+    const f = fixture({ sourceSessionMode: 'required' });
+    if (mode === 'mismatch') f.run.expectSourceSession('2');
+    if (mode === 'duplicate') {
+      f.run.expectSourceSession('1');
+      assert.throws(() => f.run.expectSourceSession('1'));
+    }
+    await assert.rejects(bounded(f.run.ready));
+    await f.run.close();
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.closed, f.opened);
+  });
+}

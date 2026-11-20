@@ -39,6 +39,7 @@ function fixture({
   missingDisplayLabel = false,
   sourceCloseFails = false,
   initialSignal,
+  strictSource = false,
 } = {}) {
   const selectedMedia = body
     ? {
@@ -56,7 +57,8 @@ function fixture({
     socket,
     stopped = false,
     playerHandler,
-    recorderHandler;
+    recorderHandler,
+    sourceHandler;
   const counts = {
     nativeStop: 0,
     playerStop: 0,
@@ -253,6 +255,15 @@ function fixture({
     player,
     recorder,
     source: {
+      ...(strictSource
+        ? {
+            mode: 'v1',
+            subscribe(fn) {
+              sourceHandler = fn;
+              return () => (sourceHandler = () => {});
+            },
+          }
+        : {}),
       close() {
         trace.push('source-close');
         if (sourceCloseFails) throw Error('private observer cleanup');
@@ -260,7 +271,11 @@ function fixture({
       async waitListening({ runId }) {
         sourceRunId = runId;
         trace.push('listening');
-        return { runId, listening };
+        return {
+          runId,
+          listening,
+          ...(strictSource ? { version: 1, sessionId: '1' } : {}),
+        };
       },
     },
     settings: {
@@ -304,6 +319,7 @@ function fixture({
     counts,
     events,
     providerClosing: providerClosing.promise,
+    failSource: () => sourceHandler?.({ type: 'failed' }),
     failPlayer: () => playerHandler(),
     failRecorder: () => recorderHandler(),
     disconnect: () => socket?.destroy(),
@@ -531,3 +547,32 @@ for (const event of [
     assert.equal(f.counts.playerStop, 1);
     assert.equal(f.counts.recorderStop, 1);
   });
+
+test('strict source session binds before lazy hello and retirement after readiness aborts all owners', async () => {
+  const holding = deferred();
+  const entered = deferred();
+  const f = fixture({
+    strictSource: true,
+    body: async () => {
+      entered.resolve();
+      await holding.promise;
+    },
+  });
+  await entered.promise;
+  f.failSource();
+  holding.resolve();
+  await assert.rejects(f.take.done);
+  assert.equal(f.counts.nativeStop, 1);
+  assert.equal(f.counts.providerClose, 1);
+  assert.equal(f.counts.playerStop, 1);
+  assert.equal(f.counts.recorderStop, 1);
+  assert.equal(f.counts.requests, 0);
+});
+test('strict prepared source allows saved playback before hello/calibration without deadlock', async () => {
+  const f = fixture({ strictSource: true });
+  await f.take.done;
+  assert.ok(f.trace.indexOf('listening') < f.trace.indexOf('play'));
+  assert.ok(f.trace.indexOf('record-ready') < f.trace.indexOf('play'));
+  assert.equal(f.counts.nativeStop, 1);
+  assert.equal(f.counts.providerClose, 1);
+});

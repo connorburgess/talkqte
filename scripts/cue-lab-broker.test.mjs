@@ -22,9 +22,11 @@ async function setup({
   maxCalls = 5,
   hello = true,
   armed = true,
+  sourceSessionMode = 'legacy-fixture',
 } = {}) {
   const calls = [];
   const broker = await openLabBroker({
+    sourceSessionMode,
     provider: {
       metadata: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' },
       request: async (req) => {
@@ -680,6 +682,7 @@ for (const connect of [false, true])
       release = resolve;
     });
     const broker = await openLabBroker({
+      sourceSessionMode: 'legacy-fixture',
       provider: {
         metadata: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' },
         request: ({ signal }) =>
@@ -739,3 +742,75 @@ for (const connect of [false, true])
       }),
     );
   });
+
+for (const mode of [
+  'missing',
+  'mismatch',
+  'duplicate',
+  'noncanonical',
+  'zero',
+]) {
+  test(`strict source join refuses ${mode} expectation before dispatch`, async () => {
+    const ctx = await setup({ hello: false, sourceSessionMode: 'required' });
+    try {
+      if (mode === 'duplicate') {
+        ctx.broker.expectSourceSession('7');
+        assert.throws(() => ctx.broker.expectSourceSession('7'));
+      } else if (mode === 'noncanonical' || mode === 'zero') {
+        assert.throws(() =>
+          ctx.broker.expectSourceSession(mode === 'zero' ? '0' : '07'),
+        );
+      } else {
+        if (mode === 'mismatch') ctx.broker.expectSourceSession('8');
+        ctx.greet();
+      }
+      await terminal(ctx.broker);
+      assert.equal(ctx.calls.length, 0);
+    } finally {
+      await ctx.close();
+    }
+  });
+}
+test('strict expectation joins authenticated hello and returned calibration session', async () => {
+  const ctx = await setup({ hello: false, sourceSessionMode: 'required' });
+  try {
+    ctx.broker.expectSourceSession('7');
+    ctx.greet();
+    await ctx.next('ready');
+    await ctx.broker.ready;
+    const calibrated = ctx.broker.calibrateClock();
+    const probe = await ctx.next('clock_probe');
+    ctx.send('clock_sample', {
+      probeId: probe.probeId,
+      nativeSessionElapsedMs: 100,
+    });
+    assert.equal((await calibrated).sessionId, '7');
+    assert.equal(ctx.calls.length, 0);
+    assert.throws(() => ctx.broker.expectSourceSession('7'));
+    await terminal(ctx.broker);
+  } finally {
+    await ctx.close();
+  }
+});
+test('clock sample from a replacement session is terminal before inference', async () => {
+  const ctx = await setup({ hello: false, sourceSessionMode: 'required' });
+  try {
+    ctx.broker.expectSourceSession('7');
+    ctx.greet();
+    await ctx.next('ready');
+    await ctx.broker.ready;
+    const calibrated = ctx.broker.calibrateClock();
+    const failed = assert.rejects(calibrated);
+    const probe = await ctx.next('clock_probe');
+    ctx.send('clock_sample', {
+      sessionId: '8',
+      probeId: probe.probeId,
+      nativeSessionElapsedMs: 100,
+    });
+    await failed;
+    await terminal(ctx.broker);
+    assert.equal(ctx.calls.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});

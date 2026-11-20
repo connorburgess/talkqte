@@ -260,24 +260,28 @@ test('abort before dispatch spends no call, abort during request discards a late
     0,
   );
   await first.close();
-  let release;
+  let release, markEntered;
+  const entered = new Promise((resolve) => {
+    markEntered = resolve;
+  });
   const controller = new AbortController();
   const session = await openCodexLab(
     options({
       run: () =>
         new Promise((resolve) => {
           release = resolve;
+          markEntered();
         }),
     }),
   );
   const pending = session.request(request({ signal: controller.signal }));
-  await delay(0);
+  await entered;
   controller.abort();
   let closed = false;
   const closing = session.close().then(() => {
     closed = true;
   });
-  await delay(0);
+  await Promise.resolve();
   assert.equal(closed, false);
   const rejected = rejects(pending, 'cancelled', 1);
   release({ stdout: events() });

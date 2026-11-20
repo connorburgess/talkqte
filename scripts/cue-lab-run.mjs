@@ -19,9 +19,13 @@ export function createLabRun({
   processEvents = process,
   startupMs = 10000,
   releaseMs = 12000,
+  sourceSessionMode = 'required',
 } = {}) {
   if (
     !settings ||
+    !['required', 'legacy-fixture'].includes(sourceSessionMode) ||
+    (sourceSessionMode === 'legacy-fixture' &&
+      settings.execution !== 'offline-stand-in') ||
     !native ||
     !['subscribe', 'start', 'stop'].every(
       (method) => typeof native[method] === 'function',
@@ -52,6 +56,7 @@ export function createLabRun({
     phase = 'starting',
     closing = null,
     terminal = null,
+    expectedSourceSession = null,
     playback = null,
     playbackResolve,
     unsubscribe = () => {},
@@ -89,12 +94,15 @@ export function createLabRun({
     if (root.signal.aborted) throw gateFailure('cancelled');
     broker = await openLabBroker({
       provider,
+      sourceSessionMode,
       runId,
       maxCalls: config.maxCalls,
       signal: root.signal,
       onTerminal: () => queueMicrotask(() => fail('cancelled')),
     });
     if (root.signal.aborted) throw gateFailure('cancelled');
+    if (expectedSourceSession)
+      broker.expectSourceSession(expectedSourceSession);
     if (playback) broker.acknowledgePlaybackStart(playback);
     // The native owner gets only the descriptor path and pinned metadata.
     // start must be abort-aware and must retain ownership until stop/release.
@@ -108,7 +116,12 @@ export function createLabRun({
     if (root.signal.aborted) throw gateFailure('cancelled');
     phase = 'waiting-for-anchors';
     await Promise.race([broker.ready, stopped]);
-    await broker.calibrateClock();
+    const calibrated = await broker.calibrateClock();
+    if (
+      sourceSessionMode === 'required' &&
+      calibrated.sessionId !== expectedSourceSession
+    )
+      throw gateFailure('protocol');
     await Promise.race([played, stopped]);
     if (root.signal.aborted || broker.gate.terminal)
       throw gateFailure('cancelled');
@@ -207,6 +220,26 @@ export function createLabRun({
     },
     get dispatchesUsed() {
       return broker?.gate.dispatchesUsed ?? 0;
+    },
+    expectSourceSession(value) {
+      if (
+        terminal ||
+        expectedSourceSession ||
+        sourceSessionMode !== 'required' ||
+        typeof value !== 'string' ||
+        !/^[1-9][0-9]{0,19}$/.test(value) ||
+        BigInt(value) > 18446744073709551615n
+      ) {
+        fail('protocol');
+        throw gateFailure('protocol');
+      }
+      expectedSourceSession = value;
+      try {
+        broker?.expectSourceSession(value);
+      } catch {
+        fail('protocol');
+        throw gateFailure('protocol');
+      }
     },
     acknowledgePlaybackStart(anchor) {
       if (terminal || playback) {
