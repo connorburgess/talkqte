@@ -1,4 +1,6 @@
-// Fixed fictional media, owned AppKit window and actual audio-render clock.
+// Approved fictional media, owned AppKit window and actual audio-render clock.
+// The media sha256 is approved per run (third argument); the file is still
+// hashed before use and the compiled 105 s ceiling still bounds its duration.
 // Build with lab-player-state.c; no network, microphone or desktop automation.
 import AppKit
 import AVFoundation
@@ -7,7 +9,9 @@ import CryptoKit
 import Darwin
 
 private let schema = "talkqte.lab.player.v1"
-private let approvedHash = "1faf1c404249bed069065f51262abfce6956fa8a31f237e68bb6e9d06cb893e2"
+private func isApprovedHashText(_ value: String) -> Bool {
+    value.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil
+}
 private enum PlayerError: Error { case invalid }
 private struct PreparationFailure: Error {
     let stage: String
@@ -29,7 +33,7 @@ private func copyStereoPlanar(_ source: UnsafeRawBufferPointer, _ planes: [Unsaf
 }
 
 // Dedicated bounded stdin reader; a short read is consumed immediately, never filled to 4096.
-private func readLabPlayerCommands(_ fd: Int32, _ runId: String,
+private func readLabPlayerCommands(_ fd: Int32, _ runId: String, approvedHash: String,
     readBytes: (Int32, UnsafeMutableRawPointer, Int) -> Int = { Darwin.read($0, $1, $2) },
     progress: (String, String, Int, Int) -> Void,
     stopReceived: () -> Void = {},
@@ -87,6 +91,7 @@ private final class DecodedMedia: @unchecked Sendable {
 final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let runId: String
     let mediaURL: URL
+    let approvedHash: String
     let state: OpaquePointer
     let engine = AVAudioEngine()
     let node = AVAudioPlayerNode()
@@ -117,8 +122,10 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var videoObserver: NSObjectProtocol?
     let outputLock = NSLock()
 
-    init(runId: String, path: String) throws {
+    init(runId: String, path: String, approvedHash: String) throws {
         try require(runId.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil)
+        try require(isApprovedHashText(approvedHash))
+        self.approvedHash = approvedHash
         let url = URL(fileURLWithPath: path)
         try require(path.hasPrefix("/") && url.resolvingSymlinksInPath().path == path)
         self.runId = runId; self.mediaURL = url
@@ -313,7 +320,7 @@ final class LabPlayer: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     func installInput() {
         DispatchQueue.global(qos: .userInitiated).async {
-            readLabPlayerCommands(STDIN_FILENO, self.runId, progress: { step, type, index, bytes in
+            readLabPlayerCommands(STDIN_FILENO, self.runId, approvedHash: self.approvedHash, progress: { step, type, index, bytes in
                 self.transportProgress(step, type, index, bytes)
             }, stopReceived: { lab_player_latch_stop(self.state) }, command: { type, value, index, bytes in
                 DispatchQueue.main.async {
@@ -522,7 +529,8 @@ func fixtureEmit(_ type: String, _ fields: [String: Any] = [:]) {
 fixtureEmit("fixture_ready")
 if mode == "read-error" { Darwin.close(STDIN_FILENO) }
 var interrupted = false
-readLabPlayerCommands(STDIN_FILENO, "fictional-transport", readBytes: { fd, bytes, count in
+readLabPlayerCommands(STDIN_FILENO, "fictional-transport",
+    approvedHash: "1faf1c404249bed069065f51262abfce6956fa8a31f237e68bb6e9d06cb893e2", readBytes: { fd, bytes, count in
     if mode == "eintr" && !interrupted { interrupted = true; errno = EINTR; return -1 }
     return Darwin.read(fd, bytes, count)
 }, progress: { step, type, index, bytes in
@@ -532,9 +540,9 @@ readLabPlayerCommands(STDIN_FILENO, "fictional-transport", readBytes: { fd, byte
 })
 #else
 let arguments = CommandLine.arguments
-if arguments.count != 3 { exit(1) }
+if arguments.count != 4 { exit(1) }
 do {
-    let delegate = try LabPlayer(runId: arguments[1], path: arguments[2])
+    let delegate = try LabPlayer(runId: arguments[1], path: arguments[2], approvedHash: arguments[3])
     let app = NSApplication.shared; app.delegate = delegate
     withExtendedLifetime(delegate) { app.run() }
 } catch { exit(1) }

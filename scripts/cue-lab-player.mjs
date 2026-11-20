@@ -18,14 +18,13 @@ const FIXTURE = fileURLToPath(
 import { TextDecoder } from 'node:util';
 import { parseUniqueLabJson } from './cue-lab-strict-json.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
+import { isLabMedia } from './cue-lab-media.mjs';
 
 export const LAB_PLAYER_RUNTIME = Object.freeze({
   platform: 'darwin',
   node: 'v22.23.2',
   libuv: '1.51.0',
 });
-export const LAB_PLAYER_MEDIA_SHA256 =
-  '1faf1c404249bed069065f51262abfce6956fa8a31f237e68bb6e9d06cb893e2';
 const SCHEMA = 'talkqte.lab.player.v1';
 const approvedSources = new WeakMap();
 const BASE = ['schema', 'type', 'runId', 'generation', 'mediaSha256'];
@@ -323,7 +322,7 @@ export function mapLabPlayerStart(
       frame.type === 'started' &&
       frame.schema === SCHEMA &&
       frame.generation === '1' &&
-      frame.mediaSha256 === LAB_PLAYER_MEDIA_SHA256 &&
+      /^[0-9a-f]{64}$/.test(frame.mediaSha256 ?? '') &&
       frame.sampleRate === 48000 &&
       integer(frame.totalFrames, 1, 105 * 48000) &&
       frame.hostTimeValid === true &&
@@ -419,7 +418,7 @@ export function mapLabPlayerStart(
   return Object.freeze({
     monotonicMs,
     uncertaintyMs,
-    sha256: LAB_PLAYER_MEDIA_SHA256,
+    sha256: frame.mediaSha256,
     basis: 'audio-render',
     outputLatencyEstimateMs: frame.outputLatencyEstimateMs,
     outputDeviceId: frame.outputDeviceId,
@@ -531,7 +530,7 @@ function playerController({
         type,
         runId,
         generation: '1',
-        mediaSha256: LAB_PLAYER_MEDIA_SHA256,
+        mediaSha256: media.sha256,
         ...fields,
       }) + '\n';
     required(
@@ -549,7 +548,7 @@ function playerController({
         frame.schema === SCHEMA &&
         frame.runId === runId &&
         frame.generation === '1' &&
-        frame.mediaSha256 === LAB_PLAYER_MEDIA_SHA256,
+        frame.mediaSha256 === media?.sha256,
     );
     if (frame.type === 'transport_progress') {
       required(
@@ -730,7 +729,7 @@ function playerController({
         application: frame.application,
         bundleId: frame.bundleId,
         processStart: Object.freeze({ ...frame.processStart }),
-        mediaSha256: LAB_PLAYER_MEDIA_SHA256,
+        mediaSha256: media.sha256,
       });
       if (!fixtureCase)
         approvedSources.set(identity, () => {
@@ -956,15 +955,16 @@ function playerController({
       required(
         !failed &&
           !closing &&
-          input?.fictional === true &&
-          input.sha256 === LAB_PLAYER_MEDIA_SHA256 &&
-          input.durationMs === 102480,
+          // Any approved fictional media within the lab bounds; the player
+          // binary hashes the file again and refuses a mismatch.
+          isLabMedia(input),
       );
       if (preparing) {
         required(media.path === input.path);
         return preparing;
       }
-      media = Object.freeze({ ...input });
+      // Keep the approved descriptor itself: a copy would not be approved.
+      media = input;
       preparing = (async () => {
         armAbort(signal);
         if (!fixtureCase) {
@@ -979,7 +979,15 @@ function playerController({
         );
         child = spawn(
           build.executable,
-          fixtureCase ? [FIXTURE, runId, fixtureCase] : [runId, media.path],
+          fixtureCase
+            ? [
+                FIXTURE,
+                runId,
+                fixtureCase,
+                media.sha256,
+                String(media.durationMs),
+              ]
+            : [runId, media.path, media.sha256],
           {
             shell: false,
             detached: true,
@@ -1049,7 +1057,7 @@ function playerController({
         operationTimer = setTimeout(() => fail('deadline'), 100);
         await clock.promise;
         clearTimeout(operationTimer);
-        return Object.freeze({ ...media });
+        return media;
       })().catch((error) => {
         fail();
         throw gateFailure(error.category ?? 'protocol');
@@ -1171,6 +1179,7 @@ export function createLabPlayerFixture({
       'duplicate',
       'oversize',
       'held-pipes',
+      'duration-mismatch',
       'stop-silent',
       'fail-after-cancel',
     ].includes(fixtureCase),

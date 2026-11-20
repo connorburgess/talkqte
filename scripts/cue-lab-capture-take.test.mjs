@@ -3,17 +3,12 @@ import { test, mock } from 'node:test';
 import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { createLabCaptureTake } from './cue-lab-capture-take.mjs';
-import {
-  createLabPlayerFixture,
-  LAB_PLAYER_MEDIA_SHA256,
-} from './cue-lab-player.mjs';
-const media = {
-  fictional: true,
-  path: '/fictional/prepared.mp4',
-  sha256: LAB_PLAYER_MEDIA_SHA256,
-  durationMs: 102480,
-};
+import { createLabPlayerFixture } from './cue-lab-player.mjs';
+import { fictionalTestMedia } from './fixtures/lab-test-media.mjs';
+// Approved through the real manifest loader (synthetic, fictional).
+const media = fictionalTestMedia();
 function fixture({
+  takeMedia = media,
   lateBeforeStart = false,
   lateAtStart = false,
   missingRelease = false,
@@ -206,7 +201,7 @@ function fixture({
     source,
     player,
     recorder,
-    media,
+    media: takeMedia,
     nativeReleaseMs: 20,
     signal,
     ...(takeMs === undefined ? {} : { takeMs }),
@@ -564,4 +559,19 @@ test('cleanup failure remains independent and dominates cancelled outcome', asyn
   assert.equal(f.counts.nativeStop, 1);
   assert.equal(f.counts.playerStop, 1);
   assert.equal(f.counts.recordStop, 1);
+});
+
+test('the capture take refuses a hand-built media descriptor even with the approved path and hash', () => {
+  const handBuilt = {
+    fictional: true,
+    path: media.path,
+    sha256: media.sha256,
+    durationMs: media.durationMs,
+  };
+  assert.throws(() => fixture({ takeMedia: handBuilt }), {
+    category: 'protocol',
+  });
+  assert.throws(() => fixture({ takeMedia: { ...media } }), {
+    category: 'protocol',
+  });
 });

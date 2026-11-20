@@ -1,7 +1,7 @@
 // Explicit zero-model first validation. No provider, broker or inference import.
 import { createLabNativeOwner } from './cue-lab-native-owner.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
-import { LAB_PLAYER_MEDIA_SHA256 } from './cue-lab-player.mjs';
+import { isLabMedia } from './cue-lab-media.mjs';
 const required = (ok) => {
   if (!ok) throw gateFailure('protocol');
 };
@@ -49,9 +49,7 @@ export function createLabCaptureTake({
       ['start', 'stop', 'subscribe'].every(
         (k) => typeof recorder?.[k] === 'function',
       ) &&
-      media?.fictional === true &&
-      media.sha256 === LAB_PLAYER_MEDIA_SHA256 &&
-      media.durationMs === 102480 &&
+      isLabMedia(media) &&
       Number.isSafeInteger(takeMs) &&
       takeMs > 0 &&
       takeMs <= 135000 &&

@@ -14,8 +14,10 @@ injects transcript text into the app or infers companion paint from publication.
 
 ## Fixed saved-meeting model recording
 
-`createFixedModelTake(options)` selects the strict prepared path for the existing
-102.48-second fictional file: Codex subscription, `gpt-6.1-sol`, medium effort,
+`createFixedModelTake(options)` selects the strict prepared path for approved
+fictional media (the existing 102.48-second file, or a per-run scenario from a
+reviewed manifest, at most 104 s): Codex subscription, `gpt-6.1-sol`, low or
+medium effort,
 one shared 20-dispatch budget and a 110-second native ordinary Stop guard. It
 does not count underlying provider requests or enable a fallback. Provider
 deadlines/output bounds remain explicit settings; the native evaluator's

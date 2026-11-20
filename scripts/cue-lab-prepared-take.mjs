@@ -4,7 +4,7 @@ import { isAbsolute } from 'node:path';
 import { createLabNativeOwner } from './cue-lab-native-owner.mjs';
 import { createLabRun } from './cue-lab-run.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
-import { LAB_PLAYER_MEDIA_SHA256 } from './cue-lab-player.mjs';
+import { isLabMedia } from './cue-lab-media.mjs';
 
 const required = (condition) => {
   if (!condition) throw gateFailure('protocol');
@@ -29,8 +29,9 @@ export function assertFixedModelTakeOptions(options) {
       ['low', 'medium'].includes(options.settings.effort) &&
       options.settings.maxCalls === 20 &&
       options.stopAfterS === 110 &&
-      options.media?.sha256 === LAB_PLAYER_MEDIA_SHA256 &&
-      options.media.durationMs === 102480,
+      // Approved fictional media (fixed MP4 or a reviewed per-run manifest)
+      // within the bounds every timing guard below was set for.
+      isLabMedia(options.media),
   );
 }
 export function createFixedModelTake(options) {
@@ -69,12 +70,8 @@ export function createLabPlaybackSession({
       typeof launcher.launch === 'function' &&
       typeof launcher.close === 'function' &&
       isAbsolute(launcher.executable ?? '') &&
-      media?.fictional === true &&
-      isAbsolute(media.path ?? '') &&
-      /^[a-f0-9]{64}$/.test(media.sha256 ?? '') &&
-      Number.isFinite(media.durationMs) &&
-      media.durationMs > 0 &&
-      media.durationMs <= 105000 &&
+      // Only media approved by cue-lab-media.mjs (manifest or fixed hash).
+      isLabMedia(media) &&
       typeof source?.waitListening === 'function' &&
       (source.mode === 'v1' || settings?.execution === 'offline-stand-in') &&
       (source.mode !== 'v1' || typeof source.subscribe === 'function') &&
@@ -139,7 +136,8 @@ export function createLabPlaybackSession({
         media.displayLabel.length <= 120 &&
         !/[\u0000-\u001f\u007f]/.test(media.displayLabel),
     );
-  const identity = Object.freeze({ ...media });
+  // The approved, frozen descriptor itself flows to the player and capture.
+  const identity = media;
   const root = new AbortController();
   let phase = 'starting',
     closing = null,
