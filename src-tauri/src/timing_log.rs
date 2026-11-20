@@ -205,6 +205,10 @@ pub enum Event {
         /// actually used. The token is never in it; it travels in a header.
         #[serde(skip_serializing_if = "Option::is_none")]
         query: Option<String>,
+        /// On `reconnecting` only: session time (ms) whose speech was lost
+        /// with the failed stream, between its last line and its last audio.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        gap_ms: Option<u64>,
     },
     /// A cloud transcription final, on the session clock. The provider's
     /// speaker label is an untrusted guess, recorded here only: it is never

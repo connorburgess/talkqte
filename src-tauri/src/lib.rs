@@ -1328,6 +1328,7 @@ async fn start_live_session(
             let failure_app = handle.clone();
             let keep_app = handle.clone();
             let dropped_app = handle.clone();
+            let reconnect_app = handle.clone();
             let sink_app = handle.clone();
             let sink = move |session, segment| {
                 let state = sink_app.state::<AppState>();
@@ -1397,7 +1398,17 @@ async fn start_live_session(
                                 })
                                 .on_failure(move |failure| {
                                     stop_after_cloud_failure(&failure_app, session, failure)
-                                }),
+                                })
+                                .on_reconnect(move |lost_ms| {
+                                    let state = reconnect_app.state::<AppState>();
+                                    if let Ok(mut runtime) = state.0.lock() {
+                                        runtime
+                                            .engine
+                                            .cloud_transcription_reconnected(session, lost_ms);
+                                        publish(&reconnect_app, &mut runtime);
+                                    };
+                                })
+                                .with_reopener(transcription::cloud::reopener().ok()),
                             ));
                         true
                     });
@@ -1807,12 +1818,26 @@ mod lab_clock_tests {
             "TALKQTE_DEV_LAB_PROVIDER",
             "TALKQTE_DEV_LAB_MODEL",
             "TALKQTE_DEV_LAB_EFFORT",
+            "TALKQTE_DEV_LAB_CONTEXT",
+            "TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD",
         ];
-        for case in ["absent", "malformed", "valid"] {
+        for case in [
+            "absent",
+            "malformed",
+            "valid",
+            "api-fresh",
+            "api-history",
+            "api-empty-context",
+            "api-invalid-context",
+            "subscription-history",
+            "orphan-history",
+            "orphan-empty",
+            "orphan-unknown",
+        ] {
             let mut variables = vec![("TALKQTE_TEST_SELECTOR_CASE", case)];
             if case == "malformed" {
                 variables.push(("TALKQTE_DEV_CUE_BACKEND", "fictional-invalid-selector"));
-            } else if case == "valid" {
+            } else if case == "valid" || case == "subscription-history" {
                 variables.extend([
                     ("TALKQTE_DEV_CUE_BACKEND", "lab-subscription"),
                     (
@@ -1824,8 +1849,69 @@ mod lab_clock_tests {
                     ("TALKQTE_DEV_LAB_EFFORT", "medium"),
                 ]);
             }
+            if case.starts_with("api-") {
+                variables.extend([
+                    ("TALKQTE_DEV_CUE_BACKEND", "lab-api"),
+                    (
+                        "TALKQTE_DEV_LAB_DESCRIPTOR",
+                        "/fictional-lab/run/descriptor.json",
+                    ),
+                    ("TALKQTE_DEV_LAB_PROVIDER", "anthropic-api"),
+                    ("TALKQTE_DEV_LAB_MODEL", "claude-opus-5-5"),
+                    ("TALKQTE_DEV_LAB_EFFORT", "low"),
+                    ("TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD", "250000"),
+                ]);
+            }
+            match case {
+                "api-history" | "subscription-history" | "orphan-history" => {
+                    variables.push(("TALKQTE_DEV_LAB_CONTEXT", "bounded-history"))
+                }
+                "api-empty-context" | "orphan-empty" => {
+                    variables.push(("TALKQTE_DEV_LAB_CONTEXT", ""))
+                }
+                "api-invalid-context" | "orphan-unknown" => {
+                    variables.push(("TALKQTE_DEV_LAB_CONTEXT", "unknown"))
+                }
+                _ => {}
+            }
             let result =
                 crate::test_isolation::run("lab_clock_tests::selector_child", &variables, &without);
+            assert!(result.left.is_empty(), "constructor wrote a file");
+        }
+        use std::os::unix::ffi::OsStringExt;
+        let invalid = std::ffi::OsString::from_vec(vec![0xff]);
+        for case in ["orphan-nonunicode", "api-nonunicode"] {
+            let mut variables = vec![
+                ("TALKQTE_TEST_SELECTOR_CASE", std::ffi::OsStr::new(case)),
+                ("TALKQTE_DEV_LAB_CONTEXT", invalid.as_os_str()),
+            ];
+            if case == "api-nonunicode" {
+                variables.extend([
+                    ("TALKQTE_DEV_CUE_BACKEND", std::ffi::OsStr::new("lab-api")),
+                    (
+                        "TALKQTE_DEV_LAB_DESCRIPTOR",
+                        std::ffi::OsStr::new("/fictional-lab/run/descriptor.json"),
+                    ),
+                    (
+                        "TALKQTE_DEV_LAB_PROVIDER",
+                        std::ffi::OsStr::new("anthropic-api"),
+                    ),
+                    (
+                        "TALKQTE_DEV_LAB_MODEL",
+                        std::ffi::OsStr::new("claude-opus-5-5"),
+                    ),
+                    ("TALKQTE_DEV_LAB_EFFORT", std::ffi::OsStr::new("low")),
+                    (
+                        "TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD",
+                        std::ffi::OsStr::new("250000"),
+                    ),
+                ]);
+            }
+            let result = crate::test_isolation::run_os(
+                "lab_clock_tests::selector_child",
+                &variables,
+                &without,
+            );
             assert!(result.left.is_empty(), "constructor wrote a file");
         }
     }
@@ -1862,6 +1948,34 @@ mod lab_clock_tests {
                 assert_eq!(processor.id, "lab-subscription");
                 assert_eq!(processor.model, "gpt-6.1-sol");
                 assert_eq!(snapshot.issue, None);
+            }
+            "api-fresh" | "api-history" => {
+                let processor = snapshot.processor.unwrap();
+                assert_eq!(processor.id, "lab-api");
+                assert_eq!(
+                    processor.data_policy.contains("24 segments"),
+                    case == "api-history"
+                );
+                assert_eq!(snapshot.issue, None);
+            }
+            "api-empty-context"
+            | "api-invalid-context"
+            | "subscription-history"
+            | "orphan-history"
+            | "orphan-empty"
+            | "orphan-unknown"
+            | "orphan-nonunicode"
+            | "api-nonunicode" => {
+                assert!(lab_evaluator::selected());
+                assert_eq!(
+                    engine.evaluation_status(),
+                    Some(engine::EvaluationStatus::Unavailable(
+                        engine::EvaluationIssue::LabUnavailable
+                    ))
+                );
+                assert!(engine
+                    .review_processing(engine::ConversationScope::RecentAndNewSpeech, &[])
+                    .is_err());
             }
             _ => panic!("unknown fictional selector case"),
         }
