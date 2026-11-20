@@ -44,11 +44,11 @@ func parseArguments() -> [String: String] {
   while let argument = iterator.next() {
     guard argument.hasPrefix("--") else { fail("Unknown argument \(argument).", code: 64) }
     let key = String(argument.dropFirst(2))
-    if ["check", "list", "capture"].contains(key) {
+    if ["check", "list", "capture", "strict-windows"].contains(key) {
       options[key] = "yes"
     } else if [
       "apps", "emulator-app", "emulator-title", "companion-app", "companion-title", "seconds",
-      "out",
+      "out", "emulator-pid", "emulator-window-id", "companion-pid", "companion-window-id",
     ].contains(key) {
       guard let value = iterator.next() else { fail("\(argument) needs a value.", code: 64) }
       options[key] = value
@@ -74,8 +74,20 @@ final class Writer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Senda
   var frames = 0
   var audioBuffers = 0
   var problem: String?
+  let strictWindows: Bool
+  var streamsStarted = false
+  var frameReported = false
 
-  init(url: URL, width: Int, height: Int) throws {
+  func reportReady() {
+    guard strictWindows && streamsStarted && frames > 0 && !frameReported && problem == nil
+      && writer.status == .writing else { return }
+    frameReported = true
+    // Accepted by the writer, not yet a durable completed movie.
+    emit(["event": "frame_accepted", "wallMs": wallMs(), "frames": frames])
+  }
+
+  init(url: URL, width: Int, height: Int, strictWindows: Bool = false) throws {
+    self.strictWindows = strictWindows
     writer = try AVAssetWriter(outputURL: url, fileType: .mov)
     video = AVAssetWriterInput(
       mediaType: .video,
@@ -112,9 +124,12 @@ final class Writer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Senda
       if !started {
         writer.startSession(atSourceTime: buffer.presentationTimeStamp)
         started = true
-        emit(["event": "started", "wallMs": wallMs()])
+        if !strictWindows { emit(["event": "started", "wallMs": wallMs()]) }
       }
-      if video.isReadyForMoreMediaData, video.append(buffer) { frames += 1 }
+      if video.isReadyForMoreMediaData, video.append(buffer) {
+        frames += 1
+        reportReady()
+      }
     case .audio:
       // Sound before the first picture has nowhere to go.
       guard started else { return }
@@ -186,40 +201,68 @@ struct Capture {
     let companionTitle = options["companion-title"] ?? "TalkQTE companion"
 
     let visible = content.windows.filter { $0.isOnScreen && $0.frame.width > 40 }
-    let emulatorWindows = visible.filter {
-      $0.owningApplication?.applicationName == emulatorApp
-        && (options["emulator-title"] == nil
-          || ($0.title ?? "").contains(options["emulator-title"]!))
-    }
-    guard
-      let emulator = emulatorWindows.max(by: {
-        $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
-      })
-    else {
-      fail("No on-screen window of \(emulatorApp) was found. Nothing was recorded.", code: 2)
-    }
-    let companionWindows = visible.filter {
-      $0.owningApplication?.applicationName == companionApp
-    }
-    // Two running copies of the app (a preview build, say) share its name:
-    // refuse rather than guess which one is the run.
-    let companionProcesses = Set(companionWindows.compactMap { $0.owningApplication?.processID })
-    guard companionProcesses.count <= 1 else {
-      fail(
-        "\(companionProcesses.count) running copies of \(companionApp) have windows on screen. Quit every copy but the one under test. Nothing was recorded.",
-        code: 2)
-    }
+    let strictWindows = options["strict-windows"] != nil
+    let emulator: SCWindow
+    let companion: SCWindow
     var rule = "title"
-    var companion = companionWindows.first { $0.title == companionTitle }
-    if companion == nil {
-      // The panel may not expose its title: take the app's smallest window.
-      rule = "smallest window"
-      companion = companionWindows.min(by: {
-        $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
-      })
+    if strictWindows {
+      guard let emulatorPid = Int32(options["emulator-pid"] ?? ""), emulatorPid > 0,
+        let companionPid = Int32(options["companion-pid"] ?? ""), companionPid > 0,
+        let emulatorId = UInt32(options["emulator-window-id"] ?? ""), emulatorId > 0,
+        let companionId = UInt32(options["companion-window-id"] ?? ""), companionId > 0,
+        emulatorId != companionId, emulatorPid != companionPid,
+        let exactEmulator = visible.first(where: {
+          $0.windowID == emulatorId && $0.owningApplication?.processID == emulatorPid
+            && $0.owningApplication?.applicationName == emulatorApp
+        }),
+        let exactCompanion = visible.first(where: {
+          $0.windowID == companionId && $0.owningApplication?.processID == companionPid
+            && $0.owningApplication?.applicationName == companionApp
+        })
+      else { fail("Strict recording window identities are unavailable. Nothing was recorded.", code: 2) }
+      emulator = exactEmulator
+      companion = exactCompanion
+      rule = "exact pid/window"
+    } else {
+      let emulatorWindows = visible.filter {
+        $0.owningApplication?.applicationName == emulatorApp
+          && (options["emulator-title"] == nil
+            || ($0.title ?? "").contains(options["emulator-title"]!))
+      }
+      guard
+        let selectedEmulator = emulatorWindows.max(by: {
+          $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
+        })
+      else {
+        fail("No on-screen window of \(emulatorApp) was found. Nothing was recorded.", code: 2)
+      }
+      emulator = selectedEmulator
+      let companionWindows = visible.filter {
+        $0.owningApplication?.applicationName == companionApp
+      }
+      // Two running copies of the app (a preview build, say) share its name:
+      // refuse rather than guess which one is the run.
+      let companionProcesses = Set(companionWindows.compactMap { $0.owningApplication?.processID })
+      guard companionProcesses.count <= 1 else {
+        fail(
+          "\(companionProcesses.count) running copies of \(companionApp) have windows on screen. Quit every copy but the one under test. Nothing was recorded.",
+          code: 2)
+      }
+      var selectedCompanion = companionWindows.first { $0.title == companionTitle }
+      if selectedCompanion == nil {
+        // The panel may not expose its title: take the app's smallest window.
+        rule = "smallest window"
+        selectedCompanion = companionWindows.min(by: {
+          $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
+        })
+      }
+      guard let selectedCompanion else {
+        fail("No on-screen window of \(companionApp) was found. Nothing was recorded.", code: 2)
+      }
+      companion = selectedCompanion
     }
-    guard let companion, let emulatorOwner = emulator.owningApplication else {
-      fail("No on-screen window of \(companionApp) was found. Nothing was recorded.", code: 2)
+    guard let emulatorOwner = emulator.owningApplication else {
+      fail("The selected emulator has no owner. Nothing was recorded.", code: 2)
     }
     guard
       let display = content.displays.first(where: { $0.frame.intersects(emulator.frame) })
@@ -260,10 +303,12 @@ struct Capture {
       "event": "matched",
       "emulator": [
         "app": emulatorApp, "windowId": Int(emulator.windowID),
+        "pid": Int(emulator.owningApplication?.processID ?? 0),
         "frame": frameDictionary(emulator.frame),
       ],
       "companion": [
         "app": companionApp, "windowId": Int(companion.windowID), "rule": rule,
+        "pid": Int(companion.owningApplication?.processID ?? 0),
         "frame": frameDictionary(companion.frame),
       ],
       "picture": ["width": width, "height": height, "scale": Double(scale)],
@@ -271,7 +316,8 @@ struct Capture {
 
     let writer: Writer
     do {
-      writer = try Writer(url: URL(fileURLWithPath: out), width: width, height: height)
+      writer = try Writer(url: URL(fileURLWithPath: out), width: width, height: height,
+        strictWindows: strictWindows)
     } catch {
       fail("Could not write \(out): \(error.localizedDescription)")
     }
@@ -296,6 +342,11 @@ struct Capture {
       source.setEventHandler { interrupted = true }
       source.resume()
       return source
+    }
+    // Strict readiness also means ordinary Stop handlers are installed.
+    queue.async {
+      writer.streamsStarted = true
+      writer.reportReady()
     }
     let deadline = Date().addingTimeInterval(seconds)
     while Date() < deadline && !interrupted && writer.problem == nil {

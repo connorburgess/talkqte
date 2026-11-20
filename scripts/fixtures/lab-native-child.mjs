@@ -57,6 +57,30 @@ else if (mode === 'frame-oversize')
 else if (mode === 'bad-utf8') appendFileSync(path, Buffer.from([255, 10]));
 else if (mode === 'stall-partial') appendFileSync(path, '{"event":');
 else put('armed');
+if (mode === 'listening') {
+  for (const event of [
+    {
+      event: 'dev_source',
+      step: 'acknowledged',
+      application: 'QuickTime Player',
+    },
+    {
+      event: 'session',
+      state: 'started',
+      session: 1,
+      live: true,
+      commit: 'b'.repeat(40),
+      features: [
+        'lab-evaluator',
+        'local-whisper',
+        'native-audio-spike',
+        'timing-log',
+      ],
+    },
+    { event: 'dev_source', step: 'started', application: 'QuickTime Player' },
+  ])
+    appendFileSync(path, JSON.stringify(event) + '\n');
+}
 if (mode === 'truncate') setTimeout(() => writeFileSync(path, ''), 80);
 if (mode === 'rotate')
   setTimeout(() => {

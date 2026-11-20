@@ -37,6 +37,7 @@ function fixture({
   bodyFails = false,
   bodyCleanupFails = false,
   missingDisplayLabel = false,
+  sourceCloseFails = false,
   initialSignal,
 } = {}) {
   const selectedMedia = body
@@ -252,6 +253,10 @@ function fixture({
     player,
     recorder,
     source: {
+      close() {
+        trace.push('source-close');
+        if (sourceCloseFails) throw Error('private observer cleanup');
+      },
       async waitListening({ runId }) {
         sourceRunId = runId;
         trace.push('listening');
@@ -442,6 +447,15 @@ test('prepared take refuses an adaptive body and a nonfictional media identity',
   assert.throws(() =>
     createPreparedTake({ media: { ...media, fictional: false } }),
   );
+});
+
+test('source observer cleanup failure cannot skip launcher observation cleanup', async () => {
+  const f = fixture({ sourceCloseFails: true });
+  await assert.rejects(f.take.done, (error) => error.category === 'cleanup');
+  assert.equal(f.take.phase, 'failed-cleanup');
+  assert.equal(f.counts.launcherClose, 1);
+  assert.equal(f.counts.providerClose, 1);
+  assert.equal(f.trace.filter((e) => e === 'source-close').length, 1);
 });
 
 test('body bootstrap rejects narrative or unlabelled media before subscribing or constructing a run', () => {
