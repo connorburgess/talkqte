@@ -381,7 +381,19 @@ test('a continued cloud session discloses reconnect loss until the session stops
     transcription: { provider: 'Deepgram', reconnects: 1, lostMs: 2_400 },
   });
   await expect(session(page)).toContainText(
-    'Transcription by Deepgram reconnected once after a connection problem; about 2 s of speech was not transcribed.',
+    'Transcription by Deepgram reconnected once after a connection problem. About 2 s of speech was not transcribed.',
+  );
+  await publish({
+    transcription: { provider: 'Deepgram', reconnects: 1, lostMs: 250 },
+  });
+  await expect(session(page)).toContainText(
+    'Less than 1 s of speech was not transcribed.',
+  );
+  await publish({
+    transcription: { provider: 'Deepgram', reconnects: 1, lostMs: 0 },
+  });
+  await expect(session(page)).toContainText(
+    'The amount of speech not transcribed is unknown.',
   );
   await publish({
     status: 'ended',
