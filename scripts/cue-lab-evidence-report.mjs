@@ -471,7 +471,11 @@ export function importNativeRows(rows, { runId, artifactId, clockId }) {
         if (
           !STT_STATES.has(r.state) ||
           (r.code !== undefined && !STT_CODES.has(r.code)) ||
-          (r.state === 'stopped') !== (r.code !== undefined) ||
+          ['stopped', 'reconnecting'].includes(r.state) !==
+            (r.code !== undefined) ||
+          (r.state === 'reconnecting'
+            ? !Number.isSafeInteger(r.gap_ms) || r.gap_ms < 0
+            : r.gap_ms !== undefined) ||
           (r.state === 'connected') !== isAllowedSttQuery(r.query) ||
           !Number.isSafeInteger(r.audio_ms) ||
           r.audio_ms < 0
@@ -482,6 +486,7 @@ export function importNativeRows(rows, { runId, artifactId, clockId }) {
           sttState: r.state,
           ...(r.code !== undefined ? { sttCode: r.code } : {}),
           ...(r.query !== undefined ? { query: r.query } : {}),
+          ...(r.gap_ms !== undefined ? { gapMs: r.gap_ms } : {}),
           audioMs: r.audio_ms,
         };
         break;
@@ -637,6 +642,8 @@ const STT_STATES = new Set([
   // Connected to the provider, with the query of the URL actually used.
   'connected',
   'dropping',
+  // A failed stream being replaced, with its code and the speech lost.
+  'reconnecting',
   'finished',
   'ended',
   'stopped',
@@ -714,6 +721,7 @@ function safePayload(payload, includeContent) {
     'startMs',
     'endMs',
     'sessionElapsedMs',
+    'gapMs',
   ])
     if (Number.isSafeInteger(payload[k]) && payload[k] >= 0)
       result[k] = payload[k];
@@ -776,10 +784,21 @@ function cloudSummary(events, m) {
     const starts = own.filter((e) => e.payload?.sttState === 'started');
     const stops = own.filter(
       (e) =>
-        !['started', 'connected', 'dropping'].includes(e.payload?.sttState),
+        !['started', 'connected', 'dropping', 'reconnecting'].includes(
+          e.payload?.sttState,
+        ),
     );
     const connected = own.filter((e) => e.payload?.sttState === 'connected');
-    const query = connected.length === 1 ? connected[0].payload.query : null;
+    const reconnects = own.filter(
+      (e) => e.payload?.sttState === 'reconnecting',
+    );
+    // Each replacement stream connects again; every connection must use
+    // the same query.
+    const query =
+      connected.length === reconnects.length + 1 &&
+      connected.every((e) => e.payload.query === connected[0].payload.query)
+        ? connected[0].payload.query
+        : null;
     const last = stops.at(-1) ?? null;
     const audioMs = Math.max(0, ...own.map((e) => e.payload?.audioMs ?? 0));
     const review = firstReview(sessionId ?? undefined);
@@ -790,7 +809,13 @@ function cloudSummary(events, m) {
         starts.length > 0 &&
         review >= 0 &&
         starts.every((e) => index.get(e) > review),
-      connected: connected.length === 1,
+      connected: connected.length === reconnects.length + 1,
+      // Replacements of a failed stream (#357): each one's code and the
+      // speech lost with the failed stream.
+      reconnects: reconnects.map((e) => ({
+        code: e.payload.sttCode ?? null,
+        gapMs: e.payload.gapMs ?? null,
+      })),
       // The query of the URL the app actually used, and whether it is the
       // one the lab expects (opt-out included).
       query,
@@ -1233,11 +1258,11 @@ function cloudMarkdown(c) {
     '',
     `In-app review row seen: ${c.reviewRowSeen}.`,
     '',
-    '| Session | Starts | Started only after its review | Connected | Query used = expected | Send queue overflowed | Stop state / code | Audio sent |',
-    '| --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| Session | Starts | Started only after its review | Connected | Query used = expected | Send queue overflowed | Reconnects (code, speech lost) | Stop state / code | Audio sent |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     ...c.streams.map(
       (s) =>
-        `| ${escape(s.sessionId ?? 'unknown')} | ${s.starts} | ${s.startedAfterReview} | ${s.connected} | ${s.queryMatchesExpected ?? 'unknown'} | ${s.dropping} | ${s.stopState ?? 'none'} / ${s.stopCode ?? 'none'} | ${s.audioMs} ms |`,
+        `| ${escape(s.sessionId ?? 'unknown')} | ${s.starts} | ${s.startedAfterReview} | ${s.connected} | ${s.queryMatchesExpected ?? 'unknown'} | ${s.dropping} | ${s.reconnects.length ? s.reconnects.map((r) => `${r.code ?? 'unknown'}, ${r.gapMs ?? 'unknown'} ms`).join('; ') : 'none'} | ${s.stopState ?? 'none'} / ${s.stopCode ?? 'none'} | ${s.audioMs} ms |`,
     ),
     '',
     ...c.streams

@@ -1093,6 +1093,7 @@ test('cloud transcription evidence records settings, review order, stop, cap and
       starts: 1,
       startedAfterReview: true,
       connected: true,
+      reconnects: [],
       query: DEEPGRAM_APP_QUERY,
       queryMatchesExpected: true,
       dropping: false,
@@ -1191,6 +1192,66 @@ test('a send-queue overflow is reported apart from the stop, and a lab run end i
     [s.dropping, s.stopState, s.stopCode, s.audioMs],
     [true, 'stopped', 'lab_ended', 50000],
   );
+});
+
+// A stalled stream replaced once (#357): the reconnecting row, then the
+// new stream's connected row with the same query.
+const reconnected = (query = DEEPGRAM_APP_QUERY) => {
+  const rows = cloudRows();
+  rows.splice(
+    rows.length - 1,
+    0,
+    ...[
+      {
+        event: 'stt_state',
+        session: '2',
+        state: 'reconnecting',
+        code: 'stalled',
+        gap_ms: 2400,
+        audio_ms: 40000,
+        mono_ms: 7000,
+      },
+      {
+        event: 'stt_state',
+        session: '2',
+        state: 'connected',
+        audio_ms: 40000,
+        query,
+        mono_ms: 7400,
+      },
+    ],
+  );
+  return rows;
+};
+
+test('a replaced stream is reported with its code and lost speech, still connected and still running', () => {
+  const [s] = cloudReport(reconnected()).cloudTranscription.streams;
+  assert.deepEqual(
+    [s.connected, s.reconnects, s.queryMatchesExpected, s.stopState],
+    [true, [{ code: 'stalled', gapMs: 2400 }], true, 'ended'],
+  );
+  // A replacement that connected with a different query is not trusted.
+  const [d] = cloudReport(
+    reconnected(
+      DEEPGRAM_APP_QUERY.replace('endpointing=300', 'endpointing=10'),
+    ),
+  ).cloudTranscription.streams;
+  assert.equal(d.query, null);
+});
+
+test('reconnect rows without their code and lost speech, or lost speech on another row, are refused', () => {
+  for (const change of [
+    (r) => delete r.gap_ms,
+    (r) => delete r.code,
+    (r) => (r.gap_ms = -1),
+  ]) {
+    const rows = reconnected();
+    change(rows.find((r) => r.state === 'reconnecting'));
+    assert.throws(() => cloudReport(rows));
+  }
+  const rows = cloudRows();
+  rows.at(-1).gap_ms = 10;
+  assert.throws(() => cloudReport(rows));
 });
 
 test("the app's liveness stop is reported as a stalled stream", () => {
