@@ -1108,7 +1108,7 @@ mod tests {
                     self.stop.store(true, Ordering::Release);
                 }
                 self.audio.try_send(vec![0.1; FRAME]).unwrap();
-                Ok((self.answer && state.0 % 3 == 0).then(|| r#"{"type":"Metadata"}"#.into()))
+                Ok((self.answer && state.0.is_multiple_of(3)).then(|| r#"{"type":"Metadata"}"#.into()))
             }
             fn close(&mut self) {
                 self.state.lock().unwrap().2 = true;
