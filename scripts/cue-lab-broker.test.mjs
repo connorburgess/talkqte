@@ -1,9 +1,26 @@
 import assert from 'node:assert/strict';
 import { createConnection } from 'node:net';
 import { readFile, stat, access } from 'node:fs/promises';
+import fsPromises from 'node:fs/promises';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { openLabBroker, evaluatorRequest } from './cue-lab-broker.mjs';
+import {
+  openLabBroker,
+  evaluatorRequest,
+  replyProblem,
+} from './cue-lab-broker.mjs';
 import { systemPromptFor } from './cue-lab.mjs';
 
 const input = {
@@ -22,11 +39,21 @@ async function setup({
   maxCalls = 5,
   hello = true,
   armed = true,
+  sourceSessionMode = 'legacy-fixture',
+  metadata = {
+    provider: 'codex',
+    model: 'gpt-6.1-sol',
+    effort: 'medium',
+    deadlineMs: 30000,
+  },
+  spentMicroUsd,
 } = {}) {
   const calls = [];
   const broker = await openLabBroker({
+    sourceSessionMode,
     provider: {
-      metadata: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' },
+      metadata,
+      ...(spentMicroUsd === undefined ? {} : { spentMicroUsd }),
       request: async (req) => {
         calls.push(req);
         return request(req);
@@ -84,9 +111,9 @@ async function setup({
   const greet = (extra = {}) =>
     send('hello', {
       nonce: descriptor.nonce,
-      expectedProvider: 'codex',
-      expectedModel: 'gpt-6.1-sol',
-      expectedEffort: 'medium',
+      expectedProvider: metadata.provider,
+      expectedModel: metadata.model,
+      expectedEffort: metadata.effort,
       ...extra,
     });
   const evaluate = (id = '1', extra = {}) =>
@@ -123,6 +150,8 @@ async function setup({
     descriptor,
     socket,
     calls,
+    // Frames received and not yet taken by next().
+    frames,
     next,
     frame,
     send,
@@ -261,16 +290,100 @@ test('failed or mismatched settlement stops all roles and never retries', async 
   }
 });
 
-test('missing settlement acknowledgement is terminal under the fixed grace', async () => {
+test('missing settlement acknowledgement is terminal one second after the request deadline', async () => {
   const ctx = await setup();
   try {
-    ctx.evaluate();
+    ctx.evaluate('1', { budgetMs: 300 });
     await ctx.next('result');
-    await delay(1050);
+    await delay(900);
+    // Still inside deadline + 1 s: native may yet settle or retire it.
+    assert.equal(ctx.broker.gate.terminal, null);
+    await delay(700);
     await terminal(ctx.broker);
+    assert.equal(ctx.broker.gate.terminal, 'deadline');
     assert.equal(ctx.calls.length, 1);
   } finally {
     await ctx.close();
+  }
+});
+
+test('an expired settlement up to one second after the request deadline continues the run', async () => {
+  // Reviewer's probe: budget 300 ms, result at about 250 ms, `expired` 1050 ms later.
+  const ctx = await setup({
+    request: async () => {
+      await delay(250);
+      return { value, elapsedMs: 250 };
+    },
+  });
+  try {
+    ctx.evaluate('1', { budgetMs: 300 });
+    await ctx.next('result');
+    await delay(1050);
+    ctx.settle('1', 'expired');
+    await ctx.broker.gate.waitIdle();
+    assert.equal(ctx.broker.gate.terminal, null);
+    assert.equal(ctx.broker.evaluationSummary.verdicts.expired, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('evaluation summary distinguishes evaluates seen, dispatches spent and retirement before dispatch', async () => {
+  let release;
+  let n = 0;
+  const ctx = await setup({
+    request: (req) => {
+      n++;
+      if (n > 1) return Promise.resolve({ value, elapsedMs: 1, usage: {} });
+      // The first call settles only after an explicit release, after abort.
+      return new Promise((_, reject) =>
+        req.signal.addEventListener('abort', () => {
+          release = () =>
+            reject(Object.assign(new Error('f'), { category: 'cancelled' }));
+        }),
+      );
+    },
+  });
+  try {
+    ctx.evaluate('1', { budgetMs: 30 });
+    assert.equal((await ctx.next('failed')).requestId, '1');
+    // Queued behind the settling first request; retired before dispatch.
+    ctx.evaluate('2', { budgetMs: 30 });
+    assert.equal((await ctx.next('failed')).requestId, '2');
+    release();
+    ctx.evaluate('3');
+    assert.equal((await ctx.next('result')).requestId, '3');
+    ctx.settle('3');
+    await ctx.broker.gate.waitIdle();
+    const s = ctx.broker.evaluationSummary;
+    assert.equal(s.requested, 3);
+    assert.equal(s.dispatched, 2);
+    assert.equal(s.retiredBeforeDispatch, 1);
+    assert.equal(ctx.broker.gate.dispatchesUsed, 2);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('an adapter deadline that cannot outlast a request budget and its settlement is refused', async () => {
+  for (const deadlineMs of [undefined, 100, 11000]) {
+    await assert.rejects(
+      openLabBroker({
+        sourceSessionMode: 'legacy-fixture',
+        provider: {
+          metadata: {
+            provider: 'codex',
+            model: 'gpt-6.1-sol',
+            effort: 'medium',
+            deadlineMs,
+          },
+          request: async () => ({ value }),
+          close: async () => {},
+        },
+        maxCalls: 1,
+      }),
+      { category: 'protocol' },
+    );
   }
 });
 
@@ -680,8 +793,14 @@ for (const connect of [false, true])
       release = resolve;
     });
     const broker = await openLabBroker({
+      sourceSessionMode: 'legacy-fixture',
       provider: {
-        metadata: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' },
+        metadata: {
+          provider: 'codex',
+          model: 'gpt-6.1-sol',
+          effort: 'medium',
+          deadlineMs: 30000,
+        },
         request: ({ signal }) =>
           new Promise((_, reject) => {
             signal.addEventListener(
@@ -739,3 +858,976 @@ for (const connect of [false, true])
       }),
     );
   });
+
+for (const mode of [
+  'missing',
+  'mismatch',
+  'duplicate',
+  'noncanonical',
+  'zero',
+]) {
+  test(`strict source join refuses ${mode} expectation before dispatch`, async () => {
+    const ctx = await setup({ hello: false, sourceSessionMode: 'required' });
+    try {
+      if (mode === 'duplicate') {
+        ctx.broker.expectSourceSession('7');
+        assert.throws(() => ctx.broker.expectSourceSession('7'));
+      } else if (mode === 'noncanonical' || mode === 'zero') {
+        assert.throws(() =>
+          ctx.broker.expectSourceSession(mode === 'zero' ? '0' : '07'),
+        );
+      } else {
+        if (mode === 'mismatch') ctx.broker.expectSourceSession('8');
+        ctx.greet();
+      }
+      await terminal(ctx.broker);
+      assert.equal(ctx.calls.length, 0);
+    } finally {
+      await ctx.close();
+    }
+  });
+}
+test('strict expectation joins authenticated hello and returned calibration session', async () => {
+  const ctx = await setup({ hello: false, sourceSessionMode: 'required' });
+  try {
+    ctx.broker.expectSourceSession('7');
+    ctx.greet();
+    await ctx.next('ready');
+    await ctx.broker.ready;
+    const calibrated = ctx.broker.calibrateClock();
+    const probe = await ctx.next('clock_probe');
+    ctx.send('clock_sample', {
+      probeId: probe.probeId,
+      nativeSessionElapsedMs: 100,
+    });
+    assert.equal((await calibrated).sessionId, '7');
+    assert.equal(ctx.calls.length, 0);
+    assert.throws(() => ctx.broker.expectSourceSession('7'));
+    await terminal(ctx.broker);
+  } finally {
+    await ctx.close();
+  }
+});
+test('clock sample from a replacement session is terminal before inference', async () => {
+  const ctx = await setup({ hello: false, sourceSessionMode: 'required' });
+  try {
+    ctx.broker.expectSourceSession('7');
+    ctx.greet();
+    await ctx.next('ready');
+    await ctx.broker.ready;
+    const calibrated = ctx.broker.calibrateClock();
+    const failed = assert.rejects(calibrated);
+    const probe = await ctx.next('clock_probe');
+    ctx.send('clock_sample', {
+      sessionId: '8',
+      probeId: probe.probeId,
+      nativeSessionElapsedMs: 100,
+    });
+    await failed;
+    await terminal(ctx.broker);
+    assert.equal(ctx.calls.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+const DIAGNOSTIC_KEYS = [
+  'connectionAccepted',
+  'helloAuthenticated',
+  'clockProbeSent',
+  'clockSampleReceived',
+  'calibrated',
+  'cause',
+  'terminal',
+];
+function assertContentFree(ctx, diagnostics) {
+  assert.deepEqual(Object.keys(diagnostics), DIAGNOSTIC_KEYS);
+  const serialized = JSON.stringify(diagnostics);
+  for (const secret of [
+    ctx.descriptor.nonce,
+    ctx.descriptor.socketPath,
+    ctx.broker.descriptorPath,
+    dirname(ctx.broker.descriptorPath),
+  ])
+    assert.equal(serialized.includes(secret), false);
+}
+
+test('a symlinked temporary root yields a canonical descriptor whose socket is its lexical sibling', async () => {
+  const real = realpathSync(mkdtempSync(join(tmpdir(), 'tq-root-')));
+  const holder = realpathSync(mkdtempSync(join(tmpdir(), 'tq-alias-')));
+  const alias = join(holder, 'root');
+  symlinkSync(real, alias);
+  const original = process.env.TMPDIR;
+  let ctx;
+  try {
+    process.env.TMPDIR = alias;
+    assert.equal(tmpdir(), alias);
+    assert.notEqual(alias, real);
+    ctx = await setup();
+    const { descriptorPath } = ctx.broker;
+    // The launcher hands native this canonical path; native then requires the
+    // socket's parent to equal the descriptor's parent without resolving links.
+    assert.equal(realpathSync(descriptorPath), descriptorPath);
+    assert.equal(dirname(descriptorPath).startsWith(real + '/'), true);
+    assert.equal(
+      dirname(ctx.descriptor.socketPath),
+      dirname(realpathSync(descriptorPath)),
+    );
+    assert.equal(ctx.broker.startupDiagnostics.calibrated, true);
+  } finally {
+    if (original === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = original;
+    await ctx?.close();
+    rmSync(holder, { recursive: true, force: true });
+    rmSync(real, { recursive: true, force: true });
+  }
+});
+
+test('startup diagnostics stay empty until a peer connects and report a normal close as closed', async () => {
+  const broker = await openLabBroker({
+    sourceSessionMode: 'legacy-fixture',
+    provider: {
+      metadata: {
+        provider: 'codex',
+        model: 'gpt-6.1-sol',
+        effort: 'medium',
+        deadlineMs: 30000,
+      },
+      request: async () => ({ value }),
+      close: async () => {},
+    },
+    maxCalls: 1,
+  });
+  assert.deepEqual(
+    { ...broker.startupDiagnostics },
+    {
+      connectionAccepted: false,
+      helloAuthenticated: false,
+      clockProbeSent: false,
+      clockSampleReceived: false,
+      calibrated: false,
+      cause: null,
+      terminal: null,
+    },
+  );
+  await broker.close();
+  assert.equal(broker.startupDiagnostics.cause, null);
+  assert.equal(broker.startupDiagnostics.terminal, 'closed');
+  assert.equal(broker.startupDiagnostics.connectionAccepted, false);
+});
+
+test('a rejected hello keeps its first cause through later close with zero dispatches', async () => {
+  const ctx = await setup({ hello: false });
+  try {
+    ctx.greet({ nonce: 'f'.repeat(64) });
+    await terminal(ctx.broker);
+    await assert.rejects(ctx.broker.ready);
+  } finally {
+    await ctx.close();
+  }
+  const diagnostics = ctx.broker.startupDiagnostics;
+  assert.equal(diagnostics.connectionAccepted, true);
+  assert.equal(diagnostics.helloAuthenticated, false);
+  assert.equal(diagnostics.cause, 'hello-rejected');
+  assert.equal(diagnostics.terminal, 'protocol');
+  assert.equal(ctx.calls.length, 0);
+  assertContentFree(ctx, diagnostics);
+});
+
+test('a peer that disconnects before hello is distinguished from a rejected hello', async () => {
+  const ctx = await setup({ hello: false });
+  try {
+    ctx.socket.end();
+    await terminal(ctx.broker);
+  } finally {
+    await ctx.close();
+  }
+  assert.equal(ctx.broker.startupDiagnostics.cause, 'closed-before-hello');
+  assert.equal(ctx.broker.startupDiagnostics.helloAuthenticated, false);
+  assertContentFree(ctx, ctx.broker.startupDiagnostics);
+});
+
+test('an unanswered clock probe reports a calibration deadline after authentication', async () => {
+  const ctx = await setup({ armed: false });
+  try {
+    const calibration = ctx.broker.calibrateClock();
+    await ctx.next('clock_probe');
+    await assert.rejects(calibration, { category: 'deadline' });
+    await terminal(ctx.broker);
+  } finally {
+    await ctx.close();
+  }
+  const diagnostics = ctx.broker.startupDiagnostics;
+  assert.equal(diagnostics.helloAuthenticated, true);
+  assert.equal(diagnostics.clockProbeSent, true);
+  assert.equal(diagnostics.clockSampleReceived, false);
+  assert.equal(diagnostics.calibrated, false);
+  assert.equal(diagnostics.cause, 'clock-deadline');
+  assert.equal(diagnostics.terminal, 'deadline');
+  assert.equal(ctx.calls.length, 0);
+  assertContentFree(ctx, diagnostics);
+});
+
+test('an invalid clock sample is a rejected frame, not a timeout', async () => {
+  const ctx = await setup({ armed: false });
+  try {
+    const calibration = ctx.broker.calibrateClock();
+    const probe = await ctx.next('clock_probe');
+    ctx.send('clock_sample', {
+      probeId: probe.probeId,
+      nativeSessionElapsedMs: -1,
+    });
+    await assert.rejects(calibration);
+    await terminal(ctx.broker);
+  } finally {
+    await ctx.close();
+  }
+  assert.equal(ctx.broker.startupDiagnostics.cause, 'frame-rejected');
+  assert.equal(ctx.broker.startupDiagnostics.terminal, 'protocol');
+  assert.equal(ctx.broker.startupDiagnostics.calibrated, false);
+});
+
+test('failures after calibration do not appear as startup causes', async () => {
+  const ctx = await setup();
+  try {
+    ctx.socket.end();
+    await terminal(ctx.broker);
+  } finally {
+    await ctx.close();
+  }
+  assert.equal(ctx.broker.startupDiagnostics.calibrated, true);
+  assert.equal(ctx.broker.startupDiagnostics.cause, null);
+  assert.equal(ctx.broker.startupDiagnostics.terminal, 'protocol');
+});
+
+test('a calibration rejected for combined uncertainty is not reported as calibrated', async () => {
+  const ctx = await setup({ armed: false });
+  try {
+    ctx.broker.acknowledgePlaybackStart({
+      monotonicMs: performance.now(),
+      uncertaintyMs: 100,
+    });
+    const calibration = ctx.broker.calibrateClock();
+    const probe = await ctx.next('clock_probe');
+    await delay(2);
+    ctx.send('clock_sample', {
+      probeId: probe.probeId,
+      nativeSessionElapsedMs: 1000,
+    });
+    await assert.rejects(calibration);
+    await terminal(ctx.broker);
+  } finally {
+    await ctx.close();
+  }
+  const diagnostics = ctx.broker.startupDiagnostics;
+  assert.equal(diagnostics.clockSampleReceived, true);
+  assert.equal(diagnostics.calibrated, false);
+  assert.equal(diagnostics.cause, 'clock-rejected');
+  assert.equal(ctx.calls.length, 0);
+});
+
+const fictionalProvider = () => ({
+  metadata: {
+    provider: 'codex',
+    model: 'gpt-6.1-sol',
+    effort: 'medium',
+    deadlineMs: 30000,
+  },
+  request: async () => ({ value }),
+  close: async () => {},
+});
+// Runs one broker opening with a substitute temporary root and working
+// directory, restoring both before the caller inspects leftovers.
+async function openWithRoot(root, cwd) {
+  const original = process.env.TMPDIR;
+  const previous = process.cwd();
+  try {
+    process.chdir(cwd);
+    process.env.TMPDIR = root;
+    return await openLabBroker({ provider: fictionalProvider(), maxCalls: 1 });
+  } finally {
+    process.chdir(previous);
+    if (original === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = original;
+  }
+}
+
+test('a relative temporary root is refused and leaves no run directory', async () => {
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), 'tq-rel-')));
+  try {
+    // Short names keep the socket path within the platform limit, so only the
+    // relative-root rule can refuse this opening.
+    mkdirSync(join(outside, 'r'));
+    mkdirSync(join(outside, 'w'));
+    // Relative to the working directory, this root is outside it.
+    await assert.rejects(openWithRoot('../r', join(outside, 'w')), {
+      category: 'protocol',
+    });
+    assert.deepEqual(readdirSync(join(outside, 'r')), []);
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('a temporary root inside the checkout named like ..cache is refused', async () => {
+  const checkout = realpathSync(fileURLToPath(new URL('../', import.meta.url)));
+  const inside = mkdtempSync(join(checkout, '..tq-cache-'));
+  try {
+    await assert.rejects(openWithRoot(inside, checkout), {
+      category: 'protocol',
+    });
+    assert.deepEqual(readdirSync(inside), []);
+  } finally {
+    rmSync(inside, { recursive: true, force: true });
+  }
+});
+
+test('a failed run-directory permission change removes the canonical directory', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'tq-chmod-')));
+  const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'tq-chmod-cwd-')));
+  const original = fsPromises.chmod;
+  fsPromises.chmod = async (path, mode) => {
+    if (basename(String(path)).startsWith('tq-lab-'))
+      throw Object.assign(new Error('fictional chmod failure'), {
+        code: 'EPERM',
+      });
+    return original(path, mode);
+  };
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(openWithRoot(root, cwd), { category: 'protocol' });
+    assert.deepEqual(readdirSync(root), []);
+  } finally {
+    fsPromises.chmod = original;
+    syncBuiltinESMExports();
+    rmSync(root, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// Per-request deadline continuation (wire change in the native lab PR).
+const abortable = (req, category = 'cancelled') =>
+  new Promise((_, reject) => {
+    const settle = () =>
+      reject(Object.assign(new Error('fictional'), { category }));
+    if (req.signal?.aborted) settle();
+    else req.signal?.addEventListener('abort', settle, { once: true });
+  });
+function slowThenQuick(category) {
+  let n = 0;
+  return async (req) => {
+    n++;
+    if (n === 1) return abortable(req, category);
+    return { value, elapsedMs: 1, usage: {} };
+  };
+}
+
+test('a broker lease deadline fails only that request and the next request is evaluated', async () => {
+  const ctx = await setup({ request: slowThenQuick() });
+  try {
+    ctx.evaluate('1', { budgetMs: 50 });
+    const failed = await ctx.next('failed');
+    assert.deepEqual(
+      [failed.requestId, failed.contextRevision, failed.code],
+      ['1', '1', 'deadline'],
+    );
+    assert.equal(ctx.broker.gate.terminal, null);
+    ctx.evaluate('2');
+    const result = await ctx.next('result');
+    assert.equal(result.requestId, '2');
+    ctx.settle('2');
+    await ctx.broker.gate.waitIdle();
+    assert.equal(ctx.broker.gate.terminal, null);
+    assert.equal(ctx.broker.gate.dispatchesUsed, 2);
+    const summary = ctx.broker.evaluationSummary;
+    assert.equal(summary.deadlineByBroker, 1);
+    assert.equal(summary.deadlineByNative, 0);
+    assert.equal(summary.resultsSent, 1);
+    assert.equal(summary.resultActions.quiet, 1);
+    assert.equal(summary.verdicts.current, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a native deadline cancel retires the running request without a reply and keeps the run', async () => {
+  const ctx = await setup({ request: slowThenQuick() });
+  try {
+    ctx.evaluate('1');
+    for (let n = 0; n < 100 && ctx.calls.length < 1; n++) await delay(5);
+    ctx.send('cancel', {
+      requestId: '1',
+      contextRevision: '1',
+      reason: 'deadline',
+    });
+    ctx.evaluate('2');
+    const result = await ctx.next('result');
+    assert.equal(result.requestId, '2');
+    ctx.settle('2');
+    await ctx.broker.gate.waitIdle();
+    await assert.rejects(ctx.next('failed'));
+    assert.equal(ctx.broker.gate.terminal, null);
+    assert.equal(ctx.broker.evaluationSummary.deadlineByNative, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a native deadline cancel while awaiting settlement retires that request', async () => {
+  const ctx = await setup();
+  try {
+    ctx.evaluate('1');
+    await ctx.next('result');
+    ctx.send('cancel', {
+      requestId: '1',
+      contextRevision: '1',
+      reason: 'deadline',
+    });
+    ctx.evaluate('2');
+    assert.equal((await ctx.next('result')).requestId, '2');
+    ctx.settle('2');
+    await ctx.broker.gate.waitIdle();
+    assert.equal(ctx.broker.gate.terminal, null);
+    assert.equal(ctx.broker.evaluationSummary.resultsSent, 2);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('an expired settlement verdict is recorded and does not end the run', async () => {
+  const ctx = await setup();
+  try {
+    ctx.evaluate('1');
+    await ctx.next('result');
+    ctx.settle('1', 'expired');
+    await ctx.broker.gate.waitIdle();
+    assert.equal(ctx.broker.gate.terminal, null);
+    assert.equal(ctx.broker.evaluationSummary.verdicts.expired, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a late native deadline cancel for a request the broker already failed is ignored', async () => {
+  const ctx = await setup({ request: slowThenQuick() });
+  try {
+    ctx.evaluate('1', { budgetMs: 50 });
+    await ctx.next('failed');
+    ctx.send('cancel', {
+      requestId: '1',
+      contextRevision: '1',
+      reason: 'deadline',
+    });
+    ctx.evaluate('2');
+    assert.equal((await ctx.next('result')).requestId, '2');
+    ctx.settle('2');
+    await ctx.broker.gate.waitIdle();
+    assert.equal(ctx.broker.gate.terminal, null);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a deadline cancel for an unknown request or without identity is terminal', async () => {
+  for (const fields of [
+    { requestId: '9', contextRevision: '9', reason: 'deadline' },
+    { reason: 'deadline' },
+  ]) {
+    const ctx = await setup({ request: slowThenQuick() });
+    try {
+      ctx.evaluate('1');
+      ctx.send('cancel', fields);
+      await terminal(ctx.broker);
+      assert.equal(ctx.broker.gate.terminal, 'protocol');
+    } finally {
+      await ctx.close();
+    }
+  }
+});
+
+test('unconfirmed provider cleanup after a request deadline stays terminal', async () => {
+  const ctx = await setup({ request: slowThenQuick('cleanup') });
+  try {
+    ctx.evaluate('1', { budgetMs: 50 });
+    await terminal(ctx.broker);
+    assert.notEqual(ctx.broker.gate.terminal, null);
+  } finally {
+    await ctx.close().catch(() => {});
+  }
+});
+
+test('repeated request deadlines still end the run at the dispatch cap', async () => {
+  const ctx = await setup({
+    maxCalls: 2,
+    request: (req) => abortable(req),
+  });
+  try {
+    for (const id of ['1', '2']) {
+      ctx.evaluate(id, { budgetMs: 30 });
+      assert.equal((await ctx.next('failed')).code, 'deadline');
+      await ctx.broker.gate.waitIdle();
+    }
+    assert.equal(ctx.broker.gate.terminal, null);
+    ctx.evaluate('3');
+    assert.equal((await ctx.next('failed')).code, 'dispatch_limit');
+    await terminal(ctx.broker);
+    assert.equal(ctx.broker.gate.dispatchesUsed, 2);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a temporary root inside the checkout is refused even when started from another directory', async () => {
+  const checkout = realpathSync(fileURLToPath(new URL('../', import.meta.url)));
+  const inside = mkdtempSync(join(checkout, 'tq-inside-'));
+  const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), 'tq-cwd-')));
+  try {
+    await assert.rejects(openWithRoot(inside, elsewhere), {
+      category: 'protocol',
+    });
+    assert.deepEqual(readdirSync(inside), []);
+  } finally {
+    rmSync(inside, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
+  }
+});
+
+const apiMetadata = {
+  provider: 'anthropic-api',
+  model: 'claude-opus-5-5',
+  effort: 'low',
+  deadlineMs: 30000,
+  spendCapMicroUsd: 1_000_000,
+};
+
+test('the API route declares request budgeting and its spend cap at ready; the CLI route does not', async () => {
+  const api = await setup({
+    hello: false,
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+  });
+  try {
+    api.greet();
+    const ready = await api.next('ready');
+    assert.equal(ready.dispatchBudgetKind, 'apiRequests');
+    assert.equal(ready.spendCapMicroUsd, 1_000_000);
+    assert.equal(ready.spendUsedMicroUsd, 0);
+  } finally {
+    await api.close();
+  }
+  const cli = await setup({ hello: false });
+  try {
+    cli.greet();
+    const ready = await cli.next('ready');
+    assert.equal(ready.dispatchBudgetKind, 'cliDispatchAttempts');
+    assert.equal(Object.hasOwn(ready, 'spendCapMicroUsd'), false);
+    assert.equal(Object.hasOwn(ready, 'spendUsedMicroUsd'), false);
+  } finally {
+    await cli.close();
+  }
+});
+
+test('an API provider without a spend cap, or a CLI provider with one, is refused', async () => {
+  for (const metadata of [
+    { ...apiMetadata, spendCapMicroUsd: undefined },
+    {
+      provider: 'codex',
+      model: 'gpt-6.1-sol',
+      effort: 'medium',
+      deadlineMs: 30000,
+      spendCapMicroUsd: 1,
+    },
+  ])
+    await assert.rejects(
+      openLabBroker({
+        sourceSessionMode: 'legacy-fixture',
+        provider: {
+          metadata,
+          request: async () => ({}),
+          close: async () => {},
+        },
+        maxCalls: 1,
+      }),
+      { category: 'protocol' },
+    );
+});
+
+test('a provider refusal is a request-scoped failed refusal and the next request is evaluated', async () => {
+  let n = 0;
+  const ctx = await setup({
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+    request: async () => {
+      n++;
+      if (n === 1)
+        throw Object.assign(new Error('fictional'), { category: 'refusal' });
+      return { value, elapsedMs: 1, usage: {} };
+    },
+  });
+  try {
+    ctx.evaluate('1');
+    const failed = await ctx.next('failed');
+    assert.deepEqual([failed.requestId, failed.code], ['1', 'refusal']);
+    assert.equal(ctx.broker.gate.terminal, null);
+    ctx.evaluate('2');
+    assert.equal((await ctx.next('result')).requestId, '2');
+    ctx.settle('2');
+    await ctx.broker.gate.waitIdle();
+    assert.equal(ctx.broker.gate.terminal, null);
+    assert.equal(ctx.broker.evaluationSummary.refusals, 1);
+    assert.equal(ctx.broker.gate.dispatchesUsed, 2);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('an API reply at its output bound is a request-scoped failed output_limit and the next request is evaluated', async () => {
+  let n = 0;
+  const ctx = await setup({
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+    request: async () => {
+      n++;
+      if (n === 1)
+        throw Object.assign(new Error('fictional'), {
+          category: 'output-limit',
+        });
+      return { value, elapsedMs: 1, usage: {} };
+    },
+  });
+  try {
+    ctx.evaluate('1');
+    const failed = await ctx.next('failed');
+    assert.deepEqual([failed.requestId, failed.code], ['1', 'output_limit']);
+    assert.equal(ctx.broker.gate.terminal, null);
+    ctx.evaluate('2');
+    assert.equal((await ctx.next('result')).requestId, '2');
+    ctx.settle('2');
+    await ctx.broker.gate.waitIdle();
+    assert.equal(ctx.broker.evaluationSummary.outputLimits, 1);
+    assert.equal(ctx.broker.gate.dispatchesUsed, 2);
+  } finally {
+    await ctx.close();
+  }
+});
+
+// B11: with a cue on screen the model sometimes answered show (meaning
+// "keep it"), which is not a valid action then, and one such reply ended the
+// whole run.
+const withCue = {
+  ...input,
+  existingCue: { text: 'Who confirms Friday?', sourceIds: ['s1'] },
+};
+const replies = (...values) => {
+  let n = 0;
+  return async () => ({ value: values[n++], elapsedMs: 1, usage: {} });
+};
+
+test('a show while a cue is on screen is settled as quiet, keeping its sources', async () => {
+  const ctx = await setup({
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+    request: replies({ action: 'show', cue: null, sourceIds: ['s1'] }),
+  });
+  try {
+    ctx.evaluate('1', { input: withCue });
+    const result = await ctx.next('result');
+    assert.deepEqual(result.value, {
+      action: 'quiet',
+      cue: null,
+      sourceIds: ['s1'],
+    });
+    ctx.settle('1');
+    await ctx.broker.gate.waitIdle();
+    assert.equal(ctx.broker.gate.terminal, null);
+    const summary = ctx.broker.evaluationSummary;
+    assert.deepEqual(
+      [
+        summary.showWithCue,
+        summary.invalidReplies,
+        summary.resultActions.quiet,
+      ],
+      [1, 0, 1],
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('an invalid API reply ends only its request, with a fixed reason and no text kept', async () => {
+  const ctx = await setup({
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+    request: replies(
+      { action: 'quiet', cue: null, sourceIds: ['not-in-the-window'] },
+      value,
+    ),
+  });
+  try {
+    ctx.evaluate('1');
+    // The signed native lab build settles `refusal` as request-scoped.
+    const failed = await ctx.next('failed');
+    assert.deepEqual([failed.requestId, failed.code], ['1', 'refusal']);
+    assert.equal(ctx.broker.gate.terminal, null);
+    ctx.evaluate('2');
+    assert.equal((await ctx.next('result')).requestId, '2');
+    ctx.settle('2');
+    await ctx.broker.gate.waitIdle();
+    const summary = ctx.broker.evaluationSummary;
+    assert.equal(summary.invalidReplies, 1);
+    assert.equal(summary.invalidReasons['source-ids'], 1);
+    assert.equal(summary.refusals, 0);
+    assert.doesNotMatch(JSON.stringify(summary), /not-in-the-window/);
+  } finally {
+    await ctx.close();
+  }
+});
+
+// TalkQTE's own "Asked you" cue on screen (kind "asked"): the model may keep
+// or resolve it, never withdraw or replace it.
+const withAsked = {
+  ...input,
+  existingCue: {
+    text: 'Can you, Robin, check Friday?',
+    sourceIds: ['s1'],
+    kind: 'asked',
+  },
+};
+
+test('an asked cue is accepted only with its own kind and its source in the window', () => {
+  assert.doesNotThrow(() => evaluatorRequest(withAsked));
+  for (const existingCue of [
+    { ...withAsked.existingCue, kind: 'model' },
+    { ...withAsked.existingCue, sourceIds: [] },
+    { ...withAsked.existingCue, sourceIds: ['not-in-window'] },
+    { ...withAsked.existingCue, origin: 'asked' },
+  ])
+    assert.throws(() => evaluatorRequest({ ...input, existingCue }));
+});
+
+test('a withdraw or show of an asked cue is settled as quiet; resolved passes', async () => {
+  const ctx = await setup({
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+    request: replies(
+      { action: 'withdraw', cue: null, sourceIds: ['s1'] },
+      { action: 'show', cue: null, sourceIds: ['s1'] },
+      { action: 'resolved', cue: null, sourceIds: ['s1'] },
+    ),
+  });
+  try {
+    const actions = [];
+    for (const id of ['1', '2', '3']) {
+      ctx.evaluate(id, { input: withAsked });
+      actions.push((await ctx.next('result')).value.action);
+      ctx.settle(id);
+    }
+    await ctx.broker.gate.waitIdle();
+    assert.deepEqual(actions, ['quiet', 'quiet', 'resolved']);
+    const summary = ctx.broker.evaluationSummary;
+    assert.deepEqual(
+      [summary.askedKept, summary.showWithCue, summary.invalidReplies],
+      [1, 1, 0],
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('three invalid API replies in a row end the run; a valid one in between resets the count', async () => {
+  const bad = { action: 'resolved', cue: null, sourceIds: ['s1'] };
+  const ctx = await setup({
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+    maxCalls: 10,
+    request: replies(bad, bad, value, bad, bad, bad),
+  });
+  try {
+    for (const id of ['1', '2']) {
+      ctx.evaluate(id);
+      assert.equal((await ctx.next('failed')).code, 'refusal');
+    }
+    ctx.evaluate('3');
+    assert.equal((await ctx.next('result')).requestId, '3');
+    ctx.settle('3');
+    for (const id of ['4', '5']) {
+      ctx.evaluate(id);
+      assert.equal((await ctx.next('failed')).code, 'refusal');
+    }
+    ctx.evaluate('6');
+    const failed = await ctx.next('failed');
+    assert.equal(failed.code, 'invalid_reply');
+    await terminal(ctx.broker);
+    const summary = ctx.broker.evaluationSummary;
+    assert.equal(summary.invalidReplies, 5);
+    assert.equal(summary.invalidReasons['action-without-cue'], 5);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('on a subscription route a show while a cue is on screen still ends the run', async () => {
+  const ctx = await setup({
+    request: replies({ action: 'show', cue: 'Again?', sourceIds: ['s1'] }),
+  });
+  try {
+    ctx.evaluate('1', { input: withCue });
+    assert.equal((await ctx.next('failed')).code, 'invalid_reply');
+    await terminal(ctx.broker);
+    const summary = ctx.broker.evaluationSummary;
+    assert.equal(summary.showWithCue, 0);
+    assert.equal(summary.invalidReasons['show-with-cue'], 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('on a subscription route an invalid reply still ends the run', async () => {
+  const ctx = await setup({
+    request: replies({ action: 'quiet', cue: 'not null', sourceIds: ['s1'] }),
+  });
+  try {
+    ctx.evaluate('1');
+    assert.equal((await ctx.next('failed')).code, 'invalid_reply');
+    await terminal(ctx.broker);
+    assert.equal(ctx.broker.evaluationSummary.invalidReasons.cue, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('each reply problem has its fixed code', () => {
+  const cases = [
+    [{ action: 'quiet', cue: null }, 'shape'],
+    [{ action: 'maybe', cue: null, sourceIds: ['s1'] }, 'action'],
+    [{ action: 'quiet', cue: null, sourceIds: ['s1', 's1'] }, 'source-ids'],
+    [
+      { action: 'withdraw', cue: null, sourceIds: ['s1'] },
+      'action-without-cue',
+    ],
+    [{ action: 'show', cue: '', sourceIds: ['s1'] }, 'cue'],
+    [
+      {
+        action: 'show',
+        cue: 'one two three four five six seven eight nine ten eleven?',
+        sourceIds: ['s1'],
+      },
+      'glance',
+    ],
+    [{ action: 'show', cue: 'Who confirms Friday?', sourceIds: ['s1'] }, null],
+  ];
+  for (const [reply, code] of cases)
+    assert.equal(replyProblem(reply, input), code, JSON.stringify(reply));
+  assert.equal(
+    replyProblem(
+      { action: 'show', cue: 'Who confirms Friday?', sourceIds: ['s1'] },
+      withCue,
+    ),
+    'show-with-cue',
+  );
+});
+
+test('on a subscription route an output limit still ends the run', async () => {
+  const ctx = await setup({
+    request: async () => {
+      throw Object.assign(new Error('fictional'), {
+        category: 'output-limit',
+      });
+    },
+  });
+  try {
+    ctx.evaluate('1');
+    const failed = await ctx.next('failed');
+    assert.notEqual(failed.code, 'output_limit');
+    await terminal(ctx.broker);
+    assert.equal(ctx.broker.evaluationSummary.outputLimits, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+// Native (#341) treats `failed` code refusal as request-scoped only when it
+// names the active request, and as terminal otherwise. The broker therefore
+// sends it exactly once, with the active request's ids, and never for a
+// request it has already retired.
+test('a refusal frame names the active request exactly; a late refusal after retirement sends nothing', async () => {
+  let n = 0;
+  const ctx = await setup({
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+    request: async ({ signal }) => {
+      n++;
+      if (n === 1)
+        throw Object.assign(new Error('fictional'), { category: 'refusal' });
+      if (n === 2)
+        // Outlives its budget, then reports a refusal after retirement.
+        return new Promise((_, reject) =>
+          signal.addEventListener(
+            'abort',
+            () =>
+              setTimeout(
+                () =>
+                  reject(
+                    Object.assign(new Error('fictional'), {
+                      category: 'refusal',
+                    }),
+                  ),
+                20,
+              ),
+            { once: true },
+          ),
+        );
+      return { value, elapsedMs: 1, usage: {} };
+    },
+  });
+  try {
+    ctx.evaluate('1');
+    const refusal = await ctx.next('failed');
+    assert.deepEqual(Object.keys(refusal).sort(), [
+      'code',
+      'contextRevision',
+      'requestId',
+      'runId',
+      'schema',
+      'sessionId',
+      'type',
+    ]);
+    assert.deepEqual(
+      [refusal.requestId, refusal.contextRevision, refusal.code],
+      ['1', '1', 'refusal'],
+    );
+    ctx.evaluate('2', { budgetMs: 50 });
+    const deadline = await ctx.next('failed');
+    assert.deepEqual([deadline.requestId, deadline.code], ['2', 'deadline']);
+    await delay(100);
+    ctx.evaluate('3');
+    assert.equal((await ctx.next('result')).requestId, '3');
+    ctx.settle('3');
+    await ctx.broker.gate.waitIdle();
+    // No second failed frame for request 2, so native never sees an
+    // unmatched refusal.
+    assert.equal(ctx.frames.filter((f) => f.type === 'failed').length, 0);
+    assert.equal(ctx.broker.gate.terminal, null);
+    assert.equal(ctx.broker.evaluationSummary.refusals, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a spend-cap usage limit ends the run with failed usage_limit', async () => {
+  const ctx = await setup({
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+    request: async () => {
+      throw Object.assign(new Error('fictional'), { category: 'usage-limit' });
+    },
+  });
+  try {
+    ctx.evaluate('1');
+    assert.equal((await ctx.next('failed')).code, 'usage_limit');
+    await terminal(ctx.broker);
+    assert.equal(ctx.broker.gate.terminal, 'usage-limit');
+  } finally {
+    await ctx.close();
+  }
+});

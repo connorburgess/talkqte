@@ -46,6 +46,13 @@ pub struct ProcessorConfiguration {
     effort: Option<String>,
     /// Whether this backend may be sent approved prior notes.
     pub(super) accepts_notes: bool,
+    pub(super) required_note_count: Option<usize>,
+    /// Where the session's audio goes for transcription once this review is
+    /// approved, when a cloud transcription service is selected. Part of the
+    /// reviewed configuration, so the review names it as a destination.
+    pub(super) audio_destination: Option<String>,
+    /// Opt-in transcript-only projection, bound to this reviewed configuration.
+    pub(super) bounded_history: bool,
 }
 
 impl ProcessorConfiguration {
@@ -74,6 +81,9 @@ impl ProcessorConfiguration {
             disclosure,
             effort: None,
             accepts_notes: true,
+            required_note_count: None,
+            audio_destination: None,
+            bounded_history: false,
         })
     }
 
@@ -81,6 +91,45 @@ impl ProcessorConfiguration {
     /// is refused, so the review cannot say a note will be sent.
     pub fn without_notes(mut self) -> Self {
         self.accepts_notes = false;
+        self
+    }
+
+    /// An explicit diagnostic count, displayed before the owner prepares review.
+    #[cfg(any(
+        all(test, unix),
+        all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        )
+    ))]
+    pub(crate) fn with_required_note_count(mut self, count: Option<usize>) -> Self {
+        self.required_note_count = count;
+        self
+    }
+
+    /// Opt into bounded transcript history for a transcript-only adapter.
+    /// This changes the complete reviewed configuration and its disclosure;
+    /// existing grants/reviews cannot authorize it. Default-off explicit API lab
+    /// selection requires expanded session review.
+    pub fn with_bounded_transcript_history(mut self) -> Result<Self, ProcessingError> {
+        const DISCLOSURE: &str = " Transcript context: up to 24 segments from the last 90 seconds, subject to a 16384-byte serialized input limit and the approved speech scope. Visible cue evidence may be older. No prior notes.";
+        if !self.bounded_history {
+            self.disclosure.data_policy.push_str(DISCLOSURE);
+        }
+        if !valid_label(&self.disclosure.data_policy, 2_048) {
+            return Err(ProcessingError::InvalidScope);
+        }
+        self.bounded_history = true;
+        self.accepts_notes = false;
+        Ok(self)
+    }
+
+    /// Names the service the session's audio is sent to for transcription
+    /// once this processor's review is approved.
+    pub fn with_audio_destination(mut self, destination: String) -> Self {
+        self.audio_destination = Some(destination);
         self
     }
 
@@ -134,6 +183,9 @@ pub(super) struct Permission {
 
 pub(super) struct Grant {
     session: u64,
+    /// The session time the grant was made. Cloud transcription never sends
+    /// audio captured before it.
+    approved_at_ms: u64,
     processor: ProcessorConfiguration,
     pub(super) after_ms: Option<u64>,
     pub(super) notes: Vec<Source>,
@@ -211,7 +263,12 @@ impl Engine {
         if state.misconfigured || state.lab_terminal || self.model_calls_exhausted() {
             return Err(ProcessingError::Unavailable);
         }
-        if notes.len() > crate::context::MAX_ITEMS
+        if state
+            .lab
+            .as_ref()
+            .and_then(|lab| lab.required_note_count())
+            .is_some_and(|count| count != notes.len())
+            || notes.len() > crate::context::MAX_ITEMS
             || (!notes.is_empty() && !state.permission.processor.accepts_notes)
         {
             return Err(ProcessingError::InvalidScope);
@@ -300,23 +357,44 @@ impl Engine {
         review: ProcessingReview,
         by_setting: bool,
     ) -> Result<(), ProcessingError> {
+        // Existing launch settings acknowledge only the current fresh slice.
+        // History requires an explicit review; no old setting can widen it.
+        if by_setting && review.processor.bounded_history {
+            return Err(ProcessingError::InvalidScope);
+        }
         if self.model_calls_exhausted() {
             return Err(ProcessingError::Unavailable);
         }
         let notes = self.reviewed_sources(&review)?;
+        if self
+            .evaluation
+            .as_ref()
+            .and_then(|s| s.lab.as_ref())
+            .and_then(|lab| lab.required_note_count())
+            .is_some_and(|count| count != notes.len())
+        {
+            return Err(ProcessingError::InvalidScope);
+        }
         self.revoke_processing();
         if self.evaluation.as_ref().is_some_and(|s| s.lab_terminal) {
             return Err(ProcessingError::Unavailable);
         }
         self.evaluation.as_mut().unwrap().permission.grant = Some(Grant {
             session: review.session,
+            approved_at_ms: self.state.elapsed_ms,
             processor: review.processor,
             after_ms: match review.conversation {
                 ConversationScope::NewSpeechOnly => Some(self.state.elapsed_ms),
                 ConversationScope::RecentAndNewSpeech => None,
             },
-            notes,
+            notes: notes.clone(),
         });
+        if let Some(lab) = self.evaluation.as_ref().and_then(|s| s.lab.as_ref()) {
+            if lab.approve_notes(self.generation, &notes).is_err() {
+                self.revoke_processing();
+                return Err(ProcessingError::Unavailable);
+            }
+        }
         // A new grant starts afresh: no run of timeouts, and no earlier cues
         // drawn from speech the new grant may not cover.
         if let Some(state) = &mut self.evaluation {
@@ -367,6 +445,11 @@ impl Engine {
             .evaluation
             .as_ref()
             .is_some_and(|state| state.permission.grant.is_some());
+        if was_on {
+            if let Some(lab) = self.evaluation.as_ref().and_then(|s| s.lab.as_ref()) {
+                lab.retire_scope();
+            }
+        }
         self.invalidate_evaluation();
         self.evaluation.as_mut().unwrap().permission.revoke();
         if was_on {
@@ -385,6 +468,49 @@ impl Engine {
             && self.evaluation.as_ref().is_some_and(|state| {
                 !state.lab_terminal && state.permission.valid(self.generation, &self.notes)
             })
+    }
+
+    /// Cloud transcription's gate for `session`'s stream: the session time of
+    /// a grant the person made in that session's own review, while it holds.
+    /// A grant from a launch setting never opens it, so audio is never sent
+    /// without a review shown in the app, and a later session's grant never
+    /// opens an earlier session's stream.
+    pub fn audio_approval(&self, session: u64) -> Option<u64> {
+        if session != self.generation || !self.has_processing_permission() {
+            return None;
+        }
+        let state = self.evaluation.as_ref()?;
+        if state.lab.as_ref().is_some_and(|lab| !lab.scope_ready()) {
+            return None;
+        }
+        if state.approval_by_setting {
+            return None;
+        }
+        state
+            .permission
+            .grant
+            .as_ref()
+            .map(|grant| grant.approved_at_ms)
+    }
+
+    /// Why an open cloud stream must stop sending now, if it must: the lab
+    /// run ended, or the review was withdrawn. A Stop in progress keeps it
+    /// sending, so the last captured audio is transcribed.
+    pub fn audio_withdrawal(&self, session: u64) -> Option<&'static str> {
+        if session != self.generation {
+            return Some("withdrawn");
+        }
+        if self.audio_approval(session).is_some() || self.live_stopping {
+            return None;
+        }
+        if self
+            .evaluation
+            .as_ref()
+            .is_some_and(|state| state.lab_terminal)
+        {
+            return Some("lab_ended");
+        }
+        Some("withdrawn")
     }
 
     pub(in crate::engine) fn reconcile_processing_permission(&mut self) {

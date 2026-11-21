@@ -10,7 +10,7 @@ use crate::{
     },
     native_session_clock::tests::measure_fictional,
     native_source::{self, Source},
-    transcription::{AudioChunk, Recognized, Transcriber},
+    transcription::cloud::{Full, StreamingTranscriber, SttEvent},
     Runtime,
 };
 use std::sync::atomic::AtomicU64;
@@ -46,6 +46,7 @@ struct Script {
     list_everything: AtomicBool,
     /// Fictional metadata for the strictly named source observation tests.
     quicktime_fixture: AtomicBool,
+    owned_player_fixture: AtomicBool,
     /// macOS refuses the start, as before TalkQTE is reopened after the grant.
     start_needs_reopen: AtomicBool,
     runs: AtomicU64,
@@ -142,11 +143,20 @@ impl Source for Scripted {
     }
 }
 
+/// A cloud stream that returns nothing. The fixture's session is never
+/// approved, so it is never opened either.
 struct Silent;
-impl Transcriber for Silent {
-    fn transcribe(&mut self, _: &AudioChunk) -> Result<Vec<Recognized>, String> {
-        Ok(Vec::new())
+impl StreamingTranscriber for Silent {
+    fn push(&mut self, _: &[f32]) -> Result<(), Full> {
+        Ok(())
     }
+    fn poll(&mut self) -> Vec<SttEvent> {
+        Vec::new()
+    }
+    fn finish(&mut self, _: Duration) -> Vec<SttEvent> {
+        Vec::new()
+    }
+    fn abort(&mut self) {}
 }
 
 struct Fake {
@@ -208,6 +218,13 @@ impl Backend for Fake {
         if self.script.list_everything.load(Ordering::SeqCst) {
             return Ok(everything());
         }
+        if self.script.owned_player_fixture.load(Ordering::SeqCst) {
+            return Ok(vec![Application::new(
+                "fictional-0".into(),
+                "TalkQTE Lab Player".into(),
+            )
+            .unwrap()]);
+        }
         if self.script.quicktime_fixture.load(Ordering::SeqCst) {
             return Ok(vec![Application::new(
                 "fictional-0".into(),
@@ -247,7 +264,7 @@ impl Backend for Fake {
                     script,
                 })
             },
-            Silent,
+            Box::new(|| Ok(Box::new(Silent) as Box<dyn StreamingTranscriber>)),
             monitor,
         )
     }
@@ -502,7 +519,10 @@ fn stop_reads_stopping_until_cleanup_is_confirmed_whoever_asked() {
         // The released run's counts are kept; this one heard nothing.
         let json = serde_json::to_value(&off).unwrap();
         assert_eq!(json["lastRun"]["acceptedLines"], 0);
-        assert_eq!(json["lastRun"]["workerDetached"], false);
+        assert_eq!(
+            json["lastRun"]["audioSentMs"], 0,
+            "never approved, so nothing was sent"
+        );
         assert_eq!(shown(&off), CaptureState::Off);
         assert_eq!(
             fixture.host.0.gate.snapshot().unwrap().phase,
@@ -1682,6 +1702,102 @@ mod observation_start {
     }
 
     #[test]
+    fn bound_owned_launcher_admission_observation_and_ordinary_stop_compose() {
+        crate::test_isolation::run(
+            "application_audio_host::tests::observation_start::owned_launcher_child",
+            &[("TALKQTE_TEST_OWNED_ADMISSION", "1")],
+            &[],
+        );
+    }
+
+    #[test]
+    #[ignore = "isolated frozen owned-source admission"]
+    fn owned_launcher_child() {
+        if std::env::var("TALKQTE_TEST_OWNED_ADMISSION").as_deref() != Ok("1") {
+            return;
+        }
+        use crate::dev_lab_source::{self, Kind, PLAYER};
+        let launch = Settings::read(|key| match key {
+            dev_start::SOURCE_ENV => Some(PLAYER.into()),
+            dev_start::STOP_AFTER_ENV => Some("1".into()),
+            _ => None,
+        })
+        .unwrap();
+        assert!(
+            !crate::dev_stop::supported_source(Some(&launch)),
+            "a display name alone cannot arm Stop"
+        );
+        dev_lab_source::tests::freeze_launcher_fixture(Some(&launch));
+        assert!(crate::dev_stop::supported_source(Some(&launch)));
+        assert!(!crate::dev_stop::supported_source(None));
+        for application in [
+            PLAYER,
+            "QuickTime Player",
+            "TalkQTE Lab Player Helper",
+            "Other Player",
+        ] {
+            for stop_after in [Ok(None), Err(()), Ok(Some(Duration::from_secs(1)))] {
+                let source = Settings {
+                    application: application.into(),
+                    stop_after,
+                };
+                assert_eq!(
+                    crate::dev_stop::supported_source(Some(&source)),
+                    application == PLAYER && matches!(source.stop_after, Ok(Some(_)))
+                );
+            }
+        }
+        let f = fixture(false);
+        f.script.owned_player_fixture.store(true, Ordering::SeqCst);
+        let outcome = f
+            .host
+            .start_by_setting_observed(&launch, waits(), |operation| {
+                assert!(f.host.0.state.try_lock().is_ok());
+                let candidate = f.host.lab_listening_candidate(operation).unwrap();
+                assert_eq!(candidate.kind, Kind::OwnedPlayer);
+                let identity = crate::dev_source_observation::observe(
+                    &f.runtime,
+                    &candidate,
+                    "fictional-owned-run",
+                    || false,
+                )
+                .unwrap();
+                let listening = serde_json::to_value(identity.event("listening")).unwrap();
+                let runtime = f.runtime.lock().unwrap();
+                assert_eq!(listening["application"], PLAYER);
+                assert_eq!(listening["run_id"], "fictional-owned-run");
+                assert_eq!(listening["session"], runtime.engine.session().to_string());
+                assert_eq!(listening["host_operation"], operation);
+                assert_eq!(
+                    listening["live_operation"],
+                    runtime.live.as_ref().unwrap().operation.as_deref().unwrap()
+                );
+                assert!(runtime.live.as_ref().unwrap().microphone.is_none());
+                assert!(
+                    !runtime.engine.has_processing_permission(),
+                    "capture admission grants no provider permission"
+                );
+                let retired = serde_json::to_value(identity.event("retired")).unwrap();
+                for key in [
+                    "application",
+                    "run_id",
+                    "session",
+                    "host_operation",
+                    "live_operation",
+                ] {
+                    assert_eq!(listening[key], retired[key]);
+                }
+                true
+            });
+        assert_eq!(outcome, Outcome::Started { stopped: true });
+        f.wait_phase(Phase::Off);
+        let operation = f.view().operation;
+        assert!(operation.is_none());
+        assert!(!f.runtime.lock().unwrap().source_session_running());
+        assert_eq!(f.script.runs.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
     fn setting_candidate_is_exact_and_runtime_observer_runs_without_host_lock() {
         let f = fixture(false);
         f.script.quicktime_fixture.store(true, Ordering::SeqCst);
@@ -1728,5 +1844,231 @@ mod observation_start {
         f.wait_phase(Phase::Off);
         assert_eq!(f.script.lists.load(Ordering::SeqCst), 1);
         assert_eq!(f.script.runs.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[cfg(all(
+    debug_assertions,
+    target_os = "macos",
+    feature = "native-audio-spike",
+    feature = "lab-evaluator"
+))]
+mod startup_diagnostics {
+    use super::*;
+    use crate::{
+        native_source::Access,
+        timing_log::{SourceStartReason as Reason, SourceStartStage as Stage},
+        LiveUnavailable,
+    };
+    #[derive(Clone)]
+    struct NoAccess;
+    impl Access for NoAccess {
+        fn with<R>(&self, _: impl FnOnce(&mut Runtime) -> R) -> Option<R> {
+            None
+        }
+    }
+    fn reviewed() -> Review {
+        Gate::default()
+            .review(Application::new("fictional-0".into(), "TalkQTE Lab Player".into()).unwrap())
+            .unwrap()
+    }
+    #[test]
+    fn production_session_diagnostics_distinguish_readiness_access_and_start_without_changing_refusals(
+    ) {
+        for (failure, reason) in [
+            (LiveUnavailable::Build, Reason::CloudBuildMissing),
+            (LiveUnavailable::Selection, Reason::CloudNotSelected),
+            (LiveUnavailable::Settings, Reason::CloudSettingsInvalid),
+            (
+                LiveUnavailable::TokenMetadata,
+                Reason::TokenMetadataRejected,
+            ),
+        ] {
+            let runtime = Arc::new(Mutex::new(Runtime::default()));
+            let review = reviewed();
+            let mut events = vec![];
+            let mut microphone_reads = 0;
+            assert_eq!(
+                app::begin_session_checked(
+                    &runtime,
+                    &review.control(),
+                    Err(failure),
+                    || {
+                        microphone_reads += 1;
+                        Some(true)
+                    },
+                    |stage, reason| events.push((stage, reason))
+                ),
+                Err(Failure::Unavailable)
+            );
+            assert_eq!(events, vec![(Stage::CloudReadiness, reason)]);
+            assert_eq!(microphone_reads, 1, "original check order retained");
+            assert!(!runtime.lock().unwrap().source_session_running());
+        }
+        let review = reviewed();
+        let mut events = vec![];
+        assert_eq!(
+            app::begin_session_checked(
+                &NoAccess,
+                &review.control(),
+                Ok(()),
+                || panic!("unavailable Runtime must not inspect microphone"),
+                |s, r| events.push((s, r))
+            ),
+            Err(Failure::Unavailable)
+        );
+        assert_eq!(
+            events,
+            vec![
+                (Stage::CloudReadiness, Reason::Ready),
+                (Stage::RuntimeAccess, Reason::RuntimeUnavailable)
+            ]
+        );
+        for microphone in [None, Some(false)] {
+            let runtime = Arc::new(Mutex::new(Runtime::default()));
+            events.clear();
+            assert_eq!(
+                app::begin_session_checked(
+                    &runtime,
+                    &review.control(),
+                    Ok(()),
+                    || microphone,
+                    |s, r| events.push((s, r))
+                ),
+                Err(Failure::Busy)
+            );
+            assert_eq!(
+                events.last(),
+                Some(&(Stage::RuntimeStart, Reason::MicrophoneBusy))
+            );
+        }
+        let runtime = Arc::new(Mutex::new(Runtime::default()));
+        let cancelled = reviewed();
+        cancelled.control().cancel();
+        events.clear();
+        assert_eq!(
+            app::begin_session_checked(
+                &runtime,
+                &cancelled.control(),
+                Ok(()),
+                || Some(true),
+                |s, r| events.push((s, r))
+            ),
+            Err(Failure::Cancelled)
+        );
+        assert_eq!(
+            events.last(),
+            Some(&(Stage::RuntimeStart, Reason::RuntimeRefused))
+        );
+        events.clear();
+        let session = app::begin_session_checked(
+            &runtime,
+            &review.control(),
+            Ok(()),
+            || Some(true),
+            |s, r| events.push((s, r)),
+        )
+        .unwrap();
+        assert_eq!(
+            events,
+            vec![
+                (Stage::CloudReadiness, Reason::Ready),
+                (Stage::SessionCreated, Reason::Created)
+            ]
+        );
+        {
+            let state = runtime.lock().unwrap();
+            assert!(state.is_source_session(session));
+            assert!(state.live.as_ref().unwrap().microphone.is_none());
+            assert!(!state.engine.has_processing_permission());
+        }
+        runtime
+            .lock()
+            .unwrap()
+            .attach_live_source(&review.control())
+            .unwrap();
+        for loaded in [false, true] {
+            events.clear();
+            let result = app::before_native_start_observed(
+                &runtime,
+                &review.control(),
+                "fictional-0",
+                &["fictional-0"],
+                || {
+                    if loaded {
+                        Ok(7)
+                    } else {
+                        Err("never logged internal detail".into())
+                    }
+                },
+                |s, r| events.push((s, r)),
+            );
+            assert_eq!(
+                result,
+                if loaded {
+                    Ok((0, 7))
+                } else {
+                    Err(Refused::Start(Failure::Unavailable))
+                }
+            );
+            assert_eq!(
+                events,
+                vec![(
+                    Stage::RecognizerLoad,
+                    if loaded {
+                        Reason::Ready
+                    } else {
+                        Reason::LoadRefused
+                    }
+                )]
+            );
+        }
+        review.control().cancel();
+        events.clear();
+        assert_eq!(
+            app::before_native_start_observed(
+                &runtime,
+                &review.control(),
+                "fictional-0",
+                &["fictional-0"],
+                || panic!("cancelled load"),
+                |s, r| events.push((s, r))
+            ),
+            Err::<(usize, ()), _>(Refused::Start(Failure::Cancelled))
+        );
+        assert!(events.is_empty());
+        runtime.lock().unwrap().end_source_session(session);
+    }
+    #[test]
+    fn raw_diagnostic_schema_is_fixed_bounded_and_content_free() {
+        for (stage, reason) in [
+            (Stage::CloudReadiness, Reason::TokenMetadataRejected),
+            (Stage::RuntimeAccess, Reason::RuntimeUnavailable),
+            (Stage::RuntimeStart, Reason::RuntimeRefused),
+            (Stage::SessionCreated, Reason::Created),
+            (Stage::RecognizerLoad, Reason::LoadRefused),
+        ] {
+            let event = crate::timing_log::Event::LabSourceStartup {
+                version: 1,
+                stage,
+                reason,
+            };
+            let encoded = serde_json::to_string(&event).unwrap();
+            assert!(encoded.len() < 256);
+            let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(
+                value
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<std::collections::BTreeSet<_>>(),
+                ["event", "reason", "stage", "version"]
+                    .into_iter()
+                    .collect()
+            );
+            assert_eq!(value["event"], "lab_source_startup");
+            assert_eq!(value["version"], 1);
+        }
     }
 }

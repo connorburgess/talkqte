@@ -1,19 +1,30 @@
+import {
+  SELECTED_CONTEXT,
+  SELECTED_FRAME,
+  SELECTED_DESCRIPTOR,
+  selectedIdentity,
+  selectedContextRequest,
+  selectedPriorContextReply,
+} from './cue-selected-context.mjs';
 // Development-only local transport. The native app remains responsible for
 // permission, heard speech, source validation, freshness and cue publication.
 import { createServer } from 'node:net';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { chmod, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, relative } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { TextDecoder } from 'node:util';
 import {
   createLabOperationGate,
   gateFailure,
 } from './cue-lab-operation-gate.mjs';
 import { systemPromptFor, validateDecision } from './cue-lab.mjs';
+import { outsideCheckout } from './cue-lab-checkout.mjs';
 
 const SCHEMA = 'talkqte.lab.v1';
 const FRAME = 65536;
+const MAX_BUDGET_MS = 10000;
+const SETTLEMENT_MS = 1000;
 const BASE = ['schema', 'type', 'runId', 'sessionId'];
 const CODES = new Set([
   'authentication',
@@ -70,6 +81,54 @@ const wireCode = (category) =>
     closed: 'protocol',
   })[category] ?? 'unavailable';
 
+// A fixed, content-free code for the first check a compact reply fails, so a
+// refused reply can be counted without keeping any of its text.
+export const REPLY_PROBLEMS = Object.freeze([
+  'shape',
+  'action',
+  'source-ids',
+  'cue',
+  'action-without-cue',
+  'show-with-cue',
+  'glance',
+  'size',
+]);
+export function replyProblem(value, input) {
+  const keys = ['action', 'cue', 'sourceIds'];
+  if (!exact(value, keys) || Object.keys(value).length !== keys.length)
+    return 'shape';
+  if (!['show', 'quiet', 'resolved', 'withdraw'].includes(value.action))
+    return 'action';
+  const ids = new Set(input.events.map((event) => event.id));
+  if (
+    !Array.isArray(value.sourceIds) ||
+    value.sourceIds.length < 1 ||
+    value.sourceIds.length > 4 ||
+    new Set(value.sourceIds).size !== value.sourceIds.length ||
+    !value.sourceIds.every((id) => ids.has(id))
+  )
+    return 'source-ids';
+  const existing = input.existingCue !== null;
+  if (['resolved', 'withdraw'].includes(value.action) && !existing)
+    return 'action-without-cue';
+  if (value.action === 'show' && existing) return 'show-with-cue';
+  if (
+    value.action === 'show'
+      ? typeof value.cue !== 'string' ||
+        !value.cue.trim() ||
+        value.cue.length > 240
+      : value.cue !== null
+  )
+    return 'cue';
+  if (Buffer.byteLength(JSON.stringify(value)) > 4096) return 'size';
+  if (value.action === 'show' && value.cue.trim().split(/\s+/u).length > 10)
+    return 'glance';
+  return null;
+}
+// Invalid replies in a row that still end the run: a broken prompt or
+// schema must not run on silently.
+export const INVALID_REPLIES_IN_A_ROW = 3;
+
 export function evaluatorRequest(input) {
   requireThat(
     exact(input, ['events', 'existingCue'], ['userName', 'earlierCues']),
@@ -96,7 +155,10 @@ export function evaluatorRequest(input) {
   if (input.existingCue !== null) {
     const cue = input.existingCue;
     requireThat(
-      exact(cue, ['text', 'sourceIds']) &&
+      // `kind: "asked"`: TalkQTE's own "Asked you" cue, which the model may
+      // only keep or resolve.
+      exact(cue, ['text', 'sourceIds'], ['kind']) &&
+        (cue.kind === undefined || cue.kind === 'asked') &&
         text(cue.text, 240) &&
         Array.isArray(cue.sourceIds) &&
         cue.sourceIds.length >= 1 &&
@@ -161,38 +223,70 @@ export async function openLabBroker({
   signal,
   runId = randomUUID(),
   onTerminal = () => {},
+  sourceSessionMode = 'required',
+  contextPolicy = 'fresh-only',
 } = {}) {
+  const selected = contextPolicy === SELECTED_CONTEXT;
+  const wireSchema = selected ? SELECTED_FRAME : SCHEMA;
+  const identityFields = selected ? selectedIdentity() : {};
+  requireThat(contextPolicy === 'fresh-only' || selected);
+  requireThat(
+    !selected ||
+      (provider?.metadata?.provider === 'anthropic-api' &&
+        Object.entries(identityFields).every(
+          ([key, value]) => provider.metadata[key] === value,
+        )),
+  );
+  requireThat(
+    selected || !Object.hasOwn(provider?.metadata ?? {}, 'contextPolicy'),
+  );
   requireThat(
     provider &&
       typeof provider.request === 'function' &&
       typeof provider.close === 'function' &&
-      ['codex', 'claude-code'].includes(provider.metadata?.provider) &&
+      ['codex', 'claude-code', 'anthropic-api'].includes(
+        provider.metadata?.provider,
+      ) &&
+      // The API route declares its per-run spend cap; the CLIs never do.
+      (provider.metadata.provider === 'anthropic-api') ===
+        Number.isSafeInteger(provider.metadata.spendCapMicroUsd) &&
       text(provider.metadata.model, 100) &&
       text(provider.metadata.effort, 20) &&
+      // The adapter's own deadline is terminal, so it must outlast the largest
+      // per-request budget plus its settlement window; otherwise one slow call
+      // would end the run instead of retiring that request.
+      Number.isSafeInteger(provider.metadata.deadlineMs) &&
+      provider.metadata.deadlineMs > MAX_BUDGET_MS + SETTLEMENT_MS &&
       /^[A-Za-z0-9_-]{1,64}$/.test(runId) &&
-      typeof onTerminal === 'function',
+      typeof onTerminal === 'function' &&
+      ['required', 'legacy-fixture'].includes(sourceSessionMode),
   );
   requireThat(
     Number.isSafeInteger(maxCalls) && maxCalls >= 1 && maxCalls <= 100,
   );
   requireThat(!signal?.aborted);
-  const directory = await mkdtemp(join(tmpdir(), 'tq-lab-'));
-  const checkoutRelation = relative(
-    await realpath(process.cwd()),
-    await realpath(directory),
-  );
-  if (
-    !isAbsolute(directory) ||
-    (!checkoutRelation.startsWith('..') && !isAbsolute(checkoutRelation))
-  ) {
-    await rm(directory, { recursive: true, force: true });
+  // The native descriptor reader requires the socket to be a lexical sibling of
+  // the descriptor path it receives, and the launcher passes that path
+  // canonicalized. Derive both paths from the canonical owned directory, not a
+  // temporary-root alias such as macOS /var -> /private/var.
+  const created = await mkdtemp(join(tmpdir(), 'tq-lab-'));
+  let directory;
+  try {
+    // A relative temporary root is refused before canonicalization makes it
+    // look absolute. The checkout is anchored to the module, not the cwd.
+    requireThat(isAbsolute(created));
+    directory = await realpath(created);
+    requireThat(outsideCheckout(directory));
+    await chmod(directory, 0o700);
+  } catch {
+    await rm(created, { recursive: true, force: true });
     throw gateFailure('protocol');
   }
-  await chmod(directory, 0o700);
   const socketPath = join(directory, 'broker.sock');
   const descriptorPath = join(directory, 'descriptor.json');
   const nonce = randomBytes(32).toString('hex');
   let socket = null,
+    expectedSourceSession = null,
     sessionId = null,
     authenticated = false,
     connected = false,
@@ -209,14 +303,50 @@ export async function openLabBroker({
     playback = null,
     observation = null,
     snapshotRevision = null;
+  // Content-free startup diagnostics: fixed booleans and codes only, never a
+  // path, nonce, frame, provider output or raw error.
+  let clockProbeSent = false,
+    clockSampleReceived = false,
+    firstTerminal = null,
+    startupCause = null;
   const seenRequests = new Set();
   const seenRequestIds = new Set();
+  // Requests retired by a per-request deadline. Late frames for them are
+  // ignored; every count below is content-free.
+  const retiredRequests = new Set();
+  let invalidInARow = 0;
+  const evaluations = {
+    requested: 0,
+    dispatched: 0,
+    retiredBeforeDispatch: 0,
+    resultsSent: 0,
+    deadlineByBroker: 0,
+    deadlineByNative: 0,
+    refusals: 0,
+    outputLimits: 0,
+    // A show while a cue was already on screen, settled as quiet (B11: the
+    // model's "keep it"), and replies the broker's check refused, by the
+    // first check each failed. Each refused reply ends only its request on
+    // the API route; three in a row end the run.
+    showWithCue: 0,
+    // A withdraw of TalkQTE's own "Asked you" cue, settled as quiet.
+    askedKept: 0,
+    invalidReplies: 0,
+    invalidReasons: Object.fromEntries(REPLY_PROBLEMS.map((code) => [code, 0])),
+    verdicts: { current: 0, staleSuccess: 0, expired: 0, failed: 0 },
+    resultActions: { show: 0, quiet: 0, resolved: 0, withdraw: 0 },
+  };
   const clearedCueIds = new Set();
   const send = (type, fields = {}) => {
     requireThat(socket && !socket.destroyed && sessionId !== null);
     const raw = Buffer.from(
-      JSON.stringify({ schema: SCHEMA, type, runId, sessionId, ...fields }) +
-        '\n',
+      JSON.stringify({
+        schema: wireSchema,
+        type,
+        runId,
+        sessionId,
+        ...fields,
+      }) + '\n',
     );
     requireThat(
       raw.length <= FRAME && socket.writableLength + raw.length <= FRAME,
@@ -228,6 +358,7 @@ export async function openLabBroker({
     maxCalls,
     signal,
     onTerminal: (category) => {
+      firstTerminal ??= category;
       observation = null;
       onTerminal(category);
       readyReject(gateFailure(category));
@@ -242,13 +373,18 @@ export async function openLabBroker({
       }
     },
   });
+  // Records only the first broker-observed startup failure, before calibration
+  // and before any other terminal reason; later teardown noise is ignored.
+  const noteStartupCause = (code) => {
+    if (clock === null && !gate.terminal && !closing) startupCause ??= code;
+  };
   const fail = (category = 'protocol') => {
     gate.stop(category);
     if (!authenticated) socket?.destroy();
   };
   const base = (frame) =>
     requireThat(
-      frame.schema === SCHEMA &&
+      frame.schema === wireSchema &&
         frame.runId === runId &&
         frame.sessionId === sessionId,
     );
@@ -276,9 +412,11 @@ export async function openLabBroker({
         seenRequests.size < 100 &&
         Number.isSafeInteger(frame.budgetMs) &&
         frame.budgetMs >= 1 &&
-        frame.budgetMs <= 10000,
+        frame.budgetMs <= MAX_BUDGET_MS,
     );
-    const request = evaluatorRequest(frame.input);
+    const request = selected
+      ? selectedContextRequest(frame.input)
+      : evaluatorRequest(frame.input);
     seenRequests.add(key);
     seenRequestIds.add(frame.requestId);
     let resolveAck, rejectAck;
@@ -296,25 +434,79 @@ export async function openLabBroker({
       resultSent: false,
       ackReceived: false,
       done: null,
+      controller: new AbortController(),
+      retired: null,
+      nativeCancelled: false,
+      dispatched: false,
     };
     evaluation = operation;
+    evaluations.requested++;
     const started = performance.now();
     operation.done = gate
       .run(
         async () => {
-          const result = await gate.request(request);
-          try {
-            validateDecision(result.value, frame.input, { compact: true });
-            requireThat(
-              Buffer.byteLength(JSON.stringify(result.value)) <= 4096,
-            );
-            if (result.value.action === 'show')
-              requireThat(result.value.cue.trim().split(/\s+/u).length <= 10);
-          } catch {
+          // The gate counts a dispatch synchronously when the provider call
+          // starts; a request retired before that spends none.
+          const before = gate.dispatchesUsed;
+          const requested = gate.request(request);
+          if (gate.dispatchesUsed > before) {
+            operation.dispatched = true;
+            evaluations.dispatched++;
+          }
+          const result = await requested;
+          let value = result.value;
+          // With a cue on screen, show is not a valid action. The model
+          // means "keep it" (B11), so it is settled as quiet, keeping the
+          // reply's own sources.
+          // Direct API route only; the subscription routes are unchanged.
+          if (
+            provider.metadata.provider === 'anthropic-api' &&
+            frame.input.existingCue !== null &&
+            object(value) &&
+            value.action === 'show'
+          ) {
+            value = { action: 'quiet', cue: null, sourceIds: value.sourceIds };
+            evaluations.showWithCue++;
+          }
+          // TalkQTE's own "Asked you" cue is not the model's to withdraw:
+          // a withdraw is settled as quiet (keep it), counted.
+          if (
+            provider.metadata.provider === 'anthropic-api' &&
+            frame.input.existingCue?.kind === 'asked' &&
+            object(value) &&
+            value.action === 'withdraw'
+          ) {
+            value = { action: 'quiet', cue: null, sourceIds: value.sourceIds };
+            evaluations.askedKept++;
+          }
+          let problem = selected ? null : replyProblem(value, frame.input);
+          if (problem === null)
+            try {
+              if (selected) selectedPriorContextReply(value, frame.input);
+              else validateDecision(value, frame.input, { compact: true });
+            } catch {
+              problem = 'shape';
+            }
+          if (problem !== null) {
+            evaluations.invalidReplies++;
+            evaluations.invalidReasons[problem]++;
+            invalidInARow++;
+            // Request-scoped on the API route, unless it keeps happening.
+            if (
+              invalidInARow < INVALID_REPLIES_IN_A_ROW &&
+              gate.retireCurrent('invalid-reply')
+            )
+              throw gateFailure('invalid-reply');
+            gate.stop('invalid-reply');
             throw gateFailure('invalid-reply');
           }
+          invalidInARow = 0;
           const elapsedMs = Math.ceil(performance.now() - started);
-          if (elapsedMs > frame.budgetMs) throw gateFailure('deadline');
+          // Over budget by rounding or timer order: retire this request only.
+          if (elapsedMs > frame.budgetMs) {
+            operation.controller.abort();
+            throw gateFailure('cancelled');
+          }
           const usage = Object.fromEntries(
             [
               'input_tokens',
@@ -333,17 +525,27 @@ export async function openLabBroker({
           send('result', {
             requestId: frame.requestId,
             contextRevision: frame.contextRevision,
-            value: result.value,
+            value,
             elapsedMs,
             usage,
           });
           operation.resultSent = true;
+          evaluations.resultsSent++;
+          evaluations.resultActions[value.action]++;
           await gate.settle(() => ack, { deadlineMs: 1000 });
           return result;
         },
-        { role: 'cue-evaluator', deadlineMs: frame.budgetMs },
+        {
+          role: 'cue-evaluator',
+          deadlineMs: frame.budgetMs,
+          scoped: true,
+          signal: operation.controller.signal,
+          onRetire: (reason) => retireEvaluation(operation, reason),
+        },
       )
       .catch((error) => {
+        // A per-request retirement was already reported; the run continues.
+        if (error?.scoped && operation.retired && !gate.terminal) return;
         if (authenticated && socket && !socket.destroyed) {
           try {
             send('failed', {
@@ -360,6 +562,45 @@ export async function openLabBroker({
       .finally(() => {
         if (evaluation === operation) evaluation = null;
       });
+  };
+  // Retires one evaluation without ending the run. The broker's own lease
+  // deadline reports a request-scoped failed/deadline frame; native's scoped
+  // deadline cancel needs no reply.
+  const retireEvaluation = (operation, reason) => {
+    if (operation.retired) return;
+    operation.retired = reason;
+    retiredRequests.add(operation.key);
+    if (!operation.dispatched) evaluations.retiredBeforeDispatch++;
+    if (evaluation === operation) evaluation = null;
+    operation.rejectAck(gateFailure(reason));
+    if (operation.nativeCancelled) {
+      evaluations.deadlineByNative++;
+      return;
+    }
+    // A provider refusal, an API reply that reached its output bound, or one
+    // the broker's check refused, is a recorded non-decision for this
+    // request only. The signed native lab build accepts only `refusal` and
+    // `output_limit` as request-scoped codes, so a refused reply travels as
+    // `refusal`; its true reason is counted above, in invalidReasons.
+    const code =
+      reason === 'refusal' || reason === 'invalid-reply'
+        ? 'refusal'
+        : reason === 'output-limit'
+          ? 'output_limit'
+          : 'deadline';
+    if (reason === 'refusal') evaluations.refusals++;
+    else if (code === 'output_limit') evaluations.outputLimits++;
+    else if (reason !== 'invalid-reply') evaluations.deadlineByBroker++;
+    if (authenticated && socket && !socket.destroyed)
+      try {
+        send('failed', {
+          requestId: operation.requestId,
+          contextRevision: operation.contextRevision,
+          code,
+        });
+      } catch {
+        socket.destroy();
+      }
   };
   const observe = (frame) => {
     requireThat(exact(frame, [...BASE, 'observation']));
@@ -451,11 +692,14 @@ export async function openLabBroker({
           'expectedProvider',
           'expectedModel',
           'expectedEffort',
+          ...Object.keys(identityFields),
         ]) &&
           frame.type === 'hello' &&
-          frame.schema === SCHEMA &&
+          frame.schema === wireSchema &&
           frame.runId === runId &&
           u64(frame.sessionId) &&
+          (sourceSessionMode === 'legacy-fixture' ||
+            frame.sessionId === expectedSourceSession) &&
           /^[a-f0-9]{64}$/.test(frame.nonce) &&
           timingSafeEqual(
             Buffer.from(frame.nonce, 'hex'),
@@ -463,22 +707,50 @@ export async function openLabBroker({
           ) &&
           frame.expectedProvider === provider.metadata.provider &&
           frame.expectedModel === provider.metadata.model &&
-          frame.expectedEffort === provider.metadata.effort,
+          frame.expectedEffort === provider.metadata.effort &&
+          Object.entries(identityFields).every(
+            ([key, value]) => frame[key] === value,
+          ),
       );
       sessionId = frame.sessionId;
       authenticated = true;
       send('ready', {
+        ...identityFields,
         provider: provider.metadata.provider,
         model: provider.metadata.model,
         effort: provider.metadata.effort,
-        dispatchBudgetKind: 'cliDispatchAttempts',
+        // One API dispatch is exactly one HTTP request; a CLI dispatch is a
+        // process attempt that may hide further requests.
+        dispatchBudgetKind:
+          provider.metadata.provider === 'anthropic-api'
+            ? 'apiRequests'
+            : 'cliDispatchAttempts',
         dispatchLimit: maxCalls,
         dispatchesUsed: gate.dispatchesUsed,
+        ...(provider.metadata.provider === 'anthropic-api'
+          ? {
+              spendCapMicroUsd: provider.metadata.spendCapMicroUsd,
+              spendUsedMicroUsd: provider.spentMicroUsd ?? 0,
+            }
+          : {}),
       });
       readyResolve();
       return;
     }
     base(frame);
+    if (frame.type === 'cancel' && frame.reason === 'deadline') {
+      // Native retired one request at its own deadline; not terminal.
+      requireThat(
+        exact(frame, [...BASE, 'reason', 'requestId', 'contextRevision']),
+      );
+      const key = identity(frame);
+      if (gate.terminal || retiredRequests.has(key)) return;
+      requireThat(evaluation && key === evaluation.key);
+      const current = evaluation;
+      current.nativeCancelled = true;
+      current.controller.abort();
+      return;
+    }
     if (frame.type === 'cancel') {
       requireThat(
         exact(frame, [...BASE, 'reason'], ['requestId', 'contextRevision']) &&
@@ -511,11 +783,14 @@ export async function openLabBroker({
           identity(frame) === evaluation.key &&
           evaluation.resultSent &&
           !evaluation.ackReceived &&
-          ['current', 'staleSuccess', 'failed'].includes(frame.verdict) &&
+          ['current', 'staleSuccess', 'expired', 'failed'].includes(
+            frame.verdict,
+          ) &&
           (frame.code === undefined ||
             (frame.verdict === 'failed' && CODES.has(frame.code))),
       );
       evaluation.ackReceived = true;
+      evaluations.verdicts[frame.verdict]++;
       const current = evaluation;
       if (frame.verdict === 'failed')
         current.rejectAck(gateFailure('invalid-reply'));
@@ -536,6 +811,7 @@ export async function openLabBroker({
           frame.probeId === probe.id &&
           ms(frame.nativeSessionElapsedMs),
       );
+      clockSampleReceived = true;
       probe.resolve({
         nativeMs: frame.nativeSessionElapsedMs,
         receivedMs: performance.now(),
@@ -547,6 +823,7 @@ export async function openLabBroker({
   const server = createServer((client) => {
     if (connected || gate.terminal) {
       client.destroy();
+      noteStartupCause('second-connection');
       fail();
       return;
     }
@@ -564,6 +841,7 @@ export async function openLabBroker({
           await receive(frames.shift());
         }
       } catch (error) {
+        noteStartupCause(authenticated ? 'frame-rejected' : 'hello-rejected');
         fail(error.category);
         client.destroy();
       } finally {
@@ -596,27 +874,37 @@ export async function openLabBroker({
         partial = Buffer.concat([partial, chunk.subarray(offset)]);
         if (partial.length && !partialTimer)
           partialTimer = setTimeout(() => {
+            noteStartupCause('frame-invalid');
             fail();
             client.destroy();
           }, 1000);
       } catch {
+        noteStartupCause('frame-invalid');
         fail();
         client.destroy();
       }
     });
-    client.once('error', () => fail());
+    client.once('error', () => {
+      noteStartupCause('peer-error');
+      fail();
+    });
     client.once('close', () => {
       clearTimeout(partialTimer);
+      noteStartupCause(authenticated ? 'peer-closed' : 'closed-before-hello');
       if (!closing) fail();
     });
     client.setTimeout(5000, () => {
       if (!authenticated) {
+        noteStartupCause('hello-timeout');
         fail();
         client.destroy();
       }
     });
   });
-  server.on('error', () => fail());
+  server.on('error', () => {
+    noteStartupCause('listener-error');
+    fail();
+  });
   try {
     await new Promise((resolve, reject) => {
       server.once('error', reject);
@@ -626,7 +914,7 @@ export async function openLabBroker({
     await writeFile(
       descriptorPath,
       JSON.stringify({
-        schema: 'talkqte.lab.descriptor.v1',
+        schema: selected ? SELECTED_DESCRIPTOR : 'talkqte.lab.descriptor.v1',
         runId,
         socketPath,
         nonce,
@@ -636,6 +924,8 @@ export async function openLabBroker({
   } catch {
     socket?.destroy();
     server.close();
+    // Record the setup failure itself before close() would report `closed`.
+    gate.stop('protocol');
     await gate.close();
     await rm(directory, { recursive: true, force: true });
     throw gateFailure('protocol');
@@ -643,12 +933,50 @@ export async function openLabBroker({
   return Object.freeze({
     descriptorPath,
     ready,
+    get evaluationSummary() {
+      return structuredClone(evaluations);
+    },
+    get startupDiagnostics() {
+      return Object.freeze({
+        connectionAccepted: connected,
+        helloAuthenticated: authenticated,
+        clockProbeSent,
+        clockSampleReceived,
+        calibrated: clock !== null,
+        cause: startupCause,
+        terminal: firstTerminal,
+      });
+    },
     gate,
     get observation() {
       return observation === null ? null : structuredClone(observation);
     },
+    expectSourceSession(value) {
+      try {
+        requireThat(
+          sourceSessionMode === 'required' &&
+            value !== '0' &&
+            u64(value) &&
+            !expectedSourceSession &&
+            !authenticated &&
+            !closing &&
+            !gate.terminal,
+        );
+        expectedSourceSession = value;
+      } catch {
+        fail('protocol');
+        throw gateFailure('protocol');
+      }
+    },
     async calibrateClock() {
-      requireThat(authenticated && !probe && !clock && !gate.terminal);
+      requireThat(
+        authenticated &&
+          !probe &&
+          !clock &&
+          !gate.terminal &&
+          (sourceSessionMode === 'legacy-fixture' ||
+            sessionId === expectedSourceSession),
+      );
       const id = randomUUID();
       const sentMs = performance.now();
       let resolve, reject;
@@ -660,19 +988,25 @@ export async function openLabBroker({
       const timer = setTimeout(() => reject(gateFailure('deadline')), 100);
       try {
         send('clock_probe', { probeId: id });
+        clockProbeSent = true;
         const sample = await done;
         const rttMs = sample.receivedMs - sentMs;
         requireThat(rttMs <= 100);
-        clock = {
+        const measured = {
           nativeMs: sample.nativeMs,
           monotonicMs: (sentMs + sample.receivedMs) / 2,
           uncertaintyMs: rttMs / 2,
         };
         requireThat(
-          !playback || clock.uncertaintyMs + playback.uncertaintyMs <= 100,
+          !playback || measured.uncertaintyMs + playback.uncertaintyMs <= 100,
         );
-        return { ...clock };
+        // Only an accepted measurement becomes the run clock.
+        clock = measured;
+        return { ...clock, sessionId };
       } catch (error) {
+        noteStartupCause(
+          error.category === 'deadline' ? 'clock-deadline' : 'clock-rejected',
+        );
         fail(error.category);
         throw gateFailure(gate.terminal ?? 'protocol');
       } finally {

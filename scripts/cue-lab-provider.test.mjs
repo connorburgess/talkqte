@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { openLabProvider, requestClaudeRole } from './cue-lab-provider.mjs';
+import { evaluatorRequest } from './cue-lab-broker.mjs';
 
 const schema = {
   type: 'object',
@@ -255,4 +256,71 @@ test('Claude normalization forwards existing generator/judge output ceilings and
     assert.deepEqual(JSON.parse(forwarded.input).outputSchema, schema);
     assert.throws(() => forwarded.reply({ invalid: true }));
   }
+});
+
+test('a deferred API session opens nothing until open(), refuses requests before it, and is API-only', async () => {
+  let opened = 0;
+  const settings = {
+    provider: 'anthropic-api',
+    model: 'claude-opus-5-5',
+    effort: 'low',
+    maxCalls: 2,
+    deadlineMs: 30000,
+    execution: 'offline-stand-in',
+    environment: {},
+    deferOpen: true,
+    openers: {
+      'anthropic-api': async () => {
+        opened++;
+        return {
+          request: async () => ({
+            value: { action: 'quiet', cue: null, sourceIds: ['s1'] },
+            elapsedMs: 1,
+          }),
+          close: async () => {},
+        };
+      },
+    },
+  };
+  const session = await openLabProvider(settings);
+  assert.equal(opened, 0);
+  assert.equal(session.opened, false);
+  assert.equal(session.metadata.spendCapMicroUsd, 1_000_000);
+  await session.open();
+  await session.open();
+  assert.equal(opened, 1);
+  assert.equal(session.opened, true);
+  await session.close();
+
+  // A request before open() ends the deferred session without opening it.
+  const early = await openLabProvider({ ...settings });
+  await assert.rejects(
+    early.request({
+      role: 'cue-evaluator',
+      ...evaluatorRequest({
+        events: [
+          {
+            id: 's1',
+            speaker: 'Speaker',
+            text: 'A fictional plan for Friday.',
+          },
+        ],
+        existingCue: null,
+      }),
+    }),
+    { category: 'protocol' },
+  );
+  await assert.rejects(early.open());
+  assert.equal(opened, 1);
+  await early.close();
+
+  await assert.rejects(
+    openLabProvider({
+      ...settings,
+      provider: 'codex',
+      model: 'gpt-6.1-sol',
+      openers: { codex: settings.openers['anthropic-api'] },
+    }),
+    { category: 'configuration' },
+  );
 });

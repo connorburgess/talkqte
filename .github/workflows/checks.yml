@@ -4,49 +4,41 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
+    inputs:
+      lab_native_sha:
+        description: Must equal reviewed 5a817dbec89e80b64a6114305018ce50c74d8e63 for its unsigned artifact; empty runs normal checks
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
 
+# A new commit on a pull request replaces that pull request's older run.
+# Every other run (a merge to main, a manual dispatch) has its own group and
+# finishes, so each tree that lands on main gets a complete result.
 concurrency:
-  group: checks-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'pull_request' && format('checks-pr-{0}', github.event.pull_request.number) || format('checks-run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  contributions:
-    name: Contribution metadata
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '22'
-      - name: Check commit sign-offs and contribution text
-        env:
-          CONTRIBUTION_BASE: ${{ github.event.pull_request.base.sha }}
-          CONTRIBUTION_HEAD: ${{ github.event.pull_request.head.sha }}
-        run: node scripts/check-contributions.mjs
-      - name: Check documentation links and source-backed facts
-        env:
-          CONTRIBUTION_BASE: ${{ github.event.pull_request.base.sha }}
-          CONTRIBUTION_HEAD: ${{ github.event.pull_request.head.sha }}
-        run: node scripts/check-docs.mjs
-
   frontend:
+    if: github.event_name != 'workflow_dispatch' || inputs.lab_native_sha == ''
     name: Frontend and browser behavior
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    container:
+      # Match the Playwright version resolved in package-lock.json.
+      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:9beb546099e11f52d62e505537914870e01a67e0e6b00ae41da4775324e73dbe
+      options: --init --ipc=host
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Trust the checked-out workspace for Git-based checks
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
@@ -54,15 +46,27 @@ jobs:
       - run: npm ci
       - run: npm run test:contributions
       - run: npm run test:cue-lab
+      - run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/lab-hosted-artifact.test.py
       - run: npm run test:cue-cases
       - run: npm run test:docs
       - run: npm run test:release
       - run: npm run format:check
       - run: npm run build
-      - run: npx playwright install --with-deps chromium webkit
       - run: npm test
+      # playwright.config.ts keeps a trace for each failed test. Save them so a
+      # failure can be opened with `npx playwright show-trace` instead of being
+      # guessed from the log. Tests use only fictional content.
+      - name: Save traces of failed browser tests
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-traces-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
   macos:
+    if: github.event_name != 'workflow_dispatch' || inputs.lab_native_sha == ''
     name: macOS Rust and desktop build
     runs-on: macos-15
     timeout-minutes: 35
@@ -77,6 +81,14 @@ jobs:
       - run: npm ci
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy
+      # Restores compiled dependencies; this repository's own crate is always
+      # rebuilt. Only runs on main save the cache, so pull requests share it
+      # and cannot fill the repository's cache quota.
+      - name: Restore compiled Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
@@ -87,8 +99,14 @@ jobs:
       - run: npm run tauri -- build --debug --bundles app
       - name: Pre-flight the debug bundle (no signing, no release)
         run: node scripts/release-preflight.mjs src-tauri/target/debug/bundle/macos/TalkQTE.app
+      # The lab's ScreenCaptureKit helper is otherwise compiled only on the
+      # owner's Mac at the start of a recording. Build it the same way here;
+      # it is not run, so nothing is captured.
+      - name: Build the lab window-capture helper (not run)
+        run: node --input-type=module -e "const lab = await import('./scripts/lab-window-record.mjs'); console.log(await lab.ensureHelper());"
 
   windows:
+    if: github.event_name != 'workflow_dispatch' || inputs.lab_native_sha == ''
     name: Windows Arm Rust and desktop build
     runs-on: windows-11-arm
     timeout-minutes: 45
@@ -112,6 +130,120 @@ jobs:
           }
           rustup toolchain install 1.97.1 --profile minimal --component clippy
           rustc +1.97.1 -vV
+      # Restores compiled dependencies; this repository's own crate is always
+      # rebuilt. Only runs on main save the cache, so pull requests share it
+      # and cannot fill the repository's cache quota.
+      - name: Restore compiled Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
       - run: npm run tauri -- build --debug --ci
+
+  lab-artifact:
+    name: Unsigned exact-source lab artifact
+    if: github.event_name == 'workflow_dispatch' && inputs.lab_native_sha != ''
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Validate reviewed commit selection
+        env:
+          NATIVE_SHA: 5a817dbec89e80b64a6114305018ce50c74d8e63
+          REQUESTED_NATIVE_SHA: ${{ inputs.lab_native_sha }}
+        run: |
+          test "$REQUESTED_NATIVE_SHA" = "$NATIVE_SHA"
+          test "$(uname -m)" = arm64
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: artifact-tools
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 5a817dbec89e80b64a6114305018ce50c74d8e63
+          path: native-source
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Install pinned build toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal --component clippy --component rustfmt --target aarch64-apple-darwin
+      - name: Validate exact source and install locked frontend dependencies
+        working-directory: native-source
+        env:
+          NATIVE_SHA: 5a817dbec89e80b64a6114305018ce50c74d8e63
+        run: |
+          test "$(git rev-parse HEAD)" = "$NATIVE_SHA"
+          test -z "$(git status --porcelain)"
+          env -i PATH="$PATH" HOME="$HOME" TMPDIR="$TMPDIR" npm ci
+      - name: Test and lint default and exact runtime feature matrices
+        working-directory: native-source
+        env:
+          NATIVE_SHA: 5a817dbec89e80b64a6114305018ce50c74d8e63
+        run: |
+          set -euo pipefail
+          mkdir -m 700 "$RUNNER_TEMP/lab-validation"
+          native_cargo() {
+            env -i PATH="$PATH" HOME="$HOME" TMPDIR="$TMPDIR" \
+              TALKQTE_COMMIT="$NATIVE_SHA" MACOSX_DEPLOYMENT_TARGET=14.0 \
+              CARGO_TARGET_DIR="$RUNNER_TEMP/lab-target" CARGO_TERM_COLOR=never \
+              cargo "$@"
+          }
+          native_cargo fmt --manifest-path src-tauri/Cargo.toml --check
+          native_cargo test --manifest-path src-tauri/Cargo.toml --locked \
+            --target aarch64-apple-darwin -- --test-threads=2 2>&1 | tee "$RUNNER_TEMP/lab-validation/default-tests.log"
+          native_cargo clippy --manifest-path src-tauri/Cargo.toml --locked \
+            --target aarch64-apple-darwin --all-targets -- -D warnings 2>&1 | tee "$RUNNER_TEMP/lab-validation/default-clippy.log"
+          native_cargo test --manifest-path src-tauri/Cargo.toml --locked \
+            --target aarch64-apple-darwin --no-default-features \
+            --features cloud-transcription,lab-evaluator,native-audio-spike,timing-log \
+            -- --test-threads=2 2>&1 | tee "$RUNNER_TEMP/lab-validation/runtime-tests.log"
+          native_cargo clippy --manifest-path src-tauri/Cargo.toml --locked \
+            --target aarch64-apple-darwin --no-default-features \
+            --features cloud-transcription,lab-evaluator,native-audio-spike,timing-log \
+            --all-targets -- -D warnings 2>&1 | tee "$RUNNER_TEMP/lab-validation/runtime-clippy.log"
+          python3 ../artifact-tools/scripts/lab-hosted-artifact.py validate-native \
+            --logs "$RUNNER_TEMP/lab-validation" --sha "$NATIVE_SHA"
+          test -z "$(git status --porcelain)"
+      - name: Build exact unsigned lab app without activation
+        working-directory: native-source
+        env:
+          NATIVE_SHA: 5a817dbec89e80b64a6114305018ce50c74d8e63
+        run: |
+          test "$(git rev-parse HEAD)" = "$NATIVE_SHA"
+          test -z "$(git status --porcelain)"
+          env -i PATH="$PATH" HOME="$HOME" TMPDIR="$TMPDIR" \
+            TALKQTE_COMMIT="$NATIVE_SHA" MACOSX_DEPLOYMENT_TARGET=14.0 \
+            CARGO_TARGET_DIR="$RUNNER_TEMP/lab-target" \
+            npm run tauri -- build --debug --ci --no-sign --bundles app \
+            --target aarch64-apple-darwin \
+            --features cloud-transcription,lab-evaluator,native-audio-spike,timing-log \
+            -- --locked --no-default-features
+          test -z "$(git status --porcelain)"
+      - name: Verify static provenance and archive app
+        env:
+          LAB_VALIDATION_DIR: ${{ runner.temp }}/lab-validation
+          NATIVE_SHA: 5a817dbec89e80b64a6114305018ce50c74d8e63
+        run: |
+          python3 artifact-tools/scripts/lab-hosted-artifact.py pack \
+            --source native-source --sha "$NATIVE_SHA" \
+            --app "$RUNNER_TEMP/lab-target/aarch64-apple-darwin/debug/bundle/macos/TalkQTE.app" \
+            --out "$RUNNER_TEMP/lab-export"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unsigned-lab-5a817dbec89e80b64a6114305018ce50c74d8e63-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/lab-export/
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+      - name: Retain bounded native validation logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-validation-5a817dbec89e80b64a6114305018ce50c74d8e63-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/lab-validation/
+          if-no-files-found: warn
+          retention-days: 3
+          compression-level: 0

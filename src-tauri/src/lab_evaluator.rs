@@ -26,12 +26,20 @@ use std::{
     time::{Duration, Instant},
 };
 
+const SELECTED_CONTEXT: &str = "selected-prior-v2";
+const SELECTED_INPUT: &str = "selected-prior-context-v2";
+const SELECTED_POLICY: &str = "fictional-lab-selected-prior-v2";
+const SELECTED_PROMPT: &str = "440a3a947d1cf1842a0e844bf447132463d74f4a1d0ab7ab2efd94211c02b636";
+const SELECTED_SCHEMA: &str = "talkqte.lab.selected.v2";
 const SCHEMA: &str = "talkqte.lab.v1";
 const FRAME_LIMIT: usize = 65_536;
 const DEADLINE: Duration = Duration::from_secs(8);
 const IO_SLICE: Duration = Duration::from_millis(20);
 const SETTLEMENT_GRACE: Duration = Duration::from_secs(1);
 const QUEUE: usize = 16;
+// Retired request identities whose late frames are ignored. The broker's
+// dispatch cap is at most 100, so this never drops one in a valid run.
+const RETIRED: usize = 128;
 
 #[derive(Clone, Copy)]
 pub(crate) enum ControlReason {
@@ -63,39 +71,147 @@ pub(crate) struct ClockSample {
 }
 pub(crate) type ClockSampler = Arc<dyn Fn() -> Option<ClockSample> + Send + Sync>;
 
+/// The two lab backends. Each is selected only by its exact launch value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Backend {
+    /// A subscription CLI (Codex or Claude Code) driven by the lab broker.
+    Subscription,
+    /// The owner's Anthropic API key, billed per token, behind a spend cap.
+    Api,
+}
+impl Backend {
+    fn parse(value: Option<&str>) -> Option<Self> {
+        match value {
+            Some("lab-subscription") => Some(Self::Subscription),
+            Some("lab-api") => Some(Self::Api),
+            _ => None,
+        }
+    }
+    fn id(self) -> &'static str {
+        match self {
+            Self::Subscription => "lab-subscription",
+            Self::Api => "lab-api",
+        }
+    }
+}
+
+/// The largest per-run spend cap the native side accepts: one US dollar.
+const MAX_SPEND_CAP_MICRO_USD: u64 = 1_000_000;
+
 #[derive(Clone)]
 struct Settings {
+    selected_prior: bool,
+    /// Selected before registration, never approval or a provider change.
+    bounded_history: bool,
+    attested: Option<(PathBuf, usize)>,
+    backend: Backend,
     descriptor: PathBuf,
     provider: String,
     model: String,
     effort: String,
+    /// The per-run spend cap, for the API backend only.
+    spend_cap_micro_usd: Option<u64>,
 }
 impl Settings {
     fn parse(mut get: impl FnMut(&str) -> Option<String>) -> Result<Self, Failure> {
-        if get("TALKQTE_DEV_CUE_BACKEND").as_deref() != Some("lab-subscription") {
-            return Err(Failure::InvalidInput);
-        }
+        let backend = Backend::parse(get("TALKQTE_DEV_CUE_BACKEND").as_deref())
+            .ok_or(Failure::InvalidInput)?;
+        let context = get("TALKQTE_DEV_LAB_CONTEXT");
+        let bounded_history = context.as_deref() == Some("bounded-history");
+        let attested = if context.as_deref() == Some(crate::selected_attestation::CONTEXT) {
+            let count = match get("TALKQTE_DEV_LAB_REQUIRED_NOTES").as_deref() {
+                Some("0") => 0,
+                Some("1") => 1,
+                _ => return Err(Failure::InvalidInput),
+            };
+            Some((
+                PathBuf::from(get("TALKQTE_DEV_LAB_SCOPE_AUTHORITY").ok_or(Failure::InvalidInput)?),
+                count,
+            ))
+        } else {
+            None
+        };
+        let selected_prior = match context.as_deref() {
+            None => false,
+            Some("bounded-history") if backend == Backend::Api => false,
+            Some(SELECTED_CONTEXT | crate::selected_attestation::CONTEXT)
+                if backend == Backend::Api =>
+            {
+                true
+            }
+            _ => return Err(Failure::InvalidInput),
+        };
         let descriptor =
             PathBuf::from(get("TALKQTE_DEV_LAB_DESCRIPTOR").ok_or(Failure::InvalidInput)?);
         let provider = get("TALKQTE_DEV_LAB_PROVIDER").ok_or(Failure::InvalidInput)?;
         let model = get("TALKQTE_DEV_LAB_MODEL").ok_or(Failure::InvalidInput)?;
         let effort = get("TALKQTE_DEV_LAB_EFFORT").ok_or(Failure::InvalidInput)?;
+        let cap = get("TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD");
         // Pinned per-run identities only. Fable is a separate owner decision.
-        let valid_model = match provider.as_str() {
-            "codex" => model == "gpt-6.1-sol",
-            "claude-code" => matches!(model.as_str(), "claude-opus-5-5" | "claude-haiku-5-5"),
+        // Each provider belongs to exactly one backend.
+        let valid = match (backend, provider.as_str()) {
+            (Backend::Subscription, "codex") => model == "gpt-6.1-sol",
+            (Backend::Subscription, "claude-code") => {
+                matches!(model.as_str(), "claude-opus-5-5" | "claude-haiku-5-5")
+            }
+            (Backend::Api, "anthropic-api") => {
+                matches!(
+                    model.as_str(),
+                    "claude-opus-5-5" | "claude-sonnet-5-5" | "claude-haiku-5-5"
+                ) && effort == "low"
+            }
             _ => false,
         };
-        if !descriptor.is_absolute() || !valid_model || !matches!(effort.as_str(), "low" | "medium")
-        {
+        let spend_cap_micro_usd = match (backend, cap.as_deref()) {
+            (Backend::Api, Some(value)) => Some(parse_cap(value)?),
+            (Backend::Subscription, None) => None,
+            _ => return Err(Failure::InvalidInput),
+        };
+        if !descriptor.is_absolute() || !valid || !matches!(effort.as_str(), "low" | "medium") {
             return Err(Failure::InvalidInput);
         }
         Ok(Self {
+            selected_prior,
+            bounded_history,
+            attested,
+            backend,
             descriptor,
             provider,
             model,
             effort,
+            spend_cap_micro_usd,
         })
+    }
+    fn schema(&self) -> &'static str {
+        if self.attested.is_some() {
+            crate::selected_attestation::WIRE
+        } else if self.selected_prior {
+            SELECTED_SCHEMA
+        } else {
+            SCHEMA
+        }
+    }
+    fn frame(&self, kind: &str, run: &str, session: u64) -> Value {
+        let mut value = frame(kind, run, session);
+        value["schema"] = json!(self.schema());
+        value
+    }
+    fn check(
+        &self,
+        v: &Value,
+        kind: &str,
+        run: &str,
+        session: u64,
+        extra: &[&str],
+    ) -> Result<(), Failure> {
+        check_schema(v, kind, run, session, extra, self.schema())
+    }
+    fn identity(&self) -> Value {
+        let mut value = json!({"contextPolicy":if self.attested.is_some() {crate::selected_attestation::CONTEXT} else {SELECTED_CONTEXT},"inputContract":SELECTED_INPUT,"policyRevision":if self.attested.is_some() {crate::selected_attestation::POLICY} else {SELECTED_POLICY},"promptSha256":SELECTED_PROMPT});
+        if let Some((_, count)) = &self.attested {
+            value["requiredNoteCount"] = json!(count);
+        }
+        value
     }
     fn label(&self) -> &'static str {
         if self.provider == "codex" {
@@ -104,6 +220,35 @@ impl Settings {
             "Claude"
         }
     }
+    /// The broker's dispatch-budget kind this provider must report.
+    fn budget_kind(&self) -> &'static str {
+        match self.backend {
+            Backend::Subscription => "cliDispatchAttempts",
+            Backend::Api => "apiRequests",
+        }
+    }
+}
+
+/// A canonical decimal number of micro-dollars, 1 to `MAX_SPEND_CAP_MICRO_USD`.
+fn parse_cap(value: &str) -> Result<u64, Failure> {
+    if value.is_empty()
+        || value.len() > 7
+        || !value.bytes().all(|b| b.is_ascii_digit())
+        || value.starts_with('0')
+    {
+        return Err(Failure::InvalidInput);
+    }
+    let cap: u64 = value.parse().map_err(|_| Failure::InvalidInput)?;
+    if !(1..=MAX_SPEND_CAP_MICRO_USD).contains(&cap) {
+        return Err(Failure::InvalidInput);
+    }
+    Ok(cap)
+}
+
+/// Dollars for display, to the cent, rounded up so a cap is never understated.
+fn dollars(micro_usd: u64) -> String {
+    let cents = micro_usd.div_ceil(10_000);
+    format!("${}.{:02}", cents / 100, cents % 100)
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -145,7 +290,14 @@ fn descriptor(settings: &Settings) -> Result<Descriptor, Failure> {
         return Err(Failure::Credentials);
     }
     let d: Descriptor = serde_json::from_slice(&bytes).map_err(|_| Failure::InvalidInput)?;
-    if d.schema != "talkqte.lab.descriptor.v1"
+    if d.schema
+        != if settings.attested.is_some() {
+            crate::selected_attestation::DESCRIPTOR
+        } else if settings.selected_prior {
+            "talkqte.lab.selected.descriptor.v2"
+        } else {
+            "talkqte.lab.descriptor.v1"
+        }
         || !identifier(&d.run_id)
         || d.nonce.len() != 64
         || !d
@@ -182,7 +334,20 @@ struct Pending {
     request: Request,
     identity: Identity,
 }
+struct ScopeApproval {
+    session: u64,
+    notes: Value,
+    current: AtomicBool,
+    ready: AtomicBool,
+    proof: Mutex<
+        Option<(
+            crate::selected_attestation::Authority,
+            crate::selected_attestation::Scope,
+        )>,
+    >,
+}
 enum Event {
+    Scope(Arc<ScopeApproval>),
     Evaluate {
         identity: Identity,
         input: Value,
@@ -194,6 +359,7 @@ enum Event {
 }
 struct Link {
     settings: Settings,
+    scope: Mutex<Option<Arc<ScopeApproval>>>,
     tx: SyncSender<Event>,
     terminal: AtomicU8,
     reason: Mutex<ControlReason>,
@@ -234,6 +400,7 @@ impl Link {
         let (tx, rx) = mpsc::sync_channel(QUEUE);
         let link = Arc::new(Self {
             settings,
+            scope: Mutex::new(None),
             tx,
             terminal: AtomicU8::new(0),
             reason: Mutex::new(ControlReason::TransportFailed),
@@ -275,6 +442,12 @@ impl Link {
         })
     }
     fn cancel_reason(&self, reason: ControlReason) {
+        if let Ok(slot) = self.scope.try_lock() {
+            if let Some(scope) = slot.as_ref() {
+                scope.current.store(false, Ordering::Release);
+                scope.ready.store(false, Ordering::Release);
+            }
+        }
         if self.terminal.load(Ordering::Acquire) != 0 {
             return;
         }
@@ -297,8 +470,12 @@ impl Link {
             context: request.context_revision(),
             request: number,
         };
-        let input =
-            serde_json::from_str(&request.prompt_input()?).map_err(|_| Failure::InvalidInput)?;
+        let input = serde_json::from_str(&if self.settings.selected_prior {
+            request.selected_prior_context_input()?
+        } else {
+            request.prompt_input()?
+        })
+        .map_err(|_| Failure::InvalidInput)?;
         {
             let mut pending = self
                 .pending
@@ -329,6 +506,16 @@ impl Link {
         })?;
         loop {
             if cancel.is_cancelled() {
+                if !cancel.is_withdrawn() && self.terminal().is_none() {
+                    // Past the deadline only: the request is retired, not the
+                    // run. The engine settles it as Expired. A result already
+                    // delivered is returned so its action can be logged; the
+                    // engine never applies a reply read after the deadline.
+                    if let Ok(result) = rx.try_recv() {
+                        return result;
+                    }
+                    return Err(Failure::Expired);
+                }
                 self.cancel_reason(ControlReason::TransportFailed);
                 return Err(Failure::Cancelled);
             }
@@ -364,6 +551,63 @@ impl Link {
     }
 }
 impl EvaluationLifecycle for Link {
+    fn required_note_count(&self) -> Option<usize> {
+        self.settings.attested.as_ref().map(|(_, n)| *n)
+    }
+    fn approve_notes(
+        &self,
+        session: u64,
+        notes: &[crate::cue_evaluator::Source],
+    ) -> Result<(), Failure> {
+        if self.settings.attested.is_none() {
+            return Ok(());
+        }
+        let scope = Arc::new(ScopeApproval {
+            session,
+            notes: crate::selected_attestation::projection(notes),
+            current: AtomicBool::new(true),
+            ready: AtomicBool::new(false),
+            proof: Mutex::new(None),
+        });
+        if scope.notes.as_array().map(Vec::len) != self.required_note_count() {
+            return Err(Failure::InvalidInput);
+        }
+        let mut slot = self
+            .scope
+            .try_lock()
+            .map_err(|_| Failure::WorkerUnavailable)?;
+        if slot.is_some() {
+            return Err(Failure::InvalidInput);
+        }
+        *slot = Some(scope.clone());
+        self.session.store(session, Ordering::Release);
+        self.started.store(true, Ordering::Release);
+        self.send(Event::Scope(scope))
+    }
+    fn scope_ready(&self) -> bool {
+        self.settings.attested.is_none()
+            || self
+                .scope
+                .try_lock()
+                .ok()
+                .and_then(|s| s.clone())
+                .is_some_and(|s| {
+                    s.current.load(Ordering::Acquire)
+                        && s.ready.load(Ordering::Acquire)
+                        && self.terminal().is_none()
+                })
+    }
+    fn retire_scope(&self) {
+        if self.settings.attested.is_some() {
+            if let Ok(slot) = self.scope.try_lock() {
+                if let Some(s) = slot.as_ref() {
+                    s.current.store(false, Ordering::Release);
+                    s.ready.store(false, Ordering::Release);
+                }
+            }
+            self.cancel_reason(ControlReason::EligibilityChange);
+        }
+    }
     fn terminal(&self) -> Option<Failure> {
         if self.fault.load(Ordering::Acquire) {
             if let Ok(mut pending) = self.pending.try_lock() {
@@ -536,10 +780,21 @@ impl Reader {
         }
     }
 }
+#[cfg(test)]
 fn check(v: &Value, kind: &str, run: &str, session: u64, extra: &[&str]) -> Result<(), Failure> {
+    check_schema(v, kind, run, session, extra, SCHEMA)
+}
+fn check_schema(
+    v: &Value,
+    kind: &str,
+    run: &str,
+    session: u64,
+    extra: &[&str],
+    schema: &str,
+) -> Result<(), Failure> {
     let keys = ["schema", "type", "runId", "sessionId"];
     let obj = v.as_object().ok_or(Failure::InvalidDecision)?;
-    if v["schema"] != SCHEMA
+    if v["schema"] != schema
         || v["type"] != kind
         || v["runId"] != run
         || !decimal_id(&v["sessionId"], session)
@@ -561,10 +816,77 @@ fn code(v: &Value) -> Failure {
         Some("credentials") => Failure::Credentials,
         Some("usage_limit" | "dispatch_limit") => Failure::UsageLimit,
         Some("deadline") => Failure::Expired,
+        Some("refusal") => Failure::Refused,
+        Some("output_limit") => Failure::OutputLimit,
         Some("invalid_reply" | "protocol") => Failure::InvalidDecision,
         Some("unavailable") => Failure::Unreachable,
         _ => Failure::InvalidDecision,
     }
+}
+
+/// The broker's ready frame must name exactly the launch's provider, model,
+/// effort and budget kind. The API backend also reports its spend cap, which
+/// must equal the cap shown in the confirmation, and what it has used; the
+/// subscription backends must not send either field.
+fn ready_matches_settings(
+    v: &Value,
+    run: &str,
+    session: u64,
+    settings: &Settings,
+) -> Result<(), Failure> {
+    const BASE: [&str; 6] = [
+        "provider",
+        "model",
+        "effort",
+        "dispatchBudgetKind",
+        "dispatchLimit",
+        "dispatchesUsed",
+    ];
+    const SPEND: [&str; 2] = ["spendCapMicroUsd", "spendUsedMicroUsd"];
+    let mut keys: Vec<&str> = match settings.spend_cap_micro_usd {
+        Some(_) => BASE.iter().chain(SPEND.iter()).copied().collect(),
+        None => BASE.to_vec(),
+    };
+    if settings.attested.is_some() {
+        keys.push("requiredNoteCount");
+    }
+    if settings.selected_prior {
+        keys.extend([
+            "contextPolicy",
+            "inputContract",
+            "policyRevision",
+            "promptSha256",
+        ]);
+    }
+    settings.check(v, "ready", run, session, &keys)?;
+    if settings.selected_prior
+        && settings
+            .identity()
+            .as_object()
+            .unwrap()
+            .iter()
+            .any(|(key, value)| &v[key] != value)
+    {
+        return Err(Failure::InvalidDecision);
+    }
+    let spend_ok = match settings.spend_cap_micro_usd {
+        Some(cap) => {
+            v["spendCapMicroUsd"].as_u64() == Some(cap)
+                && v["spendUsedMicroUsd"]
+                    .as_u64()
+                    .is_some_and(|used| used <= cap)
+        }
+        None => true,
+    };
+    if v["provider"] != settings.provider
+        || v["model"] != settings.model
+        || v["effort"] != settings.effort
+        || v["dispatchBudgetKind"] != settings.budget_kind()
+        || !spend_ok
+    {
+        return Err(Failure::InvalidDecision);
+    }
+    Ok(())
 }
 
 // Nonblocking connect: a full Unix listen backlog must not strand a worker.
@@ -658,7 +980,8 @@ fn sample_clock(
     run: &str,
     session: u64,
 ) -> Result<(), Failure> {
-    check(v, "clock_probe", run, session, &["probeId"])?;
+    link.settings
+        .check(v, "clock_probe", run, session, &["probeId"])?;
     let probe = v["probeId"]
         .as_str()
         .filter(|p| identifier(p))
@@ -677,7 +1000,7 @@ fn sample_clock(
     {
         return Err(Failure::InvalidDecision);
     }
-    let mut out = frame("clock_sample", run, session);
+    let mut out = link.settings.frame("clock_sample", run, session);
     out["probeId"] = json!(probe);
     out["nativeSessionElapsedMs"] = json!(sample.elapsed_ms);
     write_frame(stream, &out)?;
@@ -685,15 +1008,39 @@ fn sample_clock(
     Ok(())
 }
 
+// Remembers a retired request so its late frames are ignored, and returns
+// the instant by which the engine must settle it.
+fn retire(
+    retired: &mut std::collections::VecDeque<Identity>,
+    id: &Identity,
+    settle_by: Instant,
+) -> (Identity, Instant) {
+    if retired.len() == RETIRED {
+        retired.pop_front();
+    }
+    retired.push_back(id.clone());
+    (id.clone(), settle_by + SETTLEMENT_GRACE)
+}
+
 fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failure> {
-    let Event::Evaluate {
-        identity,
-        input,
-        until,
-        reply,
-    } = first
-    else {
-        return Err(Failure::InvalidInput);
+    let (identity, until, initial, scope) = match first {
+        Event::Evaluate {
+            identity,
+            input,
+            until,
+            reply,
+        } => (identity, until, Some((input, reply)), None),
+        Event::Scope(scope) => (
+            Identity {
+                session: scope.session,
+                request: 0,
+                context: 0,
+            },
+            Instant::now() + DEADLINE,
+            None,
+            Some(scope),
+        ),
+        _ => return Err(Failure::InvalidInput),
     };
     if link.terminal().is_some() {
         return Err(Failure::Cancelled);
@@ -706,11 +1053,17 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
     stream
         .set_write_timeout(Some(IO_SLICE))
         .map_err(|_| Failure::Unreachable)?;
-    let mut hello = frame("hello", &d.run_id, identity.session);
+    let mut hello = link.settings.frame("hello", &d.run_id, identity.session);
     hello["nonce"] = json!(d.nonce);
     hello["expectedProvider"] = json!(link.settings.provider);
     hello["expectedModel"] = json!(link.settings.model);
     hello["expectedEffort"] = json!(link.settings.effort);
+    if link.settings.selected_prior {
+        hello
+            .as_object_mut()
+            .unwrap()
+            .extend(link.settings.identity().as_object().unwrap().clone());
+    }
     write_frame(&mut stream, &hello)?;
     let mut reader = Reader::default();
     loop {
@@ -718,27 +1071,10 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
             return Err(Failure::Expired);
         }
         if let Some(v) = reader.read(&mut stream)? {
-            check(
-                &v,
-                "ready",
-                &d.run_id,
-                identity.session,
-                &[
-                    "provider",
-                    "model",
-                    "effort",
-                    "dispatchBudgetKind",
-                    "dispatchLimit",
-                    "dispatchesUsed",
-                ],
-            )?;
-            if v["provider"] != link.settings.provider
-                || v["model"] != link.settings.model
-                || v["effort"] != link.settings.effort
-                || v["dispatchBudgetKind"] != "cliDispatchAttempts"
-                || v["dispatchLimit"]
-                    .as_u64()
-                    .is_none_or(|n| n == 0 || n > 100)
+            ready_matches_settings(&v, &d.run_id, identity.session, &link.settings)?;
+            if v["dispatchLimit"]
+                .as_u64()
+                .is_none_or(|n| n == 0 || n > 100)
                 || v["dispatchesUsed"]
                     .as_u64()
                     .zip(v["dispatchLimit"].as_u64())
@@ -750,14 +1086,76 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
         }
     }
     let session = identity.session;
+    if let Some(scope) = &scope {
+        let (path, count) = link
+            .settings
+            .attested
+            .as_ref()
+            .ok_or(Failure::InvalidInput)?;
+        let authority = crate::selected_attestation::read(path)?;
+        if authority.run_id != d.run_id
+            || authority.expected_count != *count
+            || !scope.current.load(Ordering::Acquire)
+        {
+            return Err(Failure::InvalidInput);
+        }
+        let proof = authority.scope(session, &scope.notes)?;
+        let mut out = link.settings.frame("scope_approval", &d.run_id, session);
+        out["scope"] = serde_json::to_value(&proof).map_err(|_| Failure::InvalidInput)?;
+        write_frame(&mut stream, &out)?;
+        loop {
+            if Instant::now() >= until
+                || link.terminal().is_some()
+                || !scope.current.load(Ordering::Acquire)
+            {
+                return Err(Failure::Cancelled);
+            }
+            if let Some(v) = reader.read(&mut stream)? {
+                link.settings
+                    .check(&v, "scope_ready", &d.run_id, session, &["scope"])?;
+                if v["scope"] != out["scope"] {
+                    return Err(Failure::InvalidDecision);
+                }
+                break;
+            }
+        }
+        *scope.proof.lock().map_err(|_| Failure::WorkerUnavailable)? = Some((authority, proof));
+        if link.terminal().is_some() || !scope.current.load(Ordering::Acquire) {
+            return Err(Failure::Cancelled);
+        }
+        scope.ready.store(true, Ordering::Release);
+        out["type"] = json!("scope_current");
+        write_frame(&mut stream, &out)?;
+    }
     let send_eval = |s: &mut UnixStream, id: &Identity, input: Value, until: Instant| {
         let remaining = until.saturating_duration_since(Instant::now()).as_millis() as u64;
         if remaining == 0 {
             return Err(Failure::Expired);
         }
-        let mut v = frame("evaluate", &d.run_id, id.session);
+        let mut v = link.settings.frame("evaluate", &d.run_id, id.session);
         id.add(&mut v);
         v["budgetMs"] = json!(remaining);
+        if link.settings.attested.is_some() {
+            let scope = link
+                .scope
+                .try_lock()
+                .map_err(|_| Failure::WorkerUnavailable)?
+                .clone()
+                .ok_or(Failure::InvalidInput)?;
+            if !scope.current.load(Ordering::Acquire) || !scope.ready.load(Ordering::Acquire) {
+                return Err(Failure::Cancelled);
+            }
+            let slot = scope
+                .proof
+                .try_lock()
+                .map_err(|_| Failure::WorkerUnavailable)?;
+            let (authority, proof) = slot.as_ref().ok_or(Failure::InvalidInput)?;
+            let commitment = authority.commitment(proof, &input["priorNotes"])?;
+            if !crate::selected_attestation::equivalent(&commitment, &proof.commitment) {
+                return Err(Failure::InvalidInput);
+            }
+            v["scope"] = serde_json::to_value(proof).map_err(|_| Failure::InvalidInput)?;
+        }
         v["input"] = input;
         write_frame(s, &v)
     };
@@ -774,13 +1172,57 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
     if link.terminal().is_some() {
         return Err(Failure::Cancelled);
     }
-    send_eval(&mut stream, &identity, input, until)?;
-    let mut active = Some((identity, reply, until));
+    let mut active = if let Some((input, reply)) = initial {
+        send_eval(&mut stream, &identity, input, until)?;
+        Some((identity, reply, until))
+    } else {
+        None
+    };
     let mut awaiting: Option<(Identity, Instant)> = None;
+    // Retired past its deadline; waiting for the engine's Expired settlement
+    // until the instant held here.
+    let mut unsettled: Option<(Identity, Instant)> = None;
+    let mut retired: std::collections::VecDeque<Identity> = Default::default();
+    let same = |a: &Identity, b: &Identity| a.request == b.request && a.context == b.context;
+    let deadline_cancel = |s: &mut UnixStream, id: &Identity| {
+        let mut v = link.settings.frame("cancel", &d.run_id, session);
+        id.add(&mut v);
+        v["reason"] = json!("deadline");
+        write_frame(s, &v)
+    };
     loop {
         // Drain one outbound event before checking terminal so a Rust failed
         // validation verdict is sent before its terminal cancellation.
         match rx.try_recv() {
+            Ok(Event::Settled(id, Settlement::Retired)) => {
+                // The broker ended a refused request; confirm it silently.
+                if id.session != session || !unsettled.as_ref().is_some_and(|(a, _)| same(a, &id)) {
+                    return Err(Failure::InvalidDecision);
+                }
+                unsettled = None;
+            }
+            Ok(Event::Settled(id, Settlement::Expired)) => {
+                // No decision in time. Retire the request and keep the run.
+                if id.session != session {
+                    return Err(Failure::InvalidDecision);
+                }
+                if active.as_ref().is_some_and(|(a, _, _)| same(a, &id)) {
+                    active = None;
+                    retire(&mut retired, &id, Instant::now());
+                    deadline_cancel(&mut stream, &id)?;
+                } else if awaiting.as_ref().is_some_and(|(a, _)| same(a, &id)) {
+                    // The result arrived but the engine read it too late.
+                    awaiting = None;
+                    let mut v = link.settings.frame("settled", &d.run_id, session);
+                    id.add(&mut v);
+                    v["verdict"] = json!("expired");
+                    write_frame(&mut stream, &v)?;
+                } else if unsettled.as_ref().is_some_and(|(a, _)| same(a, &id)) {
+                    unsettled = None;
+                } else {
+                    return Err(Failure::InvalidDecision);
+                }
+            }
             Ok(Event::Settled(id, verdict)) => {
                 let Some((expected, at)) = awaiting.take() else {
                     return Err(Failure::InvalidDecision);
@@ -792,12 +1234,13 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
                 {
                     return Err(Failure::InvalidDecision);
                 }
-                let mut v = frame("settled", &d.run_id, session);
+                let mut v = link.settings.frame("settled", &d.run_id, session);
                 id.add(&mut v);
                 v["verdict"] = json!(match verdict {
                     Settlement::Current => "current",
                     Settlement::StaleSuccess => "staleSuccess",
                     Settlement::Failed => "failed",
+                    Settlement::Expired | Settlement::Retired => unreachable!("handled above"),
                 });
                 write_frame(&mut stream, &v)?;
                 if verdict == Settlement::Failed {
@@ -813,14 +1256,19 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
                 if link.terminal().is_some() {
                     return Err(Failure::Cancelled);
                 }
-                if active.is_some() || awaiting.is_some() || identity.session != session {
+                if active.is_some()
+                    || awaiting.is_some()
+                    || unsettled.is_some()
+                    || identity.session != session
+                {
                     return Err(Failure::InvalidDecision);
                 }
                 send_eval(&mut stream, &identity, input, until)?;
                 active = Some((identity, reply, until));
             }
+            Ok(Event::Scope(_)) => return Err(Failure::InvalidInput),
             Ok(Event::Observation(observation)) => {
-                let mut v = frame("cue_state", &d.run_id, session);
+                let mut v = link.settings.frame("cue_state", &d.run_id, session);
                 v["observation"] = observation;
                 write_frame(&mut stream, &v)?;
             }
@@ -828,7 +1276,7 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
             Err(TryRecvError::Empty) => {}
         }
         if let Some(f) = link.terminal() {
-            let mut v = frame("cancel", &d.run_id, session);
+            let mut v = link.settings.frame("cancel", &d.run_id, session);
             if let Some((id, _, _)) = &active {
                 id.add(&mut v);
             } else if let Some((id, _)) = &awaiting {
@@ -842,12 +1290,17 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
             let _ = write_frame(&mut stream, &v);
             return Err(f);
         }
-        if active
+        if let Some((id, _, at)) = active.take_if(|(_, _, at)| Instant::now() >= *at) {
+            // Native's deadline: end this request's lease, keep the run.
+            unsettled = Some(retire(&mut retired, &id, at));
+            deadline_cancel(&mut stream, &id)?;
+        }
+        if awaiting
             .as_ref()
-            .is_some_and(|(_, _, at)| Instant::now() >= *at)
-            || awaiting
+            .is_some_and(|(_, at)| at.elapsed() > SETTLEMENT_GRACE)
+            || unsettled
                 .as_ref()
-                .is_some_and(|(_, at)| at.elapsed() > SETTLEMENT_GRACE)
+                .is_some_and(|(_, by)| Instant::now() > *by)
         {
             return Err(Failure::Expired);
         }
@@ -856,7 +1309,7 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
         };
         match v["type"].as_str() {
             Some("result") => {
-                check(
+                link.settings.check(
                     &v,
                     "result",
                     &d.run_id,
@@ -869,11 +1322,22 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
                         "usage",
                     ],
                 )?;
-                let (id, reply, _) = active.take().ok_or(Failure::InvalidDecision)?;
-                if !id.matches(&v)
-                    || v["elapsedMs"]
-                        .as_u64()
-                        .is_none_or(|n| n > DEADLINE.as_millis() as u64)
+                if retired.iter().any(|id| id.matches(&v)) {
+                    // A late reply for a retired request is never delivered.
+                    continue;
+                }
+                let (id, reply, until) = active.take().ok_or(Failure::InvalidDecision)?;
+                if !id.matches(&v) {
+                    return Err(Failure::InvalidDecision);
+                }
+                if Instant::now() >= until {
+                    unsettled = Some(retire(&mut retired, &id, until));
+                    deadline_cancel(&mut stream, &id)?;
+                    continue;
+                }
+                if v["elapsedMs"]
+                    .as_u64()
+                    .is_none_or(|n| n > DEADLINE.as_millis() as u64)
                 {
                     return Err(Failure::InvalidDecision);
                 }
@@ -892,28 +1356,60 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
                 if text.len() > crate::cue_evaluator::MAX_REPLY_BYTES {
                     return Err(Failure::InvalidDecision);
                 }
-                awaiting = Some((id, Instant::now()));
-                reply
-                    .try_send(Ok(text))
-                    .map_err(|_| Failure::WorkerUnavailable)?;
+                match reply.try_send(Ok(text)) {
+                    Ok(()) => awaiting = Some((id, Instant::now())),
+                    // The caller already gave up at its deadline.
+                    Err(mpsc::TrySendError::Disconnected(_)) if Instant::now() >= until => {
+                        unsettled = Some(retire(&mut retired, &id, until));
+                        deadline_cancel(&mut stream, &id)?;
+                    }
+                    Err(_) => return Err(Failure::WorkerUnavailable),
+                }
             }
             Some("failed") => {
-                check(
+                link.settings.check(
                     &v,
                     "failed",
                     &d.run_id,
                     session,
                     &["requestId", "contextRevision", "code"],
                 )?;
+                if retired.iter().any(|id| id.matches(&v)) {
+                    continue;
+                }
                 if let Some((id, _, _)) = &active {
                     if !id.matches(&v) {
                         return Err(Failure::InvalidDecision);
                     }
                 }
+                let scoped = match v["code"].as_str() {
+                    Some("refusal") => Some(Failure::Refused),
+                    Some("output_limit") => Some(Failure::OutputLimit),
+                    _ => None,
+                };
+                if let Some(non_decision) = scoped {
+                    // A request-scoped non-decision: retire it now and hand
+                    // it to the engine, which settles it silently.
+                    let (id, reply, _) = active.take().ok_or(Failure::InvalidDecision)?;
+                    unsettled = Some(retire(&mut retired, &id, Instant::now()));
+                    match reply.try_send(Err(non_decision)) {
+                        Ok(()) | Err(mpsc::TrySendError::Disconnected(_)) => {}
+                        Err(_) => return Err(Failure::WorkerUnavailable),
+                    }
+                    continue;
+                }
+                if v["code"] == "deadline" {
+                    // The broker's request-scoped deadline: retire this
+                    // request and wait for native's own expiry to settle it.
+                    let (id, _, until) = active.take().ok_or(Failure::InvalidDecision)?;
+                    unsettled = Some(retire(&mut retired, &id, until.max(Instant::now())));
+                    continue;
+                }
                 return Err(code(&v));
             }
             Some("terminal") => {
-                check(&v, "terminal", &d.run_id, session, &["code", "reason"])?;
+                link.settings
+                    .check(&v, "terminal", &d.run_id, session, &["code", "reason"])?;
                 return Err(code(&v));
             }
             _ => return Err(Failure::InvalidDecision),
@@ -923,6 +1419,8 @@ fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failu
 
 struct Globals {
     selected: bool,
+    /// The backend the launch named, even when the other settings are invalid.
+    backend: Backend,
     settings: Result<Settings, Failure>,
     active: Mutex<Option<Arc<Link>>>,
     sampler: Arc<Mutex<Option<ClockSampler>>>,
@@ -931,8 +1429,16 @@ struct Globals {
 static GLOBALS: OnceLock<Globals> = OnceLock::new();
 pub(crate) fn initialize_from_environment() {
     GLOBALS.get_or_init(|| Globals {
-        selected: std::env::var_os("TALKQTE_DEV_CUE_BACKEND").is_some(),
-        settings: Settings::parse(|k| std::env::var(k).ok()),
+        selected: std::env::var_os("TALKQTE_DEV_CUE_BACKEND").is_some()
+            || std::env::var_os("TALKQTE_DEV_LAB_CONTEXT").is_some(),
+        backend: Backend::parse(std::env::var("TALKQTE_DEV_CUE_BACKEND").ok().as_deref())
+            .unwrap_or(Backend::Subscription),
+        settings: Settings::parse(|k| match std::env::var(k) {
+            Ok(value) => Some(value),
+            Err(std::env::VarError::NotPresent) => None,
+            // Invalid optional context must not silently become fresh-only.
+            Err(std::env::VarError::NotUnicode(_)) => Some(String::new()),
+        }),
         active: Mutex::new(None),
         sampler: Arc::new(Mutex::new(None)),
         fault: Arc::new(AtomicBool::new(false)),
@@ -950,37 +1456,95 @@ pub(crate) fn set_clock_sampler(sampler: ClockSampler) {
         }
     }
 }
-pub(crate) fn connected_engine() -> Engine {
-    let globals = GLOBALS.get();
-    let settings = globals.and_then(|g| g.settings.clone().ok());
-    let label = settings
-        .as_ref()
-        .map_or("Lab subscription", Settings::label);
-    let service = if label == "Codex" {
-        "OpenAI through the lab's Codex subscription CLI"
-    } else {
-        "Anthropic through the lab's Claude subscription CLI"
-    };
-    let policy=format!("Fictional development lab only. Sends recent and new conversation, the optional Your name setting and current/earlier cues to {service}. Never sends audio, prior notes, imported notes or focus lines. Near every transcript line may be sent, a few at a time. Uses an explicitly chosen subscription; no API fallback. The lab shares a CLI-dispatch cap across all roles; underlying provider request count is unobserved. Pause, Dismiss, Off and Stop terminate this strict lab run; Resume does not restart it. Provider retention follows that account's terms. No model cue text is persisted by this client.");
+fn processor_configuration(
+    backend: Backend,
+    settings: Option<&Settings>,
+    transcription: Option<String>,
+    audio_destination: Option<String>,
+) -> Result<ProcessorConfiguration, crate::engine::ProcessingError> {
+    let (label, service, mut policy) = disclosure(backend, settings);
+    if let Some((_, count)) = settings.and_then(|s| s.attested.as_ref()) {
+        policy=format!("{policy} Diagnostic scope requires exactly {count} approved prior notes. Private local count and keyed equality receipts compare this approval with SDK input; they do not prove model use.");
+    }
+    // One review covers both exports when this launch also streams audio.
+    if let Some(transcription) = transcription {
+        policy = format!("{policy} {transcription}");
+    }
     let processor = ProcessorConfiguration::new(
-        "lab-subscription".into(),
+        if settings.is_some_and(|s| s.attested.is_some()) {
+            "lab-api-selected-prior-attested-v1".into()
+        } else if settings.is_some_and(|s| s.selected_prior) {
+            "lab-api-selected-prior-v2".into()
+        } else {
+            backend.id().into()
+        },
         1,
         settings
             .as_ref()
             .map_or("unavailable".into(), |s| s.model.clone()),
-        ProcessingLocation::Hosted {
-            service: service.into(),
+        ProcessingLocation::Hosted { service },
+        if settings.is_some_and(|s| s.attested.is_some()) {
+            crate::selected_attestation::POLICY.into()
+        } else if settings.is_some_and(|s| s.selected_prior) {
+            SELECTED_POLICY.into()
+        } else {
+            "fictional-lab-v1".into()
         },
-        "fictional-lab-v1".into(),
-        ProcessorDisclosure::new(label.into(), policy).unwrap(),
-    )
-    .unwrap()
-    .without_notes()
+        ProcessorDisclosure::new(label.into(), policy)?,
+    )?
+    .with_required_note_count(settings.and_then(|s| s.attested.as_ref().map(|(_, count)| *count)))
     .with_effort(
         settings
             .as_ref()
             .map_or("unavailable".into(), |s| s.effort.clone()),
     );
+    let processor = if settings.is_some_and(|s| s.selected_prior) {
+        processor
+    } else {
+        processor.without_notes()
+    };
+    // The review names where audio goes beside where lines go.
+    let processor = match audio_destination {
+        Some(destination) => processor.with_audio_destination(destination),
+        None => processor,
+    };
+    if settings.is_some_and(|s| s.bounded_history) {
+        processor.with_bounded_transcript_history()
+    } else {
+        Ok(processor)
+    }
+}
+
+pub(crate) fn connected_engine() -> Engine {
+    let globals = GLOBALS.get();
+    let settings = globals.and_then(|g| g.settings.clone().ok());
+    let backend = settings
+        .as_ref()
+        .map(|s| s.backend)
+        .or(globals.map(|g| g.backend))
+        .unwrap_or(Backend::Subscription);
+    let Ok(processor) = processor_configuration(
+        backend,
+        settings.as_ref(),
+        crate::transcription::cloud::review_sentence(),
+        crate::transcription::cloud::audio_destination(),
+    ) else {
+        let processor = ProcessorConfiguration::new(
+            "lab-unavailable".into(),
+            1,
+            "unavailable".into(),
+            ProcessingLocation::OnDevice,
+            "unavailable".into(),
+            ProcessorDisclosure::new(
+                "Lab unavailable".into(),
+                "Invalid processing disclosure; no content is sent.".into(),
+            )
+            .expect("fixed bounded disclosure"),
+        )
+        .expect("fixed bounded configuration")
+        .without_notes();
+        return unavailable(processor);
+    };
     if let (Some(g), Some(settings)) = (globals, settings) {
         let link = Link::new(settings, g.sampler.clone(), g.fault.clone());
         let Ok(mut active) = g.active.try_lock() else {
@@ -998,6 +1562,38 @@ pub(crate) fn connected_engine() -> Engine {
     }
     unavailable(processor)
 }
+/// The name, destination and data policy shown before anything is sent. For
+/// the API backend this review is the per-run confirmation of the export:
+/// it names the destination, what is sent, the billing and the spend cap.
+fn disclosure(backend: Backend, settings: Option<&Settings>) -> (&'static str, String, String) {
+    const TIMING: &str = "A cue reflects speech up to 8 s before it appears; newer speech is checked next. A reply later than 8 s shows nothing and the run continues. Pause, Dismiss, Off, Stop and any other failure end the run; Resume does not restart it.";
+    const NEVER: &str = "Never sends the cue provider audio, prior notes, imported notes or focus lines. Near every transcript line may be sent, a few at a time.";
+    match backend {
+        Backend::Subscription => {
+            let label = settings.map_or("Lab subscription", Settings::label);
+            let service = if label == "Codex" {
+                "OpenAI through the lab's Codex subscription CLI"
+            } else {
+                "Anthropic through the lab's Claude subscription CLI"
+            };
+            let policy = format!("Fictional development lab only. Sends recent and new conversation, the optional Your name setting and current/earlier cues to {service}. {NEVER} Uses an explicitly chosen subscription; no API fallback. The lab shares a CLI-dispatch cap across all roles; underlying provider request count is unobserved. {TIMING} Provider retention follows that account's terms. No model cue text is persisted by this client.");
+            (label, service.into(), policy)
+        }
+        Backend::Api => {
+            let service = "the Anthropic API, with the lab owner's API key (billed per token)";
+            let cap = settings
+                .and_then(|s| s.spend_cap_micro_usd)
+                .map_or("an unset".into(), dollars);
+            if settings.is_some_and(|s| s.selected_prior) {
+                let policy = format!("Fictional development lab only. Sends approved recent/new conversation, optional Your name and current/earlier cues to the Anthropic API. Sends only exact prior-note snapshots approved below: excerpts, titles, source labels, dates and opaque snapshot versions. Snapshots are not verified current. Approving no notes sends none. Import/selection is not processing permission. Changing/removing an approved note requires review. Off/Stop prevent future requests but cannot recall sent requests. No audio or focus lines go to the cue provider. Near every transcript line may be sent, a few at a time. Owner's API key, billed per token; per-run cap {cap}. Broker holds the key and enforces cap/request limit; one request/check, no retries, other model or subscription fallback. App rejects different cap/overspend reports but cannot observe requests. {TIMING} Retention follows API organisation settings. No model cue text persisted by this client.");
+                return ("Claude", service.into(), policy);
+            }
+            let policy = format!("Fictional development lab only. Sends recent and new conversation, the optional Your name setting and current/earlier cues to {service}. {NEVER} Uses the owner's Anthropic API key, billed per token, with a per-run spend cap of {cap}. The lab broker, not this app, holds the key, sends one request per check with no retries or other model, and enforces the cap and the per-run request limit; this app refuses a broker that reports a different cap or more spend than the cap, but cannot see the requests themselves. No subscription fallback. {TIMING} Provider retention follows the API organisation's settings. No model cue text is persisted by this client.");
+            ("Claude", service.into(), policy)
+        }
+    }
+}
+
 fn unavailable(processor: ProcessorConfiguration) -> Engine {
     struct Refuse;
     impl Evaluator for Refuse {
@@ -1034,3 +1630,9 @@ pub(crate) fn cancel_active(reason: ControlReason) {
 #[cfg(test)]
 #[path = "lab_evaluator_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+pub(crate) fn selected_fixture_processor() -> ProcessorConfiguration {
+    let settings = tests::selected_settings();
+    processor_configuration(Backend::Api, Some(&settings), None, None).unwrap()
+}

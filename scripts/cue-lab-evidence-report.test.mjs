@@ -23,6 +23,7 @@ import {
   loadEvidence,
   writeEvidenceReport,
 } from './cue-lab-evidence-report.mjs';
+import { DEEPGRAM_APP_QUERY } from './cue-lab-deepgram.mjs';
 
 const manifest = () => ({
   schema: MANIFEST_SCHEMA,
@@ -778,4 +779,656 @@ test('snapshot row limit keeps unparsed partial count unknown and row count is c
   native.snapshotCoverage.rows = 2;
   await writeFile(f.manifestPath, JSON.stringify(raw), { mode: 0o600 });
   await assert.rejects(loadEvidence(f.manifestPath), /snapshot row count/);
+});
+
+function nativeReport(rows) {
+  const m = manifest();
+  const events = importNativeRows(rows, {
+    runId: m.runId,
+    artifactId: 'native',
+    clockId: 'audio',
+  });
+  m.artifacts.push({
+    id: 'native',
+    kind: 'native-timing',
+    path: 'native.jsonl',
+    clockId: 'audio',
+    bytes: 0,
+    sha256: 'a'.repeat(64),
+  });
+  return buildEvidenceReport(m, events);
+}
+test('an applied lab decision shows how far behind the newest speech it was, per evaluation and per cue', () => {
+  const r = nativeReport([
+    {
+      event: 'evaluation_requested',
+      mono_ms: 100,
+      session: sid,
+      request: 3,
+      through_segment: 't1-0-2',
+    },
+    {
+      event: 'evaluation_result',
+      mono_ms: 6350,
+      session: sid,
+      request: 3,
+      outcome: 'show',
+      latency_ms: 6250,
+      through_segment: 't1-0-4',
+      lag_lines: 2,
+      lag_ms: 6000,
+    },
+    {
+      event: 'cue_decision',
+      mono_ms: 6351,
+      session: sid,
+      request: 3,
+      cue: 7,
+      decider: 'model',
+    },
+    {
+      event: 'evaluation_result',
+      mono_ms: 9000,
+      session: sid,
+      request: 4,
+      outcome: 'stale',
+      latency_ms: 7000,
+      action: 'quiet',
+    },
+  ]);
+  const applied = r.evaluations.find((e) => e.id.endsWith('3'));
+  assert.deepEqual(applied.staleness, {
+    throughSegment: 't1-0-4',
+    lagLines: 2,
+    lagMs: 6000,
+  });
+  assert.equal(applied.unappliedAction, null);
+  const stale = r.evaluations.find((e) => e.id.endsWith('4'));
+  assert.equal(stale.staleness, null);
+  assert.equal(stale.unappliedAction, 'quiet');
+  assert.deepEqual(r.cues[0].staleness, applied.staleness);
+  const md = renderEvidenceMarkdown(r);
+  assert.ok(md.includes('t1-0-4 / 2 / 6000 ms'));
+  assert.ok(md.includes('bounded staleness'));
+});
+test('malformed lab decision fields are refused, never guessed', () => {
+  const base = {
+    event: 'evaluation_result',
+    mono_ms: 1,
+    session: sid,
+    request: 1,
+    latency_ms: 1,
+  };
+  for (const row of [
+    { ...base, outcome: 'show', through_segment: 't1', lag_lines: 1 },
+    {
+      ...base,
+      outcome: 'show',
+      through_segment: 't1',
+      lag_lines: 0,
+      lag_ms: 5,
+    },
+    {
+      ...base,
+      outcome: 'show',
+      through_segment: 't1',
+      lag_lines: -1,
+      lag_ms: 0,
+    },
+    {
+      ...base,
+      outcome: 'stale',
+      through_segment: 't1',
+      lag_lines: 0,
+      lag_ms: 0,
+    },
+    {
+      ...base,
+      outcome: 'stale',
+      action: 'quiet',
+      through_segment: 't1',
+      lag_lines: 0,
+      lag_ms: 0,
+    },
+    { ...base, outcome: 'stale', action: 'explain' },
+  ])
+    assert.throws(() =>
+      importNativeRows([row], {
+        runId: 'fictional-cedar',
+        artifactId: 'native',
+        clockId: 'audio',
+      }),
+    );
+});
+test('an unapplied action is accepted only on stale or timeout results, and segment ids are id-shaped', () => {
+  const load = (row) =>
+    importNativeRows(
+      [
+        {
+          event: 'evaluation_result',
+          mono_ms: 1,
+          session: sid,
+          request: 1,
+          latency_ms: 1,
+          ...row,
+        },
+      ],
+      { runId: 'fictional-cedar', artifactId: 'native', clockId: 'audio' },
+    );
+  assert.equal(
+    load({ outcome: 'failed', failure: 'timeout', action: 'show' })[0].payload
+      .decisionAction,
+    'show',
+  );
+  for (const row of [
+    { outcome: 'show', action: 'show' },
+    { outcome: 'cancelled', action: 'quiet' },
+    { outcome: 'failed', failure: 'unavailable', action: 'quiet' },
+    {
+      outcome: 'show',
+      through_segment: 'a fictional sentence',
+      lag_lines: 0,
+      lag_ms: 0,
+    },
+    { outcome: 'show', through_segment: '', lag_lines: 0, lag_ms: 0 },
+  ])
+    assert.throws(() => load(row));
+});
+
+test('a refused evaluation on the direct API route is its own non-decision outcome', () => {
+  const load = (row) =>
+    importNativeRows(
+      [
+        {
+          event: 'evaluation_result',
+          mono_ms: 1,
+          session: sid,
+          request: 1,
+          latency_ms: 900,
+          ...row,
+        },
+      ],
+      { runId: 'fictional-cedar', artifactId: 'native', clockId: 'audio' },
+    );
+  const [e] = load({ outcome: 'refused' });
+  assert.equal(e.outcome, 'refused');
+  assert.throws(() => load({ outcome: 'refused', action: 'quiet' }));
+  // Native's row for a reply at the output bound, also a non-decision.
+  assert.equal(load({ outcome: 'output_limit' })[0].outcome, 'output_limit');
+  assert.throws(() => load({ outcome: 'output_limit', action: 'show' }));
+  const r = nativeReport([
+    {
+      event: 'evaluation_result',
+      mono_ms: 1,
+      session: sid,
+      request: 1,
+      latency_ms: 900,
+      outcome: 'refused',
+    },
+  ]);
+  assert.equal(r.evaluations[0].outcome, 'refused');
+  const limited = nativeReport([
+    {
+      event: 'evaluation_result',
+      mono_ms: 1,
+      session: sid,
+      request: 1,
+      latency_ms: 900,
+      outcome: 'output_limit',
+    },
+  ]);
+  assert.equal(limited.evaluations[0].outcome, 'output_limit');
+});
+
+// Cloud transcription (#344): settings, stream order against the in-app
+// review, stop codes, audio against the cap and final → line delay.
+const transcriptionSettings = {
+  backend: 'deepgram',
+  minuteCap: 5,
+  grantTtlS: 900,
+  query: DEEPGRAM_APP_QUERY,
+};
+function cloudReport(rows, settings = transcriptionSettings) {
+  const m = manifest();
+  if (settings) m.transcription = settings;
+  const events = importNativeRows(
+    rows.map((r) => ({ ...r })),
+    {
+      runId: m.runId,
+      artifactId: 'native',
+      clockId: 'audio',
+    },
+  );
+  m.artifacts.push({
+    id: 'native',
+    kind: 'native-timing',
+    path: 'native.jsonl',
+    clockId: 'audio',
+    bytes: 0,
+    sha256: 'a'.repeat(64),
+  });
+  return buildEvidenceReport(m, events);
+}
+const cloudRows = ({
+  reviewFirst = true,
+  stop,
+  reviewSession = '2',
+  query = DEEPGRAM_APP_QUERY,
+} = {}) => {
+  const review = {
+    event: 'evaluator',
+    approval: 'review',
+    session: reviewSession,
+    state: 'on',
+    backend: 'lab-api',
+    model: 'claude-opus-5-5',
+    effort: 'low',
+    elapsed_ms: 400,
+    mono_ms: 1400,
+  };
+  const started = {
+    event: 'stt_state',
+    session: '2',
+    state: 'started',
+    audio_ms: 0,
+    mono_ms: 1500,
+  };
+  return [
+    {
+      event: 'session',
+      session: '2',
+      live: true,
+      state: 'started',
+      elapsed_ms: 0,
+      mono_ms: 1000,
+      commit: 'c',
+      features: [],
+    },
+    ...(reviewFirst ? [review, started] : [started, review]),
+    {
+      event: 'stt_state',
+      session: '2',
+      state: 'connected',
+      audio_ms: 0,
+      query,
+      mono_ms: 1600,
+    },
+    {
+      event: 'stt_final',
+      session: '2',
+      seq: 1,
+      start_ms: 2000,
+      end_ms: 4200,
+      untrusted_speaker: 3,
+      mono_ms: 5700,
+    },
+    {
+      event: 'segment',
+      session: '2',
+      id: 'c2-1-1',
+      at_ms: 2000,
+      speaker: 'Speaker',
+      text: 'A fictional plan for Friday.',
+      accepted: true,
+      mono_ms: 5701,
+    },
+    stop ?? {
+      event: 'stt_state',
+      session: '2',
+      state: 'ended',
+      audio_ms: 95000,
+      mono_ms: 9000,
+    },
+  ];
+};
+
+test('cloud transcription evidence records settings, review order, stop, cap and final delay, and no speaker label', () => {
+  const r = cloudReport(cloudRows());
+  const c = r.cloudTranscription;
+  assert.deepEqual(c.settings, transcriptionSettings);
+  assert.equal(c.reviewRowSeen, true);
+  assert.deepEqual(c.streams, [
+    {
+      sessionId: '2',
+      starts: 1,
+      startedAfterReview: true,
+      connected: true,
+      reconnects: [],
+      query: DEEPGRAM_APP_QUERY,
+      queryMatchesExpected: true,
+      dropping: false,
+      stopState: 'ended',
+      stopCode: null,
+      audioMs: 95000,
+    },
+  ]);
+  // The cap covers the whole launch.
+  assert.deepEqual([c.audioMs, c.capMs, c.withinCap], [95000, 300000, true]);
+  // Speech ended at session 4200 ms = mono 5200; the line arrived at 5701.
+  assert.equal(c.finals[0].segmentId, 'c2-1-1');
+  assert.equal(c.finals[0].finalToSegmentMs, 501);
+  assert.equal(c.finalToSegment.maxMs, 501);
+  assert.equal(JSON.stringify(r).includes('untrusted'), false);
+  assert.equal(JSON.stringify(r).includes('Speaker":3'), false);
+  const md = renderEvidenceMarkdown(r);
+  assert.match(md, /### Cloud transcription/);
+  assert.match(md, /mip_opt_out=true/);
+});
+
+test('a stream that started before the review row, and a stop code, are reported as such', () => {
+  const r = cloudReport(
+    cloudRows({
+      reviewFirst: false,
+      stop: {
+        event: 'stt_state',
+        session: '2',
+        state: 'stopped',
+        code: 'cap_reached',
+        audio_ms: 300000,
+        mono_ms: 9000,
+      },
+    }),
+  );
+  const [s] = r.cloudTranscription.streams;
+  assert.equal(s.startedAfterReview, false);
+  assert.deepEqual([s.stopState, s.stopCode], ['stopped', 'cap_reached']);
+  // A review in another session does not approve this one.
+  assert.equal(
+    cloudReport(cloudRows({ reviewSession: '7' })).cloudTranscription.streams[0]
+      .startedAfterReview,
+    false,
+  );
+});
+
+test('the query the app used is reported, and compared with the expected one', () => {
+  const used = DEEPGRAM_APP_QUERY.replace('model=nova-3', 'model=nova-2');
+  const [s] = cloudReport(cloudRows({ query: used })).cloudTranscription
+    .streams;
+  assert.deepEqual([s.query, s.queryMatchesExpected], [used, false]);
+  // A query carrying a credential, or a query on another state, is refused.
+  assert.throws(() =>
+    cloudReport(cloudRows({ query: 'model=nova-3&token=abc' })),
+  );
+  // Only the app's own parameter names are accepted, so no other parameter,
+  // however named, can carry a value into evidence; nor a repeated one.
+  for (const query of [
+    DEEPGRAM_APP_QUERY + '&session_ref=abcdef0123456789',
+    'model=nova-3&model=nova-3',
+  ])
+    assert.throws(() => cloudReport(cloudRows({ query })));
+  assert.throws(() =>
+    cloudReport([
+      {
+        event: 'stt_state',
+        session: '2',
+        state: 'started',
+        audio_ms: 0,
+        query: DEEPGRAM_APP_QUERY,
+      },
+    ]),
+  );
+});
+
+test('a send-queue overflow is reported apart from the stop, and a lab run end is its own code', () => {
+  const rows = cloudRows({
+    stop: {
+      event: 'stt_state',
+      session: '2',
+      state: 'stopped',
+      code: 'lab_ended',
+      audio_ms: 50000,
+      mono_ms: 9000,
+    },
+  });
+  rows.splice(rows.length - 1, 0, {
+    event: 'stt_state',
+    session: '2',
+    state: 'dropping',
+    audio_ms: 40000,
+    mono_ms: 8000,
+  });
+  const [s] = cloudReport(rows).cloudTranscription.streams;
+  assert.deepEqual(
+    [s.dropping, s.stopState, s.stopCode, s.audioMs],
+    [true, 'stopped', 'lab_ended', 50000],
+  );
+});
+
+// A stalled stream replaced once (#357): the reconnecting row, then the
+// new stream's connected row with the same query.
+const reconnected = (query = DEEPGRAM_APP_QUERY) => {
+  const rows = cloudRows();
+  rows.splice(
+    rows.length - 1,
+    0,
+    ...[
+      {
+        event: 'stt_state',
+        session: '2',
+        state: 'reconnecting',
+        code: 'stalled',
+        gap_ms: 2400,
+        audio_ms: 40000,
+        mono_ms: 7000,
+      },
+      {
+        event: 'stt_state',
+        session: '2',
+        state: 'connected',
+        audio_ms: 40000,
+        query,
+        mono_ms: 7400,
+      },
+    ],
+  );
+  return rows;
+};
+
+test('a replaced stream is reported with its code and lost speech, still connected and still running', () => {
+  const [s] = cloudReport(reconnected()).cloudTranscription.streams;
+  assert.deepEqual(
+    [s.connected, s.reconnects, s.queryMatchesExpected, s.stopState],
+    [true, [{ code: 'stalled', gapMs: 2400 }], true, 'ended'],
+  );
+  // A replacement that connected with a different query is not trusted.
+  const [d] = cloudReport(
+    reconnected(
+      DEEPGRAM_APP_QUERY.replace('endpointing=300', 'endpointing=10'),
+    ),
+  ).cloudTranscription.streams;
+  assert.equal(d.query, null);
+});
+
+test('reconnect rows without their code and lost speech, or lost speech on another row, are refused', () => {
+  for (const change of [
+    (r) => delete r.gap_ms,
+    (r) => delete r.code,
+    (r) => (r.gap_ms = -1),
+  ]) {
+    const rows = reconnected();
+    change(rows.find((r) => r.state === 'reconnecting'));
+    assert.throws(() => cloudReport(rows));
+  }
+  const rows = cloudRows();
+  rows.at(-1).gap_ms = 10;
+  assert.throws(() => cloudReport(rows));
+});
+
+test("the app's liveness stop is reported as a stalled stream", () => {
+  const [s] = cloudReport(
+    cloudRows({
+      stop: {
+        event: 'stt_state',
+        session: '2',
+        state: 'stopped',
+        code: 'stalled',
+        audio_ms: 41000,
+        mono_ms: 9000,
+      },
+    }),
+  ).cloudTranscription.streams;
+  assert.deepEqual([s.stopState, s.stopCode], ['stopped', 'stalled']);
+});
+
+test("the app's name setting row is imported as a boolean, never a name", () => {
+  const rows = cloudRows();
+  rows.splice(1, 0, {
+    event: 'user_name_set',
+    session: '2',
+    set: true,
+    name: 'Fictional Freya',
+    mono_ms: 1001,
+  });
+  const events = importNativeRows(rows, {
+    runId: manifest().runId,
+    artifactId: 'native',
+    clockId: 'audio',
+  });
+  const named = events.filter((e) => e.stage === 'settings.user-name');
+  assert.deepEqual(
+    named.map((e) => e.payload),
+    [{ userNameSet: true }],
+  );
+  assert.equal(JSON.stringify(events).includes('Fictional Freya'), false);
+  assert.equal(
+    JSON.stringify(cloudReport(rows)).includes('Fictional Freya'),
+    false,
+  );
+  const bad = cloudRows();
+  bad.splice(1, 0, { event: 'user_name_set', session: '2', set: 'yes' });
+  assert.throws(() => cloudReport(bad));
+});
+
+test('malformed transcription rows and settings are refused, never guessed', () => {
+  for (const row of [
+    { event: 'stt_state', session: '2', state: 'paused', audio_ms: 0 },
+    { event: 'stt_state', session: '2', state: 'stopped', audio_ms: 0 },
+    {
+      event: 'stt_state',
+      session: '2',
+      state: 'stopped',
+      code: 'provider said no',
+      audio_ms: 0,
+    },
+    { event: 'stt_final', session: '2', seq: 1, start_ms: 5, end_ms: 4 },
+    {
+      event: 'evaluator',
+      session: '9',
+      approval: 'implicit',
+      state: 'on',
+      backend: 'lab-api',
+    },
+  ])
+    assert.throws(() => cloudReport([row]));
+  for (const settings of [
+    { ...transcriptionSettings, query: 'model=nova-3' },
+    { ...transcriptionSettings, minuteCap: 61 },
+    { ...transcriptionSettings, token: 'x' },
+  ])
+    assert.throws(() => cloudReport(cloudRows(), settings), {
+      message: /transcription settings/,
+    });
+});
+
+test('source problems and identity-check transitions are reported, with ScreenCaptureKit and TalkQTE causes told apart', () => {
+  const report = (rows) => {
+    const m = manifest();
+    const events = importNativeRows(rows, {
+      runId: m.runId,
+      artifactId: 'native',
+      clockId: 'audio',
+    });
+    m.artifacts.push({
+      id: 'native',
+      kind: 'native-timing',
+      path: 'native.jsonl',
+      clockId: 'audio',
+      bytes: 0,
+      sha256: 'a'.repeat(64),
+    });
+    return buildEvidenceReport(m, events);
+  };
+  // A transient blip during an app switch that recovered: the source held.
+  const held = report([
+    {
+      event: 'lab_source_check',
+      state: 'failing',
+      check: 'running_application',
+      after_ms: 0,
+      mono_ms: 10,
+    },
+    {
+      event: 'lab_source_check',
+      state: 'recovered',
+      check: 'running_application',
+      after_ms: 340,
+      mono_ms: 11,
+    },
+  ]).sourceHealth;
+  assert.equal(held.held, true);
+  // A check that went failing and never recovered did not hold.
+  const unrecovered = report([
+    {
+      event: 'lab_source_check',
+      state: 'failing',
+      check: 'running_application',
+      after_ms: 0,
+      mono_ms: 10,
+    },
+  ]).sourceHealth;
+  assert.equal(unrecovered.held, false);
+  assert.deepEqual(unrecovered.unrecovered, ['running_application']);
+  assert.deepEqual(
+    held.checks.map((c) => [c.state, c.check, c.afterMs]),
+    [
+      ['failing', 'running_application', 0],
+      ['recovered', 'running_application', 340],
+    ],
+  );
+  // RunB07's ending, as the new build labels it, and ScreenCaptureKit's own.
+  const lost = report([
+    {
+      event: 'lab_source_check',
+      state: 'ended',
+      check: 'running_application',
+      after_ms: 2000,
+      mono_ms: 10,
+    },
+    {
+      event: 'source_problem',
+      problem: 'lab_source_lost',
+      mono_ms: 11,
+      detail: 'never reported',
+    },
+    {
+      event: 'source_problem',
+      problem: 'source_gone',
+      os_code: -3815,
+      mono_ms: 12,
+    },
+  ]);
+  assert.equal(lost.sourceHealth.held, false);
+  assert.deepEqual(
+    lost.sourceHealth.problems.map((p) => [p.problem, p.osCode]),
+    [
+      ['lab_source_lost', null],
+      ['source_gone', -3815],
+    ],
+  );
+  assert.equal(JSON.stringify(lost).includes('never reported'), false);
+  assert.match(
+    renderEvidenceMarkdown(lost),
+    /lab_source_lost, source_gone \(-3815\)/,
+  );
+  for (const row of [
+    { event: 'lab_source_check', state: 'paused', check: 'pid', after_ms: 0 },
+    {
+      event: 'lab_source_check',
+      state: 'failing',
+      check: 'Process Gone',
+      after_ms: 0,
+    },
+    { event: 'source_problem', problem: 'Source gone' },
+  ])
+    assert.throws(() => report([row]));
 });

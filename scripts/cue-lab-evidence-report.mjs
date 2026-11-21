@@ -12,6 +12,7 @@ import {
 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMain } from './is-main.mjs';
+import { DEEPGRAM_APP_QUERY, isAllowedSttQuery } from './cue-lab-deepgram.mjs';
 
 export const EVENT_SCHEMA = 'talkqte.lab.evidence.event.v1';
 export const MANIFEST_SCHEMA = 'talkqte.lab.evidence.manifest.v1';
@@ -30,6 +31,18 @@ const STAGES = new Set([
     'settled',
     'result',
   ].map((s) => `evaluator.${s}`),
+  // The native model connection turning on or off, and how it was approved.
+  'evaluator.connection',
+  // A live native session starting: anchors its session clock to mono time.
+  'session.started',
+  // Cloud transcription stream start/stop with its fixed code and audio sent.
+  'transcription.stream',
+  // The native capture source failing (source_problem), and TalkQTE's own
+  // owned-player identity check failing, recovering or ending it.
+  'source.problem',
+  'source.check',
+  // Whether the app's own name setting was in effect for a session.
+  'settings.user-name',
   'cue.decided',
   'cue.published',
   'cue.cleared',
@@ -50,6 +63,10 @@ const OUTCOMES = new Set([
   'failure',
   'stale',
   'cancelled',
+  // Direct API route non-decisions for one request: a provider refusal, and
+  // a reply that reached its output bound (native outcome output_limit).
+  'refused',
+  'output_limit',
   'unknown',
 ]);
 const LABELS = new Set([
@@ -132,7 +149,12 @@ function snapshotCoverage(artifact, manifest) {
     artifact.kind !== 'native-timing' ||
     c.schema !== 'talkqte.lab.timing-snapshot.v1' ||
     c.runId !== manifest.runId ||
-    c.sourceReleaseObserved !== true ||
+    !(c.sourceEnd === 'native-ended'
+      ? c.sourceReleaseObserved === false &&
+        /^[a-z_]{1,40}$/.test(c.nativeEndProblem ?? '')
+      : (c.sourceEnd === undefined || c.sourceEnd === 'released') &&
+        c.sourceReleaseObserved === true &&
+        c.nativeEndProblem === undefined) ||
     c.recorderFinalizationObserved !== true ||
     c.nativeWriterMayRemainOpen !== true ||
     c.completeRunCoverage !== false ||
@@ -165,7 +187,9 @@ function snapshotCoverage(artifact, manifest) {
   return {
     schema: c.schema,
     ...Object.fromEntries(counters.map((k) => [k, c[k]])),
-    sourceReleaseObserved: true,
+    sourceReleaseObserved: c.sourceReleaseObserved,
+    sourceEnd: c.sourceEnd ?? 'released',
+    ...(c.nativeEndProblem ? { nativeEndProblem: c.nativeEndProblem } : {}),
     recorderFinalizationObserved: true,
     nativeWriterMayRemainOpen: true,
     completeRunCoverage: false,
@@ -279,6 +303,22 @@ export function validateManifest(m) {
     (!Array.isArray(m.reviews) || m.reviews.length > 1000)
   )
     fail('invalid reviews');
+  // Cloud transcription settings the launcher used: never the token.
+  if (
+    m.transcription !== undefined &&
+    (!object(m.transcription) ||
+      Object.keys(m.transcription).sort().join() !==
+        'backend,grantTtlS,minuteCap,query' ||
+      m.transcription.backend !== 'deepgram' ||
+      !Number.isSafeInteger(m.transcription.minuteCap) ||
+      m.transcription.minuteCap < 1 ||
+      m.transcription.minuteCap > 60 ||
+      !Number.isSafeInteger(m.transcription.grantTtlS) ||
+      m.transcription.grantTtlS < 300 ||
+      m.transcription.grantTtlS > 3600 ||
+      m.transcription.query !== DEEPGRAM_APP_QUERY)
+  )
+    fail('invalid transcription settings');
   for (const r of m.reviews ?? []) {
     ids(r.ids);
     if (!Array.isArray(r.labels) || r.labels.some((l) => !LABELS.has(l)))
@@ -368,10 +408,129 @@ export function importNativeRows(rows, { runId, artifactId, clockId }) {
         if (r.through_segment !== undefined)
           identity.segmentId = String(r.through_segment);
         break;
-      case 'evaluation_result':
+      case 'evaluation_result': {
         stage = 'evaluator.result';
         outcome = r.outcome === 'failed' ? 'failure' : r.outcome;
         payload = { nativeReportedLatencyMs: r.latency_ms };
+        // Lab-only native fields: `action` on a decision that was not applied
+        // (stale or a late timeout), or the bounded-staleness trio on an
+        // applied decision. Never both; the trio is all-or-nothing.
+        const lag = ['through_segment', 'lag_lines', 'lag_ms'].filter(
+          (k) => r[k] !== undefined,
+        );
+        if (r.action !== undefined) {
+          // Only a decision that was not applied: stale, or read after timeout.
+          if (
+            !DECISION_ACTIONS.has(r.action) ||
+            lag.length ||
+            !(
+              r.outcome === 'stale' ||
+              (r.outcome === 'failed' && r.failure === 'timeout')
+            )
+          )
+            fail('invalid native decision action');
+          payload.decisionAction = r.action;
+        }
+        if (lag.length) {
+          if (
+            lag.length !== 3 ||
+            !DECISION_ACTIONS.has(r.outcome) ||
+            !SEGMENT_ID.test(r.through_segment ?? '') ||
+            !Number.isSafeInteger(r.lag_lines) ||
+            r.lag_lines < 0 ||
+            !Number.isSafeInteger(r.lag_ms) ||
+            r.lag_ms < 0 ||
+            (r.lag_lines === 0 && r.lag_ms !== 0)
+          )
+            fail('invalid native decision staleness');
+          payload.throughSegment = r.through_segment;
+          payload.lagLines = r.lag_lines;
+          payload.lagMs = r.lag_ms;
+        }
+        break;
+      }
+      case 'evaluator':
+        if (
+          !['review', 'launchSetting'].includes(r.approval) ||
+          !['on', 'off'].includes(r.state) ||
+          !/^[A-Za-z0-9._-]{1,64}$/.test(r.backend ?? '')
+        )
+          fail('invalid native connection row');
+        stage = 'evaluator.connection';
+        payload = {
+          approval: r.approval,
+          connectionState: r.state,
+          backend: r.backend,
+        };
+        break;
+      case 'session':
+        if (r.live !== true || r.state !== 'started') continue;
+        if (!number(r.elapsed_ms)) fail('invalid native session row');
+        stage = 'session.started';
+        payload = { sessionElapsedMs: r.elapsed_ms };
+        break;
+      case 'stt_state':
+        if (
+          !STT_STATES.has(r.state) ||
+          (r.code !== undefined && !STT_CODES.has(r.code)) ||
+          ['stopped', 'reconnecting'].includes(r.state) !==
+            (r.code !== undefined) ||
+          (r.state === 'reconnecting'
+            ? !Number.isSafeInteger(r.gap_ms) || r.gap_ms < 0
+            : r.gap_ms !== undefined) ||
+          (r.state === 'connected') !== isAllowedSttQuery(r.query) ||
+          !Number.isSafeInteger(r.audio_ms) ||
+          r.audio_ms < 0
+        )
+          fail('invalid native transcription state row');
+        stage = 'transcription.stream';
+        payload = {
+          sttState: r.state,
+          ...(r.code !== undefined ? { sttCode: r.code } : {}),
+          ...(r.query !== undefined ? { query: r.query } : {}),
+          ...(r.gap_ms !== undefined ? { gapMs: r.gap_ms } : {}),
+          audioMs: r.audio_ms,
+        };
+        break;
+      case 'source_problem':
+        if (
+          !FIXED_LABEL.test(r.problem ?? '') ||
+          (r.os_code !== undefined && !Number.isSafeInteger(r.os_code))
+        )
+          fail('invalid native source problem row');
+        // Only the fixed label and OS code; any detail stays in the original.
+        stage = 'source.problem';
+        payload = {
+          sourceProblem: r.problem,
+          ...(r.os_code !== undefined ? { osCode: r.os_code } : {}),
+        };
+        break;
+      case 'lab_source_check':
+        if (
+          !['failing', 'recovered', 'ended'].includes(r.state) ||
+          !FIXED_LABEL.test(r.check ?? '') ||
+          !Number.isSafeInteger(r.after_ms) ||
+          r.after_ms < 0
+        )
+          fail('invalid native lab source check row');
+        stage = 'source.check';
+        payload = {
+          checkState: r.state,
+          check: r.check,
+          afterMs: r.after_ms,
+        };
+        break;
+      case 'stt_final':
+        if (
+          ![r.seq, r.start_ms, r.end_ms].every(Number.isSafeInteger) ||
+          r.seq < 0 ||
+          r.start_ms < 0 ||
+          r.end_ms < r.start_ms
+        )
+          fail('invalid native transcription final row');
+        // The provider's speaker label is untrusted: never carried forward.
+        stage = 'transcript.finalized';
+        payload = { sttSeq: r.seq, startMs: r.start_ms, endMs: r.end_ms };
         break;
       case 'cue_decision':
         stage = 'cue.decided';
@@ -383,6 +542,12 @@ export function importNativeRows(rows, { runId, artifactId, clockId }) {
         break;
       case 'cue_cleared':
         stage = 'cue.cleared';
+        break;
+      case 'user_name_set':
+        // Whether the app's name setting was in effect (#363); never a name.
+        if (typeof r.set !== 'boolean') fail('invalid native name setting row');
+        stage = 'settings.user-name';
+        payload = { userNameSet: r.set };
         break;
       case 'dropped':
         stage = 'gap';
@@ -477,6 +642,49 @@ const key = (e, kind) =>
   e.ids?.sessionId && e.ids?.[kind]
     ? `${e.ids.sessionId}/${e.ids[kind]}`
     : null;
+const DECISION_ACTIONS = new Set(['show', 'quiet', 'resolved', 'withdraw']);
+// `dropping`: written once when the send queue first overflows.
+const FIXED_LABEL = /^[a-z_]{1,40}$/;
+const STT_STATES = new Set([
+  'started',
+  // Connected to the provider, with the query of the URL actually used.
+  'connected',
+  'dropping',
+  // A failed stream being replaced, with its code and the speech lost.
+  'reconnecting',
+  'finished',
+  'ended',
+  'stopped',
+]);
+const STT_CODES = new Set([
+  'auth',
+  'quota',
+  'rate_limited',
+  'cap_reached',
+  'network',
+  'protocol',
+  'closed',
+  'settings',
+  'withdrawn',
+  'lab_ended',
+  // No reply from the service for 10 s, or a write held over 3 s (#344).
+  'stalled',
+]);
+// Native segment identities such as `t1-0-4`; never free text.
+const SEGMENT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+// How far behind the current transcript an applied lab decision was.
+const staleness = (result) =>
+  result?.payload?.lagLines === undefined
+    ? null
+    : {
+        throughSegment: result.payload.throughSegment,
+        lagLines: result.payload.lagLines,
+        lagMs: result.payload.lagMs,
+      };
+const lagText = (s) =>
+  s
+    ? `${escape(s.throughSegment)} / ${s.lagLines} / ${s.lagMs} ms`
+    : 'not reported';
 const pick = (events, stage) => {
   const found = events.filter((e) => e.stage === stage);
   return found.length === 1 ? found[0] : null;
@@ -484,10 +692,49 @@ const pick = (events, stage) => {
 function safePayload(payload, includeContent) {
   if (!object(payload)) return undefined;
   const result = {};
+  if (DECISION_ACTIONS.has(payload.decisionAction))
+    result.decisionAction = payload.decisionAction;
+  if (
+    SEGMENT_ID.test(payload.throughSegment ?? '') &&
+    Number.isSafeInteger(payload.lagLines) &&
+    Number.isSafeInteger(payload.lagMs)
+  ) {
+    result.throughSegment = payload.throughSegment;
+    result.lagLines = payload.lagLines;
+    result.lagMs = payload.lagMs;
+  }
   if (Number.isSafeInteger(payload.dropped)) result.dropped = payload.dropped;
   if (['phrase_rule', 'model'].includes(payload.decider))
     result.decider = payload.decider;
   if (typeof payload.accepted === 'boolean') result.accepted = payload.accepted;
+  if (typeof payload.userNameSet === 'boolean')
+    result.userNameSet = payload.userNameSet;
+  if (['review', 'launchSetting'].includes(payload.approval))
+    result.approval = payload.approval;
+  if (['on', 'off'].includes(payload.connectionState))
+    result.connectionState = payload.connectionState;
+  if (/^[A-Za-z0-9._-]{1,64}$/.test(payload.backend ?? ''))
+    result.backend = payload.backend;
+  if (STT_STATES.has(payload.sttState)) result.sttState = payload.sttState;
+  if (FIXED_LABEL.test(payload.sourceProblem ?? ''))
+    result.sourceProblem = payload.sourceProblem;
+  if (Number.isSafeInteger(payload.osCode)) result.osCode = payload.osCode;
+  if (['failing', 'recovered', 'ended'].includes(payload.checkState))
+    result.checkState = payload.checkState;
+  if (FIXED_LABEL.test(payload.check ?? '')) result.check = payload.check;
+  if (STT_CODES.has(payload.sttCode)) result.sttCode = payload.sttCode;
+  if (isAllowedSttQuery(payload.query)) result.query = payload.query;
+  for (const k of [
+    'afterMs',
+    'audioMs',
+    'sttSeq',
+    'startMs',
+    'endMs',
+    'sessionElapsedMs',
+    'gapMs',
+  ])
+    if (Number.isSafeInteger(payload[k]) && payload[k] >= 0)
+      result[k] = payload[k];
   if (number(payload.nativeReportedLatencyMs))
     result.nativeReportedLatencyMs = payload.nativeReportedLatencyMs;
   if (includeContent) {
@@ -515,6 +762,182 @@ function safePayload(payload, includeContent) {
       }
   }
   return Object.keys(result).length ? result : undefined;
+}
+// Cloud transcription evidence, from native rows only: the settings used,
+// whether each stream opened only after the in-app review, how it stopped,
+// audio sent against the cap, and each final's delay from its end of speech
+// (session clock, bridged through the session's start row) to the arrival
+// of its transcript line.
+function cloudSummary(events, m) {
+  const streamEvents = events.filter((e) => e.stage === 'transcription.stream');
+  const finals = events.filter((e) => e.stage === 'transcript.finalized');
+  if (!m.transcription && !streamEvents.length && !finals.length) return null;
+  const index = new Map(events.map((e, i) => [e, i]));
+  // The review row carries the same engine session as the stream rows.
+  const firstReview = (sessionId) =>
+    events.findIndex(
+      (e) =>
+        e.stage === 'evaluator.connection' &&
+        e.payload?.approval === 'review' &&
+        e.payload?.connectionState === 'on' &&
+        (sessionId === undefined || e.ids?.sessionId === sessionId),
+    );
+  // The minute cap covers the whole launch: every session and source.
+  const capMs = m.transcription ? m.transcription.minuteCap * 60000 : null;
+  const sessions = [
+    ...new Set(streamEvents.map((e) => e.ids?.sessionId ?? null)),
+  ];
+  const streams = sessions.map((sessionId) => {
+    const own = streamEvents.filter(
+      (e) => (e.ids?.sessionId ?? null) === sessionId,
+    );
+    const starts = own.filter((e) => e.payload?.sttState === 'started');
+    const stops = own.filter(
+      (e) =>
+        !['started', 'connected', 'dropping', 'reconnecting'].includes(
+          e.payload?.sttState,
+        ),
+    );
+    const connected = own.filter((e) => e.payload?.sttState === 'connected');
+    const reconnects = own.filter(
+      (e) => e.payload?.sttState === 'reconnecting',
+    );
+    // Each replacement stream connects again; every connection must use
+    // the same query.
+    const query =
+      connected.length === reconnects.length + 1 &&
+      connected.every((e) => e.payload.query === connected[0].payload.query)
+        ? connected[0].payload.query
+        : null;
+    const last = stops.at(-1) ?? null;
+    const audioMs = Math.max(0, ...own.map((e) => e.payload?.audioMs ?? 0));
+    const review = firstReview(sessionId ?? undefined);
+    return {
+      sessionId,
+      starts: starts.length,
+      startedAfterReview:
+        starts.length > 0 &&
+        review >= 0 &&
+        starts.every((e) => index.get(e) > review),
+      connected: connected.length === reconnects.length + 1,
+      // Replacements of a failed stream (#357): each one's code and the
+      // speech lost with the failed stream.
+      reconnects: reconnects.map((e) => ({
+        code: e.payload.sttCode ?? null,
+        gapMs: e.payload.gapMs ?? null,
+      })),
+      // The query of the URL the app actually used, and whether it is the
+      // one the lab expects (opt-out included).
+      query,
+      queryMatchesExpected:
+        query === null || !m.transcription
+          ? null
+          : query === m.transcription.query,
+      // The send queue overflowed at least once: some audio was not sent.
+      dropping: own.some((e) => e.payload?.sttState === 'dropping'),
+      stopState: last?.payload?.sttState ?? null,
+      stopCode: last?.payload?.sttCode ?? null,
+      audioMs,
+    };
+  });
+  const audioMs = streams.reduce((n, s) => n + s.audioMs, 0);
+  const arrivals = events.filter((e) => e.stage === 'transcript.arrived');
+  const finalRows = finals.map((f) => {
+    const sessionId = f.ids?.sessionId ?? null;
+    const seq = f.payload?.sttSeq;
+    const pattern = new RegExp(`^c${sessionId}-[0-9]+-${seq}$`);
+    const matches = arrivals.filter(
+      (a) => a.ids?.sessionId === sessionId && pattern.test(a.ids?.segmentId),
+    );
+    const arrival = matches.length === 1 ? matches[0] : null;
+    const starts = events.filter(
+      (e) => e.stage === 'session.started' && e.ids?.sessionId === sessionId,
+    );
+    const start = starts.length === 1 ? starts[0] : null;
+    let finalToSegmentMs = null;
+    if (
+      arrival?.timing &&
+      start?.timing &&
+      arrival.timing.clockId === start.timing.clockId &&
+      Number.isSafeInteger(f.payload?.endMs)
+    )
+      finalToSegmentMs =
+        arrival.timing.atMs -
+        (start.timing.atMs +
+          (f.payload.endMs - start.payload.sessionElapsedMs));
+    return {
+      eventId: f.eventId,
+      sessionId,
+      seq: seq ?? null,
+      segmentId: arrival?.ids?.segmentId ?? null,
+      endMs: f.payload?.endMs ?? null,
+      finalToSegmentMs,
+    };
+  });
+  const delays = finalRows
+    .map((r) => r.finalToSegmentMs)
+    .filter((v) => v !== null)
+    .sort((a, b) => a - b);
+  return {
+    settings: m.transcription ? { ...m.transcription } : null,
+    reviewRowSeen: firstReview() >= 0,
+    streams,
+    audioMs,
+    capMs,
+    withinCap: capMs === null ? null : audioMs <= capMs,
+    finals: finalRows,
+    finalToSegment: {
+      count: delays.length,
+      medianMs: delays.length ? delays[Math.floor(delays.length / 2)] : null,
+      maxMs: delays.length ? delays.at(-1) : null,
+      basis:
+        'native session clock bridged through the session start row; about ±2 ms of logging resolution',
+    },
+  };
+}
+/**
+ * Whether the native capture source held: every source problem (with
+ * ScreenCaptureKit's -3815 "source_gone" told apart from TalkQTE's own
+ * "lab_source_lost") and every identity-check transition. It held only if
+ * there was no problem, no check ended it, and every check that went
+ * failing later recovered.
+ */
+export function summarizeSourceHealth(events) {
+  const problems = events
+    .filter((e) => e.stage === 'source.problem')
+    .map((e) => ({
+      eventId: e.eventId,
+      problem: e.payload.sourceProblem,
+      osCode: e.payload.osCode ?? null,
+    }));
+  const checks = events
+    .filter((e) => e.stage === 'source.check')
+    .map((e) => ({
+      eventId: e.eventId,
+      state: e.payload.checkState,
+      check: e.payload.check,
+      afterMs: e.payload.afterMs,
+    }));
+  const open = new Set();
+  for (const c of checks) {
+    if (c.state === 'failing') open.add(c.check);
+    else open.delete(c.check);
+  }
+  return {
+    problems,
+    checks,
+    unrecovered: [...open],
+    held:
+      problems.length === 0 &&
+      !checks.some((c) => c.state === 'ended') &&
+      open.size === 0,
+  };
+}
+/** The same summary straight from parsed native timing rows. */
+export function sourceHealthFromNativeRows(rows, { runId }) {
+  return summarizeSourceHealth(
+    importNativeRows(rows, { runId, artifactId: 'native', clockId: 'native' }),
+  );
 }
 export function buildEvidenceReport(
   manifest,
@@ -622,8 +1045,12 @@ export function buildEvidenceReport(
       ),
       nativeReportedLatencyMs:
         one('evaluator.result')?.payload?.nativeReportedLatencyMs ?? null,
+      unappliedAction: one('evaluator.result')?.payload?.decisionAction ?? null,
+      staleness: staleness(one('evaluator.result')),
     };
   });
+  const cloudTranscription = cloudSummary(events, m);
+  const sourceHealth = summarizeSourceHealth(events);
   const cueRows = [...cues].map(([id, group]) => {
     const published = pick(group, 'cue.published'),
       painted = pick(group, 'video.cue-painted');
@@ -674,6 +1101,7 @@ export function buildEvidenceReport(
         m,
       ),
       publicationToPaint: duration(published, painted, m),
+      staleness: staleness(pick(request, 'evaluator.result')),
       visibleDuration: duration(painted, pick(group, 'video.cue-cleared'), m),
       endToEnd: duration(heard, painted, m),
     };
@@ -802,6 +1230,8 @@ export function buildEvidenceReport(
       ]),
     ),
     transcription,
+    cloudTranscription,
+    sourceHealth,
     evaluations,
     cues: cueRows,
     timeline,
@@ -828,6 +1258,36 @@ const metric = (m) =>
   m.status === 'unknown'
     ? `unknown (${m.reason})`
     : `${Math.round(m.valueMs)} ± ${Math.round(m.uncertaintyMs)} ms${m.status === 'uncertain' ? ' (uncertain order)' : ''}`;
+function cloudMarkdown(c) {
+  return [
+    '### Cloud transcription',
+    '',
+    c.settings
+      ? `Settings: ${escape(c.settings.backend)}, cap ${c.settings.minuteCap} min, grant TTL ${c.settings.grantTtlS} s; expected query: \`${escape(c.settings.query)}\`. The token is not evidence.`
+      : 'Settings: not recorded in the manifest.',
+    '',
+    `In-app review row seen: ${c.reviewRowSeen}.`,
+    '',
+    '| Session | Starts | Started only after its review | Connected | Query used = expected | Send queue overflowed | Reconnects (code, speech lost) | Stop state / code | Audio sent |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    ...c.streams.map(
+      (s) =>
+        `| ${escape(s.sessionId ?? 'unknown')} | ${s.starts} | ${s.startedAfterReview} | ${s.connected} | ${s.queryMatchesExpected ?? 'unknown'} | ${s.dropping} | ${s.reconnects.length ? s.reconnects.map((r) => `${r.code ?? 'unknown'}, ${r.gapMs ?? 'unknown'} ms`).join('; ') : 'none'} | ${s.stopState ?? 'none'} / ${s.stopCode ?? 'none'} | ${s.audioMs} ms |`,
+    ),
+    '',
+    ...c.streams
+      .filter((s) => s.query)
+      .map(
+        (s) =>
+          `Session ${escape(s.sessionId)} query used: \`${escape(s.query)}\``,
+      ),
+    '',
+    `Audio sent this launch: ${c.audioMs} ms against a cap of ${c.capMs ?? 'unknown'} ms (the cap covers every session and source).`,
+    '',
+    `Final end of speech → transcript line: ${c.finalToSegment.count} finals; median ${c.finalToSegment.medianMs ?? 'unknown'} ms, max ${c.finalToSegment.maxMs ?? 'unknown'} ms (${c.finalToSegment.basis}). The provider's speaker label is untrusted and not reported.`,
+    '',
+  ];
+}
 export function renderEvidenceMarkdown(r, { recordingHref } = {}) {
   const time = (e) =>
     e.recording
@@ -871,13 +1331,13 @@ export function renderEvidenceMarkdown(r, { recordingHref } = {}) {
       ? 'Snapshot coverage is independent of emitted event gaps. Each snapshot has completeRunCoverage=false and unknownLateRecords=true; the timeline is incomplete and the native writer may remain open.'
       : 'No snapshot coverage supplied; complete timeline coverage is not established.',
     '',
-    '| Artifact | Copied / cutoff / observed at open (bytes) | Omitted at cutoff / unobserved at open (bytes) | Rows / trailing partial bytes | Row limit / grew during copy |',
-    '| --- | --- | --- | --- | --- |',
+    '| Artifact | Source end | Copied / cutoff / observed at open (bytes) | Omitted at cutoff / unobserved at open (bytes) | Rows / trailing partial bytes | Row limit / grew during copy |',
+    '| --- | --- | --- | --- | --- | --- |',
     ...r.evidence
       .filter((a) => a.snapshotCoverage)
       .map((a) => {
         const c = a.snapshotCoverage;
-        return `| ${escape(a.id)} | ${c.copiedBytes} / ${c.cutoffBytes} / ${c.observedBytesAtOpen} | ${c.omittedBytesAtCutoff} / ${c.unobservedBytesAtOpen} | ${c.rows} / ${c.trailingPartialBytes ?? 'unknown'} | ${c.rowLimitReached} / ${c.grewDuringCopy} |`;
+        return `| ${escape(a.id)} | ${c.sourceEnd === 'native-ended' ? `ended by native (${escape(c.nativeEndProblem)}), not released by Stop` : 'released by Stop'} | ${c.copiedBytes} / ${c.cutoffBytes} / ${c.observedBytesAtOpen} | ${c.omittedBytesAtCutoff} / ${c.unobservedBytesAtOpen} | ${c.rows} / ${c.trailingPartialBytes ?? 'unknown'} | ${c.rowLimitReached} / ${c.grewDuringCopy} |`;
       }),
     '',
     '## Per-take timeline',
@@ -891,19 +1351,28 @@ export function renderEvidenceMarkdown(r, { recordingHref } = {}) {
     '',
     '## Technical measurements',
     '',
-    '| Evaluation | Outcome | Gate wait | Model dispatch → response | Dispatch → returned (includes adapter cleanup) |',
-    '| --- | --- | --- | --- | --- |',
+    '| Evaluation | Outcome | Gate wait | Model dispatch → response | Dispatch → returned (includes adapter cleanup) | Unapplied decision action | Evaluated through / lines behind / ms behind |',
+    '| --- | --- | --- | --- | --- | --- | --- |',
     ...r.evaluations.map(
       (e) =>
-        `| ${escape(e.id)}${e.ambiguous ? ' (ambiguous context)' : ''} | ${e.outcome} | ${metric(e.gateWait)} | ${metric(e.modelDuration)} | ${metric(e.returnedAfterDispatch)} |`,
+        `| ${escape(e.id)}${e.ambiguous ? ' (ambiguous context)' : ''} | ${e.outcome} | ${metric(e.gateWait)} | ${metric(e.modelDuration)} | ${metric(e.returnedAfterDispatch)} | ${e.unappliedAction ?? 'none'} | ${lagText(e.staleness)} |`,
     ),
     '',
-    '| Cue / declared decider | Publication / paint | Validated → published | Visible duration | Heard end → paint |',
-    '| --- | --- | --- | --- | --- |',
+    r.evaluations.some((e) => e.staleness)
+      ? 'Lab decisions may be applied to a transcript that grew while the model replied (bounded staleness, within the native evaluator deadline). Lines and ms behind show how far each applied decision lagged the newest speech; a cue can reflect speech that newer lines already answered.'
+      : 'No applied decision reported staleness fields.',
+    '',
+    '| Cue / declared decider | Publication / paint | Validated → published | Visible duration | Heard end → paint | Evaluated through / lines behind / ms behind |',
+    '| --- | --- | --- | --- | --- | --- |',
     ...r.cues.map(
       (c) =>
-        `| ${escape(c.id)} / ${c.decider} | ${c.publication} / ${c.paint} | ${metric(c.publicationDelay)} | ${metric(c.visibleDuration)} | ${metric(c.endToEnd)} |`,
+        `| ${escape(c.id)} / ${c.decider} | ${c.publication} / ${c.paint} | ${metric(c.publicationDelay)} | ${metric(c.visibleDuration)} | ${metric(c.endToEnd)} | ${lagText(c.staleness)} |`,
     ),
+    '',
+    ...(r.cloudTranscription ? cloudMarkdown(r.cloudTranscription) : []),
+    '### Capture source',
+    '',
+    `Source held to the end: ${r.sourceHealth.held}. Source problems: ${r.sourceHealth.problems.map((p) => `${escape(p.problem)}${p.osCode === null ? '' : ` (${p.osCode})`}`).join(', ') || 'none'}. Unrecovered checks: ${r.sourceHealth.unrecovered.map(escape).join(', ') || 'none'}. Identity-check transitions: ${r.sourceHealth.checks.map((c) => `${c.state} ${escape(c.check)} after ${c.afterMs} ms`).join('; ') || 'none'}.`,
     '',
     '| Transcript event | Heard end → arrival |',
     '| --- | --- |',

@@ -265,3 +265,124 @@ for (const variant of ['deadline', 'stop'])
     ]);
     assert.equal(completed, true);
   });
+
+const abortableRequest = async ({ signal }) =>
+  new Promise((_, reject) =>
+    signal.addEventListener(
+      'abort',
+      () =>
+        reject(
+          Object.assign(new Error('fictional'), { category: 'cancelled' }),
+        ),
+      { once: true },
+    ),
+  );
+
+test('a scoped evaluator deadline retires one lease; an unscoped deadline still ends the gate', async () => {
+  const retired = [];
+  const scoped = setup({ request: abortableRequest });
+  await assert.rejects(
+    scoped.call('cue-evaluator', {
+      deadlineMs: 20,
+      scoped: true,
+      onRetire: (reason) => retired.push(reason),
+    }),
+    (e) => e.category === 'deadline' && e.scoped === true,
+  );
+  assert.deepEqual(retired, ['deadline']);
+  assert.equal(scoped.gate.terminal, null);
+  assert.deepEqual(scoped.terminals, []);
+  assert.equal(scoped.gate.dispatchesUsed, 1);
+  await scoped.gate.close();
+
+  const unscoped = setup({ request: abortableRequest });
+  await assert.rejects(
+    unscoped.call('cue-evaluator', { deadlineMs: 20 }),
+    stopped('deadline'),
+  );
+  assert.equal(unscoped.gate.terminal, 'deadline');
+  await unscoped.gate.close();
+});
+
+test('scoped leases are evaluator-only', async () => {
+  const { gate, call } = setup();
+  await assert.rejects(call('cast', { scoped: true }), stopped('protocol'));
+  assert.equal(gate.terminal, 'protocol');
+  await gate.close();
+});
+
+test('a new evaluator waits behind a retired one; if retired while waiting it spends no dispatch', async () => {
+  let n = 0;
+  let releaseFirst;
+  const { gate } = setup({
+    request: ({ signal }) => {
+      n++;
+      // The first call settles only after an explicit release, after abort.
+      if (n === 1)
+        return new Promise((_, reject) => {
+          signal.addEventListener('abort', () => {
+            releaseFirst = () =>
+              reject(Object.assign(new Error('f'), { category: 'cancelled' }));
+          });
+        });
+      return Promise.resolve({ value: {} });
+    },
+  });
+  const run = (options) =>
+    gate.run(() => gate.request(req('cue-evaluator')), {
+      role: 'cue-evaluator',
+      scoped: true,
+      ...options,
+    });
+  const first = run({ deadlineMs: 10 });
+  await delay(30);
+  // Retired but still settling: a second evaluator may queue behind it.
+  const waitingController = new AbortController();
+  const second = run({ signal: waitingController.signal });
+  waitingController.abort();
+  releaseFirst();
+  await assert.rejects(first, (e) => e.scoped === true);
+  await assert.rejects(second, (e) => e.category === 'cancelled');
+  assert.equal(gate.terminal, null);
+  assert.equal(gate.dispatchesUsed, 1);
+  const third = await run({});
+  assert.deepEqual(third, { value: {} });
+  assert.equal(gate.dispatchesUsed, 2);
+  await gate.close();
+});
+
+test('a queued evaluator retired while waiting frees the queue for the next one at once', async () => {
+  let n = 0;
+  let releaseFirst;
+  const { gate } = setup({
+    request: ({ signal }) => {
+      n++;
+      if (n === 1)
+        return new Promise((_, reject) => {
+          signal.addEventListener('abort', () => {
+            releaseFirst = () =>
+              reject(Object.assign(new Error('f'), { category: 'cancelled' }));
+          });
+        });
+      return Promise.resolve({ value: {} });
+    },
+  });
+  const run = (options) =>
+    gate.run(() => gate.request(req('cue-evaluator')), {
+      role: 'cue-evaluator',
+      scoped: true,
+      ...options,
+    });
+  const first = run({ deadlineMs: 10 });
+  await delay(30);
+  const second = run({ deadlineMs: 10 });
+  await assert.rejects(second, (e) => e.scoped === true);
+  // The first lease is still settling; a third request must still queue.
+  const third = run({});
+  releaseFirst();
+  await assert.rejects(first, (e) => e.scoped === true);
+  assert.deepEqual(await third, { value: {} });
+  assert.equal(gate.terminal, null);
+  assert.equal(gate.dispatchesUsed, 2);
+  await gate.close();
+});

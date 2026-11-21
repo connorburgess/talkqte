@@ -28,6 +28,11 @@ export interface ProcessorSummary {
   dataPolicy: string;
   /** False when the review must not offer prior notes for this processor. */
   acceptsNotes?: boolean;
+  /** Exact count required by an explicitly selected diagnostic. */
+  requiredNoteCount?: 0 | 1;
+  /** Where the session's audio goes for transcription once the review is
+   * approved, when a cloud transcription service is selected. */
+  audioDestination?: string;
 }
 export type ProcessingIssue =
   | 'scopeChanged'
@@ -216,7 +221,7 @@ export function sourceProblem(problem: string | null | undefined) {
     case 'devSettingInvalid':
       return 'TALKQTE_DEV_STOP_AFTER_S must be a whole number of seconds, so the launch setting started nothing.';
     case 'unavailable':
-      return 'Application audio is unavailable. A session from an application needs the speech model installed.';
+      return 'Application audio is unavailable. A session from an application needs live transcription, which this build or launch does not have.';
     default:
       return 'Application audio did not start. Try again.';
   }

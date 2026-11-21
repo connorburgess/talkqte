@@ -36,11 +36,50 @@ pub const ENV: &str = "TALKQTE_TIMING_LOG";
 #[cfg(feature = "timing-log")]
 const QUEUE: usize = 1024;
 
+/// Closed development-source diagnostic vocabulary. No caller-supplied text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceStartStage {
+    CloudReadiness,
+    RuntimeAccess,
+    RuntimeStart,
+    SessionCreated,
+    RecognizerLoad,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceStartReason {
+    Ready,
+    CloudBuildMissing,
+    CloudNotSelected,
+    CloudSettingsInvalid,
+    TokenMetadataRejected,
+    RuntimeUnavailable,
+    RuntimeRefused,
+    MicrophoneBusy,
+    Created,
+    LoadRefused,
+}
+
 /// One timed event. Times named `*_ms` without `wall` or `mono` are on the
 /// engine's session clock.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
+    /// Raw private diagnostic only; existing lifecycle readers ignore this new
+    /// event. It never grants readiness, permission, identity or release.
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    LabSourceStartup {
+        version: u8,
+        stage: SourceStartStage,
+        reason: SourceStartReason,
+    },
     /// Owned development process Stop handshake. Receipt is not release.
     DevStop { run_id: String, step: &'static str },
     /// A session started or ended, with its clock at that moment. Anchors
@@ -126,7 +165,11 @@ pub enum Event {
         elapsed_ms: u64,
     },
     /// What came back: `show`, `quiet`, `resolved`, `withdraw`, `failed`,
-    /// `stale` or `cancelled`, with a fixed failure code when it failed.
+    /// `stale`, `cancelled`, `refused` (the lab provider declined that one
+    /// request) or `output_limit` (its reply ran out of output room), with a
+    /// fixed failure code when it failed.
+    /// `action` is the reply's action code when a decision arrived but was
+    /// not applied: on `stale`, and on a `timeout` read after the deadline.
     EvaluationResult {
         session: u64,
         request: u64,
@@ -134,6 +177,61 @@ pub enum Event {
         latency_ms: u64,
         #[serde(skip_serializing_if = "Option::is_none")]
         failure: Option<&'static str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        action: Option<&'static str>,
+        /// Lab only, on every applied decision (all three together, never
+        /// with `action`): the newest transcript line it was evaluated through
+        /// (`segment.id`); how many lines had arrived after that line when it
+        /// was applied; and the newest of those lines' `at_ms` minus the
+        /// through line's `at_ms` (0 when none). `lag_ms` is unseen speech on
+        /// the session clock, not the reply's latency.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        through_segment: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        lag_lines: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        lag_ms: Option<u64>,
+        elapsed_ms: u64,
+    },
+    /// Cloud transcription started (at review approval), finished, ended, or
+    /// stopped with a fixed failure code. `audio_ms` is audio sent so far.
+    SttState {
+        session: u64,
+        state: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<&'static str>,
+        audio_ms: u64,
+        /// On `connected` only: the query string of the URL the connection
+        /// actually used. The token is never in it; it travels in a header.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
+        /// On `reconnecting` only: session time (ms) whose speech was lost
+        /// with the failed stream, between its last line and its last audio.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        gap_ms: Option<u64>,
+    },
+    /// A cloud transcription final, on the session clock. The provider's
+    /// speaker label is an untrusted guess, recorded here only: it is never
+    /// shown and never sent to a cue model. Its text is in the `segment` row.
+    SttFinal {
+        session: u64,
+        seq: u64,
+        start_ms: u64,
+        end_ms: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        untrusted_speaker: Option<u32>,
+    },
+    /// A model's `show` was not displayed: `slot` (a cue was on screen),
+    /// `asked` (it cites a line that already raised "Asked you"),
+    /// `expired_source` (its newest cited line is 18 s old), `cooldown`,
+    /// `focus` (Focused and not about a focus line), `repeat` (the same cue
+    /// within two minutes), `stale` (no cited line is fresh speech) or
+    /// `stale_request` (the context changed while the model answered). No
+    /// cue text.
+    CueDropped {
+        session: u64,
+        request: u64,
+        reason: &'static str,
         elapsed_ms: u64,
     },
     /// A cue is in the snapshot sent to the companion window. The log cannot
@@ -161,12 +259,12 @@ pub enum Event {
         detail: Option<String>,
     },
     /// An application source's run ended: why, if anything went wrong, and
-    /// how many chunks of its audio were transcribed.
+    /// how many final results its cloud stream returned.
     SourceEnded {
         application: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         problem: Option<String>,
-        recognized_chunks: Option<u64>,
+        transcribed_finals: Option<u64>,
     },
     /// Development builds only: the launch setting naming an application
     /// source acted. `step` is `acknowledged` (the setting stands for the
@@ -193,6 +291,25 @@ pub enum Event {
         live_operation: String,
         session: String,
     },
+    /// Development lab only: TalkQTE's own check of the pinned player
+    /// failed transiently (`failing`, with the check's name), passed again
+    /// (`recovered`, after `after_ms`), or ended the source (`ended`, with
+    /// the check that did, after `after_ms` of failing; 0 for a definitive
+    /// change). The source_problem row that follows says `lab_source_lost`.
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    LabSourceCheck {
+        state: &'static str,
+        check: &'static str,
+        after_ms: u64,
+    },
+    /// Whether the user's name, used to notice questions asked of them, is
+    /// set for this session: at its start and when it changes. Never the name.
+    UserNameSet { session: u64, set: bool },
     /// Lines lost since the last line written, because the queue was full
     /// or a write failed.
     Dropped { count: u64 },
@@ -451,7 +568,7 @@ pub fn commit() -> &'static str {
 /// The Cargo features this build has, among those that change capture.
 pub fn features() -> Vec<&'static str> {
     [
-        ("local-whisper", cfg!(feature = "local-whisper")),
+        ("cloud-transcription", cfg!(feature = "cloud-transcription")),
         ("native-audio-spike", cfg!(feature = "native-audio-spike")),
         ("timing-log", cfg!(feature = "timing-log")),
         ("claude-cli", cfg!(feature = "claude-cli")),
@@ -524,6 +641,8 @@ pub struct Shown {
     pub session: u64,
     pub running: bool,
     pub cue: Option<String>,
+    /// Whether the user's name is set, never the name itself.
+    pub named: bool,
 }
 
 impl Shown {
@@ -532,6 +651,7 @@ impl Shown {
             session: engine.session(),
             running: engine.state.status == Status::Running,
             cue: engine.state.cue.as_ref().map(|cue| cue.id.clone()),
+            named: engine.state.user_name.is_some(),
         }
     }
 }
@@ -561,8 +681,17 @@ pub fn shown_events(before: &Shown, after: &Shown, live: bool, elapsed_ms: u64) 
             });
         }
     }
-    if after.running && (!same_session || !before.running) {
+    let started = after.running && (!same_session || !before.running);
+    if started {
         events.push(session_event(after.session, "started"));
+    }
+    // Whether a name was in effect for the "asked of you" rule: at the start
+    // of each session and whenever it changes during one. Never the name.
+    if after.running && (started || before.named != after.named) {
+        events.push(Event::UserNameSet {
+            session: after.session,
+            set: after.named,
+        });
     }
     if before.cue != after.cue || !same_session {
         if let Some(cue) = &after.cue {
@@ -599,7 +728,7 @@ impl Runtime {
     /// Its callers are the live sinks, which only some builds compile.
     #[cfg_attr(
         not(any(
-            feature = "local-whisper",
+            feature = "cloud-transcription",
             all(target_os = "macos", feature = "native-audio-spike"),
             test
         )),
@@ -669,7 +798,29 @@ mod tests {
                 outcome: "failed",
                 latency_ms: 8_000,
                 failure: Some("timeout"),
+                action: Some("quiet"),
+                through_segment: None,
+                lag_lines: None,
+                lag_ms: None,
                 elapsed_ms: 8_200,
+            },
+            Event::EvaluationResult {
+                session: 3,
+                request: 2,
+                outcome: "show",
+                latency_ms: 6_250,
+                failure: None,
+                action: None,
+                through_segment: Some("w4".into()),
+                lag_lines: Some(2),
+                lag_ms: Some(6_000),
+                elapsed_ms: 15_000,
+            },
+            Event::CueDropped {
+                session: 3,
+                request: 2,
+                reason: "cooldown",
+                elapsed_ms: 9_000,
             },
         ]
         .iter()
@@ -681,6 +832,15 @@ mod tests {
         assert_eq!(lines[1]["through_segment"], "w4");
         assert_eq!(lines[2]["event"], "evaluation_result");
         assert_eq!(lines[2]["failure"], "timeout");
+        assert_eq!(lines[2]["action"], "quiet");
+        assert!(lines[2].get("lag_ms").is_none());
+        assert_eq!(lines[3]["through_segment"], "w4");
+        assert_eq!(lines[3]["lag_lines"], 2);
+        assert_eq!(lines[3]["lag_ms"], 6_000);
+        assert_eq!(lines[4]["event"], "cue_dropped");
+        assert_eq!(lines[4]["request"], 2);
+        assert_eq!(lines[4]["reason"], "cooldown");
+        assert!(lines[4].get("cue").is_none() && lines[4].get("question").is_none());
         for value in &lines {
             assert_eq!(value["wall_ms"], 1);
             assert_eq!(value["mono_ms"], 2);
@@ -726,6 +886,7 @@ mod tests {
             session,
             running,
             cue: cue.map(str::to_owned),
+            named: false,
         }
     }
 
@@ -737,6 +898,7 @@ mod tests {
                 match (&value["event"], &value["state"], &value["cue"]) {
                     (Value::String(name), Value::String(state), _) => format!("{name}:{state}"),
                     (Value::String(name), _, Value::String(cue)) => format!("{name}:{cue}"),
+                    (Value::String(name), _, _) => name.clone(),
                     (name, _, _) => name.to_string(),
                 }
             })
@@ -749,7 +911,7 @@ mod tests {
             (
                 shown(0, false, None),
                 shown(4, true, None),
-                vec!["session:started"],
+                vec!["session:started", "user_name_set"],
             ),
             (
                 shown(4, true, None),
@@ -775,7 +937,12 @@ mod tests {
             (
                 shown(4, true, Some("c")),
                 shown(5, true, None),
-                vec!["session:ended", "cue_cleared:c", "session:started"],
+                vec![
+                    "session:ended",
+                    "cue_cleared:c",
+                    "session:started",
+                    "user_name_set",
+                ],
             ),
         ];
         for (before, after, expected) in steps {
@@ -786,6 +953,51 @@ mod tests {
         let value = serde_json::to_value(started).unwrap();
         assert_eq!(value["commit"], commit());
         assert!(value["features"].is_array());
+    }
+
+    #[test]
+    fn whether_a_name_is_set_is_logged_at_session_start_and_on_change_but_never_the_name() {
+        let named = |session, running| Shown {
+            named: true,
+            ..shown(session, running, None)
+        };
+        let row = |events: Vec<Event>| {
+            events
+                .into_iter()
+                .map(|event| serde_json::to_value(event).unwrap())
+                .find(|value| value["event"] == "user_name_set")
+        };
+        let at_start = row(shown_events(
+            &shown(0, false, None),
+            &named(4, true),
+            true,
+            0,
+        ))
+        .unwrap();
+        assert_eq!(at_start["set"], true);
+        assert_eq!(at_start["session"], 4);
+        let cleared = row(shown_events(
+            &named(4, true),
+            &shown(4, true, None),
+            true,
+            0,
+        ))
+        .unwrap();
+        assert_eq!(cleared["set"], false);
+        // Unchanged, or between sessions: nothing.
+        assert!(row(shown_events(&named(4, true), &named(4, true), true, 0)).is_none());
+        assert!(row(shown_events(
+            &shown(4, false, None),
+            &named(4, false),
+            true,
+            0
+        ))
+        .is_none());
+        // The row holds only its session and a yes or no.
+        let keys: Vec<String> = at_start.as_object().unwrap().keys().cloned().collect();
+        assert!(keys
+            .iter()
+            .all(|key| ["event", "session", "set"].contains(&key.as_str())));
     }
 
     fn segment(id: &str, at_ms: u64, text: &str) -> Segment {
