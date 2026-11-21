@@ -1710,3 +1710,299 @@ fn ordinary_selected_shared_lifecycle_cases_cancel_real_link_and_reject_late_rep
         assert!(link.terminal().is_some());
     }
 }
+
+// Actual cross-process public ordinary-v2 pairing. The SDK alone is fake;
+// Engine, evaluator Worker/Link, Unix broker, provider adapter and API worker run.
+#[test]
+fn ordinary_selected_pairs_with_public_js_worker_and_retires_late_delivery() {
+    use crate::engine::{ConversationScope, Segment};
+    use std::io::{BufRead, BufReader};
+    use std::process::{Child, ChildStdin, Command, Stdio};
+    struct Peer {
+        child: Child,
+        input: ChildStdin,
+        frames: Receiver<Value>,
+        worker: Option<i32>,
+        descriptor: Option<PathBuf>,
+        done: bool,
+        home: PathBuf,
+    }
+    impl Peer {
+        fn start() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let home = std::env::temp_dir().join(format!(
+                "tq-pair-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir(&home).unwrap();
+            fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).unwrap();
+            let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../scripts/fixtures/paired-selected-broker.mjs");
+            let mut command = Command::new("node");
+            command
+                .args(["--no-warnings", "--experimental-test-module-mocks"])
+                .arg(script)
+                .env_clear()
+                .env("HOME", &home)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit());
+            for key in ["PATH", "TMPDIR", "LANG"] {
+                if let Some(value) = std::env::var_os(key) {
+                    command.env(key, value);
+                }
+            }
+            let mut child = command
+                .spawn()
+                .expect("Node22 and committed npm dependencies required");
+            let input = child.stdin.take().unwrap();
+            let output = child.stdout.take().unwrap();
+            let (send, frames) = mpsc::channel();
+            thread::spawn(move || {
+                for line in BufReader::new(output).lines() {
+                    let line = line.unwrap();
+                    let value = serde_json::from_str(&line)
+                        .unwrap_or_else(|_| panic!("invalid paired test control: {line}"));
+                    if send.send(value).is_err() {
+                        break;
+                    }
+                }
+            });
+            Self {
+                child,
+                input,
+                frames,
+                worker: None,
+                descriptor: None,
+                done: false,
+                home,
+            }
+        }
+        fn next(&mut self, kind: &str) -> Value {
+            let until = Instant::now() + Duration::from_secs(6);
+            loop {
+                let frame = self
+                    .frames
+                    .recv_timeout(until.saturating_duration_since(Instant::now()))
+                    .unwrap_or_else(|e| panic!("missing paired {kind}: {e}"));
+                if frame["type"] == "worker-started" {
+                    self.worker = Some(frame["workerPid"].as_i64().unwrap() as i32);
+                    continue;
+                }
+                assert_eq!(frame["type"], kind, "{frame}");
+                if kind == "descriptor" {
+                    let path = PathBuf::from(frame["path"].as_str().unwrap());
+                    assert_eq!(path.file_name().unwrap(), "descriptor.json");
+                    let parent = path.parent().unwrap();
+                    assert!(parent
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with("tq-lab-"));
+                    assert!(parent.starts_with(fs::canonicalize(std::env::temp_dir()).unwrap()));
+                    self.descriptor = Some(path);
+                }
+                return frame;
+            }
+        }
+        fn send(&mut self, kind: &str) {
+            writeln!(self.input, "{}", json!({"type":kind})).unwrap();
+            self.input.flush().unwrap();
+        }
+        fn finish(&mut self) -> Value {
+            self.send("finish");
+            let done = self.next("done");
+            let until = Instant::now() + Duration::from_secs(3);
+            loop {
+                if let Some(status) = self.child.try_wait().unwrap() {
+                    assert!(status.success(), "paired Node fixture failed");
+                    break;
+                }
+                assert!(Instant::now() < until, "paired fixture did not exit");
+                thread::sleep(Duration::from_millis(2));
+            }
+            assert_eq!(done["descriptorRemoved"], true);
+            assert_eq!(done["workerGone"], true);
+            self.done = true;
+            done
+        }
+    }
+    impl Drop for Peer {
+        fn drop(&mut self) {
+            if !self.done {
+                let _ = writeln!(self.input, "{}", json!({"type":"finish"}));
+                let until = Instant::now() + Duration::from_secs(2);
+                while Instant::now() < until {
+                    if self.child.try_wait().ok().flatten().is_some() {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(5));
+                }
+                if let Some(pid) = self.worker {
+                    // Only the owned worker group reported by this fixture.
+                    unsafe {
+                        libc::kill(-pid, libc::SIGKILL);
+                    }
+                }
+                if self.child.try_wait().ok().flatten().is_none() {
+                    let _ = self.child.kill();
+                }
+                let _ = self.child.wait();
+            }
+            if let Some(path) = &self.descriptor {
+                let _ = fs::remove_dir_all(path.parent().unwrap());
+            }
+            let _ = fs::remove_dir_all(&self.home);
+        }
+    }
+    for (count, control) in [
+        (0, "accept"),
+        (1, "accept"),
+        (1, "revoke"),
+        (0, "engine-stop"),
+        (1, "host-stop"),
+    ] {
+        eprintln!("paired case notes={count} control={control}");
+        let mut peer = Peer::start();
+        let descriptor = peer.next("descriptor");
+        assert_eq!(descriptor["sdkMocked"], true);
+        let mut settings = selected_settings();
+        assert!(settings.attested.is_none());
+        settings.descriptor = PathBuf::from(descriptor["path"].as_str().unwrap());
+        let link = Link::new(
+            settings.clone(),
+            Arc::new(Mutex::new(Some(Arc::new(|| {
+                Some(ClockSample {
+                    session_id: 1,
+                    elapsed_ms: 10,
+                })
+            })))),
+            Arc::new(AtomicBool::new(false)),
+        );
+        let processor = processor_configuration(Backend::Api, Some(&settings), None, None).unwrap();
+        let mut engine = Engine::live_with_evaluator(
+            Worker::start(Adapter(link.clone()), DEADLINE).unwrap(),
+            processor,
+        )
+        .with_lab_lifecycle(link.clone());
+        engine.start().unwrap();
+        let note = crate::context::ContextItem {
+            provider: crate::context::Provider::File,
+            source_id: "fixture-note".into(),
+            title: "Fictional workshop".into(),
+            source_date: "2026-10-20".into(),
+            excerpt: "The room cannot open before nine.".into(),
+            revision: 1,
+        };
+        engine.set_notes(vec![note.clone()]);
+        let selected = if count == 0 {
+            vec![]
+        } else {
+            vec![(note.provider, note.source_id.clone(), note.revision)]
+        };
+        let review = engine
+            .review_processing(ConversationScope::NewSpeechOnly, &selected)
+            .unwrap();
+        assert!(!engine.has_processing_permission());
+        engine.approve_processing(review).unwrap();
+        engine.advance(10);
+        engine
+            .ingest(
+                1,
+                Segment {
+                    id: "current".into(),
+                    at_ms: 10,
+                    speaker: "Maya".into(),
+                    text: "Can we open the room at nine?".into(),
+                },
+            )
+            .unwrap();
+        peer.next("calibrated");
+        let requested = peer.next("sdk-request");
+        let identity = &requested["nativeIdentity"];
+        assert_eq!(identity["sessionId"], "1");
+        assert_ne!(identity["requestId"], "0");
+        assert_eq!(
+            requested["input"]["priorNotes"].as_array().unwrap().len(),
+            count
+        );
+        assert_eq!(requested["input"]["events"][0]["id"], "transcript:current");
+        if count == 1 {
+            assert_eq!(requested["input"]["priorNotes"][0]["text"], note.excerpt);
+        }
+        match control {
+            "accept" => {}
+            "revoke" => engine.revoke_processing(),
+            "engine-stop" => {
+                engine.begin_live_stop();
+            }
+            "host-stop" => {
+                link.cancel_reason(ControlReason::Stop);
+                engine.begin_live_stop();
+            }
+            _ => unreachable!(),
+        }
+        if control != "accept" {
+            assert!(!engine.has_processing_permission());
+            assert_eq!(peer.next("sdk-aborted")["id"], requested["id"]);
+        }
+        peer.send("release");
+        let released = peer.next("sdk-released");
+        assert_eq!(released["afterAbort"], control != "accept");
+        let until = Instant::now() + Duration::from_secs(3);
+        loop {
+            engine.advance(1);
+            if control == "accept" && engine.state.cue.is_some() {
+                break;
+            }
+            if control != "accept" && link.terminal().is_some() {
+                break;
+            }
+            assert!(
+                Instant::now() < until,
+                "paired delivery did not settle: {count}/{control}"
+            );
+            thread::sleep(Duration::from_millis(2));
+        }
+        if control == "accept" {
+            let cue = engine.state.cue.as_ref().unwrap();
+            assert_eq!(cue.question, "Should we check the opening time?");
+            assert_eq!(cue.sources.len(), count + 1);
+            let (request, _) = engine.lab_cue_metadata(&cue.id).expect("actual model cue");
+            assert_eq!(request.to_string(), identity["requestId"].as_str().unwrap());
+            engine.revoke_processing();
+        }
+        let done = peer.finish();
+        let native: Vec<_> = done["frames"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|f| f["type"] == "evaluate")
+            .collect();
+        assert_eq!(native.len(), 1);
+        assert!(native[0].get("scope").is_none());
+        assert_eq!(native[0]["contextRevision"], identity["contextRevision"]);
+        assert_eq!(done["summary"]["dispatched"], 1);
+        assert_eq!(done["resultsSent"], if control == "accept" { 1 } else { 0 });
+        let reason = if control == "host-stop" {
+            "stop"
+        } else {
+            "eligibility_change"
+        };
+        if control != "accept" {
+            assert!(
+                done["frames"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|f| f["type"] == "cancel" && f["reason"] == reason),
+                "{done}"
+            );
+        }
+        // Recheck after both JS processes and the socket descriptor are retired.
+        engine.advance(1);
+        assert!(engine.state.cue.is_none());
+        assert!(!engine.has_processing_permission());
+    }
+}
