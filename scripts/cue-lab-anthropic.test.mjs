@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { test, mock } from 'node:test';
 import Anthropic from '@anthropic-ai/sdk';
 import {
+  ANTHROPIC_CUE_ON_SCREEN_SCHEMA,
   ANTHROPIC_DECISION_SCHEMA,
   ANTHROPIC_SPEND_CAP_MICRO_USD,
   anthropicEnvironmentNames,
@@ -188,6 +189,37 @@ test('the system prompt is byte-stable and carries no user name or earlier cues'
   assert.equal(
     a.includes('a question already asked but still unanswered'),
     false,
+  );
+  assert.match(a, /With an existing cue, answer quiet to keep it on screen/);
+});
+
+test('the schema follows the cue state: no show while a cue is on screen', () => {
+  const none = buildAnthropicParams('claude-opus-5-5', input);
+  assert.equal(none.output_config.format.schema, ANTHROPIC_DECISION_SCHEMA);
+  assert.deepEqual(ANTHROPIC_DECISION_SCHEMA.properties.action.enum, [
+    'show',
+    'quiet',
+  ]);
+  const onScreen = buildAnthropicParams('claude-opus-5-5', {
+    ...input,
+    existingCue: { text: 'Fictional cue?', sourceIds: [input.events[0].id] },
+  });
+  assert.equal(
+    onScreen.output_config.format.schema,
+    ANTHROPIC_CUE_ON_SCREEN_SCHEMA,
+  );
+  assert.deepEqual(ANTHROPIC_CUE_ON_SCREEN_SCHEMA.properties.action.enum, [
+    'quiet',
+    'resolved',
+    'withdraw',
+  ]);
+  assert.deepEqual(ANTHROPIC_CUE_ON_SCREEN_SCHEMA.properties.cue, {
+    type: 'null',
+  });
+  // Each state's schema is one constant, so its grammar compiles once.
+  assert.equal(
+    buildAnthropicParams('claude-opus-5-5', input).output_config.format.schema,
+    none.output_config.format.schema,
   );
 });
 

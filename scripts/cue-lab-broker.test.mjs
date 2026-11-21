@@ -16,7 +16,11 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { openLabBroker, evaluatorRequest } from './cue-lab-broker.mjs';
+import {
+  openLabBroker,
+  evaluatorRequest,
+  replyProblem,
+} from './cue-lab-broker.mjs';
 import { systemPromptFor } from './cue-lab.mjs';
 
 const input = {
@@ -1505,6 +1509,171 @@ test('an API reply at its output bound is a request-scoped failed output_limit a
   } finally {
     await ctx.close();
   }
+});
+
+// B11: with a cue on screen the model sometimes answered show (meaning
+// "keep it"), which is not a valid action then, and one such reply ended the
+// whole run.
+const withCue = {
+  ...input,
+  existingCue: { text: 'Who confirms Friday?', sourceIds: ['s1'] },
+};
+const replies = (...values) => {
+  let n = 0;
+  return async () => ({ value: values[n++], elapsedMs: 1, usage: {} });
+};
+
+test('a show while a cue is on screen is settled as quiet, keeping its sources', async () => {
+  const ctx = await setup({
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+    request: replies({ action: 'show', cue: null, sourceIds: ['s1'] }),
+  });
+  try {
+    ctx.evaluate('1', { input: withCue });
+    const result = await ctx.next('result');
+    assert.deepEqual(result.value, {
+      action: 'quiet',
+      cue: null,
+      sourceIds: ['s1'],
+    });
+    ctx.settle('1');
+    await ctx.broker.gate.waitIdle();
+    assert.equal(ctx.broker.gate.terminal, null);
+    const summary = ctx.broker.evaluationSummary;
+    assert.deepEqual(
+      [
+        summary.showWithCue,
+        summary.invalidReplies,
+        summary.resultActions.quiet,
+      ],
+      [1, 0, 1],
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('an invalid API reply ends only its request, with a fixed reason and no text kept', async () => {
+  const ctx = await setup({
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+    request: replies(
+      { action: 'quiet', cue: null, sourceIds: ['not-in-the-window'] },
+      value,
+    ),
+  });
+  try {
+    ctx.evaluate('1');
+    // The signed native lab build settles `refusal` as request-scoped.
+    const failed = await ctx.next('failed');
+    assert.deepEqual([failed.requestId, failed.code], ['1', 'refusal']);
+    assert.equal(ctx.broker.gate.terminal, null);
+    ctx.evaluate('2');
+    assert.equal((await ctx.next('result')).requestId, '2');
+    ctx.settle('2');
+    await ctx.broker.gate.waitIdle();
+    const summary = ctx.broker.evaluationSummary;
+    assert.equal(summary.invalidReplies, 1);
+    assert.equal(summary.invalidReasons['source-ids'], 1);
+    assert.equal(summary.refusals, 0);
+    assert.doesNotMatch(JSON.stringify(summary), /not-in-the-window/);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('three invalid API replies in a row end the run; a valid one in between resets the count', async () => {
+  const bad = { action: 'resolved', cue: null, sourceIds: ['s1'] };
+  const ctx = await setup({
+    metadata: apiMetadata,
+    spentMicroUsd: 0,
+    maxCalls: 10,
+    request: replies(bad, bad, value, bad, bad, bad),
+  });
+  try {
+    for (const id of ['1', '2']) {
+      ctx.evaluate(id);
+      assert.equal((await ctx.next('failed')).code, 'refusal');
+    }
+    ctx.evaluate('3');
+    assert.equal((await ctx.next('result')).requestId, '3');
+    ctx.settle('3');
+    for (const id of ['4', '5']) {
+      ctx.evaluate(id);
+      assert.equal((await ctx.next('failed')).code, 'refusal');
+    }
+    ctx.evaluate('6');
+    const failed = await ctx.next('failed');
+    assert.equal(failed.code, 'invalid_reply');
+    await terminal(ctx.broker);
+    const summary = ctx.broker.evaluationSummary;
+    assert.equal(summary.invalidReplies, 5);
+    assert.equal(summary.invalidReasons['action-without-cue'], 5);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('on a subscription route a show while a cue is on screen still ends the run', async () => {
+  const ctx = await setup({
+    request: replies({ action: 'show', cue: 'Again?', sourceIds: ['s1'] }),
+  });
+  try {
+    ctx.evaluate('1', { input: withCue });
+    assert.equal((await ctx.next('failed')).code, 'invalid_reply');
+    await terminal(ctx.broker);
+    const summary = ctx.broker.evaluationSummary;
+    assert.equal(summary.showWithCue, 0);
+    assert.equal(summary.invalidReasons['show-with-cue'], 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('on a subscription route an invalid reply still ends the run', async () => {
+  const ctx = await setup({
+    request: replies({ action: 'quiet', cue: 'not null', sourceIds: ['s1'] }),
+  });
+  try {
+    ctx.evaluate('1');
+    assert.equal((await ctx.next('failed')).code, 'invalid_reply');
+    await terminal(ctx.broker);
+    assert.equal(ctx.broker.evaluationSummary.invalidReasons.cue, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('each reply problem has its fixed code', () => {
+  const cases = [
+    [{ action: 'quiet', cue: null }, 'shape'],
+    [{ action: 'maybe', cue: null, sourceIds: ['s1'] }, 'action'],
+    [{ action: 'quiet', cue: null, sourceIds: ['s1', 's1'] }, 'source-ids'],
+    [
+      { action: 'withdraw', cue: null, sourceIds: ['s1'] },
+      'action-without-cue',
+    ],
+    [{ action: 'show', cue: '', sourceIds: ['s1'] }, 'cue'],
+    [
+      {
+        action: 'show',
+        cue: 'one two three four five six seven eight nine ten eleven?',
+        sourceIds: ['s1'],
+      },
+      'glance',
+    ],
+    [{ action: 'show', cue: 'Who confirms Friday?', sourceIds: ['s1'] }, null],
+  ];
+  for (const [reply, code] of cases)
+    assert.equal(replyProblem(reply, input), code, JSON.stringify(reply));
+  assert.equal(
+    replyProblem(
+      { action: 'show', cue: 'Who confirms Friday?', sourceIds: ['s1'] },
+      withCue,
+    ),
+    'show-with-cue',
+  );
 });
 
 test('on a subscription route an output limit still ends the run', async () => {
