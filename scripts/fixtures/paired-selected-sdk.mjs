@@ -58,7 +58,10 @@ class FictionalSdk {
       const value = {
         action: 'show',
         cue: 'Should we check the opening time?',
-        sourceIds: [input.events[0].id, ...input.priorNotes.map((n) => n.id)],
+        sourceIds: [
+          input.events.at(-1).id,
+          ...(input.priorNotes ?? []).map((n) => n.id),
+        ],
       };
       process.send({ type: 'sdk-released', id, afterAbort: signal.aborted });
       return (async function* () {
