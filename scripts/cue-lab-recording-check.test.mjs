@@ -203,6 +203,56 @@ test('unusable paths, counts or probe output are refused, never guessed', () => 
   assert.throws(() => summarizeRecordingLuma([{ atS: 0, luma: 37 }]));
 });
 
+test('the caption band is located from the recorder geometry and measured as a region', async () => {
+  const { playerVideoBand } = await import('./cue-lab-recording-check.mjs');
+  const geometry = {
+    emulator: { x: 100, y: 80, width: 960, height: 568 },
+    companion: { x: 700, y: 620, width: 320, height: 76 },
+    picture: { width: 1840, height: 1272, scale: 2 },
+  };
+  // 1280x800 fitted into 960x540 pt: 864x540 with 48 pt bars, under a
+  // 28 pt title bar; rows 640-716 are 432-483.3 pt down the content.
+  const band = playerVideoBand(geometry, { top: 640, bottom: 716 });
+  assert.deepEqual({ ...band }, { x: 96, y: 920, width: 1728, height: 102 });
+  const calls = [];
+  const r = measureRecordingVisibility({
+    probe: '/fictional/ffprobe',
+    path: '/fictional/run/recording.mov',
+    region: band,
+    minChanging: 0.2,
+    exec: (command, args) => {
+      calls.push(args);
+      return ffprobeJson(MOVING);
+    },
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.framesPerSecond, null);
+  assert.ok(
+    calls[0].includes(
+      'movie=/fictional/run/recording.mov,crop=1728:102:96:920,fps=1,signalstats',
+    ),
+  );
+  // A band that never changes fails even with the lower bar.
+  assert.deepEqual(
+    measureRecordingVisibility({
+      probe: '/fictional/ffprobe',
+      path: '/fictional/run/recording.mov',
+      region: band,
+      minChanging: 0.2,
+      exec: () => ffprobeJson(FROZEN),
+    }).reasons,
+    ['not-changing'],
+  );
+  // Another player size or an inverted band is refused.
+  assert.throws(() =>
+    playerVideoBand(
+      { ...geometry, emulator: { ...geometry.emulator, width: 800 } },
+      { top: 640, bottom: 716 },
+    ),
+  );
+  assert.throws(() => playerVideoBand(geometry, { top: 716, bottom: 640 }));
+});
+
 test('a window closed or gone by the end fails the check, whatever the picture shows', () => {
   const r = measureRecordingVisibility({
     probe: '/fictional/ffprobe',

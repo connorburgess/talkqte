@@ -1223,3 +1223,106 @@ test('malformed transcription rows and settings are refused, never guessed', () 
       message: /transcription settings/,
     });
 });
+
+test('source problems and identity-check transitions are reported, with ScreenCaptureKit and TalkQTE causes told apart', () => {
+  const report = (rows) => {
+    const m = manifest();
+    const events = importNativeRows(rows, {
+      runId: m.runId,
+      artifactId: 'native',
+      clockId: 'audio',
+    });
+    m.artifacts.push({
+      id: 'native',
+      kind: 'native-timing',
+      path: 'native.jsonl',
+      clockId: 'audio',
+      bytes: 0,
+      sha256: 'a'.repeat(64),
+    });
+    return buildEvidenceReport(m, events);
+  };
+  // A transient blip during an app switch that recovered: the source held.
+  const held = report([
+    {
+      event: 'lab_source_check',
+      state: 'failing',
+      check: 'running_application',
+      after_ms: 0,
+      mono_ms: 10,
+    },
+    {
+      event: 'lab_source_check',
+      state: 'recovered',
+      check: 'running_application',
+      after_ms: 340,
+      mono_ms: 11,
+    },
+  ]).sourceHealth;
+  assert.equal(held.held, true);
+  // A check that went failing and never recovered did not hold.
+  const unrecovered = report([
+    {
+      event: 'lab_source_check',
+      state: 'failing',
+      check: 'running_application',
+      after_ms: 0,
+      mono_ms: 10,
+    },
+  ]).sourceHealth;
+  assert.equal(unrecovered.held, false);
+  assert.deepEqual(unrecovered.unrecovered, ['running_application']);
+  assert.deepEqual(
+    held.checks.map((c) => [c.state, c.check, c.afterMs]),
+    [
+      ['failing', 'running_application', 0],
+      ['recovered', 'running_application', 340],
+    ],
+  );
+  // RunB07's ending, as the new build labels it, and ScreenCaptureKit's own.
+  const lost = report([
+    {
+      event: 'lab_source_check',
+      state: 'ended',
+      check: 'running_application',
+      after_ms: 2000,
+      mono_ms: 10,
+    },
+    {
+      event: 'source_problem',
+      problem: 'lab_source_lost',
+      mono_ms: 11,
+      detail: 'never reported',
+    },
+    {
+      event: 'source_problem',
+      problem: 'source_gone',
+      os_code: -3815,
+      mono_ms: 12,
+    },
+  ]);
+  assert.equal(lost.sourceHealth.held, false);
+  assert.deepEqual(
+    lost.sourceHealth.problems.map((p) => [p.problem, p.osCode]),
+    [
+      ['lab_source_lost', null],
+      ['source_gone', -3815],
+    ],
+  );
+  assert.equal(JSON.stringify(lost).includes('never reported'), false);
+  assert.match(
+    renderEvidenceMarkdown(lost),
+    /lab_source_lost, source_gone \(-3815\)/,
+  );
+  for (const row of [
+    { event: 'lab_source_check', state: 'paused', check: 'pid', after_ms: 0 },
+    {
+      event: 'lab_source_check',
+      state: 'failing',
+      check: 'Process Gone',
+      after_ms: 0,
+    },
+    { event: 'source_problem', problem: 'Source gone' },
+  ])
+    assert.throws(() => report([row]));
+});

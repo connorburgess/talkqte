@@ -35,7 +35,13 @@ const round = (n) => Math.round(n * 1000) / 1000;
  */
 export function summarizeRecordingLuma(
   samples,
-  { frames, durationMs, windowsMissing = false } = {},
+  {
+    frames,
+    durationMs,
+    windowsMissing = false,
+    minVisible = MIN_VISIBLE_FRACTION,
+    minChanging = MIN_CHANGING_FRACTION,
+  } = {},
 ) {
   required(
     Array.isArray(samples) &&
@@ -75,8 +81,8 @@ export function summarizeRecordingLuma(
   const framesPerSecond =
     frames === undefined ? null : frames / (durationMs / 1000);
   const reasons = [
-    ...(visibleFraction < MIN_VISIBLE_FRACTION ? ['mostly-black'] : []),
-    ...(changingFraction < MIN_CHANGING_FRACTION ? ['not-changing'] : []),
+    ...(visibleFraction < minVisible ? ['mostly-black'] : []),
+    ...(changingFraction < minChanging ? ['not-changing'] : []),
     ...(framesPerSecond !== null && framesPerSecond < MIN_FRAMES_PER_SECOND
       ? ['too-few-frames']
       : []),
@@ -108,6 +114,8 @@ export function measureRecordingVisibility({
   frames,
   durationMs,
   windowsMissing,
+  region,
+  minChanging,
   exec = execFileSync,
   environment,
 } = {}) {
@@ -116,10 +124,24 @@ export function measureRecordingVisibility({
       probe.startsWith('/') &&
       typeof path === 'string' &&
       /^\/[A-Za-z0-9/._-]+$/.test(path) &&
-      Number.isSafeInteger(frames) &&
-      Number.isFinite(durationMs) &&
-      typeof windowsMissing === 'boolean',
+      // A whole recording is judged with the helper's frame count and
+      // whether a window went missing; a region of it (the player's
+      // captions) by its own picture only.
+      (region === undefined
+        ? Number.isSafeInteger(frames) &&
+          Number.isFinite(durationMs) &&
+          typeof windowsMissing === 'boolean'
+        : frames === undefined &&
+          windowsMissing === undefined &&
+          ['x', 'y', 'width', 'height'].every(
+            (k) => Number.isSafeInteger(region[k]) && region[k] >= 0,
+          ) &&
+          region.width >= 2 &&
+          region.height >= 2),
   );
+  const crop = region
+    ? `,crop=${region.width}:${region.height}:${region.x}:${region.y}`
+    : '';
   const output = exec(
     probe,
     [
@@ -128,7 +150,7 @@ export function measureRecordingVisibility({
       '-f',
       'lavfi',
       '-i',
-      `movie=${path},fps=1,signalstats`,
+      `movie=${path}${crop},fps=1,signalstats`,
       '-show_entries',
       'frame=pts_time:frame_tags=lavfi.signalstats.YAVG,lavfi.signalstats.YDIF',
       '-of',
@@ -155,6 +177,53 @@ export function measureRecordingVisibility({
       luma: Number(f?.tags?.['lavfi.signalstats.YAVG']),
       change: Number(f?.tags?.['lavfi.signalstats.YDIF']),
     })),
-    { frames, durationMs, windowsMissing },
+    {
+      ...(region ? {} : { frames, durationMs, windowsMissing }),
+      ...(minChanging === undefined ? {} : { minChanging }),
+    },
   );
+}
+
+// The owned player shows the scenario's 1280x800 video fitted into its
+// 960x540 pt content area, under the window's title bar.
+const PLAYER_CONTENT = { width: 960, height: 540 };
+const VIDEO = { width: 1280, height: 800 };
+
+/**
+ * The rectangle, in recording pixels, of a horizontal band of the player's
+ * video (for example the captions at video rows 640-716), from the
+ * recorder's geometry. The picture is the two windows' union.
+ */
+export function playerVideoBand(geometry, { top, bottom }) {
+  const em = geometry?.emulator,
+    co = geometry?.companion,
+    scale = geometry?.picture?.scale;
+  required(
+    em &&
+      co &&
+      Number.isFinite(scale) &&
+      scale > 0 &&
+      em.width === PLAYER_CONTENT.width &&
+      em.height >= PLAYER_CONTENT.height &&
+      Number.isInteger(top) &&
+      Number.isInteger(bottom) &&
+      top >= 0 &&
+      bottom <= VIDEO.height &&
+      bottom - top >= 8,
+  );
+  const fit = Math.min(
+    PLAYER_CONTENT.width / VIDEO.width,
+    PLAYER_CONTENT.height / VIDEO.height,
+  );
+  const left = (PLAYER_CONTENT.width - VIDEO.width * fit) / 2;
+  const titleBar = em.height - PLAYER_CONTENT.height;
+  const originX = em.x - Math.min(em.x, co.x);
+  const originY = em.y - Math.min(em.y, co.y);
+  const even = (n) => Math.max(2, Math.floor(n / 2) * 2);
+  return Object.freeze({
+    x: Math.round((originX + left) * scale),
+    y: Math.round((originY + titleBar + top * fit) * scale),
+    width: even(VIDEO.width * fit * scale),
+    height: even((bottom - top) * fit * scale),
+  });
 }

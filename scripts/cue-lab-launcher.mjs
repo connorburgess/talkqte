@@ -252,17 +252,22 @@ function launcher({
   transcription,
 }) {
   // Cloud transcription (Deepgram) runs only on the direct API route, whose
-  // in-app session review also approves streaming the audio.
+  // in-app session review also approves streaming the audio. A capture-only
+  // launch has no review, so nothing is ever streamed; it still needs the
+  // setting because the app starts no session without a transcription
+  // backend. It gets the empty placeholder only: no grant, never a token.
   requireThat(
     transcription === undefined ||
-      (exact(transcription, ['backend', 'minuteCap', 'grant']) &&
-        transcription.backend === 'deepgram' &&
+      (transcription.backend === 'deepgram' &&
         Number.isSafeInteger(transcription.minuteCap) &&
         transcription.minuteCap >= 1 &&
         transcription.minuteCap <= 60 &&
-        typeof transcription.grant?.writeTokenFile === 'function' &&
-        mode === 'model-enabled' &&
-        selection?.provider === 'anthropic-api'),
+        (mode === 'capture-only'
+          ? exact(transcription, ['backend', 'minuteCap'])
+          : exact(transcription, ['backend', 'minuteCap', 'grant']) &&
+            typeof transcription.grant?.writeTokenFile === 'function' &&
+            mode === 'model-enabled' &&
+            selection?.provider === 'anthropic-api')),
   );
   requireThat(
     ['capture-only', 'model-enabled'].includes(mode) &&
@@ -362,7 +367,7 @@ function launcher({
   const subscribers = new Set();
   const evaluatorSubscribers = new Set();
   const close = () => {
-    transcription?.grant.discard?.();
+    transcription?.grant?.discard?.();
     removeToken();
     if (tokenRemoved) process.off('exit', removeToken);
     if (closed) return;
@@ -655,7 +660,7 @@ function launcher({
         ? Object.freeze({
             backend: transcription.backend,
             minuteCap: transcription.minuteCap,
-            grantTtlS: transcription.grant.ttlSeconds,
+            grantTtlS: transcription.grant?.ttlSeconds ?? null,
             reviewedSession,
             released: tokenReleased,
             started: transcriptionStarted,
@@ -670,7 +675,7 @@ function launcher({
     // it has accepted the review and opened the provider.
     releaseTranscriptionToken() {
       requireThat(
-        transcription &&
+        transcription?.grant &&
           !closed &&
           !tokenRemoved &&
           !tokenReleased &&
@@ -778,6 +783,8 @@ export const NO_TRANSCRIPTION_SUBSCRIPTION =
   'This route has no transcription: cloud transcription is approved only through the in-app review, which the subscription routes do not use.';
 export const NO_TRANSCRIPTION_SELECTED =
   'This model run has no transcription: select cloud transcription (Deepgram).';
+export const NO_TRANSCRIPTION_CAPTURE =
+  'This capture-only run has no transcription setting: the app starts no session without one. Select Deepgram; nothing is streamed without an in-app review.';
 const noTranscription = (reason) =>
   Object.assign(new Error(reason), { category: 'no-transcription' });
 
@@ -807,6 +814,10 @@ export function prepareLabLauncher({
     if (transcription === undefined)
       throw noTranscription(NO_TRANSCRIPTION_SELECTED);
   }
+  // The app starts no session at all without a transcription setting, so
+  // a capture-only launch carries one too (placeholder only, no grant).
+  if (mode === 'capture-only' && transcription === undefined)
+    throw noTranscription(NO_TRANSCRIPTION_CAPTURE);
   try {
     return launcher({
       build: verifyBuild(manifestFile, approved),

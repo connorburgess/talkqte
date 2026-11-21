@@ -62,6 +62,11 @@ for (const mode of ['normal', 'partial', 'moved', 'missing'])
             windowsMoved: mode === 'moved',
             windowsResized: false,
             windowsMissing: mode === 'missing',
+            geometry: {
+              emulator: { x: 100, y: 80, width: 960, height: 568 },
+              companion: { x: 700, y: 620, width: 320, height: 76 },
+              picture: { width: 1840, height: 1272, scale: 2 },
+            },
           },
         );
       } finally {

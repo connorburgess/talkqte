@@ -10,13 +10,16 @@ const matched = {
     app: value('--emulator-app'),
     pid: Number(value('--emulator-pid')),
     windowId: Number(value('--emulator-window-id')),
+    frame: { x: 100, y: 80, width: 960, height: 568 },
   },
   companion: {
     app: value('--companion-app'),
     pid: Number(value('--companion-pid')),
     windowId: Number(value('--companion-window-id')),
     rule: 'exact pid/window',
+    frame: { x: 700, y: 620, width: 320, height: 76 },
   },
+  picture: { width: 1840, height: 1272, scale: 2 },
 };
 if (mode === 'wrong') matched.companion.pid++;
 process.on('SIGTERM', () => {
