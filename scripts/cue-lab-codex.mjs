@@ -142,14 +142,16 @@ const ROLES = new Set([
   'cue-evaluator',
 ]);
 const CREDENTIAL =
-  /(?:API.?KEY|ACCESS.?TOKEN|AUTH.?TOKEN|BASE.?URL|PROXY|GATEWAY|PROVIDER|NODE_OPTIONS|CODEX_HOME|CONFIG_DIR|CUSTOM_HEADERS|^AWS_|GOOGLE_APPLICATION_CREDENTIALS|^AZURE_|CLOUD_ML_REGION|CLAUDE_CODE_(?:USE_|SKIP_))/i;
+  /(?:API.?KEY|ACCESS.?TOKEN|AUTH.?TOKEN|BASE.?URL|PROXY|GATEWAY|PROVIDER|NODE_OPTIONS|CODEX_HOME|CONFIG_DIR|CUSTOM_HEADERS|^AWS_|GOOGLE_APPLICATION_CREDENTIALS|^AZURE_|CLOUD_ML_REGION|CLAUDE_CODE_(?:USE_|SKIP_)|^ANTHROPIC_)/i;
 
 export function assertSubscriptionEnvironment(environment) {
   if (
     !environment ||
     typeof environment !== 'object' ||
     Object.keys(environment).some(
-      (key) => environment[key] && CREDENTIAL.test(key),
+      // An ANTHROPIC_* name counts even when set to an empty string.
+      (key) =>
+        (environment[key] || /^ANTHROPIC_/i.test(key)) && CREDENTIAL.test(key),
     )
   )
     throw codexFailure('ambient-credentials');
@@ -406,7 +408,15 @@ export function createCodexEventReader() {
     }
     return { value, usage };
   };
-  return { accept, finish };
+  return {
+    accept,
+    finish,
+    // True once exactly one agent message has been followed by the single
+    // turn.completed; any later event is still rejected by accept().
+    get complete() {
+      return completed === 1 && text !== null;
+    },
+  };
 }
 
 export function parseCodexEvents(stdout) {
@@ -431,8 +441,16 @@ export function runBoundedCodexProcess(
     deadlineMs = 30000,
     maxOutputBytes = MAX_BYTES,
     onStdoutLine,
+    onStage,
+    isComplete,
   } = {},
 ) {
+  // Content-free lifecycle receipts only: a fixed stage name, never output.
+  const stage = (name) => {
+    try {
+      onStage?.(name);
+    } catch {}
+  };
   return new Promise((resolve, reject) => {
     if (
       typeof command !== 'string' ||
@@ -454,6 +472,8 @@ export function runBoundedCodexProcess(
       detached: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    stage('spawned');
+    let firstOutput = false;
     const stdoutDecoder = new StringDecoder('utf8');
     const stderrDecoder = new StringDecoder('utf8');
     let stdout = '',
@@ -461,6 +481,7 @@ export function runBoundedCodexProcess(
       bytes = 0,
       partialLine = '',
       problem = null,
+      finished = false,
       killTimer;
     const killGroup = () => {
       if (child.pid)
@@ -479,6 +500,24 @@ export function runBoundedCodexProcess(
         } catch {
           /* already gone */
         }
+      // A failure during an early finish's retire wait replaces its timer.
+      clearTimeout(killTimer);
+      killTimer = setTimeout(killGroup, 100);
+    };
+    // The decision is complete: retire the process group now instead of
+    // waiting for the CLI's own shutdown. Retirement is still confirmed
+    // below before anything is returned.
+    const finishEarly = () => {
+      finished = true;
+      stage('decision-ready');
+      if (child.pid)
+        try {
+          process.kill(-child.pid, 'SIGTERM');
+        } catch {
+          /* already gone */
+        }
+      stage('retire-requested');
+      clearTimeout(killTimer);
       killTimer = setTimeout(killGroup, 100);
     };
     const abort = () => stop('cancelled');
@@ -487,6 +526,10 @@ export function runBoundedCodexProcess(
     const read = (chunk, channel) => {
       bytes += chunk.length;
       if (bytes > maxOutputBytes) return stop('output-limit');
+      if (channel === 'stdout' && !firstOutput) {
+        firstOutput = true;
+        stage('first-output');
+      }
       if (channel === 'stdout') {
         const decoded = stdoutDecoder.write(chunk);
         stdout += decoded;
@@ -499,6 +542,7 @@ export function runBoundedCodexProcess(
           } catch {
             stop('unexpected-event');
           }
+          if (!problem && !finished && isComplete?.()) finishEarly();
         }
       } else stderr += stderrDecoder.write(chunk);
     };
@@ -510,6 +554,7 @@ export function runBoundedCodexProcess(
     child.stdin.on('error', () => {});
     child.stdin.end(input);
     child.on('close', async (code) => {
+      stage('exited');
       stdout += stdoutDecoder.end();
       stderr += stderrDecoder.end();
       if (onStdoutLine && partialLine && !problem) {
@@ -536,8 +581,12 @@ export function runBoundedCodexProcess(
           await delay(10);
         }
         if (present) problem = codexFailure('cleanup');
+        else stage('group-retired');
       }
       if (problem) return reject(problem);
+      // An early finish ended the CLI on purpose; its exit status is ours.
+      if (finished)
+        return resolve({ stdout, stderr, exitCode: code, finishedEarly: true });
       if (code !== 0) return reject(codexFailure('process'));
       resolve({ stdout, stderr, exitCode: code });
     });
@@ -571,7 +620,7 @@ async function subscriptionRunner(environment, maxOutputBytes, signal) {
   const directory = await mkdtemp(join(tmpdir(), 'talkqte-codex-lab-'));
   const schemaFile = join(directory, 'reply.schema.json');
   return {
-    async run(request, { signal: operationSignal }) {
+    async run(request, { signal: operationSignal, onStage }) {
       await writeFile(schemaFile, JSON.stringify(request.schema), {
         mode: 0o600,
       });
@@ -590,6 +639,8 @@ async function subscriptionRunner(environment, maxOutputBytes, signal) {
         deadlineMs: request.deadlineMs,
         maxOutputBytes,
         onStdoutLine: reader.accept,
+        isComplete: () => reader.complete,
+        onStage,
         input: JSON.stringify({
           instructions: request.instructions,
           input: request.input,
@@ -660,6 +711,9 @@ export async function openCodexLab({
   let calls = 0,
     terminal = false,
     active = null;
+  // Bounded, content-free per-call timing receipts (milliseconds from the
+  // adapter's own request start); no prompt, output, path or error text.
+  const receipts = [];
   const fail = (category) => {
     terminal = true;
     active?.controller.abort();
@@ -701,9 +755,10 @@ export async function openCodexLab({
     const started = performance.now();
     let cancelled = false,
       timedOut = false;
+    // A caller's request-scoped abort retires only this call; the session
+    // stays usable unless its process group cannot be confirmed retired.
     const abort = () => {
       cancelled = true;
-      terminal = true;
       controller.abort();
     };
     requestSignal?.addEventListener('abort', abort, { once: true });
@@ -713,22 +768,37 @@ export async function openCodexLab({
       controller.abort();
     }, deadlineMs);
     calls++;
+    const receipt = { call: calls, outcome: null };
+    if (receipts.length < 100) receipts.push(receipt);
+    const onStage = (name) => {
+      const key = {
+        spawned: 'spawnedMs',
+        'first-output': 'firstOutputMs',
+        exited: 'exitedMs',
+        'group-retired': 'groupRetiredMs',
+        'decision-ready': 'decisionReadyMs',
+        'retire-requested': 'retireRequestedMs',
+      }[name];
+      if (key && receipt[key] === undefined)
+        receipt[key] = Math.round(performance.now() - started);
+    };
     // Assign the operation before invoking a runner, including synchronous throws.
     const operation = { controller, done: null };
     active = operation;
     operation.done = Promise.resolve().then(() =>
       run(
         { ...snapshot, model, effort, deadlineMs },
-        { signal: controller.signal },
+        { signal: controller.signal, onStage },
       ),
     );
     try {
       const result = await operation.done;
       if (timedOut) throw fail('deadline');
       if (cancelled || terminal || signal?.aborted || requestSignal?.aborted)
-        throw fail('cancelled');
+        throw codexFailure('cancelled', calls);
       const parsed = parseCodexEvents(result.stdout);
       validateCodexSchema(snapshot.schema, parsed.value);
+      receipt.outcome = 'result';
       return { ...parsed, elapsedMs: Math.round(performance.now() - started) };
     } catch (error) {
       const known = [
@@ -741,16 +811,28 @@ export async function openCodexLab({
         'process',
         'cleanup',
       ];
-      throw fail(
-        timedOut
-          ? 'deadline'
-          : cancelled || controller.signal.aborted || signal?.aborted
-            ? 'cancelled'
-            : known.includes(error?.category)
-              ? error.category
-              : 'provider',
-      );
+      // An unconfirmed process-group retirement always ends the session.
+      const category =
+        error?.category === 'cleanup'
+          ? 'cleanup'
+          : timedOut
+            ? 'deadline'
+            : cancelled || controller.signal.aborted || signal?.aborted
+              ? 'cancelled'
+              : known.includes(error?.category)
+                ? error.category
+                : 'provider';
+      receipt.outcome = category;
+      if (
+        category === 'cancelled' &&
+        cancelled &&
+        !terminal &&
+        !signal?.aborted
+      )
+        throw codexFailure('cancelled', calls);
+      throw fail(category);
     } finally {
+      receipt.settledMs = Math.round(performance.now() - started);
       clearTimeout(timer);
       requestSignal?.removeEventListener('abort', abort);
       active = null;
@@ -761,6 +843,9 @@ export async function openCodexLab({
     request,
     get calls() {
       return calls;
+    },
+    get receipts() {
+      return Object.freeze(receipts.map((r) => Object.freeze({ ...r })));
     },
     async close() {
       stop();

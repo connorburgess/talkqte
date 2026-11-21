@@ -1,0 +1,47 @@
+{
+  "schema": "talkqte.lab.selected.lifecycle-cases.v1",
+  "cases": [
+    {
+      "id": "empty-revoke",
+      "noteCount": 0,
+      "control": "revoke",
+      "cancelReason": "eligibility_change",
+      "boundary": "engine"
+    },
+    {
+      "id": "selected-revoke",
+      "noteCount": 1,
+      "control": "revoke",
+      "cancelReason": "eligibility_change",
+      "boundary": "engine"
+    },
+    {
+      "id": "selected-remove",
+      "noteCount": 1,
+      "control": "remove",
+      "cancelReason": "eligibility_change",
+      "boundary": "engine"
+    },
+    {
+      "id": "empty-stop",
+      "noteCount": 0,
+      "control": "stop",
+      "cancelReason": "eligibility_change",
+      "boundary": "engine"
+    },
+    {
+      "id": "selected-stop",
+      "noteCount": 1,
+      "control": "stop",
+      "cancelReason": "eligibility_change",
+      "boundary": "engine"
+    },
+    {
+      "id": "selected-host-stop",
+      "noteCount": 1,
+      "boundary": "host-link-stop",
+      "control": "host-stop",
+      "cancelReason": "stop"
+    }
+  ]
+}

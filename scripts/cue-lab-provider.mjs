@@ -1,6 +1,13 @@
+import { SELECTED_CONTEXT, selectedIdentity } from './cue-selected-context.mjs';
 // Explicit per-run provider selection. The caller's orchestration gate is
 // still authoritative across participant, judge and app-evaluator operations.
 import { openIsolatedCli, EFFORTS } from './cue-lab.mjs';
+import { openAnthropicLab } from './cue-lab-anthropic.mjs';
+import {
+  ANTHROPIC_EFFORT,
+  ANTHROPIC_SPEND_CAP_MICRO_USD,
+  isAnthropicModel,
+} from './cue-lab-anthropic-core.mjs';
 import { ROLE_MODELS, OUTPUT_LIMITS } from './cue-dialogue-agents.mjs';
 import {
   CODEX_SUPPORT,
@@ -25,7 +32,7 @@ const failure = (category, calls = 0) =>
     exitCode: null,
     signals: [],
   });
-const SAFE = new Set([
+export const PROVIDER_FAILURE_CATEGORIES = new Set([
   'configuration',
   'provider-unavailable',
   'unsupported-cli-version',
@@ -45,9 +52,15 @@ const SAFE = new Set([
   'transient',
   'time-or-output-limit',
   'not-installed',
+  'refusal',
 ]);
 const normalizeFailure = (error, calls) =>
-  failure(SAFE.has(error?.category) ? error.category : 'provider', calls);
+  failure(
+    PROVIDER_FAILURE_CATEGORIES.has(error?.category)
+      ? error.category
+      : 'provider',
+    calls,
+  );
 
 export function requestClaudeRole(
   cli,
@@ -111,9 +124,17 @@ export async function openLabProvider({
   signal,
   execution = 'subscription',
   openers,
+  // Direct API route only: return the session now and open the adapter
+  // (key file and worker) only on open(), after the owner's in-app approval.
+  deferOpen = false,
+  contextPolicy = 'fresh-only',
 } = {}) {
   if (
-    !['claude-code', 'codex'].includes(provider) ||
+    !['fresh-only', SELECTED_CONTEXT].includes(contextPolicy) ||
+    (contextPolicy === SELECTED_CONTEXT && provider !== 'anthropic-api') ||
+    !['claude-code', 'codex', 'anthropic-api'].includes(provider) ||
+    typeof deferOpen !== 'boolean' ||
+    (deferOpen && provider !== 'anthropic-api') ||
     !Number.isSafeInteger(maxCalls) ||
     maxCalls < 1 ||
     maxCalls > 100 ||
@@ -123,12 +144,18 @@ export async function openLabProvider({
     !Number.isSafeInteger(maxOutputBytes) ||
     maxOutputBytes < 1024 ||
     maxOutputBytes > 256 * 1024 ||
-    !['subscription', 'offline-stand-in'].includes(execution) ||
-    (execution === 'subscription' && openers !== undefined) ||
+    !['subscription', 'api', 'offline-stand-in'].includes(execution) ||
+    (execution !== 'offline-stand-in' && openers !== undefined) ||
+    // The direct API route runs only as `api` (or an offline stand-in), and
+    // the subscription CLIs never as `api`.
+    (execution === 'api') !==
+      (provider === 'anthropic-api' && execution !== 'offline-stand-in') ||
     (provider === 'codex'
       ? model !== CODEX_SUPPORT.model || !CODEX_SUPPORT.efforts.includes(effort)
-      : !Object.values(ROLE_MODELS).includes(model) ||
-        !EFFORTS.includes(effort))
+      : provider === 'anthropic-api'
+        ? !isAnthropicModel(model) || effort !== ANTHROPIC_EFFORT
+        : !Object.values(ROLE_MODELS).includes(model) ||
+          !EFFORTS.includes(effort))
   )
     throw failure('configuration');
   if (signal?.aborted) throw failure('cancelled');
@@ -138,6 +165,7 @@ export async function openLabProvider({
     throw failure('ambient-credentials');
   }
   const options = Object.freeze({
+    contextPolicy,
     provider,
     model,
     effort,
@@ -148,29 +176,37 @@ export async function openLabProvider({
     signal,
     execution,
   });
-  let adapter;
-  try {
-    if (execution === 'offline-stand-in') {
-      if (typeof openers?.[provider] !== 'function')
+  const openAdapter = async () => {
+    let opened;
+    try {
+      if (execution === 'offline-stand-in') {
+        if (typeof openers?.[provider] !== 'function')
+          throw failure('provider-unavailable');
+        opened = await openers[provider](options);
+      } else {
+        opened =
+          provider === 'codex'
+            ? await openCodexLab(options)
+            : provider === 'anthropic-api'
+              ? await openAnthropicLab(options)
+              : await openClaude(options);
+      }
+      if (
+        !opened ||
+        typeof opened.request !== 'function' ||
+        typeof opened.close !== 'function'
+      )
         throw failure('provider-unavailable');
-      adapter = await openers[provider](options);
-    } else {
-      adapter =
-        provider === 'codex'
-          ? await openCodexLab(options)
-          : await openClaude(options);
+      return opened;
+    } catch (error) {
+      await opened?.close?.();
+      throw normalizeFailure(error, 0);
     }
-    if (
-      !adapter ||
-      typeof adapter.request !== 'function' ||
-      typeof adapter.close !== 'function'
-    )
-      throw failure('provider-unavailable');
-  } catch (error) {
-    await adapter?.close?.();
-    throw normalizeFailure(error, 0);
-  }
+  };
+  let adapter = deferOpen ? null : await openAdapter();
+  let opening = null;
   const metadata = Object.freeze({
+    ...(contextPolicy === SELECTED_CONTEXT ? selectedIdentity() : {}),
     provider,
     model,
     effort,
@@ -179,8 +215,18 @@ export async function openLabProvider({
     deadlineMs,
     maxInputBytes: 64 * 1024,
     maxOutputBytes,
-    budgetUnit: 'runner-dispatch-attempts',
-    actualProviderRequestBound: false,
+    // One API dispatch is exactly one HTTP request (no retries); a CLI
+    // dispatch can hide further requests.
+    ...(provider === 'anthropic-api'
+      ? {
+          budgetUnit: 'api-requests',
+          actualProviderRequestBound: true,
+          spendCapMicroUsd: ANTHROPIC_SPEND_CAP_MICRO_USD[model],
+        }
+      : {
+          budgetUnit: 'runner-dispatch-attempts',
+          actualProviderRequestBound: false,
+        }),
   });
   let calls = 0,
     terminal = false,
@@ -228,16 +274,25 @@ export async function openLabProvider({
       stop();
       throw failure('call-cap', calls);
     }
-    const controller = new AbortController();
-    const cancel = () => {
+    // A deferred session sends nothing before open() has completed.
+    if (!adapter) {
       stop();
+      throw failure('protocol', calls);
+    }
+    const controller = new AbortController();
+    // The caller's request signal retires only this call (for example a
+    // per-request evaluator deadline). The adapter ceiling stays terminal.
+    let scoped = false;
+    const cancel = () => {
+      scoped = true;
       controller.abort();
     };
     request.signal?.addEventListener('abort', cancel, { once: true });
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      cancel();
+      stop();
+      controller.abort();
     }, deadlineMs);
     const operation = { controller, done: null };
     active = operation;
@@ -279,7 +334,27 @@ export async function openLabProvider({
       };
     } catch (error) {
       const cancelled = controller.signal.aborted;
+      if (
+        scoped &&
+        !timedOut &&
+        !terminal &&
+        !signal?.aborted &&
+        error?.category === 'cancelled'
+      )
+        throw failure('cancelled', calls);
+      // An API refusal, or an API reply that reached its output bound, is a
+      // recorded non-decision for this request only. On the CLI routes an
+      // output limit stays terminal.
+      if (
+        !timedOut &&
+        !terminal &&
+        !signal?.aborted &&
+        (error?.category === 'refusal' ||
+          (provider === 'anthropic-api' && error?.category === 'output-limit'))
+      )
+        throw failure(error.category, calls);
       stop();
+      if (error?.category === 'cleanup') throw failure('cleanup', calls);
       throw normalizeFailure(
         timedOut
           ? failure('deadline')
@@ -300,14 +375,46 @@ export async function openLabProvider({
     get calls() {
       return calls;
     },
+    get receipts() {
+      return adapter?.receipts ?? null;
+    },
+    get spentMicroUsd() {
+      return adapter?.spentMicroUsd ?? null;
+    },
+    get opened() {
+      return adapter !== null;
+    },
+    // Opens a deferred session once; a no-op for one opened at creation.
+    open() {
+      if (adapter) return Promise.resolve();
+      if (terminal || closing)
+        return Promise.reject(failure('terminal', calls));
+      opening ??= openAdapter().then(
+        (opened) => {
+          if (terminal || closing) {
+            // Closed while opening: retire what was just opened.
+            return Promise.resolve(opened.close()).then(() => {
+              throw failure('terminal', calls);
+            });
+          }
+          adapter = opened;
+        },
+        (error) => {
+          stop();
+          throw error;
+        },
+      );
+      return opening;
+    },
     close() {
       if (!closing) {
         stop();
         signal?.removeEventListener('abort', stop);
         closing = (async () => {
           if (active) await active.done.catch(() => {});
+          await opening?.catch(() => {});
           try {
-            await adapter.close();
+            await adapter?.close();
           } catch (error) {
             throw normalizeFailure(error, calls);
           }

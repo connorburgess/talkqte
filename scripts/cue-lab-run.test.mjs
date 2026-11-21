@@ -3,6 +3,9 @@ import { test } from 'node:test';
 import { EventEmitter } from 'node:events';
 import { createConnection } from 'node:net';
 import { readFile, access } from 'node:fs/promises';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createLabRun } from './cue-lab-run.mjs';
 import { createLabNativeOwner } from './cue-lab-native-owner.mjs';
@@ -44,6 +47,7 @@ function fixture({
   closeFailure = false,
   releaseValue = { released: true },
   synchronousNotifications = false,
+  sourceSessionMode = 'legacy-fixture',
 } = {}) {
   const processEvents = new EventEmitter();
   const nativeEvents = new EventEmitter();
@@ -61,7 +65,7 @@ function fixture({
     model: 'gpt-6.1-sol',
     effort: 'medium',
     maxCalls: 3,
-    deadlineMs: 100,
+    deadlineMs: 30000,
     execution: 'offline-stand-in',
     environment: {},
     openers: {
@@ -159,6 +163,7 @@ function fixture({
     },
   };
   const run = createLabRun({
+    sourceSessionMode,
     settings,
     native: nativeOverride ?? native,
     processEvents,
@@ -399,8 +404,11 @@ test('owned-process early Stop aborts root before arming and waits actual releas
   assert.equal(f.run.dispatchesUsed, 0);
 });
 
-test('startup deadline without native authentication stops with zero dispatches', async () => {
+test('startup deadline without native authentication stops with zero dispatches', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = fixture({ authenticate: false, startupMs: 15 });
+  await f.started();
+  t.mock.timers.tick(15);
   await assert.rejects(bounded(f.run.ready));
   await bounded(f.run.close());
   assert.equal(f.run.dispatchesUsed, 0);
@@ -497,4 +505,96 @@ test('owned-child signal delivery failure synchronously notifies once without du
   assert.equal(f.closed, 1);
   assert.equal(f.run.phase, 'failed-cleanup');
   assert.equal(f.run.dispatchesUsed, 0);
+});
+
+test('strict lifecycle stores source session before startup and matches lazy hello', async () => {
+  const f = fixture({ sourceSessionMode: 'required' });
+  f.run.expectSourceSession('1');
+  f.run.acknowledgePlaybackStart({
+    monotonicMs: performance.now(),
+    uncertaintyMs: 0,
+  });
+  await bounded(f.run.ready);
+  assert.equal(f.run.phase, 'ready');
+  await f.run.close();
+  assert.equal(f.closed, 1);
+  assert.equal(f.stops, 1);
+});
+for (const mode of ['missing', 'mismatch', 'duplicate']) {
+  test(`strict lifecycle ${mode} source join fails with no dispatch`, async () => {
+    const f = fixture({ sourceSessionMode: 'required' });
+    if (mode === 'mismatch') f.run.expectSourceSession('2');
+    if (mode === 'duplicate') {
+      f.run.expectSourceSession('1');
+      assert.throws(() => f.run.expectSourceSession('1'));
+    }
+    await assert.rejects(bounded(f.run.ready));
+    await f.run.close();
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.closed, f.opened);
+  });
+}
+
+// A run whose native owner is never reached; only startup diagnostics matter.
+function startupOnlyRun(environment = {}) {
+  return createLabRun({
+    native: {
+      subscribe: () => () => {},
+      start: async () => {},
+      stop: async () => ({ released: true }),
+    },
+    processEvents: new EventEmitter(),
+    sourceSessionMode: 'legacy-fixture',
+    settings: {
+      provider: 'codex',
+      model: 'gpt-6.1-sol',
+      effort: 'medium',
+      maxCalls: 1,
+      deadlineMs: 30000,
+      execution: 'offline-stand-in',
+      environment,
+      openers: {
+        codex: async () => ({
+          request: async () => ({ value: {} }),
+          close: async () => {},
+        }),
+      },
+    },
+  });
+}
+
+test('a provider preflight failure keeps its own fixed category in startup diagnostics', async () => {
+  const run = startupOnlyRun({ OPENAI_API_KEY: 'fictional-not-a-key' });
+  await assert.rejects(run.ready);
+  await run.close().catch(() => {});
+  assert.deepEqual(run.startupDiagnostics.failure, {
+    stage: 'provider-preflight',
+    reason: 'ambient-credentials',
+  });
+  assert.equal(
+    JSON.stringify(run.startupDiagnostics).includes('fictional'),
+    false,
+  );
+});
+
+test('a broker setup failure is recorded as a protocol failure, not a normal close', async () => {
+  // A temporary root deep enough that the socket path exceeds the platform limit.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'tq-deep-')));
+  const deep = join(root, 'd'.repeat(60), 'e'.repeat(60));
+  mkdirSync(deep, { recursive: true });
+  const original = process.env.TMPDIR;
+  try {
+    process.env.TMPDIR = deep;
+    const run = startupOnlyRun();
+    await assert.rejects(run.ready);
+    await run.close().catch(() => {});
+    assert.deepEqual(run.startupDiagnostics.failure, {
+      stage: 'broker-preparation',
+      reason: 'protocol',
+    });
+  } finally {
+    if (original === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = original;
+    rmSync(root, { recursive: true, force: true });
+  }
 });

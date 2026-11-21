@@ -18,7 +18,18 @@ const CODES = new Set([
   'invalid-reply',
   'provider',
   'cleanup',
+  'usage-limit',
+  'refusal',
+  'output-limit',
 ]);
+// Provider outcomes that end only one scoped evaluator request. An output
+// limit, and a reply the broker's own check refuses, are request-scoped only
+// on the direct API route; on the subscription CLI routes they still end
+// the run.
+const requestScoped = (provider, category) =>
+  category === 'refusal' ||
+  (['output-limit', 'invalid-reply'].includes(category) &&
+    provider.metadata?.provider === 'anthropic-api');
 export const gateFailure = (category) =>
   Object.assign(new Error(`Lab run stopped: ${category}.`), { category });
 const safe = (error) =>
@@ -72,6 +83,13 @@ export function createLabOperationGate({
   const rootAbort = () => stop('cancelled');
   signal?.addEventListener('abort', rootAbort, { once: true });
   if (signal?.aborted) stop('cancelled');
+  // True only for the expected abort outcome of a retired scoped lease; any
+  // other failure, including unconfirmed provider cleanup, stays terminal.
+  const scopedRetirement = (lease, error) =>
+    !!lease?.retired &&
+    !terminal &&
+    (['cancelled', 'deadline'].includes(error?.category) ||
+      requestScoped(provider, error?.category));
   const notify = () => {
     for (const waiter of waiters) waiter();
   };
@@ -87,6 +105,9 @@ export function createLabOperationGate({
       stop('protocol');
       throw gateFailure('protocol');
     }
+    // A scoped lease retired before dispatch spends no call and stays scoped.
+    if (lease.retired && !requestSignal?.aborted)
+      throw gateFailure(lease.retired);
     if (requestSignal?.aborted || lease.controller.signal.aborted) {
       stop('cancelled');
       throw gateFailure('cancelled');
@@ -105,9 +126,17 @@ export function createLabOperationGate({
     try {
       const result = await lease.providerOperation;
       if (terminal || lease.controller.signal.aborted)
-        throw gateFailure(terminal ?? 'cancelled');
+        throw gateFailure(terminal ?? lease.retired ?? 'cancelled');
       return result;
     } catch (error) {
+      if (scopedRetirement(lease, error)) throw gateFailure(lease.retired);
+      // A provider refusal, or an API reply that reached its output bound,
+      // ends only this scoped evaluator request.
+      const category = safe(error).category;
+      if (lease.scoped && !terminal && requestScoped(provider, category)) {
+        lease.retire(category);
+        throw gateFailure(category);
+      }
       stop(safe(error).category);
       throw safe(error);
     } finally {
@@ -117,7 +146,13 @@ export function createLabOperationGate({
   };
   const run = async (
     task,
-    { role, signal: operationSignal, deadlineMs = 30000 } = {},
+    {
+      role,
+      signal: operationSignal,
+      deadlineMs = 30000,
+      scoped = false,
+      onRetire,
+    } = {},
   ) => {
     if (terminal) throw gateFailure(terminal);
     if (context.getStore()) {
@@ -129,7 +164,9 @@ export function createLabOperationGate({
       !ROLES.has(role) ||
       !Number.isSafeInteger(deadlineMs) ||
       deadlineMs < 1 ||
-      deadlineMs > 60000
+      deadlineMs > 60000 ||
+      (scoped && role !== 'cue-evaluator') ||
+      (onRetire !== undefined && typeof onRetire !== 'function')
     ) {
       stop('protocol');
       throw gateFailure('protocol');
@@ -138,9 +175,13 @@ export function createLabOperationGate({
       stop('cancelled');
       throw gateFailure('cancelled');
     }
+    // A new evaluator may wait behind an evaluator lease that is already
+    // retired and only settling its provider cleanup.
     if (
       pending ||
-      (active && (role !== 'cue-evaluator' || active.role === 'cue-evaluator'))
+      (active &&
+        (role !== 'cue-evaluator' ||
+          (active.role === 'cue-evaluator' && !active.retired)))
     ) {
       stop('protocol');
       throw gateFailure('protocol');
@@ -156,10 +197,34 @@ export function createLabOperationGate({
       deadlineAt: performance.now() + deadlineMs,
       timer: null,
       finished: null,
+      retired: null,
+      scoped,
     };
-    const abort = () => stop('cancelled');
+    // A scoped lease's deadline or caller abort retires only this lease: its
+    // provider work is aborted and must settle, and the gate stays usable.
+    const retire = (reason) => {
+      if (terminal || lease.retired) return;
+      lease.retired = reason;
+      lease.controller.abort();
+      // A queued lease retired while waiting leaves the queue at once, so the
+      // next evaluator can queue behind the settling one.
+      if (pending === lease) {
+        pending = null;
+        lease.leaveQueue?.();
+      }
+      try {
+        onRetire?.(reason);
+      } catch {
+        stop('protocol');
+      }
+    };
+    lease.retire = retire;
+    const abort = () => (scoped ? retire('cancelled') : stop('cancelled'));
     operationSignal?.addEventListener('abort', abort, { once: true });
-    lease.timer = setTimeout(() => stop('deadline'), deadlineMs);
+    lease.timer = setTimeout(
+      () => (scoped ? retire('deadline') : stop('deadline')),
+      deadlineMs,
+    );
     let release;
     lease.finished = new Promise((resolve) => {
       release = resolve;
@@ -168,18 +233,31 @@ export function createLabOperationGate({
       if (active) {
         pending = lease;
         const previous = active;
-        await previous.finished;
+        await Promise.race([
+          previous.finished,
+          new Promise((resolve) => (lease.leaveQueue = resolve)),
+        ]);
         if (terminal) throw gateFailure(terminal);
+        if (lease.retired) throw gateFailure(lease.retired);
         pending = null;
       }
       active = lease;
+      if (lease.retired) throw gateFailure(lease.retired);
       const result = await context.run(lease, task);
       // A caller cannot fire-and-forget the provider and release the lease.
       if (lease.providerOperation) await lease.providerOperation;
       if (terminal) throw gateFailure(terminal);
+      if (lease.retired) throw gateFailure(lease.retired);
       if (!lease.dispatched) throw gateFailure('protocol');
       return result;
     } catch (error) {
+      if (scopedRetirement(lease, error)) {
+        // Hold the lease until the aborted provider work has settled.
+        if (lease.providerOperation)
+          await lease.providerOperation.catch(() => {});
+        if (!terminal)
+          throw Object.assign(gateFailure(lease.retired), { scoped: true });
+      }
       stop(safe(error).category);
       if (lease.providerOperation)
         await lease.providerOperation.catch(() => {});
@@ -214,7 +292,14 @@ export function createLabOperationGate({
     }
     lease.settlement = true;
     clearTimeout(lease.timer);
-    lease.timer = setTimeout(() => stop('deadline'), deadlineMs);
+    // A scoped request may be settled, or retired by native, until one second
+    // after its own deadline, plus a small transit margin because native's
+    // deadline anchor precedes this lease's; only silence after that is
+    // terminal.
+    const window = lease.scoped
+      ? Math.max(deadlineMs, lease.deadlineAt + 1250 - performance.now())
+      : deadlineMs;
+    lease.timer = setTimeout(() => stop('deadline'), window);
     // Settlement is a bounded acknowledgement, not another provider operation.
     // A missing acknowledgement must not prevent terminal cleanup/close.
     let rejectAbort;
@@ -254,10 +339,31 @@ export function createLabOperationGate({
       check();
     });
   };
+  // From inside a scoped task, after its provider call settled: retire only
+  // this request for a request-scoped reason (the broker's check refused the
+  // reply). False where that is not request-scoped; the caller then ends the
+  // run as before.
+  const retireCurrent = (category) => {
+    const lease = context.getStore();
+    if (
+      !lease ||
+      lease !== active ||
+      !lease.scoped ||
+      !lease.dispatched ||
+      !lease.providerSettled ||
+      lease.retired ||
+      terminal ||
+      !requestScoped(provider, category)
+    )
+      return false;
+    lease.retire(category);
+    return true;
+  };
   return Object.freeze({
     run,
     request,
     settle,
+    retireCurrent,
     waitIdle,
     stop,
     get dispatchesUsed() {

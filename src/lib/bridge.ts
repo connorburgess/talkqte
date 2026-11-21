@@ -7,7 +7,6 @@ import type {
   GranolaStatus,
   LiveStatus,
   MergeOutcome,
-  ModelStatus,
   PickedNotes,
   Snapshot,
   UpdateCheckReport,
@@ -53,20 +52,27 @@ export async function liveStatus() {
   return invoke<LiveStatus>('live_status');
 }
 
-/** Reports the optional speech model download and its later changes. */
-export async function watchModel(receive: (status: ModelStatus) => void) {
-  if (preview) {
-    receive((await preview).modelStatus());
-    return () => {};
-  }
-  const unlisten = await listen<ModelStatus>('model:changed', ({ payload }) =>
-    receive(payload),
-  );
+/** The edge of the companion window that stays put when it grows for a
+ * cue, as the native side places it: read when the page loads, then sent
+ * before each move. Nothing is sent in the browser. */
+export async function watchAnchor(receive: (edge: 'top' | 'bottom') => void) {
+  if (preview) return () => {};
+  const valid = (value: unknown): value is 'top' | 'bottom' =>
+    value === 'top' || value === 'bottom';
+  // An event is sent just before a move, so it is newer than any answer to
+  // the read below that was worked out before it.
+  let moved = false;
+  const unlisten = await listen<unknown>('companion:anchor', ({ payload }) => {
+    if (!valid(payload)) return;
+    moved = true;
+    receive(payload);
+  });
+  // Without an answer the page keeps listening and waits for the next move.
   try {
-    receive(await invoke<ModelStatus>('model_status'));
-  } catch (error) {
-    unlisten();
-    throw error;
+    const edge = await invoke<unknown>('companion_anchor');
+    if (!moved && valid(edge)) receive(edge);
+  } catch {
+    // Nothing to read now; the next move says which edge it is.
   }
   return unlisten;
 }
@@ -75,6 +81,12 @@ export async function watchModel(receive: (status: ModelStatus) => void) {
 export async function pickContextFile() {
   if (preview) return (await preview).pickContextFile();
   return invoke<PickedNotes | null>('pick_context_file');
+}
+
+/** Lists an explicitly entered local file; does not import or grant processing. */
+export async function readContextFilePath(path: string) {
+  if (preview) return (await preview).pickContextFile();
+  return invoke<PickedNotes>('read_context_file_path', { path });
 }
 
 /** Signs in to Granola in the browser and opens a session; desktop only. */

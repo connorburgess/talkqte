@@ -28,6 +28,14 @@ idempotent. A missing release, failed cleanup or process exit without release is
 `failed-cleanup`; signal delivery is never evidence of released capture. No new
 operation can enter while cleanup remains outstanding.
 
+`startupDiagnostics` reports the current fixed startup stage, the first
+pre-readiness failure as `{stage,reason}` (a provider preflight failure keeps
+its fixed provider category, and a broker setup failure is `protocol`) and the
+broker's
+[startup diagnostics](lab-broker.md#local-wire-v1). Later teardown reasons never
+replace the first failure. A take exposes the same value, together with the
+broker's `evaluationSummary` and the provider's content-free `providerReceipts`.
+
 ## Native owner contract
 
 The lifecycle requires `subscribe(handler)`, `start({descriptorPath,runId,metadata,signal})`

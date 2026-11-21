@@ -23,6 +23,10 @@ const visuallyHidden = {
 } as const;
 
 export const issueText = {
+  labStopped:
+    'Cues stopped: this development lab run ended. Start a new lab run and session to continue; Resume does not restart it.',
+  labUnavailable:
+    'Cues are off: the development lab backend, provider, model, effort, spend cap or local broker settings are unavailable. Correct the launch settings before starting a new run.',
   devSettings:
     'Cues are off: TALKQTE_DEV_MODEL_CONNECTION must be on or absent, and TALKQTE_DEV_MODEL_CALLS must be a whole number from 1 to 100. Correct the launch settings and relaunch.',
   callLimit:
@@ -50,6 +54,51 @@ export const issueText = {
   worker:
     'Cues stopped: the model connection stopped working. Nothing more will be sent until you turn it on again.',
 };
+/** The development lab's processors: a subscription CLI or the paid API. */
+function isLabProcessor(id: string | undefined): boolean {
+  return id === 'lab-subscription' || isLabApi(id);
+}
+
+function isLabApi(id: string | undefined): boolean {
+  return (
+    id === 'lab-api' ||
+    id === 'lab-api-selected-prior-v2' ||
+    id === 'lab-api-selected-prior-attested-v1'
+  );
+}
+
+const apiLaunchApproval =
+  'Cues are off: launch-time approval (TALKQTE_DEV_MODEL_CONNECTION=on) is not accepted for the API lab backend. Relaunch without it, then approve in the session review.';
+
+export function processingIssueText(
+  issue: keyof typeof issueText,
+  provider = 'Claude',
+  lab = false,
+  api = false,
+): string {
+  if (!lab) return issueText[issue];
+  if (api && issue === 'devSettings') return apiLaunchApproval;
+  if (
+    issue === 'labStopped' ||
+    issue === 'labUnavailable' ||
+    issue === 'callLimit' ||
+    issue === 'devSettings'
+  )
+    return issueText[issue];
+  const reason =
+    issue === 'timedOut'
+      ? 'a deadline ended the lab connection'
+      : issue === 'authentication'
+        ? `${provider} sign-in or setup for the lab connection is unavailable`
+        : issue === 'credentials'
+          ? "the lab connection's credential policy was not met"
+          : issue === 'allowance' || issue === 'rateLimit'
+            ? `${provider} usage or rate limit was reached`
+            : issue === 'invalidReply'
+              ? 'the model reply failed validation'
+              : 'the development model connection failed';
+  return `Cues stopped: ${reason}. Nothing more will be sent in this lab run. Start a new lab run and session to continue.`;
+}
 function NoteLabel({ note }: { note: ProcessingNote }) {
   return (
     <>
@@ -455,7 +504,23 @@ export function ProcessingControl({
       )}
       {snapshot?.issue && (
         <p className="processing-message" role="status">
-          {issueText[snapshot.issue]}
+          {processingIssueText(
+            snapshot.issue,
+            snapshot.processor?.name,
+            isLabProcessor(snapshot.processor?.id),
+            isLabApi(snapshot.processor?.id),
+          )}
+        </p>
+      )}
+      {isLabProcessor(snapshot?.processor?.id) && (
+        <p className="processing-muted">
+          Fictional development lab. A cue reflects speech up to 8 s before it
+          appears; newer speech is checked next. A reply later than 8 s shows no
+          cue and the run continues. Pause, Dismiss, Off, Stop and any other
+          failure end the run; Resume does not restart it.{' '}
+          {isLabApi(snapshot?.processor?.id)
+            ? "Uses the lab owner's Anthropic API key, billed per token; the lab caps requests and spending per run."
+            : 'The lab shares a CLI-dispatch budget across roles; underlying provider request count is unobserved.'}
         </p>
       )}
       {snapshot?.phase === 'off' && snapshot.processor && !snapshot.issue && (
@@ -467,7 +532,9 @@ export function ProcessingControl({
         <p className="processing-muted" role="status">
           {snapshot.processor?.name.startsWith('Claude')
             ? 'Sending recent lines to Claude…'
-            : 'Sending recent lines to the model…'}
+            : snapshot.processor?.name === 'Codex'
+              ? 'Sending recent lines to Codex…'
+              : 'Sending recent lines to the model…'}
         </p>
       )}
       {active && snapshot?.lastDecision === 'quiet' && (
@@ -611,7 +678,18 @@ export function ProcessingControl({
           ) : (
             <>
               <fieldset disabled={!!busy || !!status?.failed}>
-                <legend>Prior notes · optional</legend>
+                <legend>
+                  {snapshot?.processor?.requiredNoteCount === undefined
+                    ? 'Prior notes · optional'
+                    : 'Prior notes'}
+                </legend>
+                {snapshot?.processor?.requiredNoteCount !== undefined && (
+                  <p>
+                    {snapshot.processor.requiredNoteCount === 1
+                      ? 'This diagnostic requires exactly one approved prior note.'
+                      : 'This control requires no prior notes.'}
+                  </p>
+                )}
                 <p>Importing a note does not approve it for processing.</p>
                 {snapshot?.notes.length ? (
                   <div className="processing-notes">
@@ -639,8 +717,9 @@ export function ProcessingControl({
                   </div>
                 ) : (
                   <p>
-                    No prior notes imported. You can continue with new speech
-                    only.
+                    {snapshot?.processor?.requiredNoteCount === 1
+                      ? 'Import a prior note before preparing this review.'
+                      : 'No prior notes imported. You can continue with new speech only.'}
                   </p>
                 )}
               </fieldset>
@@ -649,7 +728,12 @@ export function ProcessingControl({
           <div className="processing-actions">
             <button
               className="primary-button"
-              disabled={!!busy || !!status?.failed}
+              disabled={
+                !!busy ||
+                !!status?.failed ||
+                (snapshot?.processor?.requiredNoteCount !== undefined &&
+                  selected.length !== snapshot.processor.requiredNoteCount)
+              }
               type="submit"
             >
               {busy === 'review'
@@ -682,6 +766,12 @@ export function ProcessingControl({
                 ? `Sent to ${review.processor.destination}`
                 : 'On this device'}
             </dd>
+            {review.processor.audioDestination && (
+              <>
+                <dt>Audio</dt>
+                <dd>Sent to {review.processor.audioDestination}</dd>
+              </>
+            )}
             <dt>Conversation</dt>
             <dd>{conversationLabel(review.scope)}</dd>
             <dt>Prior notes</dt>

@@ -27,6 +27,13 @@ pub(crate) struct SourceSession {
 /// Held by the runtime while the source may feed the session. Dropping it,
 /// for any reason, cancels the source: an unattached source must not deliver.
 pub(crate) struct LiveSource {
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    observation: Option<crate::dev_source_observation::Identity>,
     session: u64,
     operation: String,
     control: Control,
@@ -34,6 +41,15 @@ pub(crate) struct LiveSource {
 
 impl Drop for LiveSource {
     fn drop(&mut self) {
+        #[cfg(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        ))]
+        if let Some(identity) = self.observation.take() {
+            crate::timing_log::record(identity.event("retired"));
+        }
         self.control.cancel();
     }
 }
@@ -95,11 +111,66 @@ impl Runtime {
             return Err(Refused::Occupied);
         }
         self.live_source = Some(LiveSource {
+            #[cfg(all(
+                debug_assertions,
+                target_os = "macos",
+                feature = "native-audio-spike",
+                feature = "lab-evaluator"
+            ))]
+            observation: None,
             session: self.engine.session(),
             operation,
             control: control.clone(),
         });
         Ok(())
+    }
+
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    pub(crate) fn observe_lab_source(
+        &mut self,
+        candidate: &crate::dev_source_observation::Candidate,
+        run: &str,
+        stopped: bool,
+    ) -> Option<crate::dev_source_observation::Identity> {
+        // Do not call live_source_accepts: its StartGate read can wait.
+        let (operation, phase) = self.live_start.try_control()?;
+        let live = self.live.as_ref()?;
+        let source = self.live_source.as_ref()?;
+        let own = self.source_session.as_ref()?;
+        if stopped
+            || candidate.control.is_cancelled()
+            || phase != StartupState::Idle
+            || !self.engine.state.live
+            || self.engine.state.status != Status::Running
+            || self.engine.is_live_stopping()
+            || live.session != self.engine.session()
+            || live.session != source.session
+            || own.session != source.session
+            || !own.control.same_operation(&candidate.control)
+            || !source.control.same_operation(&candidate.control)
+            || live.microphone.is_some()
+            || live.runner.is_some()
+            || operation.as_deref() != Some(source.operation.as_str())
+            || live.operation.as_deref() != Some(source.operation.as_str())
+            || source.observation.is_some()
+        {
+            return None;
+        }
+        let identity = crate::dev_source_observation::Identity::for_kind(
+            run,
+            &candidate.host_operation,
+            &source.operation,
+            source.session,
+            candidate.kind,
+        )?;
+        self.live_source.as_mut()?.observation = Some(identity.clone());
+        crate::timing_log::record(identity.event("listening"));
+        Some(identity)
     }
 
     /// Cancel the attached source, if any. Queued and already returned audio
@@ -202,6 +273,15 @@ impl Runtime {
     /// microphone is not used, and its Stop would not release a check that
     /// started inside it.
     pub(crate) fn microphone_may_start(&self) -> bool {
+        #[cfg(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        ))]
+        if crate::dev_stop::source_only() {
+            return false;
+        }
         self.live.is_none()
     }
 
@@ -275,7 +355,21 @@ impl Runtime {
             own.control.cancel();
         }
         if self.live_session() == Some(session) {
-            drop(self.take_live_for_stop());
+            if let Some(live) = self.take_live_for_stop() {
+                #[cfg(all(
+                    debug_assertions,
+                    target_os = "macos",
+                    feature = "native-audio-spike",
+                    feature = "lab-evaluator"
+                ))]
+                self.lab_stop_drains.acknowledge(
+                    live.session,
+                    live.microphone.is_none() && live.runner.is_none(),
+                );
+                // Only the exact empty source-session handle taken here is
+                // acknowledged. A drain already owned by another Stop stays pending.
+                drop(live);
+            }
         }
         self.engine.finish_live_stop(session)
     }
@@ -811,5 +905,238 @@ mod tests {
         assert!(!runtime.is_source_session(session));
         // The worker's own end step later changes nothing.
         assert!(!runtime.end_source_session(session));
+    }
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    #[test]
+    fn source_teardown_acknowledges_only_the_empty_handle_it_owns() {
+        let mut runtime = Runtime::default();
+        let first_source = source("fictional-player");
+        let session = runtime.begin_source_session(&first_source.control).unwrap();
+        assert!(runtime.end_source_session(session));
+        assert!(runtime.lab_stop_drains.settled());
+
+        let source = source("fictional-replacement");
+        let session = runtime.begin_source_session(&source.control).unwrap();
+        let ordinary_stop = runtime.take_live_for_stop().unwrap();
+        runtime.end_source_session(session);
+        assert!(
+            !runtime.lab_stop_drains.settled(),
+            "source end cannot acknowledge another Stop's handle"
+        );
+        runtime
+            .lab_stop_drains
+            .acknowledge(ordinary_stop.session, true);
+        drop(ordinary_stop);
+        assert!(runtime.lab_stop_drains.settled());
+    }
+}
+
+#[cfg(all(
+    test,
+    debug_assertions,
+    target_os = "macos",
+    feature = "native-audio-spike",
+    feature = "lab-evaluator"
+))]
+mod observation_tests {
+    use super::*;
+    use crate::{
+        application_audio::{Application, Gate, Review},
+        dev_source_observation::{self, Candidate},
+    };
+    use std::sync::{mpsc, Arc, Mutex};
+
+    fn setup() -> (Runtime, Review, Candidate) {
+        let gate = Gate::default();
+        let review = gate
+            .review(
+                Application::new("fictional-selected".into(), "QuickTime Player".into()).unwrap(),
+            )
+            .unwrap();
+        let control = review.control();
+        let mut runtime = Runtime::default();
+        runtime.begin_source_session(&control).unwrap();
+        runtime.attach_live_source(&control).unwrap();
+        (
+            runtime,
+            review,
+            Candidate {
+                host_operation: "a".repeat(32),
+                kind: crate::dev_lab_source::Kind::QuickTime,
+                control,
+            },
+        )
+    }
+
+    #[test]
+    fn exact_three_way_source_binding_is_once_only_and_retirement_prevents_rebind() {
+        let (mut runtime, _owner, candidate) = setup();
+        let before = runtime.engine.state.elapsed_ms;
+        let identity = runtime
+            .observe_lab_source(&candidate, "fictional-run", false)
+            .unwrap();
+        let value = serde_json::to_value(identity.event("listening")).unwrap();
+        assert_eq!(value["session"], runtime.engine.session().to_string());
+        assert_eq!(
+            value["live_operation"],
+            runtime.live_source.as_ref().unwrap().operation
+        );
+        assert_eq!(value["host_operation"], candidate.host_operation);
+        assert_eq!(
+            runtime.engine.state.elapsed_ms, before,
+            "observation never advances time"
+        );
+        assert!(runtime
+            .observe_lab_source(&candidate, "fictional-run", false)
+            .is_none());
+        runtime.retire_live_source();
+        assert!(runtime.live_source.is_none());
+        assert!(runtime
+            .observe_lab_source(&candidate, "fictional-run", false)
+            .is_none());
+        assert!(runtime.attach_live_source(&candidate.control).is_err());
+    }
+
+    #[test]
+    fn foreign_source_session_control_and_all_mismatched_ownership_refuse() {
+        for case in 0..9 {
+            let (mut runtime, _owner, mut candidate) = setup();
+            let foreign_gate = Gate::default();
+            let foreign = foreign_gate
+                .review(
+                    Application::new("fictional-other".into(), "QuickTime Player".into()).unwrap(),
+                )
+                .unwrap();
+            match case {
+                0 => runtime.source_session.as_mut().unwrap().control = foreign.control(),
+                1 => runtime.source_session.as_mut().unwrap().session += 1,
+                2 => runtime.live_source.as_mut().unwrap().control = foreign.control(),
+                3 => runtime.live.as_mut().unwrap().operation = Some("b".repeat(64)),
+                4 => runtime.live.as_mut().unwrap().microphone = Some(7),
+                5 => runtime.engine.state.status = Status::Paused,
+                6 => candidate.control = foreign.control(),
+                7 => runtime.live_source.as_mut().unwrap().session += 1,
+                8 => runtime.source_session = None,
+                _ => unreachable!(),
+            }
+            assert!(
+                runtime
+                    .observe_lab_source(&candidate, "fictional-run", false)
+                    .is_none(),
+                "case {case}"
+            );
+            assert!(runtime.live_source.as_ref().unwrap().observation.is_none());
+        }
+    }
+
+    #[test]
+    fn busy_runtime_or_start_gate_fail_without_waiting_or_binding() {
+        let (runtime, _owner, candidate) = setup();
+        let gate = runtime.live_start.clone();
+        let shared = Mutex::new(runtime);
+        {
+            let _held = shared.lock().unwrap();
+            assert!(
+                dev_source_observation::observe(&shared, &candidate, "fictional-run", || false)
+                    .is_none()
+            );
+        }
+        gate.with_test_control_lock(|| {
+            assert!(
+                dev_source_observation::observe(&shared, &candidate, "fictional-run", || false)
+                    .is_none()
+            );
+        });
+        assert!(shared
+            .lock()
+            .unwrap()
+            .live_source
+            .as_ref()
+            .unwrap()
+            .observation
+            .is_none());
+        assert!(
+            dev_source_observation::observe(&shared, &candidate, "fictional-run", || false)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn stop_is_sampled_after_runtime_acquisition_and_canceled_sources_refuse() {
+        let (runtime, _owner, candidate) = setup();
+        let shared = Mutex::new(runtime);
+        assert!(
+            dev_source_observation::observe(&shared, &candidate, "fictional-run", || true)
+                .is_none()
+        );
+        candidate.control.cancel();
+        assert!(
+            dev_source_observation::observe(&shared, &candidate, "fictional-run", || false)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn retirement_or_stop_between_host_candidate_and_runtime_guard_cannot_publish_listening() {
+        for ordinary_stop in [false, true] {
+            let (runtime, _owner, candidate) = setup();
+            let shared = Arc::new(Mutex::new(runtime));
+            let (release, wait) = mpsc::channel();
+            let other = shared.clone();
+            let worker = std::thread::spawn(move || {
+                wait.recv().unwrap();
+                dev_source_observation::observe(&other, &candidate, "fictional-run", || false)
+            });
+            {
+                let mut runtime = shared.lock().unwrap();
+                if ordinary_stop {
+                    runtime.take_live_for_stop();
+                } else {
+                    runtime.retire_live_source();
+                }
+            }
+            release.send(()).unwrap();
+            assert!(worker.join().unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn replacement_rejects_old_candidate_and_source_sync_retires_bound_identity() {
+        let (mut runtime, _owner, old) = setup();
+        let old_session = runtime.engine.session();
+        runtime
+            .observe_lab_source(&old, "fictional-run", false)
+            .unwrap();
+        let live = runtime.take_live_for_stop().unwrap();
+        runtime.engine.finish_live_stop(old_session);
+        runtime.lab_stop_drains.acknowledge(live.session, true);
+        let next_gate = Gate::default();
+        let next = next_gate
+            .review(Application::new("fictional-next".into(), "QuickTime Player".into()).unwrap())
+            .unwrap();
+        runtime.begin_source_session(&next.control()).unwrap();
+        runtime.attach_live_source(&next.control()).unwrap();
+        assert!(runtime
+            .observe_lab_source(&old, "fictional-run", false)
+            .is_none());
+        let current = Candidate {
+            kind: crate::dev_lab_source::Kind::QuickTime,
+            host_operation: "c".repeat(32),
+            control: next.control(),
+        };
+        runtime
+            .observe_lab_source(&current, "fictional-run", false)
+            .unwrap();
+        current.control.cancel();
+        runtime.reconcile_live_source();
+        assert!(runtime.live_source.is_none());
+        assert!(runtime
+            .observe_lab_source(&current, "fictional-run", false)
+            .is_none());
     }
 }

@@ -1,6 +1,7 @@
 {
   "name": "talkqte",
   "version": "0.1.0",
+  "description": "A meeting companion that surfaces the right cue at the right moment to help keep meetings on target. Early prototype.",
   "private": true,
   "type": "module",
   "license": "SEE LICENSE IN LICENSE",
@@ -13,7 +14,7 @@
     "test": "playwright test",
     "test:e2e": "playwright test",
     "test:contributions": "node --test scripts/check-contributions.test.mjs",
-    "test:cue-lab": "node --test scripts/cue-lab.test.mjs scripts/cue-lab-batch.test.mjs scripts/cue-sim.test.mjs scripts/cue-sim-voices.test.mjs scripts/cue-sim-media.test.mjs scripts/cue-sim-review.test.mjs scripts/cue-dialogue.test.mjs scripts/cue-dialogue-stream.test.mjs scripts/lab-meeting.test.mjs scripts/cue-lab-codex.test.mjs scripts/cue-lab-provider.test.mjs scripts/cue-lab-operation-gate.test.mjs scripts/cue-lab-broker.test.mjs scripts/cue-lab-run.test.mjs scripts/cue-lab-native-owner.test.mjs scripts/cue-lab-launcher.test.mjs scripts/cue-lab-prepared-take.test.mjs scripts/cue-lab-adaptive-take.test.mjs",
+    "test:cue-lab": "node --test scripts/cue-lab-player-input.test.mjs scripts/cue-lab.test.mjs scripts/cue-lab-batch.test.mjs scripts/cue-sim.test.mjs scripts/cue-sim-voices.test.mjs scripts/cue-sim-media.test.mjs scripts/cue-sim-review.test.mjs scripts/cue-dialogue.test.mjs scripts/cue-dialogue-stream.test.mjs scripts/lab-meeting.test.mjs scripts/cue-lab-codex.test.mjs scripts/cue-lab-anthropic.test.mjs scripts/cue-lab-provider.test.mjs scripts/cue-lab-operation-gate.test.mjs scripts/cue-lab-broker.test.mjs scripts/cue-lab-checkout.test.mjs scripts/cue-lab-media.test.mjs scripts/cue-lab-run.test.mjs scripts/cue-lab-native-owner.test.mjs scripts/cue-lab-launcher.test.mjs scripts/cue-lab-prepared-take.test.mjs scripts/cue-lab-listening.test.mjs scripts/cue-lab-source-v1.test.mjs scripts/cue-lab-player.test.mjs scripts/cue-lab-capture-take.test.mjs scripts/cue-lab-window-selection.test.mjs scripts/cue-lab-recorder.test.mjs scripts/cue-lab-window-identity.test.mjs scripts/cue-lab-evidence-writer.test.mjs scripts/cue-lab-timing-snapshot.test.mjs scripts/cue-lab-evidence-report.test.mjs scripts/cue-selected-snapshot.test.mjs scripts/cue-selected-context-route.test.mjs scripts/cue-selected-context.test.mjs scripts/lab-fresh-scenario.test.mjs scripts/cue-lab-adaptive-take.test.mjs",
     "test:cue-cases": "node --test scripts/cue-rules-independent.test.mjs",
     "test:docs": "node --test scripts/check-docs.test.mjs",
     "check:docs": "node scripts/check-docs.mjs",
@@ -44,6 +45,7 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "1.8.0",
     "@playwright/test": "^1.65.0",
     "@tauri-apps/cli": "^2.12.4",
     "@types/node": "^26.6.6",

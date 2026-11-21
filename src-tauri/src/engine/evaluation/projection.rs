@@ -57,6 +57,8 @@ pub enum Issue {
     Misconfigured,
     DevSettings,
     CallLimit,
+    LabStopped,
+    LabUnavailable,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -123,6 +125,12 @@ pub struct ProcessorSummary {
     pub data_policy: String,
     /// Whether the review may offer prior notes for this processor.
     pub accepts_notes: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub required_note_count: Option<usize>,
+    /// Where audio goes for transcription once the review is approved, when
+    /// a cloud transcription service is selected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_destination: Option<String>,
 }
 
 impl From<&ProcessorConfiguration> for ProcessorSummary {
@@ -140,6 +148,8 @@ impl From<&ProcessorConfiguration> for ProcessorSummary {
             destination,
             data_policy: config.disclosure.data_policy.clone(),
             accepts_notes: config.accepts_notes,
+            required_note_count: config.required_note_count,
+            audio_destination: config.audio_destination.clone(),
         }
     }
 }
@@ -383,6 +393,12 @@ impl Engine {
     /// The plain reason processing stopped, if it did.
     pub(crate) fn processing_issue(&self) -> Option<Issue> {
         match self.evaluation_status() {
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::LabStopped)) => {
+                Some(Issue::LabStopped)
+            }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::LabUnavailable)) => {
+                Some(Issue::LabUnavailable)
+            }
             Some(EvaluationStatus::Unavailable(EvaluationIssue::ScopeChanged)) => {
                 Some(Issue::ScopeChanged)
             }

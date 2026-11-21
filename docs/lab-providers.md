@@ -48,13 +48,34 @@ error. Its configured HTTP and stream retry budgets are zero, but that does not
 disable every internal continuation or authentication recovery. A local deadline
 cannot revoke work already submitted to the remote service.
 
-One operation may run at a time. Stop, cancellation, first failure, output overflow
-and deadline are terminal; no retry is attempted. Output bytes are bounded while
+One operation may run at a time. Stop, session cancellation, first failure,
+output overflow and the adapter deadline are terminal; no retry is attempted. An
+abort of one request's own signal (the broker's per-request evaluator deadline)
+retires only that call once its process group is confirmed gone; an unconfirmed
+retirement is terminal. Codex calls keep content-free `receipts`: per call, the
+millisecond offsets of spawn, first output, decision ready, retirement
+requested, exit and process-group retirement, and a fixed outcome. Output bytes are bounded while
 streaming, including stderr. Cancellation terminates the owned process group,
 escalates to KILL and checks group retirement before returning; unresolved cleanup
 fails closed. Late results are rejected. `close()` awaits runner settlement and
 removes the owned temporary directory. Injected offline runners must honor their
 abort/deadline contract and settle after cleanup.
+
+A Codex call is complete once its event stream has exactly one agent message
+followed by the single `turn.completed`. The adapter then stops the CLI's process
+group (TERM, then KILL after 100 ms) instead of waiting for the CLI's own
+shutdown, and still confirms the group is gone before returning; a group that
+survives is a terminal `cleanup` failure. Any event after `turn.completed`, a
+second message, or `turn.completed` without a message remains a failure. The CLI
+spends about 3.3 s after `turn.completed` before it exits by itself (about 2.3 s
+against an offline local endpoint), which alone pushed every measured call past
+the 8 s evaluator deadline. Cutting it short skips the CLI's own shutdown work: in
+an offline probe with a fresh Codex home it leaves SQLite state databases with
+uncheckpointed write-ahead logs (recovered on the next open) and one per-run
+`tmp/arg0-macos` directory holding a lock file and two symlinks (removed by the
+next Codex start). What the remaining shutdown time does with a signed-in profile
+is not observable from the event stream. The lab runs the CLI with the user's
+own Codex home, not an isolated profile.
 
 The orchestrator must still supply **one shared operation gate and nonresettable
 budget** across participants, judge and real-app evaluator. Do not count gate
@@ -110,3 +131,110 @@ The next acceptance check is a separately authorized integrated fictional run:
 incremental generated speech, actual model cue-versus-silence decisions, timely
 companion paint and bounded window-only recording. Provider smoke alone does not
 meet that check. README needs no change for these internal lab modules.
+
+## Direct Anthropic API route
+
+`anthropic-api` sends one cue evaluation per request to the Anthropic Messages API with the owner's own API key. It exists only for the development lab evaluator; the subscription routes above are unchanged. The native app's support for it (backend `lab-api`, a per-run export confirmation) is a separate change.
+
+**What leaves the device, per request:** the recent fictional transcript lines the broker received for that evaluation (at most 32 short lines), the existing cue if one is on screen, the optional user name and earlier cue texts, a fixed system prompt and a fixed reply schema. Nothing else: no audio, notes, history, files or identifiers beyond those line ids. The reply is one decision. Requests go only to `https://api.anthropic.com`. Like any client built on the official SDK, each request also carries the SDK's standard `X-Stainless-*` headers: operating system, CPU architecture, Node.js version and SDK version. They carry no content, paths or account details.
+
+**Models and settings:** exactly `claude-opus-5-5` (adaptive thinking), `claude-sonnet-5-5` (thinking `between_tools`) or `claude-haiku-5-5` (adaptive), always at effort `low`; nothing else is accepted. The client uses the pinned official SDK with no retries, a timeout from the request budget, logging off and streaming with abort. No sampling settings or fallbacks are sent. The system prompt is byte-stable; the user name and earlier cues travel only in the user message. Lengths, at most four sources and source membership are still checked client-side.
+
+**Key handling:** the key is read only from `~/.config/talkqte-lab/anthropic.env`, a `0600` file in a `0700` directory owned by the current user and outside any repository or temporary directory, holding exactly `TALKQTE_LAB_ANTHROPIC_KEY=` with a Console API key (`sk-ant-api…` or `sk-ant-usr-…`; admin and OAuth credentials are refused). It goes to a per-run worker process over stdin only, never in arguments, environment, logs, evidence or errors. Any `ANTHROPIC_*` variable in the environment is refused as an ambient credential, even one set to an empty string.
+
+**Limits:** one dispatch is exactly one HTTP request, counted by the shared gate against the dispatch cap. Before each request the adapter applies a local estimated-spend guard: it refuses if recorded spend plus the next request's estimate could exceed $1.00 for Opus or $0.25 for Sonnet and Haiku. This ends the run as a usage limit. Recorded spend uses reported token usage with a pinned price table; these local thresholds do not guarantee a maximum provider bill. Only a reply that reaches `message_stop` is charged its reported usage. Any other outcome is charged the same preflight estimate: a cancelled or timed-out request, a provider error, a reply at the output bound, or a worker that exits mid-request. Whatever was generated before the cut-off may still be billed. Once the cap is reached, every later request in the run reports a usage limit. `max_tokens` is 2,048, shared by adaptive thinking on Opus and Haiku and the reply. Two outcomes are recorded non-decisions for that request only, and the run continues: a refusal from the model (`stop_reason: refusal`, sent to native as `failed` code `refusal`), and a reply that reaches the output bound (sent as `failed` code `output_limit`). Malformed JSON rejected by the adapter, authentication errors, rate limits, provider/configuration errors and a reply from a different model remain terminal. CLI invalid-reply and output failures remain terminal; the API broker-validation distinction is below.
+
+The preflight estimate uses `ceil(UTF-8 bytes / 2) + 1,500` input tokens and the existing output-token ceiling with pinned rates. This byte heuristic is not a proven tokenizer bound. On Opus it estimates about $0.053 for a one-line input and $0.074 for the largest input the broker sends; forty such estimates total about $2.14 to $2.97. The $1.00 local threshold can therefore stop the run first. A completed decision uses its reported usage instead. Exact tokenizer coverage, rate validity and reconciliation with account billing remain separate acceptance checks; no remote token-count or billing request is made by this guard.
+
+**API broker validation:** after a provider call settles, the first two consecutive replies refused by broker validation retire only their own request, sent as `failed` code `refusal`. The third consecutive refused reply ends the run; a valid reply resets that count. Content-free `invalidReplies` and `invalidReasons` record the first failed check (shape, action, source IDs, cue, action without a cue, occupied show, glance or size); `refusals` counts provider refusals separately. On the API route only, an occupied `show` is normalized to `quiet` with a null cue and the reply's own source IDs. The normalized reply must still pass quiet-state and source-membership validation before a result is sent. `showWithCue` counts attempted normalizations, not successful validations. None of these rules establishes cue usefulness or correct silence.
+
+**In-app approval and timing:** a recorded take on this route has no launch-time approval. After the source is Listening and before anything plays, the take waits up to 180 s for the native app's connection row (`event` `evaluator`, `state` `on`, `approval` `review`, `backend` `lab-api`, and the launched model). The owner gives that approval in the app with three clicks: Review processing, Review selected sources, Enable for this session.
+
+- **Before approval:** the provider is not opened. The key file is not read, no worker starts and nothing is sent.
+- **No approval in time:** the take stops through ordinary Stop with `approval-not-given`, and nothing plays. The wait also ends early if a later approval could no longer leave room for the recorder and the full media before native Stop.
+- **Faults:** an approval by launch setting, or one naming another backend or model, stops the take as `approval-fault`, also after playback has begun.
+- **At approval:** the provider opens. The run's startup clock and the take's own clock both restart with their full budgets, so the wait itself cannot make a later step time out. The run package records its one attempt only after this point.
+
+Native Stop is set at 320 s: the usual 110 s source window, the 180 s approval budget and a 30 s allowance from native start to Listening. The evidence guard records the approval budget and the time actually waited as separate fields.
+
+A take on this route allows 40 calls, against 20 for Codex. Four limits apply: the native session call limit (40), the adapter's own call cap (40), the local estimated-spend guard checked before every request, and one request at a time with the 8 s native deadline.
+
+**Evidence:** per call, content-free receipts keep the time to first byte and first token, the stop reason, a refusal category, token usage and the computed cost. The run's estimated total spend is available beside the receipts. No prompt, reply or key text is kept.
+
+Tests drive the adapter with a fake fetch or a loopback stand-in endpoint and a dummy key; no test reaches the network.
+
+### Parent enforcement of API worker cleanup
+
+The parent independently watches each API request's adapter deadline. At that
+ceiling, or on a request abort, root abort or close, it asks the worker to abort.
+A cooperative scoped abort can keep the worker usable. If the worker does not
+settle within one second, the parent ends the session and retires its owned
+process group, using the existing bounded TERM/KILL confirmation. During that
+forced retirement, an exit or late reply cannot settle the request before group confirmation;
+unconfirmed retirement remains a cleanup failure. An incomplete call keeps its
+original abort cause and is charged the existing estimated worst case. No new
+request or provider budget is allowed during this cleanup.
+
+### Ownership-resolution prompt preparation
+
+The API lab's live prompt distinguishes a generic ownership question from an
+`asked` question. A generic ownership cue requires clear acceptance of the task
+before `resolved`; a suggestion, someone else's assignment, refusal, ambiguous
+acknowledgement or pending availability check keeps it `quiet`. Explicitly
+deferring or abandoning that task or ownership decision permits `withdraw`.
+An `asked` question can resolve on a clear answer, including a refusal; otherwise
+it stays `quiet`, never `withdraw`. Speaker identity must still come from the
+supplied text. Anonymous first-person commitment establishes someone accepting,
+not a named person's identity.
+
+On 17 November 2026, an authorized comparison used nine authored fictional
+controls, two prompt arms and three repeats: 54 requests to `claude-opus-5-5` at
+`low` effort. The candidate met the predeclared action and citation requirements
+on 27/27 requests; the preceding prompt met them on 20/27. Its seven failures
+were premature resolutions on an unconfirmed owner, an anonymous deferral of an
+asked question, and one third-party assignment. Raw and broker-settled actions
+matched throughout, with no occupied-slot `show` or raw asked `withdraw`.
+
+These are unblinded, near-rule authored diagnostics, not held-out validation,
+real-meeting accuracy or general effectiveness evidence. No native dispatch,
+Asked priority/lifetime, visible-card timing, staleness, blocked opportunities or
+participation benefit was measured. The assembled API system prompt fingerprint
+is `ad98cdf73eb7c2047510bb0b1b3a3e42b0c73db6cb36539c0077ff95432eb677`;
+the offline test verifies request assembly and preservation of asked state, not
+model correctness. Other prompt components, schemas and transport stay unchanged.
+
+This is code preparation for review, not activation or promotion of an existing
+app or launcher. The next acceptance check is a separately reviewed and
+authorized broader comparison that checks supported opportunities and temporal
+harm, including whether conservative retention blocks a later useful cue. No
+roadmap capability or production-readiness claim is closed by these controls.
+
+### Explicit bounded-history lab configuration
+
+The owned launcher accepts `contextPolicy: 'bounded-history'` only for a
+model-enabled direct Anthropic API run. Omission or `fresh-only` preserves the
+fresh-only configuration. Empty, unknown and non-API selections are refused.
+The launcher constructs `TALKQTE_DEV_LAB_CONTEXT=bounded-history` itself and
+ignores inherited copies of that flag. It does not send a launch-setting approval.
+
+This requires a separately reviewed native debug lab build that implements that
+configuration. The build must generate the expanded transcript disclosure before
+registration; the person must review the selected sources and explicitly enable
+processing for the session. The option alone is neither consent nor permission to
+release a transcription token or dispatch a cue request.
+
+The paired native history contract permits at most 24 transcript segments, with
+optional history strictly less than 90 seconds old and a 16,384-byte compact
+serialized-input limit. Current fresh-six and visible-cue evidence are reserved;
+visible-cue evidence may be older but must remain unchanged and permitted.
+Applying a decision still requires a cited transcript anchor less than 18 seconds
+old. This is bounded context preparation, not a validated improvement in cues.
+
+Offline launcher checks cover explicit selection, inherited-setting isolation,
+review-gated token release, and the real reader/source/owner/broker startup route
+with synthetic native rows and a local socket. They do not establish native
+capture, the actual in-app disclosure, model usefulness or participation benefit.
+The next combined-run gate is a reviewed native build and matching private plan,
+expanded-scope review, fresh budget and owner-present approval; existing runtime
+pins and consumed attempts are unchanged by this code preparation. README remains
+accurate because the normal app and disconnected runtime are unchanged.

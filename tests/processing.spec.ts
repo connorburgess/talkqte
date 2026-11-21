@@ -692,3 +692,178 @@ test('Cancel start still stops its own capture if startup finishes before delive
   ).toBeVisible();
   expect(await calls(page, 'stop_capture')).toHaveLength(1);
 });
+
+test('the API lab names Claude, its billing and caps, and shares the lab stop rules', async ({
+  page,
+}) => {
+  await open(page);
+  await send(page, {
+    processor: {
+      id: 'lab-api',
+      revision: 1,
+      name: 'Claude',
+      model: 'claude-haiku-5-5',
+      location: 'hosted',
+      destination:
+        "the Anthropic API, with the lab owner's API key (billed per token)",
+      dataPolicy: 'Fictional conversation-only processing with a spend cap.',
+      acceptsNotes: false,
+    },
+    phase: 'active',
+    sending: true,
+  });
+  await expect(
+    page.getByText(
+      /A cue reflects speech up to 8 s before it appears; newer speech is checked next\. A reply later than 8 s shows no cue and the run continues\. Pause, Dismiss, Off, Stop and any other failure end the run; Resume does not restart it\. Uses the lab owner's Anthropic API key, billed per token; the lab caps requests and spending per run\./,
+    ),
+  ).toBeVisible();
+  await expect(page.getByText(/CLI-dispatch budget/)).toHaveCount(0);
+  await send(page, { phase: 'unavailable', sending: false, issue: 'timedOut' });
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'a deadline ended the lab connection' }),
+  ).toBeVisible();
+});
+
+test('the API lab explains a refused launch-time approval instead of a malformed setting', async ({
+  page,
+}) => {
+  await open(page);
+  await send(page, {
+    processor: {
+      id: 'lab-api',
+      revision: 1,
+      name: 'Claude',
+      model: 'claude-haiku-5-5',
+      location: 'hosted',
+      destination:
+        "the Anthropic API, with the lab owner's API key (billed per token)",
+      dataPolicy: 'Fictional conversation-only processing with a spend cap.',
+      acceptsNotes: false,
+    },
+    phase: 'unavailable',
+    sending: false,
+    issue: 'devSettings',
+  });
+  await expect(
+    page.getByRole('status').filter({
+      hasText:
+        'launch-time approval (TALKQTE_DEV_MODEL_CONNECTION=on) is not accepted for the API lab backend',
+    }),
+  ).toBeVisible();
+  await expect(page.getByText(/must be on or absent/)).toHaveCount(0);
+});
+
+test('strict subscription lab names Codex and discloses terminal controls in the panel', async ({
+  page,
+}) => {
+  await open(page);
+  await send(page, {
+    processor: {
+      id: 'lab-subscription',
+      revision: 1,
+      name: 'Codex',
+      model: 'gpt-6.1-sol',
+      location: 'hosted',
+      destination: 'OpenAI through the lab subscription',
+      dataPolicy: 'Fictional conversation-only processing.',
+      acceptsNotes: false,
+    },
+    phase: 'active',
+    sending: true,
+  });
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'Sending recent lines to Codex' }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      /A cue reflects speech up to 8 s before it appears; newer speech is checked next\. A reply later than 8 s shows no cue and the run continues\. Pause, Dismiss, Off, Stop and any other failure end the run/,
+    ),
+  ).toBeVisible();
+  await send(page, { phase: 'unavailable', sending: false, issue: 'timedOut' });
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'a deadline ended the lab connection' }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'a deadline ended the lab connection' }),
+  ).not.toContainText('twice');
+});
+
+test('selected API identity keeps lab billing and launch-approval guidance', async ({
+  page,
+}) => {
+  await open(page, '?hosted');
+  await send(page, {
+    processor: {
+      id: 'lab-api-selected-prior-v2',
+      revision: 1,
+      name: 'Claude',
+      model: 'Fictional model',
+      location: 'hosted',
+      destination: 'Example service',
+      dataPolicy: 'Fictional selected snapshots only after review.',
+    },
+    issue: 'devSettings',
+  });
+  await expect(
+    page.getByText(
+      /launch-time approval.*not accepted for the API lab backend/,
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Uses the lab owner's Anthropic API key, billed per token/),
+  ).toBeVisible();
+  expect(await calls(page, 'approve_processing_scope')).toEqual([]);
+});
+
+test('required diagnostic note count is explicit and never selects or approves notes automatically', async ({
+  page,
+}) => {
+  await open(page, '?hosted');
+  const initial = await page.evaluate(() => window.processingTest.snapshot());
+  await send(page, {
+    processor: { ...initial.processor!, requiredNoteCount: 1 },
+  });
+  await page
+    .getByRole('button', { name: 'Review processing', exact: true })
+    .click();
+  await expect(
+    page.getByText('This diagnostic requires exactly one approved prior note.'),
+  ).toBeVisible();
+  const button = page.getByRole('button', { name: 'Review selected sources' });
+  await expect(button).toBeDisabled();
+  expect(await calls(page, 'review_processing_scope')).toEqual([]);
+  await page.getByRole('checkbox', { name: /supplier review/ }).check();
+  await expect(button).toBeEnabled();
+  await page.getByRole('checkbox', { name: /watering plan/ }).check();
+  await expect(button).toBeDisabled();
+  expect(await calls(page, 'approve_processing_scope')).toEqual([]);
+});
+
+test('explicit zero-note control still requires owner review and rejects selecting a note', async ({
+  page,
+}) => {
+  await open(page, '?hosted');
+  const initial = await page.evaluate(() => window.processingTest.snapshot());
+  await send(page, {
+    processor: { ...initial.processor!, requiredNoteCount: 0 },
+  });
+  await page
+    .getByRole('button', { name: 'Review processing', exact: true })
+    .click();
+  await expect(
+    page.getByText('This control requires no prior notes.'),
+  ).toBeVisible();
+  const button = page.getByRole('button', { name: 'Review selected sources' });
+  await expect(button).toBeEnabled();
+  await page.getByRole('checkbox', { name: /supplier review/ }).check();
+  await expect(button).toBeDisabled();
+  expect(await calls(page, 'approve_processing_scope')).toEqual([]);
+});

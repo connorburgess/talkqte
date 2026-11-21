@@ -9,8 +9,10 @@ export function createLabNativeOwner({
   stopAfterS,
   armingMs = 5000,
   releaseMs = 6000,
+  mode = 'model-enabled',
 } = {}) {
   if (
+    !['capture-only', 'model-enabled'].includes(mode) ||
     !isAbsolute(executable ?? '') ||
     typeof launch !== 'function' ||
     !Number.isSafeInteger(stopAfterS) ||
@@ -103,8 +105,13 @@ export function createLabNativeOwner({
       (event?.event === 'dev_source' && event.step === 'refused')
     )
       fail();
-    else if (event?.event === 'session' && event.state === 'ended')
+    else if (
+      (event?.event === 'session' && event.state === 'ended') ||
+      event?.event === 'source_ended'
+    )
       emit('session-ended');
+    else if (event?.event === 'dev_source' && event.step === 'stopping')
+      emit('stop-requested');
     // Transcript/cue text and receipt clocks never enter the lifecycle.
   };
   return Object.freeze({
@@ -122,10 +129,16 @@ export function createLabNativeOwner({
         signal?.aborted ||
         typeof id !== 'string' ||
         !/^[A-Za-z0-9_-]{1,64}$/.test(id) ||
-        !isAbsolute(descriptorPath ?? '') ||
-        !['codex', 'claude-code'].includes(metadata?.provider) ||
-        typeof metadata.model !== 'string' ||
-        typeof metadata.effort !== 'string'
+        (mode === 'capture-only'
+          ? descriptorPath !== undefined || metadata !== undefined
+          : !isAbsolute(descriptorPath ?? '') ||
+            !['codex', 'claude-code', 'anthropic-api'].includes(
+              metadata?.provider,
+            ) ||
+            (metadata.provider === 'anthropic-api') !==
+              Number.isSafeInteger(metadata.spendCapMicroUsd) ||
+            typeof metadata.model !== 'string' ||
+            typeof metadata.effort !== 'string')
       )
         throw gateFailure('protocol');
       began = true;
@@ -138,11 +151,25 @@ export function createLabNativeOwner({
             TALKQTE_DEV_STOP_SIGNAL: 'usr2',
             TALKQTE_DEV_STOP_AFTER_S: String(stopAfterS),
             TALKQTE_DEV_LAB_RUN_ID: id,
-            TALKQTE_DEV_CUE_BACKEND: 'lab-subscription',
-            TALKQTE_DEV_LAB_DESCRIPTOR: descriptorPath,
-            TALKQTE_DEV_LAB_PROVIDER: metadata.provider,
-            TALKQTE_DEV_LAB_MODEL: metadata.model,
-            TALKQTE_DEV_LAB_EFFORT: metadata.effort,
+            ...(mode === 'model-enabled'
+              ? {
+                  TALKQTE_DEV_CUE_BACKEND:
+                    metadata.provider === 'anthropic-api'
+                      ? 'lab-api'
+                      : 'lab-subscription',
+                  TALKQTE_DEV_LAB_DESCRIPTOR: descriptorPath,
+                  TALKQTE_DEV_LAB_PROVIDER: metadata.provider,
+                  TALKQTE_DEV_LAB_MODEL: metadata.model,
+                  TALKQTE_DEV_LAB_EFFORT: metadata.effort,
+                  ...(metadata.provider === 'anthropic-api'
+                    ? {
+                        TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD: String(
+                          metadata.spendCapMicroUsd,
+                        ),
+                      }
+                    : {}),
+                }
+              : {}),
           }),
           onTiming,
         });

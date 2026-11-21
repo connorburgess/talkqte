@@ -99,6 +99,40 @@ fn label(problem: Problem) -> String {
 }
 
 impl Host {
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    pub(super) fn lab_listening_candidate(
+        &self,
+        operation: &str,
+    ) -> Option<crate::dev_source_observation::Candidate> {
+        let state = self.0.state.try_lock().ok()?;
+        let active = state.active.as_ref()?;
+        let view = state.last.as_ref()?;
+        if !state.by_setting
+            || state.exiting
+            || active.id != operation
+            || view.phase != Phase::Listening
+            || view.operation.as_deref() != Some(operation)
+            || !active.session_only
+            || !active.session_started.load(Ordering::Acquire)
+            || active.stop_requested
+            || active.control.is_cancelled()
+            || !crate::dev_lab_source::supports(active.application.name())
+            || active.ended.try_lock().ok()?.is_some()
+        {
+            return None;
+        }
+        Some(crate::dev_source_observation::Candidate {
+            host_operation: active.id.clone(),
+            control: active.control.clone(),
+            kind: crate::dev_lab_source::Kind::from_name(active.application.name())?,
+        })
+    }
+
     /// Show `problem` as why the setting started nothing.
     fn refuse_by_setting(&self, problem: Problem) {
         let mut state = self.lock();
@@ -110,6 +144,15 @@ impl Host {
     /// One attempt for `settings`, blocking the calling thread, which must
     /// not be the worker or hold the runtime lock.
     pub(crate) fn start_by_setting(&self, settings: &Settings, waits: Waits) -> Outcome {
+        self.start_by_setting_observed(settings, waits, |_| true)
+    }
+
+    pub(super) fn start_by_setting_observed(
+        &self,
+        settings: &Settings,
+        waits: Waits,
+        observe: impl FnOnce(&str) -> bool,
+    ) -> Outcome {
         let name = settings.application.as_str();
         let refuse = |reason: &'static str, problem: Option<Problem>| {
             if let Some(problem) = problem {
@@ -188,9 +231,26 @@ impl Host {
             }
             std::thread::sleep(waits.poll);
         };
-        say("started", name, None);
+        let observed = operation.as_deref().is_some_and(observe);
+        if observed {
+            say("started", name, None);
+        } else {
+            // Readiness failure closes the same selected source, without
+            // bypassing the independent timed-Stop loop below.
+            if let Some(operation) = operation.as_deref() {
+                let _ = self.stop(operation);
+            }
+            say("refused", name, Some("source_observation_unavailable"));
+        }
+        let outcome = |stopped| {
+            if observed {
+                Outcome::Started { stopped }
+            } else {
+                Outcome::Refused("source_observation_unavailable")
+            }
+        };
         let (Some(after), Some(operation)) = (stop_after, operation) else {
-            return Outcome::Started { stopped: false };
+            return outcome(false);
         };
         let due = Instant::now() + after;
         while Instant::now() < due {
@@ -199,7 +259,7 @@ impl Host {
             if view.operation.as_deref() != Some(operation.as_str())
                 || view.phase != Phase::Listening
             {
-                return Outcome::Started { stopped: false };
+                return outcome(false);
             }
             std::thread::sleep(
                 waits
@@ -211,6 +271,6 @@ impl Host {
         if stopped {
             say("stopping", name, None);
         }
-        Outcome::Started { stopped }
+        outcome(stopped)
     }
 }
