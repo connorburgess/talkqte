@@ -208,3 +208,33 @@ app or launcher. The next acceptance check is a separately reviewed and
 authorized broader comparison that checks supported opportunities and temporal
 harm, including whether conservative retention blocks a later useful cue. No
 roadmap capability or production-readiness claim is closed by these controls.
+
+### Explicit bounded-history lab configuration
+
+The owned launcher accepts `contextPolicy: 'bounded-history'` only for a
+model-enabled direct Anthropic API run. Omission or `fresh-only` preserves the
+fresh-only configuration. Empty, unknown and non-API selections are refused.
+The launcher constructs `TALKQTE_DEV_LAB_CONTEXT=bounded-history` itself and
+ignores inherited copies of that flag. It does not send a launch-setting approval.
+
+This requires a separately reviewed native debug lab build that implements that
+configuration. The build must generate the expanded transcript disclosure before
+registration; the person must review the selected sources and explicitly enable
+processing for the session. The option alone is neither consent nor permission to
+release a transcription token or dispatch a cue request.
+
+The paired native history contract permits at most 24 transcript segments, with
+optional history strictly less than 90 seconds old and a 16,384-byte compact
+serialized-input limit. Current fresh-six and visible-cue evidence are reserved;
+visible-cue evidence may be older but must remain unchanged and permitted.
+Applying a decision still requires a cited transcript anchor less than 18 seconds
+old. This is bounded context preparation, not a validated improvement in cues.
+
+Offline launcher checks cover explicit selection, inherited-setting isolation,
+review-gated token release, and the real reader/source/owner/broker startup route
+with synthetic native rows and a local socket. They do not establish native
+capture, the actual in-app disclosure, model usefulness or participation benefit.
+The next combined-run gate is a reviewed native build and matching private plan,
+expanded-scope review, fresh budget and owner-present approval; existing runtime
+pins and consumed attempts are unchanged by this code preparation. README remains
+accurate because the normal app and disconnected runtime are unchanged.

@@ -262,8 +262,15 @@ function launcher({
   playerSource,
   transcription,
   userName,
+  contextPolicy = 'fresh-only',
 }) {
   requireThat(userName === undefined || isLabUserName(userName));
+  requireThat(
+    contextPolicy === 'fresh-only' ||
+      (contextPolicy === 'bounded-history' &&
+        mode === 'model-enabled' &&
+        selection?.provider === 'anthropic-api'),
+  );
   // Cloud transcription (Deepgram) runs only on the direct API route, whose
   // in-app session review also approves streaming the audio. A capture-only
   // launch has no review, so nothing is ever streamed; it still needs the
@@ -683,6 +690,11 @@ function launcher({
           // The listener's name as the app's own name setting (debug lab
           // builds only): applied before the first session, in memory.
           ...(userName ? { TALKQTE_DEV_USER_NAME: userName } : {}),
+          // Configuration only: the expanded scope still needs the native
+          // session's explicit review. Never inherit this from caller env.
+          ...(contextPolicy === 'bounded-history'
+            ? { TALKQTE_DEV_LAB_CONTEXT: 'bounded-history' }
+            : {}),
           ...(fixtureCase ? { TALKQTE_FIXTURE_CASE: fixtureCase } : {}),
         };
         child = spawn(executable, fixtureCase ? [fixturePath] : [], {
@@ -888,6 +900,7 @@ export function prepareLabLauncher({
   environment = process.env,
   transcription,
   userName,
+  contextPolicy,
   ...rest
 } = {}) {
   // Local transcription is gone: a Whisper model or any other unknown
@@ -919,6 +932,7 @@ export function prepareLabLauncher({
       environment,
       transcription,
       userName,
+      contextPolicy,
     });
   } catch {
     throw gateFailure('protocol');
