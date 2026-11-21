@@ -1518,4 +1518,9 @@ mod tests {
         assert!(!format!("{:?}", read_token(&file)).contains(&token));
         std::fs::remove_dir_all(&base).unwrap();
     }
+    #[cfg(all(unix, feature = "timing-log", feature = "cloud-transcription"))]
+    mod paired {
+        use super::*;
+        include!("cloud_paired_tests.rs");
+    }
 }
