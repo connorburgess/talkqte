@@ -45,13 +45,20 @@ export function snapshotLabTiming({
   runId,
   expectedIdentity,
   sourceReleased,
+  // Native ended the session itself (its source failed): { problem } with a
+  // fixed label. Either this or an observed release permits the snapshot.
+  nativeEnded,
   recorderFinalized,
   maxBytes = 8 * 1024 * 1024,
   maxRows = 10000,
   maxFrameBytes = 65536,
 } = {}) {
   required(
-    sourceReleased === true &&
+    // Exactly one: released by the lab's Stop, or ended by native itself.
+    (sourceReleased === true
+      ? nativeEnded === undefined
+      : sourceReleased === undefined &&
+        /^[a-z_]{1,40}$/.test(nativeEnded?.problem ?? '')) &&
       recorderFinalized === true &&
       /^[A-Za-z0-9_-]{1,64}$/.test(runId ?? '') &&
       expectedIdentity?.runId === runId &&
@@ -174,7 +181,11 @@ export function snapshotLabTiming({
         dev: expectedIdentity.dev,
         ino: expectedIdentity.ino,
       }),
-      sourceReleaseObserved: true,
+      sourceReleaseObserved: sourceReleased === true,
+      sourceEnd: sourceReleased === true ? 'released' : 'native-ended',
+      ...(sourceReleased === true
+        ? {}
+        : { nativeEndProblem: nativeEnded.problem }),
       recorderFinalizationObserved: true,
       nativeWriterMayRemainOpen: true,
       cutoffReceipt: Object.freeze({

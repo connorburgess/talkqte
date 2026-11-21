@@ -731,6 +731,20 @@ test('actual source failure stays first cause when host cancellation follows', a
   assert.equal(f.counts.providerClose, 1);
 });
 
+test("a native process exit during playback is kept as the run's first stop reason", async () => {
+  const pendingPlayback = deferred();
+  const f = fixture({
+    fixedModel: true,
+    playbackWait: pendingPlayback.promise,
+  });
+  await waitForTrace(f, 'validated-quiet');
+  f.nativeExit();
+  await assert.rejects(f.take.done);
+  // Evidence can say what ended the take, whatever cleanup reports after.
+  assert.equal(f.take.runStopReason, 'process-ended');
+  assert.equal(f.take.failure, 'protocol');
+});
+
 for (const [name, options] of Object.entries({
   'changed media identity': { badIdentity: true },
   'not actually Listening': { listening: false },

@@ -686,6 +686,14 @@ export function createLabPlaybackSession({
     get providerSpentMicroUsd() {
       return run.providerSpentMicroUsd;
     },
+    // The take's first failure cause, before any cleanup failure replaces
+    // it in the rejection, and the run's own first stop reason.
+    get failure() {
+      return failure;
+    },
+    get runStopReason() {
+      return run.stopReason;
+    },
     get approval() {
       return approval;
     },

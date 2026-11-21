@@ -263,8 +263,21 @@ export function watchLabTiming({
         audio_ms: value.audio_ms,
         session: value.session,
       });
-    } else if (value.event === 'source_problem' || value.event === 'dropped')
+    } else if (value.event === 'source_problem') {
+      // The native source failed (for example the captured application
+      // went away). Its fixed label and OS code are passed on so the run can
+      // record that native ended the session; the observation still ends.
+      if (
+        /^[a-z_]{1,40}$/.test(value.problem ?? '') &&
+        (value.os_code === undefined || Number.isSafeInteger(value.os_code))
+      )
+        onEvent({
+          event: 'source_problem',
+          problem: value.problem,
+          ...(value.os_code !== undefined ? { os_code: value.os_code } : {}),
+        });
       throw gateFailure('protocol');
+    } else if (value.event === 'dropped') throw gateFailure('protocol');
     else if (value.event === 'dev_source') {
       if (
         !['acknowledged', 'started', 'refused', 'stopping'].includes(

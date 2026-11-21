@@ -113,7 +113,11 @@ export function createLabRun({
   let rejectStopped;
   const stopped = new Promise((_, reject) => (rejectStopped = reject));
   stopped.catch(() => {});
+  // The first reason anything stopped this run, at any stage, as a fixed
+  // label: a native owner event, a provider or broker category, cancelled.
+  let firstStopReason = null;
   const stop = (reason = 'cancelled') => {
+    firstStopReason ??= STARTUP_REASONS.has(reason) ? reason : 'protocol';
     recordStartupFailure(reason);
     if (!terminal) terminal = reason === 'cleanup' ? 'cleanup' : 'cancelled';
     return close();
@@ -338,6 +342,9 @@ export function createLabRun({
     // Estimated direct API spend so far; null for routes without one.
     get providerSpentMicroUsd() {
       return provider?.spentMicroUsd ?? null;
+    },
+    get stopReason() {
+      return firstStopReason;
     },
     get startupDiagnostics() {
       return Object.freeze({

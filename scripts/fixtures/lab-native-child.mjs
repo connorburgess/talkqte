@@ -244,5 +244,21 @@ if (
     }, 20);
   }, 40);
 }
+if (mode === 'source-gone')
+  // Native loses its captured source mid-session and ends it itself.
+  setTimeout(() => {
+    for (const row of [
+      { event: 'source_problem', problem: 'source_gone', os_code: -3815 },
+      {
+        event: 'source_ended',
+        application: 'QuickTime Player',
+        problem: 'applicationEnded',
+      },
+    ])
+      appendFileSync(
+        path,
+        JSON.stringify({ wall_ms: 1, mono_ms: 2, ...row }) + '\n',
+      );
+  }, 60);
 // Fixture only; never evidence of release.
 setTimeout(() => process.exit(0), mode === 'descriptor-peer' ? 5000 : 1500);
