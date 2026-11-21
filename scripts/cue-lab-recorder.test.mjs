@@ -38,7 +38,7 @@ function fixture(mode, extra = {}) {
     close: () => rmSync(directory, { recursive: true, force: true }),
   };
 }
-for (const mode of ['normal', 'partial'])
+for (const mode of ['normal', 'partial', 'moved', 'missing'])
   test(
     'real harmless child ' +
       mode +
@@ -52,6 +52,18 @@ for (const mode of ['normal', 'partial'])
         const stop = f.recorder.stop();
         assert.equal(stop, f.recorder.stop());
         assert.deepEqual(await stop, { stopped: true });
+        // The helper's final report: frames written and whether a window
+        // moved or resized after its place in the picture was fixed.
+        assert.deepEqual(
+          { ...f.recorder.report },
+          {
+            frames: 1,
+            audioBuffers: 1,
+            windowsMoved: mode === 'moved',
+            windowsResized: false,
+            windowsMissing: mode === 'missing',
+          },
+        );
       } finally {
         f.close();
       }
@@ -133,7 +145,7 @@ test('strict Swift source gates exact identities before streams and readiness af
   );
   assert.ok(
     source.indexOf('if strictWindows {') <
-      source.indexOf('let pictureStream ='),
+      source.indexOf('let emulatorStream ='),
   );
   assert.match(
     source,
@@ -142,7 +154,35 @@ test('strict Swift source gates exact identities before streams and readiness af
   assert.match(source, /&& writer.status == \.writing else/);
   assert.match(
     source,
-    /video\.append\(buffer\) \{\s*frames \+= 1\s*reportReady\(\)/,
+    /adaptor\.append\(output, withPresentationTime: time\) \{\s*lastTime = time\s*frames \+= 1\s*reportReady\(\)/,
+  );
+  // Each window is captured on its own, never through a display filter
+  // that shows only the active Space (RunB07's black recording).
+  assert.match(source, /SCContentFilter\(desktopIndependentWindow: emulator\)/);
+  assert.match(
+    source,
+    /SCContentFilter\(desktopIndependentWindow: companion\)/,
+  );
+  assert.doesNotMatch(
+    source,
+    /SCContentFilter\(display: display, including: \[emulator, companion\]\)/,
+  );
+  // A window gone by the end is reported, never read as unmoved; a canvas
+  // too large for the encoder is refused with the reason.
+  assert.match(source, /windowsMissing = true/);
+  assert.match(source, /"windowsMissing": windowsMissing/);
+  assert.match(source, /guard width <= 8192 && height <= 8192 else \{/);
+  assert.match(source, /Put both on one display\./);
+  // A fixed drawing order: the player first, the companion (cue card) last.
+  assert.match(source, /for key in order \{/);
+  assert.ok(
+    source.indexOf('writer.place(emulatorStream') <
+      source.indexOf('writer.place(companionStream'),
+  );
+  // The canvas is the windows' union alone, not clipped to one display.
+  assert.match(
+    source,
+    /let union = emulator\.frame\.union\(companion\.frame\)\n/,
   );
   assert.ok(
     source.indexOf('try await soundStream.startCapture()') <

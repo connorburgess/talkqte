@@ -161,6 +161,8 @@ export async function ensureHelper() {
         'CoreMedia',
         '-framework',
         'CoreGraphics',
+        '-framework',
+        'CoreImage',
       ],
       {
         env: {
