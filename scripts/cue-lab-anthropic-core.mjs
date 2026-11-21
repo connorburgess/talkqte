@@ -69,11 +69,25 @@ export const ANTHROPIC_CUE_ON_SCREEN_SCHEMA = Object.freeze({
   additionalProperties: false,
 });
 
-/** The schema for this request's state: a cue on screen or none. */
+// With TalkQTE's own "Asked you" cue on screen: the model may only keep it
+// (quiet) or say it was answered (resolved); never withdraw or replace it.
+export const ANTHROPIC_ASKED_ON_SCREEN_SCHEMA = Object.freeze({
+  type: 'object',
+  properties: {
+    action: { type: 'string', enum: ['quiet', 'resolved'] },
+    cue: { type: 'null' },
+    sourceIds: { type: 'array', minItems: 1, items: { type: 'string' } },
+  },
+  required: ['action', 'cue', 'sourceIds'],
+  additionalProperties: false,
+});
+
+/** The schema for this request's state: no cue, a cue, or an asked cue. */
 export function anthropicSchemaFor(input) {
-  return input?.existingCue
-    ? ANTHROPIC_CUE_ON_SCREEN_SCHEMA
-    : ANTHROPIC_DECISION_SCHEMA;
+  if (!input?.existingCue) return ANTHROPIC_DECISION_SCHEMA;
+  return input.existingCue.kind === 'asked'
+    ? ANTHROPIC_ASKED_ON_SCREEN_SCHEMA
+    : ANTHROPIC_CUE_ON_SCREEN_SCHEMA;
 }
 
 /**
@@ -87,7 +101,9 @@ export function anthropicSchemaFor(input) {
  */
 export function anthropicSystemPrompt() {
   const p = CONTRACT.prompts;
-  return p.liveCompact + p.glanceRule + p.nameNote + p.historyNote;
+  return (
+    p.liveCompact + p.glanceRule + p.nameNote + p.historyNote + p.askedNote
+  );
 }
 
 export function isAnthropicModel(model) {

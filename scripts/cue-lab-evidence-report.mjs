@@ -41,6 +41,8 @@ const STAGES = new Set([
   // owned-player identity check failing, recovering or ending it.
   'source.problem',
   'source.check',
+  // Whether the app's own name setting was in effect for a session.
+  'settings.user-name',
   'cue.decided',
   'cue.published',
   'cue.cleared',
@@ -541,6 +543,12 @@ export function importNativeRows(rows, { runId, artifactId, clockId }) {
       case 'cue_cleared':
         stage = 'cue.cleared';
         break;
+      case 'user_name_set':
+        // Whether the app's name setting was in effect (#363); never a name.
+        if (typeof r.set !== 'boolean') fail('invalid native name setting row');
+        stage = 'settings.user-name';
+        payload = { userNameSet: r.set };
+        break;
       case 'dropped':
         stage = 'gap';
         payload = { dropped: r.count };
@@ -699,6 +707,8 @@ function safePayload(payload, includeContent) {
   if (['phrase_rule', 'model'].includes(payload.decider))
     result.decider = payload.decider;
   if (typeof payload.accepted === 'boolean') result.accepted = payload.accepted;
+  if (typeof payload.userNameSet === 'boolean')
+    result.userNameSet = payload.userNameSet;
   if (['review', 'launchSetting'].includes(payload.approval))
     result.approval = payload.approval;
   if (['on', 'off'].includes(payload.connectionState))

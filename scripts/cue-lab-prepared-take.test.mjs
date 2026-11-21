@@ -70,6 +70,7 @@ function fixture({
   recorderStalls = false,
   recorderMs,
   recordDelayMs = 0,
+  tailMs,
   guardSink,
   observe,
   helloSession = '1',
@@ -535,6 +536,7 @@ function fixture({
     signal: initialSignal,
     ...(adaptedBody ? { body: adaptedBody } : {}),
     ...(recorderMs ? { recorderMs } : {}),
+    ...(tailMs === undefined ? {} : { tailMs }),
     observe,
     onGuard: guardSink,
   };
@@ -1288,6 +1290,42 @@ test('the API take plays only after the in-app approval and records the wait apa
   assert.equal(manifest.guards[1].approvalBudgetMs, 180000);
 });
 
+test('a tail keeps the app running after the media and is counted in the source window', async (t) => {
+  const guards = [];
+  const { f } = await apiTake(t, {
+    approvalRows: [reviewRow],
+    evidence: true,
+    tailMs: 400,
+    guardSink: (g) => guards.push(g),
+  });
+  const started = performance.now();
+  const result = await f.take.done;
+  assert.equal(result.completed, true);
+  assert.equal(guards[0].tailMs, 400);
+  assert.ok(
+    guards[0].remainingAtRequestMs >=
+      guards[0].startBudgetMs +
+        guards[0].mediaDurationMs +
+        400 +
+        guards[0].completionReserveMs,
+  );
+  assert.ok(performance.now() - started >= 400);
+});
+
+test('Stop during the tail ends the take as stopped, not completed', async (t) => {
+  const { f } = await apiTake(t, {
+    approvalRows: [reviewRow],
+    tailMs: 15000,
+  });
+  // Wait until the media has finished and the tail has begun.
+  for (let n = 0; n < 300 && f.take.phase !== 'playing'; n++) await delay(10);
+  await delay(300);
+  const stopping = f.take.stop();
+  await assert.rejects(f.take.done);
+  await stopping.catch(() => {});
+  assert.notEqual(f.take.phase, 'completed');
+});
+
 test('no approval within 180 s stops the API take without playback, a request or an approved notice', async (t) => {
   const { f, approvals } = await apiTake(t, {
     onApproval(event) {
@@ -1367,6 +1405,9 @@ test('the option check pins each route: Codex 20 calls at 110 s, API 40 calls wi
   };
   assert.doesNotThrow(() => assertFixedModelTakeOptions(codex));
   assert.doesNotThrow(() => assertFixedModelTakeOptions(api));
+  assert.doesNotThrow(() =>
+    assertFixedModelTakeOptions({ ...api, tailMs: 10000 }),
+  );
   for (const changed of [
     { ...codex, settings: { ...codex.settings, maxCalls: 40 } },
     { ...codex, approvalBudgetMs: 180000, stopAfterS: 290 },
@@ -1376,6 +1417,10 @@ test('the option check pins each route: Codex 20 calls at 110 s, API 40 calls wi
     { ...api, stopAfterS: 290 },
     { ...api, takeMs: undefined },
     { ...api, takeMs: 315000 },
+    { ...api, tailMs: 15001 },
+    { ...api, tailMs: -1 },
+    { ...api, tailMs: 2.5 },
+    { ...codex, tailMs: 1000 },
   ])
     assert.throws(() => assertFixedModelTakeOptions(changed), {
       category: 'protocol',

@@ -63,6 +63,12 @@ export function assertFixedModelTakeOptions(options) {
           options.stopAfterS === API_STOP_AFTER_S &&
           // The take clock restarts at approval with the usual 135 s.
           options.takeMs === 135000) &&
+      // A tail after the media only on the direct API route, up to 15 s.
+      (options.tailMs === undefined ||
+        (options.settings.provider === 'anthropic-api' &&
+          Number.isSafeInteger(options.tailMs) &&
+          options.tailMs >= 0 &&
+          options.tailMs <= 15000)) &&
       // Approved fictional media (fixed MP4 or a reviewed per-run manifest)
       // within the bounds every timing guard below was set for.
       isLabMedia(options.media),
@@ -96,6 +102,10 @@ export function createLabPlaybackSession({
   recorderMs = 3000,
   startBudgetMs = 1000,
   completionReserveMs = 1000,
+  // How long the app keeps running after the media ends, so a cue on a
+  // moment near the end can still be decided, painted and recorded. It
+  // counts against the same source window as the media.
+  tailMs = 0,
   approvalBudgetMs = 0,
   onApproval,
   observe,
@@ -158,7 +168,20 @@ export function createLabPlaybackSession({
         startBudgetMs <= 1000 &&
         Number.isSafeInteger(completionReserveMs) &&
         completionReserveMs >= 1000 &&
-        completionReserveMs <= 3000,
+        completionReserveMs <= 3000 &&
+        Number.isSafeInteger(tailMs) &&
+        tailMs >= 0 &&
+        tailMs <= 15000 &&
+        // On the API route the take clock restarts at approval, and must
+        // cover everything after it: recorder start, the start budget, the
+        // media, the tail and the completion reserve.
+        (approvalBudgetMs === 0 ||
+          takeMs >=
+            recorderMs +
+              startBudgetMs +
+              media.durationMs +
+              tailMs +
+              completionReserveMs),
     );
   };
   checkSource();
@@ -371,6 +394,7 @@ export function createLabPlaybackSession({
           APPROVAL_HANDLING_MS -
           startBudgetMs -
           identity.durationMs -
+          tailMs -
           completionReserveMs,
       );
       const inTime = () => performance.now() <= waitDeadline;
@@ -451,6 +475,7 @@ export function createLabPlaybackSession({
         startRequestAt +
           startBudgetMs +
           identity.durationMs +
+          tailMs +
           completionReserveMs <=
           sourceDeadline,
       );
@@ -460,6 +485,7 @@ export function createLabPlaybackSession({
         startRequestAt,
         startBudgetMs,
         mediaDurationMs: identity.durationMs,
+        tailMs,
         completionReserveMs,
         remainingAtRequestMs: sourceDeadline - startRequestAt,
         approvalBudgetMs,
@@ -496,6 +522,7 @@ export function createLabPlaybackSession({
                   anchor.monotonicMs +
                     anchor.uncertaintyMs +
                     identity.durationMs +
+                    tailMs +
                     completionReserveMs <=
                     guard.sourceDeadline,
               );
@@ -540,6 +567,23 @@ export function createLabPlaybackSession({
     });
     step = 'playback';
     await Promise.all([playback, run.ready]);
+    if (tailMs > 0) {
+      // The media has ended; the app keeps listening, deciding and showing
+      // cues until the tail is over (or the take is stopped).
+      step = 'tail';
+      await new Promise((resolve, reject) => {
+        const onAbort = () => {
+          clearTimeout(timer);
+          reject(gateFailure('cancelled'));
+        };
+        const timer = setTimeout(() => {
+          root.signal.removeEventListener('abort', onAbort);
+          resolve();
+        }, tailMs);
+        if (root.signal.aborted) onAbort();
+        else root.signal.addEventListener('abort', onAbort, { once: true });
+      });
+    }
     step = 'completion';
     if (root.signal.aborted) throw gateFailure('cancelled');
     if (body) {

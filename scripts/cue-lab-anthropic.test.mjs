@@ -16,6 +16,7 @@ import { test, mock } from 'node:test';
 import Anthropic from '@anthropic-ai/sdk';
 import {
   ANTHROPIC_CUE_ON_SCREEN_SCHEMA,
+  ANTHROPIC_ASKED_ON_SCREEN_SCHEMA,
   ANTHROPIC_DECISION_SCHEMA,
   ANTHROPIC_SPEND_CAP_MICRO_USD,
   anthropicEnvironmentNames,
@@ -181,7 +182,10 @@ test('the system prompt is byte-stable and carries no user name or earlier cues'
   // The live prompt with the glance rule and both notes; the subscription
   // routes keep the shared compact prompt.
   const p = CONTRACT.prompts;
-  assert.equal(a, p.liveCompact + p.glanceRule + p.nameNote + p.historyNote);
+  assert.equal(
+    a,
+    p.liveCompact + p.glanceRule + p.nameNote + p.historyNote + p.askedNote,
+  );
   assert.notEqual(
     a,
     systemPromptFor(withName, { compact: true, glance: true }),
@@ -216,6 +220,23 @@ test('the schema follows the cue state: no show while a cue is on screen', () =>
   assert.deepEqual(ANTHROPIC_CUE_ON_SCREEN_SCHEMA.properties.cue, {
     type: 'null',
   });
+  // TalkQTE's own "Asked you" cue: the model may only keep or resolve it.
+  const asked = buildAnthropicParams('claude-opus-5-5', {
+    ...input,
+    existingCue: {
+      text: 'Fictional question?',
+      sourceIds: [input.events[0].id],
+      kind: 'asked',
+    },
+  });
+  assert.equal(
+    asked.output_config.format.schema,
+    ANTHROPIC_ASKED_ON_SCREEN_SCHEMA,
+  );
+  assert.deepEqual(ANTHROPIC_ASKED_ON_SCREEN_SCHEMA.properties.action.enum, [
+    'quiet',
+    'resolved',
+  ]);
   // Each state's schema is one constant, so its grammar compiles once.
   assert.equal(
     buildAnthropicParams('claude-opus-5-5', input).output_config.format.schema,

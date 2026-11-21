@@ -199,6 +199,20 @@ if (
     process.env.TALKQTE_WHISPER_MODEL === undefined;
   // Before the review the file must be the empty placeholder.
   if (!settings || !usableFile() || lstatSync(file).size !== 0) process.exit(6);
+  // As the app's TALKQTE_DEV_USER_NAME (#363 follow-up): an unusable name
+  // refuses the start; a usable one is in effect from the session's start.
+  const name = process.env.TALKQTE_DEV_USER_NAME;
+  if (
+    name !== undefined &&
+    !(
+      name === name.trim() &&
+      name.length >= 1 &&
+      name.length <= 40 &&
+      /\p{L}/u.test(name) &&
+      /^[\p{L}\u0300-\u036f '\-\u2019]+$/u.test(name)
+    )
+  )
+    process.exit(7);
   const row = (fields) =>
     appendFileSync(
       path,
@@ -221,6 +235,7 @@ if (
     audio_ms: 0,
   };
   setTimeout(() => {
+    row({ event: 'user_name_set', session: 2, set: name !== undefined });
     for (const fields of mode === 'cloud-early'
       ? [started, review]
       : [review, started])

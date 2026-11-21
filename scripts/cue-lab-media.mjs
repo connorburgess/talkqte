@@ -119,12 +119,28 @@ export function loadLabMediaManifest(manifestPath, { sha256 } = {}) {
       media.audio?.codec === 'aac' &&
       media.audio?.sampleRate === 48000,
   );
+  // The listener's first name, if the manifest gives one (#336): used only
+  // as the app's own "Your name" setting at launch, never as scenario text.
+  // A capitalised single word that is one of the scheduled speakers.
+  const listener = m.listener;
+  required(
+    listener === undefined ||
+      (listener !== null &&
+        typeof listener === 'object' &&
+        !Array.isArray(listener) &&
+        Object.keys(listener).length === 1 &&
+        typeof listener.firstName === 'string' &&
+        /^\p{Lu}[\p{L}'-]{1,23}$/u.test(listener.firstName) &&
+        Array.isArray(m.schedule) &&
+        m.schedule.some((line) => line?.speaker === listener.firstName)),
+  );
   const descriptor = approve({
     fictional: true,
     path: media.path,
     sha256: media.sha256,
     durationMs: media.durationMs,
     scenarioId: m.scenarioId,
+    ...(listener ? { listenerFirstName: listener.firstName } : {}),
   });
   required(isLabMedia(descriptor));
   return descriptor;

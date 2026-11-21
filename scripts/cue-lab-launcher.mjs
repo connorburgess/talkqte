@@ -239,6 +239,17 @@ function verifyBuild(manifestFile, approved) {
 const FIXTURE = fileURLToPath(
   new URL('./fixtures/lab-native-child.mjs', import.meta.url),
 );
+// The app's own "Your name" rule (engine set_user_name): letters, combining
+// accents, spaces and name punctuation, up to 40 characters, with at least
+// one letter. The lab passes only a name that rule accepts, already trimmed.
+export const isLabUserName = (name) =>
+  typeof name === 'string' &&
+  name === name.trim() &&
+  [...name].length >= 1 &&
+  [...name].length <= 40 &&
+  /\p{L}/u.test(name) &&
+  /^[\p{L}\u0300-\u036f '\-\u2019]+$/u.test(name);
+
 function launcher({
   build,
   selection,
@@ -250,7 +261,9 @@ function launcher({
   mode = 'model-enabled',
   playerSource,
   transcription,
+  userName,
 }) {
+  requireThat(userName === undefined || isLabUserName(userName));
   // Cloud transcription (Deepgram) runs only on the direct API route, whose
   // in-app session review also approves streaming the audio. A capture-only
   // launch has no review, so nothing is ever streamed; it still needs the
@@ -343,6 +356,8 @@ function launcher({
     // waiting for its new stream's connected row.
     reconnects = 0,
     awaitingReconnect = false;
+  // user_name_set rows, in order: { session, set } only, never a name.
+  const nameRows = [];
   const keepToken = transcription?.reconnect === true;
   const removeToken = () => {
     if (tokenRemoved) return;
@@ -591,6 +606,12 @@ function launcher({
               reviewedSession === null
             )
               reviewedSession = event.session;
+            // Whether a name is set, per session (#363): value-free, kept
+            // here only, never passed to the observers.
+            if (event.event === 'user_name_set') {
+              nameRows.push({ session: event.session, set: event.set });
+              return;
+            }
             // Connection rows go only to the approval gate, never to the
             // lifecycle or source observers, which refuse unknown rows.
             if (event.event === 'evaluator') {
@@ -659,6 +680,9 @@ function launcher({
                 TALKQTE_DEV_STT_MINUTE_CAP: String(transcription.minuteCap),
               }
             : {}),
+          // The listener's name as the app's own name setting (debug lab
+          // builds only): applied before the first session, in memory.
+          ...(userName ? { TALKQTE_DEV_USER_NAME: userName } : {}),
           ...(fixtureCase ? { TALKQTE_FIXTURE_CASE: fixtureCase } : {}),
         };
         child = spawn(executable, fixtureCase ? [fixturePath] : [], {
@@ -690,6 +714,29 @@ function launcher({
     // and OS code; null otherwise. Not a release by the lab's Stop.
     get nativeEnded() {
       return nativeEnded;
+    },
+    // Whether the app had a name for "Asked you" cues: requested at launch,
+    // set at the start of the first session, and changed during it. Never
+    // the name.
+    get userName() {
+      const first = nameRows[0] ?? null;
+      const changes = first
+        ? nameRows.slice(1).filter((row) => row.session === first.session)
+            .length
+        : 0;
+      return Object.freeze({
+        requested: userName !== undefined,
+        setAtStart: first ? first.set : null,
+        session: first ? first.session : null,
+        changes,
+        held:
+          userName === undefined
+            ? null
+            : first?.set === true &&
+              nameRows
+                .filter((row) => row.session === first.session)
+                .every((row) => row.set === true),
+      });
     },
     // Content-free transcription facts for evidence: never the token.
     get transcription() {
@@ -840,6 +887,7 @@ export function prepareLabLauncher({
   playerSource,
   environment = process.env,
   transcription,
+  userName,
   ...rest
 } = {}) {
   // Local transcription is gone: a Whisper model or any other unknown
@@ -870,6 +918,7 @@ export function prepareLabLauncher({
       modelConnection,
       environment,
       transcription,
+      userName,
     });
   } catch {
     throw gateFailure('protocol');
@@ -885,6 +934,7 @@ export function prepareLabFixtureLauncher({
   stopAfterS = 120,
   environment = {},
   transcription,
+  userName,
 } = {}) {
   requireThat(
     [
@@ -943,5 +993,6 @@ export function prepareLabFixtureLauncher({
     environment,
     fixtureCase,
     transcription,
+    userName,
   });
 }

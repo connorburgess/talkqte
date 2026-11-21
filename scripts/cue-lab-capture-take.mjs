@@ -277,6 +277,8 @@ export function createLabCaptureTake({
       startRequestAt,
       startBudgetMs,
       mediaDurationMs: media.durationMs,
+      // No tail after the media: nothing is evaluated in a capture-only take.
+      tailMs: 0,
       completionReserveMs,
       remainingAtRequestMs: sourceDeadline - startRequestAt,
       // Capture-only takes have no model connection to approve.
