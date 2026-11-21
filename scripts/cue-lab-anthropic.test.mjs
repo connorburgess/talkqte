@@ -28,7 +28,7 @@ import {
 import { openAnthropicLab } from './cue-lab-anthropic.mjs';
 import { openLabProvider } from './cue-lab-provider.mjs';
 import { assertSubscriptionEnvironment } from './cue-lab-codex.mjs';
-import { systemPromptFor } from './cue-lab.mjs';
+import { CONTRACT, systemPromptFor } from './cue-lab.mjs';
 
 // Fictional inputs only; the key is a dummy that never reaches a network.
 const KEY = 'sk-ant-api-offline-fictional';
@@ -177,8 +177,18 @@ test('the system prompt is byte-stable and carries no user name or earlier cues'
   const b = buildAnthropicParams('claude-opus-5-5', withName).system[0].text;
   assert.equal(a, b);
   assert.equal(a.includes('Fictional Freya'), false);
-  // Same rules as the subscription route's prompt with both notes present.
-  assert.equal(a, systemPromptFor(withName, { compact: true, glance: true }));
+  // The live prompt with the glance rule and both notes; the subscription
+  // routes keep the shared compact prompt.
+  const p = CONTRACT.prompts;
+  assert.equal(a, p.liveCompact + p.glanceRule + p.nameNote + p.historyNote);
+  assert.notEqual(
+    a,
+    systemPromptFor(withName, { compact: true, glance: true }),
+  );
+  assert.equal(
+    a.includes('a question already asked but still unanswered'),
+    false,
+  );
 });
 
 test('a refusal, a different model, max tokens and HTTP errors are classified without content', async () => {
