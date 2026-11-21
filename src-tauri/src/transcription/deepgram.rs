@@ -205,6 +205,8 @@ struct Timing {
     /// Frames sent between two reads, so replies and a close are read even
     /// while audio is backed up.
     frames_per_read: usize,
+    #[cfg(test)]
+    now: fn() -> Instant,
 }
 
 impl Default for Timing {
@@ -217,7 +219,26 @@ impl Default for Timing {
             stall_after: STALL_AFTER,
             slow_write: SLOW_WRITE,
             frames_per_read: FRAMES_PER_READ,
+            #[cfg(test)]
+            now: Instant::now,
         }
+    }
+}
+
+impl Timing {
+    fn now(&self) -> Instant {
+        #[cfg(test)]
+        {
+            (self.now)()
+        }
+        #[cfg(not(test))]
+        {
+            Instant::now()
+        }
+    }
+
+    fn elapsed(&self, since: Instant) -> Duration {
+        self.now().duration_since(since)
     }
 }
 
@@ -241,7 +262,7 @@ fn run(
 ) {
     // The token may arrive after approval: the lab hands it over only once
     // it has seen the review. Audio waits in the bounded queue meanwhile.
-    let until = Instant::now() + timing.token_wait;
+    let until = timing.now() + timing.token_wait;
     let token = loop {
         if stop.load(Ordering::Acquire) {
             return;
@@ -249,7 +270,7 @@ fn run(
         if let Some(token) = token.take() {
             break token;
         }
-        if Instant::now() >= until {
+        if timing.now() >= until {
             let _ = events.send(SttEvent::Failed(SttFailure::Settings));
             return;
         }
@@ -270,10 +291,10 @@ fn run(
         query: query.to_string(),
     });
     let mut pending: Vec<i16> = Vec::with_capacity(FRAME * 2);
-    let mut last_send = Instant::now();
+    let mut last_send = timing.now();
     // When anything was last heard from Deepgram, and whether audio has gone
     // out since; a probe is sent once per quiet spell.
-    let mut last_heard = Instant::now();
+    let mut last_heard = timing.now();
     let mut sent_since_heard = false;
     let mut probed = false;
     let mut unfinalized: Option<Instant> = None;
@@ -295,7 +316,7 @@ fn run(
                     ),
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => {
-                        closing = Some(Instant::now());
+                        closing = Some(timing.now());
                         break;
                     }
                 }
@@ -317,28 +338,28 @@ fn run(
                     break;
                 }
                 let bytes: Vec<u8> = pending.drain(..take).flat_map(i16::to_le_bytes).collect();
-                let started = Instant::now();
+                let started = timing.now();
                 if let Err(failure) = socket.send_binary(bytes) {
                     let _ = events.send(SttEvent::Failed(failure));
                     return;
                 }
-                if started.elapsed() > timing.slow_write {
+                if timing.elapsed(started) > timing.slow_write {
                     let _ = events.send(SttEvent::Failed(SttFailure::Stalled));
                     socket.close();
                     return;
                 }
-                last_send = Instant::now();
+                last_send = timing.now();
                 sent_since_heard = true;
                 sent_frames += 1;
             }
             // Audio is going out but nothing has come back: ask once, then
             // give up, rather than let audio pile up unheard.
-            if sent_since_heard && last_heard.elapsed() >= timing.stall_after {
+            if sent_since_heard && timing.elapsed(last_heard) >= timing.stall_after {
                 let _ = events.send(SttEvent::Failed(SttFailure::Stalled));
                 socket.close();
                 return;
             }
-            if sent_since_heard && !probed && last_heard.elapsed() >= timing.quiet_probe {
+            if sent_since_heard && !probed && timing.elapsed(last_heard) >= timing.quiet_probe {
                 probed = true;
                 if socket.send_text(r#"{"type":"Finalize"}"#).is_err() {
                     let _ = events.send(SttEvent::Failed(SttFailure::Network));
@@ -346,26 +367,26 @@ fn run(
                 }
             }
             if cap_reached || closing.is_some() {
-                closing.get_or_insert_with(Instant::now);
+                closing.get_or_insert_with(|| timing.now());
                 if socket.send_text(r#"{"type":"CloseStream"}"#).is_err() {
                     let _ = events.send(SttEvent::Failed(SttFailure::Network));
                     return;
                 }
-            } else if last_send.elapsed() >= timing.keep_alive {
+            } else if timing.elapsed(last_send) >= timing.keep_alive {
                 if socket.send_text(r#"{"type":"KeepAlive"}"#).is_err() {
                     let _ = events.send(SttEvent::Failed(SttFailure::Network));
                     return;
                 }
-                last_send = Instant::now();
+                last_send = timing.now();
             }
-            if unfinalized.is_some_and(|since| since.elapsed() >= timing.finalize_after) {
+            if unfinalized.is_some_and(|since| timing.elapsed(since) >= timing.finalize_after) {
                 if socket.send_text(r#"{"type":"Finalize"}"#).is_err() {
                     let _ = events.send(SttEvent::Failed(SttFailure::Network));
                     return;
                 }
                 unfinalized = None;
             }
-        } else if closing.is_some_and(|at| at.elapsed() > Duration::from_secs(5)) {
+        } else if closing.is_some_and(|at| timing.elapsed(at) > Duration::from_secs(5)) {
             socket.close();
             if cap_reached {
                 let _ = events.send(SttEvent::Failed(SttFailure::CapReached));
@@ -374,7 +395,7 @@ fn run(
         }
         let reply = socket.recv();
         if matches!(reply, Ok(Some(_))) {
-            last_heard = Instant::now();
+            last_heard = timing.now();
             sent_since_heard = false;
             probed = false;
         }
@@ -384,7 +405,7 @@ fn run(
                     match &event {
                         SttEvent::Final { .. } => unfinalized = None,
                         SttEvent::Partial => {
-                            unfinalized.get_or_insert_with(Instant::now);
+                            unfinalized.get_or_insert_with(|| timing.now());
                         }
                         SttEvent::Failed(_) | SttEvent::Connected { .. } => {}
                     }
@@ -1046,37 +1067,106 @@ mod tests {
         assert!(wire.closed);
     }
 
+    thread_local! {
+        static SCRIPT_TIME: std::cell::Cell<Instant> = std::cell::Cell::new(Instant::now());
+    }
+
+    // A synchronous socket script owns audio, reply delivery and logical time.
+    // Caller scheduling and wall-clock pauses cannot invent a network stall.
+    fn scripted_quiet_spell(answer: bool) -> (Vec<SttEvent>, usize, usize, bool) {
+        struct Script {
+            audio: SyncSender<Vec<f32>>,
+            stop: Arc<AtomicBool>,
+            state: Arc<Mutex<(usize, usize, bool)>>,
+            answer: bool,
+        }
+        impl Connector for Script {
+            fn connect(&self, _: &str, _: &str) -> Result<Box<dyn Socket>, SttFailure> {
+                Ok(Box::new(Script {
+                    audio: self.audio.clone(),
+                    stop: self.stop.clone(),
+                    state: self.state.clone(),
+                    answer: self.answer,
+                }))
+            }
+        }
+        impl Socket for Script {
+            fn send_binary(&mut self, _: Vec<u8>) -> Result<(), SttFailure> {
+                Ok(())
+            }
+            fn send_text(&mut self, text: &str) -> Result<(), SttFailure> {
+                assert_eq!(text, r#"{"type":"Finalize"}"#);
+                self.state.lock().unwrap().1 += 1;
+                Ok(())
+            }
+            fn recv(&mut self) -> Result<Option<String>, SttFailure> {
+                SCRIPT_TIME.with(|t| t.set(t.get() + Duration::from_millis(75)));
+                let mut state = self.state.lock().unwrap();
+                state.0 += 1;
+                // Each quiet spell crosses the100ms probe but stays below250ms.
+                if state.0 == 12 {
+                    self.stop.store(true, Ordering::Release);
+                }
+                self.audio.try_send(vec![0.1; FRAME]).unwrap();
+                Ok((self.answer && state.0 % 3 == 0).then(|| r#"{"type":"Metadata"}"#.into()))
+            }
+            fn close(&mut self) {
+                self.state.lock().unwrap().2 = true;
+            }
+        }
+        SCRIPT_TIME.with(|t| t.set(Instant::now()));
+        let (audio, queue) = mpsc::sync_channel(QUEUE);
+        audio.send(vec![0.1; FRAME]).unwrap();
+        let (tx, events) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let state = Arc::new(Mutex::new((0, 0, false)));
+        run(
+            Script {
+                audio,
+                stop: stop.clone(),
+                state: state.clone(),
+                answer,
+            },
+            ListenRequest::lab(),
+            Token::from("t".repeat(24)),
+            Duration::from_secs(60).into(),
+            Timing {
+                now: || SCRIPT_TIME.with(|t| t.get()),
+                ..quick()
+            },
+            queue,
+            tx,
+            stop,
+        );
+        let (reads, probes, closed) = *state.lock().unwrap();
+        (events.try_iter().collect(), reads, probes, closed)
+    }
+
     #[test]
     fn a_reply_keeps_the_stream_alive_through_a_quiet_spell() {
-        let fake = Fake::default();
-        let mut stream = DeepgramStream::start_with(
-            fake.clone(),
-            ListenRequest::lab(),
-            "t".repeat(24),
-            Duration::from_secs(60),
-            quick(),
+        let (events, reads, probes, closed) = scripted_quiet_spell(true);
+        assert_eq!(
+            events,
+            vec![SttEvent::Connected {
+                query: QUERY.into()
+            }]
         );
-        // Deepgram answers now and then, as it does while audio flows.
-        let until = Instant::now() + Duration::from_millis(800);
-        let mut events = Vec::new();
-        let mut answered = Instant::now();
-        while Instant::now() < until {
-            let _ = stream.push(&[0.1; FRAME]);
-            if answered.elapsed() > Duration::from_millis(150) {
-                fake.0
-                    .lock()
-                    .unwrap()
-                    .replies
-                    .push_back(Ok(Some(r#"{"type":"Metadata"}"#.into())));
-                answered = Instant::now();
-            }
-            events.extend(stream.poll());
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        assert!(
-            !events.iter().any(|e| matches!(e, SttEvent::Failed(_))),
-            "{events:?}"
+        assert_eq!((reads, probes, closed), (12, 4, true));
+    }
+
+    #[test]
+    fn the_same_quiet_spell_without_replies_is_probed_then_stalled() {
+        let (events, reads, probes, closed) = scripted_quiet_spell(false);
+        assert_eq!(
+            events,
+            vec![
+                SttEvent::Connected {
+                    query: QUERY.into()
+                },
+                SttEvent::Failed(SttFailure::Stalled)
+            ]
         );
+        assert_eq!((reads, probes, closed), (4, 1, true));
     }
 
     #[test]
