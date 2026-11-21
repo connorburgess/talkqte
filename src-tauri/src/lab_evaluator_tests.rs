@@ -1,4 +1,4 @@
-//! Offline Unix peers only: no provider process, app, audio or model calls.
+//! Offline Unix transport and fake SDK delivery; no app, audio or remote calls.
 use super::*;
 use std::os::unix::{fs::PermissionsExt, net::UnixListener};
 
