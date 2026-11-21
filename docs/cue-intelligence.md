@@ -1,6 +1,6 @@
 # Cue intelligence and feedback
 
-Status: evaluation plan with an optional [fictional Claude Code lab](claude-cue-lab.md), 8 November 2026. Ordinary builds connect no model. A `claude-cli` development build can send conversation lines to Claude for cue decisions, on the owner's own subscription, after the person approves the session ([model-decided cues](cue-model.md)); no production provider, conversational feedback system, or learning pipeline is selected. This supports the [participation goal](../PRODUCT.md#goal-and-first-proof) and [product readiness plan](product-readiness.md).
+Status: development evaluation plan. On 16 November 2026 the owner chose the Anthropic API as the cue-provider direction; its [development lab implementation](development-lab-evaluator.md) remains subject to explicit processing approval. Ordinary builds connect no model. The optional [fictional Claude Code lab](claude-cue-lab.md) and the `claude-cli` development connection are separate subscription experiments; the app connection requires session approval ([model-decided cues](cue-model.md)). The shipped credential and billing model—each person’s own provider keys or a TalkQTE-run paid service—remains undecided ([cloud providers](product-readiness.md#cloud-providers-for-a-shipped-product)). No conversational feedback system or learning pipeline is implemented. This supports the [participation goal](../PRODUCT.md#goal-and-first-proof) and [product readiness plan](product-readiness.md).
 
 ## What powers the prototype today
 
