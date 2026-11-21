@@ -775,12 +775,20 @@ test('the API session refuses TLS or code-loading Node settings, even empty', as
 
 test("the API session checks this process's own environment even when a clean one is passed", async (t) => {
   const api = await fakeApi([{}]);
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  // Presence is refused even when certificate validation stays enabled.
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '1';
   t.after(() => delete process.env.NODE_TLS_REJECT_UNAUTHORIZED);
+  let session;
   try {
-    await assert.rejects(open(api), { category: 'environment' });
+    await assert.rejects(
+      async () => {
+        session = await open(api);
+      },
+      { category: 'environment' },
+    );
     assert.equal(api.requests.length, 0);
   } finally {
+    await session?.close();
     await api.close();
   }
 });
