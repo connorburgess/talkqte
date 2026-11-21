@@ -1,10 +1,14 @@
-# Selected snapshot request preparation — inert
+# Selected snapshot request preparation and explicit v2 wiring
 
-`scripts/cue-selected-snapshot.mjs` is a pure versioned validator, local citation
-checker and API parameter constructor. No broker, worker or launcher entrypoint
-imports it. It never invokes an SDK or reads a credential. Legacy serializers,
-10-word prompts, API state grammars and real `without_notes()` registrations
-remain unchanged. The standalone CLI is not extended.
+The v1 helpers in `scripts/cue-selected-snapshot.mjs` remain pure versioned
+validators, local citation checkers and API parameter constructors. The module
+never invokes an SDK or reads a credential. Explicit selected-context v2 wiring
+now imports it through `cue-selected-context.mjs` in broker, worker and launcher
+paths; the API core also reaches it through `cue-selected-context.mjs`.
+The opt-in v2 path
+constructs selected API parameters; the v1 helpers alone do not activate a route.
+Legacy serializers, 10-word prompts, API state grammars and real
+`without_notes()` defaults remain unchanged. The standalone CLI is not extended.
 
 The new input separates current `events` from historical `priorNotes`. Only
 existing file/Granola labels are accepted; there is no Tactiq adapter. Notes
@@ -22,8 +26,8 @@ Unicode count correctly. No partial selection or truncation is permitted.
 These are input policies, not model token/cost or measured latency bounds.
 Model reservation and spending checks are independent prerequisites.
 
-Fake parameter tests capture the exact string that a future API path would
-place in `messages[0].content`, the unchanged three state-dependent provider
+Fake parameter tests capture the exact string that the explicit selected API
+path places in `messages[0].content`, the unchanged three state-dependent provider
 grammars, and a separately appended snapshot policy. Broker/native checks
 still enforce citation membership, uniqueness and max four; state-changing
 proposals cite speech. Rust must also recheck session/grant generation, source
@@ -35,8 +39,10 @@ with the separately based native serializer change. The native change drives
 its serializer through the existing runtime approval/cancellation tests; this
 JS delta does not claim runtime lifecycle enforcement on its own.
 
-Next blocker: align the distinct native and API broker ancestry and review a
-new processor policy/prompt identity plus exact selected-source disclosure.
+The public v2 API source and native selected-context source define the processor
+policy/prompt identity and exact selected-source disclosure. Next blocker: review
+and validate their distinct ancestry together, including paired native IPC and
+runtime acceptance; source definitions do not establish that pairing.
 Activation and any bounded fictional provider comparison need separate
 assignments. Imported context is not processing permission. No paid run,
 account, native IPC, useful-assistance or latency acceptance is established.

@@ -241,7 +241,10 @@ export function createLabPlaybackSession({
       if (row.approval === 'launchSetting') this.fault = true;
       else if (row.state === 'on' && !this.row) {
         if (
-          row.backend !== 'lab-api' ||
+          row.backend !==
+            (settings.contextPolicy === 'selected-prior-v2'
+              ? 'lab-api-selected-prior-v2'
+              : 'lab-api') ||
           row.model !== settings.model ||
           (row.effort !== undefined && row.effort !== settings.effort)
         )

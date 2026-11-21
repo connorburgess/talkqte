@@ -1,3 +1,4 @@
+import { selectedIdentity } from './cue-selected-context.mjs';
 import assert from 'node:assert/strict';
 import { test as nodeTest, mock } from 'node:test';
 import childProcess from 'node:child_process';
@@ -833,7 +834,7 @@ function fakeBuild() {
   };
 }
 
-test('bounded history is explicit API configuration and never inherited session approval', () => {
+test('history and selected context are explicit API configuration and never inherited approval', () => {
   const f = fakeBuild();
   try {
     let seen;
@@ -842,7 +843,12 @@ test('bounded history is explicit API configuration and never inherited session 
       return new EventEmitter();
     });
     syncBuiltinESMExports();
-    for (const contextPolicy of [undefined, 'fresh-only', 'bounded-history']) {
+    for (const contextPolicy of [
+      undefined,
+      'fresh-only',
+      'bounded-history',
+      'selected-prior-v2',
+    ]) {
       const prepared = prepareLabLauncher({
         ...f.options,
         contextPolicy,
@@ -852,10 +858,20 @@ test('bounded history is explicit API configuration and never inherited session 
         },
       });
       try {
-        prepared.launch(f.launchOptions);
+        prepared.launch({
+          ...f.launchOptions,
+          metadata: {
+            ...f.launchOptions.metadata,
+            ...(contextPolicy === 'selected-prior-v2'
+              ? selectedIdentity()
+              : {}),
+          },
+        });
         assert.equal(
           seen.TALKQTE_DEV_LAB_CONTEXT,
-          contextPolicy === 'bounded-history' ? 'bounded-history' : undefined,
+          ['bounded-history', 'selected-prior-v2'].includes(contextPolicy)
+            ? contextPolicy
+            : undefined,
         );
         assert.equal(
           Object.hasOwn(seen, 'TALKQTE_DEV_MODEL_CONNECTION'),

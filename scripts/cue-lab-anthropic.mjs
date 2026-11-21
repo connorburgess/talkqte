@@ -1,3 +1,8 @@
+import {
+  SELECTED_CONTEXT,
+  selectedPriorContextInput,
+  selectedIdentity,
+} from './cue-selected-context.mjs';
 // Parent side of the lab's direct Anthropic API route. It owns one worker
 // process per run (cue-lab-anthropic-worker.mjs), hands it the key once over
 // stdin, sends one request per evaluation, enforces the call and spend caps,
@@ -53,8 +58,10 @@ export async function openAnthropicLab({
   environment = process.env,
   keyFile,
   offline,
+  contextPolicy = 'fresh-only',
 } = {}) {
   if (
+    !['fresh-only', SELECTED_CONTEXT].includes(contextPolicy) ||
     !isAnthropicModel(model) ||
     effort !== ANTHROPIC_EFFORT ||
     !Number.isSafeInteger(maxCalls) ||
@@ -135,7 +142,7 @@ export async function openAnthropicLab({
   };
   pendingReady = deferred();
   child.stdin.write(
-    JSON.stringify({ type: 'init', key, offlineBaseUrl }) + '\n',
+    JSON.stringify({ type: 'init', contextPolicy, key, offlineBaseUrl }) + '\n',
   );
   key = null;
   const readyTimer = setTimeout(
@@ -218,7 +225,18 @@ export async function openAnthropicLab({
     }
     // Refuse before dispatch if the worst case for this call could pass the
     // per-run cap; that ends the run as a usage limit.
-    const worst = worstCaseMicroUsd(model, input);
+    try {
+      if (contextPolicy === SELECTED_CONTEXT) selectedPriorContextInput(input);
+      else if (
+        Object.hasOwn(input, 'inputContract') ||
+        Object.hasOwn(input, 'priorNotes')
+      )
+        throw new Error('mode');
+    } catch {
+      stop();
+      throw failure('invalid-request', calls);
+    }
+    const worst = worstCaseMicroUsd(model, input, contextPolicy);
     if (spent + worst > cap) {
       capReached = true;
       stop();
@@ -361,6 +379,7 @@ export async function openAnthropicLab({
   return Object.freeze({
     metadata: Object.freeze({
       provider: 'anthropic-api',
+      ...(contextPolicy === SELECTED_CONTEXT ? selectedIdentity() : {}),
       model,
       effort,
       spendCapMicroUsd: cap,

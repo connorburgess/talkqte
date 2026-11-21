@@ -1,3 +1,4 @@
+import { SELECTED_CONTEXT } from './cue-selected-context.mjs';
 // Per-run worker for the lab's direct Anthropic API route. It is the only
 // process that holds the key: the first stdin line carries it, never argv,
 // environment, logs or evidence. Then it answers one request at a time.
@@ -11,10 +12,18 @@ import {
 const write = (frame) => process.stdout.write(JSON.stringify(frame) + '\n');
 let client = null;
 let active = null;
+let contextPolicy = 'fresh-only';
 let buffer = '';
 
 function handle(frame) {
   if (frame?.type === 'init' && client === null) {
+    if (
+      !['fresh-only', SELECTED_CONTEXT].includes(
+        frame.contextPolicy ?? 'fresh-only',
+      )
+    )
+      process.exit(3);
+    contextPolicy = frame.contextPolicy ?? 'fresh-only';
     const key = frame.key;
     // A loopback endpoint exists only for the offline stand-in tests.
     const baseURL =
@@ -38,6 +47,7 @@ function handle(frame) {
     active = { id: frame.id, controller };
     runAnthropicRequest({
       client,
+      contextPolicy,
       model: frame.model,
       input: frame.input,
       budgetMs: frame.budgetMs,

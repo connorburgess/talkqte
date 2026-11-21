@@ -1,5 +1,5 @@
-// Inert selected-snapshot contract. No broker, worker or launcher entrypoint
-// imports this module. Preparation only: no SDK, credentials or network call.
+// Selected-snapshot validation: v1 remains inert; explicit API lab v2 reuses
+// its strict domain. Pure preparation: no SDK, credentials or network call.
 import { buildAnthropicParams } from './cue-lab-anthropic-core.mjs';
 
 export const INPUT_CONTRACT = 'selected-snapshots-v1';
@@ -32,6 +32,14 @@ const date = (v) =>
   new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
 
 export function selectedSnapshotInput(input) {
+  return validateInput(input, INPUT_CONTRACT);
+}
+
+export function selectedPriorContextInput(input) {
+  return validateInput(input, 'selected-prior-context-v2');
+}
+
+function validateInput(input, contract) {
   check(
     exact(
       input,
@@ -39,11 +47,11 @@ export function selectedSnapshotInput(input) {
       ['userName', 'earlierCues'],
     ),
   );
-  check(input.inputContract === INPUT_CONTRACT);
+  check(input.inputContract === contract);
   check(Array.isArray(input.events) && input.events.length >= 1);
   check(
     Array.isArray(input.priorNotes) &&
-      input.priorNotes.length >= 1 &&
+      input.priorNotes.length >= (contract === INPUT_CONTRACT ? 1 : 0) &&
       input.priorNotes.length <= 20,
   );
   check(input.events.length + input.priorNotes.length <= 32);
@@ -141,7 +149,15 @@ export function selectedSnapshotFrame(input, envelope) {
 }
 
 export function selectedSnapshotSchema(input) {
-  selectedSnapshotInput(input);
+  return inputSchema(input, selectedSnapshotInput);
+}
+
+export function selectedPriorContextSchema(input) {
+  return inputSchema(input, selectedPriorContextInput);
+}
+
+function inputSchema(input, validate) {
+  validate(input);
   return {
     type: 'object',
     properties: {
@@ -180,12 +196,20 @@ export function selectedSnapshotSchema(input) {
 // Pure local membership/state validation. Rust must still enforce exact source
 // revisions, session/grant generation and a fresh cited speech anchor at apply.
 export function selectedSnapshotReply(reply, input) {
-  selectedSnapshotInput(input);
+  return validateReply(reply, input, selectedSnapshotInput);
+}
+
+export function selectedPriorContextReply(reply, input) {
+  return validateReply(reply, input, selectedPriorContextInput);
+}
+
+function validateReply(reply, input, validate) {
+  validate(input);
   check(exact(reply, ['action', 'cue', 'sourceIds']));
   check(Buffer.byteLength(JSON.stringify(reply)) <= 4096);
   const ids = new Set([...input.events, ...input.priorNotes].map((s) => s.id));
   check(citations(reply.sourceIds, ids));
-  const schema = selectedSnapshotSchema(input);
+  const schema = inputSchema(input, validate);
   check(schema.properties.action.enum.includes(reply.action));
   if (reply.action === 'show') {
     check(text(reply.cue, 240) && reply.cue.trim().split(/\s+/u).length <= 10);

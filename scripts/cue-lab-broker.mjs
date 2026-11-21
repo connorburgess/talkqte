@@ -1,3 +1,11 @@
+import {
+  SELECTED_CONTEXT,
+  SELECTED_FRAME,
+  SELECTED_DESCRIPTOR,
+  selectedIdentity,
+  selectedContextRequest,
+  selectedPriorContextReply,
+} from './cue-selected-context.mjs';
 // Development-only local transport. The native app remains responsible for
 // permission, heard speech, source validation, freshness and cue publication.
 import { createServer } from 'node:net';
@@ -216,7 +224,22 @@ export async function openLabBroker({
   runId = randomUUID(),
   onTerminal = () => {},
   sourceSessionMode = 'required',
+  contextPolicy = 'fresh-only',
 } = {}) {
+  const selected = contextPolicy === SELECTED_CONTEXT;
+  const wireSchema = selected ? SELECTED_FRAME : SCHEMA;
+  const identityFields = selected ? selectedIdentity() : {};
+  requireThat(contextPolicy === 'fresh-only' || selected);
+  requireThat(
+    !selected ||
+      (provider?.metadata?.provider === 'anthropic-api' &&
+        Object.entries(identityFields).every(
+          ([key, value]) => provider.metadata[key] === value,
+        )),
+  );
+  requireThat(
+    selected || !Object.hasOwn(provider?.metadata ?? {}, 'contextPolicy'),
+  );
   requireThat(
     provider &&
       typeof provider.request === 'function' &&
@@ -317,8 +340,13 @@ export async function openLabBroker({
   const send = (type, fields = {}) => {
     requireThat(socket && !socket.destroyed && sessionId !== null);
     const raw = Buffer.from(
-      JSON.stringify({ schema: SCHEMA, type, runId, sessionId, ...fields }) +
-        '\n',
+      JSON.stringify({
+        schema: wireSchema,
+        type,
+        runId,
+        sessionId,
+        ...fields,
+      }) + '\n',
     );
     requireThat(
       raw.length <= FRAME && socket.writableLength + raw.length <= FRAME,
@@ -356,7 +384,7 @@ export async function openLabBroker({
   };
   const base = (frame) =>
     requireThat(
-      frame.schema === SCHEMA &&
+      frame.schema === wireSchema &&
         frame.runId === runId &&
         frame.sessionId === sessionId,
     );
@@ -386,7 +414,9 @@ export async function openLabBroker({
         frame.budgetMs >= 1 &&
         frame.budgetMs <= MAX_BUDGET_MS,
     );
-    const request = evaluatorRequest(frame.input);
+    const request = selected
+      ? selectedContextRequest(frame.input)
+      : evaluatorRequest(frame.input);
     seenRequests.add(key);
     seenRequestIds.add(frame.requestId);
     let resolveAck, rejectAck;
@@ -449,10 +479,11 @@ export async function openLabBroker({
             value = { action: 'quiet', cue: null, sourceIds: value.sourceIds };
             evaluations.askedKept++;
           }
-          let problem = replyProblem(value, frame.input);
+          let problem = selected ? null : replyProblem(value, frame.input);
           if (problem === null)
             try {
-              validateDecision(value, frame.input, { compact: true });
+              if (selected) selectedPriorContextReply(value, frame.input);
+              else validateDecision(value, frame.input, { compact: true });
             } catch {
               problem = 'shape';
             }
@@ -661,9 +692,10 @@ export async function openLabBroker({
           'expectedProvider',
           'expectedModel',
           'expectedEffort',
+          ...Object.keys(identityFields),
         ]) &&
           frame.type === 'hello' &&
-          frame.schema === SCHEMA &&
+          frame.schema === wireSchema &&
           frame.runId === runId &&
           u64(frame.sessionId) &&
           (sourceSessionMode === 'legacy-fixture' ||
@@ -675,11 +707,15 @@ export async function openLabBroker({
           ) &&
           frame.expectedProvider === provider.metadata.provider &&
           frame.expectedModel === provider.metadata.model &&
-          frame.expectedEffort === provider.metadata.effort,
+          frame.expectedEffort === provider.metadata.effort &&
+          Object.entries(identityFields).every(
+            ([key, value]) => frame[key] === value,
+          ),
       );
       sessionId = frame.sessionId;
       authenticated = true;
       send('ready', {
+        ...identityFields,
         provider: provider.metadata.provider,
         model: provider.metadata.model,
         effort: provider.metadata.effort,
@@ -878,7 +914,7 @@ export async function openLabBroker({
     await writeFile(
       descriptorPath,
       JSON.stringify({
-        schema: 'talkqte.lab.descriptor.v1',
+        schema: selected ? SELECTED_DESCRIPTOR : 'talkqte.lab.descriptor.v1',
         runId,
         socketPath,
         nonce,

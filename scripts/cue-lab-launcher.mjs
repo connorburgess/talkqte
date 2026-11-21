@@ -1,3 +1,4 @@
+import { SELECTED_CONTEXT, selectedIdentity } from './cue-selected-context.mjs';
 // Explicit verified launch only. No shell, environment-derived executable,
 // existing-process attachment or provider fallback.
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
@@ -267,7 +268,7 @@ function launcher({
   requireThat(userName === undefined || isLabUserName(userName));
   requireThat(
     contextPolicy === 'fresh-only' ||
-      (contextPolicy === 'bounded-history' &&
+      (['bounded-history', 'selected-prior-v2'].includes(contextPolicy) &&
         mode === 'model-enabled' &&
         selection?.provider === 'anthropic-api'),
   );
@@ -508,6 +509,13 @@ function launcher({
               runEnv.TALKQTE_DEV_LAB_MODEL === pinned.model &&
               runEnv.TALKQTE_DEV_LAB_EFFORT === pinned.effort,
           );
+          requireThat(
+            contextPolicy === SELECTED_CONTEXT
+              ? Object.entries(selectedIdentity()).every(
+                  ([key, value]) => metadata?.[key] === value,
+                )
+              : metadata?.contextPolicy === undefined,
+          );
           descriptor = runEnv.TALKQTE_DEV_LAB_DESCRIPTOR;
           requireThat(
             isAbsolute(descriptor ?? '') &&
@@ -608,7 +616,10 @@ function launcher({
               event.event === 'evaluator' &&
               event.approval === 'review' &&
               event.state === 'on' &&
-              event.backend === 'lab-api' &&
+              event.backend ===
+                (contextPolicy === SELECTED_CONTEXT
+                  ? 'lab-api-selected-prior-v2'
+                  : 'lab-api') &&
               event.model === pinned?.model &&
               reviewedSession === null
             )
@@ -692,8 +703,8 @@ function launcher({
           ...(userName ? { TALKQTE_DEV_USER_NAME: userName } : {}),
           // Configuration only: the expanded scope still needs the native
           // session's explicit review. Never inherit this from caller env.
-          ...(contextPolicy === 'bounded-history'
-            ? { TALKQTE_DEV_LAB_CONTEXT: 'bounded-history' }
+          ...(['bounded-history', 'selected-prior-v2'].includes(contextPolicy)
+            ? { TALKQTE_DEV_LAB_CONTEXT: contextPolicy }
             : {}),
           ...(fixtureCase ? { TALKQTE_FIXTURE_CASE: fixtureCase } : {}),
         };

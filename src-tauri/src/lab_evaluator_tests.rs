@@ -1575,3 +1575,138 @@ fn lab_history_opaque_review_cancel_replay_and_legacy_grant_never_dispatch() {
         Err(ProcessingError::StaleReview)
     );
 }
+
+// Ordinary public v2 only: this is not an attested-scope handshake or runtime IPC.
+#[test]
+fn ordinary_selected_shared_lifecycle_cases_cancel_real_link_and_reject_late_reply() {
+    use crate::engine::{ConversationScope, Segment};
+    let cases: Value = serde_json::from_str(include_str!(
+        "../../scripts/fixtures/selected-context-lifecycle.json"
+    ))
+    .unwrap();
+    assert_eq!(cases["schema"], "talkqte.lab.selected.lifecycle-cases.v1");
+    for case in cases["cases"].as_array().unwrap() {
+        let count = case["noteCount"].as_u64().unwrap();
+        assert!(count <= 1);
+        let mut f = Fixture::new();
+        let path = f.settings.descriptor.clone();
+        f.settings = selected_settings();
+        f.settings.descriptor = path.clone();
+        assert!(f.settings.attested.is_none());
+        let mut descriptor: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        descriptor["schema"] = json!("talkqte.lab.selected.descriptor.v2");
+        fs::write(&path, descriptor.to_string()).unwrap();
+        let link = f.link(Some(ClockSample {
+            session_id: 1,
+            elapsed_ms: 10,
+        }));
+        let processor =
+            processor_configuration(Backend::Api, Some(&f.settings), None, None).unwrap();
+        assert_eq!(
+            crate::engine::ProcessorSummary::from(&processor).required_note_count,
+            None
+        );
+        let mut engine = Engine::live_with_evaluator(
+            Worker::start(Adapter(link.clone()), DEADLINE).unwrap(),
+            processor,
+        )
+        .with_lab_lifecycle(link.clone());
+        engine.start().unwrap();
+        let note = crate::context::ContextItem {
+            provider: crate::context::Provider::File,
+            source_id: "fixture-note".into(),
+            title: "Fictional workshop".into(),
+            source_date: "2026-10-20".into(),
+            excerpt: "The room cannot open before nine.".into(),
+            revision: 1,
+        };
+        engine.set_notes(vec![note.clone()]);
+        let selected = if count == 0 {
+            vec![]
+        } else {
+            vec![(note.provider, note.source_id.clone(), note.revision)]
+        };
+        let review = engine
+            .review_processing(ConversationScope::NewSpeechOnly, &selected)
+            .unwrap();
+        assert!(!engine.has_processing_permission());
+        engine.approve_processing(review).unwrap();
+        engine.advance(10);
+        engine
+            .ingest(
+                1,
+                Segment {
+                    id: "current".into(),
+                    at_ms: 10,
+                    speaker: "Maya".into(),
+                    text: "Can we open the room at nine?".into(),
+                },
+            )
+            .unwrap();
+        let mut stream = f.accept();
+        let mut reader = Reader::default();
+        let hello = read(&mut reader, &mut stream);
+        assert_eq!(hello["schema"], SELECTED_SCHEMA);
+        assert_eq!(hello["contextPolicy"], SELECTED_CONTEXT);
+        assert!(hello.get("scope").is_none());
+        let mut ready = f.settings.frame("ready", "fictional-run", 1);
+        ready
+            .as_object_mut()
+            .unwrap()
+            .extend(f.settings.identity().as_object().unwrap().clone());
+        ready.as_object_mut().unwrap().extend(json!({"provider":"anthropic-api","model":"claude-opus-5-5","effort":"low","dispatchBudgetKind":"apiRequests","dispatchLimit":40,"dispatchesUsed":0,"spendCapMicroUsd":1000000,"spendUsedMicroUsd":0}).as_object().unwrap().clone());
+        write_frame(&mut stream, &ready).unwrap();
+        let mut probe = f.settings.frame("clock_probe", "fictional-run", 1);
+        probe["probeId"] = json!("ordinary-lifecycle");
+        write_frame(&mut stream, &probe).unwrap();
+        assert_eq!(read(&mut reader, &mut stream)["type"], "clock_sample");
+        let request = read(&mut reader, &mut stream);
+        assert_eq!(request["type"], "evaluate");
+        assert_eq!(
+            request["input"]["priorNotes"].as_array().unwrap().len() as u64,
+            count,
+            "{}",
+            case["id"]
+        );
+        assert!(request.get("scope").is_none());
+        match case["control"].as_str().unwrap() {
+            "revoke" => engine.revoke_processing(),
+            "remove" => {
+                assert_eq!(count, 1);
+                engine.set_notes(vec![]);
+            }
+            "stop" => {
+                // Engine eligibility retirement is distinct from the host hook below.
+                assert_eq!(case["boundary"], "engine");
+                engine.begin_live_stop();
+            }
+            "host-stop" => {
+                assert_eq!(case["boundary"], "host-link-stop");
+                link.cancel_reason(ControlReason::Stop);
+                engine.begin_live_stop();
+            }
+            _ => panic!("unknown fictional lifecycle control"),
+        }
+        assert!(!engine.has_processing_permission());
+        let cancel = read(&mut reader, &mut stream);
+        assert_eq!(cancel["type"], "cancel");
+        assert_eq!(cancel["reason"], case["cancelReason"]);
+        let mut late = f.settings.frame("result", "fictional-run", 1);
+        late["requestId"] = request["requestId"].clone();
+        late["contextRevision"] = request["contextRevision"].clone();
+        late["elapsedMs"] = json!(1);
+        late["value"] = json!({
+            "action": "show",
+            "cue": "Should we check the opening time?",
+            "sourceIds": [request["input"]["events"][0]["id"].clone()]
+        });
+        let _ = write_frame(&mut stream, &late);
+        for _ in 0..10 {
+            thread::sleep(Duration::from_millis(2));
+            engine.advance(1);
+        }
+        assert!(engine.state.cue.is_none(), "{}", case["id"]);
+        assert!(!engine.has_processing_permission());
+        assert!(link.terminal().is_some());
+    }
+}

@@ -1,3 +1,9 @@
+import {
+  SELECTED_CONTEXT,
+  buildSelectedContextParams,
+  selectedSystemPrompt,
+  selectedPriorContextInput,
+} from './cue-selected-context.mjs';
 // Direct Anthropic API cue decisions for the development lab: request shape,
 // streamed call, outcome classification, pricing and credential checks.
 // Pure logic; the per-run worker (cue-lab-anthropic-worker.mjs) is the only
@@ -147,10 +153,15 @@ export function costMicroUsd(model, usage = {}) {
 // Worst case for one call before it is sent: about two bytes per token for
 // the prompt and input plus 1,500 tokens for the structured-output prompt,
 // at the higher of input and cache-write price, plus the full output bound.
-export function worstCaseMicroUsd(model, input) {
+export function worstCaseMicroUsd(model, input, contextPolicy = 'fresh-only') {
+  if (!['fresh-only', SELECTED_CONTEXT].includes(contextPolicy))
+    throw new Error('invalid_context_policy');
+  if (contextPolicy === SELECTED_CONTEXT) selectedPriorContextInput(input);
   const p = PRICE[model];
   const bytes = Buffer.byteLength(
-    anthropicSystemPrompt() +
+    (contextPolicy === SELECTED_CONTEXT
+      ? selectedSystemPrompt()
+      : anthropicSystemPrompt()) +
       JSON.stringify(input) +
       JSON.stringify(anthropicSchemaFor(input)),
   );
@@ -170,10 +181,20 @@ export async function runAnthropicRequest({
   client,
   model,
   input,
+  contextPolicy = 'fresh-only',
   budgetMs,
   signal,
 }) {
-  const params = buildAnthropicParams(model, input);
+  const params =
+    contextPolicy === SELECTED_CONTEXT
+      ? buildSelectedContextParams(model, input)
+      : contextPolicy === 'fresh-only' &&
+          !Object.hasOwn(input, 'inputContract') &&
+          !Object.hasOwn(input, 'priorNotes')
+        ? buildAnthropicParams(model, input)
+        : (() => {
+            throw new Error('invalid_context_policy');
+          })();
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal?.addEventListener('abort', abort, { once: true });
