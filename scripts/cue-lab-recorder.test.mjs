@@ -67,6 +67,7 @@ for (const mode of ['normal', 'partial', 'moved', 'missing'])
               companion: { x: 700, y: 620, width: 320, height: 76 },
               picture: { width: 1840, height: 1272, scale: 2 },
             },
+            filters: { emulator: 'independent', companion: 'display' },
           },
         );
       } finally {
@@ -93,6 +94,21 @@ for (const mode of [
       f.close();
     }
   });
+test("a helper failure keeps its exit and fixed reason, never the helper's message", async () => {
+  const f = fixture('error');
+  try {
+    await assert.rejects(f.recorder.start({ runId: 'owned-run' }));
+    await f.recorder.stop().catch(() => {});
+    const detail = f.recorder.failureDetail;
+    assert.deepEqual(
+      [detail.exit, detail.errorReason, detail.frameAccepted],
+      [{ code: 2, signal: null }, 'output-write', false],
+    );
+    assert.doesNotMatch(JSON.stringify(detail), /fictional|denied/);
+  } finally {
+    f.close();
+  }
+});
 for (const mode of [
   'bad-final',
   'exit1',
@@ -163,11 +179,30 @@ test('strict Swift source gates exact identities before streams and readiness af
   );
   // Each window is captured on its own, never through a display filter
   // that shows only the active Space (RunB07's black recording).
-  assert.match(source, /SCContentFilter\(desktopIndependentWindow: emulator\)/);
+  // Independent only after a child probe built it cleanly, else a display
+  // filter that includes that one window; the window list is re-read first.
+  assert.match(source, /SCContentFilter\(desktopIndependentWindow: current\)/);
+  // Sizes, crops, placement and the canvas use the windows as re-read.
   assert.match(
     source,
-    /SCContentFilter\(desktopIndependentWindow: companion\)/,
+    /let union = emulatorNow\.frame\.union\(companionNow\.frame\)/,
   );
+  assert.match(source, /windowConfiguration\(companionNow, display:/);
+  assert.match(source, /placeOf\(companionNow\)/);
+  assert.doesNotMatch(source, /placeOf\(companion\)|placeOf\(emulator\)/);
+  // Every failure carries a fixed reason code.
+  assert.equal(
+    source.match(/\bfail\(/g).length - 1,
+    source.match(/, reason: "[a-z][a-z-]*"\)/g).length,
+  );
+  assert.match(
+    source,
+    /SCContentFilter\(display: onDisplay, including: \[current\]\)/,
+  );
+  assert.match(source, /if probed\[current\.windowID\] == true \{/);
+  // Both probes run at once, one second in all.
+  assert.match(source, /group\.wait\(timeout: \.now\(\) \+ 1\)/);
+  assert.match(source, /"event": "filters"/);
   assert.doesNotMatch(
     source,
     /SCContentFilter\(display: display, including: \[emulator, companion\]\)/,
@@ -184,11 +219,8 @@ test('strict Swift source gates exact identities before streams and readiness af
     source.indexOf('writer.place(emulatorStream') <
       source.indexOf('writer.place(companionStream'),
   );
-  // The canvas is the windows' union alone, not clipped to one display.
-  assert.match(
-    source,
-    /let union = emulator\.frame\.union\(companion\.frame\)\n/,
-  );
+  // The canvas is the windows' union alone (as re-read, asserted above),
+  // not clipped to one display.
   assert.ok(
     source.indexOf('try await soundStream.startCapture()') <
       source.indexOf('let signals ='),

@@ -41,7 +41,15 @@ process.on('SIGTERM', () => {
   setTimeout(() => process.exit(mode === 'exit1' ? 1 : 0), 5);
 });
 if (mode === 'early') process.exit(0);
-else if (mode === 'oversize') process.stdout.write('x'.repeat(270000));
+else if (mode === 'error') {
+  // A failure whose message names a private path; only the reason may be kept.
+  emit({
+    event: 'error',
+    reason: 'output-write',
+    message: 'Could not write /private/fictional/recording.mov: denied',
+  });
+  process.exit(2);
+} else if (mode === 'oversize') process.stdout.write('x'.repeat(270000));
 else if (mode === 'bad-utf8') process.stdout.write(Buffer.from([255, 10]));
 else if (mode === 'duplicate')
   process.stdout.write('{"event":"matched","event":"matched"}\n');
@@ -51,6 +59,11 @@ else if (mode === 'truncated') {
   setTimeout(() => process.exit(0), 20);
 } else {
   emit(matched);
+  emit({
+    event: 'filters',
+    emulator: { kind: 'independent' },
+    companion: { kind: 'display' },
+  });
   if (mode === 'partial') {
     const data =
       JSON.stringify({ event: 'frame_accepted', frames: 1, wallMs: 1 }) + '\n';

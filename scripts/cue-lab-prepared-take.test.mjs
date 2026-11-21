@@ -38,6 +38,11 @@ function fixture({
   badIdentity = false,
   listening = true,
   recorderFails = false,
+  // The helper exited before accepting a frame (RunB08): stop cannot
+  // confirm a recording, and none exists.
+  recorderNeverRecorded = false,
+  // The recorder's process has not exited and stop cannot confirm it.
+  recorderStillRunning = false,
   missingAck = false,
   duplicateAck = false,
   ackUncertainty = 0,
@@ -381,14 +386,22 @@ function fixture({
         const now = performance.now.bind(performance);
         mock.method(performance, 'now', () => now() + 6000);
       }
-      if (recorderFails) throw Error('private recorder failure');
+      if (recorderFails || recorderNeverRecorded)
+        throw Error('private recorder failure');
       return { started: true };
     },
     async stop() {
       counts.recorderStop++;
       trace.push('recorder-stop');
       recorderHandler();
-      return { stopped: true };
+      if (recorderNeverRecorded) throw Error('private recorder failure');
+      return { stopped: !recorderStillRunning };
+    },
+    get failureDetail() {
+      if (recorderStillRunning) return { frameAccepted: false, exit: null };
+      return recorderNeverRecorded
+        ? { frameAccepted: false, exit: { code: 1, signal: null } }
+        : undefined;
     },
   };
   const adaptedBody = body
@@ -982,6 +995,33 @@ test('prepared model path preserves preallocated player run identity and retires
   assert.ok(
     f.trace.indexOf('recorder-stop') < f.trace.indexOf('player-retired'),
   );
+});
+test('a recorder that exited before any frame names its step and still lets the player retire', async () => {
+  const f = fixture({
+    strictSource: true,
+    playerRetirement: true,
+    recorderNeverRecorded: true,
+  });
+  await assert.rejects(f.take.done);
+  assert.equal(f.take.failedStep, 'recorder-start');
+  assert.equal(f.trace.includes('play'), false);
+  assert.ok(f.trace.includes('player-retired'));
+});
+test('a recorder that may still be recording keeps the player', async () => {
+  const f = fixture({
+    strictSource: true,
+    playerRetirement: true,
+    recorderFails: true,
+    recorderStillRunning: true,
+  });
+  await assert.rejects(f.take.done);
+  assert.equal(f.take.failedStep, 'recorder-start');
+  assert.equal(f.trace.includes('player-retired'), false);
+});
+test('a take that completes has no failed step', async () => {
+  const f = fixture({ strictSource: true, playerRetirement: true });
+  await f.take.done;
+  assert.equal(f.take.failedStep, null);
 });
 test('prepared model path cannot retire player without confirmed native release', async () => {
   const f = fixture({

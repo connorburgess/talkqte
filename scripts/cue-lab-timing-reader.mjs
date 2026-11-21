@@ -246,6 +246,7 @@ export function watchLabTiming({
             'settings',
             'withdrawn',
             'lab_ended',
+            'stalled',
           ].includes(value.code)) ||
         (value.state === 'stopped') !== (value.code !== undefined) ||
         !Number.isSafeInteger(value.audio_ms) ||
