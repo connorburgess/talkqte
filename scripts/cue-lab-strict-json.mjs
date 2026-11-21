@@ -1,7 +1,7 @@
 // JSON.parse validates grammar; a second bounded scan rejects duplicate keys,
 // including equivalent escaped spellings that JSON.parse would silently replace.
-export function parseUniqueLabJson(text) {
-  const value = JSON.parse(text);
+export function parseUniqueLabJson(text, reviver) {
+  const value = JSON.parse(text, reviver);
   const stack = [];
   for (let i = 0; i < text.length; i++) {
     const c = text[i];

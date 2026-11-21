@@ -20,8 +20,9 @@ The exact `talkqte.lab.build.v1` record contains `schema`, `executable`,
 `signature` contains only `identifier`, `authority` and `designatedRequirement`.
 Unknown/missing fields, duplicate JSON keys, duplicate/extra/missing features,
 unapproved digest/commit, noncanonical paths and nonprivate records are refused.
-The approved features are exactly `lab-evaluator`, `local-whisper`,
-`native-audio-spike` and `timing-log`.
+The approved features are exactly `cloud-transcription`, `lab-evaluator`,
+`native-audio-spike` and `timing-log`. Local transcription has been removed
+from the app (#346), so a build reporting `local-whisper` is refused.
 
 The executable must be the canonical regular `Contents/MacOS/talkqte` inside the
 canonical `.app`. Info.plist must name that executable and
@@ -45,7 +46,15 @@ approval or proves that a missing log event was delivered.
 
 Supply the pinned provider/model/effort/attempt cap as `selection`, the explicit
 `sourceApplication:"QuickTime Player"`, positive finite integer `stopAfterS`,
-`modelConnection:"on"` and canonical existing external `whisperModel`. The source
+and the `transcription` described below. A model run uses the direct API
+route only: its in-app review approves both the model connection and cloud
+transcription. A Codex or Claude CLI model launch is refused before anything
+is verified: "This route has no transcription: cloud transcription is approved
+only through the in-app review, which the subscription routes do not use." An
+API-route model launch without cloud transcription is refused too. There is no
+local transcription model, and a `whisperModel` option is refused. The
+subscription adapters remain for offline use (the scenario generator uses the
+Codex route). The source
 is restricted to the approved fictional QuickTime-only topology. This selects
 all QuickTime windows/audio, not one document; the run plan must establish that
 only the intended fictional document is active. Native must enforce its pristine
@@ -68,6 +77,22 @@ installed before spawn. Arming's five-second clock begins when that owned handle
 exists, not during prelaunch verification. The owner waits for exact-run `armed`,
 sends USR2 once and requires `latched` → `stopping` → `released` or failure.
 Six seconds after signaling and twelve seconds total remain the cleanup bounds.
+
+## Cloud transcription token
+
+On the direct API route a run transcribes through Deepgram (#344). Pass `transcription: { backend: 'deepgram', minuteCap, grant }`, where `minuteCap` is 1–60 for the whole launch and `grant` comes from `mintDeepgramGrant` (`scripts/cue-lab-deepgram.mjs`).
+
+- **Minting:** the grant reads `TALKQTE_LAB_DEEPGRAM_KEY` from `~/.config/talkqte-lab/deepgram.env`. That file follows the same owner, mode and location rules as the API key file (`scripts/cue-lab-key-file.mjs`). The grant posts once, through the platform `fetch`, to `https://api.deepgram.com/v1/auth/grant` for a 900 s token. A refused key, unpaid account or rate limit (401, 402, 403, 429), or any other status, stops before launch.
+- **Environment refused:** the grant refuses to run if `NODE_TLS_REJECT_UNAUTHORIZED`, `NODE_EXTRA_CA_CERTS`, `NODE_OPTIONS` or `NODE_USE_ENV_PROXY` is set, even empty. It checks this process's own environment as well as any environment passed in, so a filtered copy cannot hide one. The API route does the same.
+- **Where the key and token live:** the key is used only for that request, in this process. The token is held in a closure, never returned or logged.
+- **At launch:** the launcher creates an empty `0600` placeholder at `TALKQTE_DEV_STT_TOKEN_FILE` in its `0700` run folder, and sets that variable plus `TALKQTE_DEV_STT_BACKEND=deepgram` and `TALKQTE_DEV_STT_MINUTE_CAP`. The app's session-start check (owner, mode, size, no read) accepts the placeholder, but it holds no token.
+- **After review:** the take calls `releaseTranscriptionToken()` only after it has accepted the in-app review row, opened the API provider and confirmed there is still time for the media. A take about to stop for lack of time never hands the token over. The launcher also refuses the call until it has seen that review row for `lab-api` and the launched model. The token is written to a sibling file and renamed over the placeholder. After approval the app waits up to 10 s for the token, buffering the audio, then connects and reports `stt_state` `connected` with the query it used.
+- **Order check:** a stream that starts before the review row or in another session, starts twice, or connects before the token was released stops the run.
+- **Deletion:** by default the token file is deleted as soon as the stream has connected, and otherwise at close, on a failed launch or at process exit. The app checks the file when a session starts, so a lab run is one session per launch.
+- **Optional reconnect retention:** only a model-enabled API launch may explicitly set `transcription.reconnect: true`. It keeps the usable short-lived token in the same owner-only run folder until close, a failed launch or process exit, so a replacement stream can read it again. This retains a valid credential on disk for the run. Without that opt-in a reconnect stops the run. The launcher accepts at most two replacements, only after the first connection and in the reviewed session, and requires every replacement to use the first connection's query. A pending replacement may fail and consume the second attempt before any replacement reports `Connected`. Recovery before the first confirmed connection is refused because no initial query has been confirmed; that narrower launcher workflow remains a native integration limitation. It reports `tokenKeptUntilStop` and the reconnect count; those receipts do not prove native reconnect, device or provider acceptance. The runner SIGKILL limitation below still applies.
+- **What deletion cannot cover:** a SIGKILL of the runner skips every cleanup path. A released token then stays in the run folder until the temporary directory is cleaned, and stays valid for up to 900 s. The app is not killed with the runner either. `removeStaleTranscriptionTokens()` removes such files from this user's owner-only `tq-owned-*` folders, but only where the run has provably ended. A folder qualifies if the runner pid it recorded in `runner.pid` is gone, or, without a pid record, if nothing in it changed for longer than the 900 s token TTL. A run still in progress, in this or another lane, is never touched. A run package calls it at start.
+
+Tests use a loopback grant stand-in and dummy keys.
 
 ## Bounded observation, not a disk quota
 

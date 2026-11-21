@@ -3,6 +3,8 @@ import { EventEmitter } from 'node:events';
 import { createConnection } from 'node:net';
 import { readFile } from 'node:fs/promises';
 import { createLabPlaybackSession } from './cue-lab-prepared-take.mjs';
+import { labelLabBootstrapMedia } from './cue-lab-media.mjs';
+import { fictionalTestMedia } from './fixtures/lab-test-media.mjs';
 import { test, after } from 'node:test';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -681,7 +683,9 @@ async function playbackFixture({ abortPrefix = false } = {}) {
       model: 'gpt-6.1-sol',
       effort: 'medium',
       maxCalls: 10,
-      deadlineMs: 1000,
+      // Current broker requests plus settlement must fit the adapter ceiling.
+      // Startup/take test deadlines remain 1000/2000 ms below.
+      deadlineMs: 30000,
       execution: 'offline-stand-in',
       environment: {},
       openers: {
@@ -695,14 +699,10 @@ async function playbackFixture({ abortPrefix = false } = {}) {
       },
     },
     stopAfterS: 10,
-    media: {
-      fictional: true,
-      path: '/fictional/neutral-calibration.wav',
-      purpose: 'neutral-calibration',
-      displayLabel: 'Neutral calibration — outside the scenario',
-      sha256: hash('neutral prefix'),
-      durationMs: 1000,
-    },
+    media: labelLabBootstrapMedia(
+      fictionalTestMedia({ durationMs: 1000 }),
+      'Neutral calibration — outside the scenario',
+    ),
     source: {
       async waitListening({ runId }) {
         trace.push('Listening');
@@ -734,7 +734,12 @@ async function playbackFixture({ abortPrefix = false } = {}) {
 test('composition starts neutral speech before lazy auth, waits prefix completion before generation', async () => {
   const p = await playbackFixture();
   try {
-    await p.prefixStarted.promise;
+    await Promise.race([
+      p.prefixStarted.promise,
+      p.take.done.then(() => {
+        throw new Error('take completed before the calibration prefix');
+      }),
+    ]);
     await tick();
     assert.equal(p.f.calls.length, 0);
     assert.deepEqual(p.trace.slice(0, 3), ['Listening', 'recorder', 'prefix']);
@@ -761,7 +766,12 @@ test('composition starts neutral speech before lazy auth, waits prefix completio
 
 test('Stop during prefix before authentication closes uninvoked body with zero generation', async () => {
   const p = await playbackFixture({ abortPrefix: true });
-  await p.prefixStarted.promise;
+  await Promise.race([
+    p.prefixStarted.promise,
+    p.take.done.then(() => {
+      throw new Error('take completed before the calibration prefix');
+    }),
+  ]);
   const stopping = p.take.stop();
   await assert.rejects(stopping);
   await assert.rejects(p.take.done);

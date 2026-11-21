@@ -49,7 +49,7 @@ export interface Cue {
 export interface CueSnapshot {
   revision: number;
   status: Status;
-  /** A live session fed by local transcription. */
+  /** A live session fed by transcription. */
   live: boolean;
   /** Browser preview and test stand-in only: a replay of a fictional
    * conversation that captures nothing. The desktop app never sends it. */
@@ -66,9 +66,15 @@ export interface CueSnapshot {
   model?: 'on' | 'sending' | 'stopped';
   /** Why sending stopped, when `model` is `stopped`. */
   modelIssue?: import('./processing').ProcessingIssue;
+  modelProvider?: string;
+  modelLab?: boolean;
   /** Development builds only: the running session is fed by a selected
    * application alone, with no microphone. */
   sourceSession?: boolean;
+  /** Where a live session's audio is transcribed: present for every live
+   * session, which only a development build with cloud transcription can
+   * start. */
+  transcription?: import('./transcription').CloudTranscription;
 }
 export interface Snapshot extends CueSnapshot {
   title: string;
@@ -96,9 +102,6 @@ export type Commands = {
   set_overlay: { enabled: boolean };
   start_live_session: undefined;
   stop_live_session: undefined;
-  download_model: undefined;
-  cancel_model_download: undefined;
-  remove_model: undefined;
   cancel_context_import: undefined;
   remove_context_item: { provider: ContextItem['provider']; sourceId: string };
   cancel_granola_sign_in: undefined;
@@ -186,18 +189,11 @@ export interface MergeOutcome {
   overLimit: number;
   rejected: number;
 }
-export interface ModelStatus {
-  revision: number;
-  status: 'unavailable' | 'developer' | 'missing' | 'downloading' | 'installed';
-  name: string;
-  sizeBytes: number;
-  neededBytes: number;
-  received: number;
-  message: string | null;
-}
 export interface LiveStatus {
   available: boolean;
   reason: string | null;
+  /** The cloud service this launch transcribes with, when one is selected. */
+  transcription?: string;
 }
 export function clockTime(ms: number) {
   const seconds = Math.floor(ms / 1000);

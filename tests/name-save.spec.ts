@@ -143,3 +143,50 @@ for (const latest of ['', 'Sam']) {
     await expect(name(page)).toHaveValue(latest);
   });
 }
+
+// Browsers report the Enter that confirms an input-method composition either
+// with isComposing (Chromium, Firefox) or, after compositionend, with keyCode
+// 229 (Safari). Neither may save the unconverted reading.
+for (const order of ['isComposing', 'keyCode 229 after compositionend']) {
+  test(`Enter that confirms an input-method composition does not save the name (${order})`, async ({
+    page,
+  }) => {
+    await open(page);
+    const field = name(page);
+    await field.focus();
+    await field.dispatchEvent('compositionstart', { data: '' });
+    await field.fill('さくら');
+    await field.evaluate((input, safari) => {
+      if (safari)
+        input.dispatchEvent(
+          new CompositionEvent('compositionend', { data: 'さくら' }),
+        );
+      const enter = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        code: 'Enter',
+        bubbles: true,
+        cancelable: true,
+        isComposing: !safari,
+      });
+      Object.defineProperty(enter, 'keyCode', {
+        value: safari ? 229 : 13,
+      });
+      input.dispatchEvent(enter);
+    }, order !== 'isComposing');
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    expect(await page.evaluate(() => window.nameTest.submissions)).toEqual([]);
+    await expect(field).toBeFocused();
+
+    // The user converts the reading, ends composition, then presses Enter.
+    await field.fill('桜');
+    if (order === 'isComposing')
+      await field.dispatchEvent('compositionend', { data: '桜' });
+    await field.press('Enter');
+    await saved(page, '桜');
+    expect(await page.evaluate(() => window.nameTest.submissions)).toEqual([
+      '桜',
+    ]);
+    await expect(field).toBeFocused();
+  });
+}

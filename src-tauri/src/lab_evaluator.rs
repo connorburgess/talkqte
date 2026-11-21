@@ -1,0 +1,1638 @@
+//! Inert, development-only fictional lab client. Native activation is a
+//! separate change. No CLI, capture handle, credential or cue-injection API.
+#![cfg_attr(test, allow(dead_code))]
+use crate::cue_evaluator::{
+    Cancellation, EvaluationLifecycle, Evaluator, Failure, Request, Settlement, Worker,
+};
+use crate::engine::{
+    CueSnapshot, Engine, ProcessingLocation, ProcessorConfiguration, ProcessorDisclosure,
+};
+use serde::Deserialize;
+use serde_json::{json, Value};
+use std::{
+    fs::{self, OpenOptions},
+    io::{Read, Write},
+    os::unix::{
+        fs::{FileTypeExt, MetadataExt, OpenOptionsExt},
+        net::UnixStream,
+    },
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering},
+        mpsc::{self, Receiver, SyncSender, TryRecvError},
+        Arc, Mutex, OnceLock,
+    },
+    thread,
+    time::{Duration, Instant},
+};
+
+const SELECTED_CONTEXT: &str = "selected-prior-v2";
+const SELECTED_INPUT: &str = "selected-prior-context-v2";
+const SELECTED_POLICY: &str = "fictional-lab-selected-prior-v2";
+const SELECTED_PROMPT: &str = "440a3a947d1cf1842a0e844bf447132463d74f4a1d0ab7ab2efd94211c02b636";
+const SELECTED_SCHEMA: &str = "talkqte.lab.selected.v2";
+const SCHEMA: &str = "talkqte.lab.v1";
+const FRAME_LIMIT: usize = 65_536;
+const DEADLINE: Duration = Duration::from_secs(8);
+const IO_SLICE: Duration = Duration::from_millis(20);
+const SETTLEMENT_GRACE: Duration = Duration::from_secs(1);
+const QUEUE: usize = 16;
+// Retired request identities whose late frames are ignored. The broker's
+// dispatch cap is at most 100, so this never drops one in a valid run.
+const RETIRED: usize = 128;
+
+#[derive(Clone, Copy)]
+pub(crate) enum ControlReason {
+    Stop,
+    Replace,
+    Exit,
+    // Engine Pause/revoke/Dismiss and other eligibility changes share this
+    // terminal lifecycle path; native hooks only need Stop/Replace/Exit.
+    EligibilityChange,
+    PublicationFailed,
+    TransportFailed,
+}
+impl ControlReason {
+    fn wire(self) -> &'static str {
+        match self {
+            Self::Stop => "stop",
+            Self::Replace => "replace",
+            Self::Exit => "exit",
+            Self::EligibilityChange => "eligibility_change",
+            Self::PublicationFailed => "publication_failed",
+            Self::TransportFailed => "transport_failed",
+        }
+    }
+}
+#[derive(Clone, Copy)]
+pub(crate) struct ClockSample {
+    pub session_id: u64,
+    pub elapsed_ms: u64,
+}
+pub(crate) type ClockSampler = Arc<dyn Fn() -> Option<ClockSample> + Send + Sync>;
+
+/// The two lab backends. Each is selected only by its exact launch value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Backend {
+    /// A subscription CLI (Codex or Claude Code) driven by the lab broker.
+    Subscription,
+    /// The owner's Anthropic API key, billed per token, behind a spend cap.
+    Api,
+}
+impl Backend {
+    fn parse(value: Option<&str>) -> Option<Self> {
+        match value {
+            Some("lab-subscription") => Some(Self::Subscription),
+            Some("lab-api") => Some(Self::Api),
+            _ => None,
+        }
+    }
+    fn id(self) -> &'static str {
+        match self {
+            Self::Subscription => "lab-subscription",
+            Self::Api => "lab-api",
+        }
+    }
+}
+
+/// The largest per-run spend cap the native side accepts: one US dollar.
+const MAX_SPEND_CAP_MICRO_USD: u64 = 1_000_000;
+
+#[derive(Clone)]
+struct Settings {
+    selected_prior: bool,
+    /// Selected before registration, never approval or a provider change.
+    bounded_history: bool,
+    attested: Option<(PathBuf, usize)>,
+    backend: Backend,
+    descriptor: PathBuf,
+    provider: String,
+    model: String,
+    effort: String,
+    /// The per-run spend cap, for the API backend only.
+    spend_cap_micro_usd: Option<u64>,
+}
+impl Settings {
+    fn parse(mut get: impl FnMut(&str) -> Option<String>) -> Result<Self, Failure> {
+        let backend = Backend::parse(get("TALKQTE_DEV_CUE_BACKEND").as_deref())
+            .ok_or(Failure::InvalidInput)?;
+        let context = get("TALKQTE_DEV_LAB_CONTEXT");
+        let bounded_history = context.as_deref() == Some("bounded-history");
+        let attested = if context.as_deref() == Some(crate::selected_attestation::CONTEXT) {
+            let count = match get("TALKQTE_DEV_LAB_REQUIRED_NOTES").as_deref() {
+                Some("0") => 0,
+                Some("1") => 1,
+                _ => return Err(Failure::InvalidInput),
+            };
+            Some((
+                PathBuf::from(get("TALKQTE_DEV_LAB_SCOPE_AUTHORITY").ok_or(Failure::InvalidInput)?),
+                count,
+            ))
+        } else {
+            None
+        };
+        let selected_prior = match context.as_deref() {
+            None => false,
+            Some("bounded-history") if backend == Backend::Api => false,
+            Some(SELECTED_CONTEXT | crate::selected_attestation::CONTEXT)
+                if backend == Backend::Api =>
+            {
+                true
+            }
+            _ => return Err(Failure::InvalidInput),
+        };
+        let descriptor =
+            PathBuf::from(get("TALKQTE_DEV_LAB_DESCRIPTOR").ok_or(Failure::InvalidInput)?);
+        let provider = get("TALKQTE_DEV_LAB_PROVIDER").ok_or(Failure::InvalidInput)?;
+        let model = get("TALKQTE_DEV_LAB_MODEL").ok_or(Failure::InvalidInput)?;
+        let effort = get("TALKQTE_DEV_LAB_EFFORT").ok_or(Failure::InvalidInput)?;
+        let cap = get("TALKQTE_DEV_LAB_SPEND_CAP_MICRO_USD");
+        // Pinned per-run identities only. Fable is a separate owner decision.
+        // Each provider belongs to exactly one backend.
+        let valid = match (backend, provider.as_str()) {
+            (Backend::Subscription, "codex") => model == "gpt-6.1-sol",
+            (Backend::Subscription, "claude-code") => {
+                matches!(model.as_str(), "claude-opus-5-5" | "claude-haiku-5-5")
+            }
+            (Backend::Api, "anthropic-api") => {
+                matches!(
+                    model.as_str(),
+                    "claude-opus-5-5" | "claude-sonnet-5-5" | "claude-haiku-5-5"
+                ) && effort == "low"
+            }
+            _ => false,
+        };
+        let spend_cap_micro_usd = match (backend, cap.as_deref()) {
+            (Backend::Api, Some(value)) => Some(parse_cap(value)?),
+            (Backend::Subscription, None) => None,
+            _ => return Err(Failure::InvalidInput),
+        };
+        if !descriptor.is_absolute() || !valid || !matches!(effort.as_str(), "low" | "medium") {
+            return Err(Failure::InvalidInput);
+        }
+        Ok(Self {
+            selected_prior,
+            bounded_history,
+            attested,
+            backend,
+            descriptor,
+            provider,
+            model,
+            effort,
+            spend_cap_micro_usd,
+        })
+    }
+    fn schema(&self) -> &'static str {
+        if self.attested.is_some() {
+            crate::selected_attestation::WIRE
+        } else if self.selected_prior {
+            SELECTED_SCHEMA
+        } else {
+            SCHEMA
+        }
+    }
+    fn frame(&self, kind: &str, run: &str, session: u64) -> Value {
+        let mut value = frame(kind, run, session);
+        value["schema"] = json!(self.schema());
+        value
+    }
+    fn check(
+        &self,
+        v: &Value,
+        kind: &str,
+        run: &str,
+        session: u64,
+        extra: &[&str],
+    ) -> Result<(), Failure> {
+        check_schema(v, kind, run, session, extra, self.schema())
+    }
+    fn identity(&self) -> Value {
+        let mut value = json!({"contextPolicy":if self.attested.is_some() {crate::selected_attestation::CONTEXT} else {SELECTED_CONTEXT},"inputContract":SELECTED_INPUT,"policyRevision":if self.attested.is_some() {crate::selected_attestation::POLICY} else {SELECTED_POLICY},"promptSha256":SELECTED_PROMPT});
+        if let Some((_, count)) = &self.attested {
+            value["requiredNoteCount"] = json!(count);
+        }
+        value
+    }
+    fn label(&self) -> &'static str {
+        if self.provider == "codex" {
+            "Codex"
+        } else {
+            "Claude"
+        }
+    }
+    /// The broker's dispatch-budget kind this provider must report.
+    fn budget_kind(&self) -> &'static str {
+        match self.backend {
+            Backend::Subscription => "cliDispatchAttempts",
+            Backend::Api => "apiRequests",
+        }
+    }
+}
+
+/// A canonical decimal number of micro-dollars, 1 to `MAX_SPEND_CAP_MICRO_USD`.
+fn parse_cap(value: &str) -> Result<u64, Failure> {
+    if value.is_empty()
+        || value.len() > 7
+        || !value.bytes().all(|b| b.is_ascii_digit())
+        || value.starts_with('0')
+    {
+        return Err(Failure::InvalidInput);
+    }
+    let cap: u64 = value.parse().map_err(|_| Failure::InvalidInput)?;
+    if !(1..=MAX_SPEND_CAP_MICRO_USD).contains(&cap) {
+        return Err(Failure::InvalidInput);
+    }
+    Ok(cap)
+}
+
+/// Dollars for display, to the cent, rounded up so a cap is never understated.
+fn dollars(micro_usd: u64) -> String {
+    let cents = micro_usd.div_ceil(10_000);
+    format!("${}.{:02}", cents / 100, cents % 100)
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Descriptor {
+    schema: String,
+    run_id: String,
+    socket_path: PathBuf,
+    nonce: String,
+}
+fn identifier(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+fn descriptor(settings: &Settings) -> Result<Descriptor, Failure> {
+    let parent = settings.descriptor.parent().ok_or(Failure::InvalidInput)?;
+    let dir = fs::symlink_metadata(parent).map_err(|_| Failure::Unreachable)?;
+    // SAFETY: geteuid has no arguments or side effects.
+    let uid = unsafe { libc::geteuid() };
+    if !dir.is_dir() || dir.uid() != uid || dir.mode() & 0o777 != 0o700 {
+        return Err(Failure::Credentials);
+    }
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(&settings.descriptor)
+        .map_err(|_| Failure::Credentials)?;
+    let meta = file.metadata().map_err(|_| Failure::Credentials)?;
+    if !meta.is_file() || meta.uid() != uid || meta.mode() & 0o777 != 0o600 || meta.len() > 4096 {
+        return Err(Failure::Credentials);
+    }
+    let mut bytes = Vec::new();
+    Read::by_ref(&mut file)
+        .take(4097)
+        .read_to_end(&mut bytes)
+        .map_err(|_| Failure::Credentials)?;
+    if bytes.len() > 4096 {
+        return Err(Failure::Credentials);
+    }
+    let d: Descriptor = serde_json::from_slice(&bytes).map_err(|_| Failure::InvalidInput)?;
+    if d.schema
+        != if settings.attested.is_some() {
+            crate::selected_attestation::DESCRIPTOR
+        } else if settings.selected_prior {
+            "talkqte.lab.selected.descriptor.v2"
+        } else {
+            "talkqte.lab.descriptor.v1"
+        }
+        || !identifier(&d.run_id)
+        || d.nonce.len() != 64
+        || !d
+            .nonce
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        || !d.socket_path.is_absolute()
+        || d.socket_path.parent() != Some(parent)
+    {
+        return Err(Failure::InvalidInput);
+    }
+    let socket = fs::symlink_metadata(&d.socket_path).map_err(|_| Failure::Unreachable)?;
+    if !socket.file_type().is_socket() || socket.uid() != uid || socket.mode() & 0o777 != 0o600 {
+        return Err(Failure::Credentials);
+    }
+    Ok(d)
+}
+#[derive(Clone)]
+struct Identity {
+    session: u64,
+    request: u64,
+    context: u64,
+}
+impl Identity {
+    fn add(&self, frame: &mut Value) {
+        frame["requestId"] = json!(self.request.to_string());
+        frame["contextRevision"] = json!(self.context.to_string());
+    }
+    fn matches(&self, v: &Value) -> bool {
+        decimal_id(&v["requestId"], self.request) && decimal_id(&v["contextRevision"], self.context)
+    }
+}
+struct Pending {
+    request: Request,
+    identity: Identity,
+}
+struct ScopeApproval {
+    session: u64,
+    notes: Value,
+    current: AtomicBool,
+    ready: AtomicBool,
+    proof: Mutex<
+        Option<(
+            crate::selected_attestation::Authority,
+            crate::selected_attestation::Scope,
+        )>,
+    >,
+}
+enum Event {
+    Scope(Arc<ScopeApproval>),
+    Evaluate {
+        identity: Identity,
+        input: Value,
+        until: Instant,
+        reply: SyncSender<Result<String, Failure>>,
+    },
+    Settled(Identity, Settlement),
+    Observation(Value),
+}
+struct Link {
+    settings: Settings,
+    scope: Mutex<Option<Arc<ScopeApproval>>>,
+    tx: SyncSender<Event>,
+    terminal: AtomicU8,
+    reason: Mutex<ControlReason>,
+    started: AtomicBool,
+    next: AtomicU64,
+    pending: Mutex<Option<Pending>>,
+    sampler: Arc<Mutex<Option<ClockSampler>>>,
+    observations: Mutex<Observations>,
+    fault: Arc<AtomicBool>,
+    session: AtomicU64,
+}
+fn failure_code(f: Failure) -> u8 {
+    match f {
+        Failure::SignIn => 2,
+        Failure::Credentials => 3,
+        Failure::UsageLimit => 4,
+        Failure::InvalidDecision => 5,
+        Failure::Expired => 6,
+        _ => 1,
+    }
+}
+fn failure_from(code: u8) -> Failure {
+    match code {
+        2 => Failure::SignIn,
+        3 => Failure::Credentials,
+        4 => Failure::UsageLimit,
+        5 => Failure::InvalidDecision,
+        6 => Failure::Expired,
+        _ => Failure::WorkerUnavailable,
+    }
+}
+impl Link {
+    fn new(
+        settings: Settings,
+        sampler: Arc<Mutex<Option<ClockSampler>>>,
+        fault: Arc<AtomicBool>,
+    ) -> Arc<Self> {
+        let (tx, rx) = mpsc::sync_channel(QUEUE);
+        let link = Arc::new(Self {
+            settings,
+            scope: Mutex::new(None),
+            tx,
+            terminal: AtomicU8::new(0),
+            reason: Mutex::new(ControlReason::TransportFailed),
+            started: AtomicBool::new(false),
+            next: AtomicU64::new(0),
+            pending: Mutex::new(None),
+            sampler,
+            observations: Mutex::new(Observations::default()),
+            fault,
+            session: AtomicU64::new(0),
+        });
+        // Inert thread: waits for first permission-gated evaluate before file/socket I/O.
+        let weak = Arc::downgrade(&link);
+        thread::spawn(move || {
+            let Ok(first) = rx.recv() else {
+                return;
+            };
+            let Some(link) = weak.upgrade() else {
+                return;
+            };
+            if let Err(f) = transport(&link, rx, first) {
+                link.fail(f);
+            }
+        });
+        link
+    }
+    fn fail(&self, f: Failure) {
+        if let Ok(mut pending) = self.pending.try_lock() {
+            *pending = None;
+        }
+        let _ =
+            self.terminal
+                .compare_exchange(0, failure_code(f), Ordering::AcqRel, Ordering::Acquire);
+    }
+    fn send(&self, event: Event) -> Result<(), Failure> {
+        self.tx.try_send(event).map_err(|_| {
+            self.fail(Failure::WorkerUnavailable);
+            Failure::WorkerUnavailable
+        })
+    }
+    fn cancel_reason(&self, reason: ControlReason) {
+        if let Ok(slot) = self.scope.try_lock() {
+            if let Some(scope) = slot.as_ref() {
+                scope.current.store(false, Ordering::Release);
+                scope.ready.store(false, Ordering::Release);
+            }
+        }
+        if self.terminal.load(Ordering::Acquire) != 0 {
+            return;
+        }
+        if let Ok(mut slot) = self.reason.try_lock() {
+            *slot = reason;
+        }
+        self.fail(Failure::WorkerUnavailable);
+    }
+    fn evaluate(&self, request: &Request, cancel: &Cancellation) -> Result<String, Failure> {
+        if let Some(f) = self.terminal() {
+            return Err(f);
+        }
+        let number = self
+            .next
+            .fetch_add(1, Ordering::AcqRel)
+            .checked_add(1)
+            .ok_or(Failure::WorkerUnavailable)?;
+        let identity = Identity {
+            session: request.session_id(),
+            context: request.context_revision(),
+            request: number,
+        };
+        let input = serde_json::from_str(&if self.settings.selected_prior {
+            request.selected_prior_context_input()?
+        } else {
+            request.prompt_input()?
+        })
+        .map_err(|_| Failure::InvalidInput)?;
+        {
+            let mut pending = self
+                .pending
+                .lock()
+                .map_err(|_| Failure::WorkerUnavailable)?;
+            if pending.is_some() {
+                return Err(Failure::Busy);
+            }
+            *pending = Some(Pending {
+                request: request.clone(),
+                identity: identity.clone(),
+            });
+        }
+        if let Some(f) = self.terminal() {
+            if let Ok(mut pending) = self.pending.try_lock() {
+                *pending = None;
+            }
+            return Err(f);
+        }
+        let (reply, rx) = mpsc::sync_channel(1);
+        self.session.store(identity.session, Ordering::Release);
+        self.started.store(true, Ordering::Release);
+        self.send(Event::Evaluate {
+            identity,
+            input,
+            until: cancel.deadline(),
+            reply,
+        })?;
+        loop {
+            if cancel.is_cancelled() {
+                if !cancel.is_withdrawn() && self.terminal().is_none() {
+                    // Past the deadline only: the request is retired, not the
+                    // run. The engine settles it as Expired. A result already
+                    // delivered is returned so its action can be logged; the
+                    // engine never applies a reply read after the deadline.
+                    if let Ok(result) = rx.try_recv() {
+                        return result;
+                    }
+                    return Err(Failure::Expired);
+                }
+                self.cancel_reason(ControlReason::TransportFailed);
+                return Err(Failure::Cancelled);
+            }
+            if let Some(f) = self.terminal() {
+                return Err(f);
+            }
+            match rx.recv_timeout(IO_SLICE) {
+                Ok(result) => return result,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(_) => thread::sleep(IO_SLICE),
+            }
+        }
+    }
+    fn observe(&self, engine: &Engine, snapshot: &CueSnapshot, emitted: bool) {
+        if !self.started.load(Ordering::Acquire) {
+            return;
+        }
+        if engine.session() != self.session.load(Ordering::Acquire) {
+            self.fail(Failure::InvalidDecision);
+            return;
+        }
+        if !emitted {
+            self.cancel_reason(ControlReason::PublicationFailed);
+            return;
+        }
+        let Ok(mut observer) = self.observations.try_lock() else {
+            self.fail(Failure::WorkerUnavailable);
+            return;
+        };
+        if let Some(frame) = observer.observe(engine, snapshot) {
+            let _ = self.send(Event::Observation(frame));
+        }
+    }
+}
+impl EvaluationLifecycle for Link {
+    fn required_note_count(&self) -> Option<usize> {
+        self.settings.attested.as_ref().map(|(_, n)| *n)
+    }
+    fn approve_notes(
+        &self,
+        session: u64,
+        notes: &[crate::cue_evaluator::Source],
+    ) -> Result<(), Failure> {
+        if self.settings.attested.is_none() {
+            return Ok(());
+        }
+        let scope = Arc::new(ScopeApproval {
+            session,
+            notes: crate::selected_attestation::projection(notes),
+            current: AtomicBool::new(true),
+            ready: AtomicBool::new(false),
+            proof: Mutex::new(None),
+        });
+        if scope.notes.as_array().map(Vec::len) != self.required_note_count() {
+            return Err(Failure::InvalidInput);
+        }
+        let mut slot = self
+            .scope
+            .try_lock()
+            .map_err(|_| Failure::WorkerUnavailable)?;
+        if slot.is_some() {
+            return Err(Failure::InvalidInput);
+        }
+        *slot = Some(scope.clone());
+        self.session.store(session, Ordering::Release);
+        self.started.store(true, Ordering::Release);
+        self.send(Event::Scope(scope))
+    }
+    fn scope_ready(&self) -> bool {
+        self.settings.attested.is_none()
+            || self
+                .scope
+                .try_lock()
+                .ok()
+                .and_then(|s| s.clone())
+                .is_some_and(|s| {
+                    s.current.load(Ordering::Acquire)
+                        && s.ready.load(Ordering::Acquire)
+                        && self.terminal().is_none()
+                })
+    }
+    fn retire_scope(&self) {
+        if self.settings.attested.is_some() {
+            if let Ok(slot) = self.scope.try_lock() {
+                if let Some(s) = slot.as_ref() {
+                    s.current.store(false, Ordering::Release);
+                    s.ready.store(false, Ordering::Release);
+                }
+            }
+            self.cancel_reason(ControlReason::EligibilityChange);
+        }
+    }
+    fn terminal(&self) -> Option<Failure> {
+        if self.fault.load(Ordering::Acquire) {
+            if let Ok(mut pending) = self.pending.try_lock() {
+                *pending = None;
+            }
+            return Some(Failure::WorkerUnavailable);
+        }
+        match self.terminal.load(Ordering::Acquire) {
+            0 => None,
+            n => Some(failure_from(n)),
+        }
+    }
+    fn cancel(&self) {
+        self.cancel_reason(ControlReason::EligibilityChange);
+    }
+    fn settle(&self, request: &Request, verdict: Settlement) -> Result<(), Failure> {
+        let mut pending = self.pending.try_lock().map_err(|_| {
+            self.fail(Failure::WorkerUnavailable);
+            Failure::WorkerUnavailable
+        })?;
+        let Some(p) = pending.take() else {
+            self.fail(Failure::InvalidDecision);
+            return Err(Failure::InvalidDecision);
+        };
+        if p.request != *request {
+            self.fail(Failure::InvalidDecision);
+            return Err(Failure::InvalidDecision);
+        }
+        self.send(Event::Settled(p.identity, verdict))
+    }
+}
+struct Adapter(Arc<Link>);
+impl Drop for Adapter {
+    fn drop(&mut self) {
+        self.0.cancel_reason(ControlReason::Exit);
+    }
+}
+impl Evaluator for Adapter {
+    fn evaluate(&mut self, r: &Request, c: &Cancellation) -> Result<String, Failure> {
+        self.0.evaluate(r, c)
+    }
+}
+
+#[derive(Default)]
+struct Observations {
+    session: Option<u64>,
+    revision: Option<u64>,
+    current: Option<(String, u64)>,
+}
+impl Observations {
+    fn observe(&mut self, engine: &Engine, snapshot: &CueSnapshot) -> Option<Value> {
+        let session = engine.session();
+        if self.session == Some(session) && self.revision.is_some_and(|r| snapshot.revision <= r) {
+            return None;
+        }
+        if self.session != Some(session) {
+            self.current = None;
+        }
+        self.session = Some(session);
+        self.revision = Some(snapshot.revision);
+        let now = engine.state.elapsed_ms;
+        let cue = snapshot
+            .cue
+            .as_ref()
+            .filter(|c| !c.about_focus && c.note.is_none())
+            .and_then(|c| engine.lab_cue_metadata(&c.id).map(|meta| (c, meta)));
+        let next = cue.as_ref().map(|(c, _)| c.id.as_str());
+        let cleared = self
+            .current
+            .as_ref()
+            .filter(|(id, _)| Some(id.as_str()) != next)
+            .map(|(id, _)| json!({"cueId":id,"clearedAtNativeMs":now}));
+        let current=cue.map(|(c,(request,decision))| {
+            let published=self.current.as_ref().filter(|(id,_)|*id==c.id).map_or(now,|(_,at)|*at);
+            self.current=Some((c.id.clone(),published));
+            json!({"cueId":c.id,"text":c.question,"kind":c.kind,"held":c.held,"resolved":c.resolved_by.is_some(),"decider":"model","requestId":request.to_string(),"decisionAtNativeMs":decision,"publishedAtNativeMs":published})
+        });
+        if current.is_none() {
+            self.current = None;
+        }
+        Some(
+            json!({"snapshotRevision":snapshot.revision.to_string(),"nativeSessionElapsedMs":now,"publicationSucceeded":true,"currentCue":current,"cleared":cleared.into_iter().collect::<Vec<_>>()}),
+        )
+    }
+}
+
+fn decimal_id(value: &Value, expected: u64) -> bool {
+    value.as_str().is_some_and(|s| {
+        s.bytes().all(|b| b.is_ascii_digit())
+            && (s == "0" || !s.starts_with('0'))
+            && s.parse::<u64>() == Ok(expected)
+    })
+}
+fn frame(kind: &str, run: &str, session: u64) -> Value {
+    json!({"schema":SCHEMA,"type":kind,"runId":run,"sessionId":session.to_string()})
+}
+fn write_frame(stream: &mut UnixStream, v: &Value) -> Result<(), Failure> {
+    let mut bytes = serde_json::to_vec(v).map_err(|_| Failure::InvalidInput)?;
+    if bytes.len() + 1 > FRAME_LIMIT {
+        return Err(Failure::InvalidInput);
+    }
+    bytes.push(b'\n');
+    // Bound the entire write, including a peer that accepts tiny fragments.
+    // The socket's short write timeout also bounds each blocking syscall.
+    let until = Instant::now() + Duration::from_millis(100);
+    let mut written = 0;
+    while written < bytes.len() {
+        if Instant::now() >= until {
+            return Err(Failure::Expired);
+        }
+        match stream.write(&bytes[written..]) {
+            Ok(0) => return Err(Failure::Unreachable),
+            Ok(n) => written += n,
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::Interrupted
+                ) => {}
+            Err(_) => return Err(Failure::Unreachable),
+        }
+    }
+    Ok(())
+}
+#[derive(Default)]
+struct Reader {
+    bytes: Vec<u8>,
+    partial_since: Option<Instant>,
+}
+impl Reader {
+    fn read(&mut self, s: &mut UnixStream) -> Result<Option<Value>, Failure> {
+        if self
+            .partial_since
+            .is_some_and(|at| at.elapsed() > Duration::from_secs(1))
+        {
+            return Err(Failure::Expired);
+        }
+        if let Some(at) = self.bytes.iter().position(|b| *b == b'\n') {
+            let bytes: Vec<_> = self.bytes.drain(..=at).collect();
+            self.partial_since = (!self.bytes.is_empty()).then(Instant::now);
+            return serde_json::from_slice(&bytes[..at])
+                .map(Some)
+                .map_err(|_| Failure::InvalidDecision);
+        }
+        let mut block = [0u8; 4096];
+        match s.read(&mut block) {
+            Ok(0) => Err(Failure::Unreachable),
+            Ok(n) => {
+                if self.bytes.len() + n > FRAME_LIMIT {
+                    return Err(Failure::InvalidDecision);
+                }
+                if self.bytes.is_empty() {
+                    self.partial_since = Some(Instant::now());
+                }
+                self.bytes.extend_from_slice(&block[..n]);
+                Ok(None)
+            }
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                Ok(None)
+            }
+            Err(_) => Err(Failure::Unreachable),
+        }
+    }
+}
+#[cfg(test)]
+fn check(v: &Value, kind: &str, run: &str, session: u64, extra: &[&str]) -> Result<(), Failure> {
+    check_schema(v, kind, run, session, extra, SCHEMA)
+}
+fn check_schema(
+    v: &Value,
+    kind: &str,
+    run: &str,
+    session: u64,
+    extra: &[&str],
+    schema: &str,
+) -> Result<(), Failure> {
+    let keys = ["schema", "type", "runId", "sessionId"];
+    let obj = v.as_object().ok_or(Failure::InvalidDecision)?;
+    if v["schema"] != schema
+        || v["type"] != kind
+        || v["runId"] != run
+        || !decimal_id(&v["sessionId"], session)
+        || obj
+            .keys()
+            .any(|k| !keys.contains(&k.as_str()) && !extra.contains(&k.as_str()))
+    {
+        return Err(Failure::InvalidDecision);
+    }
+    Ok(())
+}
+fn code(v: &Value) -> Failure {
+    match v
+        .get("code")
+        .or_else(|| v.get("reason"))
+        .and_then(Value::as_str)
+    {
+        Some("authentication") => Failure::SignIn,
+        Some("credentials") => Failure::Credentials,
+        Some("usage_limit" | "dispatch_limit") => Failure::UsageLimit,
+        Some("deadline") => Failure::Expired,
+        Some("refusal") => Failure::Refused,
+        Some("output_limit") => Failure::OutputLimit,
+        Some("invalid_reply" | "protocol") => Failure::InvalidDecision,
+        Some("unavailable") => Failure::Unreachable,
+        _ => Failure::InvalidDecision,
+    }
+}
+
+/// The broker's ready frame must name exactly the launch's provider, model,
+/// effort and budget kind. The API backend also reports its spend cap, which
+/// must equal the cap shown in the confirmation, and what it has used; the
+/// subscription backends must not send either field.
+fn ready_matches_settings(
+    v: &Value,
+    run: &str,
+    session: u64,
+    settings: &Settings,
+) -> Result<(), Failure> {
+    const BASE: [&str; 6] = [
+        "provider",
+        "model",
+        "effort",
+        "dispatchBudgetKind",
+        "dispatchLimit",
+        "dispatchesUsed",
+    ];
+    const SPEND: [&str; 2] = ["spendCapMicroUsd", "spendUsedMicroUsd"];
+    let mut keys: Vec<&str> = match settings.spend_cap_micro_usd {
+        Some(_) => BASE.iter().chain(SPEND.iter()).copied().collect(),
+        None => BASE.to_vec(),
+    };
+    if settings.attested.is_some() {
+        keys.push("requiredNoteCount");
+    }
+    if settings.selected_prior {
+        keys.extend([
+            "contextPolicy",
+            "inputContract",
+            "policyRevision",
+            "promptSha256",
+        ]);
+    }
+    settings.check(v, "ready", run, session, &keys)?;
+    if settings.selected_prior
+        && settings
+            .identity()
+            .as_object()
+            .unwrap()
+            .iter()
+            .any(|(key, value)| &v[key] != value)
+    {
+        return Err(Failure::InvalidDecision);
+    }
+    let spend_ok = match settings.spend_cap_micro_usd {
+        Some(cap) => {
+            v["spendCapMicroUsd"].as_u64() == Some(cap)
+                && v["spendUsedMicroUsd"]
+                    .as_u64()
+                    .is_some_and(|used| used <= cap)
+        }
+        None => true,
+    };
+    if v["provider"] != settings.provider
+        || v["model"] != settings.model
+        || v["effort"] != settings.effort
+        || v["dispatchBudgetKind"] != settings.budget_kind()
+        || !spend_ok
+    {
+        return Err(Failure::InvalidDecision);
+    }
+    Ok(())
+}
+
+// Nonblocking connect: a full Unix listen backlog must not strand a worker.
+fn connect(path: &std::path::Path, until: Instant, link: &Link) -> Result<UnixStream, Failure> {
+    use std::os::{
+        fd::{AsRawFd, FromRawFd, OwnedFd},
+        unix::ffi::OsStrExt,
+    };
+    // SAFETY: initialized sockaddr, checked path bound, owned fd closes on every exit.
+    unsafe {
+        let raw = libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0);
+        if raw < 0 {
+            return Err(Failure::Unreachable);
+        }
+        let fd = OwnedFd::from_raw_fd(raw);
+        if libc::fcntl(fd.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) < 0
+            || libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) < 0
+        {
+            return Err(Failure::Unreachable);
+        }
+        let mut address: libc::sockaddr_un = std::mem::zeroed();
+        address.sun_family = libc::AF_UNIX as _;
+        let bytes = path.as_os_str().as_bytes();
+        if bytes.contains(&0) || bytes.len() >= address.sun_path.len() {
+            return Err(Failure::InvalidInput);
+        }
+        for (out, byte) in address.sun_path.iter_mut().zip(bytes) {
+            *out = *byte as _;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            address.sun_len = std::mem::size_of::<libc::sockaddr_un>() as _;
+        }
+        let result = libc::connect(
+            fd.as_raw_fd(),
+            (&address as *const libc::sockaddr_un).cast(),
+            std::mem::size_of_val(&address) as _,
+        );
+        if result < 0 {
+            let error = std::io::Error::last_os_error().raw_os_error();
+            if !matches!(error, Some(libc::EINPROGRESS) | Some(libc::EAGAIN)) {
+                return Err(Failure::Unreachable);
+            }
+            loop {
+                if link.terminal().is_some() {
+                    return Err(Failure::Cancelled);
+                }
+                if Instant::now() >= until {
+                    return Err(Failure::Expired);
+                }
+                let mut p = libc::pollfd {
+                    fd: fd.as_raw_fd(),
+                    events: libc::POLLOUT,
+                    revents: 0,
+                };
+                let ready = libc::poll(&mut p, 1, 20);
+                if ready < 0 {
+                    return Err(Failure::Unreachable);
+                }
+                if ready == 0 {
+                    continue;
+                }
+                let mut error: libc::c_int = 0;
+                let mut len = std::mem::size_of_val(&error) as libc::socklen_t;
+                if libc::getsockopt(
+                    fd.as_raw_fd(),
+                    libc::SOL_SOCKET,
+                    libc::SO_ERROR,
+                    (&mut error as *mut libc::c_int).cast(),
+                    &mut len,
+                ) < 0
+                    || error != 0
+                {
+                    return Err(Failure::Unreachable);
+                }
+                break;
+            }
+        }
+        let stream = UnixStream::from(fd);
+        stream
+            .set_nonblocking(false)
+            .map_err(|_| Failure::Unreachable)?;
+        Ok(stream)
+    }
+}
+
+fn sample_clock(
+    link: &Link,
+    stream: &mut UnixStream,
+    v: &Value,
+    run: &str,
+    session: u64,
+) -> Result<(), Failure> {
+    link.settings
+        .check(v, "clock_probe", run, session, &["probeId"])?;
+    let probe = v["probeId"]
+        .as_str()
+        .filter(|p| identifier(p))
+        .ok_or(Failure::InvalidDecision)?;
+    let start = Instant::now();
+    let sampler = link
+        .sampler
+        .try_lock()
+        .ok()
+        .and_then(|s| s.clone())
+        .ok_or(Failure::WorkerUnavailable)?;
+    let sample = sampler().ok_or(Failure::WorkerUnavailable)?;
+    if sample.session_id != session
+        || sample.elapsed_ms > 9_007_199_254_740_991
+        || start.elapsed() > Duration::from_millis(100)
+    {
+        return Err(Failure::InvalidDecision);
+    }
+    let mut out = link.settings.frame("clock_sample", run, session);
+    out["probeId"] = json!(probe);
+    out["nativeSessionElapsedMs"] = json!(sample.elapsed_ms);
+    write_frame(stream, &out)?;
+
+    Ok(())
+}
+
+// Remembers a retired request so its late frames are ignored, and returns
+// the instant by which the engine must settle it.
+fn retire(
+    retired: &mut std::collections::VecDeque<Identity>,
+    id: &Identity,
+    settle_by: Instant,
+) -> (Identity, Instant) {
+    if retired.len() == RETIRED {
+        retired.pop_front();
+    }
+    retired.push_back(id.clone());
+    (id.clone(), settle_by + SETTLEMENT_GRACE)
+}
+
+fn transport(link: &Link, rx: Receiver<Event>, first: Event) -> Result<(), Failure> {
+    let (identity, until, initial, scope) = match first {
+        Event::Evaluate {
+            identity,
+            input,
+            until,
+            reply,
+        } => (identity, until, Some((input, reply)), None),
+        Event::Scope(scope) => (
+            Identity {
+                session: scope.session,
+                request: 0,
+                context: 0,
+            },
+            Instant::now() + DEADLINE,
+            None,
+            Some(scope),
+        ),
+        _ => return Err(Failure::InvalidInput),
+    };
+    if link.terminal().is_some() {
+        return Err(Failure::Cancelled);
+    }
+    let d = descriptor(&link.settings)?;
+    let mut stream = connect(&d.socket_path, until, link)?;
+    stream
+        .set_read_timeout(Some(IO_SLICE))
+        .map_err(|_| Failure::Unreachable)?;
+    stream
+        .set_write_timeout(Some(IO_SLICE))
+        .map_err(|_| Failure::Unreachable)?;
+    let mut hello = link.settings.frame("hello", &d.run_id, identity.session);
+    hello["nonce"] = json!(d.nonce);
+    hello["expectedProvider"] = json!(link.settings.provider);
+    hello["expectedModel"] = json!(link.settings.model);
+    hello["expectedEffort"] = json!(link.settings.effort);
+    if link.settings.selected_prior {
+        hello
+            .as_object_mut()
+            .unwrap()
+            .extend(link.settings.identity().as_object().unwrap().clone());
+    }
+    write_frame(&mut stream, &hello)?;
+    let mut reader = Reader::default();
+    loop {
+        if Instant::now() >= until || link.terminal().is_some() {
+            return Err(Failure::Expired);
+        }
+        if let Some(v) = reader.read(&mut stream)? {
+            ready_matches_settings(&v, &d.run_id, identity.session, &link.settings)?;
+            if v["dispatchLimit"]
+                .as_u64()
+                .is_none_or(|n| n == 0 || n > 100)
+                || v["dispatchesUsed"]
+                    .as_u64()
+                    .zip(v["dispatchLimit"].as_u64())
+                    .is_none_or(|(used, limit)| used > limit)
+            {
+                return Err(Failure::InvalidDecision);
+            }
+            break;
+        }
+    }
+    let session = identity.session;
+    if let Some(scope) = &scope {
+        let (path, count) = link
+            .settings
+            .attested
+            .as_ref()
+            .ok_or(Failure::InvalidInput)?;
+        let authority = crate::selected_attestation::read(path)?;
+        if authority.run_id != d.run_id
+            || authority.expected_count != *count
+            || !scope.current.load(Ordering::Acquire)
+        {
+            return Err(Failure::InvalidInput);
+        }
+        let proof = authority.scope(session, &scope.notes)?;
+        let mut out = link.settings.frame("scope_approval", &d.run_id, session);
+        out["scope"] = serde_json::to_value(&proof).map_err(|_| Failure::InvalidInput)?;
+        write_frame(&mut stream, &out)?;
+        loop {
+            if Instant::now() >= until
+                || link.terminal().is_some()
+                || !scope.current.load(Ordering::Acquire)
+            {
+                return Err(Failure::Cancelled);
+            }
+            if let Some(v) = reader.read(&mut stream)? {
+                link.settings
+                    .check(&v, "scope_ready", &d.run_id, session, &["scope"])?;
+                if v["scope"] != out["scope"] {
+                    return Err(Failure::InvalidDecision);
+                }
+                break;
+            }
+        }
+        *scope.proof.lock().map_err(|_| Failure::WorkerUnavailable)? = Some((authority, proof));
+        if link.terminal().is_some() || !scope.current.load(Ordering::Acquire) {
+            return Err(Failure::Cancelled);
+        }
+        scope.ready.store(true, Ordering::Release);
+        out["type"] = json!("scope_current");
+        write_frame(&mut stream, &out)?;
+    }
+    let send_eval = |s: &mut UnixStream, id: &Identity, input: Value, until: Instant| {
+        let remaining = until.saturating_duration_since(Instant::now()).as_millis() as u64;
+        if remaining == 0 {
+            return Err(Failure::Expired);
+        }
+        let mut v = link.settings.frame("evaluate", &d.run_id, id.session);
+        id.add(&mut v);
+        v["budgetMs"] = json!(remaining);
+        if link.settings.attested.is_some() {
+            let scope = link
+                .scope
+                .try_lock()
+                .map_err(|_| Failure::WorkerUnavailable)?
+                .clone()
+                .ok_or(Failure::InvalidInput)?;
+            if !scope.current.load(Ordering::Acquire) || !scope.ready.load(Ordering::Acquire) {
+                return Err(Failure::Cancelled);
+            }
+            let slot = scope
+                .proof
+                .try_lock()
+                .map_err(|_| Failure::WorkerUnavailable)?;
+            let (authority, proof) = slot.as_ref().ok_or(Failure::InvalidInput)?;
+            let commitment = authority.commitment(proof, &input["priorNotes"])?;
+            if !crate::selected_attestation::equivalent(&commitment, &proof.commitment) {
+                return Err(Failure::InvalidInput);
+            }
+            v["scope"] = serde_json::to_value(proof).map_err(|_| Failure::InvalidInput)?;
+        }
+        v["input"] = input;
+        write_frame(s, &v)
+    };
+    // Calibration is one-shot and must precede the first provider admission.
+    loop {
+        if Instant::now() >= until || link.terminal().is_some() {
+            return Err(Failure::Expired);
+        }
+        if let Some(v) = reader.read(&mut stream)? {
+            sample_clock(link, &mut stream, &v, &d.run_id, session)?;
+            break;
+        }
+    }
+    if link.terminal().is_some() {
+        return Err(Failure::Cancelled);
+    }
+    let mut active = if let Some((input, reply)) = initial {
+        send_eval(&mut stream, &identity, input, until)?;
+        Some((identity, reply, until))
+    } else {
+        None
+    };
+    let mut awaiting: Option<(Identity, Instant)> = None;
+    // Retired past its deadline; waiting for the engine's Expired settlement
+    // until the instant held here.
+    let mut unsettled: Option<(Identity, Instant)> = None;
+    let mut retired: std::collections::VecDeque<Identity> = Default::default();
+    let same = |a: &Identity, b: &Identity| a.request == b.request && a.context == b.context;
+    let deadline_cancel = |s: &mut UnixStream, id: &Identity| {
+        let mut v = link.settings.frame("cancel", &d.run_id, session);
+        id.add(&mut v);
+        v["reason"] = json!("deadline");
+        write_frame(s, &v)
+    };
+    loop {
+        // Drain one outbound event before checking terminal so a Rust failed
+        // validation verdict is sent before its terminal cancellation.
+        match rx.try_recv() {
+            Ok(Event::Settled(id, Settlement::Retired)) => {
+                // The broker ended a refused request; confirm it silently.
+                if id.session != session || !unsettled.as_ref().is_some_and(|(a, _)| same(a, &id)) {
+                    return Err(Failure::InvalidDecision);
+                }
+                unsettled = None;
+            }
+            Ok(Event::Settled(id, Settlement::Expired)) => {
+                // No decision in time. Retire the request and keep the run.
+                if id.session != session {
+                    return Err(Failure::InvalidDecision);
+                }
+                if active.as_ref().is_some_and(|(a, _, _)| same(a, &id)) {
+                    active = None;
+                    retire(&mut retired, &id, Instant::now());
+                    deadline_cancel(&mut stream, &id)?;
+                } else if awaiting.as_ref().is_some_and(|(a, _)| same(a, &id)) {
+                    // The result arrived but the engine read it too late.
+                    awaiting = None;
+                    let mut v = link.settings.frame("settled", &d.run_id, session);
+                    id.add(&mut v);
+                    v["verdict"] = json!("expired");
+                    write_frame(&mut stream, &v)?;
+                } else if unsettled.as_ref().is_some_and(|(a, _)| same(a, &id)) {
+                    unsettled = None;
+                } else {
+                    return Err(Failure::InvalidDecision);
+                }
+            }
+            Ok(Event::Settled(id, verdict)) => {
+                let Some((expected, at)) = awaiting.take() else {
+                    return Err(Failure::InvalidDecision);
+                };
+                if id.session != session
+                    || id.request != expected.request
+                    || id.context != expected.context
+                    || at.elapsed() > SETTLEMENT_GRACE
+                {
+                    return Err(Failure::InvalidDecision);
+                }
+                let mut v = link.settings.frame("settled", &d.run_id, session);
+                id.add(&mut v);
+                v["verdict"] = json!(match verdict {
+                    Settlement::Current => "current",
+                    Settlement::StaleSuccess => "staleSuccess",
+                    Settlement::Failed => "failed",
+                    Settlement::Expired | Settlement::Retired => unreachable!("handled above"),
+                });
+                write_frame(&mut stream, &v)?;
+                if verdict == Settlement::Failed {
+                    return Err(Failure::InvalidDecision);
+                }
+            }
+            Ok(Event::Evaluate {
+                identity,
+                input,
+                until,
+                reply,
+            }) => {
+                if link.terminal().is_some() {
+                    return Err(Failure::Cancelled);
+                }
+                if active.is_some()
+                    || awaiting.is_some()
+                    || unsettled.is_some()
+                    || identity.session != session
+                {
+                    return Err(Failure::InvalidDecision);
+                }
+                send_eval(&mut stream, &identity, input, until)?;
+                active = Some((identity, reply, until));
+            }
+            Ok(Event::Scope(_)) => return Err(Failure::InvalidInput),
+            Ok(Event::Observation(observation)) => {
+                let mut v = link.settings.frame("cue_state", &d.run_id, session);
+                v["observation"] = observation;
+                write_frame(&mut stream, &v)?;
+            }
+            Err(TryRecvError::Disconnected) => return Err(Failure::Cancelled),
+            Err(TryRecvError::Empty) => {}
+        }
+        if let Some(f) = link.terminal() {
+            let mut v = link.settings.frame("cancel", &d.run_id, session);
+            if let Some((id, _, _)) = &active {
+                id.add(&mut v);
+            } else if let Some((id, _)) = &awaiting {
+                id.add(&mut v);
+            }
+            v["reason"] = json!(link
+                .reason
+                .try_lock()
+                .map(|r| r.wire())
+                .unwrap_or("transport_failed"));
+            let _ = write_frame(&mut stream, &v);
+            return Err(f);
+        }
+        if let Some((id, _, at)) = active.take_if(|(_, _, at)| Instant::now() >= *at) {
+            // Native's deadline: end this request's lease, keep the run.
+            unsettled = Some(retire(&mut retired, &id, at));
+            deadline_cancel(&mut stream, &id)?;
+        }
+        if awaiting
+            .as_ref()
+            .is_some_and(|(_, at)| at.elapsed() > SETTLEMENT_GRACE)
+            || unsettled
+                .as_ref()
+                .is_some_and(|(_, by)| Instant::now() > *by)
+        {
+            return Err(Failure::Expired);
+        }
+        let Some(v) = reader.read(&mut stream)? else {
+            continue;
+        };
+        match v["type"].as_str() {
+            Some("result") => {
+                link.settings.check(
+                    &v,
+                    "result",
+                    &d.run_id,
+                    session,
+                    &[
+                        "requestId",
+                        "contextRevision",
+                        "value",
+                        "elapsedMs",
+                        "usage",
+                    ],
+                )?;
+                if retired.iter().any(|id| id.matches(&v)) {
+                    // A late reply for a retired request is never delivered.
+                    continue;
+                }
+                let (id, reply, until) = active.take().ok_or(Failure::InvalidDecision)?;
+                if !id.matches(&v) {
+                    return Err(Failure::InvalidDecision);
+                }
+                if Instant::now() >= until {
+                    unsettled = Some(retire(&mut retired, &id, until));
+                    deadline_cancel(&mut stream, &id)?;
+                    continue;
+                }
+                if v["elapsedMs"]
+                    .as_u64()
+                    .is_none_or(|n| n > DEADLINE.as_millis() as u64)
+                {
+                    return Err(Failure::InvalidDecision);
+                }
+                if let Some(usage) = v.get("usage") {
+                    let obj = usage.as_object().ok_or(Failure::InvalidDecision)?;
+                    if obj.len() > 8
+                        || obj
+                            .iter()
+                            .any(|(k, v)| k.len() > 32 || v.as_u64().is_none())
+                    {
+                        return Err(Failure::InvalidDecision);
+                    }
+                }
+                let text =
+                    serde_json::to_string(&v["value"]).map_err(|_| Failure::InvalidDecision)?;
+                if text.len() > crate::cue_evaluator::MAX_REPLY_BYTES {
+                    return Err(Failure::InvalidDecision);
+                }
+                match reply.try_send(Ok(text)) {
+                    Ok(()) => awaiting = Some((id, Instant::now())),
+                    // The caller already gave up at its deadline.
+                    Err(mpsc::TrySendError::Disconnected(_)) if Instant::now() >= until => {
+                        unsettled = Some(retire(&mut retired, &id, until));
+                        deadline_cancel(&mut stream, &id)?;
+                    }
+                    Err(_) => return Err(Failure::WorkerUnavailable),
+                }
+            }
+            Some("failed") => {
+                link.settings.check(
+                    &v,
+                    "failed",
+                    &d.run_id,
+                    session,
+                    &["requestId", "contextRevision", "code"],
+                )?;
+                if retired.iter().any(|id| id.matches(&v)) {
+                    continue;
+                }
+                if let Some((id, _, _)) = &active {
+                    if !id.matches(&v) {
+                        return Err(Failure::InvalidDecision);
+                    }
+                }
+                let scoped = match v["code"].as_str() {
+                    Some("refusal") => Some(Failure::Refused),
+                    Some("output_limit") => Some(Failure::OutputLimit),
+                    _ => None,
+                };
+                if let Some(non_decision) = scoped {
+                    // A request-scoped non-decision: retire it now and hand
+                    // it to the engine, which settles it silently.
+                    let (id, reply, _) = active.take().ok_or(Failure::InvalidDecision)?;
+                    unsettled = Some(retire(&mut retired, &id, Instant::now()));
+                    match reply.try_send(Err(non_decision)) {
+                        Ok(()) | Err(mpsc::TrySendError::Disconnected(_)) => {}
+                        Err(_) => return Err(Failure::WorkerUnavailable),
+                    }
+                    continue;
+                }
+                if v["code"] == "deadline" {
+                    // The broker's request-scoped deadline: retire this
+                    // request and wait for native's own expiry to settle it.
+                    let (id, _, until) = active.take().ok_or(Failure::InvalidDecision)?;
+                    unsettled = Some(retire(&mut retired, &id, until.max(Instant::now())));
+                    continue;
+                }
+                return Err(code(&v));
+            }
+            Some("terminal") => {
+                link.settings
+                    .check(&v, "terminal", &d.run_id, session, &["code", "reason"])?;
+                return Err(code(&v));
+            }
+            _ => return Err(Failure::InvalidDecision),
+        }
+    }
+}
+
+struct Globals {
+    selected: bool,
+    /// The backend the launch named, even when the other settings are invalid.
+    backend: Backend,
+    settings: Result<Settings, Failure>,
+    active: Mutex<Option<Arc<Link>>>,
+    sampler: Arc<Mutex<Option<ClockSampler>>>,
+    fault: Arc<AtomicBool>,
+}
+static GLOBALS: OnceLock<Globals> = OnceLock::new();
+pub(crate) fn initialize_from_environment() {
+    GLOBALS.get_or_init(|| Globals {
+        selected: std::env::var_os("TALKQTE_DEV_CUE_BACKEND").is_some()
+            || std::env::var_os("TALKQTE_DEV_LAB_CONTEXT").is_some(),
+        backend: Backend::parse(std::env::var("TALKQTE_DEV_CUE_BACKEND").ok().as_deref())
+            .unwrap_or(Backend::Subscription),
+        settings: Settings::parse(|k| match std::env::var(k) {
+            Ok(value) => Some(value),
+            Err(std::env::VarError::NotPresent) => None,
+            // Invalid optional context must not silently become fresh-only.
+            Err(std::env::VarError::NotUnicode(_)) => Some(String::new()),
+        }),
+        active: Mutex::new(None),
+        sampler: Arc::new(Mutex::new(None)),
+        fault: Arc::new(AtomicBool::new(false)),
+    });
+}
+// An explicit invalid selector claims the lab path too, so it fails closed
+// rather than silently falling through to the standalone Claude backend.
+pub(crate) fn selected() -> bool {
+    GLOBALS.get().is_some_and(|g| g.selected)
+}
+pub(crate) fn set_clock_sampler(sampler: ClockSampler) {
+    if let Some(g) = GLOBALS.get() {
+        if let Ok(mut slot) = g.sampler.try_lock() {
+            *slot = Some(sampler);
+        }
+    }
+}
+fn processor_configuration(
+    backend: Backend,
+    settings: Option<&Settings>,
+    transcription: Option<String>,
+    audio_destination: Option<String>,
+) -> Result<ProcessorConfiguration, crate::engine::ProcessingError> {
+    let (label, service, mut policy) = disclosure(backend, settings);
+    if let Some((_, count)) = settings.and_then(|s| s.attested.as_ref()) {
+        policy=format!("{policy} Diagnostic scope requires exactly {count} approved prior notes. Private local count and keyed equality receipts compare this approval with SDK input; they do not prove model use.");
+    }
+    // One review covers both exports when this launch also streams audio.
+    if let Some(transcription) = transcription {
+        policy = format!("{policy} {transcription}");
+    }
+    let processor = ProcessorConfiguration::new(
+        if settings.is_some_and(|s| s.attested.is_some()) {
+            "lab-api-selected-prior-attested-v1".into()
+        } else if settings.is_some_and(|s| s.selected_prior) {
+            "lab-api-selected-prior-v2".into()
+        } else {
+            backend.id().into()
+        },
+        1,
+        settings
+            .as_ref()
+            .map_or("unavailable".into(), |s| s.model.clone()),
+        ProcessingLocation::Hosted { service },
+        if settings.is_some_and(|s| s.attested.is_some()) {
+            crate::selected_attestation::POLICY.into()
+        } else if settings.is_some_and(|s| s.selected_prior) {
+            SELECTED_POLICY.into()
+        } else {
+            "fictional-lab-v1".into()
+        },
+        ProcessorDisclosure::new(label.into(), policy)?,
+    )?
+    .with_required_note_count(settings.and_then(|s| s.attested.as_ref().map(|(_, count)| *count)))
+    .with_effort(
+        settings
+            .as_ref()
+            .map_or("unavailable".into(), |s| s.effort.clone()),
+    );
+    let processor = if settings.is_some_and(|s| s.selected_prior) {
+        processor
+    } else {
+        processor.without_notes()
+    };
+    // The review names where audio goes beside where lines go.
+    let processor = match audio_destination {
+        Some(destination) => processor.with_audio_destination(destination),
+        None => processor,
+    };
+    if settings.is_some_and(|s| s.bounded_history) {
+        processor.with_bounded_transcript_history()
+    } else {
+        Ok(processor)
+    }
+}
+
+pub(crate) fn connected_engine() -> Engine {
+    let globals = GLOBALS.get();
+    let settings = globals.and_then(|g| g.settings.clone().ok());
+    let backend = settings
+        .as_ref()
+        .map(|s| s.backend)
+        .or(globals.map(|g| g.backend))
+        .unwrap_or(Backend::Subscription);
+    let Ok(processor) = processor_configuration(
+        backend,
+        settings.as_ref(),
+        crate::transcription::cloud::review_sentence(),
+        crate::transcription::cloud::audio_destination(),
+    ) else {
+        let processor = ProcessorConfiguration::new(
+            "lab-unavailable".into(),
+            1,
+            "unavailable".into(),
+            ProcessingLocation::OnDevice,
+            "unavailable".into(),
+            ProcessorDisclosure::new(
+                "Lab unavailable".into(),
+                "Invalid processing disclosure; no content is sent.".into(),
+            )
+            .expect("fixed bounded disclosure"),
+        )
+        .expect("fixed bounded configuration")
+        .without_notes();
+        return unavailable(processor);
+    };
+    if let (Some(g), Some(settings)) = (globals, settings) {
+        let link = Link::new(settings, g.sampler.clone(), g.fault.clone());
+        let Ok(mut active) = g.active.try_lock() else {
+            return unavailable(processor);
+        };
+        g.fault.store(false, Ordering::Release);
+        if let Some(previous) = active.take() {
+            previous.cancel_reason(ControlReason::Replace);
+        }
+        *active = Some(link.clone());
+        let worker = Worker::start(Adapter(link.clone()), DEADLINE).unwrap();
+        return Engine::live_with_evaluator(worker, processor)
+            .with_lab_lifecycle(link)
+            .with_min_gap_ms(2_000);
+    }
+    unavailable(processor)
+}
+/// The name, destination and data policy shown before anything is sent. For
+/// the API backend this review is the per-run confirmation of the export:
+/// it names the destination, what is sent, the billing and the spend cap.
+fn disclosure(backend: Backend, settings: Option<&Settings>) -> (&'static str, String, String) {
+    const TIMING: &str = "A cue reflects speech up to 8 s before it appears; newer speech is checked next. A reply later than 8 s shows nothing and the run continues. Pause, Dismiss, Off, Stop and any other failure end the run; Resume does not restart it.";
+    const NEVER: &str = "Never sends the cue provider audio, prior notes, imported notes or focus lines. Near every transcript line may be sent, a few at a time.";
+    match backend {
+        Backend::Subscription => {
+            let label = settings.map_or("Lab subscription", Settings::label);
+            let service = if label == "Codex" {
+                "OpenAI through the lab's Codex subscription CLI"
+            } else {
+                "Anthropic through the lab's Claude subscription CLI"
+            };
+            let policy = format!("Fictional development lab only. Sends recent and new conversation, the optional Your name setting and current/earlier cues to {service}. {NEVER} Uses an explicitly chosen subscription; no API fallback. The lab shares a CLI-dispatch cap across all roles; underlying provider request count is unobserved. {TIMING} Provider retention follows that account's terms. No model cue text is persisted by this client.");
+            (label, service.into(), policy)
+        }
+        Backend::Api => {
+            let service = "the Anthropic API, with the lab owner's API key (billed per token)";
+            let cap = settings
+                .and_then(|s| s.spend_cap_micro_usd)
+                .map_or("an unset".into(), dollars);
+            if settings.is_some_and(|s| s.selected_prior) {
+                let policy = format!("Fictional development lab only. Sends approved recent/new conversation, optional Your name and current/earlier cues to the Anthropic API. Sends only exact prior-note snapshots approved below: excerpts, titles, source labels, dates and opaque snapshot versions. Snapshots are not verified current. Approving no notes sends none. Import/selection is not processing permission. Changing/removing an approved note requires review. Off/Stop prevent future requests but cannot recall sent requests. No audio or focus lines go to the cue provider. Near every transcript line may be sent, a few at a time. Owner's API key, billed per token; per-run cap {cap}. Broker holds the key and enforces cap/request limit; one request/check, no retries, other model or subscription fallback. App rejects different cap/overspend reports but cannot observe requests. {TIMING} Retention follows API organisation settings. No model cue text persisted by this client.");
+                return ("Claude", service.into(), policy);
+            }
+            let policy = format!("Fictional development lab only. Sends recent and new conversation, the optional Your name setting and current/earlier cues to {service}. {NEVER} Uses the owner's Anthropic API key, billed per token, with a per-run spend cap of {cap}. The lab broker, not this app, holds the key, sends one request per check with no retries or other model, and enforces the cap and the per-run request limit; this app refuses a broker that reports a different cap or more spend than the cap, but cannot see the requests themselves. No subscription fallback. {TIMING} Provider retention follows the API organisation's settings. No model cue text is persisted by this client.");
+            ("Claude", service.into(), policy)
+        }
+    }
+}
+
+fn unavailable(processor: ProcessorConfiguration) -> Engine {
+    struct Refuse;
+    impl Evaluator for Refuse {
+        fn evaluate(&mut self, _: &Request, _: &Cancellation) -> Result<String, Failure> {
+            Err(Failure::WorkerUnavailable)
+        }
+    }
+    Engine::live_with_evaluator(Worker::start(Refuse, DEADLINE).unwrap(), processor)
+        .lab_unavailable()
+}
+pub(crate) fn observe_published(engine: &Engine, snapshot: &CueSnapshot, emitted: bool) {
+    if let Some(g) = GLOBALS.get() {
+        if let Ok(active) = g.active.try_lock() {
+            if let Some(link) = active.as_ref() {
+                link.observe(engine, snapshot, emitted);
+            }
+        } else {
+            g.fault.store(true, Ordering::Release);
+        }
+    }
+}
+pub(crate) fn cancel_active(reason: ControlReason) {
+    if let Some(g) = GLOBALS.get() {
+        if let Ok(active) = g.active.try_lock() {
+            if let Some(link) = active.as_ref() {
+                link.cancel_reason(reason);
+            }
+        } else {
+            g.fault.store(true, Ordering::Release);
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "lab_evaluator_tests.rs"]
+mod tests;
+
+#[cfg(test)]
+pub(crate) fn selected_fixture_processor() -> ProcessorConfiguration {
+    let settings = tests::selected_settings();
+    processor_configuration(Backend::Api, Some(&settings), None, None).unwrap()
+}

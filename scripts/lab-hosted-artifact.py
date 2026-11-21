@@ -1,0 +1,366 @@
+#!/usr/bin/env python3
+"""Static unsigned lab archive/provenance; never signs or executes an app."""
+import argparse
+from contextlib import contextmanager
+import hashlib
+import gzip
+import json
+import os
+from pathlib import Path, PurePosixPath
+import plistlib
+import re
+import stat
+import subprocess
+import tarfile
+import tempfile
+import zipfile
+
+SHA = re.compile(r'[0-9a-f]{40}\Z')
+MAX_ARCHIVE = 256 * 1024 * 1024
+MAX_CONTENT = 512 * 1024 * 1024
+MAX_ENTRIES = 20000
+FEATURES = ['cloud-transcription', 'lab-evaluator', 'native-audio-spike', 'timing-log']
+
+
+def require(ok, reason):
+    if not ok:
+        raise ValueError(reason)
+
+
+def digest(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for b in iter(lambda: f.read(1024 * 1024), b''):
+            h.update(b)
+    return h.hexdigest()
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
+
+
+def inventory(app):
+    records = []
+    for path in sorted(app.rglob('*'), key=lambda p: p.relative_to(app).as_posix()):
+        s = path.lstat()
+        item = {'path': path.relative_to(app).as_posix(), 'mode': stat.S_IMODE(s.st_mode)}
+        if stat.S_ISLNK(s.st_mode):
+            item.update(type='symlink', target=os.readlink(path))
+        elif stat.S_ISREG(s.st_mode):
+            item.update(type='file', bytes=s.st_size, sha256=digest(path))
+        elif stat.S_ISDIR(s.st_mode):
+            item.update(type='directory')
+        else:
+            raise ValueError('unsupported bundle entry')
+        records.append(item)
+    return records
+
+
+def validate_members(members):
+    require(0 < len(members) <= MAX_ENTRIES, 'entry count')
+    names = set()
+    spellings = {}
+    total = 0
+    for m in members:
+        p = PurePosixPath(m.name)
+        # The observed app layout is ASCII and link-free. Reject unsupported
+        # forms rather than attempting macOS Unicode/case/link emulation.
+        require(m.name.isascii() and len(m.name) <= 255 and not any(ord(c) < 32 or ord(c) == 127 or c == '\\' for c in m.name), 'unsupported path encoding')
+        require(bool(p.parts) and not p.is_absolute() and '..' not in p.parts and p.parts[0] == 'TalkQTE.app', 'unsafe member path')
+        require(m.name == p.as_posix() and m.name not in names, 'duplicate or noncanonical path')
+        for i in range(1, len(p.parts) + 1):
+            ancestor = '/'.join(p.parts[:i])
+            key = ancestor.lower()
+            require(key not in spellings or spellings[key] == ancestor, 'case alias including implicit ancestor')
+            spellings[key] = ancestor
+        names.add(m.name)
+        require(m.type in (tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE), 'links/extensions/devices unsupported')
+        require(not m.linkname, 'unexpected link target')
+        require(not (m.mode & 0o7000), 'special permission bits')
+        require(m.size >= 0 and (m.isfile() or m.size == 0), 'invalid member size')
+        total += m.size
+        require(total <= MAX_CONTENT, 'content limit')
+    require('TalkQTE.app' in names, 'missing app root')
+    types = {m.name: m.isdir() for m in members}
+    require(types['TalkQTE.app'], 'app root must be directory')
+    for name in names:
+        require(all(types.get(parent.as_posix(), True) for parent in PurePosixPath(name).parents if parent.as_posix() in names), 'member beneath non-directory')
+
+
+def scan_ustar(raw):
+    """Inspect fixed-size headers BEFORE tarfile can parse any extensions."""
+    end = raw.seek(0, 2)
+    raw.seek(0)
+    members = []
+    while True:
+        block = raw.read(512)
+        require(len(block) == 512, 'truncated tar header')
+        if block == bytes(512):
+            require(raw.read(512) == bytes(512), 'missing tar end marker')
+            while rest := raw.read(65536):
+                require(not any(rest), 'trailing nonzero tar data')
+            break
+        require(len(members) < MAX_ENTRIES, 'entry/header count')
+        require(block[257:263] == b'ustar\0' and block[263:265] == b'00', 'only USTAR headers supported')
+        require(block[156:157] in (b'0', b'\0', b'5'), 'PAX/GNU/link/extension header unsupported')
+        try:
+            m = tarfile.TarInfo.frombuf(block, 'ascii', 'strict')
+        except (tarfile.TarError, ValueError) as error:
+            raise ValueError('invalid USTAR header') from error
+        require(0 <= m.size <= MAX_CONTENT, 'member size limit')
+        members.append(m)
+        next_header = raw.tell() + ((m.size + 511) // 512) * 512
+        require(next_header <= end, 'truncated tar content')
+        raw.seek(next_header)
+    validate_members(members)
+    raw.seek(0)
+
+
+@contextmanager
+def bounded_ustar(archive):
+    # Gzip is expanded to a bounded anonymous file in small chunks. No tar
+    # metadata parser runs until the TOTAL decoded stream, including padding
+    # and PAX/GNU metadata, is proven within MAX_CONTENT.
+    with tempfile.TemporaryFile() as raw:
+        total = 0
+        with gzip.open(archive, 'rb') as compressed:
+            while True:
+                block = compressed.read(min(65536, MAX_CONTENT - total + 1))
+                if not block:
+                    break
+                total += len(block)
+                require(total <= MAX_CONTENT, 'decoded tar byte limit')
+                raw.write(block)
+        raw.seek(0)
+        scan_ustar(raw)
+        # The preceding raw scan rejects all extension types; tarfile receives
+        # only bounded, fixed USTAR headers and regular files/directories.
+        with tarfile.open(fileobj=raw, mode='r:') as tar:
+            yield tar
+
+
+def safe_extract(archive, destination, expected_sha):
+    require(re.fullmatch(r'[0-9a-f]{64}', expected_sha) is not None, 'archive digest shape')
+    require(archive.is_file() and not archive.is_symlink() and archive.stat().st_size <= MAX_ARCHIVE, 'archive limit/type')
+    require(digest(archive) == expected_sha, 'archive digest mismatch')
+    require(not destination.exists(), 'destination already exists')
+    with bounded_ustar(archive) as tar:
+        members = tar.getmembers()
+        validate_members(members)
+        destination.mkdir(mode=0o700)
+        for m in sorted(members, key=lambda v: (len(PurePosixPath(v.name).parts), v.name)):
+            target = destination.joinpath(*PurePosixPath(m.name).parts)
+            if m.isdir():
+                target.mkdir(mode=0o700, exist_ok=True)
+            else:
+                target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                with tar.extractfile(m) as src, open(target, 'xb') as out:
+                    while b := src.read(1024 * 1024):
+                        out.write(b)
+                target.chmod(m.mode & 0o777)
+        for m in sorted(members, key=lambda v: len(PurePosixPath(v.name).parts), reverse=True):
+            if m.isdir():
+                destination.joinpath(*PurePosixPath(m.name).parts).chmod(m.mode & 0o777)
+    return destination / 'TalkQTE.app'
+
+
+def safe_download(archive, destination, expected_sha):
+    require(re.fullmatch(r'[0-9a-f]{64}', expected_sha) is not None, 'artifact digest shape')
+    require(archive.is_file() and not archive.is_symlink() and archive.stat().st_size <= MAX_ARCHIVE + 9437184, 'artifact archive limit/type')
+    require(digest(archive) == expected_sha, 'Actions artifact digest mismatch')
+    require(not destination.exists(), 'destination already exists')
+    expected = {'TalkQTE-unsigned.tar.gz': MAX_ARCHIVE, 'provenance.json': 65536, 'inventory.json': 8388608}
+    with zipfile.ZipFile(archive) as z:
+        members = z.infolist()
+        require(len(members) == 3 and {m.filename for m in members} == set(expected), 'outer artifact entries')
+        for m in members:
+            kind = stat.S_IFMT(m.external_attr >> 16)
+            require(kind in (0, stat.S_IFREG) and not m.is_dir() and not (m.flag_bits & 1), 'outer artifact type')
+            require(m.file_size <= expected[m.filename], 'outer artifact size')
+        destination.mkdir(mode=0o700)
+        for m in members:
+            with z.open(m) as src, open(destination / m.filename, 'xb') as out:
+                total = 0
+                while b := src.read(1024 * 1024):
+                    total += len(b)
+                    require(total <= expected[m.filename], 'outer artifact decoded size')
+                    out.write(b)
+            (destination / m.filename).chmod(0o600)
+
+
+def capture(argv, cwd=None):
+    return subprocess.check_output(argv, cwd=cwd, text=True, timeout=30).strip()
+
+
+
+# Suffixes permit the default offline facade and the actual runtime module to
+# differ in prefix, but every named test must be reported as executed, not ignored.
+REQUIRED_NATIVE_TESTS = [
+    'shared_complete_envelope_bytes_and_hmac_match_exactly',
+    'observed_scope_mutation_and_empty_selected_are_refused',
+    'attested_real_review_link_handshake_and_worker_preserve_exact_note_before_audio_and_request',
+    'attested_pending_and_ready_scope_cannot_survive_source_removal_revoke_or_stop',
+    'attested_control_zero_refuses_note_selection_and_approves_empty_without_audio_before_ready',
+    'selected_real_link_worker_projects_native_v2_and_retires_on_stop',
+    'selected_registration_disclosure_is_bounded_and_defaults_still_refuse_notes',
+    'native_path_invoke_uses_generated_acl_and_real_command_main_only',
+    'explicit_file_read_lists_without_import_and_canceled_or_replaced_reads_cannot_win',
+    'explicit_file_pipeline_refuses_missing_wrong_format_oversize_and_invalid_text_without_import',
+    'explicit_file_path_rejects_expansion_urls_controls_and_unbounded_arguments',
+    'writerless_fifo_directory_and_device_are_refused_without_blocking_and_regular_symlinks_work',
+    'readiness_preserves_short_circuit_order_and_public_refusals',
+]
+REQUIRED_RUNTIME_TESTS = [
+    'bound_owned_launcher_admission_observation_and_ordinary_stop_compose',
+    'production_session_diagnostics_distinguish_readiness_access_and_start_without_changing_refusals',
+    'raw_diagnostic_schema_is_fixed_bounded_and_content_free',
+]
+VALIDATION_LOGS = ['default-tests.log', 'default-clippy.log', 'runtime-tests.log', 'runtime-clippy.log']
+MAX_VALIDATION_LOG = 16 * 1024 * 1024
+
+
+def native_validation(logs, sha):
+    require(SHA.fullmatch(sha), 'validation source shape')
+    workflow = os.environ.get('GITHUB_WORKFLOW_SHA', '')
+    require(SHA.fullmatch(workflow), 'validation workflow shape')
+    records = []
+    for name in VALIDATION_LOGS:
+        path = logs / name
+        require(path.is_file() and not path.is_symlink() and 0 < path.stat().st_size <= MAX_VALIDATION_LOG, 'validation log shape/size')
+        data = path.read_bytes()
+        require(len(data) <= MAX_VALIDATION_LOG, 'validation log size')
+        text = data.decode('utf-8')
+        require('test result: FAILED' not in text and not re.search(r'^error(?:\[|:)', text, re.M), 'native validation failure')
+        if name.endswith('tests.log'):
+            summaries = re.findall(r'^test result: ok\. ([0-9]+) passed; 0 failed;', text, re.M)
+            require(any(int(n) > 0 for n in summaries), 'native tests did not execute')
+            required = REQUIRED_NATIVE_TESTS + (REQUIRED_RUNTIME_TESTS if name == 'runtime-tests.log' else [])
+            for test in required:
+                require(re.search(r'^test (?:[A-Za-z0-9_]+::)*' + re.escape(test) + r' \.\.\. ok$', text, re.M), 'missing executed native test: ' + test)
+        else:
+            require(re.search(r'^\s*Finished `dev` profile', text, re.M), 'Clippy did not finish')
+        records.append({'name': name, 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()})
+    return {'schema': 'talkqte.lab.native-validation.v1', 'sourceCommit': sha,
+            'workflowCommit': workflow, 'runtimeFeatures': FEATURES,
+            'target': 'aarch64-apple-darwin', 'locked': True,
+            'logs': records, 'requiredDefaultTests': REQUIRED_NATIVE_TESTS,
+            'requiredRuntimeTests': REQUIRED_NATIVE_TESTS + REQUIRED_RUNTIME_TESTS}
+
+
+def pack(source, sha, app, out):
+    require(SHA.fullmatch(sha), 'source commit shape')
+    require(capture(['git', 'rev-parse', 'HEAD'], source) == sha, 'source commit mismatch')
+    require(not capture(['git', 'status', '--porcelain'], source), 'dirty source')
+    require(capture(['uname', '-m']) == 'arm64', 'runner architecture')
+    require(os.environ.get('GITHUB_ACTIONS') == 'true', 'hosted only')
+    workflow_sha = os.environ.get('GITHUB_WORKFLOW_SHA', '')
+    require(SHA.fullmatch(workflow_sha), 'workflow provenance')
+    require(capture(['git', 'rev-parse', 'HEAD'], Path(__file__).resolve().parents[1]) == workflow_sha, 'workflow checkout mismatch')
+    require(re.fullmatch(r'[1-9][0-9]*', os.environ.get('GITHUB_RUN_ID', '')), 'run provenance')
+    require(re.fullmatch(r'[1-9][0-9]*', os.environ.get('GITHUB_RUN_ATTEMPT', '')), 'attempt provenance')
+    exe = app / 'Contents/MacOS/talkqte'
+    require(app.is_dir() and not app.is_symlink() and exe.is_file() and not exe.is_symlink(), 'bundle shape')
+    require((app / 'Contents/Resources/THIRD-PARTY-NOTICES.txt').is_file(), 'missing notices')
+    require(sha.encode() in exe.read_bytes(), 'missing embedded source commit')
+    require(capture(['/usr/bin/lipo', '-archs', str(exe)]) == 'arm64', 'binary architecture')
+    macho = capture(['xcrun', 'vtool', '-show-build', str(exe)])
+    require(re.search(r'\bminos\s+14\.0\s', macho), 'Mach-O minimum OS')
+    with open(app / 'Contents/Info.plist', 'rb') as f:
+        info = plistlib.load(f)
+    require(info.get('CFBundleIdentifier') == 'com.talkqte.desktop' and info.get('LSMinimumSystemVersion') == '14.0', 'bundle identity/minimum OS')
+    require(capture(['rustc', '--version'], source).startswith('rustc 1.97.1 '), 'Rust toolchain')
+    require(digest(source / 'src-tauri/Entitlements.plist') == 'd70ae7a3f925e53536fe56d205e4bab9bc1df03495738bf8dfdb6cb6dbb53c7d', 'entitlement input changed')
+    validation = native_validation(Path(os.environ.get('LAB_VALIDATION_DIR', '')), sha)
+    records = inventory(app)
+    require(not out.exists(), 'output already exists')
+    out.mkdir(mode=0o700)
+    archive = out / 'TalkQTE-unsigned.tar.gz'
+    def public_header(member):
+        member.uid = member.gid = 0
+        member.uname = member.gname = ''
+        # PAX filesystem metadata is unnecessary for a repository-built app.
+        member.pax_headers = {}
+        member.mtime = int(member.mtime)
+        return member
+    with tarfile.open(archive, 'w:gz', format=tarfile.USTAR_FORMAT, dereference=False) as tar:
+        tar.add(app, arcname='TalkQTE.app', recursive=True, filter=public_header)
+    require(archive.stat().st_size <= MAX_ARCHIVE, 'archive limit')
+    with bounded_ustar(archive) as tar:
+        validate_members(tar.getmembers())
+    provenance = {
+        'schema': 'talkqte.lab.hosted-artifact.v1', 'sourceCommit': sha,
+        'nativeValidation': validation,
+        'workflowCommit': workflow_sha, 'workflow': os.environ.get('GITHUB_WORKFLOW_REF'),
+        'runId': os.environ['GITHUB_RUN_ID'], 'runAttempt': os.environ['GITHUB_RUN_ATTEMPT'],
+        'job': os.environ.get('GITHUB_JOB'), 'runnerImage': os.environ.get('ImageOS'),
+        'runnerImageVersion': os.environ.get('ImageVersion'), 'architecture': 'arm64',
+        'minimumMacOS': '14.0', 'profile': 'debug', 'target': 'aarch64-apple-darwin',
+        'features': FEATURES, 'noDefaultFeatures': True, 'locked': True,
+        'signing': 'no identity signing requested; local development signing remains separate',
+        'executableSha256': digest(exe), 'inventorySha256': hashlib.sha256(canonical(records)).hexdigest(),
+        'archiveSha256': digest(archive), 'archiveBytes': archive.stat().st_size,
+        'entitlementInputSha256': digest(source / 'src-tauri/Entitlements.plist'),
+        'packageLockSha256': digest(source / 'package-lock.json'),
+        'cargoLockSha256': digest(source / 'src-tauri/Cargo.lock'),
+        'rustc': capture(['rustc', '-vV'], source), 'node': capture(['node', '--version']),
+        'xcode': capture(['xcodebuild', '-version']),
+        'machO': '\n'.join(line.strip() for line in macho.splitlines() if re.match(r'\s*(platform|minos|sdk)\s', line)),
+    }
+    (out / 'inventory.json').write_bytes(canonical(records))
+    (out / 'provenance.json').write_bytes(canonical(provenance) + b'\n')
+    for path in out.iterdir():
+        path.chmod(0o600)
+
+
+def verify_extracted(app, provenance_path, inventory_path, sha, workflow_sha):
+    require(SHA.fullmatch(sha) and SHA.fullmatch(workflow_sha), 'expected source/workflow shape')
+    require(provenance_path.stat().st_size <= 65536 and inventory_path.stat().st_size <= 8388608, 'metadata size')
+    p = json.loads(provenance_path.read_text())
+    require(p.get('schema') == 'talkqte.lab.hosted-artifact.v1', 'provenance version')
+    require(p.get('sourceCommit') == sha and p.get('workflowCommit') == workflow_sha, 'provenance identity mismatch')
+    require(p.get('features') == FEATURES and p.get('target') == 'aarch64-apple-darwin' and p.get('profile') == 'debug' and p.get('noDefaultFeatures') is True and p.get('locked') is True, 'build tuple mismatch')
+    expected = json.loads(inventory_path.read_bytes())
+    require(hashlib.sha256(canonical(expected)).hexdigest() == p.get('inventorySha256'), 'inventory metadata digest')
+    require(inventory(app) == expected, 'extracted inventory mismatch')
+    exe = app / 'Contents/MacOS/talkqte'
+    require(digest(exe) == p.get('executableSha256'), 'executable digest mismatch')
+    require(sha.encode() in exe.read_bytes(), 'embedded source mismatch')
+    # This is integrity checking, not a signature/architecture acceptance claim.
+    # The documented local protocol independently runs lipo/vtool/codesign.
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest='command', required=True)
+    p = sub.add_parser('pack')
+    for key in ['source', 'sha', 'app', 'out']:
+        p.add_argument('--' + key, required=True)
+    p = sub.add_parser('validate-native')
+    p.add_argument('--logs', required=True)
+    p.add_argument('--sha', required=True)
+    p = sub.add_parser('verify-download')
+    for key in ['archive', 'sha256', 'destination']:
+        p.add_argument('--' + key, required=True)
+    p = sub.add_parser('extract')
+    for key in ['archive', 'sha256', 'destination']:
+        p.add_argument('--' + key, required=True)
+    p = sub.add_parser('verify-extracted')
+    for key in ['app', 'provenance', 'inventory', 'sha', 'workflow-sha']:
+        p.add_argument('--' + key, required=True)
+    a = parser.parse_args()
+    if a.command == 'pack':
+        pack(Path(a.source), a.sha, Path(a.app), Path(a.out))
+    elif a.command == 'validate-native':
+        logs = Path(a.logs)
+        report = native_validation(logs, a.sha)
+        (logs / 'native-validation.json').write_bytes(canonical(report) + b'\n')
+    elif a.command == 'verify-download':
+        safe_download(Path(a.archive), Path(a.destination), a.sha256)
+    elif a.command == 'extract':
+        safe_extract(Path(a.archive), Path(a.destination), a.sha256)
+    else:
+        verify_extracted(Path(a.app), Path(a.provenance), Path(a.inventory), a.sha, a.workflow_sha)
+
+
+if __name__ == '__main__':
+    main()

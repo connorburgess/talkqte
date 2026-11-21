@@ -17,13 +17,13 @@ const title = (page: import('@playwright/test').Page) =>
 const session = (page: import('@playwright/test').Page) =>
   page.getByRole('region', { name: 'Session', exact: true });
 
-test('before a session, a build without local transcription says plainly that it cannot show a cue', async ({
+test('before a session, a build without live transcription says plainly that it cannot show a cue', async ({
   page,
 }) => {
   await standIn(page);
   await expect(title(page)).toHaveText('No session yet');
   await expect(session(page)).toContainText(
-    'Nothing is being captured. Cues appear only during a live session. This build does not include local transcription.',
+    'Nothing is being captured. Cues appear only during a live session. This build has no live transcription.',
   );
   await expect(
     page.getByRole('button', { name: 'Start live session' }),
@@ -117,22 +117,6 @@ test('before a session, the notebook never says nothing is captured while the mi
   await expect(session(page)).not.toContainText('Nothing is being captured');
 });
 
-test('before a session, a build that needs its speech model points to setup', async ({
-  page,
-}) => {
-  await standIn(page, '/?model');
-  await expect(title(page)).toHaveText('No session yet');
-  await expect(session(page)).toContainText(
-    'Nothing is being captured. A live session needs the speech model first.',
-  );
-  await session(page)
-    .getByRole('button', { name: 'Set up live session' })
-    .click();
-  await expect(
-    page.getByRole('heading', { name: 'Live transcription' }),
-  ).toBeFocused();
-});
-
 test('a session runs from Start to Stop, and what remains afterwards is stated', async ({
   page,
 }) => {
@@ -148,7 +132,7 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
     .click();
   await expect(title(page)).toHaveText('Live session in progress');
   await expect(session(page)).toContainText(
-    'Your microphone · transcribed on this device · not saved',
+    'Your microphone · transcribed by Deepgram once cue processing is enabled · not saved by TalkQTE',
   );
   await expect(
     session(page).getByRole('button', { name: 'Start live session' }),
@@ -314,4 +298,114 @@ test('a simulated replay is labelled in the app’s own words and never as live 
   await expect(
     companion.getByRole('button', { name: /Pause|Resume|Stop/ }),
   ).toHaveCount(0);
+});
+
+test('with cloud transcription, the notebook names the service, and says plainly when it stopped', async ({
+  page,
+}) => {
+  await standIn(page, '/?live');
+  await startLive(page);
+  const publish = (value: Record<string, unknown>) =>
+    page.evaluate((value) => window.liveTest.publish(value as never), value);
+  await publish({ transcription: { provider: 'Deepgram' } });
+  await expect(session(page)).toContainText(
+    'Your microphone · transcribed by Deepgram once cue processing is enabled · not saved by TalkQTE',
+  );
+  await expect(page.getByRole('region', { name: 'Microphone' })).toContainText(
+    'Your microphone is sent to Deepgram for transcription once you enable cue processing for this session; until then nothing is transcribed.',
+  );
+  await expect(page.locator('body')).not.toContainText('on this device');
+  await publish({
+    status: 'ended',
+    transcription: { provider: 'Deepgram', stopped: 'withdrawn' },
+  });
+  await expect(session(page).getByRole('alert')).toHaveText(
+    'Transcription by Deepgram stopped: cue processing was turned off, so audio stopped being sent. The live session ended; nothing fell back to another transcription service.',
+  );
+});
+
+test('a live launch says where audio goes in Settings, offers no speech model, and says when a lab run ended or audio was dropped', async ({
+  page,
+}) => {
+  await standIn(page, '/?cloud&model');
+  // No speech model is offered or needed for a cloud launch.
+  await expect(
+    page.getByRole('button', { name: 'Start live session' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.locator('#live-transcription').locator('..');
+  await expect(settings).toContainText(
+    'TalkQTE does not transcribe on this device. A development build can send the session’s audio to Deepgram for transcription once you enable cue processing for that session',
+  );
+  await expect(settings.getByRole('status')).toHaveText(
+    'Ready. Audio goes to Deepgram only after you enable cue processing for a session.',
+  );
+  await expect(page.locator('body')).not.toContainText('Ready on this device');
+  await expect(
+    page.getByRole('button', { name: 'Download speech model' }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await startLive(page);
+  const publish = (value: Record<string, unknown>) =>
+    page.evaluate((value) => window.liveTest.publish(value as never), value);
+  await publish({
+    transcription: { provider: 'Deepgram', droppedAudio: true },
+  });
+  await expect(session(page)).toContainText(
+    'Some audio was not sent to Deepgram because the connection fell behind; lines from it are missing.',
+  );
+  await publish({
+    status: 'ended',
+    transcription: { provider: 'Deepgram', stopped: 'lab_ended' },
+  });
+  await expect(session(page).getByRole('alert')).toHaveText(
+    'Transcription by Deepgram stopped: the lab run ended, so audio stopped being sent. The live session ended; nothing fell back to another transcription service.',
+  );
+  await publish({
+    status: 'ended',
+    transcription: { provider: 'Deepgram', stopped: 'stalled' },
+  });
+  await expect(session(page).getByRole('alert')).toHaveText(
+    'Transcription by Deepgram stopped: the connection stopped responding. The live session ended; nothing fell back to another transcription service.',
+  );
+});
+
+test('a continued cloud session discloses reconnect loss until the session stops', async ({
+  page,
+}) => {
+  await standIn(page, '/?cloud&model');
+  await startLive(page);
+  const publish = (value: Record<string, unknown>) =>
+    page.evaluate((value) => window.liveTest.publish(value as never), value);
+  await publish({
+    transcription: { provider: 'Deepgram', reconnects: 1, lostMs: 2_400 },
+  });
+  await expect(session(page)).toContainText(
+    'Transcription by Deepgram reconnected once after a connection problem. About 2 s of speech was not transcribed.',
+  );
+  await publish({
+    transcription: { provider: 'Deepgram', reconnects: 1, lostMs: 250 },
+  });
+  await expect(session(page)).toContainText(
+    'Less than 1 s of speech was not transcribed.',
+  );
+  await publish({
+    transcription: { provider: 'Deepgram', reconnects: 1, lostMs: 0 },
+  });
+  await expect(session(page)).toContainText(
+    'The amount of speech not transcribed is unknown.',
+  );
+  await publish({
+    status: 'ended',
+    transcription: {
+      provider: 'Deepgram',
+      reconnects: 1,
+      lostMs: 2_400,
+      stopped: 'withdrawn',
+    },
+  });
+  await expect(session(page).getByRole('alert')).toContainText(
+    'Transcription by Deepgram stopped: cue processing was turned off',
+  );
+  await expect(session(page)).not.toContainText('reconnected');
 });

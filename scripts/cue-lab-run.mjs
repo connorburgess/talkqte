@@ -1,7 +1,10 @@
 // Run ownership only: native launch/control is an explicit injected dependency.
 // No daemon, desktop controls, provider fallback or implicit native launch.
 import { randomUUID } from 'node:crypto';
-import { openLabProvider } from './cue-lab-provider.mjs';
+import {
+  openLabProvider,
+  PROVIDER_FAILURE_CATEGORIES,
+} from './cue-lab-provider.mjs';
 import { openLabBroker } from './cue-lab-broker.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
 
@@ -11,6 +14,20 @@ const EVENTS = new Set([
   'process-ended',
   'failed',
 ]);
+// Fixed codes only. Provider-preflight categories keep their own code so a
+// startup failure says why (for example ambient credentials or a missing CLI).
+const STARTUP_REASONS = new Set([
+  ...EVENTS,
+  ...PROVIDER_FAILURE_CATEGORIES,
+  'cancelled',
+  'closed',
+  'cleanup',
+  'deadline',
+  'dispatch-limit',
+  'invalid-reply',
+  'protocol',
+  'provider',
+]);
 
 export function createLabRun({
   settings,
@@ -19,9 +36,22 @@ export function createLabRun({
   processEvents = process,
   startupMs = 10000,
   releaseMs = 12000,
+  sourceSessionMode = 'required',
+  runId = randomUUID(),
+  // Direct API route: after native start, wait (untimed here; the take
+  // bounds the wait) for approve(), then open the provider and give the
+  // rest of startup a fresh startupMs.
+  approvalBudgetMs = 0,
 } = {}) {
   if (
     !settings ||
+    ![0, 180000].includes(approvalBudgetMs) ||
+    (approvalBudgetMs > 0 && settings.provider !== 'anthropic-api') ||
+    typeof runId !== 'string' ||
+    !/^[A-Za-z0-9_-]{1,64}$/.test(runId) ||
+    !['required', 'legacy-fixture'].includes(sourceSessionMode) ||
+    (sourceSessionMode === 'legacy-fixture' &&
+      settings.execution !== 'offline-stand-in') ||
     !native ||
     !['subscribe', 'start', 'stop'].every(
       (method) => typeof native[method] === 'function',
@@ -45,22 +75,50 @@ export function createLabRun({
       : {}),
   });
   const root = new AbortController();
-  const runId = randomUUID();
   let provider = null,
     broker = null,
     nativeStarted = false,
     phase = 'starting',
     closing = null,
     terminal = null,
+    expectedSourceSession = null,
+    clockCalibration = null,
     playback = null,
     playbackResolve,
     unsubscribe = () => {},
     initialized = false;
+  let controlCancelled = false;
+  // Content-free startup diagnostics: a fixed stage and the first fixed failure
+  // reason before readiness. Later teardown reasons never replace the first.
+  let startupStage = 'provider-preflight',
+    startupFailure = null;
+  const recordStartupFailure = (reason) => {
+    if (startupStage === 'ready' || startupFailure) return;
+    startupFailure = Object.freeze({
+      stage: startupStage,
+      reason: STARTUP_REASONS.has(reason) ? reason : 'protocol',
+    });
+  };
   const played = new Promise((resolve) => (playbackResolve = resolve));
+  let approveResolve,
+    approveCalled = false,
+    providerOpenedResolve,
+    providerOpenedReject;
+  const approved = new Promise((resolve) => (approveResolve = resolve));
+  const providerOpened = new Promise((resolve, reject) => {
+    providerOpenedResolve = resolve;
+    providerOpenedReject = reject;
+  });
+  providerOpened.catch(() => {});
   let rejectStopped;
   const stopped = new Promise((_, reject) => (rejectStopped = reject));
   stopped.catch(() => {});
+  // The first reason anything stopped this run, at any stage, as a fixed
+  // label: a native owner event, a provider or broker category, cancelled.
+  let firstStopReason = null;
   const stop = (reason = 'cancelled') => {
+    firstStopReason ??= STARTUP_REASONS.has(reason) ? reason : 'protocol';
+    recordStartupFailure(reason);
     if (!terminal) terminal = reason === 'cleanup' ? 'cleanup' : 'cancelled';
     return close();
   };
@@ -70,12 +128,16 @@ export function createLabRun({
   const onNative = (event) => {
     const handle = () => {
       if (!event || !EVENTS.has(event.type)) return fail('protocol');
+      if (event.type === 'stop-requested') controlCancelled = true;
       fail(event.type);
     };
     if (initialized) handle();
     else queueMicrotask(handle);
   };
-  const abort = () => fail('cancelled');
+  const abort = () => {
+    controlCancelled = true;
+    fail('cancelled');
+  };
   // Install these before any provider preflight, broker creation or native start.
   unsubscribe = native.subscribe(onNative);
   if (typeof unsubscribe !== 'function') throw gateFailure('protocol');
@@ -85,20 +147,40 @@ export function createLabRun({
 
   const startup = Promise.resolve().then(async () => {
     if (root.signal.aborted) throw gateFailure('cancelled');
-    provider = await openLabProvider({ ...config, signal: root.signal });
+    provider = await openLabProvider({
+      ...config,
+      contextPolicy:
+        config.contextPolicy === 'bounded-history'
+          ? 'fresh-only'
+          : (config.contextPolicy ?? 'fresh-only'),
+      signal: root.signal,
+      ...(approvalBudgetMs ? { deferOpen: true } : {}),
+    });
     if (root.signal.aborted) throw gateFailure('cancelled');
+    startupStage = 'broker-preparation';
     broker = await openLabBroker({
       provider,
+      contextPolicy:
+        config.contextPolicy === 'bounded-history'
+          ? 'fresh-only'
+          : (config.contextPolicy ?? 'fresh-only'),
+      sourceSessionMode,
       runId,
       maxCalls: config.maxCalls,
       signal: root.signal,
-      onTerminal: () => queueMicrotask(() => fail('cancelled')),
+      onTerminal: (category) => {
+        recordStartupFailure(category);
+        queueMicrotask(() => fail('cancelled'));
+      },
     });
     if (root.signal.aborted) throw gateFailure('cancelled');
+    if (expectedSourceSession)
+      broker.expectSourceSession(expectedSourceSession);
     if (playback) broker.acknowledgePlaybackStart(playback);
     // The native owner gets only the descriptor path and pinned metadata.
     // start must be abort-aware and must retain ownership until stop/release.
     nativeStarted = true;
+    startupStage = 'native-start';
     await native.start({
       descriptorPath: broker.descriptorPath,
       runId,
@@ -106,19 +188,49 @@ export function createLabRun({
       signal: root.signal,
     });
     if (root.signal.aborted) throw gateFailure('cancelled');
+    if (approvalBudgetMs) {
+      // The approval wait is not startup time: pause the startup clock,
+      // then open the provider (key file, worker) only once approved.
+      clearTimeout(timer);
+      startupStage = 'awaiting-approval';
+      await Promise.race([approved, stopped]);
+      startupStage = 'provider-open';
+      timer = setTimeout(() => fail('deadline'), startupMs);
+      try {
+        await Promise.race([provider.open(), stopped]);
+      } catch (error) {
+        providerOpenedReject(gateFailure('cancelled'));
+        throw error;
+      }
+      if (root.signal.aborted) throw gateFailure('cancelled');
+      providerOpenedResolve();
+    }
     phase = 'waiting-for-anchors';
+    startupStage = 'awaiting-hello';
     await Promise.race([broker.ready, stopped]);
-    await broker.calibrateClock();
+    startupStage = 'clock-calibration';
+    const calibrated = await broker.calibrateClock();
+    if (
+      sourceSessionMode === 'required' &&
+      calibrated.sessionId !== expectedSourceSession
+    )
+      throw gateFailure('protocol');
+    clockCalibration = Object.freeze({ ...calibrated });
+    startupStage = 'playback-anchor';
     await Promise.race([played, stopped]);
     if (root.signal.aborted || broker.gate.terminal)
       throw gateFailure('cancelled');
     phase = 'ready';
+    startupStage = 'ready';
   });
-  const timer = setTimeout(() => fail('deadline'), startupMs);
+  let timer = setTimeout(() => fail('deadline'), startupMs);
   const ready = Promise.race([startup, stopped]).finally(() =>
     clearTimeout(timer),
   );
-  ready.catch(() => fail('cancelled'));
+  ready.catch((error) => {
+    recordStartupFailure(error?.category);
+    fail('cancelled');
+  });
 
   function close() {
     if (closing) return closing;
@@ -130,9 +242,12 @@ export function createLabRun({
     });
     closing.catch(() => {});
     terminal ??= 'cancelled';
+    recordStartupFailure(controlCancelled ? 'cancelled' : terminal);
     phase = 'stopping';
     // This does not depend on native authentication or signal delivery.
-    root.abort();
+    // A fixed reason crosses the owner boundary without conflating provider or
+    // native failure with an explicit owner/host cancellation.
+    root.abort(controlCancelled ? 'cancelled' : 'failed');
     broker?.gate.stop(terminal);
     rejectStopped(gateFailure(terminal));
     (async () => {
@@ -200,13 +315,71 @@ export function createLabRun({
   return Object.freeze({
     signal: root.signal,
     ready,
-    stop,
+    stop(reason) {
+      controlCancelled = true;
+      return stop(reason);
+    },
+    // The owner approved the connection in the app (direct API route only).
+    // Resolves once the provider is open, so nothing can be sent before.
+    approve() {
+      if (!approvalBudgetMs || approveCalled || terminal) {
+        fail('protocol');
+        return Promise.reject(gateFailure('protocol'));
+      }
+      approveCalled = true;
+      approveResolve();
+      return Promise.race([providerOpened, stopped]);
+    },
     close,
     get phase() {
       return phase;
     },
     get dispatchesUsed() {
       return broker?.gate.dispatchesUsed ?? 0;
+    },
+    get clockCalibration() {
+      return clockCalibration;
+    },
+    // Content-free counts and per-call timing receipts for private evidence.
+    get evaluationSummary() {
+      return broker?.evaluationSummary ?? null;
+    },
+    get providerReceipts() {
+      return provider?.receipts ?? null;
+    },
+    // Estimated direct API spend so far; null for routes without one.
+    get providerSpentMicroUsd() {
+      return provider?.spentMicroUsd ?? null;
+    },
+    get stopReason() {
+      return firstStopReason;
+    },
+    get startupDiagnostics() {
+      return Object.freeze({
+        stage: startupStage,
+        failure: startupFailure,
+        broker: broker?.startupDiagnostics ?? null,
+      });
+    },
+    expectSourceSession(value) {
+      if (
+        terminal ||
+        expectedSourceSession ||
+        sourceSessionMode !== 'required' ||
+        typeof value !== 'string' ||
+        !/^[1-9][0-9]{0,19}$/.test(value) ||
+        BigInt(value) > 18446744073709551615n
+      ) {
+        fail('protocol');
+        throw gateFailure('protocol');
+      }
+      expectedSourceSession = value;
+      try {
+        broker?.expectSourceSession(value);
+      } catch {
+        fail('protocol');
+        throw gateFailure('protocol');
+      }
     },
     acknowledgePlaybackStart(anchor) {
       if (terminal || playback) {

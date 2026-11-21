@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import { createServer } from 'node:http';
 import {
   CODEX_SUPPORT,
@@ -260,24 +260,28 @@ test('abort before dispatch spends no call, abort during request discards a late
     0,
   );
   await first.close();
-  let release;
+  let release, markEntered;
+  const entered = new Promise((resolve) => {
+    markEntered = resolve;
+  });
   const controller = new AbortController();
   const session = await openCodexLab(
     options({
       run: () =>
         new Promise((resolve) => {
           release = resolve;
+          markEntered();
         }),
     }),
   );
   const pending = session.request(request({ signal: controller.signal }));
-  await delay(0);
+  await entered;
   controller.abort();
   let closed = false;
   const closing = session.close().then(() => {
     closed = true;
   });
-  await delay(0);
+  await Promise.resolve();
   assert.equal(closed, false);
   const rejected = rejects(pending, 'cancelled', 1);
   release({ stdout: events() });
@@ -760,3 +764,237 @@ test(
     }
   },
 );
+
+test('a request-scoped abort retires only that call; the session answers the next call', async () => {
+  let n = 0;
+  const session = await openCodexLab(
+    options({
+      deadlineMs: 1000,
+      run: (_r, { signal }) => {
+        n++;
+        if (n > 1) return Promise.resolve({ stdout: events() });
+        return new Promise((_resolve, reject) =>
+          signal.addEventListener(
+            'abort',
+            () =>
+              reject(Object.assign(new Error('x'), { category: 'cancelled' })),
+            { once: true },
+          ),
+        );
+      },
+    }),
+  );
+  const controller = new AbortController();
+  const first = session.request(request({ signal: controller.signal }));
+  await delay(5);
+  controller.abort();
+  await rejects(first, 'cancelled', 1);
+  const second = await session.request(request());
+  assert.deepEqual(second.value, value);
+  assert.deepEqual(
+    session.receipts.map((r) => [r.call, r.outcome]),
+    [
+      [1, 'cancelled'],
+      [2, 'result'],
+    ],
+  );
+  await session.close();
+});
+
+test('unconfirmed process cleanup after a scoped abort ends the session', async () => {
+  const session = await openCodexLab(
+    options({
+      deadlineMs: 1000,
+      run: (_r, { signal }) =>
+        new Promise((_resolve, reject) =>
+          signal.addEventListener(
+            'abort',
+            () =>
+              reject(Object.assign(new Error('x'), { category: 'cleanup' })),
+            { once: true },
+          ),
+        ),
+    }),
+  );
+  const controller = new AbortController();
+  const first = session.request(request({ signal: controller.signal }));
+  await delay(5);
+  controller.abort();
+  await rejects(first, 'cleanup', 1);
+  await rejects(session.request(request()), 'terminal', 1);
+  await session.close();
+});
+
+test('process receipts record only fixed lifecycle stages and millisecond offsets', async () => {
+  const stages = [];
+  const result = await runBoundedCodexProcess(
+    process.execPath,
+    ['-e', "process.stdout.write('fictional\\n')"],
+    { env: {}, deadlineMs: 2000, onStage: (s) => stages.push(s) },
+  );
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(stages, [
+    'spawned',
+    'first-output',
+    'exited',
+    'group-retired',
+  ]);
+});
+
+test('a late reply after a scoped abort is discarded without ending the session', async () => {
+  let release;
+  let n = 0;
+  const session = await openCodexLab(
+    options({
+      deadlineMs: 1000,
+      run: () => {
+        n++;
+        if (n > 1) return Promise.resolve({ stdout: events() });
+        return new Promise((resolve) => (release = resolve));
+      },
+    }),
+  );
+  const controller = new AbortController();
+  const first = session.request(request({ signal: controller.signal }));
+  await delay(5);
+  controller.abort();
+  release({ stdout: events() });
+  await rejects(first, 'cancelled', 1);
+  assert.deepEqual((await session.request(request())).value, value);
+  await session.close();
+});
+
+// A harmless fake CLI: prints the given event lines, then stays alive as the
+// real CLI does during its own shutdown, until it is signalled.
+const lingeringCli = (lines) => [
+  '-e',
+  `for (const l of ${JSON.stringify(lines)}) process.stdout.write(l + '\\n');` +
+    'setInterval(() => {}, 1000);',
+];
+const fakeEvents = (extra = []) => [
+  JSON.stringify({ type: 'thread.started', thread_id: 'fictional' }),
+  JSON.stringify({ type: 'turn.started' }),
+  JSON.stringify({
+    type: 'item.completed',
+    item: { type: 'agent_message', text: JSON.stringify(value) },
+  }),
+  ...extra,
+  JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 4 } }),
+];
+// Offline stand-in that supervises the fake CLI exactly as the subscription
+// runner does: event reader, early completion and stage receipts.
+const fakeCliRun =
+  (lines) =>
+  (_request, { signal, onStage }) => {
+    const reader = createCodexEventReader();
+    return runBoundedCodexProcess(process.execPath, lingeringCli(lines), {
+      env: {},
+      signal,
+      deadlineMs: 20000,
+      onStdoutLine: reader.accept,
+      isComplete: () => reader.complete,
+      onStage,
+    });
+  };
+
+test('a decision is returned once turn.completed follows one message, without waiting for the CLI to exit', async () => {
+  const session = await openCodexLab(
+    options({ deadlineMs: 20000, run: fakeCliRun(fakeEvents()) }),
+  );
+  const started = performance.now();
+  const result = await session.request(request());
+  // The fake CLI never exits by itself; only early retirement ends it.
+  assert.ok(performance.now() - started < 5000);
+  assert.deepEqual(result.value, value);
+  const [receipt] = session.receipts;
+  assert.equal(receipt.outcome, 'result');
+  for (const key of ['decisionReadyMs', 'retireRequestedMs', 'groupRetiredMs'])
+    assert.ok(Number.isSafeInteger(receipt[key]), key);
+  assert.ok(receipt.decisionReadyMs <= receipt.retireRequestedMs);
+  assert.ok(receipt.retireRequestedMs <= receipt.groupRetiredMs);
+  assert.deepEqual(Object.keys(receipt).sort(), [
+    'call',
+    'decisionReadyMs',
+    'exitedMs',
+    'firstOutputMs',
+    'groupRetiredMs',
+    'outcome',
+    'retireRequestedMs',
+    'settledMs',
+    'spawnedMs',
+  ]);
+  await session.close();
+});
+
+test('a second message or a turn.completed without a message is still a failure', async () => {
+  const second = JSON.stringify({
+    type: 'item.completed',
+    item: { type: 'agent_message', text: JSON.stringify(value) },
+  });
+  const noMessage = [
+    JSON.stringify({ type: 'thread.started', thread_id: 'fictional' }),
+    JSON.stringify({ type: 'turn.started' }),
+    JSON.stringify({ type: 'turn.completed', usage: {} }),
+  ];
+  for (const lines of [fakeEvents([second]), noMessage]) {
+    const session = await openCodexLab(
+      options({ deadlineMs: 20000, run: fakeCliRun(lines) }),
+    );
+    await rejects(session.request(request()), 'unexpected-event', 1);
+    assert.equal(session.receipts[0].decisionReadyMs, undefined);
+    await session.close();
+  }
+});
+
+test('a process group that survives early retirement is cleanup and ends the session', async () => {
+  const original = process.kill;
+  // The group-presence probe always reports a surviving member; real
+  // signals still reach the fake CLI.
+  mock.method(process, 'kill', (pid, signal) =>
+    pid < 0 && signal === 0 ? true : original.call(process, pid, signal),
+  );
+  try {
+    const session = await openCodexLab(
+      options({ deadlineMs: 20000, run: fakeCliRun(fakeEvents()) }),
+    );
+    await rejects(session.request(request()), 'cleanup', 1);
+    await rejects(session.request(request()), 'terminal', 1);
+    mock.restoreAll();
+    await session.close();
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test('an event arriving in a later chunk during the retire wait is still a failure', async () => {
+  // On TERM, this fake CLI writes one more event before exiting, as a real
+  // CLI might during shutdown; the reader must reject it.
+  const lines = fakeEvents();
+  const run = (_request, { signal, onStage }) => {
+    const reader = createCodexEventReader();
+    return runBoundedCodexProcess(
+      process.execPath,
+      [
+        '-e',
+        `for (const l of ${JSON.stringify(lines)}) process.stdout.write(l + '\\n');` +
+          `process.on('SIGTERM', () => process.stdout.write(${JSON.stringify(
+            JSON.stringify({ type: 'turn.started' }) + '\n',
+          )}, () => process.exit(0)));` +
+          'setInterval(() => {}, 1000);',
+      ],
+      {
+        env: {},
+        signal,
+        deadlineMs: 20000,
+        onStdoutLine: reader.accept,
+        isComplete: () => reader.complete,
+        onStage,
+      },
+    );
+  };
+  const session = await openCodexLab(options({ deadlineMs: 20000, run }));
+  await rejects(session.request(request()), 'unexpected-event', 1);
+  assert.ok(Number.isSafeInteger(session.receipts[0].decisionReadyMs));
+  await rejects(session.request(request()), 'terminal', 1);
+  await session.close();
+});

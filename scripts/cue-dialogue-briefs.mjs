@@ -121,7 +121,8 @@ export const DENY_LIST = [
 const UNOBSERVABLE =
   /\b(?:feels?|felt|thinks?|thought|believes?|believed|knows?|knew|wants?|wanted|intends?|intended|reali[sz]es?|reali[sz]ed|understands?|understood|privately|secretly|card|cue|cues|screen|glance[sd]?|notes?)\b/i;
 const GROUP = /\b(?:someone|anyone|nobody|no one|the group|everyone)\b/i;
-const CONTACT = /(?:https?:\/\/|www\.|@|\b\d{3}[-. ]\d{3,4}[-. ]\d{4}\b)/i;
+export const CONTACT =
+  /(?:https?:\/\/|www\.|@|\b\d{3}[-. ]\d{3,4}[-. ]\d{4}\b)/i;
 const NAME = /^[A-Z][a-z]{1,11}$/;
 export const VOICES = ['feminine', 'masculine', 'neutral'];
 const AGE = /^(\d{2})-(\d{2})$/;

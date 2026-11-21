@@ -15,6 +15,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod selected_snapshot;
+pub use selected_snapshot::{SELECTED_SNAPSHOT_FRAME_BYTES, SELECTED_SNAPSHOT_INPUT_BYTES};
+
 pub const MAX_SOURCES: usize = 32;
 pub const MAX_SOURCE_BYTES: usize = 4_096;
 pub const MAX_CONTEXT_BYTES: usize = 32_768;
@@ -60,6 +63,9 @@ pub struct ExistingCue {
     pub id: String,
     pub text: String,
     pub source_ids: Vec<String>,
+    /// The engine's own "Asked you" cue, a question put to the user by name:
+    /// the model may say it was answered, never withdraw or replace it.
+    pub asked: bool,
 }
 
 /// Immutable input. The context revision must change for topic, focus, pause,
@@ -203,6 +209,18 @@ impl Request {
         Ok(self)
     }
 
+    pub(crate) fn session_id(&self) -> u64 {
+        self.session
+    }
+    #[cfg(any(test, feature = "lab-evaluator"))]
+    #[allow(
+        dead_code,
+        reason = "native facade activation and API usage vary by build/test configuration"
+    )]
+    pub(crate) fn context_revision(&self) -> u64 {
+        self.context_revision
+    }
+
     pub fn sources(&self) -> &[Source] {
         &self.sources
     }
@@ -230,12 +248,14 @@ impl Request {
                 Provenance::PriorNote { .. } => return Err(Failure::InvalidInput),
             }
         }
-        // Built by hand to keep the lab's field order: text, then sourceIds.
+        // Built by hand to keep the lab's field order: text, sourceIds, then
+        // kind, which only an "Asked you" cue has.
         let cue = self.existing_cue.as_ref().map(|cue| {
             format!(
-                "{{\"text\":{},\"sourceIds\":{}}}",
+                "{{\"text\":{},\"sourceIds\":{}{}}}",
                 serde_json::Value::from(cue.text.as_str()),
-                serde_json::Value::from(cue.source_ids.clone())
+                serde_json::Value::from(cue.source_ids.clone()),
+                if cue.asked { ",\"kind\":\"asked\"" } else { "" }
             )
         });
         let mut text = format!(
@@ -350,6 +370,12 @@ pub enum Failure {
     UsageLimit,
     /// The model could not be reached, or the backend reported an error.
     Unreachable,
+    /// The provider declined to answer this one request. A recorded
+    /// non-decision for the lab; never a cue.
+    Refused,
+    /// The provider's reply reached its output limit before a decision. A
+    /// recorded non-decision for the lab, like a refusal; never a cue.
+    OutputLimit,
 }
 
 pub struct Cancellation {
@@ -359,6 +385,22 @@ pub struct Cancellation {
 }
 
 impl Cancellation {
+    #[cfg(any(test, feature = "lab-evaluator"))]
+    #[allow(
+        dead_code,
+        reason = "native facade activation and API usage vary by build/test configuration"
+    )]
+    pub(crate) fn deadline(&self) -> Instant {
+        self.deadline
+    }
+
+    /// Stopped or cancelled by the caller, as opposed to only past the
+    /// deadline. The lab link retires an expired request but ends the run on
+    /// a withdrawal.
+    pub(crate) fn is_withdrawn(&self) -> bool {
+        self.stopped.load(Ordering::Acquire) || self.cancelled.load(Ordering::Acquire)
+    }
+
     pub fn is_cancelled(&self) -> bool {
         self.stopped.load(Ordering::Acquire)
             || self.cancelled.load(Ordering::Acquire)
@@ -371,6 +413,37 @@ impl Cancellation {
 /// No credentials, retry loop, fallback provider, or model runtime is supplied.
 pub trait Evaluator: Send + 'static {
     fn evaluate(&mut self, request: &Request, cancel: &Cancellation) -> Result<String, Failure>;
+}
+
+/// Internal lab lifecycle: settlement keeps a broker lease held through Rust
+/// validation. It never performs I/O under the engine lock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Settlement {
+    Current,
+    StaleSuccess,
+    Failed,
+    /// Past the per-request deadline: no decision in time. The run continues.
+    Expired,
+    /// The provider refused this request, or its reply hit the output limit,
+    /// and the broker already ended it. A non-decision; nothing more is sent
+    /// for it and the run continues.
+    Retired,
+}
+
+pub(crate) trait EvaluationLifecycle: Send + Sync {
+    fn required_note_count(&self) -> Option<usize> {
+        None
+    }
+    fn approve_notes(&self, _session: u64, _notes: &[Source]) -> Result<(), Failure> {
+        Ok(())
+    }
+    fn scope_ready(&self) -> bool {
+        true
+    }
+    fn retire_scope(&self) {}
+    fn terminal(&self) -> Option<Failure>;
+    fn cancel(&self);
+    fn settle(&self, request: &Request, verdict: Settlement) -> Result<(), Failure>;
 }
 
 struct Job {
@@ -406,6 +479,13 @@ pub struct Worker {
     pending: Option<Pending>,
     next_id: u64,
     budget: Duration,
+    // A reply that completed before the deadline but was read after it.
+    // Never applied; kept only so its action can be logged.
+    late: Option<Decision>,
+    // The cancel flag of a request already read as Expired whose adapter may
+    // still be running. Expiry does not set it, so the lab link can retire
+    // the request without ending the run; a later Stop or withdrawal does.
+    expired: Option<Arc<AtomicBool>>,
 }
 
 impl Worker {
@@ -436,16 +516,28 @@ impl Worker {
                                 | Failure::Credentials
                                 | Failure::UsageLimit
                                 | Failure::Unreachable
-                                | Failure::InvalidDecision => failure,
+                                | Failure::InvalidDecision
+                                | Failure::Refused
+                                | Failure::OutputLimit => failure,
                                 _ => Failure::EvaluatorUnavailable,
                             })
                             .and_then(|text| {
-                                if job.cancel.is_cancelled() {
+                                // A reply past only the deadline is still
+                                // validated so the expiry can log its action;
+                                // poll checks the deadline before reading it,
+                                // so it is never applied.
+                                if job.cancel.is_withdrawn() {
                                     Err(Failure::Cancelled)
                                 } else {
                                     validate(&text, &job.request)
                                 }
                             })
+                    };
+                    // A job withdrawn while it was validating sends no decision.
+                    let result = if job.cancel.is_withdrawn() && result.is_ok() {
+                        Err(Failure::Cancelled)
+                    } else {
+                        result
                     };
                     // A bounded mailbox never blocks cancellation or caller teardown.
                     let _ = output.try_send((job.id, result));
@@ -461,6 +553,8 @@ impl Worker {
             pending: None,
             next_id: 0,
             budget,
+            late: None,
+            expired: None,
         })
     }
 
@@ -480,6 +574,8 @@ impl Worker {
         }
         // Discard a cancelled/expired attempt's late completion before reuse.
         while self.replies.try_recv().is_ok() {}
+        self.late = None;
+        self.expired = None;
         let id = self
             .next_id
             .checked_add(1)
@@ -519,6 +615,13 @@ impl Worker {
     pub fn cancel_pending(&mut self) {
         if let Some(pending) = &self.pending {
             pending.cancelled.store(true, Ordering::Release);
+        } else if let Some(expired) = self.expired.take() {
+            // Stop after an expiry: the adapter still running can no longer
+            // hand back a decision, and one it already delivered is dropped,
+            // so no reply text is kept after Stop.
+            expired.store(true, Ordering::Release);
+            while self.replies.try_recv().is_ok() {}
+            self.late = None;
         }
     }
 
@@ -528,6 +631,32 @@ impl Worker {
     /// accidentally reuses a revision. Stop/pause/dismiss must cancel the work.
     pub fn poll(&mut self, current: &Request) -> Option<Result<Decision, Failure>> {
         self.poll_at(current, Instant::now())
+    }
+
+    /// Collect the immutable submitted ticket for the explicit lab policy.
+    /// This makes NO current-context claim. Engine must check freshness under
+    /// its lock before applying, and settle failures even when input is stale.
+    pub(crate) fn poll_submitted(&mut self) -> Option<Result<Decision, Failure>> {
+        let request = self.pending.as_ref()?.request.clone();
+        self.poll_at(&request, Instant::now())
+    }
+
+    /// Tests only: the adapter has returned and its reply is in the channel.
+    #[cfg(test)]
+    pub(crate) fn adapter_finished(&self) -> bool {
+        !self.active.load(Ordering::Acquire)
+    }
+
+    /// Tests only: the deadline of the request in flight.
+    #[cfg(test)]
+    pub(crate) fn pending_deadline(&self) -> Option<Instant> {
+        self.pending.as_ref().map(|pending| pending.deadline)
+    }
+
+    /// The decision of the request that just expired, if it had completed
+    /// but was read too late. For the timing log only; never applied.
+    pub(crate) fn take_late_decision(&mut self) -> Option<Decision> {
+        self.late.take()
     }
 
     fn poll_at(&mut self, current: &Request, now: Instant) -> Option<Result<Decision, Failure>> {
@@ -542,7 +671,17 @@ impl Worker {
             None
         };
         if let Some(error) = invalid {
-            self.cancel_pending();
+            if error == Failure::Expired {
+                let id = pending.id;
+                self.expired = Some(pending.cancelled.clone());
+                if let Ok((reply, Ok(decision))) = self.replies.try_recv() {
+                    self.late = (reply == id).then_some(decision);
+                }
+            } else {
+                // Expiry is not a withdrawal: the adapter already sees its
+                // deadline, and the lab link retires only that request.
+                self.cancel_pending();
+            }
             self.pending = None;
             return Some(Err(error));
         }
@@ -607,6 +746,7 @@ mod tests {
                 id: "cue-1".into(),
                 text: "Who will send the garden checklist?".into(),
                 source_ids: vec!["e1".into()],
+                asked: false,
             }),
         )
         .unwrap()
@@ -675,6 +815,80 @@ mod tests {
         while worker.active.load(Ordering::Acquire) {
             assert!(Instant::now() < deadline);
             std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn a_reply_finished_past_the_deadline_is_kept_for_the_log_unless_withdrawn() {
+        let input = request(false);
+        for withdrawn in [false, true] {
+            let (started, receipt) = mpsc::channel();
+            let (release, wait) = mpsc::channel();
+            let calls = Arc::new(AtomicUsize::new(0));
+            let mut worker = Worker::start(
+                Held {
+                    started,
+                    release: wait,
+                    calls,
+                },
+                Duration::from_millis(50),
+            )
+            .unwrap();
+            worker.submit(input.clone()).unwrap();
+            receipt.recv_timeout(Duration::from_secs(2)).unwrap();
+            if withdrawn {
+                worker.cancel_pending();
+            }
+            // The adapter finishes after its deadline but before any poll.
+            std::thread::sleep(Duration::from_millis(80));
+            release.send(()).unwrap();
+            wait_idle(&worker);
+            let polled = worker.poll(&input);
+            if withdrawn {
+                assert_eq!(polled, Some(Err(Failure::Cancelled)));
+            } else {
+                assert_eq!(polled, Some(Err(Failure::Expired)));
+            }
+            assert_eq!(
+                worker.take_late_decision().map(|d| d.action),
+                (!withdrawn).then_some(Action::Quiet)
+            );
+        }
+    }
+
+    #[test]
+    fn stop_after_an_expiry_keeps_no_late_reply() {
+        let input = request(false);
+        for finished_before_stop in [false, true] {
+            let (started, receipt) = mpsc::channel();
+            let (release, wait) = mpsc::channel();
+            let mut worker = Worker::start(
+                Held {
+                    started,
+                    release: wait,
+                    calls: Arc::new(AtomicUsize::new(0)),
+                },
+                Duration::from_millis(50),
+            )
+            .unwrap();
+            worker.submit(input.clone()).unwrap();
+            receipt.recv_timeout(Duration::from_secs(2)).unwrap();
+            std::thread::sleep(Duration::from_millis(80));
+            // Read as Expired while the adapter is still running.
+            assert_eq!(worker.poll(&input), Some(Err(Failure::Expired)));
+            assert!(worker.take_late_decision().is_none());
+            if finished_before_stop {
+                release.send(()).unwrap();
+                wait_idle(&worker);
+            }
+            worker.cancel_pending();
+            if !finished_before_stop {
+                release.send(()).unwrap();
+                wait_idle(&worker);
+            }
+            // No decision, and so no cue text, is left after Stop.
+            assert!(!matches!(worker.replies.try_recv(), Ok((_, Ok(_)))));
+            assert!(worker.take_late_decision().is_none());
         }
     }
 
@@ -882,11 +1096,19 @@ mod tests {
                 worker.poll_at(&input, deadline),
                 Some(Err(Failure::Expired))
             );
+            // A reply that completed in time but was read late is kept only
+            // for the timing log; one that finished after the deadline is not.
+            assert_eq!(
+                worker.take_late_decision().map(|d| d.action),
+                complete_first.then_some(Action::Quiet)
+            );
+            assert!(worker.take_late_decision().is_none());
             if !complete_first {
                 release.send(()).unwrap();
                 wait_idle(&worker);
             }
             assert!(worker.poll(&input).is_none());
+            assert!(worker.take_late_decision().is_none());
             assert_eq!(calls.load(Ordering::Relaxed), 1);
         }
     }

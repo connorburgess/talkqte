@@ -11,6 +11,12 @@ import {
 import { TextDecoder } from 'node:util';
 import { parseUniqueLabJson } from './cue-lab-strict-json.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
+import { isAllowedSttQuery } from './cue-lab-deepgram.mjs';
+
+const canonicalSession = (value) =>
+  typeof value === 'string' &&
+  /^[1-9][0-9]{0,19}$/.test(value) &&
+  BigInt(value) <= 18446744073709551615n;
 
 export function watchLabTiming({
   path,
@@ -19,6 +25,7 @@ export function watchLabTiming({
   expectedCommit,
   expectedFeatures,
   expectedApplication,
+  sourceObservation = 'legacy-fixture',
   maxFileBytes = 8 * 1024 * 1024,
   maxFrameBytes = 64 * 1024,
   readBatchBytes = 64 * 1024,
@@ -30,6 +37,7 @@ export function watchLabTiming({
     typeof runId !== 'string' ||
     !/^[A-Za-z0-9_-]{1,64}$/.test(runId) ||
     typeof onEvent !== 'function' ||
+    !['v1', 'legacy-fixture'].includes(sourceObservation) ||
     ![
       [maxFileBytes, 1, 16 * 1024 * 1024],
       [maxFrameBytes, 16, 64 * 1024],
@@ -106,12 +114,61 @@ export function watchLabTiming({
         )
           throw gateFailure('protocol');
       onEvent({ event: 'dev_stop', run_id: runId, step: value.step });
+    } else if (value.event === 'dev_source_observation') {
+      if (
+        sourceObservation !== 'v1' ||
+        value.version !== 1 ||
+        value.run_id !== runId ||
+        value.application !== expectedApplication ||
+        !['listening', 'retired'].includes(value.step) ||
+        !/^[a-f0-9]{32}$/.test(value.host_operation ?? '') ||
+        !/^[a-f0-9]{64}$/.test(value.live_operation ?? '') ||
+        !canonicalSession(value.session) ||
+        Object.keys(value).some(
+          (k) =>
+            ![
+              'event',
+              'version',
+              'run_id',
+              'application',
+              'step',
+              'host_operation',
+              'live_operation',
+              'session',
+              'wall_ms',
+              'mono_ms',
+            ].includes(k),
+        )
+      )
+        throw gateFailure('protocol');
+      const {
+        event,
+        version,
+        run_id,
+        application,
+        step,
+        host_operation,
+        live_operation,
+        session,
+      } = value;
+      onEvent({
+        event,
+        version,
+        run_id,
+        application,
+        step,
+        host_operation,
+        live_operation,
+        session,
+      });
     } else if (value.event === 'session') {
+      if (value.live === false) return;
       if (
         !['started', 'ended'].includes(value.state) ||
         typeof value.live !== 'boolean' ||
-        !Number.isSafeInteger(value.session) ||
-        value.session < 0
+        (sourceObservation === 'v1'
+          ? !canonicalSession(value.session)
+          : !Number.isSafeInteger(value.session) || value.session < 0)
       )
         throw gateFailure('protocol');
       if (!value.live) return;
@@ -130,9 +187,125 @@ export function watchLabTiming({
         if (session !== null) throw gateFailure('protocol');
         session = value.session;
       } else if (session !== value.session) throw gateFailure('protocol');
-      onEvent({ event: 'session', state: value.state });
-    } else if (value.event === 'source_problem' || value.event === 'dropped')
+      onEvent({
+        event: 'session',
+        state: value.state,
+        session: value.session,
+        ...(expectedCommit
+          ? { commit: value.commit, features: [...value.features] }
+          : {}),
+      });
+    } else if (value.event === 'evaluator') {
+      // The model connection turning on or off, and how it was approved. Only
+      // fixed labels and names pass; the lab's approval gate reads them.
+      const name = /^[A-Za-z0-9._-]{1,64}$/;
+      if (
+        !['review', 'launchSetting'].includes(value.approval) ||
+        !['on', 'off'].includes(value.state) ||
+        !name.test(value.backend ?? '') ||
+        !name.test(value.model ?? '') ||
+        (value.effort !== undefined && !name.test(value.effort)) ||
+        (sourceObservation === 'v1'
+          ? !canonicalSession(value.session)
+          : !Number.isSafeInteger(value.session) || value.session < 0)
+      )
+        throw gateFailure('protocol');
+      onEvent({
+        event: 'evaluator',
+        approval: value.approval,
+        state: value.state,
+        backend: value.backend,
+        model: value.model,
+        ...(value.effort !== undefined ? { effort: value.effort } : {}),
+        session: value.session,
+      });
+    } else if (value.event === 'stt_state') {
+      // Cloud transcription start and stop, with a fixed code and the
+      // audio sent so far. No provider message is ever in the row.
+      if (
+        ![
+          'started',
+          'connected',
+          'dropping',
+          // A failed stream being replaced (#357), with the failure's code
+          // and the speech lost with it.
+          'reconnecting',
+          'finished',
+          'ended',
+          'stopped',
+        ].includes(value.state) ||
+        // Only `connected` carries the query of the URL the app used; it
+        // never holds the token, which travels only in a header.
+        (value.state === 'connected') !== isAllowedSttQuery(value.query) ||
+        (value.code !== undefined &&
+          ![
+            'auth',
+            'quota',
+            'rate_limited',
+            'cap_reached',
+            'network',
+            'protocol',
+            'closed',
+            'settings',
+            'withdrawn',
+            'lab_ended',
+            'stalled',
+          ].includes(value.code)) ||
+        ['stopped', 'reconnecting'].includes(value.state) !==
+          (value.code !== undefined) ||
+        (value.state === 'reconnecting'
+          ? !['network', 'closed', 'stalled', 'protocol'].includes(
+              value.code,
+            ) ||
+            !Number.isSafeInteger(value.gap_ms) ||
+            value.gap_ms < 0
+          : value.gap_ms !== undefined) ||
+        !Number.isSafeInteger(value.audio_ms) ||
+        value.audio_ms < 0 ||
+        (sourceObservation === 'v1'
+          ? !canonicalSession(value.session)
+          : !Number.isSafeInteger(value.session) || value.session < 0)
+      )
+        throw gateFailure('protocol');
+      onEvent({
+        event: 'stt_state',
+        state: value.state,
+        ...(value.code !== undefined ? { code: value.code } : {}),
+        ...(value.query !== undefined ? { query: value.query } : {}),
+        ...(value.gap_ms !== undefined ? { gap_ms: value.gap_ms } : {}),
+        audio_ms: value.audio_ms,
+        session: value.session,
+      });
+    } else if (value.event === 'user_name_set') {
+      // Whether the app's name setting is in effect for a session (#363):
+      // a session and a boolean only; the name is never in the row.
+      if (
+        typeof value.set !== 'boolean' ||
+        (sourceObservation === 'v1'
+          ? !canonicalSession(value.session)
+          : !Number.isSafeInteger(value.session) || value.session < 0)
+      )
+        throw gateFailure('protocol');
+      onEvent({
+        event: 'user_name_set',
+        session: value.session,
+        set: value.set,
+      });
+    } else if (value.event === 'source_problem') {
+      // The native source failed (for example the captured application
+      // went away). Its fixed label and OS code are passed on so the run can
+      // record that native ended the session; the observation still ends.
+      if (
+        /^[a-z_]{1,40}$/.test(value.problem ?? '') &&
+        (value.os_code === undefined || Number.isSafeInteger(value.os_code))
+      )
+        onEvent({
+          event: 'source_problem',
+          problem: value.problem,
+          ...(value.os_code !== undefined ? { os_code: value.os_code } : {}),
+        });
       throw gateFailure('protocol');
+    } else if (value.event === 'dropped') throw gateFailure('protocol');
     else if (value.event === 'dev_source') {
       if (
         !['acknowledged', 'started', 'refused', 'stopping'].includes(
@@ -142,12 +315,19 @@ export function watchLabTiming({
       )
         throw gateFailure('protocol');
       if (value.step === 'refused') throw gateFailure('protocol');
+      onEvent({
+        event: 'dev_source',
+        step: value.step,
+        application: value.application,
+      });
     } else if (
       value.event === 'source_ended' &&
       (value.problem ||
         (expectedApplication && value.application !== expectedApplication))
     )
       throw gateFailure('protocol');
+    else if (value.event === 'source_ended')
+      onEvent({ event: 'source_ended', application: value.application });
     // Transcript/model payloads are discarded, never forwarded or logged.
   };
   const poll = () => {
@@ -181,7 +361,27 @@ export function watchLabTiming({
           const frame = partial.subarray(0, end);
           partial = partial.subarray(end + 1);
           partialAt = null;
-          emit(parseUniqueLabJson(decoder.decode(frame)));
+          emit(
+            parseUniqueLabJson(
+              decoder.decode(frame),
+              sourceObservation === 'v1'
+                ? function (key, value, context) {
+                    if (
+                      ((this?.event === 'session' && this.live === true) ||
+                        this?.event === 'evaluator' ||
+                        this?.event === 'stt_state' ||
+                        this?.event === 'user_name_set') &&
+                      key === 'session'
+                    ) {
+                      if (!canonicalSession(context?.source))
+                        throw gateFailure('protocol');
+                      return context.source;
+                    }
+                    return value;
+                  }
+                : undefined,
+            ),
+          );
           if (stopped) return;
         }
         if (partial.length > maxFrameBytes) throw gateFailure('protocol');
