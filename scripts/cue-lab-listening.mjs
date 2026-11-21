@@ -15,8 +15,8 @@ export function createLabListening({
     features.length !== 4 ||
     new Set(features).size !== 4 ||
     ![
+      'cloud-transcription',
       'lab-evaluator',
-      'local-whisper',
       'native-audio-spike',
       'timing-log',
     ].every((f) => features.includes(f)) ||

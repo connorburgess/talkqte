@@ -155,7 +155,7 @@ The preflight estimate uses `ceil(UTF-8 bytes / 2) + 1,500` input tokens and the
 
 Native Stop is set at 320 s: the usual 110 s source window, the 180 s approval budget and a 30 s allowance from native start to Listening. The evidence guard records the approval budget and the time actually waited as separate fields.
 
-A take on this route allows 40 calls, against 20 for Codex. Four limits apply: the native session call limit (40), the adapter's own call cap (40), the per-run spend cap checked before every request, and one request at a time with the 8 s native deadline.
+A take on this route allows 40 calls, against 20 for Codex. Four limits apply: the native session call limit (40), the adapter's own call cap (40), the local estimated-spend guard checked before every request, and one request at a time with the 8 s native deadline.
 
 **Evidence:** per call, content-free receipts keep the time to first byte and first token, the stop reason, a refusal category, token usage and the computed cost. The run's estimated total spend is available beside the receipts. No prompt, reply or key text is kept.
 
