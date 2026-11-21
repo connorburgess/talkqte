@@ -117,13 +117,17 @@ const { openLabBroker } = await import('../cue-lab-broker.mjs');
 const { openLabProvider } = await import('../cue-lab-provider.mjs');
 const { openAnthropicLab } = await import('../cue-lab-anthropic.mjs');
 const { SELECTED_CONTEXT } = await import('../cue-selected-context.mjs');
+// History uses the ordinary transcript wire, as cue-lab-run does. This test
+// argument selects no native scope; each Rust Engine still requires approval.
+const contextPolicy = process.argv[2] ?? SELECTED_CONTEXT;
+assert.ok([SELECTED_CONTEXT, 'fresh-only'].includes(contextPolicy));
 const provider = await openLabProvider({
   provider: 'anthropic-api',
   model: 'claude-opus-5-5',
   effort: 'low',
   maxCalls: 4,
   deadlineMs: 30000,
-  contextPolicy: SELECTED_CONTEXT,
+  contextPolicy,
   execution: 'offline-stand-in',
   environment: {
     PATH: process.env.PATH,
@@ -171,7 +175,7 @@ const broker = await openLabBroker({
   },
   provider,
   maxCalls: 4,
-  contextPolicy: SELECTED_CONTEXT,
+  contextPolicy,
 });
 ownedDescriptor = broker.descriptorPath;
 broker.expectSourceSession('1');
@@ -205,7 +209,13 @@ process.stdin.on('data', (chunk) => {
   for (let end; (end = buffer.indexOf('\n')) !== -1;) {
     const frame = JSON.parse(buffer.slice(0, end));
     buffer = buffer.slice(end + 1);
-    if (frame.type === 'release')
+    if (frame.type === 'status') {
+      report({
+        type: 'status',
+        dispatched: broker.evaluationSummary.dispatched,
+        evaluations: frames.filter((f) => f.type === 'evaluate').length,
+      });
+    } else if (frame.type === 'release')
       worker.send({ type: 'release', id: workerRequest });
     else if (frame.type === 'finish' && !finishing) {
       finishing = true;
