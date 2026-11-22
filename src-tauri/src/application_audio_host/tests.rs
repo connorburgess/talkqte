@@ -1426,6 +1426,7 @@ mod by_setting {
         DevWaits {
             list: WAIT,
             start: WAIT,
+            microphone: WAIT,
             poll: Duration::from_millis(2),
         }
     }
@@ -1434,6 +1435,7 @@ mod by_setting {
         Settings {
             application: application.into(),
             stop_after: Ok(None),
+            with_microphone: Ok(false),
         }
     }
 
@@ -1499,6 +1501,7 @@ mod by_setting {
         let settings = Settings {
             application: "Fictional player".into(),
             stop_after: Ok(Some(Duration::from_millis(30))),
+            with_microphone: Ok(false),
         };
         let outcome = f.host.start_by_setting(&settings, waits());
         assert_eq!(outcome, Outcome::Started { stopped: true });
@@ -1569,11 +1572,97 @@ mod by_setting {
         let invalid = Settings {
             application: "Fictional player".into(),
             stop_after: Err(()),
+            with_microphone: Ok(false),
         };
         let outcome = g.host.start_by_setting(&invalid, waits());
         assert_eq!(outcome, Outcome::Refused("stop_after_invalid"));
         assert_eq!(g.view().problem, Some(Problem::DevSettingInvalid));
         assert_eq!(g.script.lists.load(Ordering::SeqCst), 0, "nothing is asked");
+    }
+
+    fn joining(application: &str) -> Settings {
+        Settings {
+            with_microphone: Ok(true),
+            ..named(application)
+        }
+    }
+
+    #[test]
+    fn the_microphone_setting_is_read_as_exactly_one_or_refused() {
+        let read = |value: Option<&str>| {
+            Settings::read(|name| match name {
+                SOURCE_ENV => Some("Fictional player".into()),
+                dev_start::WITH_MICROPHONE_ENV => value.map(str::to_owned),
+                _ => None,
+            })
+            .unwrap()
+            .with_microphone
+        };
+        assert_eq!(read(None), Ok(false));
+        assert_eq!(read(Some("1")), Ok(true));
+        for invalid in ["", "0", "true", " 1"] {
+            assert_eq!(read(Some(invalid)), Err(()), "{invalid:?}");
+        }
+        let f = fixture(false);
+        let invalid = Settings {
+            with_microphone: Err(()),
+            ..named("Fictional player")
+        };
+        assert_eq!(
+            f.host.start_by_setting(&invalid, waits()),
+            Outcome::Refused("with_microphone_invalid")
+        );
+        // A caller that cannot see the microphone, as in a lab run.
+        assert_eq!(
+            f.host
+                .start_by_setting(&joining("Fictional player"), waits()),
+            Outcome::Refused("with_microphone_unsupported")
+        );
+        assert_eq!(f.view().problem, Some(Problem::DevSettingInvalid));
+        assert_eq!(f.script.lists.load(Ordering::SeqCst), 0, "nothing is asked");
+    }
+
+    #[test]
+    fn the_microphone_setting_waits_for_the_session_then_attaches_the_application_to_it() {
+        let f = fixture(true);
+        let asked = std::sync::atomic::AtomicUsize::new(0);
+        // The person starts the microphone a few polls after launch.
+        let running = || asked.fetch_add(1, Ordering::SeqCst) >= 3;
+        let outcome = f.host.start_by_setting_joining(
+            &joining("Fictional player"),
+            waits(),
+            Some(running),
+            |_| true,
+        );
+        assert_eq!(outcome, Outcome::Started { stopped: false });
+        assert!(asked.load(Ordering::SeqCst) > 3, "it waited");
+        let view = f.view();
+        assert_eq!(view.phase, Phase::Listening);
+        assert_eq!(view.application.as_deref(), Some("Fictional player"));
+        assert!(!view.source_session, "the session is the microphone's");
+        assert_eq!(f.script.lists.load(Ordering::SeqCst), 1);
+        assert_eq!(f.script.runs.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_microphone_that_never_starts_leaves_the_application_unreviewed_and_unstarted() {
+        let f = fixture(false);
+        let short = DevWaits {
+            microphone: Duration::from_millis(30),
+            ..waits()
+        };
+        let outcome = f.host.start_by_setting_joining(
+            &joining("Fictional player"),
+            short,
+            Some(|| false),
+            |_| true,
+        );
+        assert_eq!(outcome, Outcome::Refused("microphone_not_started"));
+        let view = f.view();
+        assert_eq!(view.phase, Phase::Off);
+        assert_eq!(view.operation, None, "nothing is under review");
+        assert_eq!(f.script.lists.load(Ordering::SeqCst), 1);
+        assert_eq!(f.script.runs.load(Ordering::SeqCst), 0);
     }
 }
 
@@ -1691,12 +1780,14 @@ mod observation_start {
         Settings {
             application: "QuickTime Player".into(),
             stop_after: Ok(None),
+            with_microphone: Ok(false),
         }
     }
     fn waits() -> DevWaits {
         DevWaits {
             list: WAIT,
             start: WAIT,
+            microphone: WAIT,
             poll: Duration::from_millis(2),
         }
     }
@@ -1740,6 +1831,7 @@ mod observation_start {
                 let source = Settings {
                     application: application.into(),
                     stop_after,
+                    with_microphone: Ok(false),
                 };
                 assert_eq!(
                     crate::dev_stop::supported_source(Some(&source)),
