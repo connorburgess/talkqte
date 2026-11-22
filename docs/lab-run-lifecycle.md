@@ -87,7 +87,9 @@ then also has `turnOff()`, which sends `kill('SIGUSR1')` once, only after
 `dev_off` `done` row. The lifecycle's `turnOff()` passes it on once, only when
 ready and nothing has stopped the run; `turnOffState` gives its outcome and
 whether the run's first stop came after it was asked. A native end that
-follows is handled like any other; Stop and cleanup are unchanged. See
+follows is handled like any other; Stop and cleanup are unchanged. A broker
+stop records the broker's own reason as the run's `stopReason`, with native's
+`cancel` control frame (the lab cue run ended) as `lab-ended`. See
 [turning processing off](lab-prepared-take.md#provider-failure-and-turning-processing-off-t5).
 
 The existing timing stream is lossy and unacknowledged. Missing `armed` permits

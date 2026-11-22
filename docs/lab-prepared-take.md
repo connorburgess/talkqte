@@ -205,10 +205,13 @@ direct API route only, whose cloud stream is what turning off withdraws.
    and the run is ready, never after anything stopped it. In a lab build the
    withdrawal also ends the lab cue run, so the stream stops with
    `lab_ended` ([what stops it](cloud-transcription.md#what-stops-it)). If
-   the run then ends from the native side (its lab connection or session
-   ending) after a confirmed `done`, the take ends `stopped` with failure
-   `turned-off`, and `run.ended` is reported as observed. Whether a real
-   run ends that way has not been observed. A `failed` or missing outcome stops
+   the run's first stop reason after a confirmed `done` is native ending the
+   lab cue run (`lab-ended`: its `cancel` control frame) or the live session
+   ending (`session-ended`), the take ends `stopped` with failure
+   `turned-off`, and `run.ended` is reported as observed. Any other stop
+   reason (lost connection, process exit, lost timing rows, a deadline, a
+   provider failure) stays its own failure. Whether a real run ends that way
+   has not been observed. A `failed` or missing outcome stops
    the take with `turn-off-failed`. If nothing ends the run, the take plays
    on and completes. In every case `take.turnOff` (and the result) gives
    `afterMs`, how long after the render start it was actually asked, and the

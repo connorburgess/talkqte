@@ -27,6 +27,9 @@ const STARTUP_REASONS = new Set([
   'invalid-reply',
   'protocol',
   'provider',
+  // Native ended the lab cue run itself (a `cancel` control frame, for
+  // example when processing is turned off), seen by the broker.
+  'lab-ended',
 ]);
 
 export function createLabRun({
@@ -176,6 +179,17 @@ export function createLabRun({
       signal: root.signal,
       onTerminal: (category) => {
         recordStartupFailure(category);
+        // The broker's own reason is the run's first stop reason, unless
+        // this run's close stopped the broker. The broker reports native's
+        // `cancel` control frame as `cancelled`, which here is `lab-ended`
+        // so it is never confused with a host cancellation.
+        if (!closing)
+          firstStopReason ??=
+            category === 'cancelled'
+              ? 'lab-ended'
+              : STARTUP_REASONS.has(category)
+                ? category
+                : 'protocol';
         queueMicrotask(() => fail('cancelled'));
       },
     });

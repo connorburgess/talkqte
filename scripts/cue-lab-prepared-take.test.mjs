@@ -96,7 +96,10 @@ function fixture({
   turnOffAfterMs,
   launcherTurnOff = turnOffAfterMs !== undefined,
   offStep = 'done',
-  offEndsSession = true,
+  // What follows a `done`: the live session ending, native ending the lab
+  // cue run (a `cancel` frame), nothing, or an unrelated stop: the broker
+  // connection lost, the process exiting, or a lost timing row.
+  offEnd = 'session',
 } = {}) {
   if (api) effort = 'low';
   if (fixedModel) {
@@ -144,12 +147,29 @@ function fixture({
           const run_id = launchOptions.environment.TALKQTE_DEV_LAB_RUN_ID;
           for (const step of ['latched', offStep])
             launchOptions.onTiming({ event: 'dev_off', run_id, step });
-          if (offStep === 'done' && offEndsSession)
+          if (offStep !== 'done') return;
+          if (offEnd === 'session')
             launchOptions.onTiming({
               event: 'session',
               state: 'ended',
               session: 1,
             });
+          else if (offEnd === 'lab')
+            socket.write(
+              JSON.stringify({
+                schema: 'talkqte.lab.v1',
+                type: 'cancel',
+                runId: run_id,
+                sessionId: helloSession,
+                reason: 'eligibility_change',
+              }) + '\n',
+            );
+          else if (offEnd === 'peer-closed') socket.destroy();
+          else if (offEnd === 'process') {
+            child.exitCode = 1;
+            child.emit('exit', 1, null);
+          } else if (offEnd === 'dropped')
+            launchOptions.onTiming({ event: 'dropped', count: 1 });
         });
         return true;
       }
@@ -1639,6 +1659,7 @@ test('a planned turn-off is asked once after the render start, and the run endin
     observe: (e) => events.push(e),
   });
   await assert.rejects(f.take.done, { category: 'turned-off' });
+  assert.equal(f.take.runStopReason, 'session-ended');
   assert.equal(f.take.phase, 'stopped');
   assert.equal(f.take.failure, 'turned-off');
   assert.equal(f.take.turnOff.afterMs, 20);
@@ -1670,7 +1691,7 @@ test('a done turn-off with no native end lets the take complete and reports it',
   const played = deferred();
   const f = fixture({
     turnOffAfterMs: 20,
-    offEndsSession: false,
+    offEnd: 'none',
     playbackWait: played.promise,
   });
   await waitForTrace(f, 'turn-off');
@@ -1701,3 +1722,36 @@ test('no turn-off is sent after the take stops, and plan and launch must agree',
   ])
     assert.throws(() => fixture(options), { category: 'protocol' });
 });
+
+test('native ending the lab cue run after a done is also the expected turn-off stop', async () => {
+  const f = fixture({
+    turnOffAfterMs: 20,
+    offEnd: 'lab',
+    playbackWait: new Promise(() => {}),
+  });
+  await assert.rejects(f.take.done, { category: 'turned-off' });
+  assert.equal(f.take.runStopReason, 'lab-ended');
+  assert.equal(f.take.turnOff.outcome, 'done');
+});
+
+for (const [offEnd, reason] of [
+  ['peer-closed', 'protocol'],
+  ['process', 'process-ended'],
+  ['dropped', 'failed'],
+])
+  test(`an unrelated stop after a done turn-off (${offEnd}) stays its own failure`, async () => {
+    const events = [];
+    const f = fixture({
+      turnOffAfterMs: 20,
+      offEnd,
+      playbackWait: new Promise(() => {}),
+      observe: (e) => events.push(e),
+    });
+    const error = await f.take.done.catch((e) => e);
+    assert.notEqual(error.category, 'turned-off');
+    assert.notEqual(f.take.failure, 'turned-off');
+    assert.equal(f.take.runStopReason, reason);
+    assert.equal(f.take.turnOff.outcome, 'done');
+    assert.equal(events.at(-1).stage, 'run.ended');
+    assert.equal(events.at(-1).outcome, 'failure');
+  });

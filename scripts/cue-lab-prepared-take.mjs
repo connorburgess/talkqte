@@ -24,6 +24,10 @@ const sourceWindowMs = (approvalBudgetMs) =>
   approvalBudgetMs
     ? SOURCE_WINDOW_MS + approvalBudgetMs + LAUNCH_ALLOWANCE_MS
     : SOURCE_WINDOW_MS;
+// The run's stop reasons that a confirmed turn-off is expected to cause:
+// native ending the lab cue run, or the live session ending. Any other
+// reason after a turn-off stays its own failure.
+const TURN_OFF_ENDS = new Set(['lab-ended', 'session-ended']);
 const required = (condition) => {
   if (!condition) throw gateFailure('protocol');
 };
@@ -772,7 +776,8 @@ export function createLabPlaybackSession({
         failure === 'protocol' &&
         failureSource === 'run' &&
         failedAfterOff &&
-        owner.offState?.outcome === 'done'
+        owner.offState?.outcome === 'done' &&
+        TURN_OFF_ENDS.has(run.stopReason)
       ) {
         failure = 'turned-off';
         turnOff.outcome = 'done';
