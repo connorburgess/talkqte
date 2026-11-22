@@ -6,7 +6,11 @@ import or preparation. There is no command-line entry point, shell, arbitrary
 argument list, existing-PID attachment or provider fallback. The actual app run
 still requires an approved build and separately reviewed bounded launch plan;
 the [prepared take runbook](lab-take-runbook.md) lists the steps, checks a
-plan without launching anything, and runs one confirmed attempt of it.
+plan without launching anything, and runs one confirmed attempt of it. A caller
+can pass `ownProcessGroup: true` to launch the app in its own process group,
+so a terminal's Ctrl-C reaches only the caller, which then uses the ordinary
+Stop; the take runner does. `verifyLabBuild` runs the launcher's receipt, hash
+and signature check on its own, without a run folder or launch.
 
 ## Build approval before launch
 

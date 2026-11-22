@@ -37,7 +37,10 @@ import {
   assertLabLaunchOptions,
   prepareLabFixtureLauncher,
 } from './cue-lab-launcher.mjs';
-import { createLabPlayerFixture } from './cue-lab-player.mjs';
+import {
+  createLabPlayerFixture,
+  LAB_PLAYER_RUNTIME,
+} from './cue-lab-player.mjs';
 import { createLabRecorderFixture } from './cue-lab-recorder.mjs';
 import { createLabNativeOwner } from './cue-lab-native-owner.mjs';
 import { createLabSourceV1 } from './cue-lab-source-v1.mjs';
@@ -479,7 +482,7 @@ const plenty = () => 64 * 1024 ** 3;
 // player retirement, observer and launcher close. Its terminal state for
 // each kind is the runbook's: provider failure `stopped` after the app
 // refuses the probe, turn-off `stopped` with failure `turned-off`.
-function standInTake(options, { trace, hold }) {
+function standInTake(options, { trace, hold, cloud }) {
   assertFixedModelTakeOptions(options);
   const { launcher, player, recorder, source, runId, signal } = options;
   const kind = launcher.transcription.failureProbe
@@ -545,7 +548,7 @@ function standInTake(options, { trace, hold }) {
       });
       step = 'approval-wait';
       options.onApproval({ state: 'waiting', budgetMs: 180000 });
-      if (kind !== 'turn-off') {
+      if (cloud && kind !== 'turn-off') {
         await Promise.race([reviewed, stopped]);
         cancelled();
         step = 'token-release';
@@ -560,6 +563,25 @@ function standInTake(options, { trace, hold }) {
         outcome: 'observed',
         ids: {},
         timing: now(),
+      });
+      // The take's guard, at an uptime where floating-point rounding makes
+      // sourceDeadline - nativeStartedAt differ from 320000.
+      let nativeStartedAt = 204000.0001;
+      while (nativeStartedAt + 320000 - nativeStartedAt === 320000)
+        nativeStartedAt += 7.31337;
+      const sourceDeadline = nativeStartedAt + 320000;
+      const startRequestAt = nativeStartedAt + 40000.25;
+      options.onGuard({
+        nativeStartedAt,
+        sourceDeadline,
+        startRequestAt,
+        startBudgetMs: 1000,
+        mediaDurationMs: options.media.durationMs,
+        tailMs: options.tailMs ?? 0,
+        completionReserveMs: 1000,
+        remainingAtRequestMs: sourceDeadline - startRequestAt,
+        approvalBudgetMs: 180000,
+        approvalWaitMs: 5,
       });
       step = 'playback';
       trace.push('playing');
@@ -580,7 +602,8 @@ function standInTake(options, { trace, hold }) {
         await owner.turnOff();
         turnOff = { afterMs: options.turnOffAfterMs, outcome: 'done' };
         failure = 'turned-off';
-      } else await until(() => launcher.transcription.connectedQuery !== null);
+      } else if (cloud)
+        await until(() => launcher.transcription.connectedQuery !== null);
     } catch {
       failedStep ??= step;
       failure ??= signal.aborted ? 'cancelled' : 'protocol';
@@ -674,6 +697,14 @@ function fixtureModules({ fixtureCase = 'cloud-transcription', hold } = {}) {
     trace = [];
   const seen = {};
   const modules = {
+    verifyNative({ manifestFile, approved }) {
+      calls.push('verify-native');
+      assert.ok(manifestFile && approved);
+    },
+    verifyPlayer({ manifestFile, approved }) {
+      calls.push('verify-player');
+      assert.ok(manifestFile && approved);
+    },
     prepareDuration() {
       calls.push('duration-tool');
       return {
@@ -721,6 +752,7 @@ function fixtureModules({ fixtureCase = 'cloud-transcription', hold } = {}) {
         manifestFile: _m,
         approved: _a,
         environment: _e,
+        ownProcessGroup: _g,
         ...scope
       } = options;
       assertLabLaunchOptions(scope);
@@ -732,6 +764,7 @@ function fixtureModules({ fixtureCase = 'cloud-transcription', hold } = {}) {
         userName: options.userName,
         turnOff: options.turnOff,
         environment: options.environment,
+        ownProcessGroup: options.ownProcessGroup,
       });
     },
     createSource(options) {
@@ -769,7 +802,11 @@ function fixtureModules({ fixtureCase = 'cloud-transcription', hold } = {}) {
     createTake(options) {
       calls.push('take');
       seen.take = options;
-      return standInTake(options, { trace, hold });
+      return standInTake(options, {
+        trace,
+        hold,
+        cloud: fixtureCase.startsWith('cloud'),
+      });
     },
     snapshotTiming(options) {
       calls.push('timing-snapshot');
@@ -796,6 +833,8 @@ function execute(planFile, planSha, f, extra = {}) {
     modules: f.modules,
     scope: fixtureScope,
     freeBytes: plenty,
+    // The owned player's exact runtime; the test's own Node may differ.
+    runtime: LAB_PLAYER_RUNTIME,
     io: quietIo(),
     ...extra,
   });
@@ -817,6 +856,8 @@ test('a full fixture take reaches its terminal state, writes the evidence report
   // The runbook's order; the key file is read (here: the stand-in grant)
   // after the player is prepared and before the launcher.
   assert.deepEqual(f.calls, [
+    'verify-native',
+    'verify-player',
     'duration-tool',
     'sweep',
     'writer',
@@ -836,6 +877,9 @@ test('a full fixture take reaches its terminal state, writes the evidence report
   assert.equal(f.seen.launch.sourceApplication, 'TalkQTE Lab Player');
   assert.equal(f.seen.launch.userName, 'Avery');
   assert.equal(f.seen.launch.turnOff, undefined);
+  // The app gets its own process group, so a terminal Ctrl-C reaches only
+  // the runner (cue-lab-launcher.test.mjs shows why).
+  assert.equal(f.seen.launch.ownProcessGroup, true);
   assert.deepEqual(Object.keys(f.seen.launch.environment).sort(), [
     'HOME',
     'PATH',
@@ -855,6 +899,13 @@ test('a full fixture take reaches its terminal state, writes the evidence report
     /Press Review processing, Review selected sources, Enable for this session NOW: 180 s remain\./,
   );
   assert.ok(lines.includes('Take ended: completed.'));
+  // In execute mode the dry run's "Nothing was launched" is not repeated,
+  // and the duration helper's build is announced.
+  assert.ok(!lines.some((l) => /Nothing was launched/.test(l)));
+  assert.match(lines[0], /^Plan valid\. Checking this attempt/);
+  assert.ok(
+    lines.some((l) => /^Building the recording-duration helper/.test(l)),
+  );
   assert.ok(
     lines.includes(
       `Evidence report: ${join(result.reportDirectory, 'report.md')}`,
@@ -877,8 +928,15 @@ test('a full fixture take reaches its terminal state, writes the evidence report
   assert.equal(outcome.evidence.timing, 'attached');
   assert.equal(outcome.evidence.recording, 'attached');
   assert.equal(outcome.evidence.recordingDurationMs, 4321.5);
+  assert.equal(outcome.player.retired, true);
   const manifest = JSON.parse(readFileSync(outcome.evidence.manifest));
   assert.equal(manifest.recording.durationMs, 4321.5);
+  // The guard reached the writer through onGuard at a large uptime.
+  assert.equal(manifest.guards.length, 1);
+  assert.notEqual(
+    manifest.guards[0].sourceDeadline - manifest.guards[0].nativeStartedAt,
+    320000,
+  );
   assert.deepEqual(manifest.transcription, {
     backend: 'deepgram',
     minuteCap: 5,
@@ -979,6 +1037,8 @@ test('a wrong confirmation, low disk or a plan outside the owner decisions is re
     ['confirmation', { confirm: 'f'.repeat(64) }],
     ['confirmation', { confirm: planSha.toUpperCase() }],
     ['disk', { freeBytes: () => DISK_FLOOR_BYTES - 1 }],
+    ['runtime', { runtime: { ...LAB_PLAYER_RUNTIME, node: 'v22.0.0' } }],
+    ['runtime', { runtime: { ...LAB_PLAYER_RUNTIME, libuv: '1.50.0' } }],
     // The default scope: the fixed meeting only (the test media is a
     // per-run manifest).
     ['owner decisions', { scope: OWNER_TAKE_SCOPE }],
@@ -1025,4 +1085,36 @@ test('a wrong confirmation, low disk or a plan outside the owner decisions is re
     /Plan refused at (confirmation|environment).*Nothing was launched/,
   );
   assert.equal(existsSync(marker), false);
+});
+
+test('a failed build check is refused before the marker; a take that cannot confirm release still has its player retired', async () => {
+  const { planFile, planSha, dir } = setup();
+  const marker = attemptMarkerPath(join(dir, 'evidence'), planSha);
+  for (const which of ['verifyNative', 'verifyPlayer']) {
+    const f = fixtureModules();
+    f.modules[which] = () => {
+      throw new Error('fictional signature failure');
+    };
+    await assert.rejects(
+      execute(planFile, planSha, f),
+      refusedAt(
+        which === 'verifyNative'
+          ? 'native build signature'
+          : 'player build signature',
+      ),
+    );
+    assert.ok(!f.calls.includes('duration-tool'));
+    assert.equal(existsSync(marker), false);
+  }
+  // Native never confirms release (the fixture writes no `released`): the
+  // take ends in failed cleanup and keeps the player; the runner retires
+  // it once the take has settled, so nothing it owns keeps running.
+  const f = fixtureModules({ fixtureCase: 'lost-released' });
+  const result = await execute(planFile, planSha, f);
+  assert.equal(result.state, 'failed-cleanup');
+  assert.equal(result.outcome.native.released, false);
+  assert.equal(result.outcome.evidence.timing, 'not-released');
+  assert.equal(result.outcome.player.retired, true);
+  assert.notEqual(result.outcome.player.diagnostics.process, null);
+  assert.ok(existsSync(join(result.reportDirectory, 'report.md')));
 });

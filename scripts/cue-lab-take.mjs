@@ -45,11 +45,14 @@ import {
   prepareLabLauncher,
   removeStaleTranscriptionTokens,
   validateLabBuildRecord,
+  verifyLabBuild,
 } from './cue-lab-launcher.mjs';
 import {
   createLabPlayer,
   hashLabOwnedFile,
+  LAB_PLAYER_RUNTIME,
   validateLabPlayerBuildRecord,
+  verifyLabPlayerBuild,
 } from './cue-lab-player.mjs';
 import { fixedLabMedia, loadLabMediaManifest } from './cue-lab-media.mjs';
 import {
@@ -407,11 +410,13 @@ function inspectTakePlan(planPath, { environment = process.env } = {}) {
   return { summary, plan: p, media, native };
 }
 
-export function renderTakePlan(s) {
+export function renderTakePlan(s, { execute = false } = {}) {
   const d = s.send.deepgram,
     a = s.send.anthropic;
   return [
-    `Plan valid (dry run). Nothing was launched, no key file was read.`,
+    execute
+      ? `Plan valid. Checking this attempt before anything is launched.`
+      : `Plan valid (dry run). Nothing was launched, no key file was read.`,
     `plan sha256: ${s.planSha256}`,
     `run id: ${s.runId}  kind: ${s.kind}`,
     ``,
@@ -437,8 +442,12 @@ export function renderTakePlan(s) {
     `  Anthropic: ${a.what}; ${a.endpoint}, ${a.model}, effort ${a.effort}, at most ${a.maxRequests} requests, max_tokens ${a.maxTokens}, context ${a.contextPolicy}${a.userName ? `, user name "${a.userName}"` : ''}; key file ${a.keyFile} read ${a.keyFileReadAt}`,
     ``,
     `Would spend: Anthropic local estimate capped at $${s.spend.anthropicLocalEstimateCapUsd.toFixed(2)} (${s.spend.anthropicNote}); Deepgram at most ${s.spend.deepgramMinutesAtMost} min (${s.spend.deepgramNote}).`,
-    ``,
-    `To run this plan once (docs/lab-take-runbook.md): npm run lab:take -- --plan <this plan> --execute --confirm ${s.planSha256}`,
+    ...(execute
+      ? []
+      : [
+          ``,
+          `To run this plan once (docs/lab-take-runbook.md): npm run lab:take -- --plan <this plan> --execute --confirm ${s.planSha256}`,
+        ]),
   ].join('\n');
 }
 
@@ -552,6 +561,10 @@ export function prepareRecordingDuration({ environment }) {
 // The existing modules an attempt composes. Tests substitute the existing
 // fixtures; `main` always uses these.
 const TAKE_MODULES = Object.freeze({
+  // Before the attempt marker: the launcher's and the player's own receipt,
+  // hash and signature checks (repeated at launch).
+  verifyNative: verifyLabBuild,
+  verifyPlayer: verifyLabPlayerBuild,
   prepareDuration: prepareRecordingDuration,
   sweepTokens: () => removeStaleTranscriptionTokens(),
   createWriter: createLabEvidenceWriter,
@@ -603,6 +616,12 @@ export async function executeTakePlan(
     modules = TAKE_MODULES,
     scope = OWNER_TAKE_SCOPE,
     freeBytes = evidenceFreeBytes,
+    // This process's runtime, which the owned player requires exactly.
+    runtime = {
+      platform: process.platform,
+      node: process.version,
+      libuv: process.versions.uv,
+    },
   } = {},
 ) {
   const {
@@ -613,7 +632,7 @@ export async function executeTakePlan(
   } = inspectTakePlan(planPath, {
     environment,
   });
-  io.log(renderTakePlan(summary));
+  io.log(renderTakePlan(summary, { execute: true }));
   io.log('');
   if (confirm !== summary.planSha256)
     throw new TakePlanRefused(
@@ -627,6 +646,17 @@ export async function executeTakePlan(
         (!scope.fixedMediaOnly || exact(p.media, ['fixedPath'])),
     ),
   );
+  // Everything that needs nothing private is checked before the marker, so
+  // it cannot use up the attempt.
+  if (
+    runtime.platform !== LAB_PLAYER_RUNTIME.platform ||
+    runtime.node !== LAB_PLAYER_RUNTIME.node ||
+    runtime.libuv !== LAB_PLAYER_RUNTIME.libuv
+  )
+    throw new TakePlanRefused(
+      'runtime',
+      `the owned player needs Node ${LAB_PLAYER_RUNTIME.node} with libuv ${LAB_PLAYER_RUNTIME.libuv} on macOS; this is Node ${runtime.node} with libuv ${runtime.libuv} on ${runtime.platform}`,
+    );
   const free = step('disk', () => freeBytes(p.evidenceDirectory));
   if (!(free >= DISK_FLOOR_BYTES))
     throw new TakePlanRefused(
@@ -640,10 +670,25 @@ export async function executeTakePlan(
       `this plan's one attempt was already used (${markerPath}); a new attempt needs a new plan`,
     );
   if (existsSync(markerPath)) throw used();
+  step('native build signature', () =>
+    modules.verifyNative({
+      manifestFile: p.native.manifestFile,
+      approved: p.native.approved,
+    }),
+  );
+  step('player build signature', () =>
+    modules.verifyPlayer({
+      manifestFile: p.player.manifestFile,
+      approved: p.player.approved,
+    }),
+  );
   const runnerEnvironment = Object.fromEntries(
     RUNNER_ENVIRONMENT.filter((k) => typeof environment[k] === 'string').map(
       (k) => [k, environment[k]],
     ),
+  );
+  io.log(
+    'Building the recording-duration helper (up to two minutes the first time)…',
   );
   const duration = step('duration tool', () =>
     modules.prepareDuration({ environment: runnerEnvironment }),
@@ -780,6 +825,9 @@ async function runAttempt({
         stopAfterS: API_STOP_AFTER_S,
         transcription,
         environment: runnerEnvironment,
+        // The terminal's Ctrl-C must reach only this runner, which stops
+        // the app through the take's ordinary Stop.
+        ownProcessGroup: true,
         ...(p.userName === undefined ? {} : { userName: p.userName }),
         ...(p.contextPolicy === undefined
           ? {}
@@ -933,8 +981,12 @@ async function finishAttempt({
   stopSignal,
   evidenceFailure,
 }) {
+  // The player is always retired once the take has settled: when the take
+  // retired it this returns its result again; when the take could not
+  // (release unconfirmed, or no take), the runner retires it so nothing it
+  // owns keeps running. The outcome records whether native was released.
   let playerRetired = null;
-  if (!take && player)
+  if (player)
     playerRetired = await player
       .close({ nativeReleased: true })
       .then((r) => r?.closed === true)
@@ -1043,7 +1095,7 @@ async function finishAttempt({
     },
     player: {
       diagnostics: get(() => player.diagnostics),
-      retiredByRunner: playerRetired,
+      retired: playerRetired,
     },
     recorder: {
       finalized: recorderFinalized,
@@ -1086,6 +1138,10 @@ async function finishAttempt({
   io.log(
     'This runner claims nothing about the take: review the report, the recording and the outcome. The attempt is used; a new attempt needs a new plan.',
   );
+  if (get(() => launcher.processStarted) && !get(() => launcher.processEnded))
+    io.log(
+      'TalkQTE keeps running after its release: quit it from its menu. This runner exits once TalkQTE has quit; Ctrl-C now ends only the runner, not TalkQTE.',
+    );
   return Object.freeze({
     exitCode: reportDirectory ? 0 : 1,
     state,

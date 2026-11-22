@@ -239,22 +239,26 @@ npm run lab:take -- --plan /Users/you/talkqte-lab-private/plan.json \
 
 The runner, in order:
 
-1. Prints the same dry run as step 10; a refused plan stops here (exit 1). `--confirm` must equal the plan's sha256 exactly.
+1. Prints the same dry run as step 10 (its first line reads `Plan valid. Checking this attempt before anything is launched.`); a refused plan stops here (exit 1). `--confirm` must equal the plan's sha256 exactly.
 2. Refuses a plan outside the [owner decisions](#owner-decisions) (`Plan refused at owner decisions`): only `claude-opus-5-5`, a minute cap of 5 and the fixed meeting.
-3. Refuses to start below 5 GiB free on the evidence volume (`Plan refused at disk`).
-4. Refuses a plan whose attempt was already used (`Plan refused at attempt`), then builds the [duration helper](#6-the-recorder-helper) and creates the attempt marker `take-attempt-<plan sha256>.json` (owner-only, exclusive) in the evidence folder. Nothing has been launched and no key file has been read up to here. A failed or interrupted attempt keeps its marker; a new attempt needs a new plan.
+3. Refuses to start under any Node other than v22.23.2 with libuv 1.51.0 on macOS, which the owned player requires (`Plan refused at runtime`), and below 5 GiB free on the evidence volume (`Plan refused at disk`).
+4. Refuses a plan whose attempt was already used (`Plan refused at attempt`). Then it runs the launcher's and the player's own receipt, executable-hash and signature checks (`Plan refused at native build signature` or `player build signature`; both are repeated at launch), prints `Building the recording-duration helper …` and builds the [duration helper](#6-the-recorder-helper) (up to two minutes the first time), and creates the attempt marker `take-attempt-<plan sha256>.json` (owner-only, exclusive) in the evidence folder. Nothing has been launched and no key file has been read up to here, and every check that needs nothing private has run, so none of them can use up the attempt. A failed or interrupted attempt keeps its marker; a new attempt needs a new plan.
 5. Sweeps stale tokens: `removeStaleTranscriptionTokens()` (`scripts/cue-lab-launcher.mjs`). It touches only owner-only `tq-owned-*` folders whose run provably ended.
 6. Opens the evidence writer: `createLabEvidenceWriter({ parentDirectory: evidenceDirectory, runId, fictional: true, mode: 'prepared', contentMode: 'fictional-content', onFailure })`, with `onFailure` stopping the take, and declares the `node` and `native-logger` clocks. It prints the evidence folder.
 7. Prepares the player before anything else: `createLabPlayer({ runId, manifestFile, approved, startMs: 1000 })`, then `player.prepare({ media })` with the media descriptor the dry run loaded.
 8. Mints the Deepgram grant, unless this is a provider-failure take: `mintDeepgramGrant()` (reads `deepgram.env`, one request).
-9. `prepareLabLauncher({ manifestFile, approved, mode: 'model-enabled', selection, sourceApplication: 'TalkQTE Lab Player', playerSource: player.identity, stopAfterS: 320, transcription: { backend: 'deepgram', minuteCap, grant }, environment })`, adding `userName`, `contextPolicy` or `turnOff: true` when the plan names them. It verifies the signature and creates the run folder; it launches nothing yet. The grant's TTL (or the probe) is recorded in the manifest.
+9. `prepareLabLauncher({ manifestFile, approved, mode: 'model-enabled', selection, sourceApplication: 'TalkQTE Lab Player', playerSource: player.identity, stopAfterS: 320, transcription: { backend: 'deepgram', minuteCap, grant }, environment })`, adding `userName`, `contextPolicy` or `turnOff: true` when the plan names them, and `ownProcessGroup: true` so TalkQTE runs in its own process group. It verifies the signature and creates the run folder; it launches nothing yet. The grant's TTL (or the probe) is recorded in the manifest.
 10. `createLabSourceV1({ launcher, application: 'TalkQTE Lab Player', commit, features })` with the receipt's commit and features.
 11. `createLabOwnedWindowSelector({ binary, sha256, playerSource: player.identity, native: launcher, nativeApplication: 'TalkQTE' })` and `createLabRecorder({ binary, sha256, directory: writer.directory, selectWindows, native: launcher, playerSource: player.identity, seconds: 180, startupMs: 3000 })`.
 12. `createFixedModelTake({ settings: { ...selection, deadlineMs: 30000, execution: 'api', environment }, runId, launcher, source, player, recorder, media, stopAfterS: 320, approvalBudgetMs: 180000, takeMs: 135000, onApproval, observe, onGuard, signal })`, with `tailMs` and `turnOffAfterMs` from the plan; `observe` stops the take when `writer.emit` returns false, and `onGuard` goes to `writer.recordGuard`. Then it waits for `take.done`.
 
 The take then runs on its own: it launches TalkQTE, waits for the exact player's Listening, waits for the [in-app approval](#12-the-in-app-approval), opens the provider, releases the Deepgram token, starts the recorder, starts playback, and stops and cleans up at the end ([composition and startup order](lab-prepared-take.md#composition-and-startup-order)). **Verified from code** for each interface and against offline compositions (`scripts/cue-lab-prepared-take.test.mjs`, and `scripts/cue-lab-take.test.mjs` for the runner with the existing fixtures); the whole composition has not run a real take.
 
-**Stopping:** Ctrl-C (SIGINT) or SIGTERM in the runner's terminal asks the take's ordinary Stop and cleanup; it never kills the app. The runner prints one `SIGINT: stopping …` line, ignores repeated signals, and still writes the evidence and report. Before the take exists (while the player is prepared or the grant minted), it stops there and retires the player; nothing was launched. Do not force-quit the runner: a killed runner skips cleanup.
+**Stopping:** Ctrl-C (SIGINT) or SIGTERM in the runner's terminal asks the take's ordinary Stop and cleanup. The terminal sends Ctrl-C to its whole foreground process group; the runner launches TalkQTE in its own process group, so the signal reaches only the runner, which then stops the app with the lab's Stop (SIGUSR2) and waits for its release. (Launched in the runner's group, TalkQTE would get the same SIGINT and exit through its own handler, without the lab's Stop; `scripts/cue-lab-launcher.test.mjs` shows both.) The player and recorder already run in their own groups. The runner prints one `SIGINT: stopping …` line, ignores repeated signals, and still writes the evidence and report.
+
+Before the take exists, a stop takes effect at the next step: nothing is launched, and the prepared player is retired. A Ctrl-C while the Deepgram grant is being minted lets that one request finish; the grant is then discarded unused and nothing reaches the app. After the take settles the runner always retires the player, also when the take could not (release unconfirmed); the outcome records whether native was released.
+
+Do not force-quit the runner: a killed runner skips cleanup, and TalkQTE, in its own group, would keep running.
 
 ### Runner settings
 
@@ -315,14 +319,14 @@ Proves it, each separately:
 - **Recorder:** finalized, with the recording in the evidence folder.
 - **Player:** retired (exit zero, process group gone) only after native release and recorder finalization.
 - **Token:** the Deepgram token file is gone from the run's `tq-owned-*` folder: `ls -la "$TMPDIR"/tq-owned-*`.
-- **The app:** the TalkQTE process may keep running after release. Quit it normally. **_To confirm on the Mac_:** that it quits cleanly from its menu after a lab take.
+- **The app:** the TalkQTE process may keep running after release; there is no lab path that ends it, and the runner never kills it. The runner prints `TalkQTE keeps running after its release: quit it from its menu.` and exits once TalkQTE has quit; after the report is written, Ctrl-C ends only the runner, not TalkQTE. **_To confirm on the Mac_:** that it quits cleanly from its menu after a lab take.
 - **Evidence:** expiry is metadata only (seven days by default); deleting private evidence is the owner's manual step.
 
 ## After a failure
 
 Keep everything: the attempt marker, the evidence folder (partial recording included, with `take-outcome.json`), and the run's `tq-owned-*` folder until its token is swept. Record the first failure as reported; later failures never replace it.
 
-Do not retry, restart or resume the same take, kill the app and call it release, or work around a permission prompt. If release is unconfirmed, the player process is kept and cleanup counts as failed; resolving that is an owner action. The runner refuses the same plan again; a new take needs a new plan and its review ([owner decisions](#owner-decisions)).
+Do not retry, restart or resume the same take, kill the app and call it release, or work around a permission prompt. If release is unconfirmed, cleanup counts as failed (`failed-cleanup`); the take keeps the player, and the runner retires it once the take has settled. Whether the app released its capture is then the owner's to check. The runner refuses the same plan again; a new take needs a new plan and its review ([owner decisions](#owner-decisions)).
 
 ## Variants on main
 
