@@ -258,6 +258,7 @@ evidence-loss markers. The original artifact remains the source for other rows.
 - `stt_state` becomes `transcription.stream`, with the state (`started`, `connected`, `dropping`, `finished`, `ended` or `stopped`), the fixed stop code (only on `stopped`; `lab_ended` when the lab cue run ends), `audio_ms`, and on `connected` only the query of the URL the app actually used (never the token, which travels in a header). Only the app's own parameter names are accepted there, each once; any other parameter refuses the row.
 - `stt_final` becomes `transcript.finalized`, with its sequence and the start and end of speech on the session clock.
 - `dev_stop` with step `latched` becomes `run.stop-latched`: where in the log the lab asked for Stop. Its other steps are not imported.
+- `dev_off` becomes `run.turn-off` with its step (`latched`, `done`, `failed` or `repeated`; a `failed` row has outcome failure): the take's own [turn-off request](lab-prepared-take.md#provider-failure-and-turning-processing-off-t5). Any other step refuses the row.
 
 The provider's speaker label is untrusted: it is dropped on import and never reported or scored.
 
@@ -269,7 +270,10 @@ When the manifest records the launcher's `transcription` settings (backend, minu
 - the last stop state and code;
 - the most audio sent;
 - whether processing was turned off: a `stopped` row with code `withdrawn` or `lab_ended`. When it was, the code, the audio sent by then, whether it came before the lab Stop latch (a lab Stop cancels the lab cue run before it takes the session, so a stream that closes after the latch may be the Stop's own), whether the stream closed without the Stop drain (no `finished` row after it, and every stream the session started closed the same way), and whether nothing of the session's transcription followed (no other stream row, final or transcript line after it). "No" for turned off needs a stop row for every stream that started;
+- when the take asked for a turn-off, whether the turned-off stream closed after the `dev_off` `latched` row (native writes it before withdrawing anything);
 - a stop for any other code (for example `auth`) as a failure, with whether nothing of the session's transcription followed it. A fallback to another service would have to appear there, so "nothing followed" is the evidence that nothing fell back.
+
+When the take asked for a turn-off, the section also gives native's outcome (`done`, `failed`, or not seen), whether it was decided before the lab Stop latch (native orders the two; with no latch row it is yes unless rows may be missing; with no outcome row it is unknown), and how many later signals were recorded as no-ops. The manifest does not record whether a take planned a turn-off, so a planned turn-off that left no `dev_off` row reads like a take that asked for none; the take's own `turnOff` result says whether it asked.
 
 For a provider-failure take the section also gives one result against the expected code `auth`: refused as expected (every stream that started stopped with `auth`, none connected, nothing followed), connected (the refused text was accepted, so the take shows no provider failure), another code, transcription after the failure, or unknown.
 

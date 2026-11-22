@@ -41,9 +41,31 @@ process.on('SIGUSR2', () => {
 if (
   !/^[1-9][0-9]*$/.test(process.env.TALKQTE_DEV_STOP_AFTER_S ?? '') ||
   process.env.TALKQTE_DEV_APPLICATION_SOURCE !== 'QuickTime Player' ||
-  process.env.TALKQTE_DEV_STOP_SIGNAL !== 'usr2'
+  process.env.TALKQTE_DEV_STOP_SIGNAL !== 'usr2' ||
+  !['usr1', undefined].includes(process.env.TALKQTE_DEV_OFF_SIGNAL)
 )
   process.exit(2);
+// As native dev_off.rs: the first SIGUSR1 turns processing off (`latched`
+// then `done`, or `failed` in that case) and stops the stream as the lab
+// build does (`lab_ended`); every later one is a recorded no-op.
+const off = (step) =>
+  appendFileSync(
+    path,
+    JSON.stringify({
+      event: 'dev_off',
+      run_id: run,
+      step,
+      wall_ms: 1,
+      mono_ms: 1,
+    }) + '\n',
+  );
+let offs = 0;
+if (process.env.TALKQTE_DEV_OFF_SIGNAL === 'usr1')
+  process.on('SIGUSR1', () => {
+    if (offs++) return off('repeated');
+    off('latched');
+    off(mode === 'turn-off-failed' ? 'failed' : 'done');
+  });
 if (mode === 'partial') {
   const text = frame('armed');
   appendFileSync(path, text.slice(0, 10));
@@ -76,6 +98,8 @@ else if (mode === 'frame-oversize')
 else if (mode === 'bad-utf8') appendFileSync(path, Buffer.from([255, 10]));
 else if (mode === 'stall-partial') appendFileSync(path, '{"event":');
 else put('armed');
+// A turn-off row nobody asked for.
+if (mode === 'turn-off-unasked') off('latched');
 if (mode === 'listening') {
   for (const event of [
     {

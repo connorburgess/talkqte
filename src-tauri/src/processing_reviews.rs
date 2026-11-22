@@ -604,6 +604,26 @@ mod tests {
     }
 
     #[test]
+    fn lab_turn_off_withdraws_like_disable_and_never_reopens() {
+        let (mut r, _) = runtime();
+        assert!(!r.withdraw_processing_for_lab(), "nothing on to withdraw");
+        let approved = prepare(&mut r, &[]);
+        approve(&mut r, &approved).unwrap();
+        let pending = prepare(&mut r, &[]);
+        assert!(r.withdraw_processing_for_lab());
+        assert!(!r.engine.has_processing_permission());
+        assert_eq!(approve(&mut r, &pending), Err(ProcessingError::StaleReview));
+        assert!(!r.withdraw_processing_for_lab(), "a second off is a no-op");
+        assert!(!r.engine.has_processing_permission());
+        // A draining Stop holds no permission, so the off changes nothing.
+        let fresh = prepare(&mut r, &[]);
+        approve(&mut r, &fresh).unwrap();
+        let _stopped = r.take_live_for_stop().unwrap();
+        assert!(!r.withdraw_processing_for_lab());
+        assert!(r.engine.is_live_stopping());
+    }
+
+    #[test]
     fn stop_keeps_transcript_drain_open_but_blocks_fresh_processing_until_a_new_session() {
         let (mut r, calls) = runtime();
         let approved = prepare(&mut r, &[]);

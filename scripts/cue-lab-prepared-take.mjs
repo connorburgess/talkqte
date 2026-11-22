@@ -24,6 +24,10 @@ const sourceWindowMs = (approvalBudgetMs) =>
   approvalBudgetMs
     ? SOURCE_WINDOW_MS + approvalBudgetMs + LAUNCH_ALLOWANCE_MS
     : SOURCE_WINDOW_MS;
+// The run's stop reasons that a confirmed turn-off is expected to cause:
+// native ending the lab cue run, or the live session ending. Any other
+// reason after a turn-off stays its own failure.
+const TURN_OFF_ENDS = new Set(['lab-ended', 'session-ended']);
 const required = (condition) => {
   if (!condition) throw gateFailure('protocol');
 };
@@ -69,6 +73,10 @@ export function assertFixedModelTakeOptions(options) {
           Number.isSafeInteger(options.tailMs) &&
           options.tailMs >= 0 &&
           options.tailMs <= 15000)) &&
+      // A turn-off take (T5) only on the direct API route, whose cloud
+      // stream is what turning processing off withdraws.
+      (options.turnOffAfterMs === undefined ||
+        options.settings.provider === 'anthropic-api') &&
       // Approved fictional media (fixed MP4 or a reviewed per-run manifest)
       // within the bounds every timing guard below was set for.
       isLabMedia(options.media),
@@ -110,6 +118,10 @@ export function createLabPlaybackSession({
   onApproval,
   observe,
   onGuard,
+  // Turn cue processing off this long after the media's actual render
+  // start, as Disable processing does (native dev_off.rs). The launcher
+  // must have been prepared with `turnOff: true`, and only then.
+  turnOffAfterMs,
 } = {}) {
   required(
     launcher &&
@@ -145,6 +157,17 @@ export function createLabPlaybackSession({
   required(
     (observe === undefined || typeof observe === 'function') &&
       (onGuard === undefined || typeof onGuard === 'function'),
+  );
+  // Within the media, so the stream is still sending when it is asked, and
+  // never on a launch that was not prepared for it (or the reverse).
+  required(
+    turnOffAfterMs === undefined
+      ? !launcher.turnOff
+      : Number.isSafeInteger(turnOffAfterMs) &&
+          turnOffAfterMs >= 1 &&
+          turnOffAfterMs < media.durationMs &&
+          body === undefined &&
+          launcher.turnOff?.step === null,
   );
   const checkSource = () => {
     if (!fixedSource) return;
@@ -223,6 +246,14 @@ export function createLabPlaybackSession({
   let nativeStartedAt,
     guard = null,
     approval = null;
+  // The planned turn-off: when it was asked (node clock, and after the
+  // render start) and native's outcome. `failureSource` says whether the
+  // take's first failure came from the run ending, which after a confirmed
+  // turn-off is the expected end rather than a fault.
+  let turnOff = null,
+    turnOffTimer,
+    failureSource = null,
+    failedAfterOff = false;
   // In-app approval, read from the native `evaluator` rows for this run's
   // private timing file. A launch-setting approval, or an approval naming a
   // backend or model this take did not launch, is a fault.
@@ -272,6 +303,7 @@ export function createLabPlaybackSession({
     stopAfterS,
     armingMs,
     releaseMs: nativeReleaseMs,
+    turnOff: turnOffAfterMs !== undefined,
   });
   const native = {
     subscribe: owner.subscribe,
@@ -289,17 +321,23 @@ export function createLabPlaybackSession({
       }
     },
     stop: owner.stop,
+    turnOff: owner.turnOff,
   };
   const subscriptions = [];
-  const fail = (reason = 'protocol') => {
+  const fail = (reason = 'protocol', source = 'take') => {
     if (closing) return;
     failedStep ??= step;
+    if (!failure) {
+      failureSource = source;
+      failedAfterOff = turnOff !== null;
+    }
     failure ??= [
       'cancelled',
       'deadline',
       'protocol',
       'approval-not-given',
       'approval-fault',
+      'turn-off-failed',
     ].includes(reason)
       ? reason
       : 'protocol';
@@ -342,7 +380,7 @@ export function createLabPlaybackSession({
   }
   const onAbort = () => fail('cancelled');
   const onRunAbort = () =>
-    fail(run.signal.reason === 'cancelled' ? 'cancelled' : 'protocol');
+    fail(run.signal.reason === 'cancelled' ? 'cancelled' : 'protocol', 'run');
   run.signal.addEventListener('abort', onRunAbort, { once: true });
   signal?.addEventListener('abort', onAbort, { once: true });
   // On the API route this clock is paused for the approval wait (bounded
@@ -544,6 +582,15 @@ export function createLabPlaybackSession({
               monotonicMs: anchor.monotonicMs,
               uncertaintyMs: anchor.uncertaintyMs,
             });
+            if (turnOffAfterMs !== undefined)
+              turnOffTimer = setTimeout(
+                askTurnOff,
+                Math.max(
+                  0,
+                  anchor.monotonicMs + turnOffAfterMs - performance.now(),
+                ),
+                anchor.monotonicMs,
+              );
             report(
               'speech.render-start',
               'observed',
@@ -596,9 +643,33 @@ export function createLabPlaybackSession({
     }
     normal = true;
   });
+  // Asked once, only once the run is ready (native may authenticate after
+  // the render start), and never after anything stopped the take. A
+  // refusal or a missing outcome stops the take as a failed check.
+  function askTurnOff(anchorMs) {
+    run.ready.then(
+      () => {
+        if (closing || root.signal.aborted) return;
+        const askedAt = performance.now();
+        turnOff = {
+          afterMs: turnOffAfterMs,
+          askedAfterRenderMs: Math.round(askedAt - anchorMs),
+          outcome: null,
+        };
+        run.turnOff().then(
+          () => (turnOff.outcome = 'done'),
+          () => {
+            turnOff.outcome = run.turnOffState?.outcome ?? 'failed';
+            fail('turn-off-failed');
+          },
+        );
+      },
+      () => {},
+    );
+  }
   // Native failure before Listening must also stop player/recorder, independent
   // of whether the injected observer has delivered its next event.
-  run.ready.catch(fail);
+  run.ready.catch((error) => fail(error, 'run'));
   const done = work.then(
     () => close(),
     (error) => {
@@ -626,6 +697,7 @@ export function createLabPlaybackSession({
     });
     closing.catch(() => {});
     phase = 'stopping';
+    clearTimeout(turnOffTimer);
     root.abort();
     // Start ordinary Stop/provider cleanup immediately, including before auth.
     const settle = (fn) => Promise.resolve().then(fn);
@@ -695,6 +767,21 @@ export function createLabPlaybackSession({
       clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
       run.signal.removeEventListener('abort', onRunAbort);
+      // Native release follows its rows in order, so a `done` written
+      // before the Stop latch has been seen by now. The run ending after a
+      // confirmed turn-off is what the plan asked for, not a fault.
+      if (turnOff && turnOff.outcome === null)
+        turnOff.outcome = run.turnOffState?.outcome ?? null;
+      if (
+        failure === 'protocol' &&
+        failureSource === 'run' &&
+        failedAfterOff &&
+        owner.offState?.outcome === 'done' &&
+        TURN_OFF_ENDS.has(run.stopReason)
+      ) {
+        failure = 'turned-off';
+        turnOff.outcome = 'done';
+      }
       phase = cleanupFailed
         ? 'failed-cleanup'
         : failure || !normal
@@ -707,9 +794,11 @@ export function createLabPlaybackSession({
             ? 'failure'
             : failure === 'cancelled'
               ? 'cancelled'
-              : failure || !normal
-                ? 'failure'
-                : 'observed',
+              : failure === 'turned-off'
+                ? 'observed'
+                : failure || !normal
+                  ? 'failure'
+                  : 'observed',
         );
       } catch {
         cleanupFailed = true;
@@ -724,6 +813,7 @@ export function createLabPlaybackSession({
         mediaSha256: identity.sha256,
         guard,
         approval,
+        turnOff: turnOff && Object.freeze({ ...turnOff }),
         clockCalibration: run.clockCalibration,
       });
     })().then(resolve, reject);
@@ -773,6 +863,12 @@ export function createLabPlaybackSession({
     },
     get approval() {
       return approval;
+    },
+    // The planned turn-off: { afterMs, askedAfterRenderMs, outcome } once
+    // asked (`done`, `failed` or `no-outcome`), else null. A take whose run
+    // ended after a confirmed `done` stops with failure `turned-off`.
+    get turnOff() {
+      return turnOff && Object.freeze({ ...turnOff });
     },
   });
 }

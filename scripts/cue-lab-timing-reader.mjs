@@ -96,15 +96,18 @@ export function watchLabTiming({
       typeof value.event !== 'string'
     )
       throw gateFailure('protocol');
-    if (value.event === 'dev_stop') {
+    if (value.event === 'dev_stop' || value.event === 'dev_off') {
+      // dev_off: the opted-in turn-off beside the lab Stop (dev_off.rs).
+      const steps =
+        value.event === 'dev_stop'
+          ? ['armed', 'latched', 'stopping', 'released', 'failed']
+          : ['latched', 'done', 'failed', 'repeated'];
       if (
         Object.keys(value).some(
           (k) => !['event', 'run_id', 'step', 'wall_ms', 'mono_ms'].includes(k),
         ) ||
         value.run_id !== runId ||
-        !['armed', 'latched', 'stopping', 'released', 'failed'].includes(
-          value.step,
-        )
+        !steps.includes(value.step)
       )
         throw gateFailure('protocol');
       for (const key of ['wall_ms', 'mono_ms'])
@@ -113,7 +116,7 @@ export function watchLabTiming({
           (!Number.isSafeInteger(value[key]) || value[key] < 0)
         )
           throw gateFailure('protocol');
-      onEvent({ event: 'dev_stop', run_id: runId, step: value.step });
+      onEvent({ event: value.event, run_id: runId, step: value.step });
     } else if (value.event === 'dev_source_observation') {
       if (
         sourceObservation !== 'v1' ||

@@ -32,6 +32,13 @@ mod dev_model;
     feature = "native-audio-spike",
     feature = "lab-evaluator"
 ))]
+mod dev_off;
+#[cfg(all(
+    debug_assertions,
+    target_os = "macos",
+    feature = "native-audio-spike",
+    feature = "lab-evaluator"
+))]
 mod dev_source_observation;
 #[cfg(all(
     debug_assertions,

@@ -117,6 +117,16 @@ Offline tests cover sticky Stop, delayed startup/listing, overlapping ordinary
 Stop/replacement, delayed microphone teardown/history refusal and release fences; this
 handshake has not been exercised with a native app or real capture.
 
+The same armed run can also opt into a withdraw-only turn-off:
+`TALKQTE_DEV_OFF_SIGNAL=usr1`, accepted only with the armed USR2 Stop and
+refused otherwise. SIGUSR1 then turns cue processing off the way **Disable
+processing** does, once, and writes `dev_off` rows (`latched`, then `done` or
+`failed`, then `repeated` for each later signal). It never starts or approves
+anything, and a Stop signal received first wins. The handler is installed
+before `armed` with the same refusal of an existing disposition; ordinary
+builds install none. See [turning processing off](lab-prepared-take.md#provider-failure-and-turning-processing-off-t5)
+for the order with the Stop latch and how a take uses it.
+
 The same armed run can publish [versioned selected-source observations](development-source-observation.md)
 that bind the host operation, live-start operation and exact session/Control.
 These are historical guard-time observations, not atomic current readiness or

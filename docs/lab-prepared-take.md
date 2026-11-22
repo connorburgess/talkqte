@@ -162,38 +162,68 @@ release a token, the app's refusal ends the session, and the take ends
 `stopped`. The [evidence report](lab-evidence-report.md#existing-native-timing-import)
 states the code seen and whether anything followed it.
 
-**Turning processing off mid-run is not yet possible unattended.** The
-native lab build's only unattended controls are its launch settings and the
-SIGUSR2 lab Stop (`src-tauri/src/dev_stop.rs`). **Disable processing**,
-**Off** and Pause are interface controls with no lab path. Ending the lab
-cue run from the broker side would close the stream with `lab_ended`, but
-the run lifecycle treats losing the broker as terminal and stops at once.
-The off and the Stop would then race, and what ran would be the
-transport-failure path, not a withdrawn review.
+**Turning processing off mid-run** uses an opt-in development signal
+beside the lab Stop. The plan names `turnOffAfterMs`, and the launcher is
+prepared with `turnOff: true` (one without the other is refused). The time is
+counted from the media's actual render start and must fall within the media
+(at least 1 ms and less than its duration). The fixed saved-meeting take accepts it on the
+direct API route only, whose cloud stream is what turning off withdraws.
 
-The smallest mechanism consistent with the existing ones, proposed and not
-built:
+1. **Native** (`src-tauri/src/dev_off.rs`, macOS debug builds with
+   `native-audio-spike` and `lab-evaluator` only, as `dev_stop.rs`).
+   `TALKQTE_DEV_OFF_SIGNAL=usr1` is accepted only with the armed USR2 lab
+   Stop for the same run. Any other value, or the setting without the lab
+   Stop, refuses setup. `dev_stop::install` installs the SIGUSR1 handler
+   after its own and before writing `armed`, with the same refusal of an
+   existing signal disposition. Default and release builds compile none of
+   it and install no handler. The raw handler does one atomic add. A worker,
+   started only after `armed` was written, handles each signal:
+   - The first writes `dev_off` `latched`. Then, if processing is on and the
+     Stop signal has not been received, it withdraws processing the way
+     **Disable processing** does (`Runtime::withdraw_processing_for_lab`:
+     pending reviews cleared, then `revoke_processing`, then publish) and
+     writes `done`. Otherwise it changes nothing and writes `failed`. The
+     runtime lock is waited for at most one second; past that it is `failed`.
+   - Every later signal writes `repeated` and changes nothing.
 
-1. Native: an opt-in `TALKQTE_DEV_OFF_SIGNAL=usr1`, accepted only with the
-   armed USR2 lab Stop for the same run id and the same debug features.
-   `dev_stop::install` installs it before arming, with the same refusal of an
-   existing signal disposition. The raw handler does one atomic store. A
-   worker takes the runtime lock and calls the same `revoke_processing` that
-   **Disable processing** uses, then writes `dev_off` rows (`latched`, then
-   `done` or `failed`). It acts once, and never after the Stop latch.
-2. Native owner and launcher: `turnOff()` sends SIGUSR1 once, only after
-   `armed` and before Stop, and needs the exact-run `done` row. The launcher
-   forwards the setting only when the plan names a turn-off time.
-3. Lifecycle and this driver: an explicit `turnOffAfterMs` within the media.
-   The session end that follows a confirmed `done` is expected, not a
-   failure. Stop and cleanup are unchanged.
-4. Evidence: the report already states, per session, whether a stream
-   stopped as turned off, before the lab Stop latch, without the drain and
-   with nothing after it. A `dev_off` row would add when the take asked.
+   It never starts, resumes or approves anything. **Order with the lab
+   Stop:** the off decision and the Stop's `latched` row share one lock. A
+   Stop signal received before the off decides wins: the off writes
+   `failed`. A Stop arriving while the off is withdrawing waits, so its
+   `latched` row follows `done`. The two `dev_off` rows of one decision are
+   never split by `dev_stop` `latched`.
+2. **Launcher and native owner.** The launcher forwards the setting only when
+   prepared for a turn-off, and accepts `dev_off` rows only then, only after
+   `armed`, in native's strict order (`latched`, then `done` or `failed`, then
+   any `repeated`). They go to the owner alone. `owner.turnOff()` sends
+   SIGUSR1 once to the exact owned child, only after `armed` and before any
+   Stop was asked for. It resolves on `done` and rejects on `failed` or when
+   no outcome arrives within two seconds. A `latched` row the owner did not
+   ask for fails the run. A `repeated` row (a signal from outside the owner)
+   is counted.
+3. **Lifecycle and this driver.** The take asks once, when the time comes
+   and the run is ready, never after anything stopped it. In a lab build the
+   withdrawal also ends the lab cue run, so the stream stops with
+   `lab_ended` ([what stops it](cloud-transcription.md#what-stops-it)). If
+   the run's first stop reason after a confirmed `done` is native ending the
+   lab cue run (`lab-ended`: its `cancel` control frame) or the live session
+   ending (`session-ended`), the take ends `stopped` with failure
+   `turned-off`, and `run.ended` is reported as observed. Any other stop
+   reason (lost connection, process exit, lost timing rows, a deadline, a
+   provider failure) stays its own failure. Whether a real run ends that way
+   has not been observed. A `failed` or missing outcome stops
+   the take with `turn-off-failed`. If nothing ends the run, the take plays
+   on and completes. In every case `take.turnOff` (and the result) gives
+   `afterMs`, how long after the render start it was actually asked, and the
+   outcome. Ordinary Stop and cleanup are unchanged.
+4. **Evidence.** The report imports the `dev_off` rows and places the take's
+   request: its outcome, whether it was decided before the lab Stop latch,
+   how many later signals changed nothing, and per session whether the
+   turned-off stream closed after the take asked
+   ([evidence report](lab-evidence-report.md#existing-native-timing-import)).
 
-This was not built in the same change because it spans Rust signal handling
-(tested in isolated processes), the timing-row schema with the launcher's
-strict step order, the native owner, the lifecycle and this driver.
+No turn-off has been run in the app. The offline tests use the scripted
+backends and the native child fixture.
 
 ## Offline checks and remaining runtime gaps
 

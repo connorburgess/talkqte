@@ -59,6 +59,9 @@ const STAGES = new Set([
   // lab asked for Stop, so a stream closing after it is not read as
   // processing turned off mid-run.
   'run.stop-latched',
+  // The take's own turn-off request (native dev_off rows): asked
+  // (`latched`), its outcome (`done` or `failed`), later no-op signals.
+  'run.turn-off',
   'run.ended',
   'gap',
 ]);
@@ -560,6 +563,12 @@ export function importNativeRows(rows, { runId, artifactId, clockId }) {
         if (r.step !== 'latched') continue;
         stage = 'run.stop-latched';
         break;
+      case 'dev_off':
+        if (!OFF_STEPS.has(r.step)) fail('invalid native turn-off row');
+        stage = 'run.turn-off';
+        if (r.step === 'failed') outcome = 'failure';
+        payload = { offStep: r.step };
+        break;
       case 'user_name_set':
         // Whether the app's name setting was in effect (#363); never a name.
         if (typeof r.set !== 'boolean') fail('invalid native name setting row');
@@ -662,6 +671,8 @@ const key = (e, kind) =>
 const DECISION_ACTIONS = new Set(['show', 'quiet', 'resolved', 'withdraw']);
 // `dropping`: written once when the send queue first overflows.
 const FIXED_LABEL = /^[a-z_]{1,40}$/;
+// Native dev_off steps, in order: asked, outcome, later no-op signals.
+const OFF_STEPS = new Set(['latched', 'done', 'failed', 'repeated']);
 const STT_STATES = new Set([
   'started',
   // Connected to the provider, with the query of the URL actually used.
@@ -738,6 +749,7 @@ function safePayload(payload, includeContent) {
   if (/^[A-Za-z0-9._-]{1,64}$/.test(payload.backend ?? ''))
     result.backend = payload.backend;
   if (STT_STATES.has(payload.sttState)) result.sttState = payload.sttState;
+  if (OFF_STEPS.has(payload.offStep)) result.offStep = payload.offStep;
   if (FIXED_LABEL.test(payload.sourceProblem ?? ''))
     result.sourceProblem = payload.sourceProblem;
   if (Number.isSafeInteger(payload.osCode)) result.osCode = payload.osCode;
@@ -813,6 +825,14 @@ function cloudSummary(events, m) {
     m.writer?.failed === true ||
     (m.writer?.dropped ?? 0) > 0;
   const latch = events.findIndex((e) => e.stage === 'run.stop-latched');
+  // The take's own turn-off request, when it asked for one: native writes
+  // `latched` before it withdraws anything, so a stream closing because of
+  // it comes after that row.
+  const offRows = events.filter((e) => e.stage === 'run.turn-off');
+  const asked = offRows.find((e) => e.payload?.offStep === 'latched') ?? null;
+  const offOutcome =
+    offRows.find((e) => ['done', 'failed'].includes(e.payload?.offStep)) ??
+    null;
   // What follows a row in the same session: any stream row, final or
   // transcript line after it. `except` keeps rows that close another
   // source's stream the same way.
@@ -922,6 +942,9 @@ function cloudSummary(events, m) {
         // other than another stream closing the same way, no final and no
         // transcript line.
         nothingAfter: claim(after(off, sessionId, isOff)),
+        // Whether it followed the take's own turn-off request; null when
+        // the take asked for none.
+        afterAsk: asked ? index.get(off) > index.get(asked) : null,
       },
       // A stream that stopped for another fixed reason (for example the
       // provider refusing the token), and whether anything of the
@@ -1009,6 +1032,22 @@ function cloudSummary(events, m) {
       probe,
       expectedCode: PROBE_CODE,
       result: probeResult,
+    },
+    // The take's own turn-off request: its outcome (null when asked but no
+    // outcome row was seen), whether it was decided before the lab Stop
+    // latch (native orders the two), and later signals that changed nothing.
+    turnOffRequest: asked && {
+      outcome: offOutcome?.payload.offStep ?? null,
+      // Unknown without an outcome row: what was decided, and when, is
+      // not in the log.
+      beforeStop: !offOutcome
+        ? null
+        : latch < 0
+          ? loss
+            ? null
+            : true
+          : index.get(offOutcome) < latch,
+      repeats: offRows.filter((e) => e.payload?.offStep === 'repeated').length,
     },
     rowsMayBeMissing: loss,
     reviewRowSeen: firstReview() >= 0,
@@ -1469,7 +1508,7 @@ const PROBE_RESULTS = {
 const yesNo = (v) => (v === null ? 'unknown' : v ? 'yes' : 'no');
 const offLine = (s) =>
   s.turnOff
-    ? `processing turned off (\`${s.turnOff.code}\`) at ${s.turnOff.audioMsAtOff} ms of audio sent; before the lab Stop: ${yesNo(s.turnOff.beforeStop)}; stream closed without the Stop drain: ${yesNo(s.turnOff.closedWithoutDrain)}; nothing sent or transcribed afterwards: ${yesNo(s.turnOff.nothingAfter)}.`
+    ? `processing turned off (\`${s.turnOff.code}\`) at ${s.turnOff.audioMsAtOff} ms of audio sent; before the lab Stop: ${yesNo(s.turnOff.beforeStop)}; stream closed without the Stop drain: ${yesNo(s.turnOff.closedWithoutDrain)}; nothing sent or transcribed afterwards: ${yesNo(s.turnOff.nothingAfter)}${s.turnOff.afterAsk === null ? '' : `; after the take asked for it: ${yesNo(s.turnOff.afterAsk)}`}.`
     : `processing turned off: ${yesNo(s.turnedOff)}.`;
 const failureLine = (s) =>
   s.failure
@@ -1488,6 +1527,12 @@ function cloudMarkdown(c) {
     ...(c.failureProbe
       ? [
           `Provider failure: expected code \`${c.failureProbe.expectedCode}\`; result **${PROBE_RESULTS[c.failureProbe.result]}**.`,
+          '',
+        ]
+      : []),
+    ...(c.turnOffRequest
+      ? [
+          `Turn-off asked by the take: native outcome **${c.turnOffRequest.outcome ?? 'not seen'}**; decided before the lab Stop: ${yesNo(c.turnOffRequest.beforeStop)}; later signals recorded as no-ops: ${c.turnOffRequest.repeats}.`,
           '',
         ]
       : []),
