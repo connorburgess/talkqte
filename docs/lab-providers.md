@@ -153,7 +153,7 @@ The preflight estimate uses `ceil(UTF-8 bytes / 2) + 1,500` input tokens and the
 - **Before approval:** the provider is not opened. The key file is not read, no worker starts and nothing is sent.
 - **No approval in time:** the take stops through ordinary Stop with `approval-not-given`, and nothing plays. The wait also ends early if a later approval could no longer leave room for the recorder and the full media before native Stop.
 - **Faults:** an approval by launch setting, or one naming another backend or model, stops the take as `approval-fault`, also after playback has begun.
-- **At approval:** the provider opens. The run's startup clock and the take's own clock both restart with their full budgets, so the wait itself cannot make a later step time out. The run package records its one attempt only after this point ([prepared take runbook](lab-take-runbook.md#12-the-in-app-approval)).
+- **At approval:** the provider opens. The run's startup clock and the take's own clock both restart with their full budgets, so the wait itself cannot make a later step time out. The take runner has already recorded its one attempt before launch, so an approval that is not given still uses it ([prepared take runbook](lab-take-runbook.md#12-the-in-app-approval)).
 
 Native Stop is set at 320 s: the usual 110 s source window, the 180 s approval budget and a 30 s allowance from native start to Listening. The evidence guard records the approval budget and the time actually waited as separate fields.
 

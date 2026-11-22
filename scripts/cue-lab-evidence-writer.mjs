@@ -27,6 +27,9 @@ import {
 const CHECKOUT = realpathSync(fileURLToPath(new URL('../', import.meta.url)));
 const EVENT = 'talkqte.lab.evidence.event.v1';
 const MANIFEST = 'talkqte.lab.evidence.manifest.v1';
+// How far a recorded guard's source window may differ from 320 s (or
+// 110 s) through floating-point rounding alone.
+const GUARD_WINDOW_TOLERANCE_MS = 0.001;
 const STAGES = new Set([
   'speech.render-start',
   'speech.render-end',
@@ -339,8 +342,15 @@ export function createLabEvidenceWriter({
           Number.isSafeInteger(guard.approvalWaitMs) &&
           guard.approvalWaitMs >= 0 &&
           guard.approvalWaitMs <= guard.approvalBudgetMs &&
-          guard.sourceDeadline - guard.nativeStartedAt ===
-            (guard.approvalBudgetMs ? 320000 : 110000) &&
+          // The take adds the window to a performance.now() reading, so
+          // the difference carries floating-point rounding: at a few
+          // hundred seconds of uptime it is off by up to about 6e-11 ms.
+          // Within a microsecond is the same window.
+          Math.abs(
+            guard.sourceDeadline -
+              guard.nativeStartedAt -
+              (guard.approvalBudgetMs ? 320000 : 110000),
+          ) < GUARD_WINDOW_TOLERANCE_MS &&
           guard.startRequestAt >=
             guard.nativeStartedAt + guard.approvalWaitMs &&
           guard.mediaDurationMs > 0 &&

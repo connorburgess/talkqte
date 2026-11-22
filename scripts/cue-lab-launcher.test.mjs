@@ -1647,3 +1647,69 @@ test('a turn-off row nobody asked for, or a setting the launch was not prepared 
       }),
     );
 });
+
+// A terminal's Ctrl-C goes to its whole foreground process group. Here a
+// real Node process leads its own group, launches the harmless native
+// fixture child through the launcher and owner, and then the whole group
+// gets SIGINT, as from a terminal. Its handler asks the ordinary Stop.
+async function groupSigint(ownProcessGroup) {
+  const url = (name) => new URL(`./${name}`, import.meta.url).href;
+  const script = `
+    import { prepareLabFixtureLauncher } from ${JSON.stringify(url('cue-lab-launcher.mjs'))};
+    import { createLabNativeOwner } from ${JSON.stringify(url('cue-lab-native-owner.mjs'))};
+    import { rmSync } from 'node:fs';
+    const launcher = prepareLabFixtureLauncher({
+      fixtureCase: 'normal',
+      mode: 'capture-only',
+      ${ownProcessGroup ? 'ownProcessGroup: true,' : ''}
+    });
+    const owner = createLabNativeOwner({
+      executable: launcher.executable,
+      launch: launcher.launch,
+      stopAfterS: 120,
+      mode: 'capture-only',
+      armingMs: 1000,
+      releaseMs: 1000,
+    });
+    process.on('SIGINT', async () => {
+      const released = await owner.stop().then((r) => r.released === true, () => false);
+      launcher.close();
+      rmSync(launcher.directory, { recursive: true, force: true });
+      process.stdout.write(JSON.stringify({ released, sourceReleased: launcher.sourceReleased }) + '\\n');
+      process.exit(0);
+    });
+    await owner.start({ runId: 'fictional-group-run' });
+    process.stdout.write('ready\\n');
+  `;
+  const child = childProcess.spawn(
+    process.execPath,
+    ['--input-type=module', '-e', script],
+    { detached: true, stdio: ['ignore', 'pipe', 'inherit'] },
+  );
+  let out = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
+    out += chunk;
+    if (out.startsWith('ready\n') && !child.signalled) {
+      child.signalled = true;
+      process.kill(-child.pid, 'SIGINT');
+    }
+  });
+  await once(child, 'close');
+  return JSON.parse(out.split('\n')[1]);
+}
+
+test('a terminal Ctrl-C to the runner group reaches only the runner when the app has its own process group', async () => {
+  // As the take runner launches it: the app survives the group's SIGINT
+  // and is released by the ordinary Stop.
+  assert.deepEqual(await groupSigint(true), {
+    released: true,
+    sourceReleased: true,
+  });
+  // As before, in the caller's group: the app is ended by the same
+  // SIGINT and release can never be shown.
+  assert.deepEqual(await groupSigint(false), {
+    released: false,
+    sourceReleased: false,
+  });
+});
