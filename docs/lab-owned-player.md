@@ -22,6 +22,8 @@ The adapter checks canonical paths outside the checkout, exact bundle metadata,
 strict/deep bundle seal, requirement and executable digest. It repeats these
 checks immediately before spawn. Verification and execution are not atomic.
 No approved signed player receipt is supplied by this change.
+`validateLabPlayerBuildRecord` checks only the receipt's fields against the
+approved tuple, touching no file, for a plan check before anything runs.
 
 ## API and first-take ordering
 

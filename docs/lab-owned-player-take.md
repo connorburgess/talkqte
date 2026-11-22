@@ -96,7 +96,8 @@ Stand-ins test zero-model settings, exact IDs, guard expiry before/at actual Sta
 source/recorder/retirement failures, process Stop and once-only cleanup. Swift
 strict-listing compilation is not device validation. Remaining setup includes
 approved native/player/helper receipts, exact companion visibility/permission
-observation, a thin reviewed execution plan and bounded private causal evidence
+observation, a thin reviewed execution plan (see the
+[prepared take runbook](lab-take-runbook.md)) and bounded private causal evidence
 writer. No app, player, audio, model or capture run is established by these tests.
 
 A failed listing parent close does not end process-group ownership: the bounded
