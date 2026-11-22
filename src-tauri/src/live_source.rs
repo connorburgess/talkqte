@@ -199,7 +199,7 @@ impl Runtime {
         if !self.live_source_accepts(session, control) {
             return Err(LineRefused::NotAttached);
         }
-        self.ingest_timed(session, segment)
+        self.ingest_timed_from(session, crate::engine::LineOrigin::Application, segment)
             .map_err(LineRefused::Engine)
     }
 
@@ -647,6 +647,46 @@ mod tests {
             .map(|line| line.id.as_str())
             .collect();
         assert_eq!(ids, ["a1", "m1"]);
+    }
+
+    #[test]
+    fn the_microphone_and_an_application_each_keep_their_own_line_order() {
+        let line = |id: &str, at_ms| crate::engine::Segment {
+            id: id.into(),
+            at_ms,
+            speaker: "Speaker 1".into(),
+            text: "A fictional line.".into(),
+        };
+        let mut runtime = live();
+        let session = runtime.engine.session();
+        let source = source("fictional-player");
+        runtime.attach_live_source(&source.control).unwrap();
+        runtime.engine.advance(10_000);
+        // The application's later line arrives before the microphone's
+        // earlier one: neither stream waits for the other.
+        runtime
+            .ingest_source_line(session, &source.control, line("a1", 4_000))
+            .unwrap();
+        runtime.engine.ingest(session, line("m1", 2_000)).unwrap();
+        // Within one origin a line timed before the last is still refused.
+        assert!(matches!(
+            runtime.ingest_source_line(session, &source.control, line("a2", 3_000)),
+            Err(LineRefused::Engine(_))
+        ));
+        assert!(runtime.engine.ingest(session, line("m2", 1_000)).is_err());
+        // A refused line does not move its origin's order forward.
+        runtime
+            .ingest_source_line(session, &source.control, line("a3", 4_000))
+            .unwrap();
+        runtime.engine.ingest(session, line("m3", 2_000)).unwrap();
+        let ids: Vec<_> = runtime
+            .engine
+            .state
+            .transcript
+            .iter()
+            .map(|line| line.id.as_str())
+            .collect();
+        assert_eq!(ids, ["a1", "m1", "a3", "m3"]);
     }
 
     #[test]
