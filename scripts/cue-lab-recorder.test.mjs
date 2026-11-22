@@ -54,22 +54,27 @@ for (const mode of ['normal', 'partial', 'moved', 'missing'])
         assert.deepEqual(await stop, { stopped: true });
         // The helper's final report: frames written and whether a window
         // moved or resized after its place in the picture was fixed.
-        assert.deepEqual(
-          { ...f.recorder.report },
-          {
-            frames: 1,
-            audioBuffers: 1,
-            windowsMoved: mode === 'moved',
-            windowsResized: false,
-            windowsMissing: mode === 'missing',
-            geometry: {
-              emulator: { x: 100, y: 80, width: 960, height: 568 },
-              companion: { x: 700, y: 620, width: 320, height: 76 },
-              picture: { width: 1840, height: 1272, scale: 2 },
-            },
-            filters: { emulator: 'independent', companion: 'display' },
-          },
+        const { timings, ...report } = f.recorder.report;
+        // Milliseconds from spawn to each start line, in order.
+        assert.ok(
+          Number.isSafeInteger(timings.matchedMs) &&
+            timings.matchedMs >= 0 &&
+            timings.filtersMs >= timings.matchedMs &&
+            timings.frameAcceptedMs >= timings.filtersMs,
         );
+        assert.deepEqual(report, {
+          frames: 1,
+          audioBuffers: 1,
+          windowsMoved: mode === 'moved',
+          windowsResized: false,
+          windowsMissing: mode === 'missing',
+          geometry: {
+            emulator: { x: 100, y: 80, width: 960, height: 568 },
+            companion: { x: 700, y: 620, width: 320, height: 76 },
+            picture: { width: 1840, height: 1272, scale: 2 },
+          },
+          filters: { emulator: 'independent', companion: 'display' },
+        });
       } finally {
         f.close();
       }
@@ -104,7 +109,46 @@ test("a helper failure keeps its exit and fixed reason, never the helper's messa
       [detail.exit, detail.errorReason, detail.frameAccepted],
       [{ code: 2, signal: null }, 'output-write', false],
     );
+    // No macOS stream code and no start line before this failure.
+    assert.equal(detail.errorCode, null);
+    assert.deepEqual(
+      { ...detail.timings },
+      { matchedMs: null, filtersMs: null, frameAcceptedMs: null },
+    );
     assert.doesNotMatch(JSON.stringify(detail), /fictional|denied/);
+  } finally {
+    f.close();
+  }
+});
+test('a stream macOS stopped keeps its fixed reason, code and start timings, never its text', async () => {
+  const f = fixture('stream-stopped');
+  try {
+    await assert.rejects(f.recorder.start({ runId: 'owned-run' }));
+    await f.recorder.stop().catch(() => {});
+    const detail = f.recorder.failureDetail;
+    assert.deepEqual(
+      [
+        detail.exit,
+        detail.errorReason,
+        detail.errorCode,
+        detail.frameAccepted,
+        detail.matched,
+        { ...detail.filters },
+      ],
+      [
+        { code: 1, signal: null },
+        'stream-stopped',
+        -3805,
+        false,
+        true,
+        { emulator: 'independent', companion: 'display' },
+      ],
+    );
+    assert.ok(Number.isSafeInteger(detail.timings.matchedMs));
+    assert.ok(detail.timings.filtersMs >= detail.timings.matchedMs);
+    assert.equal(detail.timings.frameAcceptedMs, null);
+    assert.equal(f.recorder.report, null);
+    assert.doesNotMatch(JSON.stringify(detail), /fictional|interruption/);
   } finally {
     f.close();
   }
@@ -202,6 +246,28 @@ test('strict Swift source gates exact identities before streams and readiness af
   assert.match(source, /if probed\[current\.windowID\] == true \{/);
   // Both probes run at once, one second in all.
   assert.match(source, /group\.wait\(timeout: \.now\(\) \+ 1\)/);
+  // The window server is connected before any ScreenCaptureKit call (an
+  // unconnected process aborts on the independent filter), and the window
+  // list is re-read after the probe children exit, before any stream
+  // starts (a stream started right after a child exits is stopped, -3805).
+  assert.ok(
+    source.indexOf('_ = CGMainDisplayID()') <
+      source.indexOf('let options = parseArguments()'),
+  );
+  const probesAt = source.indexOf('let probed = probeIndependentFilters(');
+  const relistAt = source.indexOf(
+    'guard let fresh = try? await SCShareableContent',
+    source.indexOf('guard options["capture"] != nil'),
+  );
+  assert.ok(probesAt > 0 && probesAt < relistAt);
+  assert.ok(
+    relistAt < source.indexOf('try await emulatorStream.startCapture()'),
+  );
+  // A stream macOS stops is reported with a fixed reason and its code.
+  assert.match(
+    source,
+    /didStopWithError error: Error\) \{\s*let code = \(error as NSError\)\.code\s*emit\(\["event": "error", "reason": "stream-stopped", "code": code,/,
+  );
   assert.match(source, /"event": "filters"/);
   assert.doesNotMatch(
     source,
