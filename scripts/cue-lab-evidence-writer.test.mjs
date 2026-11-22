@@ -365,3 +365,31 @@ test('cloud transcription settings are recorded once, with the app query and nev
   ]);
   assert.match(manifest.transcription.query, /(^|&)mip_opt_out=true(&|$)/);
 });
+
+test('a provider-failure take records its probe in place of a grant TTL, never both', (t) => {
+  const f = fixture(t);
+  for (const settings of [
+    { backend: 'deepgram', minuteCap: 5, failureProbe: 'unusable' },
+    {
+      backend: 'deepgram',
+      minuteCap: 5,
+      grantTtlS: 900,
+      failureProbe: 'refused-token',
+    },
+  ])
+    assert.throws(() => f.writer.recordTranscription(settings));
+  f.writer.recordTranscription({
+    backend: 'deepgram',
+    minuteCap: 5,
+    failureProbe: 'refused-token',
+  });
+  assert.equal(f.writer.emit(event), true);
+  const { manifest } = f.read();
+  assert.deepEqual(Object.keys(manifest.transcription).sort(), [
+    'backend',
+    'failureProbe',
+    'minuteCap',
+    'query',
+  ]);
+  assert.equal(manifest.transcription.failureProbe, 'refused-token');
+});

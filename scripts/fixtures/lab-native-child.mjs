@@ -166,7 +166,9 @@ if (
   mode === 'cloud-reconnect-pending-thrice' ||
   mode === 'cloud-reconnect-before-first' ||
   mode === 'cloud-reconnect-other-session' ||
-  mode === 'cloud-reconnect-changed-query'
+  mode === 'cloud-reconnect-changed-query' ||
+  mode === 'cloud-refused' ||
+  mode === 'cloud-probe-connects'
 ) {
   // Mirrors the app's cloud transcription settings and token-file rules
   // (#344): at session start the token file exists as an owner-only file in
@@ -248,6 +250,23 @@ if (
       } catch {}
       if (/^[A-Za-z0-9._-]{20,4096}$/.test(token)) {
         clearInterval(poll);
+        // As the provider would: the refused-token probe's fixed text is no
+        // credential, so the handshake is refused (401) and the app stops
+        // the stream with code auth, sending nothing.
+        // `cloud-probe-connects` stands for a provider that accepted it.
+        if (
+          mode === 'cloud-refused' &&
+          token === 'talkqte-lab-refused-token-probe-not-a-credential'
+        ) {
+          row({
+            event: 'stt_state',
+            session: started.session,
+            state: 'stopped',
+            code: 'auth',
+            audio_ms: 0,
+          });
+          return;
+        }
         const connected = (changed = false) =>
           row({
             event: 'stt_state',

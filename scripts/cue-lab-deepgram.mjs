@@ -159,49 +159,83 @@ export async function mintDeepgramGrant({
      * owner-only 0700 directory, exactly as the app reads it.
      */
     writeTokenFile(path) {
-      if (token === null || !isAbsolute(path ?? '')) throw failure('token');
-      const uid = process.getuid?.();
-      const dir = lstatSync(dirname(path));
-      if (
-        !dir.isDirectory() ||
-        dir.isSymbolicLink() ||
-        dir.uid !== uid ||
-        (dir.mode & 0o777) !== 0o700
-      )
-        throw failure('token');
-      const fd = openSync(
-        path,
-        constants.O_WRONLY |
-          constants.O_CREAT |
-          constants.O_EXCL |
-          constants.O_NOFOLLOW,
-        0o600,
-      );
-      let ok = false;
-      try {
-        const bytes = Buffer.from(token, 'utf8');
-        if (writeSync(fd, bytes) !== bytes.length) throw failure('token');
-        const written = fstatSync(fd);
-        if (
-          !written.isFile() ||
-          written.uid !== uid ||
-          (written.mode & 0o777) !== 0o600 ||
-          written.size !== bytes.length
-        )
-          throw failure('token');
-        ok = true;
-      } finally {
-        closeSync(fd);
-        token = null;
-        if (!ok)
-          try {
-            unlinkSync(path);
-          } catch {}
-      }
-      return Object.freeze({ written: true });
+      if (token === null) throw failure('token');
+      const value = token;
+      token = null;
+      return writeOwnerOnlyToken(path, value);
     },
     discard() {
       token = null;
+    },
+  });
+}
+
+// Writes a token, once, to a new 0600 regular file in an existing owner-only
+// 0700 directory, exactly as the app reads it.
+function writeOwnerOnlyToken(path, token) {
+  if (!isAbsolute(path ?? '') || !TOKEN.test(token)) throw failure('token');
+  const uid = process.getuid?.();
+  const dir = lstatSync(dirname(path));
+  if (
+    !dir.isDirectory() ||
+    dir.isSymbolicLink() ||
+    dir.uid !== uid ||
+    (dir.mode & 0o777) !== 0o700
+  )
+    throw failure('token');
+  const fd = openSync(
+    path,
+    constants.O_WRONLY |
+      constants.O_CREAT |
+      constants.O_EXCL |
+      constants.O_NOFOLLOW,
+    0o600,
+  );
+  let ok = false;
+  try {
+    const bytes = Buffer.from(token, 'utf8');
+    if (writeSync(fd, bytes) !== bytes.length) throw failure('token');
+    const written = fstatSync(fd);
+    if (
+      !written.isFile() ||
+      written.uid !== uid ||
+      (written.mode & 0o777) !== 0o600 ||
+      written.size !== bytes.length
+    )
+      throw failure('token');
+    ok = true;
+  } finally {
+    closeSync(fd);
+    if (!ok)
+      try {
+        unlinkSync(path);
+      } catch {}
+  }
+  return Object.freeze({ written: true });
+}
+
+// A deliberate provider-failure take (T5). The launcher, never a caller,
+// writes this fixed text where a token would go. It has the token file's
+// shape, so the app's own checks accept the file and the app connects as
+// usual, but it is no credential: it is not a Deepgram grant (a JWT has
+// dots), so Deepgram refuses it and the app's refusal path runs (expected
+// code `auth`). No key file is read, nothing is minted, and the probe
+// cannot carry a real token because it takes no grant at all.
+export const REFUSED_TOKEN_PROBE = 'refused-token';
+export const REFUSED_PROBE_TOKEN =
+  'talkqte-lab-refused-token-probe-not-a-credential';
+export function refusedTokenProbe() {
+  let used = false;
+  return Object.freeze({
+    probe: REFUSED_TOKEN_PROBE,
+    ttlSeconds: null,
+    writeTokenFile(path) {
+      if (used) throw failure('token');
+      used = true;
+      return writeOwnerOnlyToken(path, REFUSED_PROBE_TOKEN);
+    },
+    discard() {
+      used = true;
     },
   });
 }

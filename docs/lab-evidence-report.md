@@ -257,16 +257,23 @@ evidence-loss markers. The original artifact remains the source for other rows.
 - A live `session` start becomes `session.started`, with its session clock reading.
 - `stt_state` becomes `transcription.stream`, with the state (`started`, `connected`, `dropping`, `finished`, `ended` or `stopped`), the fixed stop code (only on `stopped`; `lab_ended` when the lab cue run ends), `audio_ms`, and on `connected` only the query of the URL the app actually used (never the token, which travels in a header). Only the app's own parameter names are accepted there, each once; any other parameter refuses the row.
 - `stt_final` becomes `transcript.finalized`, with its sequence and the start and end of speech on the session clock.
+- `dev_stop` with step `latched` becomes `run.stop-latched`: where in the log the lab asked for Stop. Its other steps are not imported.
 
 The provider's speaker label is untrusted: it is dropped on import and never reported or scored.
 
-When the manifest records the launcher's `transcription` settings (backend, minute cap, grant TTL and the app's fixed query, never the token), or the rows include a stream, the report adds a cloud transcription section. Per session it gives:
+When the manifest records the launcher's `transcription` settings (backend, minute cap, grant TTL and the app's fixed query, never the token), or the rows include a stream, the report adds a cloud transcription section. A provider-failure take records `failureProbe: "refused-token"` in place of the grant TTL (the two never appear together), and the section opens by calling it a provider-failure take. Per session it gives:
 
 - whether every stream start comes after that session's in-app review row (`approval` `review`, state `on`) in file order;
 - whether it connected, the query it used, and whether that equals the expected query the manifest records;
 - whether the send queue overflowed (`dropping`);
 - the last stop state and code;
-- the most audio sent.
+- the most audio sent;
+- whether processing was turned off: a `stopped` row with code `withdrawn` or `lab_ended`. When it was, the code, the audio sent by then, whether it came before the lab Stop latch (a lab Stop cancels the lab cue run before it takes the session, so a stream that closes after the latch may be the Stop's own), whether the stream closed without the Stop drain (no `finished` row after it, and every stream the session started closed the same way), and whether nothing of the session's transcription followed (no other stream row, final or transcript line after it). "No" for turned off needs a stop row for every stream that started;
+- a stop for any other code (for example `auth`) as a failure, with whether nothing of the session's transcription followed it. A fallback to another service would have to appear there, so "nothing followed" is the evidence that nothing fell back.
+
+For a provider-failure take the section also gives one result against the expected code `auth`: refused as expected (every stream that started stopped with `auth`, none connected, nothing followed), connected (the refused text was accepted, so the take shows no provider failure), another code, transcription after the failure, or unknown.
+
+Each of these answers is yes, no or unknown. A dropped row or writer loss anywhere in the log makes every "nothing followed" or "before the Stop" claim unknown, and the section says rows may be missing. A missing row is never read as a pass.
 
 It also gives the total audio sent across the launch, against the minute cap, which covers every session and source.
 

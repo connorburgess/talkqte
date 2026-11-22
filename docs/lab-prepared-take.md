@@ -149,6 +149,52 @@ required. The prepared path is unchanged. It cannot silently seed scenario narra
 transcript. Actual incremental voice/player clocks and stream scheduling belong
 to that separate driver; this helper fabricates no clock or transcript history.
 
+## Provider failure and turning processing off (T5)
+
+Roadmap item T5 asks a take to check provider failure, Stop and turning
+processing off. Stop is the ordinary end of every take.
+
+**Provider failure** is available through the launcher's
+[refused-token probe](lab-owned-launcher.md#cloud-transcription-token): the
+plan names `failureProbe: 'refused-token'` and holds no real token. This
+driver needs no change. It releases the probe's fixed text where it would
+release a token, the app's refusal ends the session, and the take ends
+`stopped`. The [evidence report](lab-evidence-report.md#existing-native-timing-import)
+states the code seen and whether anything followed it.
+
+**Turning processing off mid-run is not yet possible unattended.** The
+native lab build's only unattended controls are its launch settings and the
+SIGUSR2 lab Stop (`src-tauri/src/dev_stop.rs`). **Disable processing**,
+**Off** and Pause are interface controls with no lab path. Ending the lab
+cue run from the broker side would close the stream with `lab_ended`, but
+the run lifecycle treats losing the broker as terminal and stops at once.
+The off and the Stop would then race, and what ran would be the
+transport-failure path, not a withdrawn review.
+
+The smallest mechanism consistent with the existing ones, proposed and not
+built:
+
+1. Native: an opt-in `TALKQTE_DEV_OFF_SIGNAL=usr1`, accepted only with the
+   armed USR2 lab Stop for the same run id and the same debug features.
+   `dev_stop::install` installs it before arming, with the same refusal of an
+   existing signal disposition. The raw handler does one atomic store. A
+   worker takes the runtime lock and calls the same `revoke_processing` that
+   **Disable processing** uses, then writes `dev_off` rows (`latched`, then
+   `done` or `failed`). It acts once, and never after the Stop latch.
+2. Native owner and launcher: `turnOff()` sends SIGUSR1 once, only after
+   `armed` and before Stop, and needs the exact-run `done` row. The launcher
+   forwards the setting only when the plan names a turn-off time.
+3. Lifecycle and this driver: an explicit `turnOffAfterMs` within the media.
+   The session end that follows a confirmed `done` is expected, not a
+   failure. Stop and cleanup are unchanged.
+4. Evidence: the report already states, per session, whether a stream
+   stopped as turned off, before the lab Stop latch, without the drain and
+   with nothing after it. A `dev_off` row would add when the take asked.
+
+This was not built in the same change because it spans Rust signal handling
+(tested in isolated processes), the timing-row schema with the launcher's
+strict step order, the native owner, the lifecycle and this driver.
+
 ## Offline checks and remaining runtime gaps
 
 ```sh
