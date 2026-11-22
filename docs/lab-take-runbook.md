@@ -10,13 +10,13 @@ Use fictional material only. Every path below is a placeholder: keep receipts, k
 
 - **Modules (verified from code):** the [owned launcher](lab-owned-launcher.md) `prepareLabLauncher`, the [source session join](lab-source-session-join.md) `createLabSourceV1`, the [owned player](lab-owned-player.md) `createLabPlayer`, the strict window selector and recorder ([owned-player take](lab-owned-player-take.md)), the [fixed model take](lab-prepared-take.md#fixed-saved-meeting-model-recording) `createFixedModelTake`, the [evidence writer](lab-evidence-writer.md) and the [evidence report](lab-evidence-report.md).
 - **A plan check:** `npm run lab:take -- --plan <plan.json>` checks one plan file with the same option checks those modules apply and prints what a take would launch, send and spend ([step 10](#10-the-plan-and-its-dry-run)). It launches nothing and reads no key file.
-- **No committed runner.** Nothing in the repository executes a take. A take is still run from a reviewed private package that composes the modules in the order of [step 11](#11-run-the-take). What a committed runner would need from the owner is listed under [decisions before a committed runner](#decisions-before-a-committed-runner).
+- **A runner:** `npm run lab:take -- --plan <plan.json> --execute --confirm <plan sha256>` runs that check again, then one attempt of the plan within the [owner's decisions](#owner-decisions), composing only the modules above in the order of [step 11](#11-run-the-take). It has been tested offline against the existing fixtures only; it has not run a real take.
 
 ## 0. Scope and reservation
 
-Needs: the owner at the Mac for the whole take; no other app launch, capture, player or provider run on the Mac; a written question for the take and its bounds (the plan). Each take needs its own approval; approving one plan approves nothing else.
+Needs: the owner at the Mac for the whole take; no other app launch, capture, player or provider run on the Mac; a written question for the take and its bounds (the plan). Each take needs its own plan and approval; approving one plan approves one attempt of that plan, in that sitting, and nothing else ([owner decisions](#owner-decisions)).
 
-Proves it: the owner has written down which variant ([prepared](#11-run-the-take), [provider failure](#provider-failure-take), [turn-off](#turn-off-take)) and why existing evidence is not enough.
+Proves it: the owner has written down which variant ([prepared](#11-run-the-take), [provider failure](#provider-failure-take), [turn-off](#turn-off-take)) and why existing evidence is not enough. The takes run in that order, each from its own plan.
 
 ## 1. Checkout and offline checks
 
@@ -141,12 +141,13 @@ shasum -a 256 "$PRIVATE/build/lab-window-capture"
 
 Proves it: the plan's `helper.sha256` matches and the dry run passes "recorder helper". **Verified from code:** the recorder and the strict window selector hash the helper again before use; it must be outside the checkout and at most 64 MiB. Recordings go into the evidence folder.
 
+The runner builds one more small helper itself, `scripts/lab-recording-duration.swift`, which measures the finished recording for the evidence writer ([runner settings](#runner-settings)). It needs the same command line tools; nothing to do here. **Verified on a development Mac:** it compiles with the runner's command (about 40 s the first time) and reports an audio file's duration to the microsecond, matching `afinfo`. **_To confirm on the Mac_:** its result on a real recording.
+
 ## 7. Media
 
-Needs one of:
+Needs **the fixed meeting**, the only media the owner approved for an attempt: copy the fixed MP4 into an owner-only (`0700`) folder. `shasum -a 256` must print the `LAB_FIXED_MEDIA_SHA256` value in `scripts/cue-lab-media.mjs`. The plan names it as `"media": { "fixedPath": "<absolute path>" }`.
 
-- **The fixed meeting:** copy the fixed MP4 into an owner-only (`0700`) folder. `shasum -a 256` must print the `LAB_FIXED_MEDIA_SHA256` value in `scripts/cue-lab-media.mjs`. The plan names it as `"media": { "fixedPath": "<absolute path>" }`.
-- **A per-run scenario:** a `talkqte.fresh-scenario.media.v1` manifest ([fresh scenarios](lab-fresh-scenarios.md)) and the media it names, both in owner-only folders, with the manifest's sha256 approved in review. The plan names it as `"media": { "manifestFile": "<absolute path>", "sha256": "<approved sha256>" }`.
+The dry run also accepts a per-run scenario, a `talkqte.fresh-scenario.media.v1` manifest ([fresh scenarios](lab-fresh-scenarios.md)) named as `"media": { "manifestFile": "<absolute path>", "sha256": "<approved sha256>" }`, but the runner refuses it.
 
 Proves it: the dry run passes "media" and prints the duration and scenario. **Verified from code:** media is at most 104 s; a hand-built descriptor is refused; the player hashes the file again and refuses a measured duration more than 100 ms from the approved one.
 
@@ -174,7 +175,7 @@ Proves it: both entries are on before the take. A new prompt during the take mea
 
 ## 10. The plan and its dry run
 
-Needs: steps 4–8. Write `plan.json` in a private folder (owner-only, at most 16 KiB) and an empty evidence folder (`0700`):
+Needs: steps 4–8. Write `plan.json` in a private folder (owner-only, at most 16 KiB) and an evidence folder (`0700`). For a normal take:
 
 ```json
 {
@@ -202,8 +203,7 @@ Needs: steps 4–8. Write `plan.json` in a private folder (owner-only, at most 1
     "sha256": "<64 hex>"
   },
   "media": {
-    "manifestFile": "/Users/you/talkqte-lab-private/media/MANIFEST.json",
-    "sha256": "<64 hex>"
+    "fixedPath": "/Users/you/talkqte-lab-private/media/fixed-meeting.mp4"
   },
   "selection": {
     "provider": "anthropic-api",
@@ -216,36 +216,68 @@ Needs: steps 4–8. Write `plan.json` in a private folder (owner-only, at most 1
 }
 ```
 
-Optional fields: `tailMs` (0–15000), `turnOffAfterMs` ([turn-off take](#turn-off-take)), `userName` (the app's own name rule), `contextPolicy` (`fresh-only`, `bounded-history` or `selected-prior-v2`, each needing a build that implements it), and `transcription.reconnect: true` or `transcription.failureProbe: "refused-token"`. No other field is accepted, and the plan never holds a grant or key.
+Optional fields: `tailMs` (0–15000), `turnOffAfterMs` ([turn-off take](#turn-off-take)), `userName` (the app's own name rule), `contextPolicy` (`fresh-only`, `bounded-history` or `selected-prior-v2`, each needing a build that implements it), and `transcription.reconnect: true` or `transcription.failureProbe: "refused-token"`. No other field is accepted, and the plan never holds a grant or key. The runner takes `runId`, `tailMs`, `turnOffAfterMs`, `userName` and `contextPolicy` from the plan and nothing else; an absent field stays absent (no tail, no name, `fresh-only`).
+
+Each take needs a new plan: change at least `runId` (for example `fictional-take-02`), which changes the sha256.
 
 ```sh
 npm run lab:take -- --plan /Users/you/talkqte-lab-private/plan.json
 ```
 
-Proves it: the first line reads `Plan valid (dry run). Nothing was launched, no key file was read.`, followed by the plan's sha256, the four executables and the media it would launch, the timing (approval within 180 s of Listening, native Stop at 320 s, the take's 135 s after approval), what goes to Deepgram and to the Anthropic API, and the spend bounds. A refused plan prints `Plan refused at <step>` and exits 1. The owner reviews that output and records the plan sha256 with the approval.
+Proves it: the first line reads `Plan valid (dry run). Nothing was launched, no key file was read.`, followed by the plan's sha256, the four executables and the media it would launch, the timing (approval within 180 s of Listening, native Stop at 320 s, the take's 135 s after approval), what goes to Deepgram and to the Anthropic API, the spend bounds, and the execute command with this sha256. A refused plan prints `Plan refused at <step>` and exits 1. The owner reviews that output and records the plan sha256 with the approval.
 
 **Verified from code:** the dry run uses the launcher's own scope check (`assertLabLaunchOptions`, `assertLabTranscriptionRoute`), the receipt checks (`validateLabBuildRecord`, `validateLabPlayerBuildRecord`), the media loaders and `assertFixedModelTakeOptions`. It does not check signatures, hash the app or player executables, read key files or measure disk space; those happen when a take runs. The model and call cap are fixed by the code: the direct API route runs a listed model at effort `low` with exactly 40 calls, and a local estimated-spend guard of $1.00 for Opus or $0.25 for Sonnet and Haiku ([limits](lab-providers.md#direct-anthropic-api-route)). Deepgram cost is not computed by the code; the minute cap (1–60) bounds the stream.
 
 ## 11. Run the take
 
-There is no committed command for this step. A reviewed private package composes the modules in this order. **Verified from code** for each interface and against the offline composition in `scripts/cue-lab-prepared-take.test.mjs`; the whole composition has not been run from the repository.
+Needs: the reviewed plan sha256, the owner at the Mac with TalkQTE's window area free, and at least 5 GiB free on the evidence folder's volume. The owner starts the runner in a terminal (Terminal, if that is the app with the recorder permission):
 
-1. Sweep stale tokens: `removeStaleTranscriptionTokens()` (`scripts/cue-lab-launcher.mjs`). It touches only owner-only `tq-owned-*` folders whose run provably ended.
-2. Open the evidence writer: `createLabEvidenceWriter({ parentDirectory: evidenceDirectory, runId, fictional: true, mode: 'prepared', contentMode: 'fictional-content', onFailure })`, connecting `onFailure` to the run's abort, and declare the `node` and `native-logger` clocks.
-3. Prepare the player before anything else: `createLabPlayer({ runId, manifestFile, approved, startMs: 1000 })`, then `await player.prepare({ media })`. The start deadline must fit the take's 1 s start budget. Use the media it returns.
-4. Mint the Deepgram grant, unless this is a provider-failure take: `await mintDeepgramGrant()` (reads `deepgram.env`, one request).
-5. `prepareLabLauncher({ manifestFile, approved, mode: 'model-enabled', selection, sourceApplication: 'TalkQTE Lab Player', playerSource: player.identity, stopAfterS: 320, transcription: { backend: 'deepgram', minuteCap, grant }, environment })`, adding `userName`, `contextPolicy` or `turnOff: true` when the plan names them. It verifies the signature and creates the run folder; it launches nothing yet.
-6. `createLabSourceV1({ launcher, application: 'TalkQTE Lab Player', commit, features })`.
-7. `createLabOwnedWindowSelector({ binary, sha256, playerSource: player.identity, native: launcher, nativeApplication })` and `createLabRecorder({ binary, sha256, directory: writer.directory, selectWindows, native: launcher, playerSource: player.identity, seconds, startupMs: 3000 })`. **_To confirm on the Mac_:** `nativeApplication` is `TalkQTE` for this bundle's product name (the selector's default is `TalkQTE Development`).
-8. `createFixedModelTake({ settings: { ...selection, deadlineMs, execution: 'api', environment }, runId, launcher, source, player, recorder, media, stopAfterS: 320, approvalBudgetMs: 180000, takeMs: 135000, onApproval, observe, onGuard, signal })`, with `tailMs` and `turnOffAfterMs` from the plan; `observe` must stop the take when `writer.emit` returns false, and `onGuard` goes to `writer.recordGuard`. Then `await take.done`.
+```sh
+npm run lab:take -- --plan /Users/you/talkqte-lab-private/plan.json \
+  --execute --confirm <plan sha256>
+```
 
-The take then runs on its own: it launches TalkQTE, waits for the exact player's Listening, waits for the [in-app approval](#12-the-in-app-approval), opens the provider, releases the Deepgram token, starts the recorder, starts playback, and stops and cleans up at the end ([composition and startup order](lab-prepared-take.md#composition-and-startup-order)).
+The runner, in order:
+
+1. Prints the same dry run as step 10; a refused plan stops here (exit 1). `--confirm` must equal the plan's sha256 exactly.
+2. Refuses a plan outside the [owner decisions](#owner-decisions) (`Plan refused at owner decisions`): only `claude-opus-5-5`, a minute cap of 5 and the fixed meeting.
+3. Refuses to start below 5 GiB free on the evidence volume (`Plan refused at disk`).
+4. Refuses a plan whose attempt was already used (`Plan refused at attempt`), then builds the [duration helper](#6-the-recorder-helper) and creates the attempt marker `take-attempt-<plan sha256>.json` (owner-only, exclusive) in the evidence folder. Nothing has been launched and no key file has been read up to here. A failed or interrupted attempt keeps its marker; a new attempt needs a new plan.
+5. Sweeps stale tokens: `removeStaleTranscriptionTokens()` (`scripts/cue-lab-launcher.mjs`). It touches only owner-only `tq-owned-*` folders whose run provably ended.
+6. Opens the evidence writer: `createLabEvidenceWriter({ parentDirectory: evidenceDirectory, runId, fictional: true, mode: 'prepared', contentMode: 'fictional-content', onFailure })`, with `onFailure` stopping the take, and declares the `node` and `native-logger` clocks. It prints the evidence folder.
+7. Prepares the player before anything else: `createLabPlayer({ runId, manifestFile, approved, startMs: 1000 })`, then `player.prepare({ media })` with the media descriptor the dry run loaded.
+8. Mints the Deepgram grant, unless this is a provider-failure take: `mintDeepgramGrant()` (reads `deepgram.env`, one request).
+9. `prepareLabLauncher({ manifestFile, approved, mode: 'model-enabled', selection, sourceApplication: 'TalkQTE Lab Player', playerSource: player.identity, stopAfterS: 320, transcription: { backend: 'deepgram', minuteCap, grant }, environment })`, adding `userName`, `contextPolicy` or `turnOff: true` when the plan names them. It verifies the signature and creates the run folder; it launches nothing yet. The grant's TTL (or the probe) is recorded in the manifest.
+10. `createLabSourceV1({ launcher, application: 'TalkQTE Lab Player', commit, features })` with the receipt's commit and features.
+11. `createLabOwnedWindowSelector({ binary, sha256, playerSource: player.identity, native: launcher, nativeApplication: 'TalkQTE' })` and `createLabRecorder({ binary, sha256, directory: writer.directory, selectWindows, native: launcher, playerSource: player.identity, seconds: 180, startupMs: 3000 })`.
+12. `createFixedModelTake({ settings: { ...selection, deadlineMs: 30000, execution: 'api', environment }, runId, launcher, source, player, recorder, media, stopAfterS: 320, approvalBudgetMs: 180000, takeMs: 135000, onApproval, observe, onGuard, signal })`, with `tailMs` and `turnOffAfterMs` from the plan; `observe` stops the take when `writer.emit` returns false, and `onGuard` goes to `writer.recordGuard`. Then it waits for `take.done`.
+
+The take then runs on its own: it launches TalkQTE, waits for the exact player's Listening, waits for the [in-app approval](#12-the-in-app-approval), opens the provider, releases the Deepgram token, starts the recorder, starts playback, and stops and cleans up at the end ([composition and startup order](lab-prepared-take.md#composition-and-startup-order)). **Verified from code** for each interface and against offline compositions (`scripts/cue-lab-prepared-take.test.mjs`, and `scripts/cue-lab-take.test.mjs` for the runner with the existing fixtures); the whole composition has not run a real take.
+
+**Stopping:** Ctrl-C (SIGINT) or SIGTERM in the runner's terminal asks the take's ordinary Stop and cleanup; it never kills the app. The runner prints one `SIGINT: stopping …` line, ignores repeated signals, and still writes the evidence and report. Before the take exists (while the player is prepared or the grant minted), it stops there and retires the player; nothing was launched. Do not force-quit the runner: a killed runner skips cleanup.
+
+### Runner settings
+
+What the modules leave open, fixed in `RUNNER_SETTINGS` (`scripts/cue-lab-take.mjs`):
+
+| Setting                              | Value                                                                                        | Why                                                                                                                                                                                  |
+| ------------------------------------ | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Recorder `seconds`                   | 180                                                                                          | The recorder's maximum. The helper must outlast the take's 135 s after approval plus native release; the take stops it earlier.                                                      |
+| Recorder `startupMs`                 | 3000                                                                                         | The take's own recorder budget (`recorderMs`).                                                                                                                                       |
+| Player `startMs`                     | 1000                                                                                         | Must fit the take's 1 s start budget.                                                                                                                                                |
+| Provider `deadlineMs`                | 30000                                                                                        | The value the fixed-take tests use.                                                                                                                                                  |
+| Launcher and provider environment    | `HOME`, `PATH`, `TMPDIR`, `LANG`, `LC_ALL` from the runner's own environment                 | The only names either forwards to its children.                                                                                                                                      |
+| Window selector `nativeApplication`  | `TalkQTE`                                                                                    | The bundle's product name (`src-tauri/tauri.conf.json`).                                                                                                                             |
+| Evidence writer limits and retention | the writer's defaults: 4 MiB per file, 16 MiB in total, 10 000 events, 7 days                | No reason found to change them; expiry is metadata only.                                                                                                                             |
+| Tail, user name, context             | from the plan only; absent means none, none, `fresh-only`                                    | The user name is never taken from the scenario.                                                                                                                                      |
+| Report content                       | metadata only (the report's default)                                                         | Re-run the report with `--fictional-content` into a new folder for the transcript and cue text ([step 14](#14-evidence-and-report)).                                                 |
+| Recording duration                   | `scripts/lab-recording-duration.swift`: AVFoundation's precise duration of the finished file | Exact to the movie's timescale (1/timescale s, usually well under 1 ms). macOS ships no `ffprobe`; `afinfo` cannot open a QuickTime movie, and `mdls` depends on Spotlight indexing. |
 
 ## 12. The in-app approval
 
-Needs: the owner at the Mac. After Listening, TalkQTE shows its cue processing review. Within 180 s press **Review processing**, **Review selected sources**, **Enable for this session**.
+Needs: the owner at the Mac. After Listening, TalkQTE shows its cue processing review, and the runner prints one line: `TalkQTE is Listening. Press Review processing, Review selected sources, Enable for this session NOW: 180 s remain.` Within that time press **Review processing**, **Review selected sources**, **Enable for this session**. This in-app approval is the only consent for sending audio and text; the terminal confirmation only started the attempt.
 
-Proves it: `onApproval` reports `waiting`, then `approved` with the session and how long the wait took; the timing log has an `evaluator` row with `state` `on`, `approval` `review`, `backend` `lab-api` and the launched model. **Verified from code:** before approval no key file is read, no provider worker starts and nothing is sent; no approval in time stops the take as `approval-not-given` with nothing played; an approval by launch setting, or naming another backend or model, stops it as `approval-fault`. `onApproval({ state: 'approved' })` is where a runner records that the attempt was used, before playback. **_To confirm on the Mac_:** the exact wording and position of the three controls in this build.
+Proves it: the runner prints `In-app approval received after <n> s`; the timing log has an `evaluator` row with `state` `on`, `approval` `review`, `backend` `lab-api` and the launched model. **Verified from code:** before approval no Anthropic key file is read, no provider worker starts and nothing is sent; no approval in time stops the take as `approval-not-given` with nothing played; an approval by launch setting, or naming another backend or model, stops it as `approval-fault`. The attempt was already recorded before launch, so an approval that is not given still uses it. **_To confirm on the Mac_:** the exact wording and position of the three controls in this build.
 
 ## 13. The recording
 
@@ -255,20 +287,25 @@ Proves it: the recorder accepts its first frame within 3 s of approval; the play
 
 ## 14. Evidence and report
 
-After the take settles, and only after native release and recorder finalization:
+The runner does this after the take settles, and only after native release and recorder finalization:
 
-1. Snapshot the timing file with `snapshotLabTiming` ([timing snapshot](lab-timing-snapshot.md)) and `writer.attach` it as `native-timing` on the `native-logger` clock.
-2. `writer.attach` the recording (`recorder.output`) with its measured `durationMs`.
+1. Snapshots the timing file with `snapshotLabTiming` ([timing snapshot](lab-timing-snapshot.md)) and attaches it as `native-timing` on the `native-logger` clock (released by Stop, or ended by native itself).
+2. Measures the recording (`recorder.output`) with the duration helper and attaches it with that `durationMs`.
 3. `writer.close()` writes the manifest.
-4. Write the report into a new folder:
+4. Writes the report into `<evidence>/tq-evidence-XXXX/report` (`writeEvidenceReport`, metadata only).
+5. Writes `take-outcome.json` beside the manifest: the take's terminal state, `failure`, `failedStep`, `runStopReason`, `approval`, `turnOff`, `dispatchesUsed`, `providerSpentMicroUsd`, `providerReceipts`, `evaluationSummary`, `startupDiagnostics`, the launcher's content-free transcription facts, `player.diagnostics`, the recorder's `failureDetail` and report, and what was attached. It never holds a token, key or transcript.
+
+It then prints `Take ended: <state> (…)`, the report path and the outcome path, and exits 0 when the report was written (1 otherwise). **The runner claims nothing:** a `completed` state is not an accepted take. The coordinator reviews the evidence afterwards; visible cues still need a person to check recording frames.
+
+To include the fictional transcript and cue text, write a second report into a new folder:
 
 ```sh
-node scripts/cue-lab-evidence-report.mjs \
+node scripts/cue-lab-evidence-report.mjs --fictional-content \
   --manifest <evidence>/tq-evidence-XXXX/manifest.json \
-  --out <evidence>/tq-evidence-XXXX/report
+  --out <evidence>/tq-evidence-XXXX/report-content
 ```
 
-Add `--fictional-content` to include the fictional transcript and cue text in the report. Proves it: `report.md` and `report.json` exist (mode `0600`) with the timeline, transcription coverage, cue decisions and the human review table ([evidence report](lab-evidence-report.md)). Visible cues still need a person to check recording frames. **Verified from code:** the writer refuses a recording without a duration, and the report never deletes inputs.
+Proves it: `report.md` and `report.json` exist (mode `0600`) with the timeline, transcription coverage, cue decisions and the human review table ([evidence report](lab-evidence-report.md)). **Verified from code:** the writer refuses a recording without a duration, and neither the report nor the runner deletes anything.
 
 ## 15. Cleanup
 
@@ -283,19 +320,19 @@ Proves it, each separately:
 
 ## After a failure
 
-Keep everything: the evidence folder (partial recording included), the run's `tq-owned-*` folder until its token is swept, and the take's `failure`, `failedStep`, `runStopReason`, `startupDiagnostics`, `evaluationSummary`, `providerReceipts`, `providerSpentMicroUsd`, `approval` and `turnOff`, with `player.diagnostics` and the recorder's `failureDetail`. Record the first failure as reported; later failures never replace it.
+Keep everything: the attempt marker, the evidence folder (partial recording included, with `take-outcome.json`), and the run's `tq-owned-*` folder until its token is swept. Record the first failure as reported; later failures never replace it.
 
-Do not retry, restart or resume the same take, kill the app and call it release, or work around a permission prompt. If release is unconfirmed, the player process is kept and cleanup counts as failed; resolving that is an owner action. A new take needs a new plan review ([decisions](#decisions-before-a-committed-runner)).
+Do not retry, restart or resume the same take, kill the app and call it release, or work around a permission prompt. If release is unconfirmed, the player process is kept and cleanup counts as failed; resolving that is an owner action. The runner refuses the same plan again; a new take needs a new plan and its review ([owner decisions](#owner-decisions)).
 
 ## Variants on main
 
 ### Provider-failure take
 
-Plan: `"transcription": { "backend": "deepgram", "minuteCap": 2, "failureProbe": "refused-token" }` (any cap from 1 to 60). No Deepgram key is read and nothing is minted; at approval the launcher writes a fixed text that Deepgram is expected to refuse (401, code `auth`). The app ends the session and the take ends `stopped`; the result is in the evidence report. If the app reports `connected` for it, the run stops. The dry run shows `kind: provider-failure` and "no key file read". **_To confirm on the Mac_:** no probe has been run against Deepgram ([refused-token probe](lab-owned-launcher.md#cloud-transcription-token)).
+The second take. Plan: `"transcription": { "backend": "deepgram", "minuteCap": 5, "failureProbe": "refused-token" }` (the dry run accepts any cap from 1 to 60; the runner only 5). No Deepgram key is read and nothing is minted; at approval the launcher writes a fixed text that Deepgram is expected to refuse (401, code `auth`). The app ends the session and the take ends `stopped`; the result is in the evidence report. If the app reports `connected` for it, the run stops. The dry run shows `kind: provider-failure` and "no key file read". **_To confirm on the Mac_:** no probe has been run against Deepgram ([refused-token probe](lab-owned-launcher.md#cloud-transcription-token)).
 
 ### Turn-off take
 
-Plan: `"turnOffAfterMs": <1 to less than the media's duration>`, never with the probe. The runner prepares the launcher with `turnOff: true`. At that time after the render start the take sends one SIGUSR1; native withdraws processing as **Disable processing** does and reports `dev_off` `done`. If the run then ends as `lab-ended` or `session-ended`, the take ends `stopped` with failure `turned-off`. The dry run shows `kind: turn-off` and the time. **_To confirm on the Mac_:** no turn-off has been run in the app ([turning processing off](lab-prepared-take.md#provider-failure-and-turning-processing-off-t5)).
+The third take. Plan: `"turnOffAfterMs": <1 to less than the media's duration>`, never with the probe. The runner prepares the launcher with `turnOff: true`. At that time after the render start the take sends one SIGUSR1; native withdraws processing as **Disable processing** does and reports `dev_off` `done`. If the run then ends as `lab-ended` or `session-ended`, the take ends `stopped` with failure `turned-off`. The dry run shows `kind: turn-off` and the time. **_To confirm on the Mac_:** no turn-off has been run in the app ([turning processing off](lab-prepared-take.md#provider-failure-and-turning-processing-off-t5)).
 
 ### Both-sided session: not supported by the take path
 
@@ -309,16 +346,27 @@ Plan: `"turnOffAfterMs": <1 to less than the media's duration>`, never with the 
 
 A both-sided take would need native, launcher, recorder and evidence changes, a fictional second voice at the microphone (and headphones against pickup of the app's sound), and its own review. Several synthetic voices inside the player's audio do not establish both sides of a call.
 
-## Decisions before a committed runner
+## Owner decisions
 
-The dry run stops short of executing because these choices belong to the owner, not to code:
+Made by the owner on 23 November 2026 and enforced by the runner:
 
-1. **What an approval covers:** whether a confirmed plan sha256 allows exactly one attempt (with an attempt marker written at `onApproval` `approved`) or more, how long it stays valid, and whether a terminal confirmation beyond the in-app approval is wanted.
-2. **Media:** the fixed meeting or a per-run scenario, and who approves the manifest's sha256.
-3. **Budget:** the Deepgram minute cap per take and any spending ceiling beyond the code's fixed 40 calls and local estimate (the take cannot lower or raise either), plus which model.
-4. **Application and source:** the take path supports only the owned TalkQTE Lab Player; any other application or a both-sided session needs code changes first.
-5. **Who presses what:** the owner presses the three approval controls within 180 s; who starts the runner, who may press Stop or send SIGINT, and who confirms that no new permission prompt appeared.
-6. **Runner settings the code leaves open:** the recorder's `seconds` (at most 180), the provider `deadlineMs`, the environment passed to the launcher, the evidence writer limits and retention, the tail, and whether `userName` comes from the scenario's listener name.
-7. **Recording duration:** the writer needs a measured `durationMs`; which tool measures it (for example a pinned `ffprobe`) is not decided.
-8. **Disk and retention:** the free-space floor checked before a take and who deletes private evidence when it expires.
-9. **What counts as success:** which result fields and report sections make a take acceptable for the roadmap check, and who reviews recording frames.
+1. **Approval:** approving a plan covers one attempt per plan sha256, in that sitting only. The in-app approval (Review processing → Review selected sources → Enable for this session, within 180 s) is the only consent step for sending audio and text; the terminal confirmation only starts the attempt. The runner enforces one attempt with the marker; keeping to one sitting is the owner's.
+2. **Media:** the existing fixed fictional meeting.
+3. **Model and budget:** `claude-opus-5-5`, the code's fixed 40 calls and $1.00 local estimate, and a Deepgram minute cap of 5.
+4. **Order of takes:** normal, then [provider failure](#provider-failure-take), then [turn-off](#turn-off-take); each its own plan and its own attempt. The runner does not enforce the order.
+5. **Roles:** the owner starts the runner in a terminal, presses the approval controls and watches for permission prompts. The coordinator prepares the plan and reviews the evidence afterwards.
+
+Also settled in code: the [runner settings](#runner-settings), the recording duration tool, a 5 GiB free-space floor on the evidence volume, and that the runner deletes no evidence (expired private evidence stays until the owner deletes it). The take path supports only the owned TalkQTE Lab Player; any other application or a both-sided session needs code changes first.
+
+## To confirm on the Mac
+
+Not checked from code alone; confirm at the first run and stop if any differs:
+
+- `--deep` signing with the self-signed root gives exactly one `Authority=` line ([step 3](#3-sign-the-app)).
+- The player build commands, any other Info.plist key the player needs, and that it opens its window and plays ([step 5](#5-the-owned-player-and-its-receipt)).
+- The duration helper's result on a real recording ([step 6](#6-the-recorder-helper)).
+- That the player needs no permission, and a signed TalkQTE keeps its grant across rebuilds signed the same way ([step 9](#9-permissions)).
+- That the companion window's application name is `TalkQTE` for this bundle, as the window selector is told ([runner settings](#runner-settings)).
+- The exact wording and position of the three approval controls ([step 12](#12-the-in-app-approval)).
+- That TalkQTE quits cleanly from its menu after a lab take ([step 15](#15-cleanup)).
+- The refused-token probe against Deepgram and a turn-off in the app, neither run yet ([variants](#variants-on-main)).

@@ -5,9 +5,10 @@ native owner and run lifecycle with injected player, source-readiness and record
 adapters. It has no CLI entry point or production player/recorder implementation.
 Importing it performs no work. Calling it is an active run operation; real use
 still needs a reviewed bounded plan and separately approved signed build receipt.
-The [prepared take runbook](lab-take-runbook.md) gives the ordered steps and a
-dry-run check of such a plan (`npm run lab:take`); nothing in the repository
-executes a take.
+The [prepared take runbook](lab-take-runbook.md) gives the ordered steps, a
+dry-run check of such a plan (`npm run lab:take`) and the runner that executes
+one attempt of a confirmed plan with `createFixedModelTake`
+(`--execute --confirm <plan sha256>`).
 
 The preserved 102.48-second meeting is a single-author prepared generated
 conversation. Playing it to the real app can test live evaluator cue/silence
@@ -195,6 +196,7 @@ direct API route only, whose cloud stream is what turning off withdraws.
    `failed`. A Stop arriving while the off is withdrawing waits, so its
    `latched` row follows `done`. The two `dev_off` rows of one decision are
    never split by `dev_stop` `latched`.
+
 2. **Launcher and native owner.** The launcher forwards the setting only when
    prepared for a turn-off, and accepts `dev_off` rows only then, only after
    `armed`, in native's strict order (`latched`, then `done` or `failed`, then
