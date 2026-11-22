@@ -1162,6 +1162,9 @@ test('cloud transcription evidence records settings, review order, stop, cap and
       stopState: 'ended',
       stopCode: null,
       audioMs: 95000,
+      turnedOff: false,
+      turnOff: null,
+      failure: null,
     },
   ]);
   // The cap covers the whole launch.
@@ -1254,6 +1257,218 @@ test('a send-queue overflow is reported apart from the stop, and a lab run end i
     [s.dropping, s.stopState, s.stopCode, s.audioMs],
     [true, 'stopped', 'lab_ended', 50000],
   );
+});
+
+// Processing turned off mid-run (T5), and a provider-failure take.
+const offRow = (code = 'lab_ended', audio_ms = 50000, mono_ms = 9000) => ({
+  event: 'stt_state',
+  session: '2',
+  state: 'stopped',
+  code,
+  audio_ms,
+  mono_ms,
+});
+const latchRow = (mono_ms) => ({
+  event: 'dev_stop',
+  run_id: 'fictional-cedar',
+  step: 'latched',
+  mono_ms,
+});
+
+test('processing turned off mid-run is reported with its code, before the lab Stop, closed without the drain and followed by nothing', () => {
+  for (const code of ['lab_ended', 'withdrawn']) {
+    const r = cloudReport([
+      ...cloudRows({ stop: offRow(code) }),
+      latchRow(9100),
+    ]);
+    const [s] = r.cloudTranscription.streams;
+    assert.equal(s.turnedOff, true);
+    assert.deepEqual(s.turnOff, {
+      code,
+      audioMsAtOff: 50000,
+      beforeStop: true,
+      closedWithoutDrain: true,
+      nothingAfter: true,
+    });
+    assert.equal(s.failure, null);
+    assert.ok(r.missingEvidence.every((x) => x !== 'run.stop-latched'));
+    const md = renderEvidenceMarkdown(r);
+    assert.match(
+      md,
+      new RegExp(
+        `processing turned off \\(\`${code}\`\\) at 50000 ms of audio sent; before the lab Stop: yes; stream closed without the Stop drain: yes; nothing sent or transcribed afterwards: yes`,
+      ),
+    );
+  }
+});
+
+test('a stream closing after the lab Stop latch is not read as turned off before it', () => {
+  const rows = cloudRows({ stop: offRow() });
+  rows.splice(rows.length - 1, 0, latchRow(8900));
+  const [s] = cloudReport(rows).cloudTranscription.streams;
+  assert.equal(s.turnOff.beforeStop, false);
+});
+
+test('anything after the off row, a drain, or a lost row is said, never inferred away', () => {
+  // A later final or line in the session: something followed.
+  const late = [
+    ...cloudRows({ stop: offRow() }),
+    {
+      event: 'stt_final',
+      session: '2',
+      seq: 2,
+      start_ms: 9000,
+      end_ms: 9500,
+      mono_ms: 9600,
+    },
+  ];
+  assert.equal(
+    cloudReport(late).cloudTranscription.streams[0].turnOff.nothingAfter,
+    false,
+  );
+  // A Stop drain (`finished`) after it: not closed without the drain.
+  const drained = [
+    ...cloudRows({ stop: offRow() }),
+    {
+      event: 'stt_state',
+      session: '2',
+      state: 'finished',
+      audio_ms: 51000,
+      mono_ms: 9500,
+    },
+  ];
+  const [d] = cloudReport(drained).cloudTranscription.streams;
+  assert.deepEqual(
+    [d.turnOff.closedWithoutDrain, d.turnOff.nothingAfter],
+    [false, false],
+  );
+  // A second source's stream closing the same way is not "something after".
+  const twoStarts = cloudRows({ stop: offRow() });
+  twoStarts.splice(3, 0, {
+    event: 'stt_state',
+    session: '2',
+    state: 'started',
+    audio_ms: 0,
+    mono_ms: 1550,
+  });
+  const one = cloudReport(twoStarts).cloudTranscription.streams[0].turnOff;
+  // Only one of the two streams has a stop row: unknown, not yes.
+  assert.equal(one.closedWithoutDrain, null);
+  assert.equal(one.nothingAfter, true);
+  const both = cloudReport([...twoStarts, offRow('lab_ended', 300, 9001)])
+    .cloudTranscription.streams[0].turnOff;
+  assert.deepEqual([both.closedWithoutDrain, both.nothingAfter], [true, true]);
+  // A dropped row anywhere: claims that nothing followed become unknown.
+  const lossy = [
+    ...cloudRows({ stop: offRow() }),
+    { event: 'dropped', count: 1, mono_ms: 9700 },
+  ];
+  const r = cloudReport(lossy);
+  const [l] = r.cloudTranscription.streams;
+  assert.deepEqual(
+    [
+      l.turnOff.closedWithoutDrain,
+      l.turnOff.nothingAfter,
+      l.turnOff.beforeStop,
+    ],
+    [null, null, null],
+  );
+  assert.equal(r.cloudTranscription.rowsMayBeMissing, true);
+  assert.match(
+    renderEvidenceMarkdown(r),
+    /claims that nothing followed are unknown/,
+  );
+  // No stop row at all: whether it was turned off is unknown.
+  const open = cloudRows();
+  open.pop();
+  assert.equal(cloudReport(open).cloudTranscription.streams[0].turnedOff, null);
+});
+
+const probeSettings = {
+  backend: 'deepgram',
+  minuteCap: 5,
+  failureProbe: 'refused-token',
+  query: DEEPGRAM_APP_QUERY,
+};
+const probeRows = (extra = []) => {
+  const rows = cloudRows({ stop: offRow('auth', 0, 1700) });
+  // The refused text never connects; no line can follow.
+  return [
+    ...rows.filter(
+      (r) =>
+        !['connected'].includes(r.state) &&
+        r.event !== 'stt_final' &&
+        r.event !== 'segment',
+    ),
+    ...extra,
+  ];
+};
+
+test('a provider-failure take names its probe, the code seen, and that nothing fell back', () => {
+  const r = cloudReport(probeRows(), probeSettings);
+  const c = r.cloudTranscription;
+  assert.deepEqual(c.failureProbe, {
+    probe: 'refused-token',
+    expectedCode: 'auth',
+    result: 'refused-as-expected',
+  });
+  assert.deepEqual(c.streams[0].failure, { code: 'auth', nothingAfter: true });
+  assert.equal(c.streams[0].turnedOff, false);
+  const md = renderEvidenceMarkdown(r);
+  assert.match(md, /\*\*provider-failure take\*\* \(refused-token probe/);
+  assert.match(md, /result \*\*refused as expected/);
+  assert.match(
+    md,
+    /Stopped by failure `auth`; nothing transcribed afterwards, so nothing fell back to another service: yes/,
+  );
+  assert.doesNotMatch(md, /grant TTL/);
+});
+
+test('a failure take that connected, saw another code, transcribed afterwards or lost rows is never a pass', () => {
+  const connected = cloudReport(
+    cloudRows({ stop: offRow('auth', 0, 9000) }),
+    probeSettings,
+  ).cloudTranscription.failureProbe.result;
+  assert.equal(connected, 'connected');
+  const other = probeRows();
+  other[other.length - 1] = offRow('settings', 0, 1700);
+  assert.equal(
+    cloudReport(other, probeSettings).cloudTranscription.failureProbe.result,
+    'other-code',
+  );
+  const after = probeRows([
+    {
+      event: 'segment',
+      session: '2',
+      id: 'c2-1-1',
+      at_ms: 2000,
+      speaker: 'Speaker',
+      text: 'A fictional line from somewhere else.',
+      accepted: true,
+      mono_ms: 5701,
+    },
+  ]);
+  assert.equal(
+    cloudReport(after, probeSettings).cloudTranscription.failureProbe.result,
+    'transcribed-after',
+  );
+  const lossy = probeRows([{ event: 'dropped', count: 1, mono_ms: 1800 }]);
+  assert.equal(
+    cloudReport(lossy, probeSettings).cloudTranscription.failureProbe.result,
+    'unknown',
+  );
+  const noStop = probeRows();
+  noStop.pop();
+  assert.equal(
+    cloudReport(noStop, probeSettings).cloudTranscription.failureProbe.result,
+    'unknown',
+  );
+  // The probe and a grant TTL never appear together, and only the one probe.
+  for (const settings of [
+    { ...probeSettings, grantTtlS: 900 },
+    { ...probeSettings, failureProbe: 'unusable' },
+  ])
+    assert.throws(() => cloudReport(probeRows(), settings));
 });
 
 // A stalled stream replaced once (#357): the reconnecting row, then the

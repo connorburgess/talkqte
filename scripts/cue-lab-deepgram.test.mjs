@@ -24,6 +24,8 @@ import {
   DEEPGRAM_GRANT_TTL_S,
   mintDeepgramGrant,
   readDeepgramKeyFile,
+  REFUSED_PROBE_TOKEN,
+  refusedTokenProbe,
 } from './cue-lab-deepgram.mjs';
 import {
   isLabUserName,
@@ -220,8 +222,10 @@ async function launchCloud(
     transcription: {
       backend: 'deepgram',
       minuteCap,
-      grant,
-      ...(reconnect === undefined ? {} : { reconnect }),
+      // `grant: 'refused-token'` here launches the provider-failure probe.
+      ...(grant === 'refused-token'
+        ? { failureProbe: grant }
+        : { grant, ...(reconnect === undefined ? {} : { reconnect }) }),
     },
   });
   t.after(() => {
@@ -305,6 +309,7 @@ test('the app gets only an empty placeholder until the review row; the token fol
     backend: 'deepgram',
     minuteCap: 5,
     grantTtlS: 900,
+    failureProbe: null,
     reviewedSession: 2,
     released: true,
     started: true,
@@ -474,6 +479,103 @@ test("a name the app's own rule would refuse is refused before launch", () => {
     );
   for (const userName of ['Curtis', 'Anne-Marie', "D'Arcy", 'José', 'Mary Ann'])
     assert.equal(isLabUserName(userName), true, userName);
+});
+
+test('a refused-token probe takes no grant, hands the app only its fixed text after the review, and records itself', async (t) => {
+  const { launcher, owner, seen } = await launchCloud(
+    t,
+    'cloud-refused',
+    'refused-token',
+  );
+  const tokenFile = join(launcher.directory, 'stt-token');
+  assert.equal(seen().TALKQTE_DEV_STT_BACKEND, 'deepgram');
+  assert.equal(lstatSync(tokenFile).size, 0);
+  await waitFor(() => launcher.transcription.reviewedSession !== null);
+  launcher.releaseTranscriptionToken();
+  assert.throws(() => launcher.releaseTranscriptionToken());
+  assert.equal(readFileSync(tokenFile, 'utf8'), REFUSED_PROBE_TOKEN);
+  assert.equal(lstatSync(tokenFile).mode & 0o777, 0o600);
+  await waitFor(() => launcher.transcription.started);
+  await delay(100);
+  assert.deepEqual(
+    { ...launcher.transcription },
+    {
+      backend: 'deepgram',
+      minuteCap: 5,
+      grantTtlS: null,
+      failureProbe: 'refused-token',
+      reviewedSession: 2,
+      released: true,
+      started: true,
+      connectedQuery: null,
+      tokenRemoved: false,
+      tokenKeptUntilStop: false,
+      reconnects: 0,
+    },
+  );
+  assert.deepEqual(await owner.stop(), { released: true });
+  launcher.close();
+  assert.equal(existsSync(tokenFile), false);
+});
+
+test('a probe whose refused text connects stops the run: it is not the take the plan asked for', async (t) => {
+  const { launcher, owner, failures } = await launchCloud(
+    t,
+    'cloud-probe-connects',
+    'refused-token',
+  );
+  await waitFor(() => launcher.transcription.reviewedSession !== null);
+  launcher.releaseTranscriptionToken();
+  await waitFor(() => failures.includes('failed'));
+  assert.ok(failures.includes('failed'));
+  assert.equal(launcher.transcription.connectedQuery, null);
+  await owner.stop().catch(() => {});
+});
+
+test('the probe is its own shape: never beside a grant or reconnect, never capture-only, and a grant cannot pose as one', () => {
+  const grant = { writeTokenFile() {} };
+  for (const [mode, transcription] of [
+    ['model-enabled', { failureProbe: 'refused-token', grant }],
+    ['model-enabled', { failureProbe: 'refused-token', reconnect: true }],
+    ['model-enabled', { failureProbe: 'unusable' }],
+    ['model-enabled', { failureProbe: true }],
+    ['model-enabled', { grant: { ...grant, probe: 'refused-token' } }],
+    ['model-enabled', { grant: refusedTokenProbe() }],
+    ['capture-only', { failureProbe: 'refused-token' }],
+  ])
+    assert.throws(
+      () =>
+        prepareLabFixtureLauncher({
+          fixtureCase: 'normal',
+          mode,
+          ...(mode === 'capture-only' ? {} : { selection: apiSelection }),
+          transcription: {
+            backend: 'deepgram',
+            minuteCap: 5,
+            ...transcription,
+          },
+        }),
+      undefined,
+      JSON.stringify(transcription),
+    );
+});
+
+test('the probe writes its fixed text once, only into an owner-only folder', (t) => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'tq-probe-')));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  chmodSync(dir, 0o755);
+  assert.throws(() => refusedTokenProbe().writeTokenFile(join(dir, 'a')), {
+    category: 'token',
+  });
+  chmodSync(dir, 0o700);
+  const probe = refusedTokenProbe();
+  probe.writeTokenFile(join(dir, 'b'));
+  assert.equal(readFileSync(join(dir, 'b'), 'utf8'), REFUSED_PROBE_TOKEN);
+  assert.throws(() => probe.writeTokenFile(join(dir, 'c')), {
+    category: 'token',
+  });
+  // The text has the shape the app's token file accepts, and is no grant.
+  assert.match(REFUSED_PROBE_TOKEN, /^[A-Za-z0-9_-]{20,4096}$/);
 });
 
 test('reconnect is only `true` and only on a model run with a grant', () => {

@@ -28,6 +28,7 @@ import { parseUniqueLabJson } from './cue-lab-strict-json.mjs';
 import { watchLabTiming } from './cue-lab-timing-reader.mjs';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
 import { checkLabPlayerSource } from './cue-lab-player.mjs';
+import { REFUSED_TOKEN_PROBE, refusedTokenProbe } from './cue-lab-deepgram.mjs';
 import { outsideCheckout } from './cue-lab-checkout.mjs';
 import {
   ANTHROPIC_SPEND_CAP_MICRO_USD,
@@ -277,6 +278,10 @@ function launcher({
   // launch has no review, so nothing is ever streamed; it still needs the
   // setting because the app starts no session without a transcription
   // backend. It gets the empty placeholder only: no grant, never a token.
+  // A provider-failure take (T5) names `failureProbe: 'refused-token'`
+  // instead of a grant: it never holds a real token, and the launcher
+  // itself writes the fixed refused text (cue-lab-deepgram.mjs) after the
+  // review, so the app's own refusal path runs. It cannot reconnect.
   requireThat(
     transcription === undefined ||
       (transcription.backend === 'deepgram' &&
@@ -285,15 +290,19 @@ function launcher({
         transcription.minuteCap <= 60 &&
         (mode === 'capture-only'
           ? exact(transcription, ['backend', 'minuteCap'])
-          : (exact(transcription, ['backend', 'minuteCap', 'grant']) ||
-              (exact(transcription, [
-                'backend',
-                'minuteCap',
-                'grant',
-                'reconnect',
-              ]) &&
-                transcription.reconnect === true)) &&
-            typeof transcription.grant?.writeTokenFile === 'function' &&
+          : (exact(transcription, ['backend', 'minuteCap', 'failureProbe'])
+              ? transcription.failureProbe === REFUSED_TOKEN_PROBE
+              : (exact(transcription, ['backend', 'minuteCap', 'grant']) ||
+                  (exact(transcription, [
+                    'backend',
+                    'minuteCap',
+                    'grant',
+                    'reconnect',
+                  ]) &&
+                    transcription.reconnect === true)) &&
+                typeof transcription.grant?.writeTokenFile === 'function' &&
+                // A real grant is never a probe's.
+                transcription.grant.probe === undefined) &&
             mode === 'model-enabled' &&
             selection?.provider === 'anthropic-api')),
   );
@@ -367,6 +376,8 @@ function launcher({
   // user_name_set rows, in order: { session, set } only, never a name.
   const nameRows = [];
   const keepToken = transcription?.reconnect === true;
+  const failureProbe = transcription?.failureProbe ?? null;
+  const grant = failureProbe ? refusedTokenProbe() : transcription?.grant;
   const removeToken = () => {
     if (tokenRemoved) return;
     let gone = true;
@@ -405,7 +416,7 @@ function launcher({
   const subscribers = new Set();
   const evaluatorSubscribers = new Set();
   const close = () => {
-    transcription?.grant?.discard?.();
+    grant?.discard?.();
     removeToken();
     if (tokenRemoved) process.off('exit', removeToken);
     if (closed) return;
@@ -595,6 +606,9 @@ function launcher({
                 // replacement stream must use the first stream's query.
                 const first = connectedQuery === null;
                 if (
+                  // The refused text must never connect: if it did, this
+                  // is not the failure take the plan asked for.
+                  failureProbe ||
                   !transcriptionStarted ||
                   !tokenReleased ||
                   event.session !== reviewedSession ||
@@ -767,7 +781,9 @@ function launcher({
         ? Object.freeze({
             backend: transcription.backend,
             minuteCap: transcription.minuteCap,
-            grantTtlS: transcription.grant?.ttlSeconds ?? null,
+            grantTtlS: grant?.ttlSeconds ?? null,
+            // A deliberate provider-failure take, or null for a real token.
+            failureProbe,
             reviewedSession,
             released: tokenReleased,
             started: transcriptionStarted,
@@ -786,7 +802,7 @@ function launcher({
     // it has accepted the review and opened the provider.
     releaseTranscriptionToken() {
       requireThat(
-        transcription?.grant &&
+        grant &&
           !closed &&
           !tokenRemoved &&
           !tokenReleased &&
@@ -794,7 +810,7 @@ function launcher({
       );
       tokenReleased = true;
       try {
-        transcription.grant.writeTokenFile(tokenNext);
+        grant.writeTokenFile(tokenNext);
         renameSync(tokenNext, tokenPath);
       } catch {
         removeToken();
@@ -974,6 +990,8 @@ export function prepareLabFixtureLauncher({
       'cloud-reconnect-before-first',
       'cloud-reconnect-other-session',
       'cloud-reconnect-changed-query',
+      'cloud-refused',
+      'cloud-probe-connects',
       'capture-only',
       'normal',
       'partial',

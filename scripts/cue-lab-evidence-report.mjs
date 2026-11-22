@@ -12,7 +12,11 @@ import {
 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMain } from './is-main.mjs';
-import { DEEPGRAM_APP_QUERY, isAllowedSttQuery } from './cue-lab-deepgram.mjs';
+import {
+  DEEPGRAM_APP_QUERY,
+  isAllowedSttQuery,
+  REFUSED_TOKEN_PROBE,
+} from './cue-lab-deepgram.mjs';
 
 export const EVENT_SCHEMA = 'talkqte.lab.evidence.event.v1';
 export const MANIFEST_SCHEMA = 'talkqte.lab.evidence.manifest.v1';
@@ -51,6 +55,10 @@ const STAGES = new Set([
   'source.listening',
   'recorder.frame-accepted',
   'run.started',
+  // The native lab Stop latch (dev_stop `latched`): where in the log the
+  // lab asked for Stop, so a stream closing after it is not read as
+  // processing turned off mid-run.
+  'run.stop-latched',
   'run.ended',
   'gap',
 ]);
@@ -303,19 +311,23 @@ export function validateManifest(m) {
     (!Array.isArray(m.reviews) || m.reviews.length > 1000)
   )
     fail('invalid reviews');
-  // Cloud transcription settings the launcher used: never the token.
+  // Cloud transcription settings the launcher used: never the token. A
+  // provider-failure take carries its probe in place of a grant TTL.
   if (
     m.transcription !== undefined &&
     (!object(m.transcription) ||
-      Object.keys(m.transcription).sort().join() !==
-        'backend,grantTtlS,minuteCap,query' ||
+      !(Object.keys(m.transcription).sort().join() ===
+      'backend,grantTtlS,minuteCap,query'
+        ? Number.isSafeInteger(m.transcription.grantTtlS) &&
+          m.transcription.grantTtlS >= 300 &&
+          m.transcription.grantTtlS <= 3600
+        : Object.keys(m.transcription).sort().join() ===
+            'backend,failureProbe,minuteCap,query' &&
+          m.transcription.failureProbe === REFUSED_TOKEN_PROBE) ||
       m.transcription.backend !== 'deepgram' ||
       !Number.isSafeInteger(m.transcription.minuteCap) ||
       m.transcription.minuteCap < 1 ||
       m.transcription.minuteCap > 60 ||
-      !Number.isSafeInteger(m.transcription.grantTtlS) ||
-      m.transcription.grantTtlS < 300 ||
-      m.transcription.grantTtlS > 3600 ||
       m.transcription.query !== DEEPGRAM_APP_QUERY)
   )
     fail('invalid transcription settings');
@@ -543,6 +555,11 @@ export function importNativeRows(rows, { runId, artifactId, clockId }) {
       case 'cue_cleared':
         stage = 'cue.cleared';
         break;
+      case 'dev_stop':
+        // Only the latch is placed; arming and release are the launcher's.
+        if (r.step !== 'latched') continue;
+        stage = 'run.stop-latched';
+        break;
       case 'user_name_set':
         // Whether the app's name setting was in effect (#363); never a name.
         if (typeof r.set !== 'boolean') fail('invalid native name setting row');
@@ -670,6 +687,11 @@ const STT_CODES = new Set([
   // No reply from the service for 10 s, or a write held over 3 s (#344).
   'stalled',
 ]);
+// Stop codes for processing turned off: the review withdrawn, or the lab
+// cue run ended (in a lab build any withdrawal ends the run).
+const OFF_CODES = new Set(['withdrawn', 'lab_ended']);
+// What the provider's refusal of the probe's fixed text must produce.
+const PROBE_CODE = 'auth';
 // Native segment identities such as `t1-0-4`; never free text.
 const SEGMENT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 // How far behind the current transcript an applied lab decision was.
@@ -784,6 +806,29 @@ function cloudSummary(events, m) {
     );
   // The minute cap covers the whole launch: every session and source.
   const capMs = m.transcription ? m.transcription.minuteCap * 60000 : null;
+  // Any dropped row or writer loss means a row that would contradict a
+  // claim below may be missing, so such a claim stays unknown.
+  const loss =
+    events.some((e) => e.stage === 'gap') ||
+    m.writer?.failed === true ||
+    (m.writer?.dropped ?? 0) > 0;
+  const latch = events.findIndex((e) => e.stage === 'run.stop-latched');
+  // What follows a row in the same session: any stream row, final or
+  // transcript line after it. `except` keeps rows that close another
+  // source's stream the same way.
+  const after = (row, sessionId, except = () => false) =>
+    events.some(
+      (e) =>
+        index.get(e) > index.get(row) &&
+        (e.ids?.sessionId ?? null) === sessionId &&
+        [
+          'transcription.stream',
+          'transcript.finalized',
+          'transcript.arrived',
+        ].includes(e.stage) &&
+        !except(e),
+    );
+  const claim = (contradicted) => (contradicted ? false : loss ? null : true);
   const sessions = [
     ...new Set(streamEvents.map((e) => e.ids?.sessionId ?? null)),
   ];
@@ -811,6 +856,17 @@ function cloudSummary(events, m) {
         : null;
     const last = stops.at(-1) ?? null;
     const audioMs = Math.max(0, ...own.map((e) => e.payload?.audioMs ?? 0));
+    // Processing turned off: the stream stopped because the review was
+    // withdrawn or the lab cue run ended. Both close it at once, without
+    // the Stop drain (docs/cloud-transcription.md#what-stops-it).
+    const isOff = (e) =>
+      e.stage === 'transcription.stream' &&
+      e.payload?.sttState === 'stopped' &&
+      OFF_CODES.has(e.payload?.sttCode);
+    const offs = own.filter(isOff);
+    const off = offs[0] ?? null;
+    const failed =
+      own.find((e) => e.payload?.sttState === 'stopped' && !isOff(e)) ?? null;
     const review = firstReview(sessionId ?? undefined);
     return {
       sessionId,
@@ -838,8 +894,77 @@ function cloudSummary(events, m) {
       stopState: last?.payload?.sttState ?? null,
       stopCode: last?.payload?.sttCode ?? null,
       audioMs,
+      // Yes when a stream of the session stopped as turned off; no only
+      // when every stream that started has a stop row and none of them
+      // is that one, with no rows lost; otherwise unknown.
+      turnedOff: off
+        ? true
+        : loss || !starts.length || stops.length < starts.length
+          ? null
+          : false,
+      turnOff: off && {
+        code: off.payload.sttCode,
+        audioMsAtOff: off.payload.audioMs,
+        // A lab Stop cancels the lab cue run before it takes the session,
+        // so a stream closing after the Stop latch may be the Stop's own.
+        beforeStop: latch < 0 ? (loss ? null : true) : index.get(off) < latch,
+        // No `finished` row (the Stop drain) after it, and every stream
+        // that started closed the same way.
+        closedWithoutDrain: own.some(
+          (e) =>
+            e.payload?.sttState === 'finished' && index.get(e) > index.get(off),
+        )
+          ? false
+          : offs.length < starts.length
+            ? null
+            : claim(false),
+        // Nothing of the session's transcription after it: no stream row
+        // other than another stream closing the same way, no final and no
+        // transcript line.
+        nothingAfter: claim(after(off, sessionId, isOff)),
+      },
+      // A stream that stopped for another fixed reason (for example the
+      // provider refusing the token), and whether anything of the
+      // session's transcription came after it: a fallback to another
+      // service would have to show up there.
+      failure: failed && {
+        code: failed.payload.sttCode,
+        nothingAfter: claim(
+          after(
+            failed,
+            sessionId,
+            (e) =>
+              e.stage === 'transcription.stream' &&
+              e.payload?.sttState === 'stopped',
+          ),
+        ),
+      },
     };
   });
+  // A provider-failure take (refused-token probe): every stream that
+  // started must have stopped with `auth`, never connected, and been
+  // followed by nothing. Anything else is said plainly; missing rows leave
+  // the result unknown, never a pass.
+  const probe = m.transcription?.failureProbe ?? null;
+  let probeResult = null;
+  if (probe) {
+    const started = streams.filter((s) => s.starts > 0);
+    // Any connected row at all, whatever the reconnect count says.
+    probeResult = streamEvents.some((e) => e.payload?.sttState === 'connected')
+      ? 'connected'
+      : started.some((s) => s.failure && s.failure.code !== PROBE_CODE)
+        ? 'other-code'
+        : started.some((s) => s.failure?.nothingAfter === false)
+          ? 'transcribed-after'
+          : started.length > 0 &&
+              started.every(
+                (s) =>
+                  s.failure?.code === PROBE_CODE &&
+                  s.failure.nothingAfter === true,
+              )
+            ? 'refused-as-expected'
+            : 'unknown';
+  }
   const audioMs = streams.reduce((n, s) => n + s.audioMs, 0);
   const arrivals = events.filter((e) => e.stage === 'transcript.arrived');
   const finalRows = finals.map((f) => {
@@ -880,6 +1005,12 @@ function cloudSummary(events, m) {
     .sort((a, b) => a - b);
   return {
     settings: m.transcription ? { ...m.transcription } : null,
+    failureProbe: probe && {
+      probe,
+      expectedCode: PROBE_CODE,
+      result: probeResult,
+    },
+    rowsMayBeMissing: loss,
     reviewRowSeen: firstReview() >= 0,
     streams,
     audioMs,
@@ -1325,14 +1456,41 @@ const metric = (m) =>
   m.status === 'unknown'
     ? `unknown (${m.reason})`
     : `${Math.round(m.valueMs)} ± ${Math.round(m.uncertaintyMs)} ms${m.status === 'uncertain' ? ' (uncertain order)' : ''}`;
+const PROBE_RESULTS = {
+  'refused-as-expected':
+    'refused as expected: every stream stopped with that code, none connected, and no transcription followed in its session',
+  connected:
+    'not a failure take: the refused text connected, so this take shows no provider failure',
+  'other-code': 'stopped with a different code than expected',
+  'transcribed-after':
+    'transcription followed the failure in the same session; see the session lines',
+  unknown: 'unknown: the rows needed to tell are missing',
+};
+const yesNo = (v) => (v === null ? 'unknown' : v ? 'yes' : 'no');
+const offLine = (s) =>
+  s.turnOff
+    ? `processing turned off (\`${s.turnOff.code}\`) at ${s.turnOff.audioMsAtOff} ms of audio sent; before the lab Stop: ${yesNo(s.turnOff.beforeStop)}; stream closed without the Stop drain: ${yesNo(s.turnOff.closedWithoutDrain)}; nothing sent or transcribed afterwards: ${yesNo(s.turnOff.nothingAfter)}.`
+    : `processing turned off: ${yesNo(s.turnedOff)}.`;
+const failureLine = (s) =>
+  s.failure
+    ? `Stopped by failure \`${s.failure.code}\`; nothing transcribed afterwards, so nothing fell back to another service: ${yesNo(s.failure.nothingAfter)}.`
+    : '';
 function cloudMarkdown(c) {
   return [
     '### Cloud transcription',
     '',
     c.settings
-      ? `Settings: ${escape(c.settings.backend)}, cap ${c.settings.minuteCap} min, grant TTL ${c.settings.grantTtlS} s; expected query: \`${escape(c.settings.query)}\`. The token is not evidence.`
+      ? c.settings.failureProbe
+        ? `Settings: ${escape(c.settings.backend)}, cap ${c.settings.minuteCap} min, **provider-failure take** (${escape(c.settings.failureProbe)} probe: the launcher handed the app a fixed text that is no credential, never a real token); expected query: \`${escape(c.settings.query)}\`.`
+        : `Settings: ${escape(c.settings.backend)}, cap ${c.settings.minuteCap} min, grant TTL ${c.settings.grantTtlS} s; expected query: \`${escape(c.settings.query)}\`. The token is not evidence.`
       : 'Settings: not recorded in the manifest.',
     '',
+    ...(c.failureProbe
+      ? [
+          `Provider failure: expected code \`${c.failureProbe.expectedCode}\`; result **${PROBE_RESULTS[c.failureProbe.result]}**.`,
+          '',
+        ]
+      : []),
     `In-app review row seen: ${c.reviewRowSeen}.`,
     '',
     '| Session | Starts | Started only after its review | Connected | Query used = expected | Send queue overflowed | Reconnects (code, speech lost) | Stop state / code | Audio sent |',
@@ -1349,6 +1507,17 @@ function cloudMarkdown(c) {
           `Session ${escape(s.sessionId)} query used: \`${escape(s.query)}\``,
       ),
     '',
+    ...c.streams.map(
+      (s) =>
+        `Session ${escape(s.sessionId ?? 'unknown')}: ${offLine(s)} ${failureLine(s)}`,
+    ),
+    '',
+    ...(c.rowsMayBeMissing
+      ? [
+          'Rows may be missing from this log (a dropped row or writer loss), so claims that nothing followed are unknown.',
+          '',
+        ]
+      : []),
     `Audio sent this launch: ${c.audioMs} ms against a cap of ${c.capMs ?? 'unknown'} ms (the cap covers every session and source).`,
     '',
     `Final end of speech → transcript line: ${c.finalToSegment.count} finals; median ${c.finalToSegment.medianMs ?? 'unknown'} ms, max ${c.finalToSegment.maxMs ?? 'unknown'} ms (${c.finalToSegment.basis}). The provider's speaker label is untrusted and not reported.`,

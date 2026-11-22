@@ -20,7 +20,10 @@ import { parseUniqueLabJson } from './cue-lab-strict-json.mjs';
 import { TextDecoder } from 'node:util';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
 import { LAB_MEDIA_MAX_MS } from './cue-lab-media.mjs';
-import { DEEPGRAM_APP_QUERY } from './cue-lab-deepgram.mjs';
+import {
+  DEEPGRAM_APP_QUERY,
+  REFUSED_TOKEN_PROBE,
+} from './cue-lab-deepgram.mjs';
 const CHECKOUT = realpathSync(fileURLToPath(new URL('../', import.meta.url)));
 const EVENT = 'talkqte.lab.evidence.event.v1';
 const MANIFEST = 'talkqte.lab.evidence.manifest.v1';
@@ -233,25 +236,33 @@ export function createLabEvidenceWriter({
   const api = {
     directory,
     // The cloud transcription settings the launcher used, once; never the
-    // token. The app's fixed query is recorded as the request it sends.
+    // token. The app's fixed query is recorded as the request it sends. A
+    // provider-failure take records its probe instead of a grant TTL, so its
+    // manifest can never read as a normal take's.
     recordTranscription(settings) {
+      const probe = settings?.failureProbe !== undefined;
       required(
         !terminal &&
           !closed &&
           transcription === null &&
-          exact(settings, ['backend', 'minuteCap', 'grantTtlS']) &&
+          (probe
+            ? exact(settings, ['backend', 'minuteCap', 'failureProbe']) &&
+              settings.failureProbe === REFUSED_TOKEN_PROBE
+            : exact(settings, ['backend', 'minuteCap', 'grantTtlS']) &&
+              Number.isSafeInteger(settings.grantTtlS) &&
+              settings.grantTtlS >= 300 &&
+              settings.grantTtlS <= 3600) &&
           settings.backend === 'deepgram' &&
           Number.isSafeInteger(settings.minuteCap) &&
           settings.minuteCap >= 1 &&
-          settings.minuteCap <= 60 &&
-          Number.isSafeInteger(settings.grantTtlS) &&
-          settings.grantTtlS >= 300 &&
-          settings.grantTtlS <= 3600,
+          settings.minuteCap <= 60,
       );
       transcription = Object.freeze({
         backend: settings.backend,
         minuteCap: settings.minuteCap,
-        grantTtlS: settings.grantTtlS,
+        ...(probe
+          ? { failureProbe: settings.failureProbe }
+          : { grantTtlS: settings.grantTtlS }),
         query: DEEPGRAM_APP_QUERY,
       });
     },
