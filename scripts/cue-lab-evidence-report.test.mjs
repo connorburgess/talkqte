@@ -1275,6 +1275,54 @@ const latchRow = (mono_ms) => ({
   mono_ms,
 });
 
+const offAsk = (step, mono_ms) => ({
+  event: 'dev_off',
+  run_id: 'fictional-cedar',
+  step,
+  mono_ms,
+});
+
+test("the take's own turn-off request is placed: asked before the stream closed, done before the lab Stop, later signals counted", () => {
+  const r = cloudReport([
+    ...cloudRows({ stop: offRow('lab_ended', 50000, 9000) }).flatMap((row) =>
+      row === undefined || row.code !== 'lab_ended'
+        ? [row]
+        : [offAsk('latched', 8990), row, offAsk('done', 9001)],
+    ),
+    offAsk('repeated', 9050),
+    latchRow(9100),
+  ]);
+  const c = r.cloudTranscription;
+  assert.deepEqual(c.turnOffRequest, {
+    outcome: 'done',
+    beforeStop: true,
+    repeats: 1,
+  });
+  assert.equal(c.streams[0].turnOff.afterAsk, true);
+  assert.ok(!r.missingEvidence.includes('run.turn-off'));
+  const md = renderEvidenceMarkdown(r);
+  assert.match(
+    md,
+    /Turn-off asked by the take: native outcome \*\*done\*\*; decided before the lab Stop: yes; later signals recorded as no-ops: 1\./,
+  );
+  assert.match(md, /after the take asked for it: yes\./);
+  // Refused after the Stop latch: failed, and placed after it.
+  const late = cloudReport([
+    ...cloudRows({ stop: offRow('lab_ended', 50000, 9000) }),
+    latchRow(9100),
+    offAsk('latched', 9200),
+    offAsk('failed', 9201),
+  ]).cloudTranscription;
+  assert.deepEqual(late.turnOffRequest, {
+    outcome: 'failed',
+    beforeStop: false,
+    repeats: 0,
+  });
+  // The stream closed before the take asked: not its turn-off.
+  assert.equal(late.streams[0].turnOff.afterAsk, false);
+  assert.throws(() => cloudReport([offAsk('started', 1)]));
+});
+
 test('processing turned off mid-run is reported with its code, before the lab Stop, closed without the drain and followed by nothing', () => {
   for (const code of ['lab_ended', 'withdrawn']) {
     const r = cloudReport([
@@ -1289,7 +1337,9 @@ test('processing turned off mid-run is reported with its code, before the lab St
       beforeStop: true,
       closedWithoutDrain: true,
       nothingAfter: true,
+      afterAsk: null,
     });
+    assert.equal(r.cloudTranscription.turnOffRequest, null);
     assert.equal(s.failure, null);
     assert.ok(r.missingEvidence.every((x) => x !== 'run.stop-latched'));
     const md = renderEvidenceMarkdown(r);

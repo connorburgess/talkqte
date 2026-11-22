@@ -80,6 +80,16 @@ The lifecycle's twelve-second default release wait covers both bounds. Timing
 loss, process error or process exit before release fails cleanup. Transcript and
 cue text are not forwarded into lifecycle events or logs.
 
+A take that plans a turn-off creates the owner with `turnOff: true`, which
+adds `TALKQTE_DEV_OFF_SIGNAL=usr1` to the launch settings. Its native object
+then also has `turnOff()`, which sends `kill('SIGUSR1')` once, only after
+`armed` and before any Stop was asked for, and resolves on the exact-run
+`dev_off` `done` row. The lifecycle's `turnOff()` passes it on once, only when
+ready and nothing has stopped the run; `turnOffState` gives its outcome and
+whether the run's first stop came after it was asked. A native end that
+follows is handled like any other; Stop and cleanup are unchanged. See
+[turning processing off](lab-prepared-take.md#provider-failure-and-turning-processing-off-t5).
+
 The existing timing stream is lossy and unacknowledged. Missing `armed` permits
 no signal; missing `released` remains unconfirmed cleanup even if ordinary Stop,
 source-end or process-exit events were observed. Never infer native release or

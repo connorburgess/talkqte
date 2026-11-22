@@ -78,6 +78,16 @@ exists, not during prelaunch verification. The owner waits for exact-run `armed`
 sends USR2 once and requires `latched` → `stopping` → `released` or failure.
 Six seconds after signaling and twelve seconds total remain the cleanup bounds.
 
+`turnOff: true` prepares a launch for one mid-run turn-off of cue processing
+(T5). It is accepted only on a model run and never with the provider-failure
+probe. Only then is `TALKQTE_DEV_OFF_SIGNAL=usr1` forwarded (the owner must
+supply exactly that) and are native `dev_off` rows accepted: only after
+`armed`, in the order `latched`, then `done` or `failed`, then any `repeated`.
+Any other order or an unprepared launch fails the run. The rows go to the
+owner alone, never to the source observers or the lifecycle. `turnOff` reports
+the last outcome row and the count of later signals, or null when not
+prepared. See [turning processing off](lab-prepared-take.md#provider-failure-and-turning-processing-off-t5).
+
 ## Cloud transcription token
 
 On the direct API route a run transcribes through Deepgram (#344). Pass `transcription: { backend: 'deepgram', minuteCap, grant }`, where `minuteCap` is 1–60 for the whole launch and `grant` comes from `mintDeepgramGrant` (`scripts/cue-lab-deepgram.mjs`).

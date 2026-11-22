@@ -265,8 +265,19 @@ function launcher({
   transcription,
   userName,
   contextPolicy = 'fresh-only',
+  turnOff,
 }) {
   requireThat(userName === undefined || isLabUserName(userName));
+  // A turn-off take (T5) asks the app, mid-run, to turn cue processing off
+  // as Disable processing does (TALKQTE_DEV_OFF_SIGNAL, src-tauri dev_off.rs).
+  // Only a model run has processing to turn off, and a provider-failure
+  // take is a different check: its refusal already ends the stream.
+  requireThat(
+    turnOff === undefined ||
+      (turnOff === true &&
+        mode === 'model-enabled' &&
+        transcription?.failureProbe === undefined),
+  );
   requireThat(
     contextPolicy === 'fresh-only' ||
       (['bounded-history', 'selected-prior-v2'].includes(contextPolicy) &&
@@ -413,6 +424,9 @@ function launcher({
     step = null,
     closed = false;
   let activeRunId = null;
+  // The turn-off's last outcome row and later signals counted, if prepared.
+  let offStep = null,
+    offRepeats = 0;
   const subscribers = new Set();
   const evaluatorSubscribers = new Set();
   const close = () => {
@@ -483,6 +497,8 @@ function launcher({
           'TALKQTE_DEV_STOP_SIGNAL',
           'TALKQTE_DEV_STOP_AFTER_S',
           'TALKQTE_DEV_LAB_RUN_ID',
+          // Forwarded only when this launch was prepared for a turn-off.
+          ...(turnOff ? ['TALKQTE_DEV_OFF_SIGNAL'] : []),
         ];
         const viaApi = pinned?.provider === 'anthropic-api';
         const modelKeys = [
@@ -500,6 +516,7 @@ function launcher({
             ...(mode === 'model-enabled' ? modelKeys : []),
           ]) &&
             runEnv.TALKQTE_DEV_STOP_SIGNAL === 'usr2' &&
+            (!turnOff || runEnv.TALKQTE_DEV_OFF_SIGNAL === 'usr1') &&
             runEnv.TALKQTE_DEV_STOP_AFTER_S === String(stopAfterS) &&
             /^[A-Za-z0-9_-]{1,64}$/.test(runEnv.TALKQTE_DEV_LAB_RUN_ID),
         );
@@ -565,6 +582,28 @@ function launcher({
                 requireThat(previous[event.step] === step);
               step = event.step;
               if (step === 'released') released = true;
+            }
+            // The turn-off's rows, in native's strict order: only in a
+            // launch prepared for one, only once armed, `latched` once,
+            // then `done` or `failed` once, then `repeated` for any later
+            // signal. They go to the owner alone; the source observers
+            // and lifecycle never see them.
+            if (event.event === 'dev_off') {
+              const previous = {
+                latched: [null],
+                done: ['latched'],
+                failed: ['latched'],
+                repeated: ['done', 'failed', 'repeated'],
+              };
+              requireThat(
+                turnOff === true &&
+                  step !== null &&
+                  previous[event.step].includes(offStep),
+              );
+              if (event.step === 'repeated') offRepeats++;
+              else offStep = event.step;
+              onTiming(event);
+              return;
             }
             // A cloud stream may open only after the in-app review approved
             // the session; the token is not needed once it has opened.
@@ -747,6 +786,14 @@ function launcher({
     get sourceReleased() {
       return released;
     },
+    // Prepared for a turn-off, with native's outcome so far: `latched`,
+    // `done` or `failed`, and how many later signals it recorded as no-ops.
+    // null when the launch was not prepared for one.
+    get turnOff() {
+      return turnOff
+        ? Object.freeze({ step: offStep, repeats: offRepeats })
+        : null;
+    },
     // Native ended the session itself (source_problem), with its fixed label
     // and OS code; null otherwise. Not a release by the lab's Stop.
     get nativeEnded() {
@@ -928,6 +975,7 @@ export function prepareLabLauncher({
   transcription,
   userName,
   contextPolicy,
+  turnOff,
   ...rest
 } = {}) {
   // Local transcription is gone: a Whisper model or any other unknown
@@ -960,6 +1008,7 @@ export function prepareLabLauncher({
       transcription,
       userName,
       contextPolicy,
+      turnOff,
     });
   } catch {
     throw gateFailure('protocol');
@@ -976,6 +1025,7 @@ export function prepareLabFixtureLauncher({
   environment = {},
   transcription,
   userName,
+  turnOff,
 } = {}) {
   requireThat(
     [
@@ -1008,6 +1058,9 @@ export function prepareLabFixtureLauncher({
       'frame-oversize',
       'listening',
       'descriptor-peer',
+      'turn-off',
+      'turn-off-failed',
+      'turn-off-unasked',
     ].includes(fixtureCase),
   );
   const before = digest(process.execPath),
@@ -1037,5 +1090,6 @@ export function prepareLabFixtureLauncher({
     fixtureCase,
     transcription,
     userName,
+    turnOff,
   });
 }

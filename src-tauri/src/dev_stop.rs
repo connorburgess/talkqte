@@ -8,7 +8,7 @@ use crate::{
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc, OnceLock,
+        mpsc, Mutex, MutexGuard, OnceLock,
     },
     time::{Duration, Instant},
 };
@@ -22,6 +22,22 @@ static SOURCE_ONLY: AtomicBool = AtomicBool::new(false);
 static REQUESTED: AtomicBool = AtomicBool::new(false);
 static INSTALLED: OnceLock<()> = OnceLock::new();
 static ARMED_RUN: OnceLock<String> = OnceLock::new();
+// Orders the Stop latch row against an opted-in turn-off (dev_off.rs), so
+// the two are never interleaved.
+static ORDER: Mutex<()> = Mutex::new(());
+
+pub(crate) fn order() -> MutexGuard<'static, ()> {
+    // Holds no data, so a panic elsewhere cannot leave it inconsistent.
+    ORDER
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Writes the Stop latch once no turn-off decision is in progress.
+pub(crate) fn latch(write: impl FnOnce()) {
+    let _order = order();
+    write();
+}
 
 pub(crate) fn armed_run() -> Option<&'static str> {
     ARMED_RUN.get().map(String::as_str)
@@ -137,6 +153,8 @@ pub(crate) fn install(
         std::env::var_os(SIGNAL_ENV).map(|value| value.into_string().unwrap_or_default());
     let run_setting =
         std::env::var_os(RUN_ENV).map(|value| value.into_string().unwrap_or_default());
+    let off_setting = std::env::var_os(crate::dev_off::SIGNAL_ENV)
+        .map(|value| value.into_string().unwrap_or_default());
     let run = match settings(|key| {
         if key == SIGNAL_ENV {
             signal_setting.clone()
@@ -144,7 +162,10 @@ pub(crate) fn install(
             run_setting.clone()
         }
     }) {
-        Ok(None) => return Ok(()),
+        Ok(None) => {
+            // A turn-off without the armed lab Stop is refused, never ignored.
+            return crate::dev_off::settings(off_setting.as_deref(), false).map(|_| ());
+        }
         Ok(Some(run)) => run,
         Err(error) => {
             // Never echo a malformed identity, and never reread the environment.
@@ -164,6 +185,7 @@ pub(crate) fn install(
         emit(&run, "failed");
         error
     };
+    let turn_off = crate::dev_off::settings(off_setting.as_deref(), true).map_err(fail)?;
     if !timing_log::enabled() {
         return Err(fail("development Stop requires its private timing channel"));
     }
@@ -205,13 +227,19 @@ pub(crate) fn install(
             while !requested() {
                 std::thread::sleep(POLL);
             }
-            emit(&worker_run, "latched");
+            latch(|| emit(&worker_run, "latched"));
             crate::lab_evaluator::cancel_active(crate::lab_evaluator::ControlReason::Stop);
             emit(&worker_run, "stopping");
             stop_owned(&handle, &host, &worker_run);
         })
         .map_err(|_| fail("cannot start development Stop worker"))?;
     install_handler().map_err(fail)?;
+    // Installed before arming, so the owner can rely on it once `armed` is seen.
+    let off_start = if turn_off {
+        Some(crate::dev_off::install(app, &run).map_err(fail)?)
+    } else {
+        None
+    };
     ready
         .send(())
         .map_err(|_| fail("development Stop worker unavailable"))?;
@@ -221,6 +249,11 @@ pub(crate) fn install(
         .set(run.clone())
         .map_err(|_| fail("development run already armed"))?;
     emit(&run, "armed");
+    if let Some(start) = off_start {
+        start
+            .send(())
+            .map_err(|_| fail("development off worker unavailable"))?;
+    }
     Ok(())
 }
 

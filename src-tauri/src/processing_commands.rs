@@ -108,9 +108,42 @@ impl Runtime {
 
     pub(crate) fn disable_processing(&mut self, expected: &ExpectedScope) -> Result<(), Error> {
         self.require_processing_scope(expected)?;
+        self.withdraw_processing();
+        Ok(())
+    }
+
+    /// What **Disable processing** does once its scope matches.
+    fn withdraw_processing(&mut self) {
         self.processing_reviews.clear();
         self.engine.revoke_processing();
-        Ok(())
+    }
+
+    /// The development lab turn-off (dev_off.rs): the same withdrawal, with
+    /// no notebook scope to compare, and only while processing is on, so
+    /// `true` always means a review was withdrawn. It never approves,
+    /// resumes or reopens anything.
+    #[cfg_attr(
+        not(all(
+            debug_assertions,
+            target_os = "macos",
+            feature = "native-audio-spike",
+            feature = "lab-evaluator"
+        )),
+        allow(dead_code)
+    )]
+    pub(crate) fn withdraw_processing_for_lab(&mut self) -> bool {
+        self.sync();
+        let on = self.engine.has_processing_permission();
+        if on {
+            self.withdraw_processing();
+        }
+        let Runtime {
+            engine,
+            processing_reviews,
+            ..
+        } = self;
+        processing_reviews.reconcile(engine);
+        on
     }
 
     pub(crate) fn pause_processing(

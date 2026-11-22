@@ -10,9 +10,18 @@ export function createLabNativeOwner({
   armingMs = 5000,
   releaseMs = 6000,
   mode = 'model-enabled',
+  // Prepared for one mid-run turn-off (TALKQTE_DEV_OFF_SIGNAL, native
+  // dev_off.rs) and how long its outcome row may take after SIGUSR1.
+  turnOff = false,
+  offMs = 2000,
 } = {}) {
   if (
     !['capture-only', 'model-enabled'].includes(mode) ||
+    typeof turnOff !== 'boolean' ||
+    (turnOff && mode !== 'model-enabled') ||
+    !Number.isSafeInteger(offMs) ||
+    offMs < 1 ||
+    offMs > 10000 ||
     !isAbsolute(executable ?? '') ||
     typeof launch !== 'function' ||
     !Number.isSafeInteger(stopAfterS) ||
@@ -34,6 +43,13 @@ export function createLabNativeOwner({
     failed = false,
     armingTimer,
     releaseTimer,
+    // The turn-off: signal sent, `latched` seen, and its outcome row.
+    offSent = false,
+    offLatched = false,
+    offOutcome = null,
+    offRepeats = 0,
+    offTimer,
+    settleOff = () => {},
     resolveArmed,
     rejectArmed,
     resolveReleased,
@@ -56,6 +72,7 @@ export function createLabNativeOwner({
     failed = true;
     clearTimeout(armingTimer);
     clearTimeout(releaseTimer);
+    settleOff(gateFailure('cleanup'));
     rejectArmed(gateFailure('cleanup'));
     rejectReleased(gateFailure('cleanup'));
     emit('failed');
@@ -98,6 +115,21 @@ export function createLabNativeOwner({
       } else if (event.step === 'latched' || event.step === 'stopping') {
         if (!armed) return fail();
         emit('stop-requested');
+      } else fail();
+    } else if (event?.event === 'dev_off') {
+      // Only this owner's single signal may start the turn-off. A later
+      // signal from anywhere is a recorded no-op natively, counted here.
+      if (event.run_id !== runId || !turnOff) return fail();
+      if (event.step === 'latched') {
+        if (!offSent || offLatched) return fail();
+        offLatched = true;
+      } else if (event.step === 'done' || event.step === 'failed') {
+        if (!offLatched || offOutcome) return fail();
+        offOutcome = event.step;
+        settleOff(event.step === 'done' ? null : gateFailure('protocol'));
+      } else if (event.step === 'repeated') {
+        if (!offOutcome) return fail();
+        offRepeats++;
       } else fail();
     } else if (
       event?.event === 'source_problem' ||
@@ -151,6 +183,7 @@ export function createLabNativeOwner({
             TALKQTE_DEV_STOP_SIGNAL: 'usr2',
             TALKQTE_DEV_STOP_AFTER_S: String(stopAfterS),
             TALKQTE_DEV_LAB_RUN_ID: id,
+            ...(turnOff ? { TALKQTE_DEV_OFF_SIGNAL: 'usr1' } : {}),
             ...(mode === 'model-enabled'
               ? {
                   TALKQTE_DEV_CUE_BACKEND:
@@ -197,6 +230,60 @@ export function createLabNativeOwner({
         fail();
         throw gateFailure('cleanup');
       }
+    },
+    // Asks native once, by SIGUSR1 to the exact owned child, to turn cue
+    // processing off. Only after `armed` and before any Stop was asked for:
+    // it never races the Stop. Resolves on native's `done` row; rejects on
+    // `failed`, on no outcome within offMs, or when not allowed. It starts
+    // nothing, and a rejection leaves the ordinary Stop to the caller.
+    turnOff() {
+      if (
+        !turnOff ||
+        offSent ||
+        !armed ||
+        requested ||
+        signalled ||
+        released ||
+        failed ||
+        !child
+      )
+        return Promise.reject(gateFailure('protocol'));
+      if (
+        child.pid !== pid ||
+        child.spawnfile !== executable ||
+        child.exitCode !== null ||
+        child.signalCode !== null
+      ) {
+        fail();
+        return Promise.reject(gateFailure('cleanup'));
+      }
+      offSent = true;
+      const outcome = new Promise((resolve, reject) => {
+        settleOff = (error) => {
+          settleOff = () => {};
+          clearTimeout(offTimer);
+          if (error) reject(error);
+          else resolve({ turnedOff: true });
+        };
+      });
+      outcome.catch(() => {});
+      offTimer = setTimeout(() => settleOff(gateFailure('deadline')), offMs);
+      try {
+        if (child.kill('SIGUSR1') !== true) fail();
+      } catch {
+        fail();
+      }
+      return outcome;
+    },
+    // The turn-off so far: null when not prepared for one.
+    get offState() {
+      return turnOff
+        ? Object.freeze({
+            sent: offSent,
+            outcome: offOutcome,
+            repeats: offRepeats,
+          })
+        : null;
     },
     stop() {
       requested = true;

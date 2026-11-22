@@ -116,7 +116,13 @@ export function createLabRun({
   // The first reason anything stopped this run, at any stage, as a fixed
   // label: a native owner event, a provider or broker category, cancelled.
   let firstStopReason = null;
+  // A mid-run turn-off (native.turnOff): asked, its outcome, and whether
+  // the run's first stop came after it was asked.
+  let offAsked = false,
+    offOutcome = null,
+    stoppedAfterOff = null;
   const stop = (reason = 'cancelled') => {
+    stoppedAfterOff ??= offAsked;
     firstStopReason ??= STARTUP_REASONS.has(reason) ? reason : 'protocol';
     recordStartupFailure(reason);
     if (!terminal) terminal = reason === 'cleanup' ? 'cleanup' : 'cancelled';
@@ -353,6 +359,46 @@ export function createLabRun({
     },
     get stopReason() {
       return firstStopReason;
+    },
+    // Asks native once to turn cue processing off, as Disable processing
+    // does: only when ready and nothing has stopped the run. The end that
+    // may follow (the lab cue run or session ending) stops the run as any
+    // native end does; ordinary Stop and cleanup are unchanged.
+    turnOff() {
+      if (
+        offAsked ||
+        typeof native.turnOff !== 'function' ||
+        phase !== 'ready' ||
+        terminal ||
+        broker.gate.terminal
+      )
+        return Promise.reject(gateFailure('protocol'));
+      offAsked = true;
+      let asked;
+      try {
+        asked = Promise.resolve(native.turnOff());
+      } catch (error) {
+        asked = Promise.reject(error);
+      }
+      return asked.then(
+        (result) => {
+          if (result?.turnedOff !== true) throw gateFailure('protocol');
+          offOutcome = 'done';
+          return Object.freeze({ turnedOff: true });
+        },
+        (error) => {
+          offOutcome = error?.category === 'deadline' ? 'no-outcome' : 'failed';
+          throw gateFailure(offOutcome === 'failed' ? 'protocol' : 'deadline');
+        },
+      );
+    },
+    get turnOffState() {
+      return offAsked
+        ? Object.freeze({
+            outcome: offOutcome,
+            stoppedAfter: stoppedAfterOff === true,
+          })
+        : null;
     },
     get startupDiagnostics() {
       return Object.freeze({

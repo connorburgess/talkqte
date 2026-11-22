@@ -91,6 +91,12 @@ function fixture({
   releaseFails = false,
   // Called while the provider opens (after approval), e.g. to move a clock.
   onProviderOpen,
+  // A planned turn-off: native's outcome row for SIGUSR1, and whether the
+  // live session then ends (as the lab cue run ending ends the stream).
+  turnOffAfterMs,
+  launcherTurnOff = turnOffAfterMs !== undefined,
+  offStep = 'done',
+  offEndsSession = true,
 } = {}) {
   if (api) effort = 'low';
   if (fixedModel) {
@@ -123,6 +129,7 @@ function fixture({
     bodyClose: 0,
     requests: 0,
     providerOpen: 0,
+    turnOff: 0,
   };
   Object.assign(child, {
     pid: 44001,
@@ -130,6 +137,22 @@ function fixture({
     exitCode: null,
     signalCode: null,
     kill(name) {
+      if (name === 'SIGUSR1') {
+        counts.turnOff++;
+        trace.push('turn-off');
+        queueMicrotask(() => {
+          const run_id = launchOptions.environment.TALKQTE_DEV_LAB_RUN_ID;
+          for (const step of ['latched', offStep])
+            launchOptions.onTiming({ event: 'dev_off', run_id, step });
+          if (offStep === 'done' && offEndsSession)
+            launchOptions.onTiming({
+              event: 'session',
+              state: 'ended',
+              session: 1,
+            });
+        });
+        return true;
+      }
       assert.equal(name, 'SIGUSR2');
       counts.nativeStop++;
       trace.push('native-stop');
@@ -165,6 +188,7 @@ function fixture({
     close() {
       counts.launcherClose++;
     },
+    ...(launcherTurnOff ? { turnOff: { step: null, repeats: 0 } } : {}),
   };
   if (cloud) {
     launcher.transcription = { backend: 'deepgram' };
@@ -539,6 +563,7 @@ function fixture({
     ...(tailMs === undefined ? {} : { tailMs }),
     observe,
     onGuard: guardSink,
+    ...(turnOffAfterMs === undefined ? {} : { turnOffAfterMs }),
   };
   if (fixedModel) {
     if (!ownedPlayer)
@@ -603,6 +628,7 @@ test('prepared speech starts after Listening and recorder readiness but before l
     bodyClose: 0,
     requests: 0,
     providerOpen: 1,
+    turnOff: 0,
   });
 });
 
@@ -1603,4 +1629,75 @@ test('a take that runs out of time while the provider opens stops without releas
     approvals.map((e) => e.state),
     ['waiting'],
   );
+});
+
+test('a planned turn-off is asked once after the render start, and the run ending after done is the expected stop', async () => {
+  const events = [];
+  const f = fixture({
+    turnOffAfterMs: 20,
+    playbackWait: new Promise(() => {}),
+    observe: (e) => events.push(e),
+  });
+  await assert.rejects(f.take.done, { category: 'turned-off' });
+  assert.equal(f.take.phase, 'stopped');
+  assert.equal(f.take.failure, 'turned-off');
+  assert.equal(f.take.turnOff.afterMs, 20);
+  assert.ok(f.take.turnOff.askedAfterRenderMs >= 19);
+  assert.equal(f.take.turnOff.outcome, 'done');
+  assert.equal(f.counts.turnOff, 1);
+  assert.ok(f.trace.indexOf('turn-off') < f.trace.indexOf('native-stop'));
+  // Ordinary Stop and cleanup are unchanged, once each.
+  assert.equal(f.counts.nativeStop, 1);
+  assert.equal(f.counts.providerClose, 1);
+  assert.equal(f.counts.recorderStop, 1);
+  assert.equal(events.at(-1).stage, 'run.ended');
+  assert.equal(events.at(-1).outcome, 'observed');
+});
+
+test('a turn-off native refuses stops the take as a failed check', async () => {
+  const f = fixture({
+    turnOffAfterMs: 20,
+    offStep: 'failed',
+    playbackWait: new Promise(() => {}),
+  });
+  await assert.rejects(f.take.done, { category: 'turn-off-failed' });
+  assert.equal(f.take.turnOff.outcome, 'failed');
+  assert.equal(f.counts.turnOff, 1);
+  assert.equal(f.counts.nativeStop, 1);
+});
+
+test('a done turn-off with no native end lets the take complete and reports it', async () => {
+  const played = deferred();
+  const f = fixture({
+    turnOffAfterMs: 20,
+    offEndsSession: false,
+    playbackWait: played.promise,
+  });
+  await waitForTrace(f, 'turn-off');
+  while (f.take.turnOff?.outcome !== 'done') await delay(1);
+  played.resolve();
+  const result = await f.take.done;
+  assert.equal(result.completed, true);
+  assert.equal(result.turnOff.outcome, 'done');
+  assert.equal(f.counts.turnOff, 1);
+});
+
+test('no turn-off is sent after the take stops, and plan and launch must agree', async () => {
+  const f = fixture({
+    turnOffAfterMs: 50,
+    playbackWait: new Promise(() => {}),
+  });
+  await waitForTrace(f, 'play');
+  await assert.rejects(f.take.stop(), { category: 'cancelled' });
+  await delay(80);
+  assert.equal(f.counts.turnOff, 0);
+  assert.equal(f.take.turnOff, null);
+  for (const options of [
+    { launcherTurnOff: true },
+    { turnOffAfterMs: 20, launcherTurnOff: false },
+    { turnOffAfterMs: 0 },
+    { turnOffAfterMs: media.durationMs },
+    { turnOffAfterMs: 1.5 },
+  ])
+    assert.throws(() => fixture(options), { category: 'protocol' });
 });

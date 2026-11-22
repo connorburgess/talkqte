@@ -47,8 +47,12 @@ const selection = {
   effort: 'medium',
   maxCalls: 2,
 };
-function fixture(mode) {
-  const launcher = prepareLabFixtureLauncher({ fixtureCase: mode, selection });
+function fixture(mode, { turnOff = false, ownerTurnOff = turnOff } = {}) {
+  const launcher = prepareLabFixtureLauncher({
+    fixtureCase: mode,
+    selection,
+    ...(turnOff ? { turnOff: true } : {}),
+  });
   const descriptor = join(launcher.directory, 'descriptor.json');
   writeFileSync(descriptor, '{}', { mode: 0o600 });
   let child, lastLaunch;
@@ -57,6 +61,8 @@ function fixture(mode) {
     stopAfterS: 120,
     armingMs: 1200,
     releaseMs: 300,
+    turnOff: ownerTurnOff,
+    offMs: 1000,
     launch(options) {
       lastLaunch = options;
       child = launcher.launch(options);
@@ -1534,4 +1540,110 @@ test('bounded-history production routing connects reviewed source to broker HELL
     if (launcher) rmSync(launcher.directory, { recursive: true, force: true });
     f.close();
   }
+});
+
+test('a prepared turn-off is one owned SIGUSR1 whose done row the owner needs; later signals are recorded no-ops', async () => {
+  const f = fixture('turn-off', { turnOff: true });
+  try {
+    assert.equal(f.launcher.turnOff.step, null);
+    await f.start();
+    assert.equal(f.lastLaunch.environment.TALKQTE_DEV_OFF_SIGNAL, 'usr1');
+    assert.deepEqual(await f.owner.turnOff(), { turnedOff: true });
+    assert.deepEqual(f.launcher.turnOff, { step: 'done', repeats: 0 });
+    // Once only: a second request sends nothing.
+    await assert.rejects(f.owner.turnOff(), { category: 'protocol' });
+    // A signal from outside the owner changes nothing and is still recorded.
+    process.kill(f.child.pid, 'SIGUSR1');
+    for (let n = 0; n < 100 && f.owner.offState.repeats === 0; n++)
+      await delay(10);
+    assert.deepEqual(f.owner.offState, {
+      sent: true,
+      outcome: 'done',
+      repeats: 1,
+    });
+    assert.deepEqual(f.launcher.turnOff, { step: 'done', repeats: 1 });
+    assert.deepEqual(await f.owner.stop(), { released: true });
+    assert.equal(f.launcher.sourceReleased, true);
+    assert.ok(!f.events.includes('failed'));
+  } finally {
+    await f.close();
+  }
+});
+
+test('a turn-off native refuses rejects but leaves the ordinary Stop working', async () => {
+  const f = fixture('turn-off-failed', { turnOff: true });
+  try {
+    await f.start();
+    await assert.rejects(f.owner.turnOff(), { category: 'protocol' });
+    assert.equal(f.owner.offState.outcome, 'failed');
+    assert.deepEqual(f.launcher.turnOff, { step: 'failed', repeats: 0 });
+    assert.deepEqual(await f.owner.stop(), { released: true });
+  } finally {
+    await f.close();
+  }
+});
+
+test('no turn-off is sent once Stop was asked for, and none without the prepared setting', async () => {
+  const f = fixture('turn-off', { turnOff: true });
+  try {
+    await f.start();
+    const released = f.owner.stop();
+    await assert.rejects(f.owner.turnOff(), { category: 'protocol' });
+    assert.deepEqual(await released, { released: true });
+    assert.equal(f.owner.offState.sent, false);
+  } finally {
+    await f.close();
+  }
+  const plain = fixture('normal');
+  try {
+    await plain.start();
+    assert.equal(
+      plain.lastLaunch.environment.TALKQTE_DEV_OFF_SIGNAL,
+      undefined,
+    );
+    assert.equal(plain.launcher.turnOff, null);
+    assert.equal(plain.owner.offState, null);
+    await assert.rejects(plain.owner.turnOff(), { category: 'protocol' });
+    assert.deepEqual(await plain.owner.stop(), { released: true });
+  } finally {
+    await plain.close();
+  }
+});
+
+test('a turn-off row nobody asked for, or a setting the launch was not prepared for, stops the run', async () => {
+  const unasked = fixture('turn-off-unasked', { turnOff: true });
+  try {
+    await unasked.start().catch(() => {});
+    for (let n = 0; n < 200 && !unasked.events.includes('failed'); n++)
+      await delay(10);
+    assert.ok(unasked.events.includes('failed'));
+    await assert.rejects(unasked.owner.stop());
+  } finally {
+    await unasked.close();
+  }
+  // Owner and launcher must agree in both directions.
+  for (const [turnOff, ownerTurnOff] of [
+    [true, false],
+    [false, true],
+  ]) {
+    const f = fixture('turn-off', { turnOff, ownerTurnOff });
+    try {
+      await assert.rejects(f.start());
+      assert.equal(f.child, undefined);
+    } finally {
+      await f.close();
+    }
+  }
+  for (const options of [
+    { turnOff: 'yes' },
+    { turnOff: false },
+    { turnOff: true, mode: 'capture-only', selection: undefined },
+  ])
+    assert.throws(() =>
+      prepareLabFixtureLauncher({
+        fixtureCase: 'turn-off',
+        selection,
+        ...options,
+      }),
+    );
 });
