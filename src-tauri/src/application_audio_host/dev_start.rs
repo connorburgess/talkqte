@@ -172,6 +172,7 @@ impl Host {
         self.start_by_setting_observed(settings, waits, |_| true)
     }
 
+    #[cfg(any(test, all(debug_assertions, feature = "lab-evaluator")))]
     pub(super) fn start_by_setting_observed(
         &self,
         settings: &Settings,
@@ -182,7 +183,9 @@ impl Host {
         self.start_by_setting_joining(settings, waits, None::<fn() -> bool>, observe)
     }
 
-    /// As `start_by_setting`. When the settings ask to join the microphone,
+    /// One attempt for `settings`, blocking the calling thread, which must
+    /// not be the worker or hold the runtime lock. `observe` confirms the
+    /// started operation. When the settings ask to join the microphone,
     /// `microphone_running` says whether a live microphone session can take
     /// a source now; without it that setting is refused.
     pub(crate) fn start_by_setting_joining(

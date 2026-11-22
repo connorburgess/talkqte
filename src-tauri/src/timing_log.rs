@@ -726,14 +726,7 @@ impl Runtime {
     /// `Engine::ingest`, recording the line and any cue it raised while the
     /// timing log is on. Behaves exactly like `Engine::ingest` otherwise.
     /// Its callers are the live sinks, which only some builds compile.
-    #[cfg_attr(
-        not(any(
-            feature = "cloud-transcription",
-            all(target_os = "macos", feature = "native-audio-spike"),
-            test
-        )),
-        allow(dead_code)
-    )]
+    #[cfg_attr(not(any(feature = "cloud-transcription", test)), allow(dead_code))]
     pub(crate) fn ingest_timed(&mut self, session: u64, segment: Segment) -> Result<(), String> {
         self.ingest_timed_from(session, crate::engine::LineOrigin::Microphone, segment)
     }
