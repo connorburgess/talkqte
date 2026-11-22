@@ -252,21 +252,22 @@ export const isLabUserName = (name) =>
   /\p{L}/u.test(name) &&
   /^[\p{L}\u0300-\u036f '\-\u2019]+$/u.test(name);
 
-function launcher({
-  build,
+// The launch scope checks that need nothing on disk: the same rules the
+// launcher applies before it verifies a build or creates its run folder.
+// Exported so a plan can be checked before anything is launched; the
+// prepared player's identity is checked separately, by the launcher.
+export function assertLabLaunchOptions({
   selection,
   stopAfterS,
   sourceApplication,
   modelConnection,
-  environment,
-  fixtureCase,
   mode = 'model-enabled',
   playerSource,
   transcription,
   userName,
   contextPolicy = 'fresh-only',
   turnOff,
-}) {
+} = {}) {
   requireThat(userName === undefined || isLabUserName(userName));
   // A turn-off take (T5) asks the app, mid-run, to turn cue processing off
   // as Disable processing does (TALKQTE_DEV_OFF_SIGNAL, src-tauri dev_off.rs).
@@ -339,8 +340,7 @@ function launcher({
   requireThat(
     (sourceApplication === 'QuickTime Player'
       ? playerSource === undefined
-      : sourceApplication === 'TalkQTE Lab Player' &&
-        checkLabPlayerSource(playerSource)) &&
+      : sourceApplication === 'TalkQTE Lab Player') &&
       // The direct API route has no launch approval: the owner approves in
       // the app's session review, which names the API, model and spend cap.
       (mode === 'capture-only' || selection?.provider === 'anthropic-api'
@@ -349,6 +349,37 @@ function launcher({
       Number.isSafeInteger(stopAfterS) &&
       stopAfterS > 0,
   );
+}
+
+function launcher({
+  build,
+  selection,
+  stopAfterS,
+  sourceApplication,
+  modelConnection,
+  environment,
+  fixtureCase,
+  mode = 'model-enabled',
+  playerSource,
+  transcription,
+  userName,
+  contextPolicy = 'fresh-only',
+  turnOff,
+}) {
+  assertLabLaunchOptions({
+    selection,
+    stopAfterS,
+    sourceApplication,
+    modelConnection,
+    mode,
+    playerSource,
+    transcription,
+    userName,
+    contextPolicy,
+    turnOff,
+  });
+  if (sourceApplication === 'TalkQTE Lab Player')
+    checkLabPlayerSource(playerSource);
   assertSubscriptionEnvironment(environment);
   const pinned = selection ? Object.freeze({ ...selection }) : null;
   const osEnv = Object.fromEntries(
@@ -962,6 +993,27 @@ export const NO_TRANSCRIPTION_CAPTURE =
 const noTranscription = (reason) =>
   Object.assign(new Error(reason), { category: 'no-transcription' });
 
+// A model run needs a transcript, and the only one left is cloud
+// transcription, approved only by the in-app review that the direct API
+// route uses. The subscription routes are refused before anything is
+// verified or launched. The app starts no session at all without a
+// transcription setting, so a capture-only launch carries one too
+// (placeholder only, no grant).
+export function assertLabTranscriptionRoute({
+  mode = 'model-enabled',
+  selection,
+  transcription,
+} = {}) {
+  if (mode === 'model-enabled') {
+    if (selection?.provider !== 'anthropic-api')
+      throw noTranscription(NO_TRANSCRIPTION_SUBSCRIPTION);
+    if (transcription === undefined)
+      throw noTranscription(NO_TRANSCRIPTION_SELECTED);
+  }
+  if (mode === 'capture-only' && transcription === undefined)
+    throw noTranscription(NO_TRANSCRIPTION_CAPTURE);
+}
+
 export function prepareLabLauncher({
   manifestFile,
   approved,
@@ -981,20 +1033,7 @@ export function prepareLabLauncher({
   // Local transcription is gone: a Whisper model or any other unknown
   // option is refused rather than ignored.
   requireThat(Object.keys(rest).length === 0);
-  // A model run needs a transcript, and the only one left is cloud
-  // transcription, approved only by the in-app review that the direct API
-  // route uses. The subscription routes are refused before anything is
-  // verified or launched.
-  if (mode === 'model-enabled') {
-    if (selection?.provider !== 'anthropic-api')
-      throw noTranscription(NO_TRANSCRIPTION_SUBSCRIPTION);
-    if (transcription === undefined)
-      throw noTranscription(NO_TRANSCRIPTION_SELECTED);
-  }
-  // The app starts no session at all without a transcription setting, so
-  // a capture-only launch carries one too (placeholder only, no grant).
-  if (mode === 'capture-only' && transcription === undefined)
-    throw noTranscription(NO_TRANSCRIPTION_CAPTURE);
+  assertLabTranscriptionRoute({ mode, selection, transcription });
   try {
     return launcher({
       build: verifyBuild(manifestFile, approved),

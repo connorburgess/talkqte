@@ -162,6 +162,43 @@ const deferred = () => {
   return { promise, resolve, reject };
 };
 
+// The receipt's own fields against the separately approved tuple, without
+// touching the bundle (no path, signature or hash check): what a plan can
+// check before anything is run. verifyLabPlayerBuild adds the rest.
+export function validateLabPlayerBuildRecord(v, approved) {
+  required(
+    exact(approved, ['manifestSha256', 'executableSha256', 'commit']) &&
+      exact(v, [
+        'schema',
+        'executable',
+        'bundlePath',
+        'sha256',
+        'commit',
+        'signature',
+      ]) &&
+      v.schema === 'talkqte.lab.player.build.v1' &&
+      v.sha256 === approved.executableSha256 &&
+      /^[a-f0-9]{64}$/.test(v.sha256) &&
+      v.commit === approved.commit &&
+      /^[a-f0-9]{40}$/.test(v.commit) &&
+      exact(v.signature, [
+        'identifier',
+        'authority',
+        'designatedRequirement',
+      ]) &&
+      v.signature.identifier === 'com.talkqte.lab-player' &&
+      v.signature.authority === 'TalkQTE Development' &&
+      typeof v.signature.designatedRequirement === 'string' &&
+      v.signature.designatedRequirement.length < 8192 &&
+      v.signature.designatedRequirement.includes('certificate leaf') &&
+      typeof v.bundlePath === 'string' &&
+      v.bundlePath.endsWith('.app') &&
+      typeof v.executable === 'string' &&
+      v.executable === join(v.bundlePath, 'Contents/MacOS/lab-owned-player'),
+  );
+  return v;
+}
+
 // Separate approval pins the receipt bytes; receipt claims do not approve themselves.
 export function verifyLabPlayerBuild({ manifestFile, approved } = {}) {
   try {
@@ -176,36 +213,12 @@ export function verifyLabPlayerBuild({ manifestFile, approved } = {}) {
       createHash('sha256').update(raw).digest('hex') ===
         approved.manifestSha256,
     );
-    const v = parseUniqueLabJson(raw.toString('utf8'));
+    const v = validateLabPlayerBuildRecord(
+      parseUniqueLabJson(raw.toString('utf8')),
+      approved,
+    );
     required(
-      exact(v, [
-        'schema',
-        'executable',
-        'bundlePath',
-        'sha256',
-        'commit',
-        'signature',
-      ]) &&
-        v.schema === 'talkqte.lab.player.build.v1' &&
-        v.sha256 === approved.executableSha256 &&
-        /^[a-f0-9]{64}$/.test(v.sha256) &&
-        v.commit === approved.commit &&
-        /^[a-f0-9]{40}$/.test(v.commit) &&
-        exact(v.signature, [
-          'identifier',
-          'authority',
-          'designatedRequirement',
-        ]) &&
-        v.signature.identifier === 'com.talkqte.lab-player' &&
-        v.signature.authority === 'TalkQTE Development' &&
-        typeof v.signature.designatedRequirement === 'string' &&
-        v.signature.designatedRequirement.length < 8192 &&
-        v.signature.designatedRequirement.includes('certificate leaf') &&
-        typeof v.bundlePath === 'string' &&
-        v.bundlePath.endsWith('.app') &&
-        realpathSync(v.bundlePath) === v.bundlePath &&
-        outside(v.bundlePath) &&
-        v.executable === join(v.bundlePath, 'Contents/MacOS/lab-owned-player'),
+      realpathSync(v.bundlePath) === v.bundlePath && outside(v.bundlePath),
     );
     const inspect = () => {
       required(realpathSync(v.bundlePath) === v.bundlePath);
