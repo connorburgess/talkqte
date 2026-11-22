@@ -895,6 +895,69 @@ function cloudSummary(events, m) {
     },
   };
 }
+// The timing targets of docs/budgets.md that one take can be compared with.
+export const BUDGET_TARGETS = Object.freeze({
+  speechToLine: Object.freeze({ medianMs: 3500, p95Ms: 5000 }),
+  lineToVisibleCue: Object.freeze({ p95Ms: 5000 }),
+  staleCue: Object.freeze({ maxMs: 18000 }),
+});
+// Each statistic three ways: from the measured values, and from every
+// sample's shortest and longest possible duration. A target is met only when
+// the longest holds it and missed only when the shortest exceeds it; anything
+// between is uncertain. Samples that could not be measured are counted, never
+// assumed to pass.
+function budgetSummary(lineLags, cueLatencies) {
+  const measured = (metrics) =>
+    metrics.filter((d) => d.status === 'measured' || d.status === 'uncertain');
+  const rank = (sorted, quantile) =>
+    quantile === 0.5
+      ? sorted[Math.floor(sorted.length / 2)]
+      : sorted[Math.max(0, Math.ceil(quantile * sorted.length) - 1)];
+  const statistic = (samples, quantile, targetMs) => {
+    const at = (field) =>
+      rank(
+        samples.map((d) => d[field]).sort((a, b) => a - b),
+        quantile,
+      );
+    const [valueMs, minMs, maxMs] = ['valueMs', 'minMs', 'maxMs'].map(at);
+    return {
+      targetMs,
+      valueMs,
+      minMs,
+      maxMs,
+      result:
+        maxMs <= targetMs ? 'within' : minMs > targetMs ? 'over' : 'uncertain',
+    };
+  };
+  const row = (metrics, statistics) => {
+    const samples = measured(metrics);
+    return {
+      samples: samples.length,
+      unmeasured: metrics.length - samples.length,
+      ...Object.fromEntries(
+        statistics.map(([name, quantile, targetMs]) => [
+          name,
+          samples.length
+            ? statistic(samples, quantile, targetMs)
+            : { targetMs, result: 'unmeasured' },
+        ]),
+      ),
+    };
+  };
+  const t = BUDGET_TARGETS;
+  return {
+    speechToLine: row(lineLags, [
+      ['median', 0.5, t.speechToLine.medianMs],
+      ['p95', 0.95, t.speechToLine.p95Ms],
+    ]),
+    lineToVisibleCue: row(cueLatencies, [
+      ['p95', 0.95, t.lineToVisibleCue.p95Ms],
+    ]),
+    staleCue: row(cueLatencies, [['max', 1, t.staleCue.maxMs]]),
+    basis:
+      'this take only; docs/budgets.md asks for a 60-minute meeting on the lowest supported Mac',
+  };
+}
 /**
  * Whether the native capture source held: every source problem (with
  * ScreenCaptureKit's -3815 "source_gone" told apart from TalkQTE's own
@@ -1234,6 +1297,10 @@ export function buildEvidenceReport(
     sourceHealth,
     evaluations,
     cues: cueRows,
+    budgets: budgetSummary(
+      transcription.map((t) => t.lag),
+      cueRows.map((c) => c.endToEnd),
+    ),
     timeline,
     reviews,
     limitations: [
@@ -1285,6 +1352,26 @@ function cloudMarkdown(c) {
     `Audio sent this launch: ${c.audioMs} ms against a cap of ${c.capMs ?? 'unknown'} ms (the cap covers every session and source).`,
     '',
     `Final end of speech → transcript line: ${c.finalToSegment.count} finals; median ${c.finalToSegment.medianMs ?? 'unknown'} ms, max ${c.finalToSegment.maxMs ?? 'unknown'} ms (${c.finalToSegment.basis}). The provider's speaker label is untrusted and not reported.`,
+    '',
+  ];
+}
+function budgetMarkdown(b) {
+  const cell = (s) =>
+    s.result === 'unmeasured'
+      ? `unmeasured (target ${s.targetMs} ms)`
+      : `${s.result}: ${Math.round(s.valueMs)} ms, between ${Math.round(s.minMs)} and ${Math.round(s.maxMs)} ms (target ${s.targetMs} ms)`;
+  const line = (label, row, statistics) =>
+    `| ${label} | ${row.samples} | ${row.unmeasured} | ${statistics.map((name) => `${name} ${cell(row[name])}`).join('; ')} |`;
+  return [
+    '### Timing targets',
+    '',
+    `Compared with docs/budgets.md for ${b.basis}. Within means even the longest possible duration meets the target; over means even the shortest exceeds it. Unmeasured samples are not counted as passing, and no result here confirms a budget.`,
+    '',
+    '| Target | Measured samples | Unmeasured | Result |',
+    '| --- | --- | --- | --- |',
+    line('Heard end → transcript line', b.speechToLine, ['median', 'p95']),
+    line('Heard end → visible cue', b.lineToVisibleCue, ['p95']),
+    line('Cue first visible after its line', b.staleCue, ['max']),
     '',
   ];
 }
@@ -1369,6 +1456,7 @@ export function renderEvidenceMarkdown(r, { recordingHref } = {}) {
         `| ${escape(c.id)} / ${c.decider} | ${c.publication} / ${c.paint} | ${metric(c.publicationDelay)} | ${metric(c.visibleDuration)} | ${metric(c.endToEnd)} | ${lagText(c.staleness)} |`,
     ),
     '',
+    ...budgetMarkdown(r.budgets),
     ...(r.cloudTranscription ? cloudMarkdown(r.cloudTranscription) : []),
     '### Capture source',
     '',

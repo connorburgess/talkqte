@@ -105,6 +105,68 @@ test('complete synthetic take joins exact identities and separates timing from h
   );
   assert.equal(r.mode, 'adaptive');
 });
+test('timing targets compare worst and best cases and never count an unmeasured sample as passing', () => {
+  const r = buildEvidenceReport(manifest(), take());
+  assert.deepEqual(r.budgets.speechToLine, {
+    samples: 1,
+    unmeasured: 0,
+    median: {
+      targetMs: 3500,
+      valueMs: 200,
+      minMs: 196,
+      maxMs: 204,
+      result: 'within',
+    },
+    p95: {
+      targetMs: 5000,
+      valueMs: 200,
+      minMs: 196,
+      maxMs: 204,
+      result: 'within',
+    },
+  });
+  assert.equal(r.budgets.lineToVisibleCue.p95.result, 'within');
+  assert.equal(r.budgets.staleCue.max.valueMs, 900);
+  // Lines 4 s, 4.999 s and 6 s after their heard ends: both the median and
+  // the 95th percentile are over their targets.
+  const lines = [4000, 4999, 6000].flatMap((lag, i) => [
+    event('speech.render-end', 2000 + i * 100, {
+      lineId: `L${i}`,
+      segmentId: `s${i}`,
+    }),
+    event('transcript.arrived', 2000 + i * 100 + lag, { segmentId: `s${i}` }),
+  ]);
+  const slow = buildEvidenceReport(manifest(), lines).budgets;
+  assert.equal(slow.speechToLine.samples, 3);
+  assert.equal(slow.speechToLine.median.valueMs, 4999);
+  assert.equal(slow.speechToLine.median.result, 'over');
+  assert.equal(slow.speechToLine.p95.valueMs, 6000);
+  assert.equal(slow.speechToLine.p95.result, 'over');
+  assert.deepEqual(slow.lineToVisibleCue, {
+    samples: 0,
+    unmeasured: 0,
+    p95: { targetMs: 5000, result: 'unmeasured' },
+  });
+  // A value whose uncertainty spans the target is neither met nor missed.
+  const near = buildEvidenceReport(manifest(), [
+    event('speech.render-end', 2000, { lineId: 'L1', segmentId: 's1' }),
+    event('transcript.arrived', 5499, { segmentId: 's1' }),
+  ]).budgets.speechToLine;
+  assert.equal(near.median.result, 'uncertain');
+  assert.equal(near.p95.result, 'within');
+  // An arrival with no joined heard end is counted, not dropped.
+  const unjoined = buildEvidenceReport(manifest(), [
+    event('transcript.arrived', 2200, { segmentId: 's1' }),
+  ]).budgets.speechToLine;
+  assert.deepEqual(
+    [unjoined.samples, unjoined.unmeasured, unjoined.median.result],
+    [0, 1, 'unmeasured'],
+  );
+  assert.match(
+    renderEvidenceMarkdown(r),
+    /### Timing targets[\s\S]*Heard end → transcript line \| 1 \| 0 \| median within: 200 ms, between 196 and 204 ms \(target 3500 ms\)/,
+  );
+});
 test('partial native results cannot imply dispatch, validation or video paint', () => {
   const rows = [
     parseNativeRow(
