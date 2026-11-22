@@ -393,3 +393,59 @@ test('a provider-failure take records its probe in place of a grant TTL, never b
   ]);
   assert.equal(manifest.transcription.failureProbe, 'refused-token');
 });
+
+test('a guard taken at a large performance.now() uptime is accepted despite floating-point rounding', (t) => {
+  // The take computes sourceDeadline = nativeStartedAt + 320000 from a
+  // performance.now() reading; past about 204 s of uptime the difference
+  // back is often not exactly 320000.
+  const starts = [];
+  for (let x = 204000.0001; starts.length < 20 && x < 2e6; x += 7.31337)
+    if (x + 320000 - x !== 320000) starts.push(x);
+  assert.equal(starts.length, 20);
+  for (const [i, nativeStartedAt] of starts.entries()) {
+    const f = fixture(t, { runId: `fictional-take-${i}` });
+    const sourceDeadline = nativeStartedAt + 320000;
+    const startRequestAt = nativeStartedAt + 40000.25;
+    const guard = {
+      nativeStartedAt,
+      sourceDeadline,
+      startRequestAt,
+      startBudgetMs: 1000,
+      mediaDurationMs: 102480,
+      tailMs: 0,
+      completionReserveMs: 1000,
+      remainingAtRequestMs: sourceDeadline - startRequestAt,
+      approvalBudgetMs: 180000,
+      approvalWaitMs: 30000,
+    };
+    f.writer.recordGuard(guard);
+    const actualAnchorMs = startRequestAt + 200.5,
+      actualUncertaintyMs = 3;
+    f.writer.recordGuard({
+      ...guard,
+      actualAnchorMs,
+      actualUncertaintyMs,
+      remainingAtAnchorMs:
+        sourceDeadline - actualAnchorMs - actualUncertaintyMs,
+    });
+    assert.equal(f.read().manifest.guards.length, 2);
+    assert.deepEqual(f.failures, []);
+  }
+  // A window that is really different is still refused.
+  const f = fixture(t, { runId: 'fictional-take-other' });
+  assert.throws(() =>
+    f.writer.recordGuard({
+      nativeStartedAt: 1000,
+      sourceDeadline: 1000 + 320000.01,
+      startRequestAt: 2000,
+      startBudgetMs: 1000,
+      mediaDurationMs: 102480,
+      tailMs: 0,
+      completionReserveMs: 1000,
+      remainingAtRequestMs: 1000 + 320000.01 - 2000,
+      approvalBudgetMs: 180000,
+      approvalWaitMs: 0,
+    }),
+  );
+  assert.equal(f.read().manifest.guards.length, 0);
+});
