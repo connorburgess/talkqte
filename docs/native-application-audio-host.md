@@ -455,7 +455,8 @@ Against the [selected-application acceptance gates](system-audio-plan.md):
   by a device run. Microphone pickup of the same speech could still add
   duplicate lines, and that is not handled, so transcript quality must not
   be judged through this host. The refused-line count in the run's record
-  counts the source's lines the engine refused for any reason.
+  counts every line of the source that was not taken, whether the engine
+  refused it or the source was no longer attached.
 - **Performance: open.** The source has its own cloud stream; its network,
   memory and CPU cost against the budgets is unmeasured.
 
