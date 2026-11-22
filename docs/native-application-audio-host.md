@@ -446,14 +446,16 @@ Against the [selected-application acceptance gates](system-audio-plan.md):
   application quitting, device change, and sleep and wake are not.
 - **Audio contract: open.** Clock drift, real buffer sizes, callback
   allocation and the delivered channel and sample-rate layout are unmeasured.
-  The engine refuses any line timed before the last line it accepted, whoever
-  sent it. With a microphone and an application in one session, a line from
-  either can therefore be dropped because the other's later line arrived
-  first: **attaching a source can drop microphone lines**. Microphone pickup
-  of the same speech could also add duplicate lines. Neither is handled, so
-  transcript quality must not be judged through this host. The refused-line
-  count in the run's record shows how many of the source's lines were lost
-  this way, not the microphone's.
+  The engine checks line order within each capture: a line is refused only
+  when it is timed before the last line accepted from the same origin
+  (microphone or application). With both in one session, a line from one is
+  no longer dropped because the other's later line arrived first; the
+  transcript and cue requests keep arrival order, so lines from the two can
+  appear slightly out of time order. This is covered by a scripted test, not
+  by a device run. Microphone pickup of the same speech could still add
+  duplicate lines, and that is not handled, so transcript quality must not
+  be judged through this host. The refused-line count in the run's record
+  counts the source's lines the engine refused for any reason.
 - **Performance: open.** The source has its own cloud stream; its network,
   memory and CPU cost against the budgets is unmeasured.
 

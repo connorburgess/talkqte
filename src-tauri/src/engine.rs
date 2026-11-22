@@ -32,6 +32,14 @@ pub struct Segment {
     pub text: String,
 }
 
+/// Which capture a live line came from. Each has its own recognizer stream,
+/// so lines are in order within one origin but not across the two.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineOrigin {
+    Microphone,
+    Application,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 /// Scripted lines played on the session clock. The app never supplies any:
@@ -562,6 +570,9 @@ pub struct Engine {
     next_segment: usize,
     cue_deadline: u64,
     cooldown_until: u64,
+    /// The time of the last line accepted from each origin, indexed by
+    /// `LineOrigin`. Scripted lines count as the microphone's.
+    line_floor: [u64; 2],
     /// Lines that asked the user a question by name this session. A model
     /// cue citing one would repeat the "Asked you" cue, so it is not shown.
     asked_lines: Vec<String>,
@@ -666,6 +677,7 @@ impl Engine {
             next_segment: 0,
             cue_deadline: 0,
             cooldown_until: 0,
+            line_floor: [0; 2],
             asked_lines: vec![],
             model_pause_until: 0,
             dismissed_sources: vec![],
@@ -743,6 +755,7 @@ impl Engine {
         self.still_open_shown = false;
         self.next_segment = 0;
         self.cooldown_until = 0;
+        self.line_floor = [0; 2];
         self.asked_lines.clear();
         self.model_pause_until = 0;
         self.dismissed_sources.clear();
@@ -875,6 +888,7 @@ impl Engine {
             }
             let segment = segment.clone();
             self.next_segment += 1;
+            self.line_floor[LineOrigin::Microphone as usize] = segment.at_ms;
             self.consume(segment, now);
         }
         if now >= self.script.duration_ms {
@@ -945,11 +959,24 @@ impl Engine {
         }
     }
 
+    /// `ingest_from` for a line from the microphone.
+    pub fn ingest(&mut self, session: u64, segment: Segment) -> Result<(), String> {
+        self.ingest_from(session, LineOrigin::Microphone, segment)
+    }
+
     /// Accepts one transcript segment from a live source for the running
     /// session. Invalid, late, or out-of-order input is rejected without
-    /// changing state. Accepted input follows the same cue, answer, and
-    /// stale-cue rules as a scripted line.
-    pub fn ingest(&mut self, session: u64, segment: Segment) -> Result<(), String> {
+    /// changing state. Order is checked within the line's origin only: the
+    /// microphone and an application are recognized on separate streams, so
+    /// a line from one may be timed before a line already accepted from the
+    /// other. The transcript keeps arrival order. Accepted input follows the
+    /// same cue, answer, and stale-cue rules as a scripted line.
+    pub fn ingest_from(
+        &mut self,
+        session: u64,
+        origin: LineOrigin,
+        segment: Segment,
+    ) -> Result<(), String> {
         if session != self.generation {
             return Err("That transcript belongs to an earlier session.".into());
         }
@@ -992,14 +1019,10 @@ impl Engine {
         if segment.at_ms > now {
             return Err("A transcript segment cannot come from the future.".into());
         }
-        if self
-            .state
-            .transcript
-            .last()
-            .is_some_and(|last| segment.at_ms < last.at_ms)
-        {
+        if segment.at_ms < self.line_floor[origin as usize] {
             return Err("Transcript segments must arrive in order.".into());
         }
+        self.line_floor[origin as usize] = segment.at_ms;
         let segment = Segment {
             text: text.into(),
             speaker: speaker.into(),

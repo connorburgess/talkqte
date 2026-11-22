@@ -735,10 +735,28 @@ impl Runtime {
         allow(dead_code)
     )]
     pub(crate) fn ingest_timed(&mut self, session: u64, segment: Segment) -> Result<(), String> {
+        self.ingest_timed_from(session, crate::engine::LineOrigin::Microphone, segment)
+    }
+
+    /// `ingest_timed` for a line from the named capture.
+    #[cfg_attr(
+        not(any(
+            feature = "cloud-transcription",
+            all(target_os = "macos", feature = "native-audio-spike"),
+            test
+        )),
+        allow(dead_code)
+    )]
+    pub(crate) fn ingest_timed_from(
+        &mut self,
+        session: u64,
+        origin: crate::engine::LineOrigin,
+        segment: Segment,
+    ) -> Result<(), String> {
         #[cfg(feature = "timing-log")]
-        return self.ingest_into(global(), session, segment);
+        return self.ingest_into(global(), session, origin, segment);
         #[cfg(not(feature = "timing-log"))]
-        self.engine.ingest(session, segment)
+        self.engine.ingest_from(session, origin, segment)
     }
 
     #[cfg(feature = "timing-log")]
@@ -746,14 +764,15 @@ impl Runtime {
         &mut self,
         log: Option<&Log>,
         session: u64,
+        origin: crate::engine::LineOrigin,
         segment: Segment,
     ) -> Result<(), String> {
         let Some(log) = log else {
-            return self.engine.ingest(session, segment);
+            return self.engine.ingest_from(session, origin, segment);
         };
         let line = segment.clone();
         let before = self.engine.state.cue.as_ref().map(|cue| cue.id.clone());
-        let result = self.engine.ingest(session, segment);
+        let result = self.engine.ingest_from(session, origin, segment);
         for event in ingest_events(
             session,
             &line,
@@ -1288,11 +1307,25 @@ mod tests {
                 segment("l1", 1_000, "The greenhouse keys are in the blue tin."),
                 segment("l2", 2_000, "Someone should send the checklist."),
             ] {
-                runtime.ingest_into(Some(&log), session, line).unwrap();
+                runtime
+                    .ingest_into(
+                        Some(&log),
+                        session,
+                        crate::engine::LineOrigin::Microphone,
+                        line,
+                    )
+                    .unwrap();
             }
             // A line the engine refuses is recorded as refused.
             let late = segment("l0", 500, "An earlier fictional line.");
-            assert!(runtime.ingest_into(Some(&log), session, late).is_err());
+            assert!(runtime
+                .ingest_into(
+                    Some(&log),
+                    session,
+                    crate::engine::LineOrigin::Microphone,
+                    late
+                )
+                .is_err());
             drop(log);
             let written = sink.lines();
             let events: Vec<_> = written

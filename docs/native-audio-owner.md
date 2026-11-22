@@ -797,5 +797,6 @@ Not covered:
   app's access must publish under the lock as the microphone sink does.
 - App exit, sleep and wake.
 - A microphone and an application feeding one session at once. The engine
-  refuses a line timed before the last accepted one, so two sources would lose
-  lines until ordering is designed.
+  now checks line order within each capture, so neither loses lines to the
+  other's timing; duplicate lines from microphone pickup, and any run on a
+  device, remain open.
