@@ -129,6 +129,19 @@ export function validateLabBuildRecord(value, approved, manifestSha256) {
   );
   return structuredClone(value);
 }
+/**
+ * The launcher's own build check, with no run folder and no launch: the
+ * receipt, the executable's hash and its code signature. A runner can use
+ * it before it records an attempt; the launcher repeats it before launch.
+ */
+export function verifyLabBuild({ manifestFile, approved } = {}) {
+  try {
+    verifyBuild(manifestFile, approved);
+  } catch {
+    throw gateFailure('protocol');
+  }
+}
+
 function verifyBuild(manifestFile, approved) {
   requireThat(
     isAbsolute(manifestFile ?? '') &&
@@ -365,7 +378,13 @@ function launcher({
   userName,
   contextPolicy = 'fresh-only',
   turnOff,
+  ownProcessGroup,
 }) {
+  // A runner started from a terminal launches the app in its own process
+  // group, so the terminal's Ctrl-C reaches only the runner, which stops
+  // the app through the ordinary Stop. Without it the app shares the
+  // caller's group, as before.
+  requireThat(ownProcessGroup === undefined || ownProcessGroup === true);
   assertLabLaunchOptions({
     selection,
     stopAfterS,
@@ -797,6 +816,7 @@ function launcher({
           env,
           stdio: ['ignore', 'ignore', 'ignore'],
           shell: false,
+          detached: ownProcessGroup === true,
         });
         activeRunId = runEnv.TALKQTE_DEV_LAB_RUN_ID;
         // Drain already-written final evidence before the owner's exit listener.
@@ -1028,6 +1048,7 @@ export function prepareLabLauncher({
   userName,
   contextPolicy,
   turnOff,
+  ownProcessGroup,
   ...rest
 } = {}) {
   // Local transcription is gone: a Whisper model or any other unknown
@@ -1048,6 +1069,7 @@ export function prepareLabLauncher({
       userName,
       contextPolicy,
       turnOff,
+      ownProcessGroup,
     });
   } catch {
     throw gateFailure('protocol');
@@ -1065,6 +1087,7 @@ export function prepareLabFixtureLauncher({
   transcription,
   userName,
   turnOff,
+  ownProcessGroup,
 } = {}) {
   requireThat(
     [
@@ -1130,5 +1153,6 @@ export function prepareLabFixtureLauncher({
     transcription,
     userName,
     turnOff,
+    ownProcessGroup,
   });
 }
