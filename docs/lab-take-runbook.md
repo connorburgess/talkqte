@@ -139,6 +139,8 @@ swiftc -O -parse-as-library -swift-version 5 \
 shasum -a 256 "$PRIVATE/build/lab-window-capture"
 ```
 
+A helper built before 23 November 2026 recorded nothing on macOS 26.4: rebuild it with the command above and put the new hash in the plan. **Verified on a development Mac:** the old helper aborted inside macOS on the desktop-independent window filter (`CGS_REQUIRE_INIT`), so both probes failed and fell back to display filters, and its streams were stopped within milliseconds (`-3805`, connection interrupted) because a probe child had just exited. The helper now connects to the window server first and re-reads the window list after the probes, before it starts any stream. A stream macOS stops prints an `error` line with reason `stream-stopped` and macOS's numeric code; the recorder keeps the reason, the code and the times from spawn to `matched`, `filters` and `frame_accepted` (`failureDetail.timings`), and `take-outcome.json` carries them.
+
 Proves it: the plan's `helper.sha256` matches and the dry run passes "recorder helper". **Verified from code:** the recorder and the strict window selector hash the helper again before use; it must be outside the checkout and at most 64 MiB. Recordings go into the evidence folder.
 
 The runner builds one more small helper itself, `scripts/lab-recording-duration.swift`, which measures the finished recording for the evidence writer ([runner settings](#runner-settings)). It needs the same command line tools; nothing to do here. **Verified on a development Mac:** it compiles with the runner's command (about 40 s the first time) and reports an audio file's duration to the microsecond, matching `afinfo`. **_To confirm on the Mac_:** its result on a real recording.

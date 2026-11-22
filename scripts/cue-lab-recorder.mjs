@@ -103,6 +103,12 @@ function recorder({
     // last error line (fixed helper text, bounded), for OUTCOME.
     exitStatus = null,
     errorReason = null,
+    // macOS's numeric code when a stream stopped (stream-stopped), else null.
+    errorCode = null,
+    // Milliseconds from spawning the helper to its matched, filters and
+    // frame_accepted lines, to check the start deadline against.
+    spawnedAt = null,
+    timings = { matchedMs: null, filtersMs: null, frameAcceptedMs: null },
     accepted = false,
     final = null,
     invalid = false,
@@ -194,6 +200,8 @@ function recorder({
   };
   function frame(value) {
     requireThat(value && typeof value === 'object' && !Array.isArray(value));
+    const since = () =>
+      spawnedAt === null ? null : Math.round(performance.now() - spawnedAt);
     if (value.event === 'matched') {
       requireThat(!matched && !accepted);
       for (const key of ['emulator', 'companion'])
@@ -232,6 +240,7 @@ function recorder({
         });
       }
       matched = true;
+      timings.matchedMs = since();
     } else if (value.event === 'filters') {
       const kind = (k) => ['independent', 'display'].includes(value[k]?.kind);
       requireThat(
@@ -245,6 +254,7 @@ function recorder({
         emulator: value.emulator.kind,
         companion: value.companion.kind,
       });
+      timings.filtersMs = since();
     } else if (value.event === 'error') {
       // Only the helper's fixed reason code is kept: its message may name
       // the recording's path or carry macOS's own text. The start then
@@ -254,6 +264,12 @@ function recorder({
         /^[a-z][a-z-]{0,39}$/.test(value.reason)
       )
         errorReason ??= value.reason;
+      if (
+        errorCode === null &&
+        Number.isSafeInteger(value.code) &&
+        Math.abs(value.code) < 2 ** 31
+      )
+        errorCode = value.code;
       throw gateFailure('protocol');
     } else if (value.event === 'frame_accepted') {
       requireThat(
@@ -264,6 +280,7 @@ function recorder({
           Number.isSafeInteger(value.wallMs),
       );
       accepted = true;
+      timings.frameAcceptedMs = since();
       clearTimeout(startTimer);
       resolveStart({ started: true });
     } else if (value.event === 'stopped') {
@@ -348,9 +365,11 @@ function recorder({
         ? Object.freeze({
             exit: exitStatus,
             errorReason,
+            errorCode,
             frameAccepted: accepted,
             matched,
             filters,
+            timings: Object.freeze({ ...timings }),
           })
         : null;
     },
@@ -367,6 +386,7 @@ function recorder({
             windowsMissing: final.windowsMissing ?? null,
             geometry,
             filters,
+            timings: Object.freeze({ ...timings }),
           })
         : null;
     },
@@ -426,6 +446,7 @@ function recorder({
           '--out',
           output,
         ];
+        spawnedAt = performance.now();
         child = spawn(
           binary,
           fixtureCase
@@ -520,6 +541,7 @@ export function createLabRecorderFixture(options = {}) {
       'bad-utf8',
       'no-audio',
       'no-artifact',
+      'stream-stopped',
     ].includes(options.fixtureCase),
   );
   return recorder({

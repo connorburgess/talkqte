@@ -692,7 +692,11 @@ after(() =>
 // The existing modules with the existing fixtures in place of the app,
 // player, recorder, grant and duration tool. `calls` lists each module in
 // the order the runner used it.
-function fixtureModules({ fixtureCase = 'cloud-transcription', hold } = {}) {
+function fixtureModules({
+  fixtureCase = 'cloud-transcription',
+  hold,
+  recorderCase = 'normal',
+} = {}) {
   const calls = [],
     trace = [];
   const seen = {};
@@ -796,7 +800,7 @@ function fixtureModules({ fixtureCase = 'cloud-transcription', hold } = {}) {
       return createLabRecorderFixture({
         ...options,
         playerSource: undefined,
-        fixtureCase: 'normal',
+        fixtureCase: recorderCase,
       });
     },
     createTake(options) {
@@ -985,6 +989,31 @@ test('a refused-token fixture take ends stopped after the app refuses the probe,
   const manifest = JSON.parse(readFileSync(result.outcome.evidence.manifest));
   assert.equal(manifest.transcription.failureProbe, 'refused-token');
   assert.ok(existsSync(join(result.reportDirectory, 'report.md')));
+});
+
+test('a recorder whose stream macOS stopped leaves its reason, code and start timings in the outcome', async () => {
+  const { planFile, planSha } = setup();
+  const f = fixtureModules({ recorderCase: 'stream-stopped' });
+  const lines = [];
+  const result = await execute(planFile, planSha, f, { io: quietIo(lines) });
+  // A recorder that never started cannot finalize: the take's existing
+  // terminal state for that.
+  assert.equal(result.state, 'failed-cleanup');
+  assert.equal(result.outcome.failedStep, 'recorder-start');
+  const outcome = JSON.parse(readFileSync(result.outcomePath));
+  const detail = outcome.recorder.failureDetail;
+  assert.equal(detail.errorReason, 'stream-stopped');
+  assert.equal(detail.errorCode, -3805);
+  assert.equal(detail.frameAccepted, false);
+  assert.deepEqual(detail.filters, {
+    emulator: 'independent',
+    companion: 'display',
+  });
+  assert.ok(Number.isSafeInteger(detail.timings.matchedMs));
+  assert.ok(Number.isSafeInteger(detail.timings.filtersMs));
+  assert.equal(detail.timings.frameAcceptedMs, null);
+  assert.doesNotMatch(JSON.stringify(outcome), /fictional interruption/);
+  assert.ok(lines.some((l) => /recorder stream-stopped/.test(l)));
 });
 
 test('a turn-off fixture take ends stopped with failure turned-off', async () => {

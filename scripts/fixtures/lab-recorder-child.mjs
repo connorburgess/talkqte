@@ -64,7 +64,16 @@ else if (mode === 'truncated') {
     emulator: { kind: 'independent' },
     companion: { kind: 'display' },
   });
-  if (mode === 'partial') {
+  if (mode === 'stream-stopped') {
+    // macOS stopped a stream before the first frame; its text is not kept.
+    emit({
+      event: 'error',
+      reason: 'stream-stopped',
+      code: -3805,
+      message: 'Failed during stream due to a fictional interruption',
+    });
+    setTimeout(() => process.exit(1), 5);
+  } else if (mode === 'partial') {
     const data =
       JSON.stringify({ event: 'frame_accepted', frames: 1, wallMs: 1 }) + '\n';
     process.stdout.write(data.slice(0, 10));

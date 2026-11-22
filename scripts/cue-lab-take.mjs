@@ -1123,6 +1123,8 @@ async function finishAttempt({
     outcome.failedStep && `failed step ${outcome.failedStep}`,
     outcome.runStopReason && `run stop reason ${outcome.runStopReason}`,
     startFailure && `stopped before launch at ${startFailure}`,
+    outcome.recorder.failureDetail?.errorReason &&
+      `recorder ${outcome.recorder.failureDetail.errorReason}`,
   ].filter(Boolean);
   io.log('');
   io.log(

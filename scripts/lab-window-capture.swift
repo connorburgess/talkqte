@@ -32,10 +32,11 @@ import Foundation
 import ScreenCaptureKit
 
 func emit(_ value: [String: Any]) {
-  guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
+  guard var data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
   else { return }
+  // One write per line: a stream's stop is reported from macOS's own queue.
+  data.append(0x0A)
   FileHandle.standardOutput.write(data)
-  FileHandle.standardOutput.write(Data("\n".utf8))
 }
 
 /// Ends the helper with a message for the person running it and a fixed
@@ -275,7 +276,13 @@ final class Writer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Senda
     }
   }
 
+  /// A stream macOS stopped (for example -3805, its connection
+  /// interrupted) ends the recording; the error event says so with a fixed
+  /// reason and macOS's numeric code, so the recorder knows why.
   func stream(_ stream: SCStream, didStopWithError error: Error) {
+    let code = (error as NSError).code
+    emit(["event": "error", "reason": "stream-stopped", "code": code,
+      "message": error.localizedDescription])
     problem = error.localizedDescription
   }
 
@@ -318,6 +325,10 @@ struct WindowIdentityFixture {
 @main
 struct Capture {
   static func main() async {
+    // Connect to the window server before any ScreenCaptureKit call: on
+    // macOS 26.4 a desktop-independent window filter in a process that has
+    // not done so aborts (CGS_REQUIRE_INIT), which failed every probe.
+    _ = CGMainDisplayID()
     let options = parseArguments()
 
     if options["check"] != nil {
@@ -474,6 +485,10 @@ struct Capture {
 
     // Each window on its own, wherever it is: not limited to the active
     // Space and not hidden by other windows.
+    guard let emulatorSelected = windowIdentity(emulator),
+      let companionSelected = windowIdentity(companion)
+    else { fail("A selected window has no exact owner. Nothing was recorded.", code: 2, reason: "window-owner") }
+    let probed = probeIndependentFilters(identities: [emulatorSelected, companionSelected])
     // Each window gets a desktop-independent filter (not limited to the
     // active Space) only if a child probe built one cleanly just now;
     // otherwise a display filter that includes that one window only, cropped
@@ -481,7 +496,10 @@ struct Capture {
     // aborted inside macOS in RunB08 (SkyLight SLGetDisplaysWithRect
     // assert). Either way nothing but the two windows can appear. The window
     // list is re-read just before, so a moving or hidden window is not
-    // filtered with a stale rectangle.
+    // filtered with a stale rectangle. It is re-read after the probe
+    // children have exited: a stream started right after a child that used
+    // ScreenCaptureKit exits is stopped by macOS within milliseconds (-3805,
+    // connection interrupted), and this round trip waits that out.
     guard let fresh = try? await SCShareableContent.excludingDesktopWindows(
       true, onScreenWindowsOnly: false)
     else { fail("Could not list windows again.", code: 2, reason: "relist-windows") }
@@ -497,10 +515,6 @@ struct Capture {
     }
     let (emulatorNow, emulatorOnDisplay) = currentWindow(emulator)
     let (companionNow, companionOnDisplay) = currentWindow(companion)
-    guard let emulatorIdentity = windowIdentity(emulatorNow),
-      let companionIdentity = windowIdentity(companionNow)
-    else { fail("A selected window has no exact owner. Nothing was recorded.", code: 2, reason: "window-owner") }
-    let probed = probeIndependentFilters(identities: [emulatorIdentity, companionIdentity])
     func chooseFilter(_ current: SCWindow, on onDisplay: SCDisplay) -> (
       SCContentFilter, String, SCDisplay?
     ) {
