@@ -134,7 +134,7 @@ meet that check. README needs no change for these internal lab modules.
 
 ## Direct Anthropic API route
 
-`anthropic-api` sends one cue evaluation per request to the Anthropic Messages API with the owner's own API key. It exists only for the development lab evaluator; the subscription routes above are unchanged. The native app's support for it (backend `lab-api`, a per-run export confirmation) is a separate change.
+`anthropic-api` sends one cue evaluation per request to the Anthropic Messages API with the owner's own API key. It exists only for the development lab evaluator; the subscription routes above are unchanged. The native lab build accepts it as backend `lab-api`, with a per-run export confirmation.
 
 **What leaves the device, per request:** the recent fictional transcript lines the broker received for that evaluation (at most 32 short lines), the existing cue if one is on screen, the optional user name and earlier cue texts, a fixed system prompt and a fixed reply schema. Nothing else: no audio, notes, history, files or identifiers beyond those line ids. The reply is one decision. Requests go only to `https://api.anthropic.com`. Like any client built on the official SDK, each request also carries the SDK's standard `X-Stainless-*` headers: operating system, CPU architecture, Node.js version and SDK version. They carry no content, paths or account details.
 

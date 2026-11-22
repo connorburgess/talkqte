@@ -16,10 +16,15 @@ injects transcript text into the app or infers companion paint from publication.
 
 `createFixedModelTake(options)` selects the strict prepared path for approved
 fictional media (the existing 102.48-second file, or a per-run scenario from a
-reviewed manifest, at most 104 s): Codex subscription, `gpt-6.1-sol`, low or
-medium effort,
-one shared 20-dispatch budget and a 110-second native ordinary Stop guard. It
-does not count underlying provider requests or enable a fallback. Provider
+reviewed manifest, at most 104 s) on one of two routes. The Codex subscription
+route takes `gpt-6.1-sol` at low or medium effort, one shared 20-dispatch
+budget and a 110-second native ordinary Stop guard. The
+[direct Anthropic API route](lab-providers.md#direct-anthropic-api-route)
+takes a listed Anthropic model at low effort and one shared 40-dispatch
+budget; the owner approves in the app after Listening and before playback,
+within 180 seconds, and native Stop moves out to 320 seconds so the media
+window after approval is unchanged. Neither route counts underlying provider
+requests or enables a fallback. Provider
 deadlines/output bounds remain explicit settings; the native evaluator's
 eight-second request deadline includes admission wait and may expire earlier.
 
