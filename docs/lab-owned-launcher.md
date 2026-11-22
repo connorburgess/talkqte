@@ -4,7 +4,9 @@ This internal follow-up supplies the synchronous launcher and private timing-fil
 adapter used by the [run lifecycle](lab-run-lifecycle.md). It launches nothing at
 import or preparation. There is no command-line entry point, shell, arbitrary
 argument list, existing-PID attachment or provider fallback. The actual app run
-still requires an approved build and separately reviewed bounded launch plan.
+still requires an approved build and separately reviewed bounded launch plan;
+the [prepared take runbook](lab-take-runbook.md) lists the steps and checks a
+plan without launching anything.
 
 ## Build approval before launch
 
@@ -61,6 +63,11 @@ only the intended fictional document is active. Native must enforce its pristine
 microphone/source-only admission rules before arming. No microphone or alternative
 source is selected by this launcher.
 
+`assertLabLaunchOptions` and `assertLabTranscriptionRoute` expose these scope
+checks on their own, with no file read or folder created, so a plan can be
+checked before launch; the prepared player identity is still checked by the
+launcher itself.
+
 The launch settings must match lifecycle metadata and its exact broker descriptor.
 The environment retains only HOME/PATH/TMPDIR/LANG/LC_ALL plus the frozen approved
 lab/source/model/Stop settings. Ambient API keys, endpoint/proxy/provider overrides
@@ -100,7 +107,7 @@ On the direct API route a run transcribes through Deepgram (#344). Pass `transcr
 - **Order check:** a stream that starts before the review row or in another session, starts twice, or connects before the token was released stops the run.
 - **Deletion:** by default the token file is deleted as soon as the stream has connected, and otherwise at close, on a failed launch or at process exit. The app checks the file when a session starts, so a lab run is one session per launch.
 - **Optional reconnect retention:** only a model-enabled API launch may explicitly set `transcription.reconnect: true`. It keeps the usable short-lived token in the same owner-only run folder until close, a failed launch or process exit, so a replacement stream can read it again. This retains a valid credential on disk for the run. Without that opt-in a reconnect stops the run. The launcher accepts at most two replacements, only after the first connection and in the reviewed session, and requires every replacement to use the first connection's query. A pending replacement may fail and consume the second attempt before any replacement reports `Connected`. Recovery before the first confirmed connection is refused because no initial query has been confirmed; that narrower launcher workflow remains a native integration limitation. It reports `tokenKeptUntilStop` and the reconnect count; those receipts do not prove native reconnect, device or provider acceptance. The runner SIGKILL limitation below still applies.
-- **What deletion cannot cover:** a SIGKILL of the runner skips every cleanup path. A released token then stays in the run folder until the temporary directory is cleaned, and stays valid for up to 900 s. The app is not killed with the runner either. `removeStaleTranscriptionTokens()` removes such files from this user's owner-only `tq-owned-*` folders, but only where the run has provably ended. A folder qualifies if the runner pid it recorded in `runner.pid` is gone, or, without a pid record, if nothing in it changed for longer than the 900 s token TTL. A run still in progress, in this or another lane, is never touched. A run package calls it at start.
+- **What deletion cannot cover:** a SIGKILL of the runner skips every cleanup path. A released token then stays in the run folder until the temporary directory is cleaned, and stays valid for up to 900 s. The app is not killed with the runner either. `removeStaleTranscriptionTokens()` removes such files from this user's owner-only `tq-owned-*` folders, but only where the run has provably ended. A folder qualifies if the runner pid it recorded in `runner.pid` is gone, or, without a pid record, if nothing in it changed for longer than the 900 s token TTL. A run still in progress, in this or another lane, is never touched. A run package calls it at start ([prepared take runbook](lab-take-runbook.md#11-run-the-take)).
 
 - **Provider-failure probe (T5):** a take that checks the app's own failure path passes `transcription: { backend: 'deepgram', minuteCap, failureProbe: 'refused-token' }` instead of a grant. Only that exact value is accepted, never together with a grant or `reconnect`, and never on a capture-only launch; a grant object that claims to be a probe is refused. No key file is read and nothing is minted. At the same point where a real token would be released, the launcher writes a fixed text (`REFUSED_PROBE_TOKEN` in `scripts/cue-lab-deepgram.mjs`) through the same owner-only file rules. It has the shape the app's token file accepts but is no credential, so the app connects as usual and Deepgram is expected to refuse it (401, code `auth`). If the app ever reports `connected` for it, the run stops: that is not the take the plan asked for. The receipt reports `failureProbe` (null for a real token) and `grantTtlS: null`, and the evidence manifest records the probe in place of the grant TTL, so a probe take cannot be read as a normal one. After the refusal the app ends the session itself, so the take ends `stopped`. Its result is in the [evidence report](lab-evidence-report.md#existing-native-timing-import), not in the take's outcome. No probe has been run against Deepgram.
 

@@ -1,6 +1,6 @@
 # Real-app lab run: checklist
 
-One page to follow at the Mac for a recorded run of the real TalkQTE app hearing a fictional meeting. The [runbook](real-app-lab.md) has the detail behind each app step; the [meeting emulator page](meeting-emulator.md) has the detail behind the meeting and the recording. Fictional conversations only. Record on the Mac itself, never in a virtual machine. Before each run, write its question, why existing evidence is insufficient, and its duration/call bounds. Stop at the first unexpected failure; a new macOS permission prompt requires the owner. Coordinate app launches and capture with other active runs.
+One page to follow at the Mac for a recorded run of the real TalkQTE app hearing a fictional meeting. The [runbook](real-app-lab.md) has the detail behind each app step; the [meeting emulator page](meeting-emulator.md) has the detail behind the meeting and the recording. Fictional conversations only. Record on the Mac itself, never in a virtual machine. Before each run, write its question, why existing evidence is insufficient, and its duration/call bounds. Stop at the first unexpected failure; a new macOS permission prompt requires the owner. Coordinate app launches and capture with other active runs. This is the manual QuickTime route; a model-enabled prepared take with the owned lab player follows the [prepared take runbook](lab-take-runbook.md).
 
 ## Once
 

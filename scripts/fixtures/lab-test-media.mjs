@@ -13,7 +13,9 @@ process.once('exit', () => {
 });
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
-export function fictionalTestMedia({ durationMs = 102480 } = {}) {
+// The synthetic manifest itself, for code that takes a manifest path and
+// its approved sha256 (a take plan).
+export function fictionalTestMediaManifest({ durationMs = 102480 } = {}) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'tq-test-media-')));
   directories.push(dir);
   const path = join(dir, 'fictional.mp4');
@@ -34,7 +36,12 @@ export function fictionalTestMedia({ durationMs = 102480 } = {}) {
     window: { withinCurrentLabCap: true },
     verification: { passed: true },
   });
-  const manifest = join(dir, 'MANIFEST.json');
-  writeFileSync(manifest, raw, { mode: 0o600 });
-  return loadLabMediaManifest(manifest, { sha256: sha(raw) });
+  const manifestFile = join(dir, 'MANIFEST.json');
+  writeFileSync(manifestFile, raw, { mode: 0o600 });
+  return { manifestFile, sha256: sha(raw) };
+}
+
+export function fictionalTestMedia(options) {
+  const { manifestFile, sha256 } = fictionalTestMediaManifest(options);
+  return loadLabMediaManifest(manifestFile, { sha256 });
 }

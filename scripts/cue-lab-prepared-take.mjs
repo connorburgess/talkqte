@@ -39,9 +39,9 @@ export function createPreparedTake(options) {
 // Fixed saved-meeting model recording. It shares the existing provider/broker
 // owner; this wrapper cannot create a second gate, retry or change the media.
 //
-// The option check is exported so a run package can verify, before approval
-// and without launching anything, that its plan matches what this code
-// accepts.
+// The option check is exported so a plan can be verified, before approval
+// and without launching anything, against what this code accepts
+// (scripts/cue-lab-take.mjs, docs/lab-take-runbook.md).
 export function assertFixedModelTakeOptions(options) {
   required(
     options?.body === undefined &&
@@ -79,7 +79,12 @@ export function assertFixedModelTakeOptions(options) {
         options.settings.provider === 'anthropic-api') &&
       // Approved fictional media (fixed MP4 or a reviewed per-run manifest)
       // within the bounds every timing guard below was set for.
-      isLabMedia(options.media),
+      isLabMedia(options.media) &&
+      // A turn-off falls within the media, as the take itself requires.
+      (options.turnOffAfterMs === undefined ||
+        (Number.isSafeInteger(options.turnOffAfterMs) &&
+          options.turnOffAfterMs >= 1 &&
+          options.turnOffAfterMs < options.media.durationMs)),
   );
 }
 export function createFixedModelTake(options) {

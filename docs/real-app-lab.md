@@ -9,6 +9,9 @@ processing is approved, the engine's cues and the real companion window.
 On-device transcription was removed on 16 November 2026; this page was
 updated for that, and nothing here has been run with cloud transcription.
 
+This page covers the manual QuickTime route. For a model-enabled prepared take
+with the owned lab player, use the [prepared take runbook](lab-take-runbook.md).
+
 **None of this has been run yet.** Every step below is written from the code
 and has to be confirmed on the owner's Mac. Steps marked _to confirm_ are the
 ones most likely to differ. Use fictional conversations only: never a real

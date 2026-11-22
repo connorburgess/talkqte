@@ -5,6 +5,9 @@ native owner and run lifecycle with injected player, source-readiness and record
 adapters. It has no CLI entry point or production player/recorder implementation.
 Importing it performs no work. Calling it is an active run operation; real use
 still needs a reviewed bounded plan and separately approved signed build receipt.
+The [prepared take runbook](lab-take-runbook.md) gives the ordered steps and a
+dry-run check of such a plan (`npm run lab:take`); nothing in the repository
+executes a take.
 
 The preserved 102.48-second meeting is a single-author prepared generated
 conversation. Playing it to the real app can test live evaluator cue/silence
