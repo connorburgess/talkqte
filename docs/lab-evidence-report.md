@@ -189,6 +189,18 @@ are marked uncertain. A zero declared uncertainty is not physical accuracy proof
 | Visible duration     | Observed paint → observed clear frame                   |
 | End-to-end latency   | Explicitly joined heard/render end → observed paint     |
 
+The report's `budgets` compare three of these with the timing targets in
+[budgets](budgets.md): transcription lag against the speech-to-line median
+(3.5 s) and 95th percentile (5 s), and end-to-end latency against the
+visible-cue 95th percentile (5 s) and the 18-second stale-cue limit. Each
+statistic is computed three times, from the measured values and from every
+sample's shortest and longest possible duration: `within` needs the longest
+to meet the target, `over` needs the shortest to exceed it, and anything
+between is `uncertain`. Samples that could not be measured are counted beside
+the measured ones and never treated as passing. This is a comparison for one
+take; it does not confirm a budget, which needs the 60-minute meeting and the
+lowest supported Mac that page names.
+
 Missing endpoints, ambiguous relationships or absent clock bridges remain unknown.
 A heard/render-end endpoint must use actual `event` basis. A validated completion
 receipt remains in the timeline, labelled receipt only, but cannot establish
