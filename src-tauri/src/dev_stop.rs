@@ -352,6 +352,7 @@ mod tests {
                 let settings = DevSettings {
                     application: application.into(),
                     stop_after,
+                    with_microphone: Ok(false),
                 };
                 assert_eq!(
                     supported_source(Some(&settings)),

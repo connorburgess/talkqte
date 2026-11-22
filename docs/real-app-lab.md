@@ -233,6 +233,16 @@ open -a ./src-tauri/target/debug/bundle/macos/TalkQTE.app \
   a session from it alone. It never starts the microphone. The panel says
   that the setting acknowledged the notice, and the capture line ends
   "Started by the TALKQTE_DEV_APPLICATION_SOURCE launch setting."
+- **`TALKQTE_DEV_APPLICATION_WITH_MICROPHONE=1`** makes the application join
+  a microphone session instead of starting one alone, for a call with both
+  sides. After finding the application, the app waits up to 5 minutes for
+  you to start a live session from the microphone in the notebook, then
+  attaches the application to it. You still start the microphone and approve
+  processing yourself; one approval then sends both the microphone's and the
+  application's audio, although its text names one source. The timed Stop
+  below stops the application only. Any other value starts nothing. _To
+  confirm_: this has not been run on a device, and microphone pickup of the
+  application's sound can add duplicate lines unless you use headphones.
 - **`TALKQTE_DEV_STOP_AFTER_S`**, a whole number of seconds from 1, asks the
   ordinary Stop that long after capture is confirmed. Release then follows
   as in [Stop cleanly](#stop-cleanly). Any other value starts nothing.

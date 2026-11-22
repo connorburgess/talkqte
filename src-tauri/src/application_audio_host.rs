@@ -1276,6 +1276,7 @@ pub(crate) mod app {
         // Act once on its own thread: it waits for listing and the start.
         if let Some(settings) = settings {
             let host = host.clone();
+            let app_for_microphone = app.clone();
             #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
             let observer_app = app.clone();
             let _ = std::thread::Builder::new()
@@ -1302,7 +1303,19 @@ pub(crate) mod app {
                         );
                         return;
                     }
-                    host.start_by_setting(&settings, DevWaits::default());
+                    let microphone_app = app_for_microphone;
+                    host.start_by_setting_joining(
+                        &settings,
+                        DevWaits::default(),
+                        Some(move || {
+                            microphone_app
+                                .state::<AppState>()
+                                .0
+                                .lock()
+                                .is_ok_and(|runtime| runtime.microphone_session_takes_a_source())
+                        }),
+                        |_| true,
+                    );
                 });
         }
         let app = app.clone();

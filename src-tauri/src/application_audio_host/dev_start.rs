@@ -9,6 +9,14 @@
 //! other refusal ends the attempt with its reason in the panel, on stderr and
 //! in the timing log; nothing is retried, so macOS is asked at most once.
 //!
+//! `TALKQTE_DEV_APPLICATION_WITH_MICROPHONE=1` changes the last step, for a
+//! call with both sides: after finding the application, the host waits for a
+//! live session the person has started from the microphone in the notebook,
+//! then attaches the application to that session instead of starting one of
+//! its own. The setting never starts the microphone or approves processing.
+//! Stop by this setting stops the application only; the microphone session
+//! runs until the person stops it. A lab run does not accept this setting.
+//!
 //! `TALKQTE_DEV_STOP_AFTER_S`, if set, asks the host's ordinary Stop that many
 //! seconds after capture is confirmed. Nothing else is stopped or forced.
 
@@ -17,12 +25,16 @@ use crate::timing_log::{self, Event};
 
 pub(crate) const SOURCE_ENV: &str = "TALKQTE_DEV_APPLICATION_SOURCE";
 pub(crate) const STOP_AFTER_ENV: &str = "TALKQTE_DEV_STOP_AFTER_S";
+pub(crate) const WITH_MICROPHONE_ENV: &str = "TALKQTE_DEV_APPLICATION_WITH_MICROPHONE";
 
 /// How long listing may wait, for example behind the one-time macOS prompt,
 /// before the attempt gives up and cancels it.
 pub(crate) const LIST_WAIT: Duration = Duration::from_secs(120);
 /// How long a start may take to be confirmed or refused.
 pub(crate) const START_WAIT: Duration = Duration::from_secs(60);
+/// How long the person has to start the microphone session the application
+/// is to join.
+pub(crate) const MICROPHONE_WAIT: Duration = Duration::from_secs(300);
 const POLL: Duration = Duration::from_millis(50);
 
 /// The launch settings, read once.
@@ -32,6 +44,10 @@ pub(crate) struct Settings {
     /// Invalid when the stop setting is present but not a whole number of
     /// seconds from 1 upward; nothing is started then.
     pub stop_after: Result<Option<Duration>, ()>,
+    /// Join a microphone session the person starts, instead of starting a
+    /// session for the application alone. Invalid when the setting is
+    /// present but not exactly `1`; nothing is started then.
+    pub with_microphone: Result<bool, ()>,
 }
 
 impl Settings {
@@ -45,9 +61,15 @@ impl Settings {
                 _ => Err(()),
             },
         };
+        let with_microphone = match lookup(WITH_MICROPHONE_ENV) {
+            None => Ok(false),
+            Some(text) if text == "1" => Ok(true),
+            Some(_) => Err(()),
+        };
         Some(Self {
             application,
             stop_after,
+            with_microphone,
         })
     }
 }
@@ -66,6 +88,7 @@ pub(crate) enum Outcome {
 pub(crate) struct Waits {
     pub list: Duration,
     pub start: Duration,
+    pub microphone: Duration,
     pub poll: Duration,
 }
 
@@ -74,6 +97,7 @@ impl Default for Waits {
         Self {
             list: LIST_WAIT,
             start: START_WAIT,
+            microphone: MICROPHONE_WAIT,
             poll: POLL,
         }
     }
@@ -143,6 +167,7 @@ impl Host {
 
     /// One attempt for `settings`, blocking the calling thread, which must
     /// not be the worker or hold the runtime lock.
+    #[cfg(test)]
     pub(crate) fn start_by_setting(&self, settings: &Settings, waits: Waits) -> Outcome {
         self.start_by_setting_observed(settings, waits, |_| true)
     }
@@ -151,6 +176,20 @@ impl Host {
         &self,
         settings: &Settings,
         waits: Waits,
+        observe: impl FnOnce(&str) -> bool,
+    ) -> Outcome {
+        // A lab run binds a session for the application alone.
+        self.start_by_setting_joining(settings, waits, None::<fn() -> bool>, observe)
+    }
+
+    /// As `start_by_setting`. When the settings ask to join the microphone,
+    /// `microphone_running` says whether a live microphone session can take
+    /// a source now; without it that setting is refused.
+    pub(crate) fn start_by_setting_joining(
+        &self,
+        settings: &Settings,
+        waits: Waits,
+        microphone_running: Option<impl Fn() -> bool>,
         observe: impl FnOnce(&str) -> bool,
     ) -> Outcome {
         let name = settings.application.as_str();
@@ -163,6 +202,19 @@ impl Host {
         };
         let Ok(stop_after) = settings.stop_after else {
             return refuse("stop_after_invalid", Some(Problem::DevSettingInvalid));
+        };
+        let microphone_running = match (settings.with_microphone, microphone_running) {
+            (Err(()), _) => {
+                return refuse("with_microphone_invalid", Some(Problem::DevSettingInvalid))
+            }
+            (Ok(false), _) => None,
+            (Ok(true), Some(running)) => Some(running),
+            (Ok(true), None) => {
+                return refuse(
+                    "with_microphone_unsupported",
+                    Some(Problem::DevSettingInvalid),
+                )
+            }
         };
         self.lock().by_setting = true;
         say("acknowledged", name, None);
@@ -201,13 +253,28 @@ impl Host {
                 Some(Problem::NoMatchingApplication),
             );
         };
-        if self.review(&choice.id).is_err() {
+        let choice = choice.id.clone();
+        if let Some(running) = &microphone_running {
+            say("waiting_for_microphone", name, None);
+            let deadline = Instant::now() + waits.microphone;
+            while !running() {
+                if Instant::now() >= deadline {
+                    return refuse("microphone_not_started", None);
+                }
+                std::thread::sleep(waits.poll);
+            }
+        }
+        if self.review(&choice).is_err() {
             return refuse("busy", None);
         }
         let Some(review) = self.snapshot().view.operation else {
             return refuse("busy", None);
         };
-        if self.start_session(&review).is_err() {
+        let started = match microphone_running {
+            Some(_) => self.start(&review),
+            None => self.start_session(&review),
+        };
+        if started.is_err() {
             return refuse("busy", None);
         }
         let deadline = Instant::now() + waits.start;

@@ -92,6 +92,18 @@ impl Runtime {
             .then_some(operation)
     }
 
+    /// A live session with the microphone is running and no source feeds it
+    /// yet, so an application may be attached to it now.
+    #[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
+    pub(crate) fn microphone_session_takes_a_source(&self) -> bool {
+        self.live_source_operation().is_some()
+            && self.live_source.is_none()
+            && self
+                .live
+                .as_ref()
+                .is_some_and(|live| live.microphone.is_some())
+    }
+
     /// Call with the runtime lock held, before the source may deliver audio
     /// stamped with this session. One source at a time, attached once: a
     /// second attach for the same operation is refused like any other. The
@@ -647,6 +659,23 @@ mod tests {
             .map(|line| line.id.as_str())
             .collect();
         assert_eq!(ids, ["a1", "m1"]);
+    }
+
+    #[test]
+    fn only_a_running_microphone_session_without_a_source_takes_one() {
+        let mut runtime = live();
+        // A live session that the microphone has not joined.
+        assert!(!runtime.microphone_session_takes_a_source());
+        runtime.live.as_mut().unwrap().microphone = Some(1);
+        assert!(runtime.microphone_session_takes_a_source());
+        let source = source("fictional-player");
+        runtime.attach_live_source(&source.control).unwrap();
+        assert!(!runtime.microphone_session_takes_a_source(), "occupied");
+        runtime.retire_live_source();
+        assert!(runtime.microphone_session_takes_a_source());
+        runtime.take_live_for_stop().unwrap();
+        assert!(!runtime.microphone_session_takes_a_source(), "stopping");
+        assert!(!Runtime::default().microphone_session_takes_a_source());
     }
 
     #[test]

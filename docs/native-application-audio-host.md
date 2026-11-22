@@ -188,6 +188,16 @@ including no exact match or a refused permission, ends the attempt with its
 reason in the status and is not retried
 ([runbook](real-app-lab.md#start-and-stop-without-clicks)).
 
+With `TALKQTE_DEV_APPLICATION_WITH_MICROPHONE=1` the same attempt instead
+joins a call's other side: after finding the application it waits up to five
+minutes for a live session the person starts from the microphone, then
+reviews the application and attaches it to that session with the ordinary
+`start`. It never starts the microphone or approves processing, and it is
+refused in a lab run, which binds a session for the application alone. The
+timed Stop then stops the application only. Scripted tests cover the wait,
+the attach and the refusals; no device run has used it, and the approval
+text shown for the session still names one capture source, not both.
+
 ## The status
 
 The status says **Off only when nothing was started or native cleanup was
