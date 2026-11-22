@@ -1038,12 +1038,15 @@ function cloudSummary(events, m) {
     // latch (native orders the two), and later signals that changed nothing.
     turnOffRequest: asked && {
       outcome: offOutcome?.payload.offStep ?? null,
-      beforeStop:
-        latch < 0
+      // Unknown without an outcome row: what was decided, and when, is
+      // not in the log.
+      beforeStop: !offOutcome
+        ? null
+        : latch < 0
           ? loss
             ? null
             : true
-          : index.get(offOutcome ?? asked) < latch,
+          : index.get(offOutcome) < latch,
       repeats: offRows.filter((e) => e.payload?.offStep === 'repeated').length,
     },
     rowsMayBeMissing: loss,

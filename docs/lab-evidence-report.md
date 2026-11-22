@@ -273,7 +273,7 @@ When the manifest records the launcher's `transcription` settings (backend, minu
 - when the take asked for a turn-off, whether the turned-off stream closed after the `dev_off` `latched` row (native writes it before withdrawing anything);
 - a stop for any other code (for example `auth`) as a failure, with whether nothing of the session's transcription followed it. A fallback to another service would have to appear there, so "nothing followed" is the evidence that nothing fell back.
 
-When the take asked for a turn-off, the section also gives native's outcome (`done`, `failed`, or not seen), whether it was decided before the lab Stop latch (native orders the two; with no latch row it is yes unless rows may be missing), and how many later signals were recorded as no-ops.
+When the take asked for a turn-off, the section also gives native's outcome (`done`, `failed`, or not seen), whether it was decided before the lab Stop latch (native orders the two; with no latch row it is yes unless rows may be missing; with no outcome row it is unknown), and how many later signals were recorded as no-ops. The manifest does not record whether a take planned a turn-off, so a planned turn-off that left no `dev_off` row reads like a take that asked for none; the take's own `turnOff` result says whether it asked.
 
 For a provider-failure take the section also gives one result against the expected code `auth`: refused as expected (every stream that started stopped with `auth`, none connected, nothing followed), connected (the refused text was accepted, so the take shows no provider failure), another code, transcription after the failure, or unknown.
 

@@ -1320,6 +1320,24 @@ test("the take's own turn-off request is placed: asked before the stream closed,
   });
   // The stream closed before the take asked: not its turn-off.
   assert.equal(late.streams[0].turnOff.afterAsk, false);
+  // Asked, but no outcome row: neither the outcome nor its order with the
+  // Stop is claimed, with or without a latch.
+  for (const rows of [[], [latchRow(9100)]]) {
+    const unseen = cloudReport([
+      ...cloudRows({ stop: offRow('lab_ended', 50000, 9000) }),
+      offAsk('latched', 8990),
+      ...rows,
+    ]);
+    assert.deepEqual(unseen.cloudTranscription.turnOffRequest, {
+      outcome: null,
+      beforeStop: null,
+      repeats: 0,
+    });
+    assert.match(
+      renderEvidenceMarkdown(unseen),
+      /native outcome \*\*not seen\*\*; decided before the lab Stop: unknown;/,
+    );
+  }
   assert.throws(() => cloudReport([offAsk('started', 1)]));
 });
 
