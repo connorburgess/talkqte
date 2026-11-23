@@ -76,6 +76,14 @@ pub enum EvaluationIssue {
     CallLimit,
     LabStopped,
     LabUnavailable,
+    /// Anthropic refused the person's own key.
+    KeyRejected,
+    /// The person's own key was removed or the Keychain could not be read.
+    KeyUnavailable,
+    /// The session's estimated spend cap was reached.
+    SpendLimit,
+    /// The session's request cap was reached, with the person's own key.
+    RequestLimit,
 }
 
 /// The owner's rule for slow replies: one reply over the deadline is skipped
@@ -147,11 +155,7 @@ impl Engine {
         engine
     }
 
-    #[cfg(any(test, all(debug_assertions, feature = "lab-evaluator")))]
-    #[allow(
-        dead_code,
-        reason = "native facade activation and API usage vary by build/test configuration"
-    )]
+    /// The lab's settlement rules: the lab link, or the in-app connection.
     pub(crate) fn with_lab_lifecycle(
         mut self,
         lifecycle: std::sync::Arc<dyn crate::cue_evaluator::EvaluationLifecycle>,
@@ -179,6 +183,13 @@ impl Engine {
                     | "lab-api-selected-prior-attested-v1"
             )
         })
+    }
+
+    /// The in-app Anthropic API connection with the person's own key.
+    pub(crate) fn is_own_key(&self) -> bool {
+        self.evaluation
+            .as_ref()
+            .is_some_and(|s| s.permission.processor.id == crate::anthropic_api::PROCESSOR_ID)
     }
 
     /// The lab backend that sends conversation text to the paid Anthropic
@@ -257,14 +268,6 @@ impl Engine {
     }
 
     /// A session-wide ceiling; turning permission off/on never resets it.
-    #[cfg(any(
-        test,
-        all(
-            debug_assertions,
-            any(feature = "claude-cli", feature = "lab-evaluator"),
-            feature = "native-audio-spike"
-        )
-    ))]
     pub(crate) fn set_model_call_limit(&mut self, limit: u64) {
         if let Some(state) = &mut self.evaluation {
             state.call_limit = Some(limit);
@@ -363,7 +366,10 @@ impl Engine {
             Failure::EvaluatorUnavailable | Failure::WorkerUnavailable => {
                 EvaluationIssue::WorkerUnavailable
             }
+            Failure::SignIn if self.is_own_key() => EvaluationIssue::KeyRejected,
             Failure::SignIn => EvaluationIssue::SignIn,
+            Failure::Credentials if self.is_own_key() => EvaluationIssue::KeyUnavailable,
+            Failure::SpendLimit => EvaluationIssue::SpendLimit,
             Failure::Credentials => EvaluationIssue::Credentials,
             Failure::UsageLimit => EvaluationIssue::UsageLimit,
             Failure::Unreachable => EvaluationIssue::Unreachable,
@@ -391,7 +397,7 @@ impl Engine {
     pub(super) fn invalidate_evaluation(&mut self) {
         self.evaluation_revision = self.evaluation_revision.wrapping_add(1);
         if let Some(state) = &mut self.evaluation {
-            if let Some(lab) = &state.lab {
+            if let Some(lab) = state.lab.as_ref().filter(|lab| lab.ends_run_on_control()) {
                 if state.pending.is_some() || state.permission.grant.is_some() {
                     state.lab_terminal = true;
                     lab.cancel();
@@ -641,7 +647,12 @@ impl Engine {
         }
         if self.model_calls_exhausted() {
             self.revoke_processing();
-            self.set_evaluation_status(EvaluationStatus::Unavailable(EvaluationIssue::CallLimit));
+            let issue = if self.is_own_key() {
+                EvaluationIssue::RequestLimit
+            } else {
+                EvaluationIssue::CallLimit
+            };
+            self.set_evaluation_status(EvaluationStatus::Unavailable(issue));
             crate::timing_log::record(crate::timing_log::Event::EvaluationStopped {
                 session: self.generation,
                 failure: "call_limit",
@@ -2043,6 +2054,27 @@ mod tests {
         h.line("The review schedule is unclear.");
         assert_eq!(h.request().sources().len(), 2);
         h.reply("quiet", None, &["transcript:line-1"]);
+    }
+
+    #[test]
+    fn a_kept_meeting_records_a_model_cue_with_its_line_but_no_speaker_label() {
+        let mut h = Harness::new();
+        h.line("The checklist handoff is still unassigned.");
+        h.request();
+        h.reply(
+            "show",
+            Some("Who owns the checklist?"),
+            &["transcript:line-1"],
+        );
+        let cue = h.engine.state.cue.as_ref().unwrap();
+        // The cue on screen shows the speaker and time; the record must not.
+        assert!(cue.evidence.contains("Maya"));
+        h.engine.set_keep_meeting(true);
+        let kept = h.engine.markdown();
+        assert!(kept.contains(
+            ": Who owns the checklist? (from: \"The checklist handoff is still unassigned.\")"
+        ));
+        assert!(!kept.contains("Maya"), "{kept}");
     }
 
     #[test]

@@ -4,7 +4,6 @@
 //! device.
 
 pub mod cloud;
-#[cfg(feature = "cloud-transcription")]
 pub mod deepgram;
 
 /// 16 kHz mono samples, the format every capture path hands to transcription.

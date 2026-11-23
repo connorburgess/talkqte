@@ -36,6 +36,8 @@ import {
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { ContextNotes } from './components/ContextNotes';
 import { SetupCard, type SetupTarget } from './components/SetupCard';
+import { ProviderKeys } from './components/ProviderKeys';
+import { KeepMeetingChoice } from './components/KeepMeetingChoice';
 import {
   PanelDivider,
   boundWidth,
@@ -1816,6 +1818,7 @@ function Notebook() {
             <p className="page-description">
               A few controls to keep questions on your terms.
             </p>
+            <ProviderKeys />
             <section className="setting">
               <div>
                 <h2>Your name</h2>
@@ -2113,6 +2116,7 @@ function Notebook() {
           This is the exact text that will be saved as Markdown. Review it
           before choosing a destination.
         </p>
+        <KeepMeetingChoice snapshot={state} onPreview={setPreview} />
         <pre>{preview}</pre>
         {error && (
           <p role="alert" className="export-error">

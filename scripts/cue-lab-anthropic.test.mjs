@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -152,6 +153,24 @@ test('the request is one streamed call with the fixed schema, stable system prom
   assert.ok(Number.isSafeInteger(result.messageStartMs));
   assert.ok(Number.isSafeInteger(result.firstTextMs));
   assert.deepEqual(result.usage, { input_tokens: 900, output_tokens: 40 });
+});
+
+test('the app builds the same requests: the shared fixture matches this route', () => {
+  // src-tauri/src/anthropic_api.rs checks the same file from Rust.
+  const fixture = JSON.parse(
+    readFileSync(
+      new URL('./fixtures/anthropic-request.json', import.meta.url),
+      'utf8',
+    ),
+  );
+  assert.equal(fixture.cases.length, 3);
+  for (const c of fixture.cases) {
+    const parsed = JSON.parse(c.input);
+    // The app's input string is exactly what this route would serialize.
+    assert.equal(JSON.stringify(parsed), c.input);
+    assert.deepEqual(buildAnthropicParams(c.model, parsed), c.params);
+    assert.equal(worstCaseMicroUsd(c.model, parsed), c.worstCaseMicroUsd);
+  }
 });
 
 test('thinking is fixed per model and nothing else is accepted', () => {

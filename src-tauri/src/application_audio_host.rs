@@ -1124,10 +1124,17 @@ pub(crate) mod app {
             Stage::CloudReadiness,
             match availability {
                 Ok(()) => Reason::Ready,
-                Err(crate::LiveUnavailable::Build) => Reason::CloudBuildMissing,
+                Err(crate::LiveUnavailable::Build | crate::LiveUnavailable::CueKeyRejected) => {
+                    Reason::CloudBuildMissing
+                }
                 Err(crate::LiveUnavailable::Selection) => Reason::CloudNotSelected,
                 Err(crate::LiveUnavailable::Settings) => Reason::CloudSettingsInvalid,
                 Err(crate::LiveUnavailable::TokenMetadata) => Reason::TokenMetadataRejected,
+                Err(
+                    crate::LiveUnavailable::KeyRejected
+                    | crate::LiveUnavailable::KeyUnreadable
+                    | crate::LiveUnavailable::CueKeyUnreadable,
+                ) => Reason::CloudSettingsInvalid,
             },
         );
         let result = access.with(|runtime| {
@@ -1226,11 +1233,11 @@ pub(crate) mod app {
     /// the cloud stream this launch selected. A build or launch without one,
     /// or with unusable settings, refuses the start; nothing is transcribed
     /// on this device.
-    fn recognizer(_app: &tauri::AppHandle) -> Result<crate::transcription::cloud::Opener, String> {
+    fn recognizer(_app: &tauri::AppHandle) -> Result<crate::transcription::cloud::Streams, String> {
         if let Some(reason) = crate::live_unavailable() {
             return Err(reason.into());
         }
-        crate::transcription::cloud::opener()
+        crate::transcription::cloud::streams()
             .map_err(|_| "The cloud transcription settings are not usable.".to_string())
     }
 

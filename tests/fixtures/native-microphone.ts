@@ -3,6 +3,7 @@
 import { fictionalPermissions } from './processing-permissions';
 import * as granolaFixture from './native-granola';
 import * as contextFixture from './native-context';
+import * as providerKeysFixture from './native-provider-keys';
 import { mockIPC } from '@tauri-apps/api/mocks';
 import { emit } from '@tauri-apps/api/event';
 import * as preview from '../../src/lib/preview';
@@ -332,6 +333,8 @@ mockIPC(
     }
     if (permissionFixture.commands.includes(command))
       return permissionFixture.command(command, args);
+    if (providerKeysFixture.commands.includes(command))
+      return providerKeysFixture.command(command, args);
     switch (command) {
       case 'application_audio':
         // Development builds only: record what the notebook asked for.
@@ -511,10 +514,22 @@ mockIPC(
           cue: null,
         });
         return;
-      case 'export_preview':
+      case 'export_preview': {
         if (session.live && session.status === 'running')
           throw new Error('Live sessions are not saved or exported.');
-        return preview.exportPreview();
+        const notes = preview.exportPreview();
+        // Stands in for the engine's kept-meeting export.
+        return session.keepMeeting
+          ? `${notes}\n## Transcript\n\n${session.transcript
+              .map((line) => `- ${line.text}`)
+              .join('\n')}\n`
+          : notes;
+      }
+      case 'set_keep_meeting':
+        await publish({
+          keepMeeting: (args as Commands['set_keep_meeting']).keep,
+        });
+        return;
       case 'export_markdown':
         return true;
       case 'inspect_cue': {
@@ -628,6 +643,7 @@ preview.connect((value) => {
 
 declare global {
   interface Window {
+    providerKeysTest: typeof providerKeysFixture.providerKeysTest;
     focusTest: {
       submissions: string[][];
       current: () => string[];
@@ -707,6 +723,7 @@ declare global {
   }
 }
 window.permissionTest = permissionFixture;
+window.providerKeysTest = providerKeysFixture.providerKeysTest;
 window.captureTest = {
   send: sendProcessing,
   state: () => structuredClone(processing),

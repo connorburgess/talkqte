@@ -1,0 +1,24 @@
+/* The keep-the-meeting choice in the export review. Plain; no borders. */
+.keep-meeting {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 12px 0;
+}
+.keep-meeting input {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+.keep-meeting label {
+  font-weight: 650;
+}
+.keep-meeting p {
+  color: var(--muted);
+  font-size: 15px;
+  margin-top: 4px;
+}
+.keep-meeting [role='alert'] {
+  color: var(--accent);
+}

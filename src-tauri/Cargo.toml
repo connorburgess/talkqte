@@ -16,9 +16,11 @@ tauri-build = { version = "2", features = [] }
 [features]
 # Development-only lab transport; native selection is wired separately.
 lab-evaluator = ["cloud-transcription"]
-# Development-only cloud streaming transcription (Deepgram), approved per
-# session in the processing review. Never part of a release build.
-cloud-transcription = ["dep:tungstenite", "dep:rustls", "dep:webpki-roots"]
+# Development-only Deepgram credential: lets a debug launch point
+# transcription at a short-lived token file (TALKQTE_DEV_STT_*) instead of the
+# person's stored key. Deepgram streaming itself is in every build and sends
+# nothing until the session review is approved. Never part of a release build.
+cloud-transcription = []
 # Development-only application audio: one main-window command can list, review
 # and start a selected application. Never part of a default build.
 native-audio-spike = ["dep:objc2-screen-capture-kit", "dep:objc2-foundation", "dep:dispatch2", "dep:objc2-core-media", "dep:objc2-core-audio-types"]
@@ -44,9 +46,13 @@ sha2 = "0.10"
 # The HTTPS client for the Granola connection; it makes no request until the
 # person starts one.
 ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
-tungstenite = { version = "0.30", optional = true, default-features = false, features = ["handshake"] }
-rustls = { version = "0.23", optional = true, default-features = false, features = ["ring", "std", "tls12", "logging"] }
-webpki-roots = { version = "1", optional = true }
+# Deepgram live streaming: a WebSocket over TLS with the bundled web roots.
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = "1"
+# Wipes a provider key from memory once it has been used. Already in the
+# tree through rustls.
+zeroize = "1"
 # Randomness for the sign-in's PKCE verifier and state.
 getrandom = "0.3"
 # Opens the sign-in page in the person's default browser.
@@ -66,6 +72,9 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 # The CGRect the companion's single frame change passes to AppKit.
 objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std", "CFCGTypes"] }
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "AVCaptureDevice", "AVMediaFormat", "block2"] }
+# The person's own provider keys in the login Keychain (generic passwords
+# through Security.framework). The standard binding; no default features.
+security-framework = { version = "3", default-features = false }
 
 # Direct bindings for the isolated native ownership experiment.
 objc2-screen-capture-kit = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "SCStream", "SCError", "SCShareableContent", "block2", "dispatch2", "libc", "objc2-core-media", "objc2-core-graphics"] }

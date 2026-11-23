@@ -146,8 +146,8 @@ audio, with no microphone.
   cleanup still pending, or behind a controller that cannot be read. The
   status then says `sessionBusy`. A microphone that failed and has released
   its device, for example after a denied permission, does not block it. It is also refused, as `unavailable`, when
-  the build has no live transcription, or the launch has not selected cloud
-  transcription with usable settings, so it never clears the previous session
+  the build has no live transcription, or there is neither a usable Deepgram
+  key nor a development selection with usable settings, so it never clears the previous session
   only to end at once.
 - The microphone check and the session cannot overlap in either order: the
   session checks the microphone under the runtime lock, and a standalone

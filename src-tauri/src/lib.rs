@@ -1,3 +1,4 @@
+pub mod anthropic_api;
 pub mod application_audio;
 #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
 mod application_audio_host;
@@ -69,6 +70,8 @@ mod native_source;
 pub mod notes_file;
 mod processing_commands;
 pub mod processing_reviews;
+mod provider_key_commands;
+pub mod provider_keys;
 #[cfg(any(
     test,
     all(
@@ -169,9 +172,10 @@ impl Runtime {
     }
 
     /// The Markdown a person reviews before saving, kept so the save dialog
-    /// writes exactly that text. It is the notes only. A running live session
-    /// is refused, and refusing it drops any earlier preview; once the
-    /// session has ended the notes can be exported, never its transcript.
+    /// writes exactly that text. It is the notes, plus the session's
+    /// transcript and cues only when the person chose to keep the meeting. A
+    /// running live session is refused, and refusing it drops any earlier
+    /// preview.
     fn prepare_export(&mut self) -> Result<String, String> {
         // Live transcripts stay in memory only; this version never saves them.
         if self.engine.state.live
@@ -393,14 +397,11 @@ fn snapshot(
     .map_err(|_| "Could not read the session.".into())
 }
 
-/// The engine for a new live session: with the `claude-cli` development
-/// feature it registers the Claude Code backend, which sends nothing until
-/// the person turns it on; otherwise the plain engine with no cue backend.
-#[cfg(any(
-    feature = "cloud-transcription",
-    all(target_os = "macos", feature = "native-audio-spike"),
-    test
-))]
+/// The engine for a new live session: the lab's backend when a lab launch
+/// selects it; with the `claude-cli` development feature the Claude Code
+/// backend; otherwise the Anthropic API with the person's own key when one is
+/// stored, or the plain engine with no cue backend. Each sends nothing until
+/// the person approves the session review.
 pub(crate) fn live_engine() -> Engine {
     #[cfg(all(
         debug_assertions,
@@ -416,15 +417,16 @@ pub(crate) fn live_engine() -> Engine {
     #[cfg(feature = "claude-cli")]
     return claude_cli::connected_engine();
     #[cfg(not(feature = "claude-cli"))]
-    Engine::live()
+    if provider_keys::global().is_set(provider_keys::Provider::Anthropic) {
+        // The person's own key: sends nothing until the session review is
+        // approved, and never falls back to another service.
+        anthropic_api::connected_engine()
+    } else {
+        Engine::live()
+    }
 }
 
 /// A fresh engine that keeps the person's display choices and notes.
-#[cfg(any(
-    feature = "cloud-transcription",
-    all(target_os = "macos", feature = "native-audio-spike"),
-    test
-))]
 fn carry_over(previous: &Engine, mut next: Engine) -> Engine {
     let state = &previous.state;
     // Both windows ignore a snapshot older than the last one they saw, so
@@ -550,6 +552,22 @@ fn export_preview(state: tauri::State<AppState>) -> Result<String, String> {
         .prepare_export()
 }
 
+/// The person's choice, for this session only, to include its transcript
+/// and the cues shown in the export. Changing it drops any earlier preview,
+/// so only a preview of the new content can be saved.
+#[tauri::command]
+fn set_keep_meeting(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    keep: bool,
+) -> Result<(), String> {
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    runtime.engine.set_keep_meeting(keep);
+    runtime.export = None;
+    publish(&app, &mut runtime);
+    Ok(())
+}
+
 #[tauri::command]
 async fn export_markdown(
     app: tauri::AppHandle,
@@ -594,53 +612,99 @@ struct LiveStatus {
     transcription: Option<&'static str>,
 }
 
-/// Why a live session cannot start, if it cannot. Transcription is only
-/// through a cloud provider, selected per launch in development builds; a
-/// build without it transcribes nothing and says so.
+/// Why a live session cannot start, if it cannot. Audio is sent to
+/// Deepgram only once a cue review is approved, so a start needs both a cue
+/// connection and a Deepgram credential: the person's own keys, or in a
+/// development launch the lab's or Claude Code connection and a token file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LiveUnavailable {
+    /// No Anthropic key is stored and no development cue connection exists.
     Build,
+    /// The provider refused the stored Anthropic key.
+    CueKeyRejected,
+    /// No Deepgram key is stored and no development launch selects one.
     Selection,
     Settings,
     TokenMetadata,
+    /// Deepgram refused the stored key.
+    KeyRejected,
+    /// The Keychain could not be read for the Deepgram key.
+    KeyUnreadable,
+    /// The Keychain could not be read for the Anthropic key.
+    CueKeyUnreadable,
 }
 
 impl LiveUnavailable {
     fn message(self) -> &'static str {
         match self {
-            Self::Build => "This build has no live transcription.",
-            Self::Selection => {
-                "Live transcription needs cloud transcription selected for this development launch."
+            Self::Build => "Add your Anthropic API key in Settings to start a live session.",
+            Self::CueKeyRejected => {
+                "Anthropic rejected your API key. Replace it in Settings to start a live session."
             }
+            Self::Selection => "Add your Deepgram API key in Settings to start a live session.",
             Self::Settings | Self::TokenMetadata => {
                 "The cloud transcription settings are not usable."
+            }
+            Self::KeyRejected => {
+                "Deepgram rejected your API key. Replace it in Settings to start a live session."
+            }
+            Self::KeyUnreadable => {
+                "Your Deepgram key could not be read from the Keychain. Check it in Settings."
+            }
+            Self::CueKeyUnreadable => {
+                "Your Anthropic key could not be read from the Keychain. Check it in Settings."
             }
         }
     }
 }
 
+/// Whether this build registers a cue connection for live sessions: the
+/// lab's, the development Claude Code connection, or the person's own
+/// Anthropic key.
+fn cue_connection() -> Result<(), LiveUnavailable> {
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    if lab_evaluator::selected() {
+        return Ok(());
+    }
+    if cfg!(feature = "claude-cli") {
+        return Ok(());
+    }
+    match provider_keys::global().status().anthropic.state {
+        provider_keys::KeyState::Set => Ok(()),
+        provider_keys::KeyState::Rejected => Err(LiveUnavailable::CueKeyRejected),
+        provider_keys::KeyState::NotSet => Err(LiveUnavailable::Build),
+        provider_keys::KeyState::Unreadable => Err(LiveUnavailable::CueKeyUnreadable),
+    }
+}
+
 pub(crate) fn live_availability() -> Result<(), LiveUnavailable> {
     classify_live_availability(
-        cfg!(feature = "cloud-transcription"),
+        cue_connection(),
         transcription::cloud::selected,
         transcription::cloud::readiness,
     )
 }
 
 fn classify_live_availability(
-    compiled: bool,
+    cue_connection: Result<(), LiveUnavailable>,
     selected: impl FnOnce() -> bool,
     readiness: impl FnOnce() -> Result<(), transcription::cloud::ReadinessFailure>,
 ) -> Result<(), LiveUnavailable> {
-    if !compiled {
-        return Err(LiveUnavailable::Build);
-    }
+    cue_connection?;
     if !selected() {
         return Err(LiveUnavailable::Selection);
     }
     readiness().map_err(|failure| match failure {
         transcription::cloud::ReadinessFailure::Settings => LiveUnavailable::Settings,
         transcription::cloud::ReadinessFailure::TokenMetadata => LiveUnavailable::TokenMetadata,
+        transcription::cloud::ReadinessFailure::NoKey => LiveUnavailable::Selection,
+        transcription::cloud::ReadinessFailure::KeyRejected => LiveUnavailable::KeyRejected,
+        transcription::cloud::ReadinessFailure::KeyUnreadable => LiveUnavailable::KeyUnreadable,
     })
 }
 
@@ -659,7 +723,6 @@ fn live_status() -> LiveStatus {
 }
 
 /// Microphone audio handed to a cloud stream, a tenth of a second at a time.
-#[cfg(feature = "cloud-transcription")]
 const CLOUD_CHUNK_MS: u64 = 100;
 
 /// What the notebook shows about prior notes picked from a file.
@@ -1239,7 +1302,6 @@ fn finish_live(app: &tauri::AppHandle, live: Live, flush: bool) {
 /// A microphone session's cloud stream ended with a failure: the session
 /// records why and stops, as if Stop were chosen, without flushing to any
 /// other recognizer. Runs off the feeding thread, which the stop joins.
-#[cfg(feature = "cloud-transcription")]
 fn stop_after_cloud_failure(
     app: &tauri::AppHandle,
     session: u64,
@@ -1282,31 +1344,26 @@ async fn start_live_session(
     state: tauri::State<'_, AppState>,
     microphone: tauri::State<'_, microphone::Controller>,
 ) -> Result<(), String> {
-    #[cfg(not(feature = "cloud-transcription"))]
-    {
-        let _ = (app, state, microphone);
-        Err(live_unavailable()
-            .unwrap_or("This build has no live transcription.")
-            .into())
-    }
-    #[cfg(feature = "cloud-transcription")]
     {
         if let Some(reason) = live_unavailable() {
             return Err(reason.into());
         }
-        let opener = transcription::cloud::opener()
-            .map_err(|_| "The cloud transcription settings are not usable.")?;
         let start = state
             .0
             .lock()
             .map_err(|_| "The session is unavailable.")?
             .begin_live_start()?;
+        // Made only once this start holds the gate, so a refused second
+        // start can never replace or reuse this session's minute budget.
+        let streams = transcription::cloud::streams()
+            .map_err(|_| "The cloud transcription settings are not usable.")?;
         // Nothing is opened here: the stream opens once the review is
         // approved. The start can still be cancelled before capture.
-        let (start, opener) =
-            tauri::async_runtime::spawn_blocking(move || start.load(|| Ok(opener)))
+        let (start, streams) =
+            tauri::async_runtime::spawn_blocking(move || start.load(|| Ok(streams)))
                 .await
                 .map_err(|_| "Could not start the live session.")??;
+        let (opener, reopener) = streams.into_parts();
         let session = {
             let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
             runtime.sync();
@@ -1415,7 +1472,7 @@ async fn start_live_session(
                                         publish(&reconnect_app, &mut runtime);
                                     };
                                 })
-                                .with_reopener(transcription::cloud::reopener().ok()),
+                                .with_reopener(reopener),
                             ));
                         true
                     });
@@ -1554,7 +1611,13 @@ pub fn run() {
             set_overlay,
             export_preview,
             export_markdown,
+            set_keep_meeting,
             live_status,
+            provider_key_commands::provider_keys_status,
+            provider_key_commands::set_provider_key,
+            provider_key_commands::test_provider_key,
+            provider_key_commands::remove_provider_key,
+            provider_key_commands::cue_usage,
             companion::companion_anchor,
             pick_context_file,
             read_context_file_path,
@@ -2071,6 +2134,69 @@ mod export_tests {
         assert!(!after.contains("blue tin"));
         assert_eq!(runtime.export.as_deref(), Some(after.as_str()));
     }
+
+    #[test]
+    fn keeping_the_meeting_is_chosen_per_session_and_only_reviewed_text_is_saved() {
+        // A plain live engine: phrase rules raise the cue in every build.
+        let mut runtime = Runtime {
+            engine: Engine::live(),
+            ..Runtime::default()
+        };
+        runtime
+            .engine
+            .update_notes("Fictional notes beside the call.".into())
+            .unwrap();
+        runtime.engine.set_user_name(Some("Jordan".into())).unwrap();
+        runtime.engine.start().unwrap();
+        let session = runtime.engine.session();
+        assert!(!runtime.engine.state.keep_meeting);
+        runtime.engine.advance(65_000);
+        runtime
+            .engine
+            .ingest(
+                session,
+                engine::Segment {
+                    id: "l1".into(),
+                    at_ms: 65_000,
+                    speaker: "Speaker".into(),
+                    text: "Can someone take the fictional\ndraft soon?".into(),
+                },
+            )
+            .unwrap();
+        // The phrase rules raise a cue from that line.
+        let cue = runtime.engine.state.cue.clone().expect("a cue is shown");
+        // Choosing during the session still saves nothing while it runs.
+        runtime.engine.set_keep_meeting(true);
+        assert!(runtime.prepare_export().is_err());
+        runtime.engine.end();
+        let kept = runtime.prepare_export().unwrap();
+        assert!(kept.starts_with("# TalkQTE notes\n\nFictional notes beside the call.\n"));
+        assert!(kept.contains(&format!(
+            "## Cues shown\n\n- 01:05 · {}: {}",
+            cue.kind, cue.question
+        )));
+        assert!(kept.contains("## Transcript\n\n"));
+        assert!(kept.contains("- 01:05 Can someone take the fictional draft soon?\n"));
+        // Never the name, speaker labels or anything else.
+        assert!(!kept.contains("Jordan") && !kept.contains("Speaker"));
+        assert_eq!(runtime.export.as_deref(), Some(kept.as_str()));
+        // Turning it off again leaves the notes only.
+        runtime.engine.set_keep_meeting(false);
+        assert_eq!(
+            runtime.prepare_export().unwrap(),
+            "# TalkQTE notes\n\nFictional notes beside the call.\n"
+        );
+        // The next session starts with the choice off and an empty record.
+        runtime.engine.set_keep_meeting(true);
+        runtime.engine.start().unwrap();
+        assert!(!runtime.engine.state.keep_meeting);
+        runtime.engine.set_keep_meeting(true);
+        runtime.engine.end();
+        let next = runtime.prepare_export().unwrap();
+        assert!(next.contains("## Cues shown\n\nNone.\n"));
+        assert!(next.contains("## Transcript\n\n"));
+        assert!(!next.contains("draft soon"));
+    }
 }
 
 #[cfg(test)]
@@ -2210,14 +2336,22 @@ mod live_readiness_diagnostics_tests {
     fn readiness_preserves_short_circuit_order_and_public_refusals() {
         assert_eq!(
             classify_live_availability(
-                false,
+                Err(LiveUnavailable::Build),
                 || panic!("selection read"),
                 || panic!("metadata read")
             ),
             Err(LiveUnavailable::Build)
         );
         assert_eq!(
-            classify_live_availability(true, || false, || panic!("metadata read")),
+            classify_live_availability(
+                Err(LiveUnavailable::CueKeyRejected),
+                || panic!("selection read"),
+                || panic!("metadata read")
+            ),
+            Err(LiveUnavailable::CueKeyRejected)
+        );
+        assert_eq!(
+            classify_live_availability(Ok(()), || false, || panic!("metadata read")),
             Err(LiveUnavailable::Selection)
         );
         for (ready, expected) in [
@@ -2229,20 +2363,40 @@ mod live_readiness_diagnostics_tests {
                 Err(ReadinessFailure::TokenMetadata),
                 Err(LiveUnavailable::TokenMetadata),
             ),
+            (
+                Err(ReadinessFailure::NoKey),
+                Err(LiveUnavailable::Selection),
+            ),
+            (
+                Err(ReadinessFailure::KeyRejected),
+                Err(LiveUnavailable::KeyRejected),
+            ),
+            (
+                Err(ReadinessFailure::KeyUnreadable),
+                Err(LiveUnavailable::KeyUnreadable),
+            ),
             (Ok(()), Ok(())),
         ] {
             assert_eq!(
-                classify_live_availability(true, || true, || ready),
+                classify_live_availability(Ok(()), || true, || ready),
                 expected
             );
         }
         assert_eq!(
             LiveUnavailable::Build.message(),
-            "This build has no live transcription."
+            "Add your Anthropic API key in Settings to start a live session."
+        );
+        assert_eq!(
+            LiveUnavailable::CueKeyRejected.message(),
+            "Anthropic rejected your API key. Replace it in Settings to start a live session."
         );
         assert_eq!(
             LiveUnavailable::Selection.message(),
-            "Live transcription needs cloud transcription selected for this development launch."
+            "Add your Deepgram API key in Settings to start a live session."
+        );
+        assert_eq!(
+            LiveUnavailable::KeyRejected.message(),
+            "Deepgram rejected your API key. Replace it in Settings to start a live session."
         );
         assert_eq!(
             LiveUnavailable::Settings.message(),
