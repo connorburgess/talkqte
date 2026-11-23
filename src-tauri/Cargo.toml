@@ -47,6 +47,9 @@ ureq = { version = "3", default-features = false, features = ["rustls", "json"] 
 tungstenite = { version = "0.30", optional = true, default-features = false, features = ["handshake"] }
 rustls = { version = "0.23", optional = true, default-features = false, features = ["ring", "std", "tls12", "logging"] }
 webpki-roots = { version = "1", optional = true }
+# Wipes a provider key from memory once it has been used. Already in the
+# tree through rustls.
+zeroize = "1"
 # Randomness for the sign-in's PKCE verifier and state.
 getrandom = "0.3"
 # Opens the sign-in page in the person's default browser.
@@ -66,6 +69,9 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 # The CGRect the companion's single frame change passes to AppKit.
 objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std", "CFCGTypes"] }
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "AVCaptureDevice", "AVMediaFormat", "block2"] }
+# The person's own provider keys in the login Keychain (generic passwords
+# through Security.framework). The standard binding; no default features.
+security-framework = { version = "3", default-features = false }
 
 # Direct bindings for the isolated native ownership experiment.
 objc2-screen-capture-kit = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "SCStream", "SCError", "SCShareableContent", "block2", "dispatch2", "libc", "objc2-core-media", "objc2-core-graphics"] }

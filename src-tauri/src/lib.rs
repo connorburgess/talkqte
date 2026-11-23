@@ -69,6 +69,8 @@ mod native_source;
 pub mod notes_file;
 mod processing_commands;
 pub mod processing_reviews;
+mod provider_key_commands;
+pub mod provider_keys;
 #[cfg(any(
     test,
     all(
@@ -1555,6 +1557,10 @@ pub fn run() {
             export_preview,
             export_markdown,
             live_status,
+            provider_key_commands::provider_keys_status,
+            provider_key_commands::set_provider_key,
+            provider_key_commands::test_provider_key,
+            provider_key_commands::remove_provider_key,
             companion::companion_anchor,
             pick_context_file,
             read_context_file_path,
