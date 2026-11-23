@@ -40,7 +40,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function importTwo(page: Page, url: string) {
-  await page.goto(url);
+  await page.goto(`${url}${url.includes('?') ? '&' : '?'}keys=set`);
   await page.locator('.context-disclosure > summary').press('Enter');
   await page
     .getByRole('button', { name: 'Connect Granola', exact: true })

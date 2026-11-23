@@ -1,0 +1,345 @@
+/* First-run onboarding flow rendered inside the notebook canvas (Direction C).
+   Static step labels, uniform all-round borders on cards and dialogs, neutral
+   1px --line structural dividers only, zero transitions under reduced motion. */
+.onboarding-flow {
+  padding: var(--space-24) var(--space-32) var(--space-32);
+  max-width: 860px;
+  margin: 0 auto;
+  min-width: 0;
+}
+.ob-canvas {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ob-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+  flex-wrap: wrap;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.ob-step-indicator {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+}
+.ob-head-note {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ob-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ob-chip.is-set {
+  border-color: var(--accent-ink);
+  background: var(--cue-asked-surface);
+  color: var(--accent-ink);
+}
+.ob-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+  flex-wrap: wrap;
+}
+.ob-card-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ob-body {
+  padding: 20px 0 8px;
+  min-width: 0;
+}
+.ob-h2 {
+  display: inline-block;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+  color: var(--ink);
+  border-radius: var(--radius-control);
+}
+.ob-h2:focus {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+.ob-lead {
+  margin-top: var(--space-12);
+  max-width: 64ch;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.ob-lead strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.ob-cue-card {
+  margin-top: var(--space-16);
+  max-width: 540px;
+  padding: 18px 20px 16px;
+  background: var(--cue-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-question);
+  min-width: 0;
+}
+.ob-cue-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+  margin-bottom: var(--space-8);
+}
+.ob-cue-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+}
+.ob-cue-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--accent-ink);
+  flex-shrink: 0;
+}
+.ob-cue-x {
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+}
+.ob-cue-statement {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+.ob-cue-track {
+  margin: 12px 0 10px;
+  height: 3px;
+  border-radius: 1px;
+  background: var(--line);
+  overflow: hidden;
+}
+.ob-cue-fill {
+  display: block;
+  width: 62%;
+  height: 100%;
+  background: var(--cue-fill);
+}
+.ob-cue-source {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.ob-cue-source-label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ob-cue-source-quote {
+  margin-top: 3px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.ob-ways {
+  margin-top: var(--space-24);
+}
+.ob-ways-label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.ob-ways-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-12);
+  margin-top: var(--space-12);
+}
+.ob-way {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--band);
+  min-width: 0;
+}
+.ob-way.is-active {
+  border: 1.5px solid var(--accent-ink);
+  background: var(--cue-asked-surface);
+}
+.ob-way strong {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.ob-way.is-disabled strong {
+  color: var(--muted);
+}
+.ob-way p {
+  margin-top: var(--space-8);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.ob-perm-card {
+  margin-top: var(--space-12);
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--band);
+  min-width: 0;
+}
+.ob-perm-card h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.ob-perm-card p {
+  margin-top: var(--space-8);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--muted);
+  max-width: 64ch;
+}
+.ob-sequence-label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+}
+.ob-sequence-list {
+  margin: 10px 0 0 18px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+.ob-sequence-list li + li {
+  margin-top: var(--space-8);
+}
+.ob-foot {
+  margin-top: var(--space-24);
+  padding-top: var(--space-16);
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+  flex-wrap: wrap;
+}
+.ob-foot-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+.ob-foot-button {
+  min-height: 44px;
+}
+.ob-skip-dialog {
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-dialog);
+  width: min(460px, calc(100vw - 32px));
+  padding: var(--space-24);
+  box-shadow: var(--shadow-dock);
+}
+.ob-skip-dialog::backdrop {
+  background: var(--backdrop);
+}
+.ob-skip-dialog h3 {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ink);
+}
+.ob-skip-dialog p {
+  margin-top: var(--space-8);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.ob-skip-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+  margin-top: var(--space-16);
+}
+@media (max-width: 1200px) {
+  .onboarding-flow {
+    padding-inline: var(--space-24);
+  }
+}
+@media (max-width: 720px) {
+  .ob-ways-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 480px) {
+  .onboarding-flow {
+    padding: var(--space-16);
+  }
+  .ob-foot {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  .ob-foot-group {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  .ob-foot-button {
+    width: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-flow,
+  .onboarding-flow * {
+    transition: none;
+    animation: none;
+  }
+}

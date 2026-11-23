@@ -23,7 +23,9 @@ export async function standIn(page: Page, path = '/') {
       ),
     });
   });
-  await page.goto(path);
+  const target = new URL(path, 'http://stand-in.local');
+  if (!target.searchParams.has('keys')) target.searchParams.set('keys', 'set');
+  await page.goto(`${target.pathname}${target.search}${target.hash}`);
   await page.waitForFunction(() => !!window.liveTest);
 }
 

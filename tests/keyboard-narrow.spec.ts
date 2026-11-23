@@ -120,7 +120,7 @@ test('a live session starts and stops from the keyboard without losing focus at 
       ),
     });
   });
-  await page.goto('/?live');
+  await page.goto('/?live&keys=set');
   await page
     .getByRole('button', { name: 'Start live session', exact: true })
     .press('Enter');

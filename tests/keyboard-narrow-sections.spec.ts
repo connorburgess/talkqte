@@ -139,7 +139,7 @@ test('processing is reviewed, enabled, paused, resumed and disabled from the key
       ),
     });
   });
-  await page.goto('/?live&processor');
+  await page.goto('/?live&processor&keys=set');
   await page
     .getByRole('button', { name: 'Start live session', exact: true })
     .press('Enter');

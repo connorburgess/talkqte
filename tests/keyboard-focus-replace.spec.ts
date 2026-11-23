@@ -17,7 +17,7 @@ async function liveWithProcessor(page: Page) {
       ),
     });
   });
-  await page.goto('/?live&processor');
+  await page.goto('/?live&processor&keys=set');
   await page
     .getByRole('button', { name: 'Start live session', exact: true })
     .press('Enter');

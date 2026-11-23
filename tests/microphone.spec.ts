@@ -4,7 +4,7 @@ import type { MicrophoneSnapshot } from '../src/lib/microphone';
 async function nativePage(page: Page, query = '') {
   await page.clock.install();
   await page.route(
-    /\/\?(?:window=cue|delay-microphone|live|model).*|:\d+\/$/,
+    /\/\?(?:window=cue|delay-microphone|live|model|keys=).*|:\d+\/$/,
     async (route) => {
       if (route.request().resourceType() !== 'document')
         return route.continue();
@@ -18,7 +18,8 @@ async function nativePage(page: Page, query = '') {
       });
     },
   );
-  await page.goto(`/${query}`);
+  const sep = query ? '&' : '?';
+  await page.goto(`/${query}${sep}keys=set`);
 }
 async function signal(page: Page, state: Partial<MicrophoneSnapshot>) {
   await page.evaluate((value) => window.microphoneTest.send(value), state);
