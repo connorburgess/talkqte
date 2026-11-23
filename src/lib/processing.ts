@@ -49,6 +49,10 @@ export type ProcessingIssue =
   | 'callLimit'
   | 'labStopped'
   | 'labUnavailable'
+  | 'keyRejected'
+  | 'keyUnavailable'
+  | 'spendLimit'
+  | 'requestLimit'
   | 'worker'
   | null;
 export interface StopTarget {

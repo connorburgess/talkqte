@@ -376,6 +376,9 @@ pub enum Failure {
     /// The provider's reply reached its output limit before a decision. A
     /// recorded non-decision for the lab, like a refusal; never a cue.
     OutputLimit,
+    /// The session's estimated spend would pass its cap with the next
+    /// request, so nothing more is sent.
+    SpendLimit,
 }
 
 pub struct Cancellation {
@@ -385,11 +388,6 @@ pub struct Cancellation {
 }
 
 impl Cancellation {
-    #[cfg(any(test, feature = "lab-evaluator"))]
-    #[allow(
-        dead_code,
-        reason = "native facade activation and API usage vary by build/test configuration"
-    )]
     pub(crate) fn deadline(&self) -> Instant {
         self.deadline
     }
@@ -443,6 +441,12 @@ pub(crate) trait EvaluationLifecycle: Send + Sync {
     fn retire_scope(&self) {}
     fn terminal(&self) -> Option<Failure>;
     fn cancel(&self);
+    /// Whether Pause, Dismiss and other controls that cancel the request in
+    /// flight also end the run, as they do for the lab. The in-app
+    /// connection cancels only the request.
+    fn ends_run_on_control(&self) -> bool {
+        true
+    }
     fn settle(&self, request: &Request, verdict: Settlement) -> Result<(), Failure>;
 }
 
@@ -518,7 +522,8 @@ impl Worker {
                                 | Failure::Unreachable
                                 | Failure::InvalidDecision
                                 | Failure::Refused
-                                | Failure::OutputLimit => failure,
+                                | Failure::OutputLimit
+                                | Failure::SpendLimit => failure,
                                 _ => Failure::EvaluatorUnavailable,
                             })
                             .and_then(|text| {

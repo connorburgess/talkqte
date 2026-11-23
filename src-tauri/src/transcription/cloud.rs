@@ -689,6 +689,7 @@ fn source_for(
         (None, KeyState::Set) => Ok(Source::OwnKey),
         (None, KeyState::Rejected) => Err(ReadinessFailure::KeyRejected),
         (None, KeyState::NotSet) => Err(ReadinessFailure::NoKey),
+        (None, KeyState::Unreadable) => Err(ReadinessFailure::KeyUnreadable),
     }
 }
 
@@ -769,6 +770,8 @@ pub enum ReadinessFailure {
     NoKey,
     /// Deepgram refused the stored key, at a check or in a session.
     KeyRejected,
+    /// The Keychain could not be read.
+    KeyUnreadable,
 }
 
 /// The same metadata-only checks as `ready`, with their boundary retained.
@@ -849,6 +852,13 @@ pub fn review_sentence() -> Option<String> {
     review_sentence_for(&source().ok()?)
 }
 
+/// The review sentence with the person's own key, for checks of a whole
+/// review's text.
+#[cfg(test)]
+pub(crate) fn review_sentence_for_own_key() -> String {
+    review_sentence_for(&Source::OwnKey).expect("always worded")
+}
+
 fn review_sentence_for(source: &Source) -> Option<String> {
     const SENT: &str = "Audio: this approval also sends the live audio of the session's capture source (the microphone, or the selected application) to Deepgram (US, model Nova-3) for transcription";
     const TERMS: &str = "Each request asks Deepgram to opt out of its Model Improvement Program; what Deepgram keeps is set by its terms (https://deepgram.com/terms). Audio captured before this approval is never sent.";
@@ -860,7 +870,7 @@ fn review_sentence_for(source: &Source) -> Option<String> {
             settings.minute_cap
         ),
         Source::OwnKey => format!(
-            "{SENT}, with your own Deepgram API key: Deepgram bills your account for each minute of audio. {TERMS} At most {OWN_KEY_MINUTE_CAP} minutes of audio for this session. {END}"
+            "{SENT}, with your own Deepgram API key: Deepgram bills your account for each minute of audio. {TERMS} At most {OWN_KEY_MINUTE_CAP} minutes of audio for this session. Pausing cues does not stop the audio; turning processing off or Stop does. {END}"
         ),
     })
 }
@@ -1513,7 +1523,12 @@ mod tests {
         };
         // The lab's selection is used, even with a key stored, and an invalid
         // one is refused rather than falling back to the key.
-        for key in [KeyState::NotSet, KeyState::Set, KeyState::Rejected] {
+        for key in [
+            KeyState::NotSet,
+            KeyState::Set,
+            KeyState::Rejected,
+            KeyState::Unreadable,
+        ] {
             assert_eq!(
                 source_for(Some(Ok(dev.clone())), key),
                 Ok(Source::Dev(dev.clone()))
@@ -1531,6 +1546,10 @@ mod tests {
         assert_eq!(
             source_for(None, KeyState::Rejected),
             Err(ReadinessFailure::KeyRejected)
+        );
+        assert_eq!(
+            source_for(None, KeyState::Unreadable),
+            Err(ReadinessFailure::KeyUnreadable)
         );
         // The test build has no development selection and no stored key.
         assert!(!dev_selected());
@@ -1563,6 +1582,7 @@ mod tests {
             "https://deepgram.com/terms",
             "Audio captured before this approval is never sent",
             "At most 120 minutes of audio for this session",
+            "Pausing cues does not stop the audio",
             "nothing falls back to another service",
         ] {
             assert!(own.contains(part), "missing: {part}");

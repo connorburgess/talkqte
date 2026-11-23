@@ -8,7 +8,7 @@ The current public objective is to explain the idea with a clearly labeled ficti
 
 ## Current provider checkpoint — 20 November 2026
 
-Deepgram streaming and the Anthropic API are the selected development direction. The cloud implementation is merged; optional development features and session review still gate processing. Ordinary and release builds have no live transcription. Earlier dated checkpoints below describe the source and observations at their recorded dates, including the former local Whisper path; they are not current setup instructions. See [cloud transcription](cloud-transcription.md) and the [current provider release blocker](#cloud-providers-for-a-shipped-product).
+Deepgram streaming and the Anthropic API are the selected development direction. The cloud implementation is merged. With the person's own keys an ordinary build runs both providers after the session review is approved; without them it has no live transcription. Earlier dated checkpoints below describe the source and observations at their recorded dates, including the former local Whisper path; they are not current setup instructions. See [cloud transcription](cloud-transcription.md) and the [current provider release blocker](#cloud-providers-for-a-shipped-product).
 
 No roadmap item is completed by this reconciliation. The next technical blocker is a separately authorized synthetic call proving both sides, cloud latency and native Stop/recovery (**T2**, **T5**). A fictional showcase or lab response is not a production release or evidence of participation benefit; the human comparison (**V5**–**V7**) and shipped operating model remain separate gates.
 
@@ -205,7 +205,7 @@ Release blocker, recorded 14 November 2026 and updated 16 November 2026. At the 
 
 Both send meeting audio or text off the device only after the person turns them on for that session. Without that consent a session has no transcription and no cues; there is no on-device mode.
 
-**Open: the operating model for a shipped product.** The owner named two candidates on 16 November 2026 and has not chosen between them; neither is committed. Development and lab builds use the owner's keys. A release build has transcription unavailable, and so shows no cues, until one model is built. Provider costs are a core operating cost under either model.
+**The operating model.** The owner named two candidates on 16 November 2026 and chose bring-your-own-keys for the alpha. It is built: [key storage](provider-keys.md), Deepgram with the person's key ([cloud transcription](cloud-transcription.md)) and [in-app cue decisions](own-key-cues.md), checked only offline. A TalkQTE-run paid service remains a later candidate. Development and lab builds can still use the owner's keys. Provider costs are a core operating cost under either model.
 
 | Candidate operating model | What it needs before it could ship |
 | --- | --- |

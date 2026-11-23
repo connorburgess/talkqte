@@ -8,9 +8,10 @@ development `cloud-transcription` feature (which `lab-evaluator` switches on)
 can instead point a launch at a short-lived token file, as the lab does.
 
 Transcription starts only when the session's cue processing review is
-approved, so a build also needs a cue connection (today `claude-cli` or the
-lab evaluator). An ordinary or release build has none yet, so it still has no
-live transcription and says "This build has no live transcription."
+approved, so a build also needs a cue connection: the person's own Anthropic
+key ([cue decisions](own-key-cues.md)), or in development `claude-cli` or the
+lab evaluator. Without one a start is refused with "Add your Anthropic API
+key in Settings to start a live session."
 Deepgram is the only provider implemented; the `StreamingTranscriber`
 boundary in `src-tauri/src/transcription/cloud.rs` leaves room for others.
 
@@ -124,6 +125,7 @@ model, and only the timing log records it.
 | **Stop live session**, application-audio session | The stream is closed at once. Queued audio is discarded. |
 | End, quit, or a source that is not attached | The stream is closed at once. Queued audio is discarded. |
 | The review is turned off (**Disable processing**, **Off**, or anything else that withdraws it) | Sending stops at once, including audio already queued for the socket, and the stream is closed. The session ends with "cue processing was turned off, so audio stopped being sent". Approving again does not reopen the stream for that session. |
+| Pause cues, with your own Anthropic key | Cue requests stop and the review still holds, so audio is still sent to Deepgram and billed to your account, and the transcript continues (a kept meeting stays complete). The review, the Pause help in the notebook and the companion ("Mic still on · audio to Deepgram") say so. Turning processing off or Stop ends the audio. |
 | Pause cues, with the `claude-cli` backend | Cues stop, the review still holds, and audio is still transcribed. The companion says "Mic still on · audio to Deepgram". |
 | Pause cues, or any end of the run, with the lab evaluator | The lab's cue run ends, which ends its approval, so sending stops and the session ends with "the lab run ended, so audio stopped being sent". With the lab evaluator, turning the review off also ends the lab's cue run, so the code there is `lab_ended`, not `withdrawn` (`invalidate_evaluation` in `engine/evaluation.rs`). |
 | The minute cap is reached | The stream is closed and the session ends ("the transcription minute limit was reached"). With the person's key the cap is the session's 120 minutes; with a development token file it counts all sessions and both sources of the launch. |

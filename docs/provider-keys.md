@@ -2,8 +2,10 @@
 
 TalkQTE runs on the person's own provider accounts: one Deepgram API key for
 transcription and one Anthropic API key for cue decisions. This page describes
-how the keys are stored and the commands the notebook uses. In this version
-the keys are stored and can be checked, but no session uses them yet.
+how the keys are stored and the commands the notebook uses. Live sessions use
+the Deepgram key for [transcription](cloud-transcription.md) and the
+Anthropic key for [cue decisions](own-key-cues.md); there is no Settings
+control yet.
 
 ## Storage
 
@@ -48,7 +50,10 @@ first-run screen reads `provider_keys_status` at launch.
 }
 ```
 
-`state` is `notSet`, `set` or `rejected`. `verified` is true only after a
+`state` is `notSet`, `set`, `rejected` or `unreadable` (the Keychain could
+not be read, so whether a key is stored is unknown; nothing is attempted with
+it, and it does not count as missing). Each status call reads the Keychain
+again, so a key deleted or added outside TalkQTE is seen. `verified` is true only after a
 passing check in this app run, and is cleared when the key is replaced or
 rejected. `anyMissing` is true while either key is not set: the "no keys set"
 state a first-run screen asks for. A failed command returns one fixed message,
@@ -56,6 +61,10 @@ for example "That does not look like an Anthropic API key. It starts with
 sk-ant-api." or "Deepgram could not be reached to check the key. Nothing was
 changed." After every change the main window also receives
 `provider-keys:changed` with the same payload.
+
+`cue_usage` (no arguments) returns the current session's
+`{ model, requests, requestCap, spentMicroUsd, spendCapMicroUsd }` for the
+Anthropic connection, or `null` before a session has used it.
 
 ## Evidence
 

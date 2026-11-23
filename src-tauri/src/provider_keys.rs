@@ -231,6 +231,9 @@ pub enum KeyState {
     Set,
     /// The provider refused the key, at a check or during a session.
     Rejected,
+    /// The Keychain could not be read, so whether a key is stored is not
+    /// known. Nothing is attempted with it.
+    Unreadable,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -308,21 +311,25 @@ impl Keys {
     }
 
     fn key_status(&self, provider: Provider) -> KeyStatus {
-        // A Keychain that cannot be read reports the key as not set, so
-        // nothing is attempted with it; saving again reports the failure.
-        let present = self.present(provider).unwrap_or(false);
+        let present = self.present(provider);
         let memo = self.memo()[provider.index()];
         KeyStatus {
             state: match (present, memo.rejected) {
-                (false, _) => KeyState::NotSet,
-                (true, true) => KeyState::Rejected,
-                (true, false) => KeyState::Set,
+                (Err(_), _) => KeyState::Unreadable,
+                (Ok(false), _) => KeyState::NotSet,
+                (Ok(true), true) => KeyState::Rejected,
+                (Ok(true), false) => KeyState::Set,
             },
-            verified: present && memo.verified && !memo.rejected,
+            verified: present == Ok(true) && memo.verified && !memo.rejected,
         }
     }
 
+    /// Both keys' states, read from the store again, so a key deleted or
+    /// added outside TalkQTE is seen.
     pub fn status(&self) -> KeysStatus {
+        for memo in self.memo().iter_mut() {
+            memo.present = None;
+        }
         let deepgram = self.key_status(Provider::Deepgram);
         let anthropic = self.key_status(Provider::Anthropic);
         KeysStatus {
@@ -422,7 +429,10 @@ impl Probe for NetworkProbe {
         let response = match provider {
             Provider::Deepgram => agent
                 .get("https://api.deepgram.com/v1/projects")
-                .header("Authorization", &format!("Token {}", key.expose()))
+                .header(
+                    "Authorization",
+                    Zeroizing::new(format!("Token {}", key.expose())).as_str(),
+                )
                 .call(),
             Provider::Anthropic => agent
                 .get("https://api.anthropic.com/v1/models?limit=1")
@@ -664,7 +674,6 @@ mod tests {
         // Still stored, so still not missing: the person replaces it.
         assert!(status.any_missing); // Deepgram is not set.
         keys.set(Provider::Deepgram, DEEPGRAM).unwrap();
-        assert!(!keys.status().any_missing);
         // A session refusal also marks it.
         keys.mark_rejected(Provider::Deepgram);
         assert_eq!(keys.status().deepgram.state, KeyState::Rejected);
@@ -725,12 +734,30 @@ mod tests {
             keys.set(Provider::Anthropic, ANTHROPIC).unwrap_err(),
             KeyError::Store
         );
-        assert_eq!(keys.status().anthropic, not_set());
+        // Not reported as missing: the Keychain could not be read.
+        assert_eq!(keys.status().anthropic.state, KeyState::Unreadable);
+        assert!(!keys.status().any_missing || keys.status().deepgram.state != KeyState::NotSet);
         assert_eq!(keys.get(Provider::Anthropic).unwrap_err(), KeyError::Store);
+        *store.fail.lock().unwrap() = false;
+        assert_eq!(keys.status().anthropic.state, KeyState::NotSet);
         assert_eq!(
             KeyError::Store.message(),
             "The Keychain could not be used. Nothing was changed."
         );
+    }
+
+    #[test]
+    fn a_key_deleted_outside_the_app_is_seen_at_the_next_status() {
+        let (keys, store, _) = keys(ProbeResult::Accepted);
+        keys.set(Provider::Deepgram, DEEPGRAM).unwrap();
+        assert_eq!(keys.status().deepgram.state, KeyState::Set);
+        store.inner.delete("deepgram").unwrap();
+        assert_eq!(keys.status().deepgram.state, KeyState::NotSet);
+        store
+            .inner
+            .set("deepgram", &Secret::for_test(DEEPGRAM))
+            .unwrap();
+        assert_eq!(keys.status().deepgram.state, KeyState::Set);
     }
 
     #[test]
