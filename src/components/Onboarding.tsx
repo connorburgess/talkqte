@@ -170,8 +170,9 @@ export function Onboarding({
                       <span className="ob-chip">Planned</span>
                     </div>
                     <p>
-                      A paid TalkQTE service: no keys needed, usage included.
-                      Not available yet.
+                      Pay as you go: top up credit and pay per meeting hour. No
+                      keys, no subscription. Not available yet; pricing to be
+                      announced.
                     </p>
                   </div>
                 </div>

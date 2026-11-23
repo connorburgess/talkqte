@@ -101,6 +101,12 @@ test('onboarding auto-opens when both keys are notSet, moves focus to each step 
   );
   await expect(ways.locator('.ob-way.is-disabled')).toContainText('Pro');
   await expect(ways.locator('.ob-way.is-disabled')).toContainText('Planned');
+  await expect(ways.locator('.ob-way.is-disabled')).toContainText(
+    'Pay as you go',
+  );
+  await expect(ways.locator('.ob-way.is-disabled')).not.toContainText(
+    /[$€£]|\d\s*(?:hours?|hrs?)|per month/i,
+  );
   await expect(ways).not.toContainText(/Hosted|BYOK/);
   await expect(page.locator('.ob-way.is-disabled')).toHaveAttribute(
     'aria-disabled',
