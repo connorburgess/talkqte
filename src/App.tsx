@@ -36,6 +36,7 @@ import {
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { ContextNotes } from './components/ContextNotes';
 import { SetupCard, type SetupTarget } from './components/SetupCard';
+import { ProviderKeys } from './components/ProviderKeys';
 import {
   PanelDivider,
   boundWidth,
@@ -1735,6 +1736,7 @@ function Notebook() {
             <p className="page-description">
               A few controls to keep questions on your terms.
             </p>
+            <ProviderKeys />
             <section className="setting">
               <div>
                 <h2>Your name</h2>

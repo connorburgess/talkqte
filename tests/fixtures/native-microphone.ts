@@ -3,6 +3,7 @@
 import { fictionalPermissions } from './processing-permissions';
 import * as granolaFixture from './native-granola';
 import * as contextFixture from './native-context';
+import * as providerKeysFixture from './native-provider-keys';
 import { mockIPC } from '@tauri-apps/api/mocks';
 import { emit } from '@tauri-apps/api/event';
 import * as preview from '../../src/lib/preview';
@@ -269,6 +270,8 @@ mockIPC(
     }
     if (permissionFixture.commands.includes(command))
       return permissionFixture.command(command, args);
+    if (providerKeysFixture.commands.includes(command))
+      return providerKeysFixture.command(command, args);
     switch (command) {
       case 'application_audio':
         // Development builds only: record what the notebook asked for.
@@ -504,6 +507,7 @@ preview.connect((value) => {
 
 declare global {
   interface Window {
+    providerKeysTest: typeof providerKeysFixture.providerKeysTest;
     focusTest: {
       submissions: string[][];
       current: () => string[];
@@ -573,6 +577,7 @@ declare global {
   }
 }
 window.permissionTest = permissionFixture;
+window.providerKeysTest = providerKeysFixture.providerKeysTest;
 window.captureTest = {
   send: sendProcessing,
   state: () => structuredClone(processing),

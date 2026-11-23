@@ -133,6 +133,7 @@ These defaults are an owner decision that is still open:
 - **Display**: the `cue_usage` main-window command returns the current
   session's `{ model, requests, requestCap, spentMicroUsd, spendCapMicroUsd }`.
   It is an estimate from the person's side, not Anthropic's bill.
+  **Settings → Your API keys** shows it.
 
 ## Evidence
 

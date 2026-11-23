@@ -4,8 +4,22 @@ TalkQTE runs on the person's own provider accounts: one Deepgram API key for
 transcription and one Anthropic API key for cue decisions. This page describes
 how the keys are stored and the commands the notebook uses. Live sessions use
 the Deepgram key for [transcription](cloud-transcription.md) and the
-Anthropic key for [cue decisions](own-key-cues.md); there is no Settings
-control yet.
+Anthropic key for [cue decisions](own-key-cues.md).
+
+## In Settings
+
+**Settings → Your API keys** (`src/components/ProviderKeys.tsx`) has one form
+per provider: what the key is for and how it is billed, its state (**Not
+set**, **Set, not checked yet**, **Set and checked**, **Rejected by …
+Replace it with a new key.**, or **Could not be read from the Keychain**), a password field that is cleared after
+saving or after a refused save, and **Save key**, **Test key** and **Remove key**. Errors are the
+fixed messages below, announced as alerts. Below the forms, the current
+session's cue requests and estimated spend are shown as "This session: 12 of
+400 cue requests, about $0.03 of $0.50 (an estimate, not your bill), model
+claude-haiku-5-5.", read when Settings opens. The browser preview keeps
+fictional keys in memory and cannot check one.
+
+![Settings with both keys not set, in the browser preview](assets/provider-keys-settings.png)
 
 ## Storage
 
