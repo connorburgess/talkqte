@@ -72,8 +72,8 @@
   }
 }
 /* A cue's words are there from the first frame and darken one by one. They
-   start no lighter than text may be: 55% strength is 3.2:1 against the card,
-   enough for the large bold cue, and 68% is 4.6:1, for anything smaller. */
+   start no lighter than text may be: 55% strength is 4.0:1 against the card,
+   enough for the large bold cue, and 68% is 6.2:1, for anything smaller. */
 @keyframes cue-word {
   from {
     opacity: var(--cue-wait);
@@ -158,15 +158,15 @@
   color: var(--cue-accent);
 }
 /* Someone asked you by name: the one cue that expects you to answer. It is
-   told apart before any reading by three things that do not rely on colour:
-   an edge down the card's left side, the @ before its label and the label
-   itself. Every other kind shares the calm default, so this one stays
-   meaningful. The edge draws down once as the card arrives, then rests. */
-/* A faint warm tint as well, which says it again where colour is seen.
-   Every text colour keeps at least 4.5:1 on it. Forced colours replace it
-   with the system's own background, and the edge stays. */
+   told apart before any reading without a one-sided bar and without relying
+   on colour alone: a full 1.5px border all round in amber ink, the @ before
+   its amber-ink label, the label itself, and a quiet warm tint of the whole
+   card. Every other kind shares the calm default, so this one stays
+   meaningful. Forced colours replace the tint with the system background
+   while keeping the full 1.5px border in a system colour. */
 .question.cue-card.cue-asked {
   --cue-bg: var(--cue-asked-surface);
+  border: 1.5px solid var(--accent-ink);
 }
 .cue-card .cue-asked-mark {
   display: inline-block;
@@ -176,31 +176,9 @@
   vertical-align: -0.06em;
   stroke-width: 2.6;
 }
-.cue-card .cue-edge {
-  position: absolute;
-  z-index: 2;
-  inset: 0 auto 0 0;
-  width: 6px;
-  background: var(--cue-accent);
-  transform-origin: center top;
-  animation: cue-edge-draw 320ms 40ms var(--cue-ease) both;
-  pointer-events: none;
-}
-@keyframes cue-edge-draw {
-  from {
-    transform: scaleY(0);
-  }
-  to {
-    transform: none;
-  }
-}
-.cue-card.is-settled .cue-edge {
-  animation: none;
-}
 @media (forced-colors: active) {
-  .cue-card .cue-edge {
-    forced-color-adjust: none;
-    background: CanvasText;
+  .question.cue-card.cue-asked {
+    border-color: CanvasText;
   }
 }
 .question.cue-card .cue-line h2 {

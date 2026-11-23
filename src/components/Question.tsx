@@ -53,14 +53,25 @@ function useEdgeFades(card: RefObject<HTMLElement | null>) {
   useEffect(() => {
     const element = card.current;
     if (!element) return;
+    let active = true;
     element.addEventListener('scroll', measure, { passive: true });
     // An answer opening in place changes what fits once it has opened.
     element.addEventListener('animationend', measure);
     const resized = new ResizeObserver(measure);
     resized.observe(element);
+    // Self-hosted fonts swap in after first paint, changing scrollHeight
+    // without changing the fixed clientHeight that ResizeObserver watches.
+    const fonts = document.fonts;
+    const onFonts = () => {
+      if (active) measure();
+    };
+    fonts?.addEventListener?.('loadingdone', onFonts);
+    void fonts?.ready.then(onFonts);
     return () => {
+      active = false;
       element.removeEventListener('scroll', measure);
       element.removeEventListener('animationend', measure);
+      fonts?.removeEventListener?.('loadingdone', onFonts);
       resized.disconnect();
     };
   }, []);
@@ -426,7 +437,6 @@ export function Question({
           )}
         </div>
       </div>
-      {asked && <span className="cue-edge" aria-hidden="true" />}
       {/* Last in reading order; drawn in the corner. */}
       <button
         className="dismiss-question"
