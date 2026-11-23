@@ -29,7 +29,7 @@ On desktop, onboarding opens automatically inside the notebook window (in place 
 
 The four steps:
 
-1. **Step 1 of 4 — What TalkQTE does:** Explains one quiet source-backed cue beside a live call, states that TalkQTE is in alpha, shows a non-interactive **Fictional example** cue, and presents **Two ways to use TalkQTE** (**Use your own keys** active; **TalkQTE Hosted** shown as coming later and not selectable).
+1. **Step 1 of 4 — What TalkQTE does:** Explains one quiet source-backed cue beside a live call, states that TalkQTE is in alpha, shows a non-interactive **Fictional example** cue, and presents **Two ways to use TalkQTE** (**Free**, with your own keys, active; **Pro** shown as Planned and not selectable).
 2. **Step 2 of 4 — Your keys:** Reuses `ProviderKeysRows` from `src/components/ProviderKeys.tsx` (Deepgram for transcription and Anthropic for cue decisions), adding plain text naming each provider's dashboard (zero external fetches from the app). Behaviour, accessible names, validation, password clearing, non-echoing, `Save key`, `Test key`, `Remove key`, and `provider-keys:changed` updates are identical to **Settings → Your API keys**.
 3. **Step 3 of 4 — macOS permissions:** Informational only. Explains **Microphone** and **Screen & System Audio Recording** and states that macOS asks only when you start a source. Nothing is requested or captured on this screen.
 4. **Step 4 of 4 — Start a first session:** Explains the per-session approval sequence (`Start live session` → `Review processing` → `Review selected sources` → `Enable for this session`, naming Deepgram and Anthropic accurately, and `Stop`), with **Go to the notebook** and **Start live session**.

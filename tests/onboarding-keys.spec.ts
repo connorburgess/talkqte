@@ -85,7 +85,7 @@ test('onboarding auto-opens when both keys are notSet, moves focus to each step 
 }) => {
   await openDesktop(page);
 
-  // Step 1: focus lands on step heading; Two ways shows own keys active and Hosted disabled.
+  // Step 1: focus lands on step heading; Two ways shows Free active and Pro planned and disabled.
   const step1 = page.getByRole('heading', {
     name: 'One quiet cue beside your live call',
     level: 2,
@@ -94,7 +94,14 @@ test('onboarding auto-opens when both keys are notSet, moves focus to each step 
   await expect(step1).toBeFocused();
   await expect(page.getByText('Step 1 of 4')).toBeVisible();
   await expect(page.getByText('Context · Fictional example')).toBeVisible();
-  await expect(page.getByText('Use your own keys')).toBeVisible();
+  const ways = page.locator('.ob-ways');
+  await expect(ways.locator('.ob-way.is-active')).toContainText('Free');
+  await expect(ways.locator('.ob-way.is-active')).toContainText(
+    'With your own keys',
+  );
+  await expect(ways.locator('.ob-way.is-disabled')).toContainText('Pro');
+  await expect(ways.locator('.ob-way.is-disabled')).toContainText('Planned');
+  await expect(ways).not.toContainText(/Hosted|BYOK/);
   await expect(page.locator('.ob-way.is-disabled')).toHaveAttribute(
     'aria-disabled',
     'true',

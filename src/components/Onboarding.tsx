@@ -155,23 +155,23 @@ export function Onboarding({
                 <div className="ob-ways-grid">
                   <div className="ob-way is-active">
                     <div className="ob-card-head">
-                      <strong>Use your own keys</strong>
-                      <span className="ob-chip is-set">Active · BYOK</span>
+                      <strong>Free</strong>
+                      <span className="ob-chip is-set">Alpha</span>
                     </div>
                     <p>
-                      Add your own Deepgram and Anthropic keys in the next step.
-                      Audio and approved text go directly from your Mac to those
-                      providers.
+                      With your own keys. Add your Deepgram and Anthropic keys
+                      in the next step; you pay them directly for what you use,
+                      and audio and text go from your Mac to those providers.
                     </p>
                   </div>
                   <div className="ob-way is-disabled" aria-disabled="true">
                     <div className="ob-card-head">
-                      <strong>TalkQTE Hosted</strong>
-                      <span className="ob-chip">Coming later</span>
+                      <strong>Pro</strong>
+                      <span className="ob-chip">Planned</span>
                     </div>
                     <p>
-                      Paid service with no keys to manage. Not available yet;
-                      not selectable in alpha.
+                      A paid TalkQTE service: no keys needed, usage included.
+                      Not available yet.
                     </p>
                   </div>
                 </div>
