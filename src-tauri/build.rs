@@ -33,6 +33,7 @@ fn main() {
             "set_overlay",
             "export_markdown",
             "export_preview",
+            "set_keep_meeting",
             "microphone_snapshot",
             "start_microphone",
             "stop_microphone",

@@ -172,9 +172,10 @@ impl Runtime {
     }
 
     /// The Markdown a person reviews before saving, kept so the save dialog
-    /// writes exactly that text. It is the notes only. A running live session
-    /// is refused, and refusing it drops any earlier preview; once the
-    /// session has ended the notes can be exported, never its transcript.
+    /// writes exactly that text. It is the notes, plus the session's
+    /// transcript and cues only when the person chose to keep the meeting. A
+    /// running live session is refused, and refusing it drops any earlier
+    /// preview.
     fn prepare_export(&mut self) -> Result<String, String> {
         // Live transcripts stay in memory only; this version never saves them.
         if self.engine.state.live
@@ -549,6 +550,22 @@ fn export_preview(state: tauri::State<AppState>) -> Result<String, String> {
         .lock()
         .map_err(|_| "Could not prepare the export.")?
         .prepare_export()
+}
+
+/// The person's choice, for this session only, to include its transcript
+/// and the cues shown in the export. Changing it drops any earlier preview,
+/// so only a preview of the new content can be saved.
+#[tauri::command]
+fn set_keep_meeting(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    keep: bool,
+) -> Result<(), String> {
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    runtime.engine.set_keep_meeting(keep);
+    runtime.export = None;
+    publish(&app, &mut runtime);
+    Ok(())
 }
 
 #[tauri::command]
@@ -1594,6 +1611,7 @@ pub fn run() {
             set_overlay,
             export_preview,
             export_markdown,
+            set_keep_meeting,
             live_status,
             provider_key_commands::provider_keys_status,
             provider_key_commands::set_provider_key,
@@ -2115,6 +2133,69 @@ mod export_tests {
         assert_eq!(after, "# TalkQTE notes\n\nA fictional notebook line.\n");
         assert!(!after.contains("blue tin"));
         assert_eq!(runtime.export.as_deref(), Some(after.as_str()));
+    }
+
+    #[test]
+    fn keeping_the_meeting_is_chosen_per_session_and_only_reviewed_text_is_saved() {
+        // A plain live engine: phrase rules raise the cue in every build.
+        let mut runtime = Runtime {
+            engine: Engine::live(),
+            ..Runtime::default()
+        };
+        runtime
+            .engine
+            .update_notes("Fictional notes beside the call.".into())
+            .unwrap();
+        runtime.engine.set_user_name(Some("Jordan".into())).unwrap();
+        runtime.engine.start().unwrap();
+        let session = runtime.engine.session();
+        assert!(!runtime.engine.state.keep_meeting);
+        runtime.engine.advance(65_000);
+        runtime
+            .engine
+            .ingest(
+                session,
+                engine::Segment {
+                    id: "l1".into(),
+                    at_ms: 65_000,
+                    speaker: "Speaker".into(),
+                    text: "Can someone take the fictional\ndraft soon?".into(),
+                },
+            )
+            .unwrap();
+        // The phrase rules raise a cue from that line.
+        let cue = runtime.engine.state.cue.clone().expect("a cue is shown");
+        // Choosing during the session still saves nothing while it runs.
+        runtime.engine.set_keep_meeting(true);
+        assert!(runtime.prepare_export().is_err());
+        runtime.engine.end();
+        let kept = runtime.prepare_export().unwrap();
+        assert!(kept.starts_with("# TalkQTE notes\n\nFictional notes beside the call.\n"));
+        assert!(kept.contains(&format!(
+            "## Cues shown\n\n- 01:05 · {}: {}",
+            cue.kind, cue.question
+        )));
+        assert!(kept.contains("## Transcript\n\n"));
+        assert!(kept.contains("- 01:05 Can someone take the fictional draft soon?\n"));
+        // Never the name, speaker labels or anything else.
+        assert!(!kept.contains("Jordan") && !kept.contains("Speaker"));
+        assert_eq!(runtime.export.as_deref(), Some(kept.as_str()));
+        // Turning it off again leaves the notes only.
+        runtime.engine.set_keep_meeting(false);
+        assert_eq!(
+            runtime.prepare_export().unwrap(),
+            "# TalkQTE notes\n\nFictional notes beside the call.\n"
+        );
+        // The next session starts with the choice off and an empty record.
+        runtime.engine.set_keep_meeting(true);
+        runtime.engine.start().unwrap();
+        assert!(!runtime.engine.state.keep_meeting);
+        runtime.engine.set_keep_meeting(true);
+        runtime.engine.end();
+        let next = runtime.prepare_export().unwrap();
+        assert!(next.contains("## Cues shown\n\nNone.\n"));
+        assert!(next.contains("## Transcript\n\n"));
+        assert!(!next.contains("draft soon"));
     }
 }
 

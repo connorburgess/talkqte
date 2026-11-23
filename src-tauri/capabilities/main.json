@@ -26,6 +26,7 @@
     "allow-set-overlay",
     "allow-export-markdown",
     "allow-export-preview",
+    "allow-set-keep-meeting",
     "allow-microphone-snapshot",
     "allow-start-microphone",
     "allow-stop-microphone",

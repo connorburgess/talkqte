@@ -451,10 +451,22 @@ mockIPC(
           cue: null,
         });
         return;
-      case 'export_preview':
+      case 'export_preview': {
         if (session.live && session.status === 'running')
           throw new Error('Live sessions are not saved or exported.');
-        return preview.exportPreview();
+        const notes = preview.exportPreview();
+        // Stands in for the engine's kept-meeting export.
+        return session.keepMeeting
+          ? `${notes}\n## Transcript\n\n${session.transcript
+              .map((line) => `- ${line.text}`)
+              .join('\n')}\n`
+          : notes;
+      }
+      case 'set_keep_meeting':
+        await publish({
+          keepMeeting: (args as Commands['set_keep_meeting']).keep,
+        });
+        return;
       case 'export_markdown':
         return true;
       case 'inspect_cue': {

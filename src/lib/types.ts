@@ -87,6 +87,8 @@ export interface Snapshot extends CueSnapshot {
   userName: string | null;
   /** Session-only: what matters in this meeting, one short line each. */
   focus: string[];
+  /** Session-only: include the transcript and cues shown in the export. */
+  keepMeeting?: boolean;
 }
 export type Commands = {
   set_live_cues_paused: { paused: boolean };
@@ -100,6 +102,8 @@ export type Commands = {
   set_user_name: { name: string | null };
   set_focus: { lines: string[] };
   set_overlay: { enabled: boolean };
+  /** Include this session's transcript and cues shown in the export. */
+  set_keep_meeting: { keep: boolean };
   start_live_session: undefined;
   stop_live_session: undefined;
   cancel_context_import: undefined;

@@ -64,6 +64,9 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
     case 'inspect_cue':
       // The browser preview never has a cue.
       throw new Error('That question has already passed.');
+    case 'set_keep_meeting':
+      // The browser preview never has a transcript to keep.
+      throw new Error('Live sessions are available in the desktop app.');
     case 'set_companion_position':
       state.companionPosition = (
         args as Commands['set_companion_position']
