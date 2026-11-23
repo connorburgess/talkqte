@@ -91,6 +91,13 @@ export const ALLOWED_ONE_SIDED_BORDERS = [
     reason: 'Full-width 1px neutral section divider below Cue processing.',
   },
   {
+    file: 'src/components/service-keys.css',
+    selector: '.sk-row',
+    property: 'border-top',
+    kind: 'hairline',
+    reason: 'Full-width 1px neutral row divider between service key providers.',
+  },
+  {
     file: 'src/styles.css',
     selector: '.version',
     property: 'border-top',
