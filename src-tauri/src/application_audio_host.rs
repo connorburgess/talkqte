@@ -1130,7 +1130,11 @@ pub(crate) mod app {
                 Err(crate::LiveUnavailable::Selection) => Reason::CloudNotSelected,
                 Err(crate::LiveUnavailable::Settings) => Reason::CloudSettingsInvalid,
                 Err(crate::LiveUnavailable::TokenMetadata) => Reason::TokenMetadataRejected,
-                Err(crate::LiveUnavailable::KeyRejected) => Reason::CloudSettingsInvalid,
+                Err(
+                    crate::LiveUnavailable::KeyRejected
+                    | crate::LiveUnavailable::KeyUnreadable
+                    | crate::LiveUnavailable::CueKeyUnreadable,
+                ) => Reason::CloudSettingsInvalid,
             },
         );
         let result = access.with(|runtime| {

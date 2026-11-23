@@ -93,7 +93,9 @@ The lab adapter's and broker's rules, without a broker:
   reply to a transcript that has only grown since is still applied, as in the
   lab.
 - **Cues stop for the session**, with a fixed reason:
-  - a refused or missing key (401 or 403)
+  - a refused key (401 or 403; issue `keyRejected`)
+  - a key removed from the Keychain mid-session, or a Keychain that cannot be
+    read (issue `keyUnavailable`, nothing sent)
   - a rate limit (429)
   - any other HTTP status or a failed connection
   - a malformed stream or a reply from another model
@@ -102,7 +104,10 @@ The lab adapter's and broker's rules, without a broker:
   
   There is no retry. Turning cues on again needs a new review.
 - **Pause and Dismiss** cancel the request in flight but, unlike a lab run, do
-  not end cues for the session; Resume continues with new speech.
+  not end cues for the session; Resume continues with new speech. Pause does
+  not end the approval, so the session's audio is still sent to Deepgram and
+  billed while cues are paused; the review and the Pause help say so. Turning
+  processing off, or Stop, ends both.
 
 No provider text reaches a log, an error or the notebook.
 
@@ -110,6 +115,8 @@ No provider text reaches a log, an error or the notebook.
 
 These defaults are an owner decision that is still open:
 
+- **Per session only**: there is no per-launch or per-day cap; each new
+  session starts again from zero.
 - **Requests**: at most 400 per session, at least two seconds apart, one at a
   time.
 - **Spend**: at most an estimated $0.50 per session. Before each request, the

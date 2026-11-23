@@ -611,6 +611,10 @@ pub(crate) enum LiveUnavailable {
     TokenMetadata,
     /// Deepgram refused the stored key.
     KeyRejected,
+    /// The Keychain could not be read for the Deepgram key.
+    KeyUnreadable,
+    /// The Keychain could not be read for the Anthropic key.
+    CueKeyUnreadable,
 }
 
 impl LiveUnavailable {
@@ -626,6 +630,12 @@ impl LiveUnavailable {
             }
             Self::KeyRejected => {
                 "Deepgram rejected your API key. Replace it in Settings to start a live session."
+            }
+            Self::KeyUnreadable => {
+                "Your Deepgram key could not be read from the Keychain. Check it in Settings."
+            }
+            Self::CueKeyUnreadable => {
+                "Your Anthropic key could not be read from the Keychain. Check it in Settings."
             }
         }
     }
@@ -651,6 +661,7 @@ fn cue_connection() -> Result<(), LiveUnavailable> {
         provider_keys::KeyState::Set => Ok(()),
         provider_keys::KeyState::Rejected => Err(LiveUnavailable::CueKeyRejected),
         provider_keys::KeyState::NotSet => Err(LiveUnavailable::Build),
+        provider_keys::KeyState::Unreadable => Err(LiveUnavailable::CueKeyUnreadable),
     }
 }
 
@@ -676,6 +687,7 @@ fn classify_live_availability(
         transcription::cloud::ReadinessFailure::TokenMetadata => LiveUnavailable::TokenMetadata,
         transcription::cloud::ReadinessFailure::NoKey => LiveUnavailable::Selection,
         transcription::cloud::ReadinessFailure::KeyRejected => LiveUnavailable::KeyRejected,
+        transcription::cloud::ReadinessFailure::KeyUnreadable => LiveUnavailable::KeyUnreadable,
     })
 }
 
@@ -2277,6 +2289,10 @@ mod live_readiness_diagnostics_tests {
             (
                 Err(ReadinessFailure::KeyRejected),
                 Err(LiveUnavailable::KeyRejected),
+            ),
+            (
+                Err(ReadinessFailure::KeyUnreadable),
+                Err(LiveUnavailable::KeyUnreadable),
             ),
             (Ok(()), Ok(())),
         ] {

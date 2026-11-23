@@ -54,7 +54,9 @@ export const issueText = {
   worker:
     'Cues stopped: the model connection stopped working. Nothing more will be sent until you turn it on again.',
   keyRejected:
-    'Cues stopped: Anthropic did not accept your API key, or it was removed. Replace it in Settings, then start a new session.',
+    'Cues stopped: Anthropic did not accept your API key. Replace it in Settings, then start a new session.',
+  keyUnavailable:
+    'Cues stopped: your Anthropic key could not be read from the Keychain, or it was removed. Check it in Settings, then start a new session.',
   spendLimit:
     "Cues stopped: this session's estimated spend limit was reached. Nothing more will be sent in this session, and no other service will be used.",
   requestLimit:
@@ -582,6 +584,11 @@ export function ProcessingControl({
         {(active || paused) && (
           <button
             className="secondary-button"
+            aria-describedby={
+              approved && snapshot?.processor?.id === 'anthropic-api'
+                ? 'own-key-pause-help'
+                : undefined
+            }
             disabled={!!busy || !!status?.failed}
             onClick={() =>
               void act('pause', () => processingApi.pause(snapshot!, !paused))
@@ -634,6 +641,13 @@ export function ProcessingControl({
           </button>
         )}
       </div>
+      {approved && snapshot?.processor?.id === 'anthropic-api' && (
+        <p className="processing-muted" id="own-key-pause-help">
+          Pause cues stops cue requests only: the session&apos;s audio still
+          goes to Deepgram and is billed to your account. Disable processing or
+          Stop ends that.
+        </p>
+      )}
       {approved && (
         <p className="processing-muted">
           Pause and Disable processing leave the microphone on. Disable

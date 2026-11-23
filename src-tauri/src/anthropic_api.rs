@@ -404,8 +404,9 @@ impl<T: Transport> Evaluator for AnthropicApi<T> {
         }
         let key = match (self.key)() {
             Ok(key) => key,
-            Err(KeyError::NotSet(_)) => return Err(Failure::SignIn),
-            Err(_) => return Err(Failure::EvaluatorUnavailable),
+            // Removed from the Keychain, or the Keychain could not be read:
+            // not a refusal by Anthropic.
+            Err(_) => return Err(Failure::Credentials),
         };
         let timeout = cancel.deadline().saturating_duration_since(Instant::now());
         if timeout.is_zero() {
@@ -678,7 +679,7 @@ impl EvaluationLifecycle for InApp {
 /// review's whole policy, with the Deepgram sentence, is bounded.
 fn data_policy(model: Model) -> String {
     format!(
-        "Sends to the Anthropic API (US), with your own Anthropic API key, billed to your Anthropic account per token: up to six recent transcript lines and any lines the cue on screen cites, the cue on screen, up to four earlier cues with how each ended, and your session name if you set one. It sends after new lines, at most once every two seconds and one request at a time, until you turn this off, stop the session, or a failure stops it, so nearly every transcript line is sent, a few at a time. At most {REQUEST_CAP} requests and an estimated ${:.2} per session (an estimate, not your bill). Model {}. It never sends Anthropic audio, the full transcript, your notes, imported notes or focus lines. Anthropic handles what is sent under your API account's terms (https://www.anthropic.com/legal/commercial-terms); lines already sent cannot be recalled. If it fails, no other service is used.",
+        "Sends to the Anthropic API (US), with your own Anthropic API key, billed to your Anthropic account per token: up to six recent transcript lines and any lines the cue on screen cites, the cue on screen, up to four earlier cues with how each ended, and your session name if you set one. It sends after new lines, at most once every two seconds and one request at a time, until you turn this off, stop the session, or a failure stops it, so nearly every transcript line is sent, a few at a time. At most {REQUEST_CAP} requests and an estimated ${:.2} per session (an estimate, not your bill; there is no daily cap). Pause cues stops these requests but not the audio to Deepgram; Off and Stop end both. Model {}. It never sends Anthropic audio, the full transcript, your notes, imported notes or focus lines. Anthropic handles what is sent under your API account's terms (https://www.anthropic.com/legal/commercial-terms); lines already sent cannot be recalled. If it fails, no other service is used.",
         SPEND_CAP_MICRO_USD as f64 / 1_000_000.0,
         model.id
     )
