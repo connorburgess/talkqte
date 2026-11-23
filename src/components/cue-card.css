@@ -1,19 +1,20 @@
 /* The cue card: what it is, where it came from and how long it stays, in
    one glance and one height. Shared by the notebook and the companion. */
 .question.cue-card {
-  --cue-surface: #e7eedf;
-  --cue-ink: #1f3027;
-  --cue-soft: #3f4e3c;
-  --cue-lead: #4a5d49;
-  --cue-rule: #cbd6bf;
-  --cue-fill: #2f5a48;
-  --cue-accent: #9a452f;
-  --cue-radius: var(--radius-panel);
+  --cue-bg: var(--cue-surface);
+  --cue-ink: var(--ink);
+  --cue-soft: var(--muted);
+  --cue-lead: var(--muted);
+  --cue-rule: var(--line);
+  --cue-bar: var(--cue-fill);
+  --cue-accent: var(--accent-ink);
+  --cue-radius: var(--radius-question);
   --cue-ease: cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
   overflow: hidden;
-  background: var(--cue-surface);
+  background: var(--cue-bg);
   color: var(--cue-ink);
+  border: 1px solid var(--cue-rule);
   padding: 0;
   border-radius: var(--cue-radius);
   transform-origin: left center;
@@ -165,7 +166,7 @@
    Every text colour keeps at least 4.5:1 on it. Forced colours replace it
    with the system's own background, and the edge stays. */
 .question.cue-card.cue-asked {
-  --cue-surface: #efebdf;
+  --cue-bg: var(--cue-asked-surface);
 }
 .cue-card .cue-asked-mark {
   display: inline-block;
@@ -262,7 +263,7 @@
   display: block;
   height: 100%;
   border-radius: 2px;
-  background: var(--cue-fill);
+  background: var(--cue-bar);
   transform-origin: left center;
   transform: scaleX(var(--left));
   transition:
@@ -271,14 +272,15 @@
 }
 /* Held: the line runs back to full and rests. */
 .cue-card.is-held .cue-fill {
-  background: #7d967e;
+  background: var(--cue-held);
   transition:
     transform 560ms var(--cue-ease),
     background-color 300ms ease-out;
 }
 .cue-card .cue-stays {
   flex: 1;
-  font-size: 13px;
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 /* The word sits over the end of the line: shown when held, and when the
    pointer or the keyboard is on the card. */
@@ -288,9 +290,10 @@
   top: 50%;
   translate: 0 -50%;
   padding-left: 10px;
-  background: var(--cue-surface);
-  font-size: 13px;
-  font-weight: 650;
+  background: var(--cue-bg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
   color: var(--cue-ink);
   opacity: 0;
   transition: opacity 160ms ease-out;
@@ -304,7 +307,7 @@
   color: var(--cue-lead);
 }
 .cue-card .cue-time:hover:not([aria-disabled='true']) .cue-fill {
-  background: #244a3a;
+  background: var(--cue-ink);
 }
 
 /* Where it came from: always in view, never behind a click. */
@@ -369,8 +372,9 @@
 }
 .cue-card .cue-source-label {
   display: block;
+  font-family: var(--font-mono);
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--cue-lead);
   font-variant-numeric: tabular-nums;
 }
@@ -395,7 +399,7 @@
   display: block;
   font-size: 12.5px;
   font-weight: 650;
-  color: var(--cue-accent);
+  color: var(--danger);
 }
 .question-large.cue-card .cue-source {
   font-size: 16px;
@@ -425,7 +429,7 @@
 }
 .cue-card .dismiss-question:hover:not(:disabled) {
   color: var(--cue-ink);
-  background: #d6dfca;
+  background: var(--hover);
 }
 .cue-card .dismiss-question svg {
   transition: rotate 260ms var(--cue-ease);
@@ -438,7 +442,7 @@
 }
 .question.cue-card button:focus-visible,
 .floating-surface .question.cue-card button:focus-visible {
-  outline: 3px solid var(--forest);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 /* These two rings are drawn inside their targets: the line overlaps the
@@ -454,7 +458,7 @@
    for every state. Its words scroll inside it when they do not fit; its
    edges and Dismiss stay where they are. */
 .floating-surface .question.cue-card {
-  --cue-radius: 20px;
+  --cue-radius: 12px;
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -463,7 +467,7 @@
   border-radius: var(--cue-radius);
   padding: 0;
   overflow: hidden;
-  background: var(--cue-surface);
+  background: var(--cue-bg);
 }
 .floating-surface .cue-card .cue-scroll {
   display: flex;
@@ -613,11 +617,11 @@
 }
 .floating-surface .cue-card::before {
   top: 0;
-  background: linear-gradient(var(--cue-surface) 22%, transparent);
+  background: linear-gradient(var(--cue-bg) 22%, transparent);
 }
 .floating-surface .cue-card::after {
   bottom: 0;
-  background: linear-gradient(transparent, var(--cue-surface) 78%);
+  background: linear-gradient(transparent, var(--cue-bg) 78%);
 }
 .floating-surface .cue-card.fades-start::before,
 .floating-surface .cue-card.fades-end::after {

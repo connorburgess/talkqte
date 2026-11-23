@@ -7,7 +7,7 @@
   cursor: col-resize;
   touch-action: none;
   user-select: none;
-  color: #526552;
+  color: var(--muted);
   position: relative;
   z-index: 2;
 }
@@ -19,16 +19,16 @@
   z-index: -1;
 }
 .panel-divider svg {
-  background: var(--paper, #f8f9f2);
+  background: var(--paper);
   border-radius: 4px;
 }
 .panel-divider:hover::before,
 .panel-divider:focus-visible::before,
 .panel-divider.is-dragging::before {
-  background: var(--forest);
+  background: var(--ink);
 }
 .panel-divider:focus-visible {
-  outline: 2px solid var(--forest);
+  outline: 2px solid var(--focus);
   outline-offset: -2px;
 }
 .meeting-list-content {
@@ -38,7 +38,7 @@
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: #7b8973 transparent;
+  scrollbar-color: var(--border) transparent;
 }
 .meeting-list-content > * {
   flex-shrink: 0;
@@ -60,14 +60,14 @@
 }
 .layout-controls summary {
   cursor: pointer;
-  color: var(--forest);
+  color: var(--ink);
   padding: 12px 4px;
   min-height: 44px;
 }
 .layout-controls summary:focus-visible {
-  outline: 2px solid var(--forest);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-control);
 }
 .layout-controls-body {
   position: absolute;
@@ -75,22 +75,22 @@
   top: 100%;
   width: 272px;
   padding: 20px;
-  background: #fffef9;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  box-shadow: 0 6px 18px #203c3218;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow);
   z-index: 10;
 }
 .layout-controls-body label {
   display: block;
-  font-weight: 650;
+  font-weight: 600;
   margin-bottom: 16px;
 }
 .layout-controls-body input[type='range'] {
   display: block;
   width: 100%;
   min-height: 44px;
-  accent-color: var(--forest);
+  accent-color: var(--ink);
 }
 .layout-controls-body p {
   color: var(--muted);
