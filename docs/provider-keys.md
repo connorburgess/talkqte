@@ -10,9 +10,9 @@ Anthropic key for [cue decisions](own-key-cues.md).
 
 **Settings → Your API keys** (`src/components/ProviderKeys.tsx`) has one form
 per provider: what the key is for and how it is billed, its state (**Not
-set**, **Set, not checked yet**, **Set and checked**, or **Rejected by …
-Replace it with a new key.**), a password field that is cleared after
-saving, and **Save key**, **Test key** and **Remove key**. Errors are the
+set**, **Set, not checked yet**, **Set and checked**, **Rejected by …
+Replace it with a new key.**, or **Could not be read from the Keychain**), a password field that is cleared after
+saving or after a refused save, and **Save key**, **Test key** and **Remove key**. Errors are the
 fixed messages below, announced as alerts. Below the forms, the current
 session's cue requests and estimated spend are shown as "This session: 12 of
 400 cue requests, about $0.03 of $0.50 (an estimate, not your bill), model

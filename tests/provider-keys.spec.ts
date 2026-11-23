@@ -1,6 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 import type {} from './fixtures/native-microphone';
 
+// These checks run the notebook against stand-ins, never the Rust commands:
+// the browser preview's in-memory fake (src/lib/providerKeys.ts), or the
+// fictional native fixture (tests/fixtures/native-provider-keys.ts) for what
+// crosses IPC. Key storage, shape checks and provider checks in Rust are
+// covered by the `provider_keys` Rust tests.
 // Fictional keys of the right shape; they reach no provider.
 const ANTHROPIC = 'sk-ant-api03-FICTIONALfictional0123456789abcdefghij-_XYZ';
 const DEEPGRAM = '0123456789abcdef0123456789abcdef01234567';
@@ -24,7 +29,7 @@ async function openNative(page: Page) {
 const row = (page: Page, name: string) =>
   page.getByRole('form', { name, exact: true });
 
-test('a new install shows both keys as not set, with what each is for', async ({
+test('browser preview fake: a new install shows both keys as not set, with what each is for', async ({
   page,
 }) => {
   await page.goto('/');
@@ -48,7 +53,7 @@ test('a new install shows both keys as not set, with what each is for', async ({
   );
 });
 
-test('a key is entered, hidden, cleared after saving and can be removed', async ({
+test('browser preview fake: a key is entered, hidden, cleared after saving or refusal, and removed', async ({
   page,
 }) => {
   await page.goto('/');
@@ -64,6 +69,7 @@ test('a key is entered, hidden, cleared after saving and can be removed', async 
     'That does not look like an Anthropic API key. It starts with sk-ant-api.',
   );
   await expect(anthropic).toContainText('Not set');
+  await expect(input).toHaveValue('');
   await input.fill(ANTHROPIC);
   await anthropic.getByRole('button', { name: 'Save key' }).click();
   await expect(anthropic).toContainText('Set, not checked yet');
@@ -80,7 +86,7 @@ test('a key is entered, hidden, cleared after saving and can be removed', async 
   await expect(anthropic.getByLabel('Anthropic API key')).toBeVisible();
 });
 
-test('the keyboard reaches every key control in order', async ({
+test('browser preview fake: the keyboard reaches every key control in order', async ({
   page,
   browserName,
 }) => {
@@ -112,7 +118,7 @@ test('the keyboard reaches every key control in order', async ({
   ).toBeFocused();
 });
 
-test('in the app, the key crosses once and only its state comes back', async ({
+test('native fixture: the key crosses IPC once and only its state comes back', async ({
   page,
 }) => {
   await openNative(page);
@@ -151,7 +157,9 @@ test('in the app, the key crosses once and only its state comes back', async ({
   await expect(page.locator('body')).not.toContainText(DEEPGRAM);
 });
 
-test('the session spend estimate is shown as an estimate', async ({ page }) => {
+test('native fixture: the session spend estimate is shown as an estimate', async ({
+  page,
+}) => {
   await openNative(page);
   await page.evaluate(() =>
     window.providerKeysTest.setUsage({
@@ -172,7 +180,7 @@ test('the session spend estimate is shown as an estimate', async ({ page }) => {
   ).toBeVisible();
 });
 
-test('a narrow window keeps the key controls inside the page', async ({
+test('browser preview fake: a narrow window keeps the key controls inside the page', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 640 });
