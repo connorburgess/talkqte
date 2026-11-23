@@ -802,6 +802,11 @@ function Notebook() {
     setOnboardingState('open');
     setView('notebook');
   };
+  useEffect(() => {
+    if (view === 'settings' && keys.available) {
+      void keys.refresh();
+    }
+  }, [view, keys.available, keys.refresh]);
 
   const modal = useRef<HTMLDialogElement>(null);
   const exportButton = useRef<HTMLButtonElement>(null);

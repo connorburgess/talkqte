@@ -378,19 +378,19 @@ export function ServiceKeys({ keys }: { keys: ServiceKeysController }) {
             <span className="sk-chip">Unavailable in this build</span>
           )}
         </div>
-        <p className="sk-intro">
-          Add your own keys for live transcription and cue decisions. Keys are
-          stored in the macOS Keychain and never shown again after saving;
-          TalkQTE only displays Not set, Set, Checking…, or Rejected.
-        </p>
 
         {keys.loaded && !keys.available ? (
           <p className="sk-unavailable-note">
-            Unavailable in this build. Key storage is not connected to this
-            build yet.
+            Service key storage is not connected to this build yet.
           </p>
         ) : (
           <>
+            <p className="sk-intro">
+              Add your own keys for live transcription and cue decisions. Keys
+              are stored in the macOS Keychain and never shown again after
+              saving; TalkQTE only displays Not set, Set, Checking…, or
+              Rejected.
+            </p>
             <ServiceKeysRows keys={keys} />
             {keys.available && (
               <div className="sk-session-box" aria-label="This session usage">

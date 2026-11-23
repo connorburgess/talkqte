@@ -9,6 +9,12 @@ import * as preview from '../../src/lib/preview';
 import type { MicrophoneSnapshot } from '../../src/lib/microphone';
 import type { Commands, LiveStatus, Snapshot } from '../../src/lib/types';
 import type { ProcessingSnapshot, StopTarget } from '../../src/lib/processing';
+import type {
+  KeyProvider,
+  KeyState,
+  KeysStatusSnapshot,
+  SessionUsageSnapshot,
+} from '../../src/lib/keys';
 
 let microphone: MicrophoneSnapshot = {
   revision: 0,
@@ -153,6 +159,34 @@ const delayed = new URLSearchParams(location.search).has('delay-microphone');
 const liveAvailable = ['live', 'cloud'].some((key) =>
   new URLSearchParams(location.search).has(key),
 );
+// With ?keys, this fixture supplies the stub ServiceKeysBridge commands.
+// Without ?keys, those commands reject as unknown so default tests exercise
+// the "Unavailable in this build" path.
+const keysParam = new URLSearchParams(location.search).get('keys');
+const keysEnabled = new URLSearchParams(location.search).has('keys');
+let keysStatus: KeysStatusSnapshot = {
+  deepgram:
+    keysParam === 'set' || keysParam === 'deepgram'
+      ? { status: 'set' }
+      : { status: 'not_set' },
+  anthropic:
+    keysParam === 'set' || keysParam === 'anthropic'
+      ? { status: 'set' }
+      : { status: 'not_set' },
+};
+let keysSessionUsage: SessionUsageSnapshot = {
+  anthropicRequests: 0,
+  anthropicCap: 40,
+  estimatedSpendUsd: 0,
+  active: false,
+};
+const keysCalls: { command: string; provider?: KeyProvider }[] = [];
+const keysTestOutcomes: Record<KeyProvider, KeyState> = {
+  deepgram: { status: 'set' },
+  anthropic: { status: 'set' },
+};
+let holdKeyTest = false;
+let releaseKeyTest: (() => void) | undefined;
 Object.defineProperty(window, 'isTauri', { value: true, configurable: true });
 
 async function send(value: Partial<MicrophoneSnapshot>) {
@@ -472,6 +506,48 @@ mockIPC(
           });
         }
         return;
+      case 'keys_status': {
+        if (!keysEnabled) throw new Error('Command keys_status not found');
+        keysCalls.push({ command: 'keys_status' });
+        return structuredClone(keysStatus);
+      }
+      case 'keys_set': {
+        if (!keysEnabled) throw new Error('Command keys_set not found');
+        const { provider, secret } = args as {
+          provider: KeyProvider;
+          secret: string;
+        };
+        if (!secret || !secret.trim()) throw new Error('Key cannot be empty.');
+        keysCalls.push({ command: 'keys_set', provider });
+        keysStatus = { ...keysStatus, [provider]: { status: 'set' } };
+        return structuredClone(keysStatus[provider]);
+      }
+      case 'keys_test': {
+        if (!keysEnabled) throw new Error('Command keys_test not found');
+        const { provider } = args as { provider: KeyProvider };
+        keysCalls.push({ command: 'keys_test', provider });
+        if (holdKeyTest) {
+          holdKeyTest = false;
+          await new Promise<void>((resolve) => {
+            releaseKeyTest = resolve;
+          });
+        }
+        const outcome = structuredClone(keysTestOutcomes[provider]);
+        keysStatus = { ...keysStatus, [provider]: outcome };
+        return outcome;
+      }
+      case 'keys_remove': {
+        if (!keysEnabled) throw new Error('Command keys_remove not found');
+        const { provider } = args as { provider: KeyProvider };
+        keysCalls.push({ command: 'keys_remove', provider });
+        keysStatus = { ...keysStatus, [provider]: { status: 'not_set' } };
+        return structuredClone(keysStatus[provider]);
+      }
+      case 'keys_session_usage': {
+        if (!keysEnabled)
+          throw new Error('Command keys_session_usage not found');
+        return structuredClone(keysSessionUsage);
+      }
       default:
         return preview.command(
           command as keyof Commands,
@@ -569,6 +645,14 @@ declare global {
       rejectNextStop: () => void;
       holdNextStop: () => void;
       releaseStop: () => void;
+    };
+    keysTest: {
+      calls: { command: string; provider?: KeyProvider }[];
+      status: () => KeysStatusSnapshot;
+      setTestOutcome: (provider: KeyProvider, outcome: KeyState) => void;
+      holdNextTest: () => void;
+      releaseTest: () => void;
+      setUsage: (usage: SessionUsageSnapshot) => void;
     };
   }
 }
@@ -668,6 +752,24 @@ window.microphoneTest = {
     delayStop = true;
   },
   releaseStop: () => releaseStop?.(),
+};
+window.keysTest = {
+  calls: keysCalls,
+  status: () => structuredClone(keysStatus),
+  setTestOutcome: (provider, outcome) => {
+    keysTestOutcomes[provider] = structuredClone(outcome);
+  },
+  holdNextTest: () => {
+    holdKeyTest = true;
+  },
+  releaseTest: () => {
+    const release = releaseKeyTest;
+    releaseKeyTest = undefined;
+    release?.();
+  },
+  setUsage: (usage) => {
+    keysSessionUsage = structuredClone(usage);
+  },
 };
 await import('../../src/main');
 
