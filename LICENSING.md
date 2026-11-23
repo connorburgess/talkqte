@@ -6,16 +6,16 @@ The source is public, but the commercial-use restrictions mean this is **source-
 
 ## Everyday use and commercial products
 
-| Use | Under the Sustainable Use License |
-| --- | --- |
-| Use the app personally | Permitted without a license fee |
-| Use it for your company's internal meetings and work | Permitted without a license fee |
-| Use your own installation while consulting or doing paid client work | Permitted as your internal business use; this does not include selling customers access to TalkQTE |
-| Inspect or modify it for a permitted use | Permitted |
-| Share a fork or copy free of charge for noncommercial purposes | Permitted with the license, notices, and a prominent notice of modifications |
-| Sell or commercially redistribute TalkQTE or a modified version | Requires a separate commercial agreement |
-| White-label TalkQTE for customers or embed its implementation in a commercial product | Requires a separate commercial agreement |
-| Sell access to TalkQTE as a hosted service | Requires a separate commercial agreement |
+| Use                                                                                   | Under the Sustainable Use License                                                                  |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Use the app personally                                                                | Permitted without a license fee                                                                    |
+| Use it for your company's internal meetings and work                                  | Permitted without a license fee                                                                    |
+| Use your own installation while consulting or doing paid client work                  | Permitted as your internal business use; this does not include selling customers access to TalkQTE |
+| Inspect or modify it for a permitted use                                              | Permitted                                                                                          |
+| Share a fork or copy free of charge for noncommercial purposes                        | Permitted with the license, notices, and a prominent notice of modifications                       |
+| Sell or commercially redistribute TalkQTE or a modified version                       | Requires a separate commercial agreement                                                           |
+| White-label TalkQTE for customers or embed its implementation in a commercial product | Requires a separate commercial agreement                                                           |
+| Sell access to TalkQTE as a hosted service                                            | Requires a separate commercial agreement                                                           |
 
 An integration that connects a permitted TalkQTE installation to another application's API, without incorporating or distributing TalkQTE's implementation, does not by itself require a commercial agreement. The other application's terms still apply. Using your own notes, questions, or exported meeting content in paid work is not redistribution of TalkQTE's software.
 
@@ -29,13 +29,9 @@ For commercial terms, open a [licensing inquiry](https://github.com/connorburges
 
 The software license does not grant trademark rights in the TalkQTE name or logo. A modified version shared with others needs its own name and icon unless you have permission to use TalkQTE's. See the [name and logo guide](TRADEMARKS.md) for what is fine without asking and what needs permission.
 
-## Previously published Apache-2.0 material
+## Third-party material
 
-TalkQTE was previously published under Apache-2.0. For reference, the main-branch snapshot at [`f61fa6c`](https://github.com/connorburgess/talkqte/tree/f61fa6ce1dd1e06d1375026e2708c978455cf77f) contains that license. Other commits and branches published under Apache-2.0 retain those grants too; this reference is not an exhaustive cutoff list.
-
-This change does **not** revoke, narrow, or charge for rights already granted under Apache-2.0. Recipients may continue using, modifying, distributing, and commercializing that material under its original terms, including in forks. A later README or license change does not remove those permissions. The original license is preserved in [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt).
-
-New material offered only under the Sustainable Use License is subject to that license. Preserve applicable Apache notices when reusing earlier material. Third-party dependencies, assets, and license documents retain their own terms; the project license does not relicense them. No historical commits or releases have been rewritten.
+Third-party dependencies, assets, and license documents retain their own terms; the project license does not relicense them.
 
 ## Contributions
 
