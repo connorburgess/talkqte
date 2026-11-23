@@ -14,7 +14,7 @@
   overflow: hidden;
   background: var(--cue-bg);
   color: var(--cue-ink);
-  border: 1px solid var(--cue-rule);
+  border: 1px solid var(--border);
   padding: 0;
   border-radius: var(--cue-radius);
   transform-origin: left center;
@@ -25,7 +25,7 @@
     cue-widen 480ms var(--cue-ease) both;
 }
 .cue-card .cue-scroll {
-  padding: 16px 18px 14px;
+  padding: 18px 20px 16px;
 }
 /* The card never fades in: at any strength below full its words would be
    too faint to read, and a glance may land on the very first frame. */
@@ -135,26 +135,37 @@
   animation-delay: var(--at);
 }
 
-/* The purpose is the first words of the sentence; the cue completes it. */
+/* The purpose sits as a crisp mono kicker above the cue statement. */
 .cue-card .cue-line {
   font-size: 22px;
   line-height: 1.22;
   letter-spacing: -0.015em;
   overflow-wrap: anywhere;
 }
-/* Only the lines beside the corner Dismiss make room for it. */
-.cue-card .cue-line::before {
-  content: '';
-  float: right;
-  width: 30px;
-  height: 32px;
-}
 .cue-card .cue-lead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+  padding-right: 32px;
+  font-family: var(--font-mono);
+  font-size: 11px;
   font-weight: 500;
-  color: var(--cue-lead);
+  line-height: 1.35;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cue-accent);
+}
+.cue-card:not(.cue-asked) .cue-lead::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--cue-accent);
+  flex-shrink: 0;
 }
 .cue-card.cue-asked .cue-lead {
-  font-weight: 650;
+  font-weight: 500;
   color: var(--cue-accent);
 }
 /* Someone asked you by name: the one cue that expects you to answer. It is
@@ -164,25 +175,29 @@
    card. Every other kind shares the calm default, so this one stays
    meaningful. Forced colours replace the tint with the system background
    while keeping the full 1.5px border in a system colour. */
-.question.cue-card.cue-asked {
+.question.cue-card.cue-asked,
+.floating-surface .question.cue-card.cue-asked {
   --cue-bg: var(--cue-asked-surface);
   border: 1.5px solid var(--accent-ink);
 }
 .cue-card .cue-asked-mark {
   display: inline-block;
-  width: 0.8em;
-  height: 0.8em;
-  margin-right: 0.18em;
-  vertical-align: -0.06em;
-  stroke-width: 2.6;
+  width: 12px;
+  height: 12px;
+  stroke-width: 2.2;
 }
 @media (forced-colors: active) {
-  .question.cue-card.cue-asked {
+  .question.cue-card.cue-asked,
+  .floating-surface .question.cue-card.cue-asked {
     border-color: CanvasText;
+  }
+  .cue-card:not(.cue-asked) .cue-lead::before {
+    forced-color-adjust: none;
+    background: CanvasText;
   }
 }
 .question.cue-card .cue-line h2 {
-  display: inline;
+  display: block;
   padding: 0;
   font: inherit;
   font-weight: 700;
@@ -230,7 +245,7 @@
   position: relative;
   flex: 1;
   height: 3px;
-  border-radius: 2px;
+  border-radius: 1px;
   background: var(--cue-rule);
   transition: height 140ms ease-out;
 }
@@ -240,7 +255,7 @@
 .cue-card .cue-fill {
   display: block;
   height: 100%;
-  border-radius: 2px;
+  border-radius: 1px;
   background: var(--cue-bar);
   transform-origin: left center;
   transform: scaleX(var(--left));
@@ -258,7 +273,8 @@
 .cue-card .cue-stays {
   flex: 1;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
 }
 /* The word sits over the end of the line: shown when held, and when the
    pointer or the keyboard is on the card. */
@@ -270,8 +286,10 @@
   padding-left: 10px;
   background: var(--cue-bg);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--cue-ink);
   opacity: 0;
   transition: opacity 160ms ease-out;
@@ -318,6 +336,10 @@
   display: flex;
   align-items: center;
   gap: 5px;
+  color: var(--cue-accent);
+}
+.cue-card .cue-answer .cue-quote {
+  color: var(--cue-ink);
 }
 .cue-card .cue-tick {
   flex: none;
@@ -351,14 +373,16 @@
 .cue-card .cue-source-label {
   display: block;
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 11px;
   font-weight: 500;
-  color: var(--cue-lead);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cue-soft);
   font-variant-numeric: tabular-nums;
 }
 .cue-card .cue-quote {
-  margin: 1px 0 0;
-  color: var(--cue-ink);
+  margin: 3px 0 0;
+  color: var(--cue-soft);
 }
 .cue-card .cue-sources {
   list-style: none;
@@ -375,8 +399,9 @@
 }
 .cue-card .question-warning {
   display: block;
-  font-size: 12.5px;
-  font-weight: 650;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
   color: var(--danger);
 }
 .question-large.cue-card .cue-source {
@@ -384,7 +409,7 @@
 }
 .question-large.cue-card .cue-source-label,
 .question-large.cue-card .question-warning {
-  font-size: 14px;
+  font-size: 12px;
 }
 /* A light corner control: the cue is the focus, not the way out. */
 .cue-card .dismiss-question {
@@ -436,12 +461,14 @@
    for every state. Its words scroll inside it when they do not fit; its
    edges and Dismiss stay where they are. */
 .floating-surface .question.cue-card {
-  --cue-radius: 12px;
+  --cue-bg: var(--surface);
+  --cue-radius: var(--radius-dock-card);
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
-  margin: 0 6px 6px;
+  margin: 0 4px 4px;
+  border: 1px solid var(--line);
   border-radius: var(--cue-radius);
   padding: 0;
   overflow: hidden;
@@ -453,10 +480,7 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden auto;
-  padding: 10px 18px;
-}
-.floating-surface .cue-card .cue-line::before {
-  height: 38px;
+  padding: 10px 16px;
 }
 /* In the companion a cue grows out of the bar above it and folds back into
    it. The window is already at the cue's size (the native side changes its
@@ -612,21 +636,16 @@
    window: its cue is set close to the size of a meeting's own captions, and
    under it is the one line the cue cites, at most two lines of it. The
    notebook's card keeps every source. */
-.floating-surface .question.cue-card {
-  --cue-radius: 16px;
-  margin: 0 4px 4px;
-}
-.floating-surface .cue-card .cue-scroll {
-  padding: 8px 14px 10px;
+.floating-surface .cue-card .cue-lead {
+  font-size: 10px;
+  gap: 6px;
+  margin-bottom: 5px;
+  padding-right: 30px;
 }
 .floating-surface .cue-card .cue-line {
   font-size: 17px;
-  line-height: 1.2;
-  letter-spacing: -0.01em;
-}
-.floating-surface .cue-card .cue-line::before {
-  width: 24px;
-  height: 22px;
+  line-height: 1.24;
+  letter-spacing: -0.015em;
 }
 .floating-surface .cue-card.cue-long .cue-line {
   font-size: 16px;
@@ -636,6 +655,7 @@
 }
 .floating-surface .question-large.cue-card .cue-line {
   font-size: 21px;
+  line-height: 1.22;
 }
 .floating-surface .question-large.cue-card.cue-long .cue-line {
   font-size: 19px;
@@ -651,22 +671,27 @@
 .floating-surface .cue-card .cue-time {
   margin-block: -12px;
 }
+.floating-surface .cue-card .cue-hold {
+  font-size: 10px;
+}
 .floating-surface .cue-card .cue-source {
   font-size: 13px;
   line-height: 1.35;
 }
 .floating-surface .cue-card .cue-source-label,
 .floating-surface .cue-card .question-warning {
-  font-size: 11.5px;
+  font-size: 10px;
+  letter-spacing: 0.05em;
 }
 .floating-surface .question-large.cue-card .cue-source {
   font-size: 15px;
 }
 .floating-surface .question-large.cue-card .cue-source-label,
 .floating-surface .question-large.cue-card .question-warning {
-  font-size: 13px;
+  font-size: 11px;
 }
 .floating-surface .cue-card .cue-quote {
+  margin-top: 2px;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;

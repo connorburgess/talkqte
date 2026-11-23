@@ -1071,7 +1071,9 @@ svg {
 }
 .companion-shell {
   background: var(--companion-bg);
-  border-radius: 16px;
+  border: 1px solid var(--companion-border);
+  border-radius: var(--radius-dock);
+  box-shadow: var(--shadow-dock);
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -1108,11 +1110,11 @@ svg {
 .companion-capture {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   flex: none;
 }
 .companion-capture.is-on {
-  color: var(--companion-live);
+  color: var(--companion-fg);
 }
 .companion-bar .status-dot {
   width: 6px;
@@ -1125,15 +1127,16 @@ svg {
 .companion-status strong {
   flex: none;
   color: var(--companion-fg);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 500;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 700;
 }
 /* A state the glyph cannot say on its own is spelled out, on one line. */
 .companion-status [role='status']:not(.visually-hidden) {
   color: var(--companion-muted);
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 11px;
+  font-weight: 500;
   line-height: 1.35;
   white-space: nowrap;
   overflow: hidden;
@@ -1148,7 +1151,7 @@ svg {
   flex-shrink: 0;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 8px;
   background: transparent;
   color: inherit;
   transition:

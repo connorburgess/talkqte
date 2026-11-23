@@ -50,6 +50,7 @@
   --danger: #9c3418;
   --danger-surface: #fdf3f0;
   --companion-bg: #0d1014;
+  --companion-border: #252c36;
   --companion-fg: #f5f7fa;
   --companion-muted: #9aa4b2;
   --companion-quiet: #7d8a9b;
@@ -58,6 +59,7 @@
   --companion-focus: #ebb45b;
   --backdrop: rgba(13, 16, 20, 0.45);
   --shadow: 0 8px 24px rgba(17, 21, 27, 0.05);
+  --shadow-dock: 0 12px 28px rgba(13, 16, 20, 0.18);
   --shadow-dialog: 0 18px 60px rgba(13, 16, 20, 0.22);
   --space-4: 4px;
   --space-8: 8px;
@@ -69,5 +71,8 @@
   --radius-control: 2px;
   --radius-panel: 8px;
   --radius-question: 8px;
+  --radius-dock: 18px;
+  --radius-dock-card: 13px;
+  --radius-dialog: 10px;
   color-scheme: light;
 }
