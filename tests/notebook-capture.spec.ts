@@ -251,7 +251,7 @@ test('independent microphone cleanup is not relabelled as a live session', async
     .getByRole('button', { name: 'Stop microphone', exact: true })
     .click();
   await page.evaluate(() => window.captureTest.send({ capture: 'stopping' }));
-  await expect(mic(page)).toContainText('Microphone only');
+  await expect(mic(page)).toContainText('Microphone check');
   await expect(mic(page).getByRole('status')).toHaveText('Stopping…');
   await expect(stop(page)).toHaveCount(0);
 });

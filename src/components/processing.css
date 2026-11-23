@@ -47,7 +47,7 @@
   border-top: 1px solid var(--line);
 }
 .processing-step {
-  margin: 0 0 var(--space-4);
+  margin: 0 0 var(--space-8);
   font-size: 13px;
   font-weight: 600;
   color: var(--muted);
@@ -230,7 +230,7 @@
     padding-inline: var(--space-24);
   }
 }
-@media (max-width: 760px) {
+@media (max-width: 400px) {
   .notebook-processing {
     padding-inline: var(--space-16);
   }

@@ -45,3 +45,19 @@ The notebook used to open as a fictional demo meeting, with its title, speakers,
 These renderings come from the browser tests' fictional native stand-in, with fictional lines; no microphone or transcription was involved. Chromium and WebKit checks (`tests/notebook-session.spec.ts`) cover the three states, the wording for each kind of build, the absence of the words "demo" and "fictional" before a session and in Settings, and control sizes at 320, 390 and 880 pixels with reduced motion. Not checked: the desktop app, an actual microphone session, VoiceOver, and whether a person finds the empty state clear.
 
 Until 14 November 2026 Export stayed unavailable for the rest of a launch once a live session had run, so notes written beside a live session could not be exported. At the owner's decision the notes can now be exported once the session has ended. The export is the notes and nothing else, and it is still refused while a session runs.
+
+## Product pass — 23 November 2026
+
+A typography, layout and wording pass brings the notebook closer to a calm workspace beside a meeting without changing its palette, controls, states or consent order.
+
+What changed:
+
+- **Typography, spacing and sidebar:** the session title, Settings title and section headings use the house serif (`Georgia, 'Times New Roman', serif`) while body text, controls, labels and the cue card stay in rounded sans. A shared spacing scale (4–48 px) and aligned margins replace ad-hoc gaps, and the sidebar surface now runs the full height of the window when the workspace scrolls.
+- **Toolbar and sidebar labels:** the desktop toolbar no longer shows "Desktop prototype" (the browser preview keeps "Browser preview"); the sidebar footer reads `TalkQTE` · `0.1 · early development`.
+- **Microphone check and live capture bar:** the idle microphone check reads **Microphone check** in one quiet row with plain wording ("Shows whether your microphone picks up sound…") and no enclosing rule; when on, stopping or in error it keeps full prominence. During a live session, the capture bar shows status and Stop on one line, Input and Change microphone below it, and the unchanged data paragraph in 14 px.
+- **Session strip and cue area:** the session title H1 is the anchor of the window; during a live session its subline drops the repeated transcription phrase (which stays word for word in the capture bar above and in the Transcript tab). The cue column is titled **Cues** without the decorative help icon, updates its idle line to "In this version cues come from simple phrase rules, not AI.", and links to **Cue appearance and timing**. Settings renames its data section heading to **Your data**.
+- **Cue processing:** the panel drops its enclosing card border and radius in favor of hairline rules and spacing. Explicit `Step 1 of 2` and `Step 2 of 2` markers sit above `Choose what to process` and `Review before enabling`, and the review definition list uses hairline rows (stacking to one column when narrow). Development-only items (the `Application audio` launcher, `Lab run details` inside a `<details>` disclosure, and the `approvalBySetting` notice) are grouped at the end of the panel under a muted `Development build` heading above a dashed hairline, shown only when a snapshot reports a lab processor, `approvalBySetting` or an application source; the application-audio status line and **Stop application audio** stay at the top of the panel.
+
+What did not change:
+
+- Colours (light paper/evergreen/terracotta palette unchanged; no dark scheme), control behaviour, three-step per-session approval, consent/safety/status wording, the cue card (`Question.tsx`), the floating companion window, and Rust backend behaviour. Ordinary builds still have no live transcription and no model connection.
