@@ -533,31 +533,38 @@ pub fn reopener(settings: super::cloud::Settings) -> super::cloud::Reopener {
     })
 }
 
-/// Opens the live stream with the person's own key, read from the Keychain
-/// on the socket thread once the review is approved, under the session's
-/// budget.
-pub fn key_opener(budget: Budget) -> super::cloud::Opener {
-    Box::new(move || {
-        Ok(Box::new(DeepgramStream::start(
-            Network(Auth::Key),
-            ListenRequest::lab(),
-            Token::from_keychain(),
-            budget,
-        )) as Box<dyn StreamingTranscriber>)
-    })
+/// The stream and its replacements for one session with the person's own
+/// key: both draw on the one `budget` made for that session, so reconnects
+/// share its cap. The key is read from the Keychain on the socket thread
+/// once the review is approved, and again by each replacement, so a key
+/// replaced in Settings is used.
+pub fn key_streams(budget: Budget) -> (super::cloud::Opener, super::cloud::Reopener) {
+    key_streams_with(Network(Auth::Key), Token::from_keychain, budget)
 }
 
-/// Replacement streams with the person's own key, under the same session
-/// budget. Each reads the key again, so a key replaced in Settings is used.
-pub fn key_reopener(budget: Budget) -> super::cloud::Reopener {
-    Box::new(move || {
+fn key_streams_with<C: Connector + Clone>(
+    connector: C,
+    token: fn() -> Token,
+    budget: Budget,
+) -> (super::cloud::Opener, super::cloud::Reopener) {
+    let first = (connector.clone(), budget.clone());
+    let opener: super::cloud::Opener = Box::new(move || {
         Ok(Box::new(DeepgramStream::start(
-            Network(Auth::Key),
+            first.0,
             ListenRequest::lab(),
-            Token::from_keychain(),
+            token(),
+            first.1,
+        )) as Box<dyn StreamingTranscriber>)
+    });
+    let reopener: super::cloud::Reopener = Box::new(move || {
+        Ok(Box::new(DeepgramStream::start(
+            connector.clone(),
+            ListenRequest::lab(),
+            token(),
             budget.clone(),
         )) as Box<dyn StreamingTranscriber>)
-    })
+    });
+    (opener, reopener)
 }
 
 /// How long a stream waits after approval for a valid token.
@@ -582,8 +589,15 @@ impl Token {
         Self::from_keys(crate::provider_keys::global())
     }
 
+    /// Read once per stream attempt: a missing key, or a Keychain that
+    /// refuses or asks, is not asked again every poll. The stream then waits
+    /// out its token wait and stops with `settings`.
     fn from_keys(keys: &'static crate::provider_keys::Keys) -> Self {
+        let mut asked = false;
         Self(Box::new(move || {
+            if std::mem::replace(&mut asked, true) {
+                return None;
+            }
             keys.get(crate::provider_keys::Provider::Deepgram)
                 .ok()
                 .map(|key| Zeroizing::new(key.expose().to_string()))
@@ -628,6 +642,7 @@ impl Auth {
 /// handshake carrying the credential in the `Authorization` header, then
 /// short read waits. A key Deepgram refuses is marked rejected, so Settings
 /// says so and the next live start is refused until it is replaced.
+#[derive(Clone)]
 pub struct Network(pub Auth);
 
 impl Connector for Network {
@@ -919,17 +934,46 @@ mod tests {
         assert_eq!(wire.token.as_deref(), Some(token.as_str()));
     }
 
-    fn fictional_keys() -> &'static crate::provider_keys::Keys {
-        struct Offline;
-        impl crate::provider_keys::Probe for Offline {
-            fn check(
-                &self,
-                _: crate::provider_keys::Provider,
-                _: &crate::provider_keys::Secret,
-            ) -> crate::provider_keys::ProbeResult {
-                crate::provider_keys::ProbeResult::Unreachable
-            }
+    /// A store that counts reads, so a test can see the Keychain is asked
+    /// once per stream attempt.
+    #[derive(Default)]
+    struct Counting(
+        crate::provider_keys::MemoryStore,
+        std::sync::atomic::AtomicUsize,
+    );
+    impl crate::provider_keys::SecretStore for &'static Counting {
+        fn get(
+            &self,
+            account: &str,
+        ) -> Result<Option<crate::provider_keys::Secret>, crate::provider_keys::StoreError>
+        {
+            self.1.fetch_add(1, Ordering::SeqCst);
+            self.0.get(account)
         }
+        fn set(
+            &self,
+            account: &str,
+            secret: &crate::provider_keys::Secret,
+        ) -> Result<(), crate::provider_keys::StoreError> {
+            self.0.set(account, secret)
+        }
+        fn delete(&self, account: &str) -> Result<(), crate::provider_keys::StoreError> {
+            self.0.delete(account)
+        }
+    }
+
+    struct Offline;
+    impl crate::provider_keys::Probe for Offline {
+        fn check(
+            &self,
+            _: crate::provider_keys::Provider,
+            _: &crate::provider_keys::Secret,
+        ) -> crate::provider_keys::ProbeResult {
+            crate::provider_keys::ProbeResult::Unreachable
+        }
+    }
+
+    fn fictional_keys() -> &'static crate::provider_keys::Keys {
         Box::leak(Box::new(crate::provider_keys::Keys::new(
             Box::new(crate::provider_keys::MemoryStore::default()),
             Box::new(Offline),
@@ -937,7 +981,7 @@ mod tests {
     }
 
     #[test]
-    fn the_persons_key_is_read_after_approval_and_sent_only_as_a_token_header() {
+    fn the_persons_key_is_sent_only_as_a_token_header_on_the_opt_out_url() {
         use crate::provider_keys::{KeyState, Provider};
         const KEY: &str = "0123456789abcdef0123456789abcdef01234567";
         let keys = fictional_keys();
@@ -969,8 +1013,11 @@ mod tests {
     }
 
     #[test]
-    fn a_removed_key_opens_no_stream() {
-        let keys = fictional_keys();
+    fn a_removed_key_opens_no_stream_and_the_keychain_is_asked_once() {
+        let counting: &'static Counting = Box::leak(Box::default());
+        let keys: &'static crate::provider_keys::Keys = Box::leak(Box::new(
+            crate::provider_keys::Keys::new(Box::new(counting), Box::new(Offline)),
+        ));
         let fake = Fake::default();
         let mut stream = DeepgramStream::start_with(
             fake.clone(),
@@ -986,6 +1033,35 @@ mod tests {
         let events = stream.finish(Duration::from_secs(2));
         assert!(events.contains(&SttEvent::Failed(SttFailure::Settings)));
         assert!(fake.0.lock().unwrap().url.is_none());
+        assert_eq!(counting.1.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_sessions_replacement_streams_share_its_minute_budget() {
+        // A one-second budget: the first stream spends it; the replacement
+        // made from the same session's streams sends nothing more.
+        let fake = Fake::default();
+        let (opener, mut reopener) = key_streams_with(
+            fake.clone(),
+            || Token::from("t".repeat(24)),
+            Budget::new(Duration::from_secs(1)),
+        );
+        let mut first = opener().unwrap();
+        first.push(&[0.1; SAMPLE_RATE]).unwrap();
+        let _ = first.finish(Duration::from_secs(2));
+        let sent = fake.0.lock().unwrap().binary.iter().sum::<usize>();
+        assert_eq!(sent, SAMPLE_RATE * 2);
+        let mut replacement = reopener().unwrap();
+        replacement.push(&[0.1; FRAME]).unwrap();
+        let mut events = Vec::new();
+        let until = Instant::now() + Duration::from_secs(5);
+        while !events.contains(&SttEvent::Failed(SttFailure::CapReached)) && Instant::now() < until
+        {
+            events.extend(replacement.poll());
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(events.contains(&SttEvent::Failed(SttFailure::CapReached)));
+        assert_eq!(fake.0.lock().unwrap().binary.iter().sum::<usize>(), sent);
     }
 
     #[test]

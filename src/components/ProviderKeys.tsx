@@ -34,7 +34,9 @@ function isStatus(value: unknown): value is KeysStatus {
   const key = (v: unknown) =>
     !!v &&
     typeof v === 'object' &&
-    ['notSet', 'set', 'rejected'].includes((v as KeyStatus).state) &&
+    ['notSet', 'set', 'rejected', 'unreadable'].includes(
+      (v as KeyStatus).state,
+    ) &&
     typeof (v as KeyStatus).verified === 'boolean';
   return (
     !!value &&
@@ -47,6 +49,8 @@ function isStatus(value: unknown): value is KeysStatus {
 function stateText(name: string, status: KeyStatus | undefined) {
   if (!status) return 'Checking…';
   if (status.state === 'notSet') return 'Not set';
+  if (status.state === 'unreadable')
+    return 'Could not be read from the Keychain. Unlock it or allow access, or save the key again.';
   if (status.state === 'rejected')
     return `Rejected by ${name}. Replace it with a new key.`;
   return status.verified ? 'Set and checked' : 'Set, not checked yet';
@@ -145,7 +149,7 @@ function KeyRow({
   const [busy, setBusy] = useState<'save' | 'test' | 'remove' | null>(null);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
-  const stored = status?.state === 'set' || status?.state === 'rejected';
+  const stored = !!status && status.state !== 'notSet';
 
   const run = async (
     action: 'save' | 'test' | 'remove',
@@ -163,6 +167,8 @@ function KeyRow({
         setNote(done(next));
       }
     } catch (failure) {
+      // A refused key is not kept on screen or in memory longer than needed.
+      if (action === 'save') setDraft('');
       setError(message(failure, 'Nothing was changed. Try again.'));
     } finally {
       setBusy(null);

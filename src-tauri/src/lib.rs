@@ -628,6 +628,10 @@ pub(crate) enum LiveUnavailable {
     TokenMetadata,
     /// Deepgram refused the stored key.
     KeyRejected,
+    /// The Keychain could not be read for the Deepgram key.
+    KeyUnreadable,
+    /// The Keychain could not be read for the Anthropic key.
+    CueKeyUnreadable,
 }
 
 impl LiveUnavailable {
@@ -643,6 +647,12 @@ impl LiveUnavailable {
             }
             Self::KeyRejected => {
                 "Deepgram rejected your API key. Replace it in Settings to start a live session."
+            }
+            Self::KeyUnreadable => {
+                "Your Deepgram key could not be read from the Keychain. Check it in Settings."
+            }
+            Self::CueKeyUnreadable => {
+                "Your Anthropic key could not be read from the Keychain. Check it in Settings."
             }
         }
     }
@@ -668,6 +678,7 @@ fn cue_connection() -> Result<(), LiveUnavailable> {
         provider_keys::KeyState::Set => Ok(()),
         provider_keys::KeyState::Rejected => Err(LiveUnavailable::CueKeyRejected),
         provider_keys::KeyState::NotSet => Err(LiveUnavailable::Build),
+        provider_keys::KeyState::Unreadable => Err(LiveUnavailable::CueKeyUnreadable),
     }
 }
 
@@ -693,6 +704,7 @@ fn classify_live_availability(
         transcription::cloud::ReadinessFailure::TokenMetadata => LiveUnavailable::TokenMetadata,
         transcription::cloud::ReadinessFailure::NoKey => LiveUnavailable::Selection,
         transcription::cloud::ReadinessFailure::KeyRejected => LiveUnavailable::KeyRejected,
+        transcription::cloud::ReadinessFailure::KeyUnreadable => LiveUnavailable::KeyUnreadable,
     })
 }
 
@@ -1336,19 +1348,22 @@ async fn start_live_session(
         if let Some(reason) = live_unavailable() {
             return Err(reason.into());
         }
-        let opener = transcription::cloud::opener()
-            .map_err(|_| "The cloud transcription settings are not usable.")?;
         let start = state
             .0
             .lock()
             .map_err(|_| "The session is unavailable.")?
             .begin_live_start()?;
+        // Made only once this start holds the gate, so a refused second
+        // start can never replace or reuse this session's minute budget.
+        let streams = transcription::cloud::streams()
+            .map_err(|_| "The cloud transcription settings are not usable.")?;
         // Nothing is opened here: the stream opens once the review is
         // approved. The start can still be cancelled before capture.
-        let (start, opener) =
-            tauri::async_runtime::spawn_blocking(move || start.load(|| Ok(opener)))
+        let (start, streams) =
+            tauri::async_runtime::spawn_blocking(move || start.load(|| Ok(streams)))
                 .await
                 .map_err(|_| "Could not start the live session.")??;
+        let (opener, reopener) = streams.into_parts();
         let session = {
             let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
             runtime.sync();
@@ -1457,7 +1472,7 @@ async fn start_live_session(
                                         publish(&reconnect_app, &mut runtime);
                                     };
                                 })
-                                .with_reopener(transcription::cloud::reopener().ok()),
+                                .with_reopener(reopener),
                             ));
                         true
                     });
@@ -2355,6 +2370,10 @@ mod live_readiness_diagnostics_tests {
             (
                 Err(ReadinessFailure::KeyRejected),
                 Err(LiveUnavailable::KeyRejected),
+            ),
+            (
+                Err(ReadinessFailure::KeyUnreadable),
+                Err(LiveUnavailable::KeyUnreadable),
             ),
             (Ok(()), Ok(())),
         ] {

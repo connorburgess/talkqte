@@ -7,7 +7,8 @@ export type KeyProvider = 'deepgram' | 'anthropic';
 
 /** What the notebook may know about a key; never the key itself. */
 export interface KeyStatus {
-  state: 'notSet' | 'set' | 'rejected';
+  /** `unreadable`: the Keychain could not be read, so it is not known. */
+  state: 'notSet' | 'set' | 'rejected' | 'unreadable';
   /** The provider accepted it at the last check in this app run. */
   verified: boolean;
 }

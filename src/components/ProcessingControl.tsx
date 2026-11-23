@@ -54,7 +54,9 @@ export const issueText = {
   worker:
     'Cues stopped: the model connection stopped working. Nothing more will be sent until you turn it on again.',
   keyRejected:
-    'Cues stopped: Anthropic did not accept your API key, or it was removed. Replace it in Settings, then start a new session.',
+    'Cues stopped: Anthropic did not accept your API key. Replace it in Settings, then start a new session.',
+  keyUnavailable:
+    'Cues stopped: your Anthropic key could not be read from the Keychain, or it was removed. Check it in Settings, then start a new session.',
   spendLimit:
     "Cues stopped: this session's estimated spend limit was reached. Nothing more will be sent in this session, and no other service will be used.",
   requestLimit:
@@ -413,6 +415,14 @@ export function ProcessingControl({
             ended: 'Session ended',
           }[snapshot.phase];
 
+  const showAppAudioStart =
+    !!snapshot?.source &&
+    ['off', 'listing', 'reviewing'].includes(snapshot.source.phase);
+  const showLabDetails = isLabProcessor(snapshot?.processor?.id);
+  const showApprovalBySetting = !!snapshot?.approvalBySetting;
+  const showDevGroup =
+    showAppAudioStart || showLabDetails || showApprovalBySetting;
+
   return (
     <section
       ref={panel}
@@ -455,11 +465,6 @@ export function ProcessingControl({
           {sourceLine}
         </p>
       )}
-      {snapshot?.source &&
-        ['off', 'listing', 'reviewing'].includes(snapshot.source.phase) && (
-          // Only a native-audio-spike build reports a source at all.
-          <ApplicationAudioStart />
-        )}
       {sourceOperation && (
         // The source's own Stop: it ends exactly this application source,
         // and a session started for it alone, without touching a microphone.
@@ -520,17 +525,6 @@ export function ProcessingControl({
           )}
         </p>
       )}
-      {isLabProcessor(snapshot?.processor?.id) && (
-        <p className="processing-muted">
-          Fictional development lab. A cue reflects speech up to 8 s before it
-          appears; newer speech is checked next. A reply later than 8 s shows no
-          cue and the run continues. Pause, Dismiss, Off, Stop and any other
-          failure end the run; Resume does not restart it.{' '}
-          {isLabApi(snapshot?.processor?.id)
-            ? "Uses the lab owner's Anthropic API key, billed per token; the lab caps requests and spending per run."
-            : 'The lab shares a CLI-dispatch budget across roles; underlying provider request count is unobserved.'}
-        </p>
-      )}
       {snapshot?.phase === 'off' && snapshot.processor && !snapshot.issue && (
         <p className="processing-muted">
           Cues are off until you turn on the model connection.
@@ -547,14 +541,6 @@ export function ProcessingControl({
       )}
       {active && snapshot?.lastDecision === 'quiet' && (
         <p className="processing-muted">No cue needed for the latest lines.</p>
-      )}
-      {snapshot?.approvalBySetting && (
-        <p className="processing-muted">
-          Model connection approved by the TALKQTE_DEV_MODEL_CONNECTION=on
-          launch setting for this session. Only recent and new conversation
-          lines are approved; no prior notes. Off, Pause cues and Stop remain
-          available.
-        </p>
       )}
       {approved && (
         <details className="processing-approved">
@@ -598,6 +584,11 @@ export function ProcessingControl({
         {(active || paused) && (
           <button
             className="secondary-button"
+            aria-describedby={
+              approved && snapshot?.processor?.id === 'anthropic-api'
+                ? 'own-key-pause-help'
+                : undefined
+            }
             disabled={!!busy || !!status?.failed}
             onClick={() =>
               void act('pause', () => processingApi.pause(snapshot!, !paused))
@@ -650,6 +641,13 @@ export function ProcessingControl({
           </button>
         )}
       </div>
+      {approved && snapshot?.processor?.id === 'anthropic-api' && (
+        <p className="processing-muted" id="own-key-pause-help">
+          Pause cues stops cue requests only: the session&apos;s audio still
+          goes to Deepgram and is billed to your account. Disable processing or
+          Stop ends that.
+        </p>
+      )}
       {approved && (
         <p className="processing-muted">
           Pause and Disable processing leave the microphone on. Disable
@@ -665,6 +663,7 @@ export function ProcessingControl({
             void prepare();
           }}
         >
+          <p className="processing-step">Step 1 of 2</p>
           <h3 ref={editHeading} tabIndex={-1}>
             Choose what to process
           </h3>
@@ -760,6 +759,7 @@ export function ProcessingControl({
       )}
       {review && (
         <div className="processing-review">
+          <p className="processing-step">Step 2 of 2</p>
           <h3 ref={reviewHeading} tabIndex={-1}>
             Review before enabling
           </h3>
@@ -826,6 +826,44 @@ export function ProcessingControl({
         <p className="processing-message" role="alert">
           {error}
         </p>
+      )}
+      {showDevGroup && (
+        <div
+          className="processing-dev"
+          role="group"
+          aria-labelledby="processing-dev-title"
+        >
+          <p id="processing-dev-title" className="processing-dev-label">
+            Development build
+          </p>
+          {showAppAudioStart && (
+            // Only a native-audio-spike build reports a source at all.
+            <ApplicationAudioStart />
+          )}
+          {showLabDetails && (
+            <details className="processing-dev-details">
+              <summary>Lab run details</summary>
+              <p className="processing-muted">
+                Fictional development lab. A cue reflects speech up to 8 s
+                before it appears; newer speech is checked next. A reply later
+                than 8 s shows no cue and the run continues. Pause, Dismiss,
+                Off, Stop and any other failure end the run; Resume does not
+                restart it.{' '}
+                {isLabApi(snapshot?.processor?.id)
+                  ? "Uses the lab owner's Anthropic API key, billed per token; the lab caps requests and spending per run."
+                  : 'The lab shares a CLI-dispatch budget across roles; underlying provider request count is unobserved.'}
+              </p>
+            </details>
+          )}
+          {showApprovalBySetting && (
+            <p className="processing-muted">
+              Model connection approved by the TALKQTE_DEV_MODEL_CONNECTION=on
+              launch setting for this session. Only recent and new conversation
+              lines are approved; no prior notes. Off, Pause cues and Stop
+              remain available.
+            </p>
+          )}
+        </div>
       )}
     </section>
   );

@@ -712,6 +712,7 @@ test('the API lab names Claude, its billing and caps, and shares the lab stop ru
     phase: 'active',
     sending: true,
   });
+  await page.getByText('Lab run details', { exact: true }).click();
   await expect(
     page.getByText(
       /A cue reflects speech up to 8 s before it appears; newer speech is checked next\. A reply later than 8 s shows no cue and the run continues\. Pause, Dismiss, Off, Stop and any other failure end the run; Resume does not restart it\. Uses the lab owner's Anthropic API key, billed per token; the lab caps requests and spending per run\./,
@@ -778,6 +779,7 @@ test('strict subscription lab names Codex and discloses terminal controls in the
       .getByRole('status')
       .filter({ hasText: 'Sending recent lines to Codex' }),
   ).toBeVisible();
+  await page.getByText('Lab run details', { exact: true }).click();
   await expect(
     page.getByText(
       /A cue reflects speech up to 8 s before it appears; newer speech is checked next\. A reply later than 8 s shows no cue and the run continues\. Pause, Dismiss, Off, Stop and any other failure end the run/,
@@ -817,6 +819,7 @@ test('selected API identity keeps lab billing and launch-approval guidance', asy
       /launch-time approval.*not accepted for the API lab backend/,
     ),
   ).toBeVisible();
+  await page.getByText('Lab run details', { exact: true }).click();
   await expect(
     page.getByText(/Uses the lab owner's Anthropic API key, billed per token/),
   ).toBeVisible();

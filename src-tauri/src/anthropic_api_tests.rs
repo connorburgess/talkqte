@@ -313,7 +313,12 @@ fn a_refused_key_is_marked_rejected_and_a_missing_key_sends_nothing() {
     }
     let transport = Scripted::default();
     let mut run = run(transport.clone(), None, None);
-    assert_eq!(run.evaluate(&request(None)).unwrap_err(), Failure::SignIn);
+    // A key no longer in the Keychain is not a refusal by Anthropic.
+    assert_eq!(
+        run.evaluate(&request(None)).unwrap_err(),
+        Failure::Credentials
+    );
+    assert_eq!(*run.rejected.lock().unwrap(), 0);
     assert!(transport.sent().is_empty());
     assert_eq!(run.usage.snapshot(haiku()).requests, 0);
 }
@@ -409,6 +414,8 @@ fn the_review_names_the_provider_key_billing_caps_and_both_destinations() {
         "Model claude-haiku-5-5",
         "never sends Anthropic audio",
         "no other service is used",
+        "Pause cues stops these requests but not the audio to Deepgram; Off and Stop end both",
+        "Pausing cues does not stop the audio; turning processing off or Stop does",
         "to Deepgram (US, model Nova-3)",
         "with your own Deepgram API key",
         "opt out of its Model Improvement Program",
@@ -445,6 +452,30 @@ struct Session {
 
 fn session(transport: Scripted) -> Session {
     session_with_cap(transport, SPEND_CAP_MICRO_USD)
+}
+
+#[test]
+fn a_key_removed_mid_session_stops_cues_as_unavailable_not_rejected() {
+    let transport = Scripted::default();
+    let adapter = AnthropicApi::new(
+        haiku(),
+        transport.clone(),
+        Box::new(|| Err(KeyError::NotSet(Provider::Anthropic))),
+        Box::new(|| panic!("a missing key is not a refusal")),
+        Arc::default(),
+    );
+    let mut engine = registered(adapter, haiku(), None);
+    engine.start().unwrap();
+    let mut s = Session {
+        engine,
+        transport,
+        line: 0,
+    };
+    s.approve();
+    s.say("The fictional rota has two gaps.");
+    s.settle();
+    assert_eq!(s.issue(), "keyUnavailable");
+    assert!(s.transport.sent().is_empty());
 }
 
 fn session_with_cap(transport: Scripted, cap: u64) -> Session {
@@ -543,8 +574,13 @@ fn pause_cancels_the_request_without_ending_cues_and_resume_continues() {
             .answer(Ok((200, sse(MODEL, &quiet, "end_turn")))),
     );
     s.approve();
+    let session = s.engine.session();
     s.say("The fictional rota has two gaps.");
     s.engine.set_live_cues_paused(true).unwrap();
+    // Paused: cue requests stop, but the approval holds, so the session's
+    // audio is still sent to Deepgram, as the review and Pause help say.
+    assert!(s.engine.audio_approval(session).is_some());
+    assert_eq!(s.engine.audio_withdrawal(session), None);
     s.engine.set_live_cues_paused(false).unwrap();
     assert!(s.engine.has_processing_permission());
     assert_eq!(s.issue(), Value::Null);
@@ -552,6 +588,9 @@ fn pause_cancels_the_request_without_ending_cues_and_resume_continues() {
     s.settle();
     assert!(s.engine.has_processing_permission());
     assert_eq!(s.issue(), Value::Null);
+    // Off ends the audio too.
+    s.engine.revoke_processing();
+    assert_eq!(s.engine.audio_withdrawal(session), Some("withdrawn"));
 }
 
 #[test]

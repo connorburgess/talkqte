@@ -10,9 +10,9 @@ Anthropic key for [cue decisions](own-key-cues.md).
 
 **Settings → Your API keys** (`src/components/ProviderKeys.tsx`) has one form
 per provider: what the key is for and how it is billed, its state (**Not
-set**, **Set, not checked yet**, **Set and checked**, or **Rejected by …
-Replace it with a new key.**), a password field that is cleared after
-saving, and **Save key**, **Test key** and **Remove key**. Errors are the
+set**, **Set, not checked yet**, **Set and checked**, **Rejected by …
+Replace it with a new key.**, or **Could not be read from the Keychain**), a password field that is cleared after
+saving or after a refused save, and **Save key**, **Test key** and **Remove key**. Errors are the
 fixed messages below, announced as alerts. Below the forms, the current
 session's cue requests and estimated spend are shown as "This session: 12 of
 400 cue requests, about $0.03 of $0.50 (an estimate, not your bill), model
@@ -64,7 +64,10 @@ first-run screen reads `provider_keys_status` at launch.
 }
 ```
 
-`state` is `notSet`, `set` or `rejected`. `verified` is true only after a
+`state` is `notSet`, `set`, `rejected` or `unreadable` (the Keychain could
+not be read, so whether a key is stored is unknown; nothing is attempted with
+it, and it does not count as missing). Each status call reads the Keychain
+again, so a key deleted or added outside TalkQTE is seen. `verified` is true only after a
 passing check in this app run, and is cleared when the key is replaced or
 rejected. `anyMissing` is true while either key is not set: the "no keys set"
 state a first-run screen asks for. A failed command returns one fixed message,

@@ -28,14 +28,14 @@ AI is intended to select relevant context, decide whether a cue would help, and 
 
 **Early development.** The app runs from source on macOS. With your own Deepgram and Anthropic keys, an ordinary build transcribes a live session through Deepgram and asks the Anthropic API whether to show a cue; without them it has no live transcription. Dependable meeting understanding and useful cues remain unverified. The microphone setup below can send your microphone to Deepgram after session approval and apply phrase-based questions; that microphone-only path does not capture other apps' audio. TalkQTE does not transcribe on the device. There is no supported public release; the [macOS release path](docs/release-path.md) lists what is configured and what remains.
 
-| Working prototype                                                                                                          | Still to build and validate                                                             |
-| -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Phrase-based cues on a live session's transcript (developer build)                                                         | AI-selected context and prompts grounded in the conversation                            |
-| Floating companion, source disclosure, pause, and dismissal                                                                | Useful timing, and semantic suppression of answered questions and stale cues            |
-| Phrase-based withdrawal for answers, corrections, and topic openings; the same question is not repeated within two minutes | Recognizing paraphrased answers, duplicates, and topic changes said in other words      |
+| Working prototype                                                                                                          | Still to build and validate                                                              |
+| -------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Phrase-based cues on a live session's transcript (developer build)                                                         | AI-selected context and prompts grounded in the conversation                             |
+| Floating companion, source disclosure, pause, and dismissal                                                                | Useful timing, and semantic suppression of answered questions and stale cues             |
+| Phrase-based withdrawal for answers, corrections, and topic openings; the same question is not repeated within two minutes | Recognizing paraphrased answers, duplicates, and topic changes said in other words       |
 | Opt-in microphone activity check; cloud-transcribed live session (dev build, per-session consent)                          | Both sides of meeting audio, real-meeting accuracy, and transcription in ordinary builds |
-| Selected file-note imports, title-match reminders, and a development Granola connection                                    | Account refresh/recovery checks, and evidence that reminders help rather than interrupt |
-| In-memory notes and reviewed Markdown export                                                                               | Reliable meeting use, processing choices, and install/update support                    |
+| Selected file-note imports, title-match reminders, and a development Granola connection                                    | Account refresh/recovery checks, and evidence that reminders help rather than interrupt  |
+| In-memory notes and reviewed Markdown export                                                                               | Reliable meeting use, processing choices, and install/update support                     |
 
 The microphone indicator measures signal activity only. It does not transcribe or record, and it raises no cues. A live session is separate: see [Live session](#live-session). Granola sign-in, listing, and requested focus suggestions have worked in account checks; the owner also confirmed native note import and removal on 11 November. Refresh, failure recovery and account data-flow checks remain. Imported-note reminders use title-word matches, not a judgment of relevance. See [current privacy behavior](PRIVACY.md) and the [native validation record](docs/native-validation.md) for the limits of existing checks.
 
@@ -143,7 +143,7 @@ TalkQTE is **source-available** under the [Sustainable Use License 1.0](LICENSE)
 - You can inspect and modify the source, and share copies free of charge for noncommercial purposes while preserving the required notices.
 - Selling TalkQTE, white-labeling it for customers, incorporating its implementation into a commercial product, or offering it as a paid hosted service requires a separate commercial agreement.
 
-Using your notes in paid work or connecting a permitted TalkQTE installation to another note-taker does not by itself require a commercial agreement. This is not an OSI-approved open-source license. Previously published Apache-2.0 material keeps its existing permissions.
+Using your notes in paid work or connecting a permitted TalkQTE installation to another note-taker does not by itself require a commercial agreement. This is not an OSI-approved open-source license.
 
 See the [licensing guide](LICENSING.md) for examples, prior-version rights, and commercial inquiries. The license text governs. The TalkQTE name and logo are covered separately by the [name and logo guide](TRADEMARKS.md).
 
