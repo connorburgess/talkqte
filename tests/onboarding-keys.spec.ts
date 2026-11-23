@@ -1,8 +1,14 @@
-// First-run onboarding and Settings Service keys checks against the fictional
-// test fixture in tests/fixtures/native-microphone.ts. No real keys or network
-// requests are ever made.
+// First-run onboarding and Settings Service keys checks against the real
+// PR #408 / #411 command shapes mocked in tests/fixtures/native-microphone.ts.
+// No real keys or network requests are ever made.
 import { expect, test, type Page } from '@playwright/test';
 import type {} from './fixtures/native-microphone';
+
+const FICTIONAL_DEEPGRAM_KEY = 'fictionaldeepgramkey0123456789abcdef0123';
+const FICTIONAL_DEEPGRAM_REPLACEMENT =
+  'fictionaldeepgramreplacement9876543210ab';
+const FICTIONAL_ANTHROPIC_KEY =
+  'sk-ant-api03-fictional-test-key-0123456789abcdef0123456789';
 
 async function openDesktop(page: Page, query = '') {
   await page.route('**/*', async (route) => {
@@ -79,7 +85,9 @@ test('onboarding opens with no keys, moves focus to each step heading, and Escap
     ),
   ).toBeVisible();
   const calls = await page.evaluate(() => window.keysTest.calls);
-  expect(calls.filter((c) => c.command === 'keys_test')).toHaveLength(0);
+  expect(calls.filter((c) => c.command === 'test_provider_key')).toHaveLength(
+    0,
+  );
 
   // Step 3: informational only, focus on heading.
   await page.getByRole('button', { name: 'Next: Permissions' }).click();
@@ -129,48 +137,71 @@ test('onboarding opens with no keys, moves focus to each step heading, and Escap
   await expect(notebookHeading).toBeFocused();
 });
 
-test('key entry clears and never echoes, Test -> Rejected -> Replace -> Set, Remove confirms, and Settings reopens onboarding', async ({
+test('key entry validates and clears without echoing, Test -> Rejected -> Replace -> Checked, Remove confirms, provider-keys:changed syncs, and cue_usage displays without model', async ({
   page,
 }) => {
-  const syntheticSecret = 'fictional-api-key-never-echo-9981';
-  const replacementSecret = 'fictional-replacement-key-4420';
   await openDesktop(page, '?keys&live');
 
-  // Go to Step 2 and add Deepgram key.
+  // Go to Step 2 and verify exact Deepgram & Anthropic data statements.
   await page.getByRole('button', { name: 'Next: Your keys' }).click();
   const deepgram = page.getByRole('region', { name: 'Deepgram' });
+  const anthropic = page.getByRole('region', { name: 'Anthropic' });
   await expect(deepgram).toContainText('Not set');
   await expect(deepgram).toContainText(
-    "Receives the session's audio, only after you approve cue processing for that session.",
+    "Receives the session's audio (microphone or the application you chose), only after you approve cue processing for that session; at most 120 minutes per session. Billed to your own Deepgram account.",
+  );
+  await expect(anthropic).toContainText(
+    'Receives up to six recent transcript lines, the cue on screen and earlier cues, and your session name if set, for cue decisions; never audio, your notes or focus lines. Billed to your own Anthropic account.',
   );
 
+  // Bad shape rejects with verbatim Rust error and clears the password input.
+  await anthropic.getByRole('button', { name: 'Add key' }).click();
+  const anthropicInput = anthropic.getByLabel(/Anthropic API key/);
+  await anthropicInput.fill('not-a-valid-key');
+  await anthropic.getByRole('button', { name: 'Save key' }).click();
+  await expect(anthropic.getByRole('alert')).toHaveText(
+    'That does not look like an Anthropic API key. It starts with sk-ant-api.',
+  );
+  await expect(anthropicInput).toHaveValue('');
+  await anthropic.getByRole('button', { name: 'Cancel' }).click();
+
+  // Valid Deepgram key clears, sets Set (not yet Checked), and never echoes.
   await deepgram.getByRole('button', { name: 'Add key' }).click();
   const input = deepgram.getByLabel(/Deepgram API key/);
   await expect(input).toHaveAttribute('type', 'password');
   const save = deepgram.getByRole('button', { name: 'Save key' });
   await expect(save).toBeDisabled();
 
-  await input.fill(syntheticSecret);
+  await input.fill(FICTIONAL_DEEPGRAM_KEY);
   await expect(save).toBeEnabled();
   await save.click();
 
   await expect(deepgram).toContainText('Set');
-  // Secret must never appear anywhere in the rendered page or DOM attributes.
-  await expect(page.locator('body')).not.toContainText(syntheticSecret);
+  await expect(deepgram).not.toContainText('Checked');
+  await expect(page.locator('body')).not.toContainText(FICTIONAL_DEEPGRAM_KEY);
   expect(
     await page.evaluate(
       (secret) => document.documentElement.innerHTML.includes(secret),
-      syntheticSecret,
+      FICTIONAL_DEEPGRAM_KEY,
     ),
   ).toBe(false);
 
-  // Test -> Checking… (controls disabled) -> Rejected.
+  // Unreachable error shows the exact verbatim message from Rust without changing Set.
   await page.evaluate(() => {
     window.keysTest.setTestOutcome('deepgram', {
-      status: 'rejected',
-      reason: 'refused',
-      message: 'Refused by the service.',
+      error:
+        'Deepgram could not be reached to check the key. Nothing was changed.',
     });
+  });
+  await deepgram.getByRole('button', { name: 'Test' }).click();
+  await expect(deepgram.getByRole('alert')).toHaveText(
+    'Deepgram could not be reached to check the key. Nothing was changed.',
+  );
+  await expect(deepgram).toContainText('Set');
+
+  // Test -> Checking… (controls disabled) -> Rejected.
+  await page.evaluate(() => {
+    window.keysTest.setTestOutcome('deepgram', 'rejected');
     window.keysTest.holdNextTest();
   });
   await deepgram.getByRole('button', { name: 'Test' }).click();
@@ -187,25 +218,26 @@ test('key entry clears and never echoes, Test -> Rejected -> Replace -> Set, Rem
     'Refused by the service.',
   );
 
-  // Replace -> password input starts empty -> Set -> Test succeeds.
+  // Replace -> password input starts empty -> Set -> Test verifies ("Checked").
   await deepgram.getByRole('button', { name: 'Replace' }).click();
   const replaceInput = deepgram.getByLabel(/Deepgram API key/);
   await expect(replaceInput).toHaveValue('');
-  await replaceInput.fill(replacementSecret);
+  await replaceInput.fill(FICTIONAL_DEEPGRAM_REPLACEMENT);
   await deepgram.getByRole('button', { name: 'Save key' }).click();
   await expect(deepgram).toContainText('Set');
   expect(
     await page.evaluate(
       (secret) => document.documentElement.innerHTML.includes(secret),
-      replacementSecret,
+      FICTIONAL_DEEPGRAM_REPLACEMENT,
     ),
   ).toBe(false);
 
   await page.evaluate(() => {
-    window.keysTest.setTestOutcome('deepgram', { status: 'set' });
+    window.keysTest.setTestOutcome('deepgram', 'verified');
   });
   await deepgram.getByRole('button', { name: 'Test' }).click();
   await expect(deepgram).toContainText('Set');
+  await expect(deepgram).toContainText('Checked');
   await expect(deepgram.getByRole('alert')).toHaveCount(0);
 
   // Remove asks for inline confirmation; Cancel keeps Set; Remove key sets Not set.
@@ -225,7 +257,8 @@ test('key entry clears and never echoes, Test -> Rejected -> Replace -> Set, Rem
     .click();
   await expect(deepgram).toContainText('Not set');
 
-  // Skip setup, inspect Settings Service keys + This session estimate, then reopen onboarding.
+  // Skip setup, inspect Settings Service keys + cue_usage (without showing model),
+  // verify provider-keys:changed event updates Settings live, then reopen onboarding.
   await page.getByRole('button', { name: 'Skip setup' }).click();
   await expect(
     page.getByRole('heading', { name: 'No session yet', level: 1 }),
@@ -233,22 +266,37 @@ test('key entry clears and never echoes, Test -> Rejected -> Replace -> Set, Rem
 
   await page.evaluate(() => {
     window.keysTest.setUsage({
-      anthropicRequests: 12,
-      anthropicCap: 40,
-      estimatedSpendUsd: 0.06,
-      active: true,
+      model: 'claude-sonnet-fictional-hidden',
+      requests: 12,
+      requestCap: 400,
+      spentMicroUsd: 60_000,
+      spendCapMicroUsd: 500_000,
     });
   });
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const keysSection = page.getByRole('region', { name: 'Service keys' });
   await expect(keysSection).toBeVisible();
   await expect(keysSection).toContainText('This session');
-  await expect(keysSection).toContainText('12 of 40');
-  await expect(keysSection).toContainText('40 requests');
-  await expect(keysSection).toContainText('Est. $0.06');
+  await expect(keysSection).toContainText('12 of 400');
+  await expect(keysSection).toContainText('Est. $0.06 of $0.50');
   await expect(keysSection).toContainText(
     'Estimate calculated locally from token counts; not a bill from Anthropic.',
   );
+  await expect(keysSection).not.toContainText('claude-sonnet-fictional-hidden');
+
+  // Event `provider-keys:changed` updates Settings rows live.
+  await page.evaluate(() =>
+    window.keysTest.emitStatus({
+      deepgram: { state: 'set', verified: true },
+      anthropic: { state: 'notSet', verified: false },
+      anyMissing: true,
+    }),
+  );
+  const settingsDeepgram = keysSection.getByRole('region', {
+    name: 'Deepgram',
+  });
+  await expect(settingsDeepgram).toContainText('Set');
+  await expect(settingsDeepgram).toContainText('Checked');
 
   // Reopen onboarding via "Set up TalkQTE again".
   await page.getByRole('button', { name: 'Set up TalkQTE again' }).click();
@@ -259,7 +307,7 @@ test('key entry clears and never echoes, Test -> Rejected -> Replace -> Set, Rem
     }),
   ).toBeFocused();
 
-  // Verify empty This session state when keys are already set (no auto-onboarding).
+  // Fresh load with keys already set: no auto-onboarding, empty cue_usage state.
   await openDesktop(page, '?keys=set');
   await expect(
     page.getByRole('heading', { name: 'No session yet', level: 1 }),
@@ -267,7 +315,7 @@ test('key entry clears and never echoes, Test -> Rejected -> Replace -> Set, Rem
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(
     page.getByRole('region', { name: 'Service keys' }),
-  ).toContainText('0 of 40 Anthropic requests · Est. $0.00');
+  ).toContainText('0 of 400 Anthropic requests · Est. $0.00 of $0.50');
 });
 
 test('keyboard-only path completes all four steps and finishes in the notebook', async ({
@@ -294,7 +342,7 @@ test('keyboard-only path completes all four steps and finishes in the notebook',
   await anthropic.getByRole('button', { name: 'Add key' }).focus();
   await page.keyboard.press('Enter');
   await expect(anthropic.getByLabel(/Anthropic API key/)).toBeFocused();
-  await page.keyboard.type('fictional-keyboard-secret');
+  await page.keyboard.type(FICTIONAL_ANTHROPIC_KEY);
   await page.keyboard.press('Enter');
   await expect(anthropic).toContainText('Set');
 

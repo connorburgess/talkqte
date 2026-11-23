@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ServiceKeysController } from '../lib/keys';
+import type { ProviderKeysController } from '../lib/keys';
 import { ServiceKeysRows } from './ServiceKeys';
 import './onboarding.css';
 
 type Step = 1 | 2 | 3 | 4;
 
 interface OnboardingProps {
-  keys: ServiceKeysController;
+  keys: ProviderKeysController;
   canStartLive: boolean;
   onSkip: () => void;
   onFinish: () => void;
@@ -255,9 +255,11 @@ export function Onboarding({
                       this session
                     </strong>{' '}
                     names both services explicitly: <strong>Deepgram</strong>{' '}
-                    (session audio for transcription) and{' '}
-                    <strong>Anthropic</strong> (recent transcript lines and
-                    selected notes for cue decisions).
+                    (session audio for transcription, up to 120 minutes per
+                    session) and <strong>Anthropic</strong> (up to six recent
+                    transcript lines, the cue on screen and earlier cues, and
+                    your session name if set, for cue decisions; never audio,
+                    your notes or focus lines).
                   </li>
                   <li>
                     <strong>Stop</strong> ends the session, releases the

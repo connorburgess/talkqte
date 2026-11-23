@@ -43,7 +43,7 @@ import {
 } from './components/PanelDivider';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
 import { useCaptureControl } from './lib/useCaptureControl';
-import { useServiceKeys } from './lib/keys';
+import { useProviderKeys } from './lib/keys';
 import { ServiceKeys } from './components/ServiceKeys';
 import { Onboarding } from './components/Onboarding';
 import {
@@ -691,7 +691,7 @@ function Notebook() {
   // The setup card: put away for this app session with Not now, or gone
   // once the required steps are done.
   const [setupDismissed, setSetupDismissed] = useState(false);
-  const keys = useServiceKeys();
+  const keys = useProviderKeys();
   const [onboardingState, setOnboardingState] = useState<
     'idle' | 'open' | 'skipped' | 'finished'
   >('idle');
@@ -766,8 +766,9 @@ function Notebook() {
     onboardingChecked.current = true;
     if (
       keys.available &&
-      keys.status.deepgram.status === 'not_set' &&
-      keys.status.anthropic.status === 'not_set' &&
+      keys.status.anyMissing &&
+      keys.status.deepgram.state === 'notSet' &&
+      keys.status.anthropic.state === 'notSet' &&
       !preparing &&
       !finishing &&
       !state.live

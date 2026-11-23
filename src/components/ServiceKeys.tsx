@@ -1,9 +1,15 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { KeyProvider, KeyState, ServiceKeysController } from '../lib/keys';
+import {
+  DEFAULT_REQUEST_CAP,
+  DEFAULT_SPEND_CAP_MICRO_USD,
+  type KeyStatus,
+  type Provider,
+  type ProviderKeysController,
+} from '../lib/keys';
 import './service-keys.css';
 
 interface ProviderCopy {
-  id: KeyProvider;
+  id: Provider;
   name: string;
   role: string;
   whereToGet: string;
@@ -19,7 +25,7 @@ const PROVIDERS: ProviderCopy[] = [
     whereToGet:
       'Deepgram Console (console.deepgram.com) → API Keys. No link is fetched by TalkQTE.',
     dataStatement:
-      "Receives the session's audio, only after you approve cue processing for that session. Billed to your own Deepgram account.",
+      "Receives the session's audio (microphone or the application you chose), only after you approve cue processing for that session; at most 120 minutes per session. Billed to your own Deepgram account.",
     removeWarning: 'Live transcription will stop until a key is added again.',
   },
   {
@@ -29,30 +35,32 @@ const PROVIDERS: ProviderCopy[] = [
     whereToGet:
       'Anthropic Console (console.anthropic.com) → API Keys. No link is fetched by TalkQTE.',
     dataStatement:
-      'Receives recent transcript lines and any notes you approve, for cue decisions. Billed to your own Anthropic account.',
+      'Receives up to six recent transcript lines, the cue on screen and earlier cues, and your session name if set, for cue decisions; never audio, your notes or focus lines. Billed to your own Anthropic account.',
     removeWarning: 'Cue decisions will stop until a key is added again.',
   },
 ];
 
-function chipLabel(state: KeyState): string {
-  switch (state.status) {
-    case 'not_set':
+function formatMicroUsd(microUsd: number): string {
+  return `$${(microUsd / 1_000_000).toFixed(2)}`;
+}
+
+function chipLabel(keyStatus: KeyStatus, checking: boolean): string {
+  if (checking) return 'Checking…';
+  switch (keyStatus.state) {
+    case 'notSet':
       return 'Not set';
     case 'set':
       return 'Set';
-    case 'checking':
-      return 'Checking…';
     case 'rejected':
       return 'Rejected';
   }
 }
 
-function chipClass(state: KeyState): string {
-  switch (state.status) {
+function chipClass(keyStatus: KeyStatus, checking: boolean): string {
+  if (checking) return 'sk-chip is-checking';
+  switch (keyStatus.state) {
     case 'set':
       return 'sk-chip is-set';
-    case 'checking':
-      return 'sk-chip is-checking';
     case 'rejected':
       return 'sk-chip is-rejected';
     default:
@@ -60,26 +68,24 @@ function chipClass(state: KeyState): string {
   }
 }
 
-function rejectionHeadline(reason: 'refused' | 'unreachable'): string {
-  return reason === 'refused'
-    ? 'Refused by the service.'
-    : 'Could not reach the service.';
-}
-
 function ProviderRow({
   provider,
-  state,
+  keyStatus,
+  checking,
   busy,
+  errorMessage,
   showWhereToGet,
   onSave,
   onTest,
   onRemove,
 }: {
   provider: ProviderCopy;
-  state: KeyState;
+  keyStatus: KeyStatus;
+  checking: boolean;
   busy: boolean;
+  errorMessage: string;
   showWhereToGet: boolean;
-  onSave: (secret: string) => Promise<boolean>;
+  onSave: (key: string) => Promise<boolean>;
   onTest: () => Promise<void>;
   onRemove: () => Promise<boolean>;
 }) {
@@ -112,11 +118,10 @@ function ProviderRow({
     };
   }, []);
 
-  const checking = state.status === 'checking' || busy;
-  const hasKey =
-    state.status === 'set' ||
-    state.status === 'checking' ||
-    state.status === 'rejected';
+  const locked = checking || busy;
+  const hasKey = keyStatus.state === 'set' || keyStatus.state === 'rejected';
+  const showVerified =
+    !checking && keyStatus.state === 'set' && keyStatus.verified;
 
   const closeEntry = () => {
     if (inputRef.current) inputRef.current.value = '';
@@ -135,21 +140,30 @@ function ProviderRow({
     if (saved) setEntering(false);
   };
 
+  const alertText =
+    errorMessage ||
+    (!checking && keyStatus.state === 'rejected'
+      ? `Refused by the service. Check the key in your ${provider.name} account and replace it here.`
+      : '');
+
   return (
     <section
       className="sk-row"
       data-provider={provider.id}
       aria-labelledby={headingId}
-      aria-busy={checking || undefined}
+      aria-busy={locked || undefined}
     >
       <div className="sk-row-head">
         <div className="sk-provider">
           <h3 id={headingId}>{provider.name}</h3>
           <span className="sk-role">{provider.role}</span>
         </div>
-        <span className={chipClass(state)} aria-live="polite">
-          {chipLabel(state)}
-        </span>
+        <div className="sk-status-group" aria-live="polite">
+          <span className={chipClass(keyStatus, checking)}>
+            {chipLabel(keyStatus, checking)}
+          </span>
+          {showVerified && <span className="sk-verified">Checked</span>}
+        </div>
       </div>
 
       {showWhereToGet && (
@@ -159,21 +173,16 @@ function ProviderRow({
       )}
       <p className="sk-statement">{provider.dataStatement}</p>
 
-      {state.status === 'checking' && (
+      {checking && (
         <p className="sk-checking-note" role="status">
           Sending one test request to {provider.name}. Controls wait until it
           finishes.
         </p>
       )}
 
-      {state.status === 'rejected' && (
+      {alertText && (
         <div className="sk-error" role="alert">
-          <strong>{rejectionHeadline(state.reason)}</strong>{' '}
-          {state.message && state.message !== rejectionHeadline(state.reason)
-            ? state.message
-            : state.reason === 'refused'
-              ? `Check the key in your ${provider.name} account and replace it here.`
-              : 'Check your internet connection and try Test again.'}
+          {alertText}
         </div>
       )}
 
@@ -183,7 +192,7 @@ function ProviderRow({
             <button
               type="button"
               className="primary-button sk-action-button"
-              disabled={checking}
+              disabled={locked}
               onClick={() => {
                 setConfirmingRemove(false);
                 setEntering(true);
@@ -196,7 +205,7 @@ function ProviderRow({
               <button
                 type="button"
                 className="secondary-button sk-action-button"
-                disabled={checking}
+                disabled={locked}
                 onClick={() => void onTest()}
               >
                 Test
@@ -204,7 +213,7 @@ function ProviderRow({
               <button
                 type="button"
                 className="secondary-button sk-action-button"
-                disabled={checking}
+                disabled={locked}
                 onClick={() => {
                   setConfirmingRemove(false);
                   setEntering(true);
@@ -216,7 +225,7 @@ function ProviderRow({
                 ref={removeButtonRef}
                 type="button"
                 className="secondary-button sk-action-button sk-danger-button"
-                disabled={checking}
+                disabled={locked}
                 onClick={() => {
                   closeEntry();
                   setConfirmingRemove(true);
@@ -245,7 +254,7 @@ function ProviderRow({
               autoCorrect="off"
               autoCapitalize="off"
               spellCheck={false}
-              disabled={checking}
+              disabled={locked}
               onChange={(event) =>
                 setHasInput(event.target.value.trim().length > 0)
               }
@@ -253,14 +262,14 @@ function ProviderRow({
             <button
               type="submit"
               className="primary-button sk-action-button"
-              disabled={checking || !hasInput}
+              disabled={locked || !hasInput}
             >
               Save key
             </button>
             <button
               type="button"
               className="secondary-button sk-action-button"
-              disabled={checking}
+              disabled={locked}
               onClick={closeEntry}
             >
               Cancel
@@ -284,7 +293,7 @@ function ProviderRow({
               ref={cancelRemoveRef}
               type="button"
               className="secondary-button sk-action-button"
-              disabled={checking}
+              disabled={locked}
               onClick={() => {
                 setConfirmingRemove(false);
                 setTimeout(() => removeButtonRef.current?.focus(), 0);
@@ -295,7 +304,7 @@ function ProviderRow({
             <button
               type="button"
               className="secondary-button sk-action-button sk-danger-button"
-              disabled={checking}
+              disabled={locked}
               onClick={() => {
                 void onRemove().then((removed) => {
                   if (removed) setConfirmingRemove(false);
@@ -316,7 +325,7 @@ export function ServiceKeysRows({
   keys,
   showWhereToGet = false,
 }: {
-  keys: ServiceKeysController;
+  keys: ProviderKeysController;
   showWhereToGet?: boolean;
 }) {
   if (!keys.loaded) {
@@ -339,19 +348,16 @@ export function ServiceKeysRows({
 
   return (
     <div className="sk-rows">
-      {keys.error && (
-        <div className="sk-error" role="alert">
-          {keys.error}
-        </div>
-      )}
       {PROVIDERS.map((provider) => (
         <ProviderRow
           key={provider.id}
           provider={provider}
-          state={keys.status[provider.id]}
+          keyStatus={keys.status[provider.id]}
+          checking={keys.checkingProvider === provider.id}
           busy={keys.busyProvider === provider.id}
+          errorMessage={keys.rowErrors[provider.id]}
           showWhereToGet={showWhereToGet}
-          onSave={(secret) => keys.setKey(provider.id, secret)}
+          onSave={(key) => keys.setKey(provider.id, key)}
           onTest={() => keys.testKey(provider.id)}
           onRemove={() => keys.removeKey(provider.id)}
         />
@@ -361,10 +367,9 @@ export function ServiceKeysRows({
 }
 
 /** Settings section mounted once directly after Live transcription. */
-export function ServiceKeys({ keys }: { keys: ServiceKeysController }) {
+export function ServiceKeys({ keys }: { keys: ProviderKeysController }) {
   const { usage } = keys;
-  const spend = `Est. $${usage.estimatedSpendUsd.toFixed(2)}`;
-  const showActiveUsage = usage.active || usage.anthropicRequests > 0;
+  const defaultSpendCap = formatMicroUsd(DEFAULT_SPEND_CAP_MICRO_USD);
 
   return (
     <section
@@ -397,29 +402,26 @@ export function ServiceKeys({ keys }: { keys: ServiceKeysController }) {
                 <div className="sk-row-head">
                   <h3>This session</h3>
                   <span className="sk-role">
-                    {showActiveUsage
+                    {usage
                       ? 'Active session · local estimate only'
                       : 'No session yet'}
                   </span>
                 </div>
-                {showActiveUsage ? (
+                {usage ? (
                   <>
                     <div className="sk-session-grid">
                       <div className="sk-stat">
                         <span className="sk-role">Anthropic requests</span>
                         <span className="sk-stat-value">
-                          {usage.anthropicRequests} of {usage.anthropicCap}
-                        </span>
-                      </div>
-                      <div className="sk-stat">
-                        <span className="sk-role">Per-session cap</span>
-                        <span className="sk-stat-value">
-                          {usage.anthropicCap} requests
+                          {usage.requests} of {usage.requestCap}
                         </span>
                       </div>
                       <div className="sk-stat">
                         <span className="sk-role">Estimated spend</span>
-                        <span className="sk-stat-value">{spend}</span>
+                        <span className="sk-stat-value">
+                          Est. {formatMicroUsd(usage.spentMicroUsd)} of{' '}
+                          {formatMicroUsd(usage.spendCapMicroUsd)}
+                        </span>
                       </div>
                     </div>
                     <p className="sk-estimate-note">
@@ -429,9 +431,10 @@ export function ServiceKeys({ keys }: { keys: ServiceKeysController }) {
                   </>
                 ) : (
                   <p className="sk-estimate-note">
-                    No session yet · 0 of {usage.anthropicCap} Anthropic
-                    requests · {spend} (estimate from token counts, not a bill).
-                    Counts reset when a new session starts.
+                    No session yet · 0 of {DEFAULT_REQUEST_CAP} Anthropic
+                    requests · Est. $0.00 of {defaultSpendCap} (estimate from
+                    token counts, not a bill). Counts reset when a new session
+                    starts.
                   </p>
                 )}
               </div>

@@ -64,6 +64,20 @@
   text-transform: uppercase;
   color: var(--muted);
 }
+.sk-status-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+.sk-verified {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+}
 .sk-chip {
   display: inline-flex;
   align-items: center;
@@ -211,7 +225,7 @@
 }
 .sk-session-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-12);
   margin-top: var(--space-12);
 }

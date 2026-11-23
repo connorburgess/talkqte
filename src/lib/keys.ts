@@ -1,53 +1,48 @@
-// Typed frontend stub for the ServiceKeysBridge Tauri commands (keys_status,
-// keys_set, keys_test, keys_remove, and optional keys_session_usage).
-// The own-key lane's first PR implements these commands in Rust and replaces
-// this stub's fallback behavior. Until then, missing commands report
+// Frontend bridge for the real provider-key commands from PR #408
+// (provider_keys_status, set_provider_key, test_provider_key,
+// remove_provider_key, event `provider-keys:changed`) and session usage from
+// PR #411 (cue_usage). Until #408 merges into main, missing commands report
 // "Unavailable in this build" and never trigger first-run onboarding.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { desktop } from './bridge';
 
-export type KeyProvider = 'deepgram' | 'anthropic';
+export type Provider = 'deepgram' | 'anthropic';
 
-export type KeyState =
-  | { status: 'not_set' }
-  | { status: 'set' }
-  | { status: 'checking' }
-  | {
-      status: 'rejected';
-      reason: 'refused' | 'unreachable';
-      message: string;
-    };
+export type KeyStateValue = 'notSet' | 'set' | 'rejected';
 
-export interface KeysStatusSnapshot {
-  deepgram: KeyState;
-  anthropic: KeyState;
+export interface KeyStatus {
+  state: KeyStateValue;
+  verified: boolean;
 }
 
-export interface SessionUsageSnapshot {
-  anthropicRequests: number;
-  anthropicCap: number;
-  estimatedSpendUsd: number;
-  active: boolean;
+export interface KeysStatus {
+  deepgram: KeyStatus;
+  anthropic: KeyStatus;
+  anyMissing: boolean;
 }
 
-export interface ServiceKeysBridge {
-  keys_status(): Promise<KeysStatusSnapshot>;
-  keys_set(provider: KeyProvider, secret: string): Promise<KeyState>;
-  keys_test(provider: KeyProvider): Promise<KeyState>;
-  keys_remove(provider: KeyProvider): Promise<KeyState>;
-  keys_session_usage?(): Promise<SessionUsageSnapshot>;
+export interface CueUsage {
+  model: string;
+  requests: number;
+  requestCap: number;
+  spentMicroUsd: number;
+  spendCapMicroUsd: number;
 }
 
-export type KeysLoadResult =
-  { available: true; status: KeysStatusSnapshot } | { available: false };
+export interface ProviderKeysBridge {
+  provider_keys_status(): Promise<KeysStatus>;
+  set_provider_key(provider: Provider, key: string): Promise<KeysStatus>;
+  test_provider_key(provider: Provider): Promise<KeysStatus>;
+  remove_provider_key(provider: Provider): Promise<KeysStatus>;
+  cue_usage(): Promise<CueUsage | null>;
+}
 
-export const DEFAULT_SESSION_USAGE: SessionUsageSnapshot = {
-  anthropicRequests: 0,
-  anthropicCap: 40,
-  estimatedSpendUsd: 0,
-  active: false,
-};
+export const PROVIDER_KEYS_CHANGED_EVENT = 'provider-keys:changed';
+
+export const DEFAULT_REQUEST_CAP = 400;
+export const DEFAULT_SPEND_CAP_MICRO_USD = 500_000;
 
 export class KeysUnavailableError extends Error {
   constructor() {
@@ -68,40 +63,51 @@ export function isUnknownCommandError(error: unknown): boolean {
   );
 }
 
-function isKeyState(value: unknown): value is KeyState {
-  if (!value || typeof value !== 'object') return false;
-  const status = (value as { status?: unknown }).status;
-  return (
-    status === 'not_set' ||
-    status === 'set' ||
-    status === 'checking' ||
-    status === 'rejected'
-  );
+function errorText(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  return 'The request could not be completed. Nothing was changed.';
 }
 
-function isKeysStatusSnapshot(value: unknown): value is KeysStatusSnapshot {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Record<string, unknown>;
-  return isKeyState(candidate.deepgram) && isKeyState(candidate.anthropic);
-}
-
-function isSessionUsageSnapshot(value: unknown): value is SessionUsageSnapshot {
+function isKeyStatus(value: unknown): value is KeyStatus {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Record<string, unknown>;
   return (
-    typeof candidate.anthropicRequests === 'number' &&
-    typeof candidate.anthropicCap === 'number' &&
-    typeof candidate.estimatedSpendUsd === 'number' &&
-    typeof candidate.active === 'boolean'
+    (candidate.state === 'notSet' ||
+      candidate.state === 'set' ||
+      candidate.state === 'rejected') &&
+    typeof candidate.verified === 'boolean'
   );
 }
 
-export const serviceKeysBridge: ServiceKeysBridge = {
-  async keys_status() {
+function isKeysStatus(value: unknown): value is KeysStatus {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    isKeyStatus(candidate.deepgram) &&
+    isKeyStatus(candidate.anthropic) &&
+    typeof candidate.anyMissing === 'boolean'
+  );
+}
+
+function isCueUsage(value: unknown): value is CueUsage {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.model === 'string' &&
+    typeof candidate.requests === 'number' &&
+    typeof candidate.requestCap === 'number' &&
+    typeof candidate.spentMicroUsd === 'number' &&
+    typeof candidate.spendCapMicroUsd === 'number'
+  );
+}
+
+export const providerKeysBridge: ProviderKeysBridge = {
+  async provider_keys_status() {
     if (!desktop) throw new KeysUnavailableError();
     try {
-      const result = await invoke<unknown>('keys_status');
-      if (!isKeysStatusSnapshot(result)) throw new KeysUnavailableError();
+      const result = await invoke<unknown>('provider_keys_status');
+      if (!isKeysStatus(result)) throw new KeysUnavailableError();
       return result;
     } catch (error) {
       if (
@@ -113,11 +119,14 @@ export const serviceKeysBridge: ServiceKeysBridge = {
       throw error;
     }
   },
-  async keys_set(provider, secret) {
+  async set_provider_key(provider, key) {
     if (!desktop) throw new KeysUnavailableError();
     try {
-      const result = await invoke<unknown>('keys_set', { provider, secret });
-      if (!isKeyState(result)) throw new KeysUnavailableError();
+      const result = await invoke<unknown>('set_provider_key', {
+        provider,
+        key,
+      });
+      if (!isKeysStatus(result)) throw new KeysUnavailableError();
       return result;
     } catch (error) {
       if (
@@ -129,11 +138,11 @@ export const serviceKeysBridge: ServiceKeysBridge = {
       throw error;
     }
   },
-  async keys_test(provider) {
+  async test_provider_key(provider) {
     if (!desktop) throw new KeysUnavailableError();
     try {
-      const result = await invoke<unknown>('keys_test', { provider });
-      if (!isKeyState(result)) throw new KeysUnavailableError();
+      const result = await invoke<unknown>('test_provider_key', { provider });
+      if (!isKeysStatus(result)) throw new KeysUnavailableError();
       return result;
     } catch (error) {
       if (
@@ -145,11 +154,11 @@ export const serviceKeysBridge: ServiceKeysBridge = {
       throw error;
     }
   },
-  async keys_remove(provider) {
+  async remove_provider_key(provider) {
     if (!desktop) throw new KeysUnavailableError();
     try {
-      const result = await invoke<unknown>('keys_remove', { provider });
-      if (!isKeyState(result)) throw new KeysUnavailableError();
+      const result = await invoke<unknown>('remove_provider_key', { provider });
+      if (!isKeysStatus(result)) throw new KeysUnavailableError();
       return result;
     } catch (error) {
       if (
@@ -161,46 +170,55 @@ export const serviceKeysBridge: ServiceKeysBridge = {
       throw error;
     }
   },
-  async keys_session_usage() {
-    if (!desktop) return DEFAULT_SESSION_USAGE;
+  async cue_usage() {
+    if (!desktop) return null;
     try {
-      const result = await invoke<unknown>('keys_session_usage');
-      return isSessionUsageSnapshot(result) ? result : DEFAULT_SESSION_USAGE;
+      const result = await invoke<unknown>('cue_usage');
+      return isCueUsage(result) ? result : null;
     } catch {
-      return DEFAULT_SESSION_USAGE;
+      return null;
     }
   },
 };
 
-export interface ServiceKeysController {
+export interface ProviderKeysController {
   loaded: boolean;
   available: boolean;
-  status: KeysStatusSnapshot;
-  usage: SessionUsageSnapshot;
-  busyProvider: KeyProvider | null;
-  error: string;
-  setKey: (provider: KeyProvider, secret: string) => Promise<boolean>;
-  testKey: (provider: KeyProvider) => Promise<void>;
-  removeKey: (provider: KeyProvider) => Promise<boolean>;
+  status: KeysStatus;
+  usage: CueUsage | null;
+  checkingProvider: Provider | null;
+  busyProvider: Provider | null;
+  rowErrors: Record<Provider, string>;
+  setKey: (provider: Provider, key: string) => Promise<boolean>;
+  testKey: (provider: Provider) => Promise<void>;
+  removeKey: (provider: Provider) => Promise<boolean>;
   refresh: () => Promise<void>;
 }
 
-const EMPTY_STATUS: KeysStatusSnapshot = {
-  deepgram: { status: 'not_set' },
-  anthropic: { status: 'not_set' },
+const EMPTY_STATUS: KeysStatus = {
+  deepgram: { state: 'notSet', verified: false },
+  anthropic: { state: 'notSet', verified: false },
+  anyMissing: true,
 };
 
-export function useServiceKeys(
-  bridgeImpl: ServiceKeysBridge = serviceKeysBridge,
-): ServiceKeysController {
+const EMPTY_ERRORS: Record<Provider, string> = {
+  deepgram: '',
+  anthropic: '',
+};
+
+export function useProviderKeys(
+  bridgeImpl: ProviderKeysBridge = providerKeysBridge,
+): ProviderKeysController {
   const [loaded, setLoaded] = useState(false);
   const [available, setAvailable] = useState(false);
-  const [status, setStatus] = useState<KeysStatusSnapshot>(EMPTY_STATUS);
-  const [usage, setUsage] = useState<SessionUsageSnapshot>(
-    DEFAULT_SESSION_USAGE,
+  const [status, setStatus] = useState<KeysStatus>(EMPTY_STATUS);
+  const [usage, setUsage] = useState<CueUsage | null>(null);
+  const [checkingProvider, setCheckingProvider] = useState<Provider | null>(
+    null,
   );
-  const [busyProvider, setBusyProvider] = useState<KeyProvider | null>(null);
-  const [error, setError] = useState('');
+  const [busyProvider, setBusyProvider] = useState<Provider | null>(null);
+  const [rowErrors, setRowErrors] =
+    useState<Record<Provider, string>>(EMPTY_ERRORS);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -212,15 +230,12 @@ export function useServiceKeys(
 
   const refresh = useCallback(async () => {
     try {
-      const next = await bridgeImpl.keys_status();
+      const next = await bridgeImpl.provider_keys_status();
       if (!mounted.current) return;
       setStatus(next);
       setAvailable(true);
-      setError('');
-      if (bridgeImpl.keys_session_usage) {
-        const nextUsage = await bridgeImpl.keys_session_usage();
-        if (mounted.current) setUsage(nextUsage);
-      }
+      const nextUsage = await bridgeImpl.cue_usage();
+      if (mounted.current) setUsage(nextUsage);
     } catch (failure) {
       if (!mounted.current) return;
       if (
@@ -228,9 +243,6 @@ export function useServiceKeys(
         isUnknownCommandError(failure)
       ) {
         setAvailable(false);
-        setError('');
-      } else {
-        setError(failure instanceof Error ? failure.message : String(failure));
       }
     } finally {
       if (mounted.current) setLoaded(true);
@@ -241,15 +253,36 @@ export function useServiceKeys(
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    if (!desktop) return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void listen<unknown>(PROVIDER_KEYS_CHANGED_EVENT, ({ payload }) => {
+      if (!disposed && isKeysStatus(payload)) {
+        setStatus(payload);
+        setAvailable(true);
+      }
+    })
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else stop = unlisten;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, []);
+
   const setKey = useCallback(
-    async (provider: KeyProvider, secret: string) => {
-      if (!available || !secret.trim()) return false;
+    async (provider: Provider, key: string) => {
+      if (!available || !key.trim()) return false;
       setBusyProvider(provider);
-      setError('');
+      setRowErrors((current) => ({ ...current, [provider]: '' }));
       try {
-        const next = await bridgeImpl.keys_set(provider, secret);
+        const next = await bridgeImpl.set_provider_key(provider, key);
         if (!mounted.current) return false;
-        setStatus((current) => ({ ...current, [provider]: next }));
+        setStatus(next);
         return true;
       } catch (failure) {
         if (!mounted.current) return false;
@@ -259,9 +292,10 @@ export function useServiceKeys(
         ) {
           setAvailable(false);
         } else {
-          setError(
-            failure instanceof Error ? failure.message : String(failure),
-          );
+          setRowErrors((current) => ({
+            ...current,
+            [provider]: errorText(failure),
+          }));
         }
         return false;
       } finally {
@@ -272,18 +306,15 @@ export function useServiceKeys(
   );
 
   const testKey = useCallback(
-    async (provider: KeyProvider) => {
+    async (provider: Provider) => {
       if (!available) return;
       setBusyProvider(provider);
-      setError('');
-      setStatus((current) => ({
-        ...current,
-        [provider]: { status: 'checking' },
-      }));
+      setCheckingProvider(provider);
+      setRowErrors((current) => ({ ...current, [provider]: '' }));
       try {
-        const next = await bridgeImpl.keys_test(provider);
+        const next = await bridgeImpl.test_provider_key(provider);
         if (!mounted.current) return;
-        setStatus((current) => ({ ...current, [provider]: next }));
+        setStatus(next);
       } catch (failure) {
         if (!mounted.current) return;
         if (
@@ -292,34 +323,30 @@ export function useServiceKeys(
         ) {
           setAvailable(false);
         } else {
-          setStatus((current) => ({
+          setRowErrors((current) => ({
             ...current,
-            [provider]: {
-              status: 'rejected',
-              reason: 'unreachable',
-              message:
-                failure instanceof Error
-                  ? failure.message
-                  : 'Could not reach the service.',
-            },
+            [provider]: errorText(failure),
           }));
         }
       } finally {
-        if (mounted.current) setBusyProvider(null);
+        if (mounted.current) {
+          setCheckingProvider(null);
+          setBusyProvider(null);
+        }
       }
     },
     [available, bridgeImpl],
   );
 
   const removeKey = useCallback(
-    async (provider: KeyProvider) => {
+    async (provider: Provider) => {
       if (!available) return false;
       setBusyProvider(provider);
-      setError('');
+      setRowErrors((current) => ({ ...current, [provider]: '' }));
       try {
-        const next = await bridgeImpl.keys_remove(provider);
+        const next = await bridgeImpl.remove_provider_key(provider);
         if (!mounted.current) return false;
-        setStatus((current) => ({ ...current, [provider]: next }));
+        setStatus(next);
         return true;
       } catch (failure) {
         if (!mounted.current) return false;
@@ -329,9 +356,10 @@ export function useServiceKeys(
         ) {
           setAvailable(false);
         } else {
-          setError(
-            failure instanceof Error ? failure.message : String(failure),
-          );
+          setRowErrors((current) => ({
+            ...current,
+            [provider]: errorText(failure),
+          }));
         }
         return false;
       } finally {
@@ -346,8 +374,9 @@ export function useServiceKeys(
     available,
     status,
     usage,
+    checkingProvider,
     busyProvider,
-    error,
+    rowErrors,
     setKey,
     testKey,
     removeKey,
