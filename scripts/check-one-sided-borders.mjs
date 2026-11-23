@@ -98,6 +98,28 @@ export const ALLOWED_ONE_SIDED_BORDERS = [
     reason: 'Full-width 1px neutral row divider between service key providers.',
   },
   {
+    file: 'src/components/onboarding.css',
+    selector: '.ob-head',
+    property: 'border-bottom',
+    kind: 'hairline',
+    reason: 'Full-width 1px neutral divider below the onboarding step header.',
+  },
+  {
+    file: 'src/components/onboarding.css',
+    selector: '.ob-cue-source',
+    property: 'border-top',
+    kind: 'hairline',
+    reason: 'Full-width 1px neutral divider inside the fictional cue specimen.',
+  },
+  {
+    file: 'src/components/onboarding.css',
+    selector: '.ob-foot',
+    property: 'border-top',
+    kind: 'hairline',
+    reason:
+      'Full-width 1px neutral divider above the onboarding footer controls.',
+  },
+  {
     file: 'src/styles.css',
     selector: '.version',
     property: 'border-top',
