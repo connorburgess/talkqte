@@ -60,3 +60,19 @@
   font-size: 15px;
   min-height: 1.4em;
 }
+.provider-language {
+  display: grid;
+  gap: 8px;
+  max-width: 34rem;
+}
+.provider-language label {
+  font-size: 14px;
+  font-weight: 650;
+}
+.provider-language select {
+  min-height: 44px;
+  padding: 8px 12px;
+  background: var(--paper);
+  border: 1px solid #bfc7b6;
+  color: var(--ink);
+}

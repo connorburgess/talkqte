@@ -127,3 +127,27 @@ export async function watchKeys(receive: (status: KeysStatus) => void) {
     receive(payload),
   );
 }
+
+/** What Deepgram is asked to transcribe in the next live session. */
+export type TranscriptionLanguage = 'en' | 'multi';
+
+// The browser preview keeps the choice in memory and sends nothing.
+let previewLanguage: TranscriptionLanguage = 'en';
+
+export async function transcriptionLanguage(): Promise<TranscriptionLanguage> {
+  if (!desktop) return previewLanguage;
+  return invoke<TranscriptionLanguage>('transcription_language');
+}
+
+/** Applies to the next live session; refused while one is running. */
+export async function setTranscriptionLanguage(
+  language: TranscriptionLanguage,
+): Promise<TranscriptionLanguage> {
+  if (!desktop) {
+    previewLanguage = language;
+    return previewLanguage;
+  }
+  return invoke<TranscriptionLanguage>('set_transcription_language', {
+    language,
+  });
+}

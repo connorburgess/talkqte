@@ -307,27 +307,40 @@ export function assertLabLaunchOptions({
   // instead of a grant: it never holds a real token, and the launcher
   // itself writes the fixed refused text (cue-lab-deepgram.mjs) after the
   // review, so the app's own refusal path runs. It cannot reconnect.
+  // A plan keeps English unless `transcription.language` is `multi`; the
+  // field is checked here and taken off before the shapes below.
+  const language = transcription?.language ?? 'en';
   requireThat(
     transcription === undefined ||
-      (transcription.backend === 'deepgram' &&
-        Number.isSafeInteger(transcription.minuteCap) &&
-        transcription.minuteCap >= 1 &&
-        transcription.minuteCap <= 60 &&
+      (transcription !== null &&
+        typeof transcription === 'object' &&
+        ['en', 'multi'].includes(language)),
+  );
+  const planned =
+    transcription !== undefined && Object.hasOwn(transcription, 'language')
+      ? (({ language: _language, ...rest }) => rest)(transcription)
+      : transcription;
+  requireThat(
+    planned === undefined ||
+      (planned.backend === 'deepgram' &&
+        Number.isSafeInteger(planned.minuteCap) &&
+        planned.minuteCap >= 1 &&
+        planned.minuteCap <= 60 &&
         (mode === 'capture-only'
-          ? exact(transcription, ['backend', 'minuteCap'])
-          : (exact(transcription, ['backend', 'minuteCap', 'failureProbe'])
-              ? transcription.failureProbe === REFUSED_TOKEN_PROBE
-              : (exact(transcription, ['backend', 'minuteCap', 'grant']) ||
-                  (exact(transcription, [
+          ? exact(planned, ['backend', 'minuteCap'])
+          : (exact(planned, ['backend', 'minuteCap', 'failureProbe'])
+              ? planned.failureProbe === REFUSED_TOKEN_PROBE
+              : (exact(planned, ['backend', 'minuteCap', 'grant']) ||
+                  (exact(planned, [
                     'backend',
                     'minuteCap',
                     'grant',
                     'reconnect',
                   ]) &&
-                    transcription.reconnect === true)) &&
-                typeof transcription.grant?.writeTokenFile === 'function' &&
+                    planned.reconnect === true)) &&
+                typeof planned.grant?.writeTokenFile === 'function' &&
                 // A real grant is never a probe's.
-                transcription.grant.probe === undefined) &&
+                planned.grant.probe === undefined) &&
             mode === 'model-enabled' &&
             selection?.provider === 'anthropic-api')),
   );
@@ -397,6 +410,8 @@ function launcher({
     contextPolicy,
     turnOff,
   });
+  // Checked above: `en` (the default) or `multi`.
+  const language = transcription?.language ?? 'en';
   if (sourceApplication === 'TalkQTE Lab Player')
     checkLabPlayerSource(playerSource);
   assertSubscriptionEnvironment(environment);
@@ -799,6 +814,10 @@ function launcher({
                 TALKQTE_DEV_STT_BACKEND: 'deepgram',
                 TALKQTE_DEV_STT_TOKEN_FILE: tokenPath,
                 TALKQTE_DEV_STT_MINUTE_CAP: String(transcription.minuteCap),
+                // English unless the plan asks: only then is it set.
+                ...(language === 'multi'
+                  ? { TALKQTE_DEV_STT_LANGUAGE: 'multi' }
+                  : {}),
               }
             : {}),
           // The listener's name as the app's own name setting (debug lab
@@ -879,6 +898,7 @@ function launcher({
         ? Object.freeze({
             backend: transcription.backend,
             minuteCap: transcription.minuteCap,
+            language,
             grantTtlS: grant?.ttlSeconds ?? null,
             // A deliberate provider-failure take, or null for a real token.
             failureProbe,

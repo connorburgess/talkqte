@@ -197,3 +197,50 @@ test('browser preview fake: a narrow window keeps the key controls inside the pa
     expect(box!.height).toBeGreaterThanOrEqual(44);
   }
 });
+
+test('browser preview fake: the transcription language is English until changed, with what each means', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const choice = page.getByLabel('Transcription language');
+  await expect(choice).toHaveValue('en');
+  await expect(
+    page.getByText(
+      'Applies to the next live session, never one already running.',
+    ),
+  ).toBeVisible();
+  await expect(page.locator('body')).toContainText(
+    'Deepgram bills it at a higher rate than English',
+  );
+  await expect(page.locator('body')).toContainText(
+    'Phrase-rule cues understand English only',
+  );
+  await choice.selectOption('multi');
+  await expect(choice).toHaveValue('multi');
+});
+
+test('native fixture: the language is sent as en or multi, and a running session refuses a change', async ({
+  page,
+}) => {
+  await openNative(page);
+  const choice = page.getByLabel('Transcription language');
+  await expect(choice).toHaveValue('en');
+  await choice.selectOption('multi');
+  await expect
+    .poll(() => page.evaluate(() => window.providerKeysTest.language()))
+    .toBe('multi');
+  expect(
+    await page.evaluate(() =>
+      window.providerKeysTest.sent.filter((a) =>
+        JSON.stringify(a).includes('language'),
+      ),
+    ),
+  ).toEqual([{ language: 'multi' }]);
+  await page.evaluate(() => window.providerKeysTest.setSessionRunning(true));
+  await choice.selectOption('en');
+  await expect(page.getByRole('alert')).toHaveText(
+    'Change the transcription language when no live session is running.',
+  );
+  await expect(choice).toHaveValue('multi');
+});

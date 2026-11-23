@@ -1618,6 +1618,8 @@ pub fn run() {
             provider_key_commands::test_provider_key,
             provider_key_commands::remove_provider_key,
             provider_key_commands::cue_usage,
+            provider_key_commands::transcription_language,
+            provider_key_commands::set_transcription_language,
             companion::companion_anchor,
             pick_context_file,
             read_context_file_path,
@@ -2133,6 +2135,20 @@ mod export_tests {
         assert_eq!(after, "# TalkQTE notes\n\nA fictional notebook line.\n");
         assert!(!after.contains("blue tin"));
         assert_eq!(runtime.export.as_deref(), Some(after.as_str()));
+    }
+
+    #[test]
+    fn a_live_session_is_open_from_its_start_until_it_ends() {
+        let mut runtime = Runtime::default();
+        assert!(!runtime.live_session_open());
+        let ticket = runtime.begin_live_start().unwrap();
+        assert!(runtime.live_session_open(), "while starting");
+        drop(ticket);
+        assert!(!runtime.live_session_open(), "a cancelled start");
+        let ticket = runtime.begin_live_start().unwrap();
+        let (ticket, ()) = ticket.load(|| Ok(())).unwrap();
+        runtime.install_live_start(&ticket).unwrap();
+        assert!(runtime.live_session_open(), "while running");
     }
 
     #[test]

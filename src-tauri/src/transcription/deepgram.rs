@@ -12,7 +12,7 @@
 //! is sent, a Finalize when speech has gone 6 s without a final, and
 //! CloseStream on finish or at the minute cap.
 
-use super::cloud::{Budget, Full, StreamingTranscriber, SttEvent, SttFailure};
+use super::cloud::{Budget, Full, Language, StreamingTranscriber, SttEvent, SttFailure};
 use super::SAMPLE_RATE;
 use std::{
     sync::{
@@ -25,7 +25,16 @@ use std::{
 };
 use zeroize::Zeroizing;
 
-const QUERY: &str = "model=nova-3&language=en&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&diarize=true&endpointing=300&utterance_end_ms=1000&vad_events=true&mip_opt_out=true";
+/// English: Nova-3 with `language=en`, the request since #344.
+pub const QUERY_EN: &str = "model=nova-3&language=en&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&diarize=true&endpointing=300&utterance_end_ms=1000&vad_events=true&mip_opt_out=true";
+/// Multilingual: Nova-3 with `language=multi`, which transcribes several
+/// languages and follows switches between them within one stream. Deepgram
+/// recommends 100 ms endpointing for code-switching; everything else is the
+/// English request. Deepgram cannot detect a language on a live stream, so
+/// the choice is made before a session starts.
+pub const QUERY_MULTI: &str = "model=nova-3&language=multi&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&diarize=true&endpointing=100&utterance_end_ms=1000&vad_events=true&mip_opt_out=true";
+#[cfg(test)]
+const QUERY: &str = QUERY_EN;
 const HOST: &str = "api.deepgram.com";
 /// Samples per frame sent: 100 ms.
 const FRAME: usize = SAMPLE_RATE / 10;
@@ -37,24 +46,33 @@ pub const FINALIZE_AFTER: Duration = Duration::from_secs(6);
 /// Blocks waiting to be sent before new audio is dropped (about 10 s).
 const QUEUE: usize = 128;
 
-/// The one request this app makes. It cannot be built without the opt-out.
+/// One of the two requests this app makes. Neither can be built without the
+/// opt-out.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ListenRequest {
-    _fixed: (),
+    language: Language,
 }
 
 impl ListenRequest {
+    /// The English request.
     pub fn lab() -> Self {
-        Self { _fixed: () }
+        Self::for_language(Language::English)
+    }
+
+    pub fn for_language(language: Language) -> Self {
+        Self { language }
     }
 
     /// The exact query string sent, for the run's evidence.
     pub fn query(&self) -> &'static str {
-        QUERY
+        match self.language {
+            Language::English => QUERY_EN,
+            Language::Multilingual => QUERY_MULTI,
+        }
     }
 
     pub fn url(&self) -> String {
-        format!("wss://{HOST}/v1/listen?{QUERY}")
+        format!("wss://{HOST}/v1/listen?{}", self.query())
     }
 }
 
@@ -513,7 +531,7 @@ pub fn opener(settings: super::cloud::Settings) -> super::cloud::Opener {
         let path = settings.token_file;
         Ok(Box::new(DeepgramStream::start(
             Network(Auth::Bearer),
-            ListenRequest::lab(),
+            ListenRequest::for_language(settings.language),
             Token::from_file(path),
             budget,
         )) as Box<dyn StreamingTranscriber>)
@@ -526,7 +544,7 @@ pub fn reopener(settings: super::cloud::Settings) -> super::cloud::Reopener {
     Box::new(move || {
         Ok(Box::new(DeepgramStream::start(
             Network(Auth::Bearer),
-            ListenRequest::lab(),
+            ListenRequest::for_language(settings.language),
             Token::from_file(settings.token_file.clone()),
             super::cloud::launch_budget(&settings),
         )) as Box<dyn StreamingTranscriber>)
@@ -538,20 +556,24 @@ pub fn reopener(settings: super::cloud::Settings) -> super::cloud::Reopener {
 /// share its cap. The key is read from the Keychain on the socket thread
 /// once the review is approved, and again by each replacement, so a key
 /// replaced in Settings is used.
-pub fn key_streams(budget: Budget) -> (super::cloud::Opener, super::cloud::Reopener) {
-    key_streams_with(Network(Auth::Key), Token::from_keychain, budget)
+pub fn key_streams(
+    budget: Budget,
+    language: Language,
+) -> (super::cloud::Opener, super::cloud::Reopener) {
+    key_streams_with(Network(Auth::Key), Token::from_keychain, budget, language)
 }
 
 fn key_streams_with<C: Connector + Clone>(
     connector: C,
     token: fn() -> Token,
     budget: Budget,
+    language: Language,
 ) -> (super::cloud::Opener, super::cloud::Reopener) {
     let first = (connector.clone(), budget.clone());
     let opener: super::cloud::Opener = Box::new(move || {
         Ok(Box::new(DeepgramStream::start(
             first.0,
-            ListenRequest::lab(),
+            ListenRequest::for_language(language),
             token(),
             first.1,
         )) as Box<dyn StreamingTranscriber>)
@@ -559,7 +581,7 @@ fn key_streams_with<C: Connector + Clone>(
     let reopener: super::cloud::Reopener = Box::new(move || {
         Ok(Box::new(DeepgramStream::start(
             connector.clone(),
-            ListenRequest::lab(),
+            ListenRequest::for_language(language),
             token(),
             budget.clone(),
         )) as Box<dyn StreamingTranscriber>)
@@ -890,6 +912,59 @@ mod tests {
     }
 
     #[test]
+    fn each_language_sends_its_exact_query_and_reports_it_when_connected() {
+        for (language, query) in [
+            (Language::English, QUERY_EN),
+            (Language::Multilingual, QUERY_MULTI),
+        ] {
+            let fake = Fake::default();
+            let mut stream = DeepgramStream::start(
+                fake.clone(),
+                ListenRequest::for_language(language),
+                "t".repeat(24),
+                Duration::from_secs(60),
+            );
+            stream.push(&[0.25; FRAME]).unwrap();
+            let events = stream.finish(Duration::from_secs(2));
+            let url = fake.0.lock().unwrap().url.clone().unwrap();
+            assert_eq!(url, format!("wss://api.deepgram.com/v1/listen?{query}"));
+            assert_eq!(checked(&url), Ok(url.as_str()));
+            assert!(events.contains(&SttEvent::Connected {
+                query: query.to_string()
+            }));
+        }
+        // The two differ only where Deepgram's documentation says they should.
+        assert_eq!(
+            QUERY_MULTI,
+            QUERY_EN
+                .replace("language=en", "language=multi")
+                .replace("endpointing=300", "endpointing=100")
+        );
+    }
+
+    #[test]
+    fn a_multilingual_sessions_replacement_streams_stay_multilingual() {
+        let fake = Fake::default();
+        let (opener, mut reopener) = key_streams_with(
+            fake.clone(),
+            || Token::from("t".repeat(24)),
+            Budget::new(Duration::from_secs(60)),
+            Language::Multilingual,
+        );
+        let mut first = opener().unwrap();
+        first.push(&[0.25; FRAME]).unwrap();
+        let _ = first.finish(Duration::from_secs(2));
+        let opened = fake.0.lock().unwrap().url.take().unwrap();
+        assert!(opened.ends_with(QUERY_MULTI));
+        // The replacement after a connection failure keeps the language.
+        let mut replacement = reopener().unwrap();
+        replacement.push(&[0.25; FRAME]).unwrap();
+        let _ = replacement.finish(Duration::from_secs(2));
+        let reopened = fake.0.lock().unwrap().url.take().unwrap();
+        assert_eq!(reopened, opened);
+    }
+
+    #[test]
     fn the_request_always_opts_out_and_the_token_is_only_a_header() {
         let request = ListenRequest::lab();
         let url = request.url();
@@ -1045,6 +1120,7 @@ mod tests {
             fake.clone(),
             || Token::from("t".repeat(24)),
             Budget::new(Duration::from_secs(1)),
+            Language::English,
         );
         let mut first = opener().unwrap();
         first.push(&[0.1; SAMPLE_RATE]).unwrap();

@@ -400,13 +400,17 @@ fn unusable_replies_skip_the_request_until_three_in_a_row() {
 
 #[test]
 fn the_review_names_the_provider_key_billing_caps_and_both_destinations() {
-    let deepgram = crate::transcription::cloud::review_sentence_for_own_key();
-    let policy = format!("{} {deepgram}", data_policy(haiku()));
+    use crate::transcription::cloud::Language;
+    // The longer, multilingual wording must also fit the review's bound.
+    let multi = crate::transcription::cloud::review_sentence_for_own_key(Language::Multilingual);
+    let longest = format!("{} {multi}", data_policy(haiku()));
     assert!(
-        policy.len() <= 2_048,
+        longest.len() <= 2_048,
         "the review's bound: {}",
-        policy.len()
+        longest.len()
     );
+    let deepgram = crate::transcription::cloud::review_sentence_for_own_key(Language::English);
+    let policy = format!("{} {deepgram}", data_policy(haiku()));
     for part in [
         "Anthropic API (US), with your own Anthropic API key",
         "billed to your Anthropic account per token",
@@ -416,7 +420,7 @@ fn the_review_names_the_provider_key_billing_caps_and_both_destinations() {
         "no other service is used",
         "Pause cues stops these requests but not the audio to Deepgram; Off and Stop end both",
         "Pausing cues does not stop the audio; turning processing off or Stop does",
-        "to Deepgram (US, model Nova-3)",
+        "to Deepgram (US, model Nova-3, English)",
         "with your own Deepgram API key",
         "opt out of its Model Improvement Program",
     ] {

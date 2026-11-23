@@ -30,6 +30,11 @@ pub(crate) struct StartTicket {
 }
 
 impl StartGate {
+    /// A live start holds the gate: loading, or cancelling.
+    fn starting(&self) -> bool {
+        self.0.lock().map_or(true, |state| state.current.is_some())
+    }
+
     fn begin(&self) -> Result<StartTicket, String> {
         let mut current = self.0.lock().map_err(|_| "Live startup is unavailable.")?;
         if current.current.is_some() {
@@ -158,6 +163,18 @@ impl Runtime {
     pub(crate) fn begin_live_start(&mut self) -> Result<StartTicket, String> {
         self.check_live_start()?;
         self.live_start.begin()
+    }
+
+    /// A live session is starting, running or still finishing, so settings
+    /// it was started with (the transcription language) must not change.
+    pub(crate) fn live_session_open(&self) -> bool {
+        self.live.is_some()
+            || self.live_start.starting()
+            || (self.engine.state.live
+                && matches!(
+                    self.engine.state.status,
+                    engine::Status::Running | engine::Status::Paused
+                ))
     }
 
     fn check_live_start(&self) -> Result<(), String> {
