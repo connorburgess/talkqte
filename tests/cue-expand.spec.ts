@@ -230,39 +230,54 @@ test('a question put to you by name is told apart from other cues without relyin
   });
   const marks = () =>
     question.evaluate((card) => {
-      const edge = card.querySelector<HTMLElement>('.cue-edge');
-      const box = card.getBoundingClientRect();
-      const drawn = edge?.getBoundingClientRect();
+      const style = getComputedStyle(card);
+      const lead = card.querySelector<HTMLElement>('.cue-lead');
       return {
+        dpr: window.devicePixelRatio || 1,
         mark: !!card.querySelector('.cue-lead svg'),
-        edge: drawn
-          ? {
-              width: drawn.width,
-              tall: drawn.height / box.height,
-              fill: getComputedStyle(edge!).backgroundColor,
-              card: getComputedStyle(card).backgroundColor,
-            }
-          : null,
+        hasEdge: !!card.querySelector('.cue-edge'),
+        styles: [
+          style.borderTopStyle,
+          style.borderRightStyle,
+          style.borderBottomStyle,
+          style.borderLeftStyle,
+        ],
+        widths: [
+          parseFloat(style.borderTopWidth),
+          parseFloat(style.borderRightWidth),
+          parseFloat(style.borderBottomWidth),
+          parseFloat(style.borderLeftWidth),
+        ],
+        colours: [
+          style.borderTopColor,
+          style.borderRightColor,
+          style.borderBottomColor,
+          style.borderLeftColor,
+        ],
+        card: style.backgroundColor,
+        lead: lead ? getComputedStyle(lead).color : '',
       };
     });
 
   await show(page, asked);
   await expect(question.getByText('Asked you', { exact: true })).toBeVisible();
   const told = await marks();
-  // A mark before its label and an edge down the whole left side: a shape,
-  // not only a colour, and at least 3:1 against the card where colour shows.
+  const minAskedWidth = told.dpr >= 2 ? 1.5 : 1;
+  // Told apart before reading without a one-sided bar and without relying on
+  // colour alone: a mark before the label, a full 1.5px border all round with
+  // at least 3:1 contrast against the tinted card (Chromium snaps 1.5px to
+  // 1px at 1x DPR), and the amber-ink label.
   expect(told.mark).toBe(true);
-  expect(told.edge).not.toBeNull();
-  expect(told.edge!.width).toBeGreaterThanOrEqual(4);
-  expect(told.edge!.tall).toBeCloseTo(1, 2);
-  expect(contrast(told.edge!.fill, told.edge!.card)).toBeGreaterThanOrEqual(3);
-  // The mark and the edge are drawing only; the label says it.
-  await expect(question.locator('.cue-edge')).toHaveAttribute(
-    'aria-hidden',
-    'true',
-  );
+  expect(told.hasEdge).toBe(false);
+  expect(told.styles).toEqual(['solid', 'solid', 'solid', 'solid']);
+  expect(new Set(told.widths).size).toBe(1);
+  expect(told.widths[0]).toBeGreaterThanOrEqual(minAskedWidth);
+  expect(new Set(told.colours).size).toBe(1);
+  expect(contrast(told.colours[0], told.card)).toBeGreaterThanOrEqual(3);
+  expect(contrast(told.lead, told.card)).toBeGreaterThanOrEqual(4.5);
 
-  // Every other kind keeps the calm default.
+  // Every other kind keeps the calm default: no @ mark, 1px neutral border,
+  // and a distinct untinted card surface.
   for (const kind of ['Owner', 'Suggestion', 'Open question', 'Said']) {
     await show(
       page,
@@ -273,17 +288,26 @@ test('a question put to you by name is told apart from other cues without relyin
       }),
     );
     await expect(question.getByRole('heading')).toContainText('first draft');
-    expect(await marks(), kind).toEqual({ mark: false, edge: null });
+    const calm = await marks();
+    expect(calm.mark, kind).toBe(false);
+    expect(calm.hasEdge, kind).toBe(false);
+    expect(new Set(calm.widths).size, kind).toBe(1);
+    expect(calm.widths[0], kind).toBeLessThanOrEqual(1.05);
+    expect(calm.colours[0], kind).not.toBe(told.colours[0]);
+    expect(calm.card, kind).not.toBe(told.card);
   }
 
-  // With forced colours the edge is still drawn, in the system's text colour.
+  // With forced colours the full border all round stays in a system colour.
   await page.emulateMedia({ forcedColors: 'active' });
   await show(page, asked);
   const forced = await marks();
-  expect(forced.edge).not.toBeNull();
-  expect(contrast(forced.edge!.fill, forced.edge!.card)).toBeGreaterThanOrEqual(
-    3,
-  );
+  expect(forced.mark).toBe(true);
+  expect(forced.hasEdge).toBe(false);
+  expect(forced.styles).toEqual(['solid', 'solid', 'solid', 'solid']);
+  expect(new Set(forced.widths).size).toBe(1);
+  expect(forced.widths[0]).toBeGreaterThanOrEqual(minAskedWidth);
+  expect(new Set(forced.colours).size).toBe(1);
+  expect(contrast(forced.colours[0], forced.card)).toBeGreaterThanOrEqual(3);
 });
 
 function contrast(one: string, two: string) {

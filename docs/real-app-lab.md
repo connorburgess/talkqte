@@ -174,8 +174,8 @@ If selecting "Google Chrome for Testing" captures nothing, that route is out.
 
 ## Start capture
 
-In the notebook's **Cue processing** panel, under "Application audio ·
-development build":
+In the notebook's **Cue processing** panel, under **Development build** →
+"Application audio" at the end of the panel:
 
 1. Read the notice, then press **List applications**.
 2. **The first listing shows the macOS Screen Recording prompt.** On recent
