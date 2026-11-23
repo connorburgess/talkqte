@@ -933,63 +933,65 @@ function Notebook() {
         aria-label="Notebook navigation"
         style={listResizable ? { width: listWidth } : undefined}
       >
-        <a
-          className="brand"
-          href="#notebook"
-          onClick={(e) => {
-            e.preventDefault();
-            setView('notebook');
-          }}
-        >
-          <img src="/mark.svg" alt="" />
-          TalkQTE
-        </a>
-        <nav aria-label="Main navigation">
-          <button
-            ref={notebookNav}
-            className={view === 'notebook' ? 'nav-item selected' : 'nav-item'}
-            aria-current={view === 'notebook' ? 'page' : undefined}
-            onClick={() => setView('notebook')}
+        <div className="meeting-list-inner">
+          <a
+            className="brand"
+            href="#notebook"
+            onClick={(e) => {
+              e.preventDefault();
+              setView('notebook');
+            }}
           >
-            <BookOpen size={19} />
-            Notebook
-          </button>
-        </nav>
-        {view === 'notebook' && (
-          <div className="meeting-list-content">
-            {state &&
-              !setupDismissed &&
-              !live &&
-              !simulated &&
-              !state.userName && (
-                <details className="setup-disclosure">
-                  <summary>Set up a live session</summary>
-                  <SetupCard
-                    name={state.userName}
-                    focus={state.focus}
-                    items={contextItems}
-                    busy={busy}
-                    onGoTo={goToSetup}
-                    onDismiss={() => {
-                      setSetupDismissed(true);
-                      notebookNav.current?.focus();
-                    }}
-                  />
-                </details>
-              )}
-          </div>
-        )}
-        <div className="sidebar-bottom">
-          <button
-            className={view === 'settings' ? 'nav-item selected' : 'nav-item'}
-            aria-current={view === 'settings' ? 'page' : undefined}
-            onClick={() => setView('settings')}
-          >
-            <Settings size={19} />
-            Settings
-          </button>
-          <div className="version">
-            TalkQTE <span>Prototype 0.1</span>
+            <img src="/mark.svg" alt="" />
+            TalkQTE
+          </a>
+          <nav aria-label="Main navigation">
+            <button
+              ref={notebookNav}
+              className={view === 'notebook' ? 'nav-item selected' : 'nav-item'}
+              aria-current={view === 'notebook' ? 'page' : undefined}
+              onClick={() => setView('notebook')}
+            >
+              <BookOpen size={19} />
+              Notebook
+            </button>
+          </nav>
+          {view === 'notebook' && (
+            <div className="meeting-list-content">
+              {state &&
+                !setupDismissed &&
+                !live &&
+                !simulated &&
+                !state.userName && (
+                  <details className="setup-disclosure">
+                    <summary>Set up a live session</summary>
+                    <SetupCard
+                      name={state.userName}
+                      focus={state.focus}
+                      items={contextItems}
+                      busy={busy}
+                      onGoTo={goToSetup}
+                      onDismiss={() => {
+                        setSetupDismissed(true);
+                        notebookNav.current?.focus();
+                      }}
+                    />
+                  </details>
+                )}
+            </div>
+          )}
+          <div className="sidebar-bottom">
+            <button
+              className={view === 'settings' ? 'nav-item selected' : 'nav-item'}
+              aria-current={view === 'settings' ? 'page' : undefined}
+              onClick={() => setView('settings')}
+            >
+              <Settings size={19} />
+              Settings
+            </button>
+            <div className="version">
+              TalkQTE <span>Prototype 0.1</span>
+            </div>
           </div>
         </div>
         {view === 'notebook' && listResizable && (

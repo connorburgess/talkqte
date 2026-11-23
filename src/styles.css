@@ -145,53 +145,60 @@ svg {
   font-weight: 650;
 }
 .sidebar-bottom {
-  padding-top: 16px;
+  padding-top: var(--space-16);
   margin-top: auto;
 }
 .version {
-  margin: 18px 12px 0;
-  padding-top: 17px;
+  margin: var(--space-16) var(--space-8) 0;
+  padding-top: var(--space-16);
   border-top: 1px solid var(--line);
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
+  gap: var(--space-4) var(--space-8);
   color: var(--muted);
   font-size: 12px;
 }
 .meeting-list {
   width: 248px;
-  padding: 31px 16px 20px;
   border-right: 1px solid var(--line);
   background: #f0f1e9;
   flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
+  position: relative;
+  min-height: 100vh;
+}
+.meeting-list-inner {
   position: sticky;
   top: 0;
   height: 100vh;
+  padding: var(--space-32) var(--space-16) var(--space-24);
+  display: flex;
+  flex-direction: column;
 }
 .meeting-line {
   display: flex;
   align-items: center;
   justify-content: space-between;
   color: #506146;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-12);
 }
 .workspace {
   flex: 1;
   min-width: 0;
 }
 .toolbar {
-  height: 73px;
-  padding: 0 36px;
+  height: 64px;
+  padding: 0 var(--space-32);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-16);
   border-bottom: 1px solid var(--line);
 }
 .breadcrumb {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: var(--space-8);
   color: var(--muted);
   font-size: 13px;
 }
@@ -200,7 +207,7 @@ svg {
   color: var(--muted);
 }
 .notebook-body {
-  padding: 28px 32px 24px;
+  padding: var(--space-24) var(--space-32) var(--space-32);
   max-width: 1280px;
   margin: 0 auto;
 }
@@ -209,9 +216,9 @@ svg {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: var(--space-8);
   min-height: 48px;
-  padding: 10px 16px;
+  padding: 10px var(--space-16);
   font-size: 15px;
   font-weight: 700;
   white-space: nowrap;
@@ -232,7 +239,6 @@ svg {
   background: #e9ecdf;
 }
 .export-button {
-  margin-top: 6px;
   flex-shrink: 0;
 }
 .icon-button {
@@ -253,32 +259,58 @@ svg {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  align-items: center;
-  gap: 14px 24px;
-  padding: 0 0 20px;
-  margin-bottom: 24px;
+  align-items: flex-start;
+  gap: var(--space-16) var(--space-24);
+  padding: 0 0 var(--space-24);
+  margin-bottom: var(--space-24);
   border-bottom: 1px solid var(--line);
 }
 .microphone-panel {
-  margin: 20px clamp(16px, 3vw, 44px) 0;
-  padding: 12px 0;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: var(--space-16) var(--space-32) 0;
+}
+.wide-workspace .microphone-panel {
+  margin-inline: 0;
+  max-width: 840px;
+}
+.microphone-panel-body {
+  padding-bottom: var(--space-16);
   border-bottom: 1px solid var(--line);
+}
+.microphone-panel.is-quiet .microphone-panel-body {
+  padding-bottom: var(--space-4);
+  border-bottom: 0;
+}
+.microphone-panel.is-live .microphone-panel-body {
+  padding-bottom: var(--space-16);
+  border-bottom: 0;
 }
 .microphone-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: var(--space-12);
 }
 .microphone-heading > div {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px 12px;
+  gap: var(--space-4) var(--space-8);
 }
 .microphone-heading strong {
-  font-size: 16px;
+  font-size: 15px;
+  font-weight: 650;
+}
+.microphone-panel.is-quiet .microphone-heading strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.status-sep {
+  color: var(--muted);
+  font-size: 14px;
 }
 .microphone-status,
 .microphone-activity {
@@ -288,28 +320,41 @@ svg {
 .microphone-activity {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-8);
 }
 .microphone-panel p {
-  margin: 8px 0 0;
+  margin: var(--space-8) 0 0;
   font-size: 14px;
-  color: #52624d;
+  line-height: 1.55;
+  color: var(--muted);
+  max-width: 68ch;
 }
 .microphone-panel .microphone-message {
   color: #85432e;
 }
 .microphone-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-4) var(--space-16);
+  margin-top: var(--space-8);
   overflow-wrap: anywhere;
 }
+.microphone-input > p {
+  margin: 0;
+  color: #52624d;
+}
 .microphone-input details {
-  margin-top: 8px;
   font-size: 14px;
   color: #52624d;
+}
+.microphone-input details[open] {
+  flex: 1 1 100%;
 }
 .microphone-input summary {
   cursor: pointer;
   width: fit-content;
-  padding: 6px 0;
+  padding: var(--space-4) 0;
 }
 .microphone-input summary:focus-visible {
   outline: 2px solid var(--forest);
@@ -321,8 +366,8 @@ svg {
 }
 .session-state {
   display: flex;
-  align-items: baseline;
-  gap: 12px;
+  align-items: flex-start;
+  gap: var(--space-12);
   flex: 1 1 320px;
   min-width: 0;
 }
@@ -340,49 +385,63 @@ svg {
   background: #986329;
 }
 .session-state .status-dot {
-  transform: translateY(-3px);
+  margin-top: 15px;
 }
 .session-clock {
   color: var(--muted);
 }
 .session-state h1 {
-  font-size: 24px;
+  font-family: var(--font-serif);
+  font-size: 32px;
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
   margin: 0;
 }
 .session-state p {
-  font-size: 15px;
+  font-size: 14px;
   color: var(--muted);
-  margin-top: 6px;
-  max-width: 62ch;
+  margin-top: var(--space-8);
+  max-width: 68ch;
+  line-height: 1.55;
 }
 .session-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 .session-clock {
   font-variant-numeric: tabular-nums;
   font-size: 14px;
-  margin-right: 5px;
+  margin-right: var(--space-4);
   white-space: nowrap;
 }
 .meeting-focus {
-  margin-top: 28px;
+  margin-top: var(--space-32);
   border-block: 1px solid var(--line);
 }
 .focus-disclosure > summary,
 .setup-disclosure > summary {
   cursor: pointer;
   min-height: 48px;
-  padding: 12px 4px;
+  padding: var(--space-12) var(--space-4);
   color: var(--forest);
   font-size: 14px;
   font-weight: 650;
 }
+.focus-disclosure > summary {
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.35;
+}
 .focus-disclosure > summary span {
-  margin-left: 12px;
+  margin-left: var(--space-12);
   color: var(--muted);
+  font-family: var(--font);
+  font-size: 14px;
   font-weight: 400;
 }
 .focus-disclosure > summary:focus-visible,
@@ -392,10 +451,10 @@ svg {
   border-radius: 4px;
 }
 .focus-disclosure[open] {
-  padding-bottom: 16px;
+  padding-bottom: var(--space-16);
 }
 .focus-disclosure .setting-control {
-  margin-top: 12px;
+  margin-top: var(--space-12);
 }
 .setup-disclosure {
   border-top: 1px solid var(--line);
@@ -404,21 +463,21 @@ svg {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 12px;
+  gap: var(--space-12);
 }
 .meeting-focus-heading h2 {
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-4);
   font-size: 17px;
 }
 .meeting-focus-heading p {
   margin: 0;
-  max-width: 60ch;
+  max-width: 68ch;
 }
 .notebook-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 28px;
-  margin-top: 32px;
+  gap: var(--space-24);
+  margin-top: var(--space-24);
 }
 .notebook-grid.is-split {
   column-gap: 0;
@@ -432,13 +491,13 @@ svg {
 }
 .tabs {
   display: flex;
-  gap: 18px;
+  gap: var(--space-24);
   border-bottom: 1px solid var(--line);
 }
 .tabs button {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-8);
   color: var(--muted);
   border: 0;
   padding: 10px 0;
@@ -459,13 +518,13 @@ svg {
 .note-editor {
   width: 100%;
   min-height: 220px;
-  margin-top: 16px;
-  padding: 8px 4px;
+  margin-top: var(--space-16);
+  padding: var(--space-8) var(--space-4);
   border: 0;
   resize: vertical;
   background: transparent;
   color: var(--ink);
-  line-height: 1.8;
+  line-height: 1.75;
   font-size: 16px;
   border-radius: 4px;
 }
@@ -475,45 +534,51 @@ svg {
 .editor-footer {
   display: flex;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--space-12);
   font-size: 12px;
   flex-wrap: wrap;
   color: var(--muted);
-  margin-top: 9px;
-  padding-bottom: 12px;
+  margin-top: var(--space-8);
+  padding-bottom: var(--space-12);
   font-variant-numeric: tabular-nums;
 }
 .companion-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 2px 13px;
-  color: #5c6755;
+  min-height: 44px;
+  padding: 0 var(--space-4) var(--space-8);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
 }
 .companion-heading h2 {
-  font-size: 16px;
-  font-weight: 700;
+  font-family: var(--font-serif);
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1.3;
 }
 .question-idle {
-  padding: 20px 0;
+  padding: var(--space-24) 0 var(--space-16);
 }
 .question-idle h3 {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 650;
-  letter-spacing: -0.025em;
-  line-height: 1.35;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
 }
 .question-idle > p {
-  font-size: 16px;
-  color: #616e56;
-  margin-top: 11px;
-  line-height: 1.7;
+  font-size: 14px;
+  color: var(--muted);
+  margin-top: var(--space-8);
+  line-height: 1.6;
+  max-width: 68ch;
 }
 .companion-footnote {
   font-size: 14px;
-  line-height: 1.65;
+  line-height: 1.6;
   color: var(--muted);
-  padding: 14px 3px 0;
+  padding: var(--space-16) var(--space-4) 0;
+  max-width: 68ch;
 }
 .text-button {
   border: 0;
@@ -531,8 +596,9 @@ svg {
   color: var(--accent);
 }
 .companion-settings {
-  margin: 15px 3px 0;
+  margin: var(--space-12) var(--space-4) 0;
   font-size: 14px;
+  color: var(--muted);
   text-decoration: none;
 }
 .setting .appearance-example.question-large {
@@ -561,8 +627,8 @@ svg {
   margin-top: 8px;
 }
 .context-panel {
-  margin-top: 24px;
-  padding: 0 0 18px;
+  margin-top: var(--space-8);
+  padding: 0 0 var(--space-16);
   background: var(--paper);
 }
 .context-panel,
@@ -573,18 +639,31 @@ svg {
 }
 .context-disclosure > summary {
   cursor: pointer;
-  min-height: 44px;
-  padding: 10px 4px;
+  min-height: 48px;
+  padding: var(--space-12) var(--space-4);
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.35;
+}
+.context-disclosure > summary strong {
+  font-family: inherit;
+  font-weight: 400;
 }
 .context-disclosure > summary span {
-  margin-left: 12px;
+  margin-left: var(--space-12);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 400;
 }
 .context-disclosure > summary:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 3px;
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 .context-disclosure[open] > summary {
-  margin-bottom: 12px;
+  margin-bottom: var(--space-12);
 }
 .context-heading {
   display: flex;
@@ -761,56 +840,67 @@ svg {
 .notebook-footer {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   border-top: 1px solid var(--line);
   color: var(--muted);
-  margin-top: 38px;
-  padding-top: 15px;
+  margin-top: var(--space-32);
+  padding-top: var(--space-16);
   font-size: 13px;
 }
 .secondary-page {
-  padding: 54px 60px;
-  max-width: 900px;
+  padding: var(--space-32);
+  max-width: 840px;
 }
 .page-description {
-  margin-top: 13px;
+  margin-top: var(--space-8);
   color: var(--muted);
+  max-width: 68ch;
 }
 .empty-inline {
-  padding: 38px 0;
+  padding: var(--space-32) 0;
   color: var(--muted);
 }
 .empty-inline h2 {
+  font-family: var(--font-serif);
+  font-size: 20px;
+  font-weight: 400;
   color: var(--ink);
-  margin: 18px 0 10px;
+  margin: var(--space-16) 0 var(--space-8);
 }
 .empty-inline p {
   max-width: 50ch;
   font-size: 16px;
 }
 .settings-page h1 {
-  font-size: 28px;
+  font-family: var(--font-serif);
+  font-size: 32px;
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
 }
 .setting {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 36px;
-  padding: 30px 0;
+  gap: var(--space-32);
+  padding: var(--space-24) 0;
   border-bottom: 1px solid var(--line);
 }
 .setting:first-of-type {
-  margin-top: 24px;
+  margin-top: var(--space-24);
 }
 .setting h2,
 .coming-next h2 {
-  font-size: 18px;
+  font-family: var(--font-serif);
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.3;
 }
 .setting p {
   color: var(--muted);
   font-size: 16px;
-  max-width: 55ch;
-  margin-top: 7px;
+  max-width: 60ch;
+  margin-top: var(--space-8);
 }
 .setting select {
   max-width: 100%;
@@ -873,12 +963,12 @@ svg {
   accent-color: var(--forest);
 }
 .coming-next {
-  padding-top: 32px;
+  padding-top: var(--space-32);
 }
 .coming-next p {
-  margin-top: 10px;
+  margin-top: var(--space-8);
   font-size: 16px;
-  line-height: 1.8;
+  line-height: 1.75;
   max-width: 60ch;
 }
 .small {
@@ -893,7 +983,7 @@ svg {
   align-items: center;
   background: #f6e3d9;
   color: #843b2e;
-  padding: 10px 30px;
+  padding: var(--space-12) var(--space-32);
   font-size: 14px;
 }
 .export-dialog {
@@ -903,7 +993,7 @@ svg {
   border-radius: var(--radius-question);
   width: min(650px, calc(100vw - 32px));
   max-height: 85vh;
-  padding: 25px;
+  padding: var(--space-24);
   box-shadow: 0 18px 60px #18251f40;
 }
 .export-dialog::backdrop {
@@ -915,7 +1005,9 @@ svg {
   justify-content: space-between;
 }
 .dialog-heading h2 {
+  font-family: var(--font-serif);
   font-size: 22px;
+  font-weight: 400;
 }
 .export-dialog > p {
   color: var(--muted);
@@ -1075,19 +1167,25 @@ svg {
 @media (max-width: 1200px) {
   .brand {
     font-size: 22px;
-    padding-inline: 8px;
+    padding-inline: var(--space-8);
   }
   .nav-item {
     padding-inline: 10px;
     font-size: 14px;
-    gap: 8px;
+    gap: var(--space-8);
   }
   .meeting-list {
     width: 220px;
-    padding-inline: 12px;
   }
-  .notebook-body {
-    padding-inline: 28px;
+  .meeting-list-inner {
+    padding-inline: var(--space-12);
+  }
+  .toolbar,
+  .microphone-panel,
+  .notebook-body,
+  .secondary-page,
+  .error-banner {
+    padding-inline: var(--space-24);
   }
 }
 @media (max-width: 1150px) {
@@ -1095,19 +1193,13 @@ svg {
     width: 205px;
   }
   .question-idle {
-    padding: 16px 0;
-  }
-  .question-idle h3 {
-    font-size: 20px;
-  }
-  .question-idle > p {
-    margin-top: 5px;
+    padding: var(--space-16) 0;
   }
   .companion-footnote {
-    padding-top: 9px;
+    padding-top: var(--space-12);
   }
   .companion-settings {
-    margin-top: 7px;
+    margin-top: var(--space-8);
   }
   .session-strip {
     flex-wrap: wrap;
@@ -1142,15 +1234,20 @@ svg {
   }
   .meeting-list {
     position: static;
+    min-height: 0;
     height: auto;
     width: 100%;
     border-bottom: 1px solid var(--line);
     border-right: 0;
-    padding: 16px;
+  }
+  .meeting-list-inner {
+    position: static;
+    height: auto;
+    padding: var(--space-16);
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-8);
   }
   .meeting-list nav {
     margin: 0;
@@ -1166,19 +1263,29 @@ svg {
   }
   .toolbar {
     height: 48px;
-    padding-inline: 20px;
+    padding-inline: var(--space-16);
+  }
+  .microphone-panel {
+    padding: var(--space-12) var(--space-16) 0;
+  }
+  .error-banner {
+    padding-inline: var(--space-16);
   }
   .notebook-body {
-    padding: 25px 20px;
+    padding: var(--space-16);
   }
   .export-button {
-    padding: 7px;
+    padding: 7px var(--space-12);
     font-size: 14px;
   }
   .session-state h1 {
-    font-size: 22px;
+    font-size: 26px;
   }
-  .focus-disclosure > summary span {
+  .session-state .status-dot {
+    margin-top: 12px;
+  }
+  .focus-disclosure > summary span,
+  .context-disclosure > summary span {
     display: block;
     margin-left: 18px;
   }
@@ -1186,13 +1293,13 @@ svg {
     margin-left: auto;
   }
   .secondary-page {
-    padding: 35px 22px;
+    padding: var(--space-24) var(--space-16);
   }
   .secondary-page h1 {
     font-size: 26px;
   }
   .setting {
-    gap: 20px;
+    gap: var(--space-16);
     flex-direction: column;
     align-items: stretch;
   }
