@@ -18,7 +18,7 @@ test('narrow keyboard flow preserves context controls and independent Stop', asy
       ),
     });
   });
-  await page.goto('/?granola&live');
+  await page.goto('/?granola&live&keys=set');
   const nav = page.getByRole('navigation', { name: 'Main navigation' });
   const context = page.getByRole('region', { name: 'Prior context' });
   await nav

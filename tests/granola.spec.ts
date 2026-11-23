@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
-  await page.route('**/?granola', async (route) => {
+  await page.route('**/?granola*', async (route) => {
     const response = await route.fetch();
     await route.fulfill({
       response,
@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
       ),
     });
   });
-  await page.goto('/?granola');
+  await page.goto('/?granola&keys=set');
   await page.locator('.context-disclosure > summary').press('Enter');
   await page
     .getByRole('button', { name: 'Connect Granola', exact: true })

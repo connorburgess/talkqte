@@ -36,7 +36,7 @@ import {
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { ContextNotes } from './components/ContextNotes';
 import { SetupCard, type SetupTarget } from './components/SetupCard';
-import { ProviderKeys } from './components/ProviderKeys';
+import { isKeysStatus, ProviderKeys } from './components/ProviderKeys';
 import { KeepMeetingChoice } from './components/KeepMeetingChoice';
 import {
   PanelDivider,
@@ -45,6 +45,8 @@ import {
 } from './components/PanelDivider';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
 import { useCaptureControl } from './lib/useCaptureControl';
+import { keysStatus, type KeysStatus } from './lib/providerKeys';
+import { Onboarding } from './components/Onboarding';
 import {
   transcribedWhere,
   transcriptionDropText,
@@ -690,6 +692,13 @@ function Notebook() {
   // The setup card: put away for this app session with Not now, or gone
   // once the required steps are done.
   const [setupDismissed, setSetupDismissed] = useState(false);
+  const [keysAvailable, setKeysAvailable] = useState(false);
+  const [initialKeys, setInitialKeys] = useState<KeysStatus | null>(null);
+  const [onboardingMode, setOnboardingMode] = useState<
+    'idle' | 'auto' | 'manual' | 'skipped' | 'finished'
+  >('idle');
+  const onboardingChecked = useRef(false);
+  const sessionHeading = useRef<HTMLHeadingElement>(null);
   const notebookNav = useRef<HTMLButtonElement>(null);
   const [focusExpanded, setFocusExpanded] = useState(false);
   // A failed background save must stay discoverable even after collapsing Focus.
@@ -753,6 +762,85 @@ function Notebook() {
       stop?.();
     };
   }, []);
+  useEffect(() => {
+    if (!bridge.desktop) return;
+    let live = true;
+    keysStatus().then(
+      (next) => {
+        if (!live) return;
+        if (isKeysStatus(next)) {
+          setKeysAvailable(true);
+          setInitialKeys(next);
+        } else {
+          setKeysAvailable(false);
+        }
+      },
+      () => {
+        if (live) setKeysAvailable(false);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  const showOnboarding =
+    view === 'notebook' &&
+    (onboardingMode === 'manual' ||
+      (onboardingMode === 'auto' && !state?.live && !preparing && !finishing));
+  useEffect(() => {
+    if (
+      !bridge.desktop ||
+      !keysAvailable ||
+      !initialKeys ||
+      !state ||
+      !liveStatus
+    )
+      return;
+    if (onboardingChecked.current) return;
+    onboardingChecked.current = true;
+    // Auto-open once per launch only when both keys are notSet (an unreadable
+    // key is not missing), live transcription is unavailable for that reason
+    // (a development or lab launch with its own credentials stays on the
+    // notebook) and no session is active.
+    if (
+      !liveStatus.available &&
+      initialKeys.deepgram.state === 'notSet' &&
+      initialKeys.anthropic.state === 'notSet' &&
+      !preparing &&
+      !finishing &&
+      !state.live
+    ) {
+      setOnboardingMode('auto');
+    }
+  }, [keysAvailable, initialKeys, preparing, finishing, state, liveStatus]);
+  const focusSessionHeading = () => {
+    setTimeout(() => sessionHeading.current?.focus(), 0);
+  };
+  const skipOnboarding = () => {
+    setOnboardingMode('skipped');
+    setNotice(
+      'Setup skipped. Add your keys or run setup again any time in Settings.',
+    );
+    focusSessionHeading();
+  };
+  const finishOnboarding = () => {
+    setOnboardingMode('finished');
+    setNotice('Setup complete.');
+    focusSessionHeading();
+  };
+  const startFromOnboarding = () => {
+    setOnboardingMode('finished');
+    if (liveStatus?.available && !busy && !startPending && !microphone.active) {
+      void startLive();
+    } else {
+      focusSessionHeading();
+    }
+  };
+  const reopenOnboarding = () => {
+    setOnboardingMode('manual');
+    setView('notebook');
+  };
+
   const modal = useRef<HTMLDialogElement>(null);
   const exportButton = useRef<HTMLButtonElement>(null);
   const notesEditor = useRef<HTMLTextAreaElement>(null);
@@ -991,7 +1079,7 @@ function Notebook() {
               Settings
             </button>
             <div className="version">
-              TalkQTE <span>0.1 · early development</span>
+              TalkQTE <span>0.1 · alpha</span>
             </div>
           </div>
         </div>
@@ -1022,108 +1110,116 @@ function Notebook() {
               </>
             )}
           </div>
-          {view === 'notebook' && (listResizable || splitContent) && (
-            <details
-              className="layout-controls"
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') {
-                  event.preventDefault();
-                  event.currentTarget.open = false;
-                  event.currentTarget.querySelector('summary')?.focus();
-                }
-              }}
-            >
-              <summary>Panel sizes</summary>
-              <div className="layout-controls-body">
-                {listResizable && (
-                  <label>
-                    Sidebar width
-                    <input
-                      type="range"
-                      min={200}
-                      max={listMax}
-                      value={listWidth}
-                      aria-valuetext={`${listWidth} pixels wide`}
-                      onChange={(event) =>
-                        setPreferredListWidth(Number(event.target.value))
-                      }
-                    />
-                  </label>
-                )}
-                {splitContent && (
-                  <label>
-                    Notes and transcript width
-                    <input
-                      type="range"
-                      min={260}
-                      max={notesMax}
-                      value={notesWidth}
-                      aria-valuetext={`${notesWidth} pixels wide`}
-                      onChange={(event) =>
-                        resizeNotes(Number(event.target.value))
-                      }
-                    />
-                  </label>
-                )}
-                <button
-                  className="secondary-button"
-                  onClick={() => {
-                    setPreferredListWidth(null);
-                    setNotesRatio(1 / 1.95);
-                  }}
-                >
-                  Reset panel sizes
-                </button>
-                <p>
-                  Sizes last until you close the app. Narrow windows stack the
-                  panels.
-                </p>
-              </div>
-            </details>
-          )}
+          {view === 'notebook' &&
+            !showOnboarding &&
+            (listResizable || splitContent) && (
+              <details
+                className="layout-controls"
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    event.currentTarget.open = false;
+                    event.currentTarget.querySelector('summary')?.focus();
+                  }
+                }}
+              >
+                <summary>Panel sizes</summary>
+                <div className="layout-controls-body">
+                  {listResizable && (
+                    <label>
+                      Sidebar width
+                      <input
+                        type="range"
+                        min={200}
+                        max={listMax}
+                        value={listWidth}
+                        aria-valuetext={`${listWidth} pixels wide`}
+                        onChange={(event) =>
+                          setPreferredListWidth(Number(event.target.value))
+                        }
+                      />
+                    </label>
+                  )}
+                  {splitContent && (
+                    <label>
+                      Notes and transcript width
+                      <input
+                        type="range"
+                        min={260}
+                        max={notesMax}
+                        value={notesWidth}
+                        aria-valuetext={`${notesWidth} pixels wide`}
+                        onChange={(event) =>
+                          resizeNotes(Number(event.target.value))
+                        }
+                      />
+                    </label>
+                  )}
+                  <button
+                    className="secondary-button"
+                    onClick={() => {
+                      setPreferredListWidth(null);
+                      setNotesRatio(1 / 1.95);
+                    }}
+                  >
+                    Reset panel sizes
+                  </button>
+                  <p>
+                    Sizes last until you close the app. Narrow windows stack the
+                    panels.
+                  </p>
+                </div>
+              </details>
+            )}
           {!bridge.desktop && (
             <span className="prototype-label">Browser preview</span>
           )}
         </header>
-        <MicrophoneControl
-          microphone={microphone}
-          live={live || finishing}
-          preparing={preparing}
-          cancelling={cancelling}
-          processingConfigured={!!capture.state?.processor}
-          sourceMayBeCapturing={!!capture.state?.source?.mayBeCapturing}
-          sourceSession={sourceApp}
-          transcription={state?.transcription}
-          action={
-            preparing ? (
-              <button
-                ref={rememberCancel}
-                className="secondary-button"
-                disabled={
-                  capture.busy ||
-                  cancelling ||
-                  capture.state?.startup !== 'loading'
-                }
-                onClick={() => {
-                  restoreStartFocus.current =
-                    document.activeElement === cancelButton.current;
-                  void capture.stop();
-                }}
-              >
-                {cancelling ? 'Cancelling…' : 'Cancel start'}
-              </button>
-            ) : live || finishing ? (
-              <button
-                className="secondary-button"
-                disabled={capture.busy || !capture.state}
-                onClick={() => void capture.stop()}
-              >
-                <Square size={14} />
-                Stop live session
-              </button>
-            ) : undefined
-          }
-        />
+        {(!showOnboarding ||
+          live ||
+          preparing ||
+          finishing ||
+          microphone.active) && (
+          <MicrophoneControl
+            microphone={microphone}
+            live={live || finishing}
+            preparing={preparing}
+            cancelling={cancelling}
+            processingConfigured={!!capture.state?.processor}
+            sourceMayBeCapturing={!!capture.state?.source?.mayBeCapturing}
+            sourceSession={sourceApp}
+            transcription={state?.transcription}
+            action={
+              preparing ? (
+                <button
+                  ref={rememberCancel}
+                  className="secondary-button"
+                  disabled={
+                    capture.busy ||
+                    cancelling ||
+                    capture.state?.startup !== 'loading'
+                  }
+                  onClick={() => {
+                    restoreStartFocus.current =
+                      document.activeElement === cancelButton.current;
+                    void capture.stop();
+                  }}
+                >
+                  {cancelling ? 'Cancelling…' : 'Cancel start'}
+                </button>
+              ) : live || finishing ? (
+                <button
+                  className="secondary-button"
+                  disabled={capture.busy || !capture.state}
+                  onClick={() => void capture.stop()}
+                >
+                  <Square size={14} />
+                  Stop live session
+                </button>
+              ) : undefined
+            }
+          />
+        )}
         {(preparing || live || finishing || view === 'settings') &&
           (capture.statusError || capture.error) && (
             <div className="error-banner" role="alert">
@@ -1172,7 +1268,21 @@ function Notebook() {
           </div>
         )}
 
-        {view === 'notebook' && (
+        {view === 'notebook' && showOnboarding && (
+          <Onboarding
+            canStartLive={
+              !!liveStatus?.available &&
+              !busy &&
+              !startPending &&
+              !microphone.active
+            }
+            onSkip={skipOnboarding}
+            onFinish={finishOnboarding}
+            onStartLive={startFromOnboarding}
+          />
+        )}
+
+        {view === 'notebook' && !showOnboarding && (
           <div className="notebook-body">
             <section className="session-strip" aria-label="Session">
               <div className="session-state">
@@ -1181,7 +1291,7 @@ function Notebook() {
                   <span className={`status-dot ${state.status}`} />
                 )}
                 <div>
-                  <h1>
+                  <h1 ref={sessionHeading} tabIndex={-1}>
                     {preparing
                       ? cancelling
                         ? 'Cancelling start'
@@ -1738,6 +1848,24 @@ function Notebook() {
               A few controls to keep questions on your terms.
             </p>
             <ProviderKeys />
+            {keysAvailable && (
+              <section className="setting">
+                <div>
+                  <h2>Setup walkthrough</h2>
+                  <p>
+                    Review keys, permissions, and how per-session approval
+                    works.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={reopenOnboarding}
+                >
+                  Set up TalkQTE again
+                </button>
+              </section>
+            )}
             <section className="setting">
               <div>
                 <h2>Your name</h2>

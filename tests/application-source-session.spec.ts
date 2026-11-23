@@ -33,7 +33,7 @@ async function fixture(page: Page, file: string) {
       body: (await response.text()).replace('/src/main.tsx', file),
     });
   });
-  await page.goto('/');
+  await page.goto(file.endsWith('native-microphone.ts') ? '/?keys=set' : '/');
 }
 
 async function panelAlone(page: Page) {

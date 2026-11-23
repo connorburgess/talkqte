@@ -62,7 +62,7 @@ test('a collapsed focus section reveals a rejected save without moving keyboard 
       ),
     });
   });
-  await page.goto('/?granola');
+  await page.goto('/?granola&keys=set');
   const summary = page.locator('.focus-disclosure > summary');
   await summary.press('Enter');
   await page.evaluate(() => window.focusTest.hold());

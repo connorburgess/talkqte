@@ -13,7 +13,7 @@ async function open(page: Page, query = '?live&hold-start') {
       ),
     });
   });
-  await page.goto(`/${query}`);
+  await page.goto(`/${query}${query ? '&' : '?'}keys=set`);
   await expect(
     page.getByRole('button', { name: 'Start live session', exact: true }),
   ).toBeEnabled();

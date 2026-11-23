@@ -223,7 +223,7 @@ async function notebook(page: Page) {
       ),
     });
   });
-  await page.goto('/');
+  await page.goto('/?keys=set');
   return {
     microphone: page.getByRole('region', { name: 'Microphone', exact: true }),
     panel: page.getByRole('region', { name: 'Cue processing', exact: true }),
