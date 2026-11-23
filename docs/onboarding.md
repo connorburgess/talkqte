@@ -23,6 +23,7 @@ On desktop, onboarding opens automatically inside the notebook window (in place 
 
 - key commands are available (`provider_keys_status()` returns a valid status),
 - both Deepgram and Anthropic are `notSet` (if either key is `set`, `rejected`, or `unreadable`, onboarding does not auto-open),
+- live transcription is unavailable (`live_status` reports `available: false`), so a development or lab launch that already has its own credentials stays on the notebook,
 - setup has not been skipped or finished in this launch, and
 - no live session is preparing, running, or active.
 
@@ -41,4 +42,4 @@ Nothing is sent during onboarding except a key test, and only when the person ex
 
 ## Checks
 
-Browser checks in `tests/onboarding-keys.spec.ts` run in Chromium and WebKit against the fictional test fixture, covering unavailable key commands, automatic first-run launch, `unreadable` Keychain state not auto-opening, step navigation, heading focus, `Escape` confirmation, key shape rejection messages, password clearing and non-echoing, `Test key` → `Checking…` → `Rejected` → `Replace` → `Set and checked`, unreachable error messages, `Remove key`, `provider-keys:changed` sync, Settings re-entry, keyboard-only operation, `390px` narrow layout without overflow, and reduced motion. `tests/provider-keys.spec.ts` and `tests/keep-meeting.spec.ts` cover **Your API keys** and the export dialog's kept-meeting controls unchanged.
+Browser checks in `tests/onboarding-keys.spec.ts` run in Chromium and WebKit against the fictional test fixture, covering unavailable key commands, automatic first-run launch, no automatic launch when live transcription is already available, `unreadable` Keychain state not auto-opening, step navigation, heading focus, `Escape` confirmation, key shape rejection messages, password clearing and non-echoing, `Test key` → `Checking…` → `Rejected` → `Replace` → `Set and checked`, unreachable error messages, `Remove key`, `provider-keys:changed` sync, Settings re-entry, keyboard-only operation, `390px` narrow layout without overflow, and reduced motion. `tests/provider-keys.spec.ts` and `tests/keep-meeting.spec.ts` cover **Your API keys** and the export dialog's kept-meeting controls unchanged.

@@ -788,12 +788,22 @@ function Notebook() {
     (onboardingMode === 'manual' ||
       (onboardingMode === 'auto' && !state?.live && !preparing && !finishing));
   useEffect(() => {
-    if (!bridge.desktop || !keysAvailable || !initialKeys || !state) return;
+    if (
+      !bridge.desktop ||
+      !keysAvailable ||
+      !initialKeys ||
+      !state ||
+      !liveStatus
+    )
+      return;
     if (onboardingChecked.current) return;
     onboardingChecked.current = true;
     // Auto-open once per launch only when both keys are notSet (an unreadable
-    // key is not missing) and no session is active.
+    // key is not missing), live transcription is unavailable for that reason
+    // (a development or lab launch with its own credentials stays on the
+    // notebook) and no session is active.
     if (
+      !liveStatus.available &&
       initialKeys.deepgram.state === 'notSet' &&
       initialKeys.anthropic.state === 'notSet' &&
       !preparing &&
@@ -802,7 +812,7 @@ function Notebook() {
     ) {
       setOnboardingMode('auto');
     }
-  }, [keysAvailable, initialKeys, preparing, finishing, state]);
+  }, [keysAvailable, initialKeys, preparing, finishing, state, liveStatus]);
   const focusSessionHeading = () => {
     setTimeout(() => sessionHeading.current?.focus(), 0);
   };

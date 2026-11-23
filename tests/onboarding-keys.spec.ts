@@ -170,7 +170,7 @@ test('onboarding auto-opens when both keys are notSet, moves focus to each step 
 test('key entry clears without echoing, Test -> rejected -> replace -> set and checked, remove works, provider-keys:changed syncs, and Set up TalkQTE again reopens from Settings', async ({
   page,
 }) => {
-  await openDesktop(page, '?live');
+  await openDesktop(page);
 
   // Step 2 uses the single ProviderKeys rows with dashboard guidance.
   await page.getByRole('button', { name: 'Next: Your keys' }).click();
@@ -397,4 +397,24 @@ test('390px narrow layout has zero horizontal overflow and reduced motion disabl
     page.getByRole('region', { name: 'Your API keys' }),
   ).toBeVisible();
   await checkNoOverflowAndReducedMotion('Settings Your API keys at 390px');
+});
+
+test('a launch whose live transcription is already available (development or lab credentials) does not open onboarding by itself, and Settings still reopens it', async ({
+  page,
+}) => {
+  await openDesktop(page, '?live');
+  await expect(
+    page.getByRole('heading', { name: 'No session yet', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'One quiet cue beside your live call' }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Start live session', exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Set up TalkQTE again' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'One quiet cue beside your live call' }),
+  ).toBeFocused();
 });
