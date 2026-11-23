@@ -247,7 +247,9 @@ test('a live session is labelled live, has no end time, and cannot be exported',
   await expect(strip).not.toContainText('/');
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
   await expect(panel).toContainText('sent to Deepgram for transcription');
-  await expect(panel).not.toContainText('Activity check only');
+  await expect(panel).not.toContainText(
+    'Shows whether your microphone picks up sound',
+  );
   await expect(
     page.getByRole('button', { name: 'Export', exact: true }),
   ).toBeDisabled();

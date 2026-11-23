@@ -9,7 +9,7 @@ The [project license](LICENSE) covers the software. It does not grant trademark 
 
 Connor Burgess claims these as unregistered marks identifying this project. No trademark registration is claimed.
 
-This guide is about using the name and logo to identify software, not about copyright in the image files. Copies of those files published earlier under Apache-2.0 keep that license's copyright permissions, as described in the [licensing guide](LICENSING.md#previously-published-apache-20-material). Apache-2.0 section 6 likewise grants no permission to use the licensor's names or marks beyond describing the origin of the work.
+This guide is about using the name and logo to identify software, not about copyright in the image files.
 
 ## Uses that need no permission
 
