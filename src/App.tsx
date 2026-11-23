@@ -1047,7 +1047,7 @@ function Notebook() {
               Settings
             </button>
             <div className="version">
-              TalkQTE <span>0.1 · early development</span>
+              TalkQTE <span>0.1 · alpha</span>
             </div>
           </div>
         </div>
