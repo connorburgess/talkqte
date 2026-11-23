@@ -29,6 +29,10 @@ For commercial terms, open a [licensing inquiry](https://github.com/connorburges
 
 The software license does not grant trademark rights in the TalkQTE name or logo. A modified version shared with others needs its own name and icon unless you have permission to use TalkQTE's. See the [name and logo guide](TRADEMARKS.md) for what is fine without asking and what needs permission.
 
+## Future versions
+
+The licensor may offer future versions of TalkQTE under different terms, and may offer separate terms to a particular person or company. A version that has already been published keeps the terms it was published under for anyone who received it.
+
 ## Third-party material
 
 Third-party dependencies, assets, and license documents retain their own terms; the project license does not relicense them.
