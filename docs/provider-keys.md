@@ -35,7 +35,7 @@ first-run screen reads `provider_keys_status` at launch.
 | --- | --- | --- |
 | `provider_keys_status` | none | Reads which keys are stored. Sends nothing. |
 | `set_provider_key` | `{ provider, key }` | Checks the shape, then stores or replaces the key. Sends nothing to the provider. |
-| `test_provider_key` | `{ provider }` | One read-only request with the stored key: `GET https://api.deepgram.com/v1/projects` (`Authorization: Token …`) or `GET https://api.anthropic.com/v1/models?limit=1` (`x-api-key`, `anthropic-version: 2023-06-01`). Neither is billed. HTTP 200 marks the key checked; 401 or 403 marks it rejected; anything else is reported as unreachable and changes nothing. The response body is never read. |
+| `test_provider_key` | `{ provider }` | One read-only request with the stored key: `GET https://api.deepgram.com/v1/projects` (`Authorization: Token …`) or `GET https://api.anthropic.com/v1/models?limit=1` (`x-api-key`, `anthropic-version: 2026-10-21`). Neither is billed. HTTP 200 marks the key checked; 401 or 403 marks it rejected; anything else is reported as unreachable and changes nothing. The response body is never read. |
 | `remove_provider_key` | `{ provider }` | Deletes the key from the Keychain. |
 
 `provider` is `"deepgram"` or `"anthropic"`. The payload:

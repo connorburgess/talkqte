@@ -405,7 +405,9 @@ impl Keys {
 /// neither is billed. TLS with the bundled web roots, as Granola uses.
 pub struct NetworkProbe;
 
-const ANTHROPIC_VERSION: &str = "2023-06-01";
+/// The API version the lab's pinned Anthropic SDK sends; the in-app cue
+/// requests use the same one.
+pub const ANTHROPIC_VERSION: &str = "2026-10-21";
 
 impl Probe for NetworkProbe {
     fn check(&self, provider: Provider, key: &Secret) -> ProbeResult {
