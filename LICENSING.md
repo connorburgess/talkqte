@@ -37,6 +37,15 @@ The licensor may offer future versions of TalkQTE under different terms, and may
 
 Third-party dependencies, assets, and license documents retain their own terms; the project license does not relicense them.
 
+## Bundled fonts
+
+The app bundles two open-licensed font families in `public/fonts/`, each distributed under the SIL Open Font License, Version 1.1:
+
+- **Manrope Variable** — [LICENSES/MANROPE-OFL.txt](LICENSES/MANROPE-OFL.txt)
+- **IBM Plex Mono** — [LICENSES/IBM-PLEX-MONO-OFL.txt](LICENSES/IBM-PLEX-MONO-OFL.txt)
+
+Both notices are also included in `src-tauri/THIRD-PARTY-NOTICES.txt`, which ships inside the desktop app bundle.
+
 ## Contributions
 
 New contributions follow [CONTRIBUTING.md](CONTRIBUTING.md) and the [contributor agreement](CONTRIBUTOR_LICENSE_AGREEMENT.md). Contributors retain copyright and give the steward permission to license their contributions under other terms, including commercial terms. The agreement applies only when accepted; it is not retroactive and does not convert earlier DCO sign-offs into consent.

@@ -136,9 +136,7 @@ test('appearance controls are discoverable, apply to cues, and last into the nex
   page,
 }) => {
   await standIn(page, '/?live');
-  await page
-    .getByRole('button', { name: 'Question appearance & timing' })
-    .click();
+  await page.getByRole('button', { name: 'Cue appearance and timing' }).click();
   await expect(
     page.getByRole('heading', { name: 'Glance view' }),
   ).toBeVisible();

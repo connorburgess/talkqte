@@ -18,6 +18,8 @@
     "test:cue-cases": "node --test scripts/cue-rules-independent.test.mjs",
     "test:docs": "node --test scripts/check-docs.test.mjs scripts/check-brand-borders.test.mjs",
     "check:docs": "node scripts/check-docs.mjs",
+    "test:borders": "node --test scripts/check-one-sided-borders.test.mjs",
+    "check:borders": "node scripts/check-one-sided-borders.mjs",
     "test:release": "node --test scripts/release-preflight.test.mjs scripts/third-party-notices.test.mjs scripts/release-build.test.mjs scripts/release-data-snapshot.test.mjs scripts/is-main.test.mjs",
     "build:release": "node scripts/release-build.mjs",
     "notices": "node scripts/third-party-notices.mjs",

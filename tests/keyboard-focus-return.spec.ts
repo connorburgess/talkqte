@@ -44,12 +44,12 @@ test('saving an export from the keyboard returns focus to Export', async ({
   await expect(dialog).toBeVisible();
 });
 
-test('Question appearance & timing opens Settings with focus on the first appearance control', async ({
+test('Cue appearance and timing opens Settings with focus on the first appearance control', async ({
   page,
 }) => {
   await page.goto('/');
   await page
-    .getByRole('button', { name: 'Question appearance & timing' })
+    .getByRole('button', { name: 'Cue appearance and timing' })
     .press('Enter');
   await expect(
     page.getByRole('heading', { name: 'Make room for your conversation.' }),

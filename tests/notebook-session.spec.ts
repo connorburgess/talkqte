@@ -31,7 +31,7 @@ test('before a session, a build without live transcription says plainly that it 
   await expect(
     page.getByRole('complementary', { name: 'Question companion' }),
   ).toContainText(
-    'No cue yet.During a live session, one cue at a time appears here. Cues come from simple phrase rules on what is transcribed, not from AI.',
+    'No cue yet.During a live session, one cue at a time appears here. In this version cues come from simple phrase rules, not AI.',
   );
   await page.getByRole('tab', { name: /Transcript/ }).click();
   await expect(page.getByRole('tabpanel')).toContainText(
@@ -132,7 +132,7 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
     .click();
   await expect(title(page)).toHaveText('Live session in progress');
   await expect(session(page)).toContainText(
-    'Your microphone · transcribed by Deepgram once cue processing is enabled · not saved by TalkQTE',
+    'Your microphone · not saved by TalkQTE',
   );
   await expect(
     session(page).getByRole('button', { name: 'Start live session' }),
@@ -309,7 +309,7 @@ test('with cloud transcription, the notebook names the service, and says plainly
     page.evaluate((value) => window.liveTest.publish(value as never), value);
   await publish({ transcription: { provider: 'Deepgram' } });
   await expect(session(page)).toContainText(
-    'Your microphone · transcribed by Deepgram once cue processing is enabled · not saved by TalkQTE',
+    'Your microphone · not saved by TalkQTE',
   );
   await expect(page.getByRole('region', { name: 'Microphone' })).toContainText(
     'Your microphone is sent to Deepgram for transcription once you enable cue processing for this session; until then nothing is transcribed.',

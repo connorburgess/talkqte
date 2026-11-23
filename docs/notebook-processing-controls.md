@@ -1,5 +1,7 @@
 # Notebook processing permissions
 
+> Layout pass, 23 November 2026: **Cue processing** drops its enclosing card border and radius for hairline rules and spacing, adds `Step 1 of 2` / `Step 2 of 2` markers above the two approval headings with hairline rows on the review definition list, and groups development-only items (`Application audio`, `Lab run details` disclosure, and `approvalBySetting`) at the end of the panel under a muted `Development build` heading. Approval actions, consent text, accessible names and native commands are unchanged.
+
 Development acceptance, 11 November 2026. The main notebook and Settings now share native processing status with the existing capture controls. **No evaluator is registered in the normal app.** It shows **No model connection** with "No model cues: this build has no model connection." (worded that way since 14 November 2026), and offers no approval action. This change does not select a provider or enable inference.
 
 ## User task and boundaries

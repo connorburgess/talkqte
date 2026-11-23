@@ -393,3 +393,91 @@ test('the review names where audio goes beside where lines go, and only when aud
   await prepare(page);
   await expect(panel(page).locator('dl')).not.toContainText('Audio');
 });
+
+test('desktop toolbar omits the prototype label and the development group appears only for development signals', async ({
+  page,
+}) => {
+  await open(page, '?live');
+  await expect(page.locator('.toolbar')).not.toContainText(/prototype/i);
+  await expect(page.locator('.prototype-label')).toHaveCount(0);
+  const devHeading = panel(page).getByText('Development build', {
+    exact: true,
+  });
+  await expect(devHeading).toHaveCount(0);
+
+  await page.evaluate(() =>
+    window.captureTest.send({
+      processor: {
+        id: 'garden-evaluator',
+        revision: 1,
+        name: 'Garden evaluator',
+        model: 'Fictional model',
+        location: 'hosted',
+        destination: 'Example service',
+        dataPolicy: 'Fictional policy.',
+      },
+      approvalBySetting: false,
+      source: undefined,
+    }),
+  );
+  await expect(devHeading).toHaveCount(0);
+
+  await page.evaluate(() =>
+    window.captureTest.send({
+      processor: {
+        id: 'lab-api',
+        revision: 1,
+        name: 'Claude',
+        model: 'Fictional model',
+        location: 'hosted',
+        destination: 'Example service',
+        dataPolicy: 'Fictional policy.',
+      },
+      approvalBySetting: false,
+      source: undefined,
+    }),
+  );
+  await expect(devHeading).toBeVisible();
+
+  await page.evaluate(() =>
+    window.captureTest.send({
+      processor: {
+        id: 'garden-evaluator',
+        revision: 1,
+        name: 'Garden evaluator',
+        model: 'Fictional model',
+        location: 'hosted',
+        destination: 'Example service',
+        dataPolicy: 'Fictional policy.',
+      },
+      approvalBySetting: true,
+      source: undefined,
+    }),
+  );
+  await expect(devHeading).toBeVisible();
+
+  await page.evaluate(() =>
+    window.captureTest.send({
+      approvalBySetting: false,
+      source: {
+        phase: 'off',
+        mayBeCapturing: false,
+        stalled: false,
+        canRetry: false,
+        application: null,
+        problem: null,
+        operation: null,
+        sourceSession: false,
+      },
+    }),
+  );
+  await expect(devHeading).toBeVisible();
+
+  await page.evaluate(() =>
+    window.captureTest.send({
+      approvalBySetting: false,
+      source: undefined,
+    }),
+  );
+  await expect(devHeading).toHaveCount(0);
+});

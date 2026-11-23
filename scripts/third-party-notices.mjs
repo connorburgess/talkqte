@@ -239,6 +239,40 @@ function javascriptComponents(root, names) {
     .sort(byName);
 }
 
+/** Fonts bundled with the frontend in public/fonts/ under SIL OFL 1.1. */
+const BUNDLED_FONTS = [
+  {
+    name: 'Manrope Variable',
+    version: 'woff2',
+    license: 'OFL-1.1',
+    source: 'https://github.com/sharanda/manrope',
+    notice: 'LICENSES/MANROPE-OFL.txt',
+  },
+  {
+    name: 'IBM Plex Mono',
+    version: 'woff2',
+    license: 'OFL-1.1',
+    source: 'https://github.com/IBM/plex',
+    notice: 'LICENSES/IBM-PLEX-MONO-OFL.txt',
+  },
+];
+
+function bundledFontComponents(root) {
+  return BUNDLED_FONTS.map((font) => ({
+    kind: 'Bundled font',
+    name: font.name,
+    version: font.version,
+    license: font.license,
+    source: font.source,
+    notices: [
+      {
+        file: font.notice,
+        text: normalize(readFileSync(join(root, font.notice), 'utf8')),
+      },
+    ],
+  })).sort(byName);
+}
+
 function toolchainComponent(root) {
   const channel = /^channel\s*=\s*"([^"]+)"/m.exec(
     readFileSync(join(root, 'rust-toolchain.toml'), 'utf8'),
@@ -296,8 +330,9 @@ export function render(components, inputs) {
           `Scope: Rust crates linked for ${RUST_TARGET} with the default features (no`,
           'optional features; development builds link more), the Rust standard library,',
         ]),
-    'and the JavaScript packages in the frontend bundle. The system web view and',
-    'macOS frameworks are part of the operating system and are not listed.',
+    'and the JavaScript packages and bundled fonts in the frontend bundle. The',
+    'system web view and macOS frameworks are part of the operating system and are',
+    'not listed.',
     '',
     'Declared licences',
     '-----------------',
@@ -375,6 +410,7 @@ export async function generate(root = REPOSITORY) {
       ...rustComponents(metadata, linked),
       toolchainComponent(root),
       ...javascriptComponents(root, await bundledPackages(root)),
+      ...bundledFontComponents(root),
     ],
     inputsLine(root),
   );

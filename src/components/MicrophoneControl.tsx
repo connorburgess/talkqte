@@ -62,54 +62,64 @@ export function MicrophoneControl({
   const provider = transcription?.provider ?? 'the transcription service';
   if (live || preparing)
     return (
-      <section className="microphone-panel" aria-label="Microphone">
-        <div className="microphone-heading">
-          <div>
-            <strong>
-              {preparing ? 'Preparing live session' : 'Live session'}
-            </strong>
-            <span className="microphone-status" role="status">
-              {microphoneLabel(state)}
-            </span>
-            {state?.status === 'listening' && (
-              <span className="microphone-activity">
-                <span
-                  className={`status-dot ${state.activity}`}
-                  aria-hidden="true"
-                />
-                {state.activity === 'active'
-                  ? 'Signal detected'
-                  : 'Quiet input'}
+      <section className="microphone-panel is-live" aria-label="Microphone">
+        <div className="microphone-panel-body">
+          <div className="microphone-heading">
+            <div>
+              <strong>
+                {preparing ? 'Preparing live session' : 'Live session'}
+              </strong>
+              <span className="status-sep" aria-hidden="true">
+                ·
               </span>
-            )}
+              <span className="microphone-status" role="status">
+                {microphoneLabel(state)}
+              </span>
+              {state?.status === 'listening' && (
+                <>
+                  <span className="status-sep" aria-hidden="true">
+                    ·
+                  </span>
+                  <span className="microphone-activity">
+                    <span
+                      className={`status-dot ${state.activity}`}
+                      aria-hidden="true"
+                    />
+                    {state.activity === 'active'
+                      ? 'Signal detected'
+                      : 'Quiet input'}
+                  </span>
+                </>
+              )}
+            </div>
+            {action}
           </div>
-          {action}
+          <MicrophoneInput state={state} />
+          {preparing ? (
+            <p role="status">
+              {cancelling
+                ? 'Start cancelled. Waiting for the start to finish before you can start again.'
+                : 'Starting the live session. Cancel start to prevent capture.'}
+            </p>
+          ) : (
+            <p>
+              {sourceSession
+                ? `Audio from ${sourceSession} is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. The microphone is not used. TalkQTE does not record audio.`
+                : `Your microphone is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. TalkQTE does not record audio.`}
+              {processingConfigured
+                ? ' Cue processing has separate permissions below.'
+                : ' TalkQTE does not save the transcript.'}{' '}
+              {sourceSession
+                ? 'Stop live session to end it.'
+                : 'Stop live session to release the microphone.'}
+            </p>
+          )}
+          {(error || state?.message) && (
+            <p className="microphone-message" role="alert">
+              {error || state?.message}
+            </p>
+          )}
         </div>
-        <MicrophoneInput state={state} />
-        {preparing ? (
-          <p role="status">
-            {cancelling
-              ? 'Start cancelled. Waiting for the start to finish before you can start again.'
-              : 'Starting the live session. Cancel start to prevent capture.'}
-          </p>
-        ) : (
-          <p>
-            {sourceSession
-              ? `Audio from ${sourceSession} is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. The microphone is not used. TalkQTE does not record audio.`
-              : `Your microphone is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. TalkQTE does not record audio.`}
-            {processingConfigured
-              ? ' Cue processing has separate permissions below.'
-              : ' TalkQTE does not save the transcript.'}{' '}
-            {sourceSession
-              ? 'Stop live session to end it.'
-              : 'Stop live session to release the microphone.'}
-          </p>
-        )}
-        {(error || state?.message) && (
-          <p className="microphone-message" role="alert">
-            {error || state?.message}
-          </p>
-        )}
       </section>
     );
   const stopping =
@@ -117,62 +127,92 @@ export function MicrophoneControl({
     (state?.status === 'error' && !state.canStart);
   const canStop =
     (active && state?.status !== 'error') || (!!error && !state) || stopping;
+  const idle =
+    !active &&
+    !stopping &&
+    !error &&
+    state?.status !== 'error' &&
+    !state?.message &&
+    !microphone.stopPending;
+  const description = sourceMayBeCapturing
+    ? 'Shows whether your microphone picks up sound. Nothing from the microphone is recorded or transcribed. Audio from a selected application may still be captured; see Cue processing below.'
+    : 'Shows whether your microphone picks up sound. Nothing is recorded or transcribed, and no system audio is used.';
   return (
-    <section className="microphone-panel" aria-label="Microphone">
-      <div className="microphone-heading">
-        <div>
-          <strong>Microphone only</strong>
-          <span className="microphone-status" role="status">
-            {error && !state ? 'Status unavailable' : microphoneLabel(state)}
-          </span>
-          {state?.status === 'listening' && (
-            <span className="microphone-activity">
-              <span
-                className={`status-dot ${state.activity}`}
-                aria-hidden="true"
-              />
-              {state.activity === 'active' ? 'Signal detected' : 'Quiet input'}
+    <section
+      className={`microphone-panel${idle ? ' is-quiet' : ''}`}
+      aria-label="Microphone"
+    >
+      <div className="microphone-panel-body">
+        <div className="microphone-heading">
+          <div>
+            <strong>Microphone check</strong>
+            <span className="status-sep" aria-hidden="true">
+              ·
             </span>
-          )}
+            <span className="microphone-status" role="status">
+              {error && !state ? 'Status unavailable' : microphoneLabel(state)}
+            </span>
+            {state?.status === 'listening' && (
+              <>
+                <span className="status-sep" aria-hidden="true">
+                  ·
+                </span>
+                <span className="microphone-activity">
+                  <span
+                    className={`status-dot ${state.activity}`}
+                    aria-hidden="true"
+                  />
+                  {state.activity === 'active'
+                    ? 'Signal detected'
+                    : 'Quiet input'}
+                </span>
+              </>
+            )}
+          </div>
+          <button
+            className="secondary-button"
+            disabled={
+              !desktop || busy || stopping || (!canStop && !state?.canStart)
+            }
+            onClick={() => void (canStop ? stop() : start())}
+            aria-label={canStop ? 'Stop microphone' : 'Start microphone'}
+          >
+            {stopping
+              ? 'Stopping…'
+              : canStop
+                ? 'Stop microphone'
+                : 'Start microphone'}
+          </button>
         </div>
-        <button
-          className="secondary-button"
-          disabled={
-            !desktop || busy || stopping || (!canStop && !state?.canStart)
-          }
-          onClick={() => void (canStop ? stop() : start())}
-          aria-label={canStop ? 'Stop microphone' : 'Start microphone'}
-        >
-          {stopping
-            ? 'Stopping…'
-            : canStop
-              ? 'Stop microphone'
-              : 'Start microphone'}
-        </button>
+        {idle ? (
+          <>
+            <p>{description}</p>
+            <MicrophoneInput state={state} />
+          </>
+        ) : (
+          <>
+            <MicrophoneInput state={state} />
+            <p>{description}</p>
+          </>
+        )}
+        {active && state?.status !== 'error' && (
+          <p>
+            Companion controls do not stop this check. Use Stop microphone to
+            release it.
+          </p>
+        )}
+        {microphone.stopPending && state?.status !== 'stopping' && (
+          <p aria-live="polite">Stop requested… waiting for microphone.</p>
+        )}
+        {(error || state?.message) && (
+          <p
+            className="microphone-message"
+            role={error || state?.status === 'error' ? 'alert' : undefined}
+          >
+            {error || state?.message}
+          </p>
+        )}
       </div>
-      <MicrophoneInput state={state} />
-      <p>
-        {sourceMayBeCapturing
-          ? 'Activity check only. No recording or transcription from the microphone. Audio from a selected application may still be captured; see Cue processing below.'
-          : 'Activity check only. No recording, transcription, or system audio.'}
-      </p>
-      {active && state?.status !== 'error' && (
-        <p>
-          Companion controls do not stop this check. Use Stop microphone to
-          release it.
-        </p>
-      )}
-      {microphone.stopPending && state?.status !== 'stopping' && (
-        <p aria-live="polite">Stop requested… waiting for microphone.</p>
-      )}
-      {(error || state?.message) && (
-        <p
-          className="microphone-message"
-          role={error || state?.status === 'error' ? 'alert' : undefined}
-        >
-          {error || state?.message}
-        </p>
-      )}
     </section>
   );
 }
