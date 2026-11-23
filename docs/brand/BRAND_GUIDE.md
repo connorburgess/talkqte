@@ -8,7 +8,10 @@ Exported visual sheets in `docs/brand/images/`:
 
 - [Adopted identity: White and studio amber](images/direction-c.png)
 - [Dock (floating companion): all states, 1x](images/dock.png) and [2x](images/dock-2x.png)
-- [Panel (desktop notebook): all states, 1x](images/panel.png) and [2x](images/panel-2x.png)
+- [Panel (desktop notebook & Service keys): all states, 1x](images/panel.png) and [2x](images/panel-2x.png)
+- [First-run onboarding (4 steps, 390px, states): 1x](images/onboarding.png) and [2x](images/onboarding-2x.png)
+- [Keeping a meeting (wide layout, Stop states, review dialog, Not built summary): 1x](images/keeping-meeting.png) and [2x](images/keeping-meeting-2x.png)
+- [Two ways to use TalkQTE (website specimen): 1x](images/two-ways.png) and [2x](images/two-ways-2x.png)
 - [Historical comparison with Seatbelt Labs](images/comparison.png)
 - [Not adopted: Direction A (White and evergreen)](images/direction-a.png) and [Direction B (White and ink)](images/direction-b.png)
 
@@ -223,7 +226,73 @@ The notebook moves from warm cream and rounded green pills onto pure white (`#FF
 
 ---
 
-## 9. Motion, Voice, and Accessibility
+## 9. Onboarding, Keeping a Meeting, and Two Ways to Use TalkQTE
+
+### 9.1 First-Run Onboarding (`Onboarding`)
+
+Shown inside the notebook window (in place of the notebook body) when no service keys are set, and always reachable again from Settings via **"Set up TalkQTE again"**. See [images/onboarding.png](images/onboarding.png) ([2x](images/onboarding-2x.png)).
+
+- **Structure:** Four single-screen steps with a static monospace indicator (`Step 1 of 4` through `Step 4 of 4`, no animated progress bar), `Skip setup`, `Back`, and `Next` (or terminal actions on Step 4) on every step.
+- **Step 1 (What TalkQTE does):** Explains one quiet source-backed cue beside a live call, states that TalkQTE is in alpha, displays the fictional cue specimen (visibly labelled `Fictional example`), and shows the compact **Two ways to use TalkQTE** element (`Use your own keys` active with `Alpha · BYOK`; `TalkQTE Hosted` shown as `Coming later`, `aria-disabled="true"`, not selectable).
+- **Step 2 (Your keys):** Reuses the two `ServiceKeys` rows (Deepgram for transcription, Anthropic for cue decisions), each with a **"Where to get one"** line naming the provider's own dashboard in words (*"Deepgram Console (console.deepgram.com) → API Keys"*, *"Anthropic Console (console.anthropic.com) → API Keys"*, zero external fetches from the app), `Add key`, `Test`, `Replace`, `Remove`, and the plain statement of what each service receives. Displays plainly on screen: **"Test is the only action in setup that sends anything over the network, and only when you press it."** Either key can be skipped. Covers `Not set`, `Set`, and `Rejected` states.
+- **Step 3 (macOS permissions):** Informational only; **nothing is requested on this screen**. Explains **Microphone** (asked by macOS on first session start) and **Screen & System Audio Recording** (asked by macOS only if choosing an application's audio), why each is needed, and that macOS asks, not TalkQTE.
+- **Step 4 (Start a first session):** Explains the exact sequence (`Start live session` → per-session approval: `Review processing` → `Review selected sources` → `Enable for this session`, naming both Deepgram and Anthropic and what each receives; nothing is sent before approval; `Stop` ends capture and sending). Terminal actions: **`Start live session`** (primary) and **`Go to the notebook`** (secondary), alongside `Back` and `Skip setup`.
+- **Keyboard, VoiceOver, and motion:**
+  - Focus moves programmatically to the step heading `h2` (`tabIndex={-1}`) on every step transition, with a `3px solid --focus` outline.
+  - Pressing `Escape` opens a focus-trapped **Skip setup for now?** confirmation dialog (`Keep setting up` / `Skip setup`).
+  - `prefers-reduced-motion: reduce` applies zero transitions (`transition: none; animation: none;`).
+  - Zero one-sided accent borders; `1320 × 880` notebook frame and `390px` narrow stacked layout both maintain `44px` minimum targets and zero horizontal overflow.
+- **Component boundary and typed stub interface:** One new component `src/components/Onboarding.tsx` with its own stylesheet `src/components/onboarding.css`, mounted at one mount point in `src/App.tsx` in place of the notebook body while active (plus one Settings row `"Set up TalkQTE again"`). Until the own-key lane's first PR lands, build against this stub interface:
+
+```ts
+export type KeyProvider = 'deepgram' | 'anthropic';
+
+export type KeyState =
+  | { status: 'not_set' }
+  | { status: 'set' }
+  | { status: 'checking' }
+  | {
+      status: 'rejected';
+      reason: 'refused' | 'unreachable';
+      message: string;
+    };
+
+export interface KeysStatusSnapshot {
+  deepgram: KeyState;
+  anthropic: KeyState;
+}
+
+export interface ServiceKeysBridge {
+  keys_status(): Promise<KeysStatusSnapshot>;
+  keys_set(provider: KeyProvider, secret: string): Promise<KeyState>;
+  keys_test(provider: KeyProvider): Promise<KeyState>;
+  keys_remove(provider: KeyProvider): Promise<KeyState>;
+}
+```
+
+### 9.2 Keeping a Meeting (Design Only)
+
+Designed for people who use TalkQTE on its own without a separate note-taker (such as Granola). Behaviour is implemented by the own-key lane. See [images/keeping-meeting.png](images/keeping-meeting.png) ([2x](images/keeping-meeting-2x.png)).
+
+- **During a session (layout choice & justification):** At wide window widths (`>= 1080px`), `Your notes` and `Live transcript` sit **side-by-side** in two equal bordered panes above a chronological **Shown cues** log (each row listing timestamp, cue kind, and cue text). Below `1080px`, `Your notes` and `Live transcript` collapse back to the existing tabbed layout. *Justification:* single-app users who do not run a separate note-taker need to scan recent spoken lines while typing notes without toggling tabs mid-call; collapsing below `1080px` preserves comfortable reading widths (`>= 260px`) down to `390px`.
+- **At Stop (off by default):** Every session defaults to keeping nothing, stated plainly verbatim: **`"TalkQTE keeps nothing unless you choose Keep this meeting."`**
+  - **Without keeping (default):** Ended session strip shows the plain notice, notes that data clears on next session or quit, and offers `Keep this meeting` and `Start live session`.
+  - **Review dialog (`Keep this meeting`):** Opens a modal dialog previewing the single combined Markdown document (`# Notes`, `## Shown cues`, `## Transcript`) before the user chooses a file destination (`Cancel` / `Choose destination`).
+  - **With keeping (saved):** Confirms the reviewed Markdown filename written to disk while noting that the next session still defaults to keeping nothing.
+- **Optional later step (`Not built`):** A clearly separated section below a neutral `1px` divider offers **`Summarise with your Anthropic key`**, visibly badged **`Not built`** with a disabled control and plain text stating that when built it would send the session's transcript and notes to Anthropic using the user's key, and that nothing is sent today.
+- **Required documentation & contract update:** Product `main` currently states that the live transcript is never saved or exported. Implementing **Keep this meeting** changes that contract; the own-key lane must update `PRIVACY.md` and `DESIGN.md` alongside the behaviour before shipping.
+
+### 9.3 Two Ways to Use TalkQTE (Naming Proposal & Specimen)
+
+Used both as a two-column section on `talkqte.com` ([images/two-ways.png](images/two-ways.png), [2x](images/two-ways-2x.png)) and as the compact selector element on Onboarding Step 1:
+
+- **Proposed names:** **`Your own keys`** (with a small monospace chip `Alpha · BYOK`, never "BYOK" as the heading) and **`TalkQTE Hosted`** (with chip `Planned`).
+- **Why `TalkQTE Hosted` over `Pro`:** "Pro" implies extra power-user features or a feature tier split, whereas the only planned distinction is a paid TalkQTE service where keys are managed and usage is included, with no price, release date, or extra feature promise. `TalkQTE Hosted` states the exact difference without promising unbuilt features.
+- **Visual rules:** Two equal-width bordered columns on `talkqte.com`, uniform `1px solid --border` all round (no one-sided accents), no "most popular" badge, no pricing, and one plain `mailto:connor@seatbeltlabs.com?subject=TalkQTE%20Hosted` link on `TalkQTE Hosted` (no form, no third-party request).
+
+---
+
+## 10. Motion, Voice, and Accessibility
 
 ### Motion
 

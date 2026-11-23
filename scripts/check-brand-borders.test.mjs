@@ -62,6 +62,16 @@ const ALLOWLIST = {
   '.panel-transcript-row': '1px neutral hairline separating transcript lines.',
   '.panel-setting-row': '1px neutral hairline separating Settings rows.',
   '.sk-row': '1px neutral hairline separating Service keys provider rows.',
+  '.ob-head': '1px neutral hairline under Onboarding step header.',
+  '.ob-foot': '1px neutral hairline above Onboarding step footer actions.',
+  '.ob-a11y-row':
+    '1px neutral hairline separating Keyboard and VoiceOver order blocks.',
+  '.km-cue-row':
+    '1px neutral hairline separating chronological Shown cues rows.',
+  '.km-summary-sep':
+    '1px neutral hairline separating Keep this meeting from Not built summary.',
+  '.tw-points li':
+    '1px neutral hairline separating Two ways comparison bullet items.',
   '.panel-note-row': '1px neutral hairline separating Prior context note rows.',
   '.panel-footer-line': '1px neutral hairline above notebook footer note.',
   '.dock-matrix-head':
