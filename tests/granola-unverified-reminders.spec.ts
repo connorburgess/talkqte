@@ -40,7 +40,7 @@ async function nativePage(page: Page, url: string) {
       ),
     });
   });
-  await page.goto(url);
+  await page.goto(`${url}${url.includes('?') ? '&' : '?'}keys=set`);
 }
 
 async function show(page: Page, cue: Cue) {

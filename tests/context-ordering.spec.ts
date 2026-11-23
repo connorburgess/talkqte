@@ -26,7 +26,7 @@ for (const all of [false, true]) {
   test(`a delayed startup list cannot restore ${all ? 'all removed notes' : 'a removed note'}`, async ({
     page,
   }, testInfo) => {
-    await page.goto('/?context-ordering&hold-context');
+    await page.goto('/?context-ordering&hold-context&keys=set');
     await page.locator('.context-disclosure > summary').press('Enter');
     await expect
       .poll(() => page.evaluate(() => window.contextTest.pending()))
@@ -68,7 +68,7 @@ for (const all of [false, true]) {
 test('a delayed empty startup list cannot hide newly imported notes', async ({
   page,
 }) => {
-  await page.goto('/?context-ordering&hold-context&empty-context');
+  await page.goto('/?context-ordering&hold-context&empty-context&keys=set');
   await page.locator('.context-disclosure > summary').press('Enter');
   await expect
     .poll(() => page.evaluate(() => window.contextTest.pending()))
@@ -84,7 +84,7 @@ test('a delayed empty startup list cannot hide newly imported notes', async ({
 test('a failed startup read after an event does not detach later removal updates', async ({
   page,
 }) => {
-  await page.goto('/?context-ordering&hold-context');
+  await page.goto('/?context-ordering&hold-context&keys=set');
   await page.locator('.context-disclosure > summary').press('Enter');
   await expect
     .poll(() => page.evaluate(() => window.contextTest.pending()))
@@ -103,7 +103,7 @@ test('a failed startup read after an event does not detach later removal updates
 test('the initial list still supplies notes when no event has arrived', async ({
   page,
 }) => {
-  await page.goto('/?context-ordering&hold-context');
+  await page.goto('/?context-ordering&hold-context&keys=set');
   await page.locator('.context-disclosure > summary').press('Enter');
   await expect
     .poll(() => page.evaluate(() => window.contextTest.pending()))
@@ -120,7 +120,7 @@ for (const all of [false, true]) {
   test(`keyboard removal of ${all ? 'all notes' : 'one note'} keeps focus in prior context`, async ({
     page,
   }) => {
-    await page.goto('/?context-ordering&hold-context');
+    await page.goto('/?context-ordering&hold-context&keys=set');
     const summary = page.locator('.context-disclosure > summary');
     await summary.press('Enter');
     await page.evaluate(() => window.contextTest.publish());
@@ -144,7 +144,7 @@ for (const failure of [false, true]) {
   test(`a ${failure ? 'failed' : 'delayed'} removal does not take focus after the user moves it`, async ({
     page,
   }) => {
-    await page.goto('/?context-ordering&hold-context&hold-removal');
+    await page.goto('/?context-ordering&hold-context&hold-removal&keys=set');
     const summary = page.locator('.context-disclosure > summary');
     await summary.press('Enter');
     await page.evaluate(() => window.contextTest.publish());
@@ -173,7 +173,7 @@ for (const failure of [false, true]) {
 test('returning to the disclosure during removal does not restore old focus intent', async ({
   page,
 }) => {
-  await page.goto('/?context-ordering&hold-context&hold-removal');
+  await page.goto('/?context-ordering&hold-context&hold-removal&keys=set');
   const summary = page.locator('.context-disclosure > summary');
   await summary.press('Enter');
   await page.evaluate(() => window.contextTest.publish());

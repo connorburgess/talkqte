@@ -87,7 +87,7 @@
   border-color: var(--danger);
   background: var(--danger-surface);
   color: var(--danger);
-  font-family: var(--font-sans);
+  font-family: var(--font);
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0;

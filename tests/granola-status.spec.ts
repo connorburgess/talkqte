@@ -50,7 +50,7 @@ for (const fail of [false, true]) {
   test(`an old ${fail ? 'failed' : 'disconnected'} snapshot cannot hide a newly connected account`, async ({
     page,
   }, testInfo) => {
-    await page.goto('/?granola&hold-granola-status');
+    await page.goto('/?granola&hold-granola-status&keys=set');
     await page.locator('.context-disclosure > summary').press('Enter');
     await pendingStatus(page);
     await button(page, 'Connect Granola').press('Enter');
@@ -84,7 +84,7 @@ for (const fail of [false, true]) {
   test(`a ${fail ? 'failed' : 'connected'} snapshot from a closed notebook cannot replace a newer connection`, async ({
     page,
   }) => {
-    await page.goto('/?granola');
+    await page.goto('/?granola&keys=set');
     await page.locator('.context-disclosure > summary').press('Enter');
     await button(page, 'Connect Granola').press('Enter');
     await connected(page);
@@ -124,7 +124,7 @@ for (const fail of [false, true]) {
 test('a current connection snapshot restores controls on returning to the notebook', async ({
   page,
 }) => {
-  await page.goto('/?granola');
+  await page.goto('/?granola&keys=set');
   await page.locator('.context-disclosure > summary').press('Enter');
   await button(page, 'Connect Granola').press('Enter');
   await connected(page);
@@ -144,7 +144,7 @@ test('a current connection snapshot restores controls on returning to the notebo
 test('an initial status failure leaves explicit connection available', async ({
   page,
 }) => {
-  await page.goto('/?granola&hold-granola-status');
+  await page.goto('/?granola&hold-granola-status&keys=set');
   await page.locator('.context-disclosure > summary').press('Enter');
   await pendingStatus(page);
   await page.evaluate(() => window.granolaTest.releaseStatuses(true));
