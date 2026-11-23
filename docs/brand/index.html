@@ -3635,7 +3635,7 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
                   <span class="sk-chip is-set">Set</span>
                 </div>
                 <p class="panel-muted" style="margin-top: 6px; max-width: 70ch">
-                  Receives the session's audio, only after you approve cue processing for that session. Billed to your own Deepgram account.
+                  Receives the session's audio (microphone or the chosen application), only after you approve cue processing for that session, at most 120 minutes per session. Billed to your own Deepgram account.
                 </p>
                 <div class="sk-actions">
                   <span class="sk-btn">Test</span>
@@ -3653,7 +3653,7 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
                   <span class="sk-chip">Not set</span>
                 </div>
                 <p class="panel-muted" style="margin-top: 6px; max-width: 70ch">
-                  Receives recent transcript lines and any notes you approve, for cue decisions. Billed to your own Anthropic account.
+                  Receives up to six recent transcript lines (labelled only "Speaker") and any lines the cue on screen cites, the cue on screen, up to four earlier cues with how each ended, and your session name if set; never audio, the full transcript, your notes, imported notes, or focus lines. Billed to your own Anthropic account.
                 </p>
                 <div class="sk-actions">
                   <span class="sk-btn-primary">Add key</span>
@@ -3672,24 +3672,24 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
               <div class="sk-session-box">
                 <div class="sk-row-head">
                   <strong class="panel-h3">This session</strong>
-                  <span class="mono-label" style="color: var(--g-muted)">Active session · local estimate only</span>
+                  <span class="mono-label" style="color: var(--g-muted)">Active session · local estimate only · model never shown</span>
                 </div>
                 <div class="sk-session-grid">
                   <div class="sk-stat">
                     <span class="mono-label" style="color: var(--g-muted)">Anthropic requests</span>
-                    <span class="sk-stat-value">12 of 40</span>
+                    <span class="sk-stat-value">12 of 400</span>
                   </div>
                   <div class="sk-stat">
-                    <span class="mono-label" style="color: var(--g-muted)">Per-session cap</span>
-                    <span class="sk-stat-value">40 requests</span>
+                    <span class="mono-label" style="color: var(--g-muted)">Per-session caps</span>
+                    <span class="sk-stat-value">400 req · $0.50</span>
                   </div>
                   <div class="sk-stat">
                     <span class="mono-label" style="color: var(--g-muted)">Estimated spend</span>
-                    <span class="sk-stat-value">Est. $0.06</span>
+                    <span class="sk-stat-value">Est. $0.03 of $0.50</span>
                   </div>
                 </div>
                 <p class="panel-muted" style="margin-top: 8px; font-size: 12px">
-                  Estimate calculated locally from token counts; not a bill from Anthropic.
+                  Estimate calculated locally from token counts (via <code>cue_usage</code>); not a bill from Anthropic. The model name is never shown here.
                 </p>
               </div>
 
@@ -3699,7 +3699,7 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
                   <span class="mono-label" style="color: var(--g-muted)">No session yet</span>
                 </div>
                 <p class="panel-muted" style="margin-top: 6px">
-                  0 of 40 Anthropic requests · Est. $0.00 (estimate from token counts, not a bill). Counts reset when a new session starts.
+                  0 of 400 requests · est. $0.00 of $0.50 (estimate from token counts, not a bill). Counts reset when a new session starts.
                 </p>
               </div>
             </article>
@@ -3784,7 +3784,7 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
                     <strong style="font-size: 14px">Deepgram · Transcription</strong>
                     <span class="sk-chip is-set">Set</span>
                   </div>
-                  <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Receives the session's audio, only after you approve cue processing for that session. Billed to your own account.</p>
+                  <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Receives the session's audio (microphone or chosen application), only after you approve cue processing, at most 120 minutes per session. Billed to your own account.</p>
                   <div class="sk-actions">
                     <span class="sk-btn">Test</span>
                     <span class="sk-btn">Replace</span>
@@ -3797,7 +3797,7 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
                     <strong style="font-size: 14px">Anthropic · Cue decisions</strong>
                     <span class="sk-chip is-rejected">Rejected</span>
                   </div>
-                  <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Receives recent transcript lines and any notes you approve, for cue decisions. Billed to your own account.</p>
+                  <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Receives up to six recent transcript lines (labelled "Speaker"), cited lines, the cue on screen, up to four earlier cues, and your session name if set; never audio, the full transcript, notes, or focus lines. Billed to your own account.</p>
                   <div class="panel-error-box" style="font-size: 12px">Refused by the service.</div>
                   <div class="sk-actions">
                     <span class="sk-btn">Test</span>
@@ -3808,12 +3808,12 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
 
                 <div class="sk-session-box" style="margin-top: 10px; padding: 12px">
                   <strong style="font-size: 13px">This session</strong>
-                  <p class="panel-muted" style="margin-top: 4px; font-size: 12px; font-family: var(--font-mono)">12 of 40 requests · Est. $0.06</p>
-                  <p class="panel-muted" style="margin-top: 4px; font-size: 11px">Estimate from token counts; not a bill.</p>
+                  <p class="panel-muted" style="margin-top: 4px; font-size: 12px; font-family: var(--font-mono)">12 of 400 requests · est. $0.03 of $0.50</p>
+                  <p class="panel-muted" style="margin-top: 4px; font-size: 11px">Estimate from token counts; not a bill. Model never shown.</p>
                 </div>
               </div>
               <p class="panel-footer-line">
-                Component boundary: one new component <code>src/components/ServiceKeys.tsx</code> + <code>src/components/service-keys.css</code>, mounted as one <code>&lt;section className="setting"&gt;</code> in <code>src/App.tsx</code> directly after Live transcription.
+                Component boundary: one new component <code>src/components/ServiceKeys.tsx</code> + <code>src/components/service-keys.css</code>, mounted as one <code>&lt;section className="setting"&gt;</code> in <code>src/App.tsx</code> directly after Live transcription. Commands: <code>provider_keys_status</code>, <code>set_provider_key</code>, <code>test_provider_key</code>, <code>remove_provider_key</code>, event <code>provider-keys:changed</code>, and <code>cue_usage</code>.
               </p>
             </article>
           </div>
@@ -3890,7 +3890,7 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
                             <strong style="font-size: 14px">Use your own keys</strong>
                             <span class="sk-chip is-set">Active · BYOK</span>
                           </div>
-                          <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Add your own Deepgram and Anthropic keys in the next step. Audio and approved text go directly from your Mac to those providers.</p>
+                          <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Add your own Deepgram and Anthropic keys in the next step. Audio and short recent transcript excerpts go directly from your Mac to those providers.</p>
                         </div>
                         <div class="ob-way" aria-disabled="true">
                           <div class="sk-row-head">
@@ -3978,7 +3978,7 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
                         <span class="sk-chip is-set">Set</span>
                       </div>
                       <p class="panel-muted" style="margin-top: 4px; font-size: 12px"><strong>Where to get one:</strong> Deepgram Console (console.deepgram.com) → API Keys. No link is fetched by TalkQTE.</p>
-                      <p class="panel-muted" style="margin-top: 4px; font-size: 12px">Receives the session's audio, only after you approve cue processing for that session. Billed to your own Deepgram account.</p>
+                      <p class="panel-muted" style="margin-top: 4px; font-size: 12px">Receives the session's audio (microphone or the chosen application), only after you approve cue processing for that session, at most 120 minutes per session. Billed to your own Deepgram account.</p>
                       <div class="sk-actions">
                         <span class="sk-btn">Test</span>
                         <span class="sk-btn">Replace</span>
@@ -3992,7 +3992,7 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
                         <span class="sk-chip is-rejected">Rejected</span>
                       </div>
                       <p class="panel-muted" style="margin-top: 4px; font-size: 12px"><strong>Where to get one:</strong> Anthropic Console (console.anthropic.com) → API Keys. No link is fetched by TalkQTE.</p>
-                      <p class="panel-muted" style="margin-top: 4px; font-size: 12px">Receives recent transcript lines and any notes you approve, for cue decisions. Billed to your own Anthropic account.</p>
+                      <p class="panel-muted" style="margin-top: 4px; font-size: 12px">Receives up to six recent transcript lines (labelled only "Speaker") and any lines the cue on screen cites, the cue on screen, up to four earlier cues with how each ended, and your session name if set; never audio, the full transcript, your notes, imported notes, or focus lines. Billed to your own Anthropic account.</p>
                       <div class="panel-error-box" style="font-size: 12px">Refused by the service. Check the key in your Anthropic account and replace it, or skip for now.</div>
                       <div class="sk-actions">
                         <span class="sk-btn">Test</span>
@@ -4167,7 +4167,7 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
                       <span class="mono-label" style="color: var(--g-amber-ink)">Per-session approval sequence</span>
                       <ol style="margin: 8px 0 0 18px; font-size: 13px; line-height: 1.6; color: var(--g-ink)">
                         <li><strong>Start live session</strong> opens the floating dock and starts local capture only. Audio captured before approval is discarded.</li>
-                        <li><strong>Review processing → Review selected sources → Enable for this session</strong> names both services explicitly: <strong>Deepgram</strong> (session audio for transcription) and <strong>Anthropic</strong> (recent transcript lines and selected notes for cue decisions).</li>
+                        <li><strong>Review processing → Review selected sources → Enable for this session</strong> names both services explicitly: <strong>Deepgram</strong> (session audio from your microphone or chosen application, at most 120 minutes per session) and <strong>Anthropic</strong> (up to six recent transcript lines labelled only "Speaker", any lines the cue on screen cites, the cue on screen, up to four earlier cues with how each ended, and your session name if set; never audio, the full transcript, your notes, imported notes, or focus lines).</li>
                         <li><strong>Stop</strong> ends the session, releases the microphone or application audio source, and stops sending.</li>
                       </ol>
                     </div>
@@ -4397,7 +4397,7 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
                   <span class="sk-chip">Not built</span>
                 </div>
                 <p class="panel-muted" style="margin-top: 6px">
-                  Optional later step, kept separate from saving your file. When built, running this would send this meeting's transcript and notes to Anthropic using your key. Nothing is sent today.
+                  Live cue decisions never send your notes or full transcript to Anthropic. This optional later summary step is separate from saving your file; when built, running it would send this meeting's transcript and notes to Anthropic using your key. Nothing is sent today.
                 </p>
                 <div class="sk-actions">
                   <span class="sk-btn is-disabled">Summarise with your Anthropic key (Not built)</span>
@@ -4472,8 +4472,8 @@ Date: 2026-11-23 · Length: 06:42
               </p>
               <ul class="tw-points">
                 <li>Add your own Deepgram and Anthropic keys in Settings, stored in the macOS Keychain.</li>
-                <li>Audio and approved text go directly from your Mac to Deepgram and Anthropic after per-session approval.</li>
-                <li>Pay each provider directly; the app shows a per-session request cap and local spend estimate.</li>
+                <li>Audio and short recent transcript excerpts go directly from your Mac to Deepgram and Anthropic after per-session approval (never your notes, imported notes, or focus lines).</li>
+                <li>Pay each provider directly; the app shows per-session caps (400 requests and est. $0.50) and local spend estimate.</li>
                 <li>Build from source on macOS; no signed release or installer yet.</li>
               </ul>
               <span class="sm-text-link">Build from source on GitHub</span>
@@ -4489,7 +4489,7 @@ Date: 2026-11-23 · Length: 06:42
               </p>
               <ul class="tw-points">
                 <li>No separate Deepgram or Anthropic accounts or API keys to manage.</li>
-                <li>Audio and approved text would pass through TalkQTE's service as well as the transcription and cue providers.</li>
+                <li>Audio and short recent transcript excerpts would pass through TalkQTE's service as well as the transcription and cue providers.</li>
                 <li>Not available yet: no price, release date, or extra feature promise beyond managed keys and usage.</li>
               </ul>
               <span class="sm-text-link">Email to hear when it is ready (connor@seatbeltlabs.com)</span>

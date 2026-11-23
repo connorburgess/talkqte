@@ -219,10 +219,10 @@ The notebook moves from warm cream and rounded green pills onto pure white (`#FF
 
 - **Rows:** Two rows, **Deepgram** (transcription) and **Anthropic** (cue decisions). Each displays only its state (`Not set`, `Set`, `Checking…`, or `Rejected` with plain reason: *"Refused by the service."* or *"Could not reach the service."*). Actions: `Add key` when not set; `Test`, `Replace`, and `Remove` when set or rejected. `Remove` opens an inline confirmation row (`Remove <Provider> key?` with `Cancel` and `Remove key`). Key entry uses `<input type="password">` (`Save key` disabled while empty); saving writes to the macOS Keychain, clears the input immediately, and never shows the key again. While `Checking…`, all row action buttons are disabled.
 - **Data statements under each row:**
-  - Deepgram: *"Receives the session's audio, only after you approve cue processing for that session. Billed to your own Deepgram account."*
-  - Anthropic: *"Receives recent transcript lines and any notes you approve, for cue decisions. Billed to your own Anthropic account."*
-- **This session block:** Displays Anthropic requests sent (`12 of 40`), per-session cap (`40 requests`), and local estimated spend (`Est. $0.06`), explicitly labelled *"Estimate calculated locally from token counts; not a bill from Anthropic."* Empty state before any session: *"No session yet · 0 of 40 Anthropic requests · Est. $0.00 (estimate from token counts, not a bill)."*
-- **Component boundary:** One new component `src/components/ServiceKeys.tsx` with its own stylesheet `src/components/service-keys.css`, mounted at one mount point in `src/App.tsx`: a new `<section className="setting">` in Settings directly after `"Live transcription"`. The own-key lane implements the plain functional component; the notebook branch applies these Direction C tokens once it exists.
+  - Deepgram: *"Receives the session's audio (microphone or the chosen application), only after you approve cue processing for that session, at most 120 minutes per session. Billed to your own Deepgram account."*
+  - Anthropic: *"Receives up to six recent transcript lines (labelled only 'Speaker') and any lines the cue on screen cites, the cue on screen, up to four earlier cues with how each ended, and your session name if set; never audio, the full transcript, your notes, imported notes, or focus lines. Billed to your own Anthropic account."*
+- **This session block:** Reads `cue_usage` (`{ model, requests, requestCap, spentMicroUsd, spendCapMicroUsd }`, PR #411) and displays Anthropic requests sent against the cap (`12 of 400 requests`) and local estimated spend against the spend cap (`est. $0.03 of $0.50`), explicitly labelled *"Estimate calculated locally from token counts; not a bill from Anthropic."* **The session block never shows the `model` name.** Empty state before any session: *"No session yet · 0 of 400 requests · est. $0.00 of $0.50 (estimate from token counts, not a bill)."*
+- **Component boundary:** One new component `src/components/ServiceKeys.tsx` with its own stylesheet `src/components/service-keys.css`, mounted at one mount point in `src/App.tsx`: a new `<section className="setting">` in Settings directly after `"Live transcription"`. Uses the real own-key commands (`provider_keys_status`, `set_provider_key`, `test_provider_key`, `remove_provider_key`, event `provider-keys:changed` from PR #408, and `cue_usage` from PR #411). The own-key lane implements the plain functional component; the notebook branch applies these Direction C tokens once it exists.
 
 ---
 
@@ -242,7 +242,7 @@ Shown inside the notebook window (in place of the notebook body) when no service
   - Pressing `Escape` opens a focus-trapped **Skip setup for now?** confirmation dialog (`Keep setting up` / `Skip setup`).
   - `prefers-reduced-motion: reduce` applies zero transitions (`transition: none; animation: none;`).
   - Zero one-sided accent borders; `1320 × 880` notebook frame and `390px` narrow stacked layout both maintain `44px` minimum targets and zero horizontal overflow.
-- **Component boundary and typed stub interface:** One new component `src/components/Onboarding.tsx` with its own stylesheet `src/components/onboarding.css`, mounted at one mount point in `src/App.tsx` in place of the notebook body while active (plus one Settings row `"Set up TalkQTE again"`). Until the own-key lane's first PR lands, build against this stub interface:
+- **Component boundary and typed command interface:** One new component `src/components/Onboarding.tsx` with its own stylesheet `src/components/onboarding.css`, mounted at one mount point in `src/App.tsx` in place of the notebook body while active (plus one Settings row `"Set up TalkQTE again"`). Uses the real own-key commands from PR #408 (`provider_keys_status`, `set_provider_key`, `test_provider_key`, `remove_provider_key`, event `provider-keys:changed`) and PR #411 (`cue_usage`, whose `model` field is never rendered in the UI):
 
 ```ts
 export type KeyProvider = 'deepgram' | 'anthropic';
@@ -257,16 +257,26 @@ export type KeyState =
       message: string;
     };
 
-export interface KeysStatusSnapshot {
+export interface ProviderKeysStatus {
   deepgram: KeyState;
   anthropic: KeyState;
 }
 
+export interface CueUsageSnapshot {
+  model: string; // Never rendered in This session or Settings UI.
+  requests: number;
+  requestCap: number; // 400
+  spentMicroUsd: number;
+  spendCapMicroUsd: number; // 500_000 ($0.50)
+}
+
 export interface ServiceKeysBridge {
-  keys_status(): Promise<KeysStatusSnapshot>;
-  keys_set(provider: KeyProvider, secret: string): Promise<KeyState>;
-  keys_test(provider: KeyProvider): Promise<KeyState>;
-  keys_remove(provider: KeyProvider): Promise<KeyState>;
+  provider_keys_status(): Promise<ProviderKeysStatus>;
+  set_provider_key(provider: KeyProvider, secret: string): Promise<KeyState>;
+  test_provider_key(provider: KeyProvider): Promise<KeyState>;
+  remove_provider_key(provider: KeyProvider): Promise<KeyState>;
+  cue_usage(): Promise<CueUsageSnapshot>;
+  // Emitted by Rust whenever key state changes: 'provider-keys:changed'
 }
 ```
 
@@ -279,7 +289,7 @@ Designed for people who use TalkQTE on its own without a separate note-taker (su
   - **Without keeping (default):** Ended session strip shows the plain notice, notes that data clears on next session or quit, and offers `Keep this meeting` and `Start live session`.
   - **Review dialog (`Keep this meeting`):** Opens a modal dialog previewing the single combined Markdown document (`# Notes`, `## Shown cues`, `## Transcript`) before the user chooses a file destination (`Cancel` / `Choose destination`).
   - **With keeping (saved):** Confirms the reviewed Markdown filename written to disk while noting that the next session still defaults to keeping nothing.
-- **Optional later step (`Not built`):** A clearly separated section below a neutral `1px` divider offers **`Summarise with your Anthropic key`**, visibly badged **`Not built`** with a disabled control and plain text stating that when built it would send the session's transcript and notes to Anthropic using the user's key, and that nothing is sent today.
+- **Optional later step (`Not built`):** A clearly separated section below a neutral `1px` divider offers **`Summarise with your Anthropic key`**, visibly badged **`Not built`** with a disabled control and plain text stating that live cue decisions never send your notes or full transcript to Anthropic, whereas this separate unbuilt summary step would send the session's transcript and notes to Anthropic using the user's key, and nothing is sent today.
 - **Required documentation & contract update:** Product `main` currently states that the live transcript is never saved or exported. Implementing **Keep this meeting** changes that contract; the own-key lane must update `PRIVACY.md` and `DESIGN.md` alongside the behaviour before shipping.
 
 ### 9.3 Two Ways to Use TalkQTE (Naming Proposal & Specimen)
