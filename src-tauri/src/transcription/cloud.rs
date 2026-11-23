@@ -827,6 +827,13 @@ pub fn review_sentence() -> Option<String> {
     review_sentence_for(&source().ok()?)
 }
 
+/// The review sentence with the person's own key, for checks of a whole
+/// review's text.
+#[cfg(test)]
+pub(crate) fn review_sentence_for_own_key() -> String {
+    review_sentence_for(&Source::OwnKey).expect("always worded")
+}
+
 fn review_sentence_for(source: &Source) -> Option<String> {
     const SENT: &str = "Audio: this approval also sends the live audio of the session's capture source (the microphone, or the selected application) to Deepgram (US, model Nova-3) for transcription";
     const TERMS: &str = "Each request asks Deepgram to opt out of its Model Improvement Program; what Deepgram keeps is set by its terms (https://deepgram.com/terms). Audio captured before this approval is never sent.";

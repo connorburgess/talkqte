@@ -63,3 +63,10 @@ pub async fn remove_provider_key(
     let status = blocking(move || provider_keys::global().remove(provider)).await?;
     Ok(changed(&app, status))
 }
+
+/// This session's requests and estimated spend with the person's Anthropic
+/// key, or null before a session has used it. Content-free.
+#[tauri::command]
+pub fn cue_usage() -> Option<crate::anthropic_api::UsageSnapshot> {
+    crate::anthropic_api::usage()
+}

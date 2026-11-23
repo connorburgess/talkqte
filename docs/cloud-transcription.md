@@ -8,9 +8,10 @@ development `cloud-transcription` feature (which `lab-evaluator` switches on)
 can instead point a launch at a short-lived token file, as the lab does.
 
 Transcription starts only when the session's cue processing review is
-approved, so a build also needs a cue connection (today `claude-cli` or the
-lab evaluator). An ordinary or release build has none yet, so it still has no
-live transcription and says "This build has no live transcription."
+approved, so a build also needs a cue connection: the person's own Anthropic
+key ([cue decisions](own-key-cues.md)), or in development `claude-cli` or the
+lab evaluator. Without one a start is refused with "Add your Anthropic API
+key in Settings to start a live session."
 Deepgram is the only provider implemented; the `StreamingTranscriber`
 boundary in `src-tauri/src/transcription/cloud.rs` leaves room for others.
 

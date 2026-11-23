@@ -53,6 +53,12 @@ export const issueText = {
     "Cues stopped: the model's rate limit was reached. Nothing more will be sent, and it will not retry.",
   worker:
     'Cues stopped: the model connection stopped working. Nothing more will be sent until you turn it on again.',
+  keyRejected:
+    'Cues stopped: Anthropic did not accept your API key, or it was removed. Replace it in Settings, then start a new session.',
+  spendLimit:
+    "Cues stopped: this session's estimated spend limit was reached. Nothing more will be sent in this session, and no other service will be used.",
+  requestLimit:
+    "Cues stopped: this session's request limit was reached. Nothing more will be sent in this session, and no other service will be used.",
 };
 /** The development lab's processors: a subscription CLI or the paid API. */
 function isLabProcessor(id: string | undefined): boolean {
@@ -380,6 +386,8 @@ export function ProcessingControl({
     (snapshot?.phase === 'off' || snapshot?.phase === 'unavailable') &&
     !status?.failed &&
     snapshot?.issue !== 'callLimit' &&
+    snapshot?.issue !== 'requestLimit' &&
+    snapshot?.issue !== 'spendLimit' &&
     snapshot?.issue !== 'devSettings' &&
     !!snapshot.processor &&
     !snapshot.approved;

@@ -1,6 +1,6 @@
 # Cue processing and permission proposal
 
-Initially reviewed 10 November 2026; current status reconciled 20 November 2026. This is the permission contract, not permission to run inference. The [development evaluator](cue-evaluator.md) has bounded requests, source disclosure, cancellation and catch-up scheduling. Notebook controls and optional development provider connections are implemented; ordinary builds have no live transcription or model connection. Deepgram and the Anthropic API are the selected direction ([cloud providers](product-readiness.md#cloud-providers-for-a-shipped-product)).
+Initially reviewed 10 November 2026; current status reconciled 20 November 2026. This is the permission contract, not permission to run inference. The [development evaluator](cue-evaluator.md) has bounded requests, source disclosure, cancellation and catch-up scheduling. Notebook controls, optional development provider connections and the [in-app Anthropic connection with the person's own key](own-key-cues.md) are implemented; without the person's keys an ordinary build has no live transcription or model connection. Deepgram and the Anthropic API are the selected direction ([cloud providers](product-readiness.md#cloud-providers-for-a-shipped-product)).
 
 The purpose is timely, relevant context while someone keeps listening. Processing permission, source membership and a successful model response do not establish relevance or useful participation. The [no-assistance comparison](research.md#the-next-experiment) remains separate.
 

@@ -59,6 +59,9 @@ pub enum Issue {
     CallLimit,
     LabStopped,
     LabUnavailable,
+    KeyRejected,
+    SpendLimit,
+    RequestLimit,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -429,6 +432,15 @@ impl Engine {
             }
             Some(EvaluationStatus::Unavailable(EvaluationIssue::Misconfigured)) => {
                 Some(Issue::Misconfigured)
+            }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::KeyRejected)) => {
+                Some(Issue::KeyRejected)
+            }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::SpendLimit)) => {
+                Some(Issue::SpendLimit)
+            }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::RequestLimit)) => {
+                Some(Issue::RequestLimit)
             }
             Some(EvaluationStatus::Unavailable(_)) => Some(Issue::Worker),
             _ => None,

@@ -41,6 +41,7 @@ fn main() {
             "set_provider_key",
             "test_provider_key",
             "remove_provider_key",
+            "cue_usage",
             "model_status",
             "companion_anchor",
             "pick_context_file",

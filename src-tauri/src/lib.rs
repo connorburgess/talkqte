@@ -1,3 +1,4 @@
+pub mod anthropic_api;
 pub mod application_audio;
 #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
 mod application_audio_host;
@@ -395,9 +396,11 @@ fn snapshot(
     .map_err(|_| "Could not read the session.".into())
 }
 
-/// The engine for a new live session: with the `claude-cli` development
-/// feature it registers the Claude Code backend, which sends nothing until
-/// the person turns it on; otherwise the plain engine with no cue backend.
+/// The engine for a new live session: the lab's backend when a lab launch
+/// selects it; with the `claude-cli` development feature the Claude Code
+/// backend; otherwise the Anthropic API with the person's own key when one is
+/// stored, or the plain engine with no cue backend. Each sends nothing until
+/// the person approves the session review.
 pub(crate) fn live_engine() -> Engine {
     #[cfg(all(
         debug_assertions,
@@ -413,7 +416,13 @@ pub(crate) fn live_engine() -> Engine {
     #[cfg(feature = "claude-cli")]
     return claude_cli::connected_engine();
     #[cfg(not(feature = "claude-cli"))]
-    Engine::live()
+    if provider_keys::global().is_set(provider_keys::Provider::Anthropic) {
+        // The person's own key: sends nothing until the session review is
+        // approved, and never falls back to another service.
+        anthropic_api::connected_engine()
+    } else {
+        Engine::live()
+    }
 }
 
 /// A fresh engine that keeps the person's display choices and notes.
@@ -586,14 +595,16 @@ struct LiveStatus {
     transcription: Option<&'static str>,
 }
 
-/// Why a live session cannot start, if it cannot. Transcription is only
-/// through Deepgram, with the person's own key or, in a development launch,
-/// a token file; and audio is sent only once a cue review is approved, so a
-/// build without a cue connection transcribes nothing and says so.
+/// Why a live session cannot start, if it cannot. Audio is sent to
+/// Deepgram only once a cue review is approved, so a start needs both a cue
+/// connection and a Deepgram credential: the person's own keys, or in a
+/// development launch the lab's or Claude Code connection and a token file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LiveUnavailable {
-    /// No cue connection is registered, so no review could ever approve audio.
+    /// No Anthropic key is stored and no development cue connection exists.
     Build,
+    /// The provider refused the stored Anthropic key.
+    CueKeyRejected,
     /// No Deepgram key is stored and no development launch selects one.
     Selection,
     Settings,
@@ -605,7 +616,10 @@ pub(crate) enum LiveUnavailable {
 impl LiveUnavailable {
     fn message(self) -> &'static str {
         match self {
-            Self::Build => "This build has no live transcription.",
+            Self::Build => "Add your Anthropic API key in Settings to start a live session.",
+            Self::CueKeyRejected => {
+                "Anthropic rejected your API key. Replace it in Settings to start a live session."
+            }
             Self::Selection => "Add your Deepgram API key in Settings to start a live session.",
             Self::Settings | Self::TokenMetadata => {
                 "The cloud transcription settings are not usable."
@@ -618,8 +632,9 @@ impl LiveUnavailable {
 }
 
 /// Whether this build registers a cue connection for live sessions: the
-/// lab's, or the development Claude Code connection.
-fn cue_connection() -> bool {
+/// lab's, the development Claude Code connection, or the person's own
+/// Anthropic key.
+fn cue_connection() -> Result<(), LiveUnavailable> {
     #[cfg(all(
         debug_assertions,
         target_os = "macos",
@@ -627,9 +642,16 @@ fn cue_connection() -> bool {
         feature = "lab-evaluator"
     ))]
     if lab_evaluator::selected() {
-        return true;
+        return Ok(());
     }
-    cfg!(feature = "claude-cli")
+    if cfg!(feature = "claude-cli") {
+        return Ok(());
+    }
+    match provider_keys::global().status().anthropic.state {
+        provider_keys::KeyState::Set => Ok(()),
+        provider_keys::KeyState::Rejected => Err(LiveUnavailable::CueKeyRejected),
+        provider_keys::KeyState::NotSet => Err(LiveUnavailable::Build),
+    }
 }
 
 pub(crate) fn live_availability() -> Result<(), LiveUnavailable> {
@@ -641,13 +663,11 @@ pub(crate) fn live_availability() -> Result<(), LiveUnavailable> {
 }
 
 fn classify_live_availability(
-    cue_connection: bool,
+    cue_connection: Result<(), LiveUnavailable>,
     selected: impl FnOnce() -> bool,
     readiness: impl FnOnce() -> Result<(), transcription::cloud::ReadinessFailure>,
 ) -> Result<(), LiveUnavailable> {
-    if !cue_connection {
-        return Err(LiveUnavailable::Build);
-    }
+    cue_connection?;
     if !selected() {
         return Err(LiveUnavailable::Selection);
     }
@@ -1564,6 +1584,7 @@ pub fn run() {
             provider_key_commands::set_provider_key,
             provider_key_commands::test_provider_key,
             provider_key_commands::remove_provider_key,
+            provider_key_commands::cue_usage,
             companion::companion_anchor,
             pick_context_file,
             read_context_file_path,
@@ -2219,14 +2240,22 @@ mod live_readiness_diagnostics_tests {
     fn readiness_preserves_short_circuit_order_and_public_refusals() {
         assert_eq!(
             classify_live_availability(
-                false,
+                Err(LiveUnavailable::Build),
                 || panic!("selection read"),
                 || panic!("metadata read")
             ),
             Err(LiveUnavailable::Build)
         );
         assert_eq!(
-            classify_live_availability(true, || false, || panic!("metadata read")),
+            classify_live_availability(
+                Err(LiveUnavailable::CueKeyRejected),
+                || panic!("selection read"),
+                || panic!("metadata read")
+            ),
+            Err(LiveUnavailable::CueKeyRejected)
+        );
+        assert_eq!(
+            classify_live_availability(Ok(()), || false, || panic!("metadata read")),
             Err(LiveUnavailable::Selection)
         );
         for (ready, expected) in [
@@ -2249,13 +2278,17 @@ mod live_readiness_diagnostics_tests {
             (Ok(()), Ok(())),
         ] {
             assert_eq!(
-                classify_live_availability(true, || true, || ready),
+                classify_live_availability(Ok(()), || true, || ready),
                 expected
             );
         }
         assert_eq!(
             LiveUnavailable::Build.message(),
-            "This build has no live transcription."
+            "Add your Anthropic API key in Settings to start a live session."
+        );
+        assert_eq!(
+            LiveUnavailable::CueKeyRejected.message(),
+            "Anthropic rejected your API key. Replace it in Settings to start a live session."
         );
         assert_eq!(
             LiveUnavailable::Selection.message(),
