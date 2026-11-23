@@ -1,16 +1,18 @@
-# Cloud transcription (development builds)
+# Cloud transcription
 
-A development build with the `cloud-transcription` Cargo feature can send a
-live session's audio to Deepgram for transcription. This is the only way
-TalkQTE transcribes: on-device transcription was removed on 16 November 2026.
-The `lab-evaluator` feature switches it on. Release builds refuse the feature
-([release preflight](release-path.md)), and the settings below are read only
-in debug builds, so an ordinary or release build has no live transcription and
-says "This build has no live transcription." Transcription starts only when
-the session's cue processing review is approved, so a build also needs a cue
-backend (`claude-cli` or the lab evaluator). Deepgram is the only provider implemented; the
-`StreamingTranscriber` boundary in `src-tauri/src/transcription/cloud.rs`
-leaves room for others.
+TalkQTE transcribes live sessions only through Deepgram's streaming service.
+On-device transcription was removed on 16 November 2026. Deepgram streaming
+is compiled into every build and uses the person's own Deepgram API key from
+the Keychain ([provider keys](provider-keys.md)). A debug build with the
+development `cloud-transcription` feature (which `lab-evaluator` switches on)
+can instead point a launch at a short-lived token file, as the lab does.
+
+Transcription starts only when the session's cue processing review is
+approved, so a build also needs a cue connection (today `claude-cli` or the
+lab evaluator). An ordinary or release build has none yet, so it still has no
+live transcription and says "This build has no live transcription."
+Deepgram is the only provider implemented; the `StreamingTranscriber`
+boundary in `src-tauri/src/transcription/cloud.rs` leaves room for others.
 
 This page describes what the code does. No session has been run against the
 real service with this code; the evidence is the offline tests listed at the
@@ -18,7 +20,22 @@ end.
 
 ## Selecting it
 
-The developer selects it per launch, before the app starts:
+**The person's own key.** With a Deepgram key stored and no development
+selection, every live session uses it. The key is read from the Keychain on
+the stream's own thread when the stream opens, after approval, and is sent
+once in the handshake as `Authorization: Token …`; replacement streams after
+a connection failure read it again. A session may send at most 120 minutes
+of audio (`OWN_KEY_MINUTE_CAP`), across its reconnects; Deepgram bills the
+person's account for it. A 401 or 403 marks the key rejected, so Settings
+says so and the next start is refused with "Deepgram rejected your API key.
+Replace it in Settings to start a live session." Without a key, a start is
+refused with "Add your Deepgram API key in Settings to start a live
+session."
+
+**A development token file.** The developer selects it per launch, before the
+app starts, in a debug build with the `cloud-transcription` feature. It wins
+over a stored key, and invalid settings are refused rather than falling back
+to the key:
 
 | Setting | Meaning |
 | --- | --- |
@@ -26,18 +43,16 @@ The developer selects it per launch, before the app starts:
 | `TALKQTE_DEV_STT_TOKEN_FILE` | Absolute path of a file holding a short-lived Deepgram access token. The file must be a regular file (not a symlink), mode `0600`, owned by the user running the app, at most 4 KiB, in a directory of mode `0700` owned by that user. |
 | `TALKQTE_DEV_STT_MINUTE_CAP` | Most minutes of audio this launch may send, across all its sessions and both capture sources, from 1 to 60. |
 
-Only the token reaches the app. The Deepgram API key stays in the owner's
-own file; the lab launcher uses it to mint a token (Deepgram's
-`/v1/auth/grant`, with a lifetime set by the launcher) and writes that token
-into the run folder. The app never logs the token and never passes it on a
-command line. The token is read when a stream opens, so it must still be
-valid then.
+With this selection only the token reaches the app. The Deepgram API key
+stays in the owner's own file; the lab launcher uses it to mint a token
+(Deepgram's `/v1/auth/grant`, with a lifetime set by the launcher) and writes
+that token into the run folder. The token is sent as `Authorization: Bearer
+…`. The app never logs a key or token and never passes one on a command line.
+The token is read when a stream opens, so it must still be valid then.
 
 With the backend selected, unusable settings refuse the start of a live
-session ("The cloud transcription settings are not usable."). A development
-build launched without the backend says "Live transcription needs cloud
-transcription selected for this development launch." There is no other
-recognizer to fall back to.
+session ("The cloud transcription settings are not usable."). There is no
+other recognizer to fall back to.
 
 ## When audio is sent
 
@@ -54,7 +69,7 @@ reaches the stream after it; the first audio sent starts at the approval's
 time on the session clock. The notebook says "transcribed by Deepgram once cue
 processing is enabled", and the companion says "not transcribing yet".
 
-The token file's presence and permissions are checked, without reading the
+With a development selection, the token file's presence and permissions are checked, without reading the
 token, when Settings checks readiness and when a session starts, so a bad
 setup is refused before anyone is asked to approve. The token itself is read
 on the stream's own thread after approval. The file may still be an empty
@@ -104,9 +119,9 @@ model, and only the timing log records it.
 | The review is turned off (**Disable processing**, **Off**, or anything else that withdraws it) | Sending stops at once, including audio already queued for the socket, and the stream is closed. The session ends with "cue processing was turned off, so audio stopped being sent". Approving again does not reopen the stream for that session. |
 | Pause cues, with the `claude-cli` backend | Cues stop, the review still holds, and audio is still transcribed. The companion says "Mic still on · audio to Deepgram". |
 | Pause cues, or any end of the run, with the lab evaluator | The lab's cue run ends, which ends its approval, so sending stops and the session ends with "the lab run ended, so audio stopped being sent". With the lab evaluator, turning the review off also ends the lab's cue run, so the code there is `lab_ended`, not `withdrawn` (`invalidate_evaluation` in `engine/evaluation.rs`). |
-| The minute cap is reached | The stream is closed and the session ends ("this launch's transcription minute limit was reached"). The cap counts all sessions and both sources of the launch. |
+| The minute cap is reached | The stream is closed and the session ends ("the transcription minute limit was reached"). With the person's key the cap is the session's 120 minutes; with a development token file it counts all sessions and both sources of the launch. |
 | The send queue is full because the connection fell behind | The audio that does not fit is dropped, not sent later. The session continues, and the notebook says "Some audio was not sent to Deepgram because the connection fell behind; lines from it are missing." |
-| Deepgram refuses the token (401 or 403), the account cannot pay (402), or requests are limited (429) | The session ends with a fixed reason. There is no retry. |
+| Deepgram refuses the key or token (401 or 403), the account cannot pay (402), or requests are limited (429) | The session ends with a fixed reason. There is no retry. |
 | The connection drops, closes, or a reply cannot be read | The stream is replaced, as described under [reconnecting](#reconnecting). If it cannot be, the session ends with a fixed reason. |
 | The connection stops keeping up: no reply of any kind for 10 s while audio is going out (after one `Finalize` at 5 s asking for one), one 100 ms frame taking more than 3 s to send, or more than 1 s of audio dropped for a full send queue within 5 s | The stream is closed (code `stalled`) and replaced, as described under [reconnecting](#reconnecting). If it cannot be, the session ends with "the connection stopped responding". Audio is sent at most a second at a time between reads, so replies and a close are not left unread while audio is backed up. Any reply counts, including results with no words: in one lab measurement (17 November 2026, 20 s of digital silence, one sample per case) Deepgram sent an empty interim result about every second and an empty final about every 3 s, with no gap over 1.4 s, and answered a `Finalize` in 332 ms. Room noise and other network paths were not measured. |
 
@@ -114,7 +129,7 @@ model, and only the timing log records it.
 
 A stream that fails for a network reason (lost, closed, `stalled`, or an
 unreadable reply) is replaced by a new one, under the same approval, the same
-session and the launch's same minute budget, at most twice per session for each
+session and the same minute budget, at most twice per session for each
 capture source. A refused token, a spent budget, rate limiting, a withdrawn
 review and the end of a lab run are not retried.
 
@@ -146,7 +161,7 @@ reaches the interface or a log; only fixed codes do.
 
 ## What is kept
 
-TalkQTE writes no audio and no token to disk. The transcript stays in memory
+TalkQTE writes no audio, key or token to disk. The transcript stays in memory
 as for any live session. A `timing-log` build also writes `stt_state` rows
 (started, connected, dropping, finished, ended or stopped, with a fixed code
 and the audio sent so far; the connected row also holds the query string of
@@ -197,6 +212,13 @@ Offline tests with a fake socket and scripted streams only:
   operation is never sent, and an unapproved session never opens a stream.
 - Browser tests: the companion and notebook wording, and the stop message.
 
+- `transcription::cloud` and `transcription::deepgram` tests also cover the
+  person's key: a development selection wins over it, a missing or rejected
+  key refuses the start, the review names the key, billing and the
+  per-session cap, the key is read after approval and sent only as a `Token`
+  header on the opt-out URL, a removed key opens no stream, and only a
+  refusal of the key (not of a lab token) marks it rejected.
+
 Still unverified: a session against the real service, latency on real
-hardware, behaviour with an expired token, and native microphone and
-application-audio acceptance.
+hardware, behaviour with an expired token or a real refused key, and native
+microphone and application-audio acceptance.

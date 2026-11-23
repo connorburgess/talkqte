@@ -79,7 +79,8 @@ const DEVELOPER_ID_REQUIREMENT =
  * file for lab runs, and `claude-cli` can send conversation lines to Anthropic
  * through one person's own subscription. `lab-evaluator` adds an explicitly
  * selected subscription broker client for fictional development runs, and
- * `cloud-transcription` can stream captured audio to Deepgram. */
+ * `cloud-transcription` lets a launch point Deepgram at a development token
+ * file instead of the person's own stored key. */
 export const DEVELOPMENT_FEATURES = [
   'native-audio-spike',
   'timing-log',

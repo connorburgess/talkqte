@@ -6,10 +6,11 @@
 //! log only: it is never shown and never sent to a cue model.
 //!
 //! Nothing is sent before the session's processing review is approved: until
-//! then `CloudFeed` discards audio. In development builds the provider is
-//! selected by `TALKQTE_DEV_STT_BACKEND`, and the only credential the app
-//! sees is a short-lived token in an owner-only file; release builds have no
-//! cloud transcription.
+//! then `CloudFeed` discards audio. The credential is the person's own
+//! Deepgram API key from the Keychain (`provider_keys`). A debug build with
+//! the `cloud-transcription` feature can instead be pointed at a short-lived
+//! token in an owner-only file by `TALKQTE_DEV_STT_BACKEND`, as the lab does;
+//! that selection wins over a stored key and is never read in a release.
 
 use super::SAMPLE_RATE;
 use crate::engine::Segment;
@@ -635,18 +636,66 @@ impl Settings {
     }
 }
 
-/// Whether this launch asked for cloud transcription. Only a debug build
-/// reads the setting; a release build never selects it.
-pub fn selected() -> bool {
-    cfg!(debug_assertions) && std::env::var_os("TALKQTE_DEV_STT_BACKEND").is_some()
+/// Whether this launch asked for development cloud transcription. Only a
+/// debug build with the `cloud-transcription` feature reads the setting; a
+/// release build never selects it.
+pub fn dev_selected() -> bool {
+    cfg!(all(debug_assertions, feature = "cloud-transcription"))
+        && std::env::var_os("TALKQTE_DEV_STT_BACKEND").is_some()
 }
 
-/// The launch's settings, read once.
+/// Whether live sessions transcribe through Deepgram: the development
+/// selection, or else a stored Deepgram key. Without either, nothing is
+/// transcribed.
+pub fn selected() -> bool {
+    dev_selected()
+        || crate::provider_keys::global().is_set(crate::provider_keys::Provider::Deepgram)
+}
+
+/// Where this launch's Deepgram credential comes from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Source {
+    /// The development token file and launch-wide minute cap.
+    Dev(Settings),
+    /// The person's own key, read from the Keychain when a stream opens,
+    /// with a cap of [`OWN_KEY_MINUTE_CAP`] minutes per session.
+    OwnKey,
+}
+
+/// Most minutes of audio one session may send with the person's own key,
+/// across its reconnects and capture sources.
+pub const OWN_KEY_MINUTE_CAP: u32 = 120;
+
+/// The launch's source: development settings when selected (and then only
+/// they, even if invalid), otherwise a stored key.
+pub fn source() -> Result<Source, ReadinessFailure> {
+    source_for(
+        dev_selected().then(settings),
+        crate::provider_keys::global().status().deepgram.state,
+    )
+}
+
+fn source_for(
+    dev: Option<Result<Settings, SttFailure>>,
+    key: crate::provider_keys::KeyState,
+) -> Result<Source, ReadinessFailure> {
+    use crate::provider_keys::KeyState;
+    match (dev, key) {
+        (Some(settings), _) => settings
+            .map(Source::Dev)
+            .map_err(|_| ReadinessFailure::Settings),
+        (None, KeyState::Set) => Ok(Source::OwnKey),
+        (None, KeyState::Rejected) => Err(ReadinessFailure::KeyRejected),
+        (None, KeyState::NotSet) => Err(ReadinessFailure::NoKey),
+    }
+}
+
+/// The launch's development settings, read once.
 pub fn settings() -> Result<Settings, SttFailure> {
     static SETTINGS: std::sync::OnceLock<Result<Settings, SttFailure>> = std::sync::OnceLock::new();
     SETTINGS
         .get_or_init(|| {
-            if !selected() {
+            if !dev_selected() {
                 return Err(SttFailure::Settings);
             }
             Settings::parse(|key| std::env::var(key).ok())
@@ -700,10 +749,11 @@ pub fn launch_budget(settings: &Settings) -> Budget {
     BUDGET.get_or_init(|| Budget::new(settings.cap())).clone()
 }
 
-/// Whether this launch can transcribe: its settings parse and the token
-/// file passes the owner-only checks. The token itself is not read until a
-/// stream opens, so a bad setup is reported before anyone is asked to
-/// approve anything.
+/// Whether this launch can transcribe: a stored key that the provider has
+/// not rejected, or development settings that parse with a token file that
+/// passes the owner-only checks. Neither credential is read until a stream
+/// opens, so a bad setup is reported before anyone is asked to approve
+/// anything.
 pub fn ready() -> Result<(), SttFailure> {
     readiness().map_err(|_| SttFailure::Settings)
 }
@@ -713,12 +763,19 @@ pub fn ready() -> Result<(), SttFailure> {
 pub enum ReadinessFailure {
     Settings,
     TokenMetadata,
+    /// No Deepgram key is stored.
+    NoKey,
+    /// Deepgram refused the stored key, at a check or in a session.
+    KeyRejected,
 }
 
 /// The same metadata-only checks as `ready`, with their boundary retained.
-/// No token content is read and no connection is opened.
+/// No token or key content is read and no connection is opened.
 pub fn readiness() -> Result<(), ReadinessFailure> {
-    readiness_for(settings())
+    match source()? {
+        Source::Dev(settings) => readiness_for(Ok(settings)),
+        Source::OwnKey => Ok(()),
+    }
 }
 
 fn readiness_for(settings: Result<Settings, SttFailure>) -> Result<(), ReadinessFailure> {
@@ -726,52 +783,70 @@ fn readiness_for(settings: Result<Settings, SttFailure>) -> Result<(), Readiness
     check_token_file(&settings.token_file).map_err(|_| ReadinessFailure::TokenMetadata)
 }
 
-/// The opener for this launch's selected cloud provider. It reads the token
-/// file only when the stream opens, after the review is approved. Refused
-/// when the settings are invalid or this build has no cloud transcription;
-/// there is never a fallback to another recognizer.
+/// The opener for this launch's Deepgram source. It reads the token file or
+/// the stored key only when the stream opens, after the review is approved.
+/// Refused when neither is usable; there is never a fallback to another
+/// recognizer. With the person's key it starts a new per-session budget,
+/// which this session's replacement streams then share.
 pub fn opener() -> Result<Opener, SttFailure> {
-    let settings = settings()?;
-    #[cfg(feature = "cloud-transcription")]
-    {
-        Ok(super::deepgram::opener(settings))
-    }
-    #[cfg(not(feature = "cloud-transcription"))]
-    {
-        let _ = settings;
-        Err(SttFailure::Settings)
+    match source().map_err(|_| SttFailure::Settings)? {
+        Source::Dev(settings) => Ok(super::deepgram::opener(settings)),
+        Source::OwnKey => {
+            let budget = Budget::new(Duration::from_secs(u64::from(OWN_KEY_MINUTE_CAP) * 60));
+            *session_budget() = Some(budget.clone());
+            Ok(super::deepgram::key_opener(budget))
+        }
     }
 }
 
 /// A repeatable opener for replacement streams after a connection
-/// failure, under the same settings and launch budget. Refused as `opener`.
+/// failure, under the same settings and budget. Refused as `opener`.
 pub fn reopener() -> Result<Reopener, SttFailure> {
-    let settings = settings()?;
-    #[cfg(feature = "cloud-transcription")]
-    {
-        Ok(super::deepgram::reopener(settings))
+    match source().map_err(|_| SttFailure::Settings)? {
+        Source::Dev(settings) => Ok(super::deepgram::reopener(settings)),
+        Source::OwnKey => {
+            let budget = session_budget().clone().ok_or(SttFailure::Settings)?;
+            Ok(super::deepgram::key_reopener(budget))
+        }
     }
-    #[cfg(not(feature = "cloud-transcription"))]
-    {
-        let _ = settings;
-        Err(SttFailure::Settings)
-    }
+}
+
+/// The minute budget of the session the latest own-key opener was made for.
+/// Live starts are serialized by the start gate, so its replacement streams
+/// are the next to ask.
+fn session_budget() -> std::sync::MutexGuard<'static, Option<Budget>> {
+    static BUDGET: std::sync::Mutex<Option<Budget>> = std::sync::Mutex::new(None);
+    BUDGET
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// The sentence the session review adds when cloud transcription is
 /// selected, so one approval covers both exports.
 pub fn review_sentence() -> Option<String> {
-    let settings = settings().ok()?;
-    Some(format!(
-        "Audio: this approval also sends the live audio of the session's capture source (the microphone, or the selected application) to Deepgram (US, model Nova-3) for transcription. Each request asks Deepgram to opt out of its Model Improvement Program; what Deepgram keeps is set by its terms (https://deepgram.com/terms). Audio captured before this approval is never sent. At most {} minutes of audio for this whole launch, across sessions and sources. If transcription stops, nothing is transcribed and nothing falls back to another service.",
-        settings.minute_cap
-    ))
+    review_sentence_for(&source().ok()?)
+}
+
+fn review_sentence_for(source: &Source) -> Option<String> {
+    const SENT: &str = "Audio: this approval also sends the live audio of the session's capture source (the microphone, or the selected application) to Deepgram (US, model Nova-3) for transcription";
+    const TERMS: &str = "Each request asks Deepgram to opt out of its Model Improvement Program; what Deepgram keeps is set by its terms (https://deepgram.com/terms). Audio captured before this approval is never sent.";
+    const END: &str =
+        "If transcription stops, nothing is transcribed and nothing falls back to another service.";
+    Some(match source {
+        Source::Dev(settings) => format!(
+            "{SENT}. {TERMS} At most {} minutes of audio for this whole launch, across sessions and sources. {END}",
+            settings.minute_cap
+        ),
+        Source::OwnKey => format!(
+            "{SENT}, with your own Deepgram API key: Deepgram bills your account for each minute of audio. {TERMS} At most {OWN_KEY_MINUTE_CAP} minutes of audio for this session. {END}"
+        ),
+    })
 }
 
 /// The audio destination the session review names beside the cue
 /// destination, when cloud transcription is selected.
 pub fn audio_destination() -> Option<String> {
-    settings()
+    source()
         .ok()
         .map(|_| "Deepgram (US), for transcription of the session's audio".to_string())
 }
@@ -1405,6 +1480,66 @@ mod tests {
         );
         assert_eq!(feed.push(0, 100, &[0.0; 1_600]), Err(SttFailure::Auth));
         assert_eq!(feed.push(0, 100, &[0.0; 1_600]), Err(SttFailure::Auth));
+    }
+
+    #[test]
+    fn a_development_launch_wins_over_a_stored_key_and_otherwise_the_key_is_used() {
+        use crate::provider_keys::KeyState;
+        let dev = Settings {
+            token_file: std::env::temp_dir().join("fictional-stt-token"),
+            minute_cap: 5,
+        };
+        // The lab's selection is used, even with a key stored, and an invalid
+        // one is refused rather than falling back to the key.
+        for key in [KeyState::NotSet, KeyState::Set, KeyState::Rejected] {
+            assert_eq!(
+                source_for(Some(Ok(dev.clone())), key),
+                Ok(Source::Dev(dev.clone()))
+            );
+            assert_eq!(
+                source_for(Some(Err(SttFailure::Settings)), key),
+                Err(ReadinessFailure::Settings)
+            );
+        }
+        assert_eq!(source_for(None, KeyState::Set), Ok(Source::OwnKey));
+        assert_eq!(
+            source_for(None, KeyState::NotSet),
+            Err(ReadinessFailure::NoKey)
+        );
+        assert_eq!(
+            source_for(None, KeyState::Rejected),
+            Err(ReadinessFailure::KeyRejected)
+        );
+        // The test build has no development selection and no stored key.
+        assert!(!dev_selected());
+        assert!(!selected());
+        assert!(opener().is_err() && reopener().is_err());
+        assert_eq!(review_sentence(), None);
+    }
+
+    #[test]
+    fn the_review_names_the_persons_key_billing_opt_out_and_session_cap() {
+        let own = review_sentence_for(&Source::OwnKey).unwrap();
+        for part in [
+            "to Deepgram (US, model Nova-3)",
+            "with your own Deepgram API key",
+            "Deepgram bills your account for each minute of audio",
+            "opt out of its Model Improvement Program",
+            "https://deepgram.com/terms",
+            "Audio captured before this approval is never sent",
+            "At most 120 minutes of audio for this session",
+            "nothing falls back to another service",
+        ] {
+            assert!(own.contains(part), "missing: {part}");
+        }
+        // The development wording is unchanged.
+        let dev = review_sentence_for(&Source::Dev(Settings {
+            token_file: std::env::temp_dir().join("fictional-stt-token"),
+            minute_cap: 5,
+        }))
+        .unwrap();
+        assert!(dev.contains("At most 5 minutes of audio for this whole launch"));
+        assert!(!dev.contains("your own"));
     }
 
     #[test]

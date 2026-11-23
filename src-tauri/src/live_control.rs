@@ -1,10 +1,5 @@
 //! Native startup ownership across model loading and microphone reservation.
 //! No device or model is opened here; the same gates accept fictional loaders.
-#[cfg(any(
-    feature = "cloud-transcription",
-    all(target_os = "macos", feature = "native-audio-spike"),
-    test
-))]
 use crate::{carry_over, engine};
 use crate::{Live, Runtime};
 use std::sync::{
@@ -12,11 +7,6 @@ use std::sync::{
     Arc, Mutex,
 };
 
-#[cfg(any(
-    feature = "cloud-transcription",
-    all(target_os = "macos", feature = "native-audio-spike"),
-    test
-))]
 const CANCELLED: &str = "Live session start was cancelled.";
 
 #[derive(Clone, Default)]
@@ -31,18 +21,8 @@ struct StartState {
 }
 
 #[derive(Clone)]
-#[cfg(any(
-    feature = "cloud-transcription",
-    all(target_os = "macos", feature = "native-audio-spike"),
-    test
-))]
 pub(crate) struct StartGuard(Arc<AtomicBool>);
 
-#[cfg(any(
-    feature = "cloud-transcription",
-    all(target_os = "macos", feature = "native-audio-spike"),
-    test
-))]
 pub(crate) struct StartTicket {
     gate: StartGate,
     guard: StartGuard,
@@ -50,11 +30,6 @@ pub(crate) struct StartTicket {
 }
 
 impl StartGate {
-    #[cfg(any(
-        feature = "cloud-transcription",
-        all(target_os = "macos", feature = "native-audio-spike"),
-        test
-    ))]
     fn begin(&self) -> Result<StartTicket, String> {
         let mut current = self.0.lock().map_err(|_| "Live startup is unavailable.")?;
         if current.current.is_some() {
@@ -133,11 +108,6 @@ impl StartGate {
         Ok((state.operation.clone(), phase))
     }
 
-    #[cfg(any(
-        feature = "cloud-transcription",
-        all(target_os = "macos", feature = "native-audio-spike"),
-        test
-    ))]
     fn accepts(&self, guard: &StartGuard) -> bool {
         self.0.lock().is_ok_and(|current| {
             current
@@ -148,7 +118,6 @@ impl StartGate {
     }
 }
 
-#[cfg(any(feature = "cloud-transcription", test))]
 impl StartTicket {
     pub(crate) fn guard(&self) -> StartGuard {
         self.guard.clone()
@@ -171,11 +140,6 @@ impl StartTicket {
     }
 }
 
-#[cfg(any(
-    feature = "cloud-transcription",
-    all(target_os = "macos", feature = "native-audio-spike"),
-    test
-))]
 impl Drop for StartTicket {
     fn drop(&mut self) {
         if let Ok(mut current) = self.gate.0.lock() {
@@ -191,21 +155,11 @@ impl Drop for StartTicket {
 }
 
 impl Runtime {
-    #[cfg(any(
-        feature = "cloud-transcription",
-        all(target_os = "macos", feature = "native-audio-spike"),
-        test
-    ))]
     pub(crate) fn begin_live_start(&mut self) -> Result<StartTicket, String> {
         self.check_live_start()?;
         self.live_start.begin()
     }
 
-    #[cfg(any(
-        feature = "cloud-transcription",
-        all(target_os = "macos", feature = "native-audio-spike"),
-        test
-    ))]
     fn check_live_start(&self) -> Result<(), String> {
         #[cfg(all(
             debug_assertions,
@@ -236,11 +190,6 @@ impl Runtime {
         Ok(())
     }
 
-    #[cfg(any(
-        feature = "cloud-transcription",
-        all(target_os = "macos", feature = "native-audio-spike"),
-        test
-    ))]
     pub(crate) fn install_live_start(&mut self, ticket: &StartTicket) -> Result<u64, String> {
         if !self.live_start.accepts(&ticket.guard) {
             return Err(CANCELLED.into());
@@ -275,7 +224,6 @@ impl Runtime {
         Ok(session)
     }
 
-    #[cfg(any(feature = "cloud-transcription", test))]
     pub(crate) fn reserve_live_microphone(
         &mut self,
         guard: &StartGuard,

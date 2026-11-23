@@ -742,16 +742,17 @@ mod tests {
 
     #[test]
     fn the_test_build_never_uses_the_real_keychain_or_network() {
+        // The shared store starts empty in every test run and is never
+        // written by tests, so parallel tests cannot see each other's keys.
         let keys = global();
-        assert_eq!(
-            keys.set(Provider::Deepgram, DEEPGRAM)
-                .map(|s| s.deepgram.state),
-            Ok(KeyState::Set)
-        );
+        assert!(keys.status().any_missing);
         assert_eq!(
             keys.test(Provider::Deepgram).unwrap_err(),
-            KeyError::Unreachable(Provider::Deepgram)
+            KeyError::NotSet(Provider::Deepgram)
         );
-        keys.remove(Provider::Deepgram).unwrap();
+        assert_eq!(
+            NoNetwork.check(Provider::Deepgram, &Secret::for_test(DEEPGRAM)),
+            ProbeResult::Unreachable
+        );
     }
 }

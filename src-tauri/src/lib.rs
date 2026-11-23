@@ -398,11 +398,6 @@ fn snapshot(
 /// The engine for a new live session: with the `claude-cli` development
 /// feature it registers the Claude Code backend, which sends nothing until
 /// the person turns it on; otherwise the plain engine with no cue backend.
-#[cfg(any(
-    feature = "cloud-transcription",
-    all(target_os = "macos", feature = "native-audio-spike"),
-    test
-))]
 pub(crate) fn live_engine() -> Engine {
     #[cfg(all(
         debug_assertions,
@@ -422,11 +417,6 @@ pub(crate) fn live_engine() -> Engine {
 }
 
 /// A fresh engine that keeps the person's display choices and notes.
-#[cfg(any(
-    feature = "cloud-transcription",
-    all(target_os = "macos", feature = "native-audio-spike"),
-    test
-))]
 fn carry_over(previous: &Engine, mut next: Engine) -> Engine {
     let state = &previous.state;
     // Both windows ignore a snapshot older than the last one they saw, so
@@ -597,44 +587,65 @@ struct LiveStatus {
 }
 
 /// Why a live session cannot start, if it cannot. Transcription is only
-/// through a cloud provider, selected per launch in development builds; a
-/// build without it transcribes nothing and says so.
+/// through Deepgram, with the person's own key or, in a development launch,
+/// a token file; and audio is sent only once a cue review is approved, so a
+/// build without a cue connection transcribes nothing and says so.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LiveUnavailable {
+    /// No cue connection is registered, so no review could ever approve audio.
     Build,
+    /// No Deepgram key is stored and no development launch selects one.
     Selection,
     Settings,
     TokenMetadata,
+    /// Deepgram refused the stored key.
+    KeyRejected,
 }
 
 impl LiveUnavailable {
     fn message(self) -> &'static str {
         match self {
             Self::Build => "This build has no live transcription.",
-            Self::Selection => {
-                "Live transcription needs cloud transcription selected for this development launch."
-            }
+            Self::Selection => "Add your Deepgram API key in Settings to start a live session.",
             Self::Settings | Self::TokenMetadata => {
                 "The cloud transcription settings are not usable."
+            }
+            Self::KeyRejected => {
+                "Deepgram rejected your API key. Replace it in Settings to start a live session."
             }
         }
     }
 }
 
+/// Whether this build registers a cue connection for live sessions: the
+/// lab's, or the development Claude Code connection.
+fn cue_connection() -> bool {
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    if lab_evaluator::selected() {
+        return true;
+    }
+    cfg!(feature = "claude-cli")
+}
+
 pub(crate) fn live_availability() -> Result<(), LiveUnavailable> {
     classify_live_availability(
-        cfg!(feature = "cloud-transcription"),
+        cue_connection(),
         transcription::cloud::selected,
         transcription::cloud::readiness,
     )
 }
 
 fn classify_live_availability(
-    compiled: bool,
+    cue_connection: bool,
     selected: impl FnOnce() -> bool,
     readiness: impl FnOnce() -> Result<(), transcription::cloud::ReadinessFailure>,
 ) -> Result<(), LiveUnavailable> {
-    if !compiled {
+    if !cue_connection {
         return Err(LiveUnavailable::Build);
     }
     if !selected() {
@@ -643,6 +654,8 @@ fn classify_live_availability(
     readiness().map_err(|failure| match failure {
         transcription::cloud::ReadinessFailure::Settings => LiveUnavailable::Settings,
         transcription::cloud::ReadinessFailure::TokenMetadata => LiveUnavailable::TokenMetadata,
+        transcription::cloud::ReadinessFailure::NoKey => LiveUnavailable::Selection,
+        transcription::cloud::ReadinessFailure::KeyRejected => LiveUnavailable::KeyRejected,
     })
 }
 
@@ -661,7 +674,6 @@ fn live_status() -> LiveStatus {
 }
 
 /// Microphone audio handed to a cloud stream, a tenth of a second at a time.
-#[cfg(feature = "cloud-transcription")]
 const CLOUD_CHUNK_MS: u64 = 100;
 
 /// What the notebook shows about prior notes picked from a file.
@@ -1241,7 +1253,6 @@ fn finish_live(app: &tauri::AppHandle, live: Live, flush: bool) {
 /// A microphone session's cloud stream ended with a failure: the session
 /// records why and stops, as if Stop were chosen, without flushing to any
 /// other recognizer. Runs off the feeding thread, which the stop joins.
-#[cfg(feature = "cloud-transcription")]
 fn stop_after_cloud_failure(
     app: &tauri::AppHandle,
     session: u64,
@@ -1284,14 +1295,6 @@ async fn start_live_session(
     state: tauri::State<'_, AppState>,
     microphone: tauri::State<'_, microphone::Controller>,
 ) -> Result<(), String> {
-    #[cfg(not(feature = "cloud-transcription"))]
-    {
-        let _ = (app, state, microphone);
-        Err(live_unavailable()
-            .unwrap_or("This build has no live transcription.")
-            .into())
-    }
-    #[cfg(feature = "cloud-transcription")]
     {
         if let Some(reason) = live_unavailable() {
             return Err(reason.into());
@@ -2235,6 +2238,14 @@ mod live_readiness_diagnostics_tests {
                 Err(ReadinessFailure::TokenMetadata),
                 Err(LiveUnavailable::TokenMetadata),
             ),
+            (
+                Err(ReadinessFailure::NoKey),
+                Err(LiveUnavailable::Selection),
+            ),
+            (
+                Err(ReadinessFailure::KeyRejected),
+                Err(LiveUnavailable::KeyRejected),
+            ),
             (Ok(()), Ok(())),
         ] {
             assert_eq!(
@@ -2248,7 +2259,11 @@ mod live_readiness_diagnostics_tests {
         );
         assert_eq!(
             LiveUnavailable::Selection.message(),
-            "Live transcription needs cloud transcription selected for this development launch."
+            "Add your Deepgram API key in Settings to start a live session."
+        );
+        assert_eq!(
+            LiveUnavailable::KeyRejected.message(),
+            "Deepgram rejected your API key. Replace it in Settings to start a live session."
         );
         assert_eq!(
             LiveUnavailable::Settings.message(),
