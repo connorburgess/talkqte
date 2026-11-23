@@ -223,9 +223,9 @@ export function Onboarding({
                   </span>
                 </div>
                 <p>
-                  Needed only if you choose to capture audio from a specific
-                  application window instead of your microphone. macOS will not
-                  ask for this unless you pick an application audio source.
+                  Needed only if you choose to capture one application's audio
+                  (all of its windows) instead of your microphone. macOS asks
+                  when you first list applications to choose one.
                 </p>
               </div>
             </>
@@ -235,8 +235,8 @@ export function Onboarding({
             <>
               <p className="ob-lead">
                 Nothing leaves your Mac when you press Start live session. You
-                approve each session before anything is sent, and Stop ends
-                capture and sending immediately.
+                approve each session before anything is sent, and Stop ends the
+                session and stops sending.
               </p>
 
               <div className="ob-perm-card">
