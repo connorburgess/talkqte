@@ -542,6 +542,8 @@ export function createLabRecorderFixture(options = {}) {
       'no-audio',
       'no-artifact',
       'stream-stopped',
+      'list-timeout',
+      'start-timeout',
     ].includes(options.fixtureCase),
   );
   return recorder({
