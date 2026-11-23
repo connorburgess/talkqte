@@ -271,10 +271,10 @@ test('the session strip and Transcript tab credit the application, not the micro
   await notebook(page);
   await sourceSession(page, 'listening');
   await expect(page.locator('.notebook-body')).toContainText(
-    'Audio from Fictional player · transcribed by Deepgram once cue processing is enabled · not saved by TalkQTE',
+    'Audio from Fictional player · not saved by TalkQTE',
   );
   await expect(page.locator('.notebook-body')).not.toContainText(
-    'Your microphone · transcribed by Deepgram once cue processing is enabled',
+    'Your microphone · not saved by TalkQTE',
   );
   await page.getByRole('tab', { name: /Transcript/ }).click();
   await expect(
@@ -325,7 +325,7 @@ test('a stale source-session flag beside a listening microphone credits the micr
   });
   await expect(microphone).not.toContainText('the microphone is not used');
   await expect(page.locator('.notebook-body')).toContainText(
-    'Your microphone · transcribed by Deepgram once cue processing is enabled · not saved by TalkQTE',
+    'Your microphone · not saved by TalkQTE',
   );
   // Nor while the source is stopping or failed, whatever the flag says.
   await page.evaluate((value) => window.microphoneTest.send(value), {
@@ -344,7 +344,7 @@ test('a stale source-session flag beside a listening microphone credits the micr
       'the microphone is not used',
     );
     await expect(page.locator('.notebook-body'), phase).not.toContainText(
-      'Audio from Fictional player · transcribed',
+      'Audio from Fictional player · not saved by TalkQTE',
     );
   }
 });
@@ -443,6 +443,6 @@ test('a failed microphone counts as unused only once its device is released', as
   });
   await expect(microphone).not.toContainText('the microphone is not used');
   await expect(page.locator('.notebook-body')).not.toContainText(
-    'Audio from Fictional player · transcribed',
+    'Audio from Fictional player · not saved by TalkQTE',
   );
 });

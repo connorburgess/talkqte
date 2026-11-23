@@ -1,8 +1,7 @@
 .processing-panel {
-  padding: 24px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-panel);
-  background: var(--paper);
+  padding: var(--space-16) 0 var(--space-24);
+  border-top: 1px solid var(--line);
+  background: transparent;
   max-width: 760px;
   overflow-wrap: anywhere;
 }
@@ -11,51 +10,89 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: var(--space-12);
 }
 .processing-heading {
   justify-content: space-between;
 }
+.processing-heading h2 {
+  font-family: var(--font);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
 .processing-panel p {
-  margin-top: 12px;
-  max-width: 70ch;
+  margin-top: var(--space-12);
+  max-width: 68ch;
 }
 .processing-capture {
   font-weight: 600;
 }
-.processing-muted,
+.processing-muted {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
 .processing-heading > span {
   color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.35;
 }
 .processing-actions {
-  margin-top: 20px;
+  margin-top: var(--space-16);
 }
 .processing-actions button {
   min-height: 48px;
 }
 .processing-review {
-  margin-top: 24px;
-  padding-top: 24px;
+  margin-top: var(--space-24);
+  padding-top: var(--space-24);
   border-top: 1px solid var(--line);
 }
-.processing-review h3 {
-  font-size: 20px;
+.processing-step {
+  margin: 0 0 var(--space-8);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
 }
-.processing-review fieldset {
+.processing-panel .processing-step {
+  margin-top: 0;
+}
+.processing-review h3 {
+  font-family: var(--font);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+}
+.processing-review fieldset,
+.processing-source-start fieldset {
   border: 0;
   padding: 0;
-  margin: 24px 0 0;
+  margin: var(--space-24) 0 0;
   min-width: 0;
 }
-.processing-review legend {
+.processing-source-start fieldset {
+  margin-top: var(--space-16);
+}
+.processing-review legend,
+.processing-source-start legend {
   font-weight: 700;
   padding: 0;
 }
 .processing-option {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  padding: 12px 0;
+  gap: var(--space-12);
+  padding: var(--space-12) 0;
   cursor: pointer;
 }
 .processing-option input {
@@ -63,7 +100,7 @@
   height: 20px;
   flex-shrink: 0;
   margin: 3px 0 0;
-  accent-color: var(--forest);
+  accent-color: var(--ink);
 }
 .processing-note {
   border-bottom: 1px solid var(--line);
@@ -77,60 +114,103 @@
 .processing-note span span,
 .processing-panel li span {
   color: var(--muted);
-  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  margin-top: var(--space-4);
 }
 .processing-note:has(input:checked) {
-  background: #edf0e7;
+  background: var(--band);
 }
 .processing-review dl {
   display: grid;
-  grid-template-columns: minmax(100px, 1fr) minmax(0, 3fr);
-  gap: 12px 24px;
-  margin: 20px 0;
+  grid-template-columns: minmax(140px, 1fr) minmax(0, 3fr);
+  gap: 0;
+  margin: var(--space-16) 0;
+  border-bottom: 1px solid var(--line);
 }
 .processing-review dt {
   color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: var(--space-12) var(--space-24) var(--space-12) 0;
+  border-top: 1px solid var(--line);
 }
 .processing-review dd {
   margin: 0;
+  font-size: 14px;
+  padding: var(--space-12) 0;
+  border-top: 1px solid var(--line);
 }
 .processing-panel ul {
   margin: 0;
   padding-left: 20px;
 }
 .processing-panel li + li {
-  margin-top: 12px;
+  margin-top: var(--space-12);
 }
 .processing-approved {
-  margin-top: 16px;
+  margin-top: var(--space-16);
 }
-.processing-approved summary {
+.processing-approved summary,
+.processing-dev-details summary {
   cursor: pointer;
-  padding: 8px 0;
+  padding: var(--space-8) 0;
   min-height: 44px;
   text-decoration: underline;
   text-underline-offset: 4px;
 }
+.processing-dev-details summary {
+  color: var(--muted);
+}
 .processing-panel h2:focus,
 .processing-approved summary:focus-visible,
+.processing-dev-details summary:focus-visible,
 .processing-review h3:focus {
-  outline: 3px solid var(--accent);
+  outline: 3px solid var(--focus);
   outline-offset: 3px;
 }
 .processing-approved ul {
-  margin-top: 12px;
+  margin-top: var(--space-12);
 }
 .processing-message {
-  color: #91412e;
+  color: var(--danger);
+}
+.processing-dev {
+  margin-top: var(--space-24);
+  font-size: 14px;
+}
+.processing-panel .processing-dev-label {
+  margin: 0;
+  padding-bottom: var(--space-8);
+  border-bottom: 1px dashed var(--line);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  max-width: none;
+}
+.processing-dev p {
+  font-size: 14px;
+  line-height: 1.55;
+}
+.processing-source-start {
+  margin-top: var(--space-16);
+}
+.processing-source-start h3 {
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.processing-dev-details {
+  margin-top: var(--space-12);
 }
 @media (max-width: 520px) {
-  .processing-panel {
-    padding: 20px 16px;
-  }
   .processing-heading {
     align-items: flex-start;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-4);
   }
   .processing-actions {
     align-items: stretch;
@@ -141,18 +221,38 @@
   }
   .processing-review dl {
     grid-template-columns: minmax(0, 1fr);
-    gap: 4px;
   }
-  .processing-review dd + dt {
-    margin-top: 12px;
+  .processing-review dt {
+    padding: var(--space-12) 0 var(--space-4);
+  }
+  .processing-review dd {
+    border-top: 0;
+    padding: 0 0 var(--space-12);
   }
 }
 
 .notebook-processing {
-  margin: 16px clamp(16px, 3vw, 44px) 0;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 var(--space-32);
+}
+.wide-workspace .notebook-processing {
+  margin-inline: 0;
+  max-width: 840px;
 }
 .notebook-processing .processing-panel {
   max-width: none;
+  border-bottom: 1px solid var(--line);
+}
+@media (max-width: 1200px) {
+  .notebook-processing {
+    padding-inline: var(--space-24);
+  }
+}
+@media (max-width: 400px) {
+  .notebook-processing {
+    padding-inline: var(--space-16);
+  }
 }
 .processing-actions:empty {
   display: none;

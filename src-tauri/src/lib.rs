@@ -1319,19 +1319,22 @@ async fn start_live_session(
         if let Some(reason) = live_unavailable() {
             return Err(reason.into());
         }
-        let opener = transcription::cloud::opener()
-            .map_err(|_| "The cloud transcription settings are not usable.")?;
         let start = state
             .0
             .lock()
             .map_err(|_| "The session is unavailable.")?
             .begin_live_start()?;
+        // Made only once this start holds the gate, so a refused second
+        // start can never replace or reuse this session's minute budget.
+        let streams = transcription::cloud::streams()
+            .map_err(|_| "The cloud transcription settings are not usable.")?;
         // Nothing is opened here: the stream opens once the review is
         // approved. The start can still be cancelled before capture.
-        let (start, opener) =
-            tauri::async_runtime::spawn_blocking(move || start.load(|| Ok(opener)))
+        let (start, streams) =
+            tauri::async_runtime::spawn_blocking(move || start.load(|| Ok(streams)))
                 .await
                 .map_err(|_| "Could not start the live session.")??;
+        let (opener, reopener) = streams.into_parts();
         let session = {
             let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
             runtime.sync();
@@ -1440,7 +1443,7 @@ async fn start_live_session(
                                         publish(&reconnect_app, &mut runtime);
                                     };
                                 })
-                                .with_reopener(transcription::cloud::reopener().ok()),
+                                .with_reopener(reopener),
                             ));
                         true
                     });
