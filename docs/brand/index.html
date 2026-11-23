@@ -1448,6 +1448,213 @@
         color: var(--g-muted);
       }
 
+      /* Service keys (Settings section) */
+      .sk-row {
+        padding: 14px 0;
+        border-top: 1px solid var(--g-line);
+      }
+
+      .sk-row-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .sk-provider {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .sk-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 8px;
+        border: 1px solid var(--g-border);
+        border-radius: 2px;
+        background: #ffffff;
+        color: var(--g-muted);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .sk-chip.is-set {
+        border-color: var(--g-amber-ink);
+        background: #fdf6e9;
+        color: var(--g-amber-ink);
+      }
+
+      .sk-chip.is-checking {
+        border-color: var(--g-border);
+        background: var(--g-band);
+        color: var(--g-ink);
+      }
+
+      .sk-chip.is-rejected {
+        border-color: var(--g-error-ink);
+        background: var(--g-error-bg);
+        color: var(--g-error-ink);
+      }
+
+      .sk-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+      }
+
+      .sk-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 8px 14px;
+        border: 1px solid var(--g-border);
+        border-radius: 2px;
+        background: #ffffff;
+        color: var(--g-ink);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .sk-btn-primary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 8px 14px;
+        border: 1px solid var(--g-ink);
+        border-radius: 2px;
+        background: var(--g-ink);
+        color: #ffffff;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .sk-btn.is-danger {
+        border-color: var(--g-error-ink);
+        color: var(--g-error-ink);
+      }
+
+      .sk-btn.is-disabled,
+      .sk-btn-primary.is-disabled {
+        background: var(--g-band);
+        border-color: var(--g-line);
+        color: var(--g-muted);
+      }
+
+      .sk-focused {
+        outline: 3px solid var(--g-amber-ink);
+        outline-offset: 3px;
+      }
+
+      .sk-entry {
+        margin-top: 10px;
+        padding: 12px 14px;
+        background: var(--g-band);
+        border: 1px solid var(--g-line);
+        border-radius: 2px;
+      }
+
+      .sk-input-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+      }
+
+      .sk-password {
+        flex: 1 1 220px;
+        min-height: 44px;
+        padding: 8px 12px;
+        border: 1px solid var(--g-border);
+        border-radius: 2px;
+        background: #ffffff;
+        color: var(--g-ink);
+        font-family: var(--font-mono);
+        font-size: 13px;
+      }
+
+      .sk-confirm {
+        margin-top: 10px;
+        padding: 12px 14px;
+        background: var(--g-error-bg);
+        border: 1px solid var(--g-error-ink);
+        border-radius: 2px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .sk-session-box {
+        margin-top: 14px;
+        padding: 14px 16px;
+        background: var(--g-band);
+        border: 1px solid var(--g-line);
+        border-radius: 2px;
+      }
+
+      .sk-session-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 10px;
+      }
+
+      .sk-stat {
+        padding: 10px 12px;
+        background: #ffffff;
+        border: 1px solid var(--g-line);
+        border-radius: 2px;
+      }
+
+      .sk-stat-value {
+        display: block;
+        margin-top: 4px;
+        font-family: var(--font-mono);
+        font-size: 15px;
+        font-weight: 500;
+        color: var(--g-ink);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .sk-narrow-frame {
+        width: min(390px, 100%);
+        max-width: 100%;
+        min-width: 0;
+        padding: 16px;
+        background: #ffffff;
+        border: 1px solid var(--g-border);
+        border-radius: 6px;
+      }
+
+      .panel-card {
+        min-width: 0;
+      }
+
+      .sk-password {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      @media (max-width: 720px) {
+        .sk-session-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
       /* Website Hero Mock */
       .site-mock {
         background: var(--d-paper);
@@ -3059,6 +3266,205 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
                 <div style="max-width: 56ch"><strong class="panel-h3">Live transcription · Your data · What comes next</strong><p class="panel-muted" style="margin-top: 4px">Plain factual disclosures for cloud transcription, in-memory notes, reviewed Markdown exports, and planned future capabilities, separated by 1px neutral hairlines.</p></div>
                 <span class="mono-label" style="color: var(--g-muted)">Disclosures</span>
               </div>
+            </article>
+
+            <!-- 11. Settings · Service keys (default & entry & active session) -->
+            <article class="panel-card is-wide" id="service-keys-spec">
+              <div class="panel-card-tag mono-label"><span>11 · Settings · Service keys</span><span>Mounted in src/App.tsx directly after Live transcription</span></div>
+              <div class="panel-h2">Service keys</div>
+              <p class="panel-muted" style="margin-top: 4px; max-width: 72ch">
+                Add your own keys for live transcription and cue decisions. Keys are stored in the macOS Keychain and never shown again after saving; TalkQTE only displays Not set, Set, Checking…, or Rejected.
+              </p>
+
+              <div class="sk-row" style="margin-top: 14px">
+                <div class="sk-row-head">
+                  <div class="sk-provider">
+                    <strong class="panel-h3">Deepgram</strong>
+                    <span class="mono-label" style="color: var(--g-muted)">Transcription</span>
+                  </div>
+                  <span class="sk-chip is-set">Set</span>
+                </div>
+                <p class="panel-muted" style="margin-top: 6px; max-width: 70ch">
+                  Receives the session's audio, only after you approve cue processing for that session. Billed to your own Deepgram account.
+                </p>
+                <div class="sk-actions">
+                  <span class="sk-btn">Test</span>
+                  <span class="sk-btn">Replace</span>
+                  <span class="sk-btn is-danger">Remove</span>
+                </div>
+              </div>
+
+              <div class="sk-row">
+                <div class="sk-row-head">
+                  <div class="sk-provider">
+                    <strong class="panel-h3">Anthropic</strong>
+                    <span class="mono-label" style="color: var(--g-muted)">Cue decisions</span>
+                  </div>
+                  <span class="sk-chip">Not set</span>
+                </div>
+                <p class="panel-muted" style="margin-top: 6px; max-width: 70ch">
+                  Receives recent transcript lines and any notes you approve, for cue decisions. Billed to your own Anthropic account.
+                </p>
+                <div class="sk-actions">
+                  <span class="sk-btn-primary">Add key</span>
+                </div>
+                <div class="sk-entry">
+                  <div class="mono-label" style="color: var(--g-ink)">Password entry (clears after saving; never shown again)</div>
+                  <div class="sk-input-row">
+                    <span class="sk-password sk-focused">••••••••••••••••••••••••••••</span>
+                    <span class="sk-btn-primary">Save key</span>
+                    <span class="sk-btn">Cancel</span>
+                  </div>
+                  <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Focus ring: 3px solid #875500, 3px offset. Save key stays disabled while empty.</p>
+                </div>
+              </div>
+
+              <div class="sk-session-box">
+                <div class="sk-row-head">
+                  <strong class="panel-h3">This session</strong>
+                  <span class="mono-label" style="color: var(--g-muted)">Active session · local estimate only</span>
+                </div>
+                <div class="sk-session-grid">
+                  <div class="sk-stat">
+                    <span class="mono-label" style="color: var(--g-muted)">Anthropic requests</span>
+                    <span class="sk-stat-value">12 of 40</span>
+                  </div>
+                  <div class="sk-stat">
+                    <span class="mono-label" style="color: var(--g-muted)">Per-session cap</span>
+                    <span class="sk-stat-value">40 requests</span>
+                  </div>
+                  <div class="sk-stat">
+                    <span class="mono-label" style="color: var(--g-muted)">Estimated spend</span>
+                    <span class="sk-stat-value">Est. $0.06</span>
+                  </div>
+                </div>
+                <p class="panel-muted" style="margin-top: 8px; font-size: 12px">
+                  Estimate calculated locally from token counts; not a bill from Anthropic.
+                </p>
+              </div>
+
+              <div class="sk-session-box" style="margin-top: 10px">
+                <div class="sk-row-head">
+                  <strong class="panel-h3">This session · empty state (before any session)</strong>
+                  <span class="mono-label" style="color: var(--g-muted)">No session yet</span>
+                </div>
+                <p class="panel-muted" style="margin-top: 6px">
+                  0 of 40 Anthropic requests · Est. $0.00 (estimate from token counts, not a bill). Counts reset when a new session starts.
+                </p>
+              </div>
+            </article>
+
+            <!-- 12. Service keys · Checking, Rejected, Remove confirm, Disabled -->
+            <article class="panel-card">
+              <div class="panel-card-tag mono-label"><span>12 · Service keys · States</span><span>Checking, Rejected, Remove confirm, Disabled</span></div>
+
+              <div class="sk-row">
+                <div class="sk-row-head">
+                  <div class="sk-provider">
+                    <strong class="panel-h3">Deepgram</strong>
+                    <span class="mono-label" style="color: var(--g-muted)">Transcription</span>
+                  </div>
+                  <span class="sk-chip is-checking">Checking…</span>
+                </div>
+                <p class="panel-muted" style="margin-top: 6px">Sending one test request to Deepgram. Controls wait until it finishes.</p>
+                <div class="sk-actions">
+                  <span class="sk-btn is-disabled">Test</span>
+                  <span class="sk-btn is-disabled">Replace</span>
+                  <span class="sk-btn is-disabled">Remove</span>
+                </div>
+              </div>
+
+              <div class="sk-row">
+                <div class="sk-row-head">
+                  <div class="sk-provider">
+                    <strong class="panel-h3">Anthropic</strong>
+                    <span class="mono-label" style="color: var(--g-muted)">Cue decisions</span>
+                  </div>
+                  <span class="sk-chip is-rejected">Rejected</span>
+                </div>
+                <div class="panel-error-box">
+                  <strong>Refused by the service.</strong> Check the key in your Anthropic account and replace it here.
+                </div>
+                <div class="panel-error-box">
+                  <strong>Could not reach the service.</strong> Check your internet connection and try Test again.
+                </div>
+                <div class="sk-actions">
+                  <span class="sk-btn sk-focused">Test</span>
+                  <span class="sk-btn">Replace</span>
+                  <span class="sk-btn is-danger">Remove</span>
+                </div>
+              </div>
+
+              <div class="sk-row">
+                <div class="sk-row-head">
+                  <div class="sk-provider">
+                    <strong class="panel-h3">Deepgram</strong>
+                    <span class="mono-label" style="color: var(--g-muted)">Remove confirmation</span>
+                  </div>
+                  <span class="sk-chip is-set">Set</span>
+                </div>
+                <div class="sk-confirm">
+                  <span style="font-size: 13px; color: var(--g-error-ink)"><strong>Remove Deepgram key?</strong> Live transcription will stop until a key is added again.</span>
+                  <div style="display: flex; gap: 8px; flex-wrap: wrap">
+                    <span class="sk-btn">Cancel</span>
+                    <span class="sk-btn is-danger">Remove key</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="sk-row">
+                <div class="mono-label" style="color: var(--g-muted)">Empty password field · disabled Save key</div>
+                <div class="sk-input-row">
+                  <span class="sk-password" style="color: var(--g-muted)">Paste key…</span>
+                  <span class="sk-btn-primary is-disabled">Save key</span>
+                  <span class="sk-btn">Cancel</span>
+                </div>
+              </div>
+            </article>
+
+            <!-- 13. Service keys · 390px narrow layout + implementer boundary -->
+            <article class="panel-card">
+              <div class="panel-card-tag mono-label"><span>13 · Service keys · 390px narrow</span><span>Stacked layout &amp; 44px targets</span></div>
+              <div class="sk-narrow-frame">
+                <strong class="panel-h3">Service keys</strong>
+                <p class="panel-muted" style="margin-top: 4px; font-size: 12px">Stored in macOS Keychain. Never shown again after saving.</p>
+
+                <div class="sk-row" style="margin-top: 10px">
+                  <div class="sk-row-head">
+                    <strong style="font-size: 14px">Deepgram · Transcription</strong>
+                    <span class="sk-chip is-set">Set</span>
+                  </div>
+                  <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Receives the session's audio, only after you approve cue processing for that session. Billed to your own account.</p>
+                  <div class="sk-actions">
+                    <span class="sk-btn">Test</span>
+                    <span class="sk-btn">Replace</span>
+                    <span class="sk-btn is-danger">Remove</span>
+                  </div>
+                </div>
+
+                <div class="sk-row">
+                  <div class="sk-row-head">
+                    <strong style="font-size: 14px">Anthropic · Cue decisions</strong>
+                    <span class="sk-chip is-rejected">Rejected</span>
+                  </div>
+                  <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Receives recent transcript lines and any notes you approve, for cue decisions. Billed to your own account.</p>
+                  <div class="panel-error-box" style="font-size: 12px">Refused by the service.</div>
+                  <div class="sk-actions">
+                    <span class="sk-btn">Test</span>
+                    <span class="sk-btn">Replace</span>
+                    <span class="sk-btn is-danger">Remove</span>
+                  </div>
+                </div>
+
+                <div class="sk-session-box" style="margin-top: 10px; padding: 12px">
+                  <strong style="font-size: 13px">This session</strong>
+                  <p class="panel-muted" style="margin-top: 4px; font-size: 12px; font-family: var(--font-mono)">12 of 40 requests · Est. $0.06</p>
+                  <p class="panel-muted" style="margin-top: 4px; font-size: 11px">Estimate from token counts; not a bill.</p>
+                </div>
+              </div>
+              <p class="panel-footer-line">
+                Component boundary: one new component <code>src/components/ServiceKeys.tsx</code> + <code>src/components/service-keys.css</code>, mounted as one <code>&lt;section className="setting"&gt;</code> in <code>src/App.tsx</code> directly after Live transcription.
+              </p>
             </article>
           </div>
         </div>

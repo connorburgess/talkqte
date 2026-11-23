@@ -61,6 +61,7 @@ const ALLOWLIST = {
     '1px neutral hairline under Development build group label.',
   '.panel-transcript-row': '1px neutral hairline separating transcript lines.',
   '.panel-setting-row': '1px neutral hairline separating Settings rows.',
+  '.sk-row': '1px neutral hairline separating Service keys provider rows.',
   '.panel-note-row': '1px neutral hairline separating Prior context note rows.',
   '.panel-footer-line': '1px neutral hairline above notebook footer note.',
   '.dock-matrix-head':
