@@ -126,8 +126,18 @@ test('rejects inline one-sided borders, inset shadows and strips in TSX', () => 
   );
 });
 
+test('rejects active tab one-sided borders now that tabs use text-decoration', () => {
+  const css = `
+    .tabs button { border-bottom: 2px solid transparent; }
+    .tabs button[aria-selected='true'] { border-bottom-color: var(--ink); }
+  `;
+  const violations = checkCss(css, 'src/styles.css');
+  assert.equal(violations.length, 2);
+});
+
 test('every allowlist entry documents a reason and the repository passes cleanly', () => {
   for (const entry of ALLOWED_ONE_SIDED_BORDERS) {
+    assert.equal(entry.kind, 'hairline');
     assert.ok(entry.reason.length > 10, `${entry.selector} must have a reason`);
   }
   const result = checkRepository();

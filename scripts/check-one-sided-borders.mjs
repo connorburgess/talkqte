@@ -1,9 +1,9 @@
 // Guards against one-sided accent borders and strip bars on cards, cues,
 // notes, callouts, alerts, quotes, chips and list items.
 //
-// Full-width neutral 1px hairlines used as section or row dividers (and the
-// explicitly reviewed active tab underline) must be listed in
-// ALLOWED_ONE_SIDED_BORDERS with a one-line reason and still pass value checks.
+// Full-width neutral 1px hairlines used as section or row dividers must be
+// listed in ALLOWED_ONE_SIDED_BORDERS with a one-line reason and still pass
+// value checks.
 //
 //   node scripts/check-one-sided-borders.mjs
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -152,21 +152,6 @@ export const ALLOWED_ONE_SIDED_BORDERS = [
     property: 'border-bottom',
     kind: 'hairline',
     reason: 'Full-width 1px neutral baseline rule under the tab bar.',
-  },
-  {
-    file: 'src/styles.css',
-    selector: '.tabs button',
-    property: 'border-bottom',
-    kind: 'tab-underline',
-    reason:
-      'Transparent 2px baseline slot reserved for the active tab underline.',
-  },
-  {
-    file: 'src/styles.css',
-    selector: ".tabs button[aria-selected='true']",
-    property: 'border-bottom-color',
-    kind: 'tab-underline',
-    reason: 'Active Notes/Transcript tab underline in neutral carbon ink.',
   },
   {
     file: 'src/styles.css',
@@ -399,18 +384,7 @@ function isAllowedBorder(file, selector, property, value) {
       entry.property === property,
   );
   if (!match) return false;
-  if (match.kind === 'hairline') {
-    return NEUTRAL_HAIRLINE_RE.test(value);
-  }
-  if (match.kind === 'tab-underline') {
-    if (property === 'border-bottom') {
-      return /^2px\s+solid\s+transparent$/i.test(value);
-    }
-    if (property === 'border-bottom-color') {
-      return /^var\(--ink\)$/i.test(value);
-    }
-  }
-  return false;
+  return match.kind === 'hairline' && NEUTRAL_HAIRLINE_RE.test(value);
 }
 
 function isNonTransparentBackground(value) {

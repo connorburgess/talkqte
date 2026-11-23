@@ -512,18 +512,20 @@ svg {
   padding: 10px 0;
   background: transparent;
   border-radius: 0;
-  border-bottom: 2px solid transparent;
   font-size: 15px;
 }
 .tabs button[aria-selected='true'] {
   color: var(--ink);
-  border-bottom-color: var(--ink);
   font-weight: 600;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 8px;
 }
 .tabs button > span {
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: 12px;
+  text-decoration: none;
 }
 .note-editor {
   width: 100%;
