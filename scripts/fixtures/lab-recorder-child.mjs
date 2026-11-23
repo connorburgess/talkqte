@@ -40,7 +40,13 @@ process.on('SIGTERM', () => {
   });
   setTimeout(() => process.exit(mode === 'exit1' ? 1 : 0), 5);
 });
+// A helper whose window listing or stream start macOS never answered.
+const timedOut = (reason) => {
+  emit({ event: 'error', reason, message: 'macOS did not answer.' });
+  setTimeout(() => process.exit(2), 5);
+};
 if (mode === 'early') process.exit(0);
+else if (mode === 'list-timeout') timedOut('list-timeout');
 else if (mode === 'error') {
   // A failure whose message names a private path; only the reason may be kept.
   emit({
@@ -64,7 +70,8 @@ else if (mode === 'truncated') {
     emulator: { kind: 'independent' },
     companion: { kind: 'display' },
   });
-  if (mode === 'stream-stopped') {
+  if (mode === 'start-timeout') timedOut('start-timeout');
+  else if (mode === 'stream-stopped') {
     // macOS stopped a stream before the first frame; its text is not kept.
     emit({
       event: 'error',

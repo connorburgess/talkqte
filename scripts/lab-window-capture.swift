@@ -1,10 +1,8 @@
 // Records exactly two windows, the meeting emulator's and the real TalkQTE
 // companion's, with the emulator app's sound, using ScreenCaptureKit. It
 // never records the whole screen: each window is captured on its own,
-// independently of the active Space and of other windows covering it when a
-// child probe shows macOS can do that for the window, and otherwise through
-// a display filter limited to that one window. The two are composited at
-// their on-screen positions into one picture.
+// independently of the active Space and of other windows covering it. The
+// two are composited at their on-screen positions into one picture.
 // (A display filter showed only windows on the active Space, so a run
 // recorded black whenever the operator's frontmost app was on another
 // Space; RunB07.) The sound comes from the emulator app alone. If either
@@ -55,12 +53,11 @@ func parseArguments() -> [String: String] {
   while let argument = iterator.next() {
     guard argument.hasPrefix("--") else { fail("Unknown argument \(argument).", code: 64, reason: "unknown-argument") }
     let key = String(argument.dropFirst(2))
-    if ["check", "list", "capture", "strict-windows", "probe-window"].contains(key) {
+    if ["check", "list", "capture", "strict-windows"].contains(key) {
       options[key] = "yes"
     } else if [
       "apps", "emulator-app", "emulator-title", "companion-app", "companion-title", "seconds",
       "out", "emulator-pid", "emulator-window-id", "companion-pid", "companion-window-id",
-      "window-id", "owner-pid", "owner-app", "owner-bundle",
     ].contains(key) {
       guard let value = iterator.next() else { fail("\(argument) needs a value.", code: 64, reason: "missing-value") }
       options[key] = value
@@ -78,7 +75,7 @@ func frameDictionary(_ rect: CGRect) -> [String: Double] {
   ]
 }
 
-// Pure identity boundary, shared by refresh and the child probe. A reused
+// Pure identity boundary, used when the windows are re-checked. A reused
 // window ID cannot widen the two selected owners; absent metadata fails closed.
 struct LabWindowIdentity: Equatable {
   let windowID: UInt32
@@ -114,41 +111,47 @@ func usableWindow(_ window: SCWindow, displays: [SCDisplay]) -> Bool {
     && f.height >= 2 && displays.contains(where: { $0.frame.intersects(f) })
 }
 
-/// Runs this program again in --probe-window mode, one child per window,
-/// all at once, for up to one second in all. For each window, true only if
-/// its child built the filter and exited 0. Both probes share the second so
-/// the recorder's start deadline (3 s to the first accepted frame) holds.
-func probeIndependentFilters(identities: [LabWindowIdentity]) -> [CGWindowID: Bool] {
-  let windowIDs = identities.map { $0.windowID }
-  let group = DispatchGroup()
-  var children: [(CGWindowID, Process)] = []
-  for identity in identities {
-    let windowID = identity.windowID
-    let child = Process()
-    child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
-    child.arguments = ["--probe-window", "--window-id", String(windowID),
-      "--owner-pid", String(identity.ownerPID), "--owner-app", identity.app,
-      "--owner-bundle", identity.bundle]
-    child.standardOutput = FileHandle.nullDevice
-    child.standardError = FileHandle.nullDevice
-    group.enter()
-    child.terminationHandler = { _ in group.leave() }
-    do {
-      try child.run()
-      children.append((windowID, child))
-    } catch {
-      group.leave()
+/// The window list, or nil if macOS failed or did not answer within
+/// `seconds`: ScreenCaptureKit has been seen never to call back (a helper
+/// then hung before printing anything). `timedOut` tells the two apart.
+func listWindows(onScreenOnly: Bool, within seconds: Double) async -> (
+  content: SCShareableContent?, timedOut: Bool
+) {
+  final class Once: @unchecked Sendable {
+    let lock = NSLock()
+    var done = false
+    func first() -> Bool {
+      lock.lock()
+      defer { lock.unlock() }
+      if done { return false }
+      done = true
+      return true
     }
   }
-  if group.wait(timeout: .now() + 1) == .timedOut {
-    for (_, child) in children where child.isRunning { child.terminate() }
+  let once = Once()
+  return await withCheckedContinuation { continuation in
+    SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: onScreenOnly) {
+      content, _ in
+      if once.first() { continuation.resume(returning: (content, false)) }
+    }
+    DispatchQueue.global().asyncAfter(deadline: .now() + seconds) {
+      if once.first() { continuation.resume(returning: (nil, true)) }
+    }
   }
-  var result: [CGWindowID: Bool] = [:]
-  for windowID in windowIDs { result[windowID] = false }
-  for (windowID, child) in children where !child.isRunning {
-    result[windowID] = child.terminationReason == .exit && child.terminationStatus == 0
+}
+
+/// Runs `body`, an await before the first frame, and ends the helper with
+/// `reason` if it has not returned within `seconds`, so a start never hangs
+/// silently.
+func bounded<T>(_ seconds: Double, reason: String, _ body: () async throws -> T) async rethrows
+  -> T
+{
+  let timer = DispatchWorkItem {
+    fail("macOS did not answer within \(seconds) s. Nothing was recorded.", code: 2, reason: reason)
   }
-  return result
+  DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: timer)
+  defer { timer.cancel() }
+  return try await body()
 }
 
 final class Writer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
@@ -327,7 +330,7 @@ struct Capture {
   static func main() async {
     // Connect to the window server before any ScreenCaptureKit call: on
     // macOS 26.4 a desktop-independent window filter in a process that has
-    // not done so aborts (CGS_REQUIRE_INIT), which failed every probe.
+    // not done so aborts (CGS_REQUIRE_INIT).
     _ = CGMainDisplayID()
     let options = parseArguments()
 
@@ -345,12 +348,12 @@ struct Capture {
         code: 77, reason: "screen-recording-not-allowed")
     }
 
-    let content: SCShareableContent
-    do {
-      content = try await SCShareableContent.excludingDesktopWindows(
-        true, onScreenWindowsOnly: true)
-    } catch {
-      fail("Could not list windows: \(error.localizedDescription)", reason: "list-windows")
+    let listed = await listWindows(onScreenOnly: true, within: 1.5)
+    guard let content = listed.content else {
+      if listed.timedOut {
+        fail("macOS did not list the windows within 1.5 s. Nothing was recorded.", code: 2, reason: "list-timeout")
+      }
+      fail("Could not list windows.", reason: "list-windows")
     }
 
     if options["list"] != nil {
@@ -377,29 +380,6 @@ struct Capture {
         ])
       }
       return
-    }
-
-    // A child of the capture run: build one desktop-independent filter for
-    // one window and exit. Creating that filter can abort inside macOS
-    // (RunB08), which no Swift code can catch; probing it in a child keeps
-    // the capture alive and lets it fall back to a display filter.
-    if options["probe-window"] != nil {
-      guard let id = UInt32(options["window-id"] ?? ""),
-        let expected = LabWindowIdentity(windowID: id,
-          ownerPID: Int32(options["owner-pid"] ?? ""),
-          app: options["owner-app"], bundle: options["owner-bundle"])
-      else {
-        fail("--probe-window needs an exact selected owner.", code: 64, reason: "probe-needs-window")
-      }
-      guard let fresh = try? await SCShareableContent.excludingDesktopWindows(
-        true, onScreenWindowsOnly: false),
-        let window = fresh.windows.first(where: { $0.windowID == id }),
-        matchesSelectedWindow(expected, windowIdentity(window)),
-        usableWindow(window, displays: fresh.displays)
-      else { exit(3) }
-      _ = SCContentFilter(desktopIndependentWindow: window)
-      emit(["event": "probe", "ok": true])
-      exit(0)
     }
 
     guard options["capture"] != nil else {
@@ -484,49 +464,29 @@ struct Capture {
     else { fail("No display was found.", code: 2, reason: "no-display") }
 
     // Each window on its own, wherever it is: not limited to the active
-    // Space and not hidden by other windows.
-    guard let emulatorSelected = windowIdentity(emulator),
-      let companionSelected = windowIdentity(companion)
-    else { fail("A selected window has no exact owner. Nothing was recorded.", code: 2, reason: "window-owner") }
-    let probed = probeIndependentFilters(identities: [emulatorSelected, companionSelected])
-    // Each window gets a desktop-independent filter (not limited to the
-    // active Space) only if a child probe built one cleanly just now;
-    // otherwise a display filter that includes that one window only, cropped
-    // to it. Creating the independent filter for the TalkQTE companion bar
-    // aborted inside macOS in RunB08 (SkyLight SLGetDisplaysWithRect
-    // assert). Either way nothing but the two windows can appear. The window
-    // list is re-read just before, so a moving or hidden window is not
-    // filtered with a stale rectangle. It is re-read after the probe
-    // children have exited: a stream started right after a child that used
-    // ScreenCaptureKit exits is stopped by macOS within milliseconds (-3805,
-    // connection interrupted), and this round trip waits that out.
-    guard let fresh = try? await SCShareableContent.excludingDesktopWindows(
-      true, onScreenWindowsOnly: false)
-    else { fail("Could not list windows again.", code: 2, reason: "relist-windows") }
-    func currentWindow(_ window: SCWindow) -> (SCWindow, SCDisplay) {
-      guard let current = fresh.windows.first(where: { $0.windowID == window.windowID }),
-        matchesSelectedWindow(windowIdentity(window), windowIdentity(current)),
-        usableWindow(current, displays: fresh.displays),
-        let onDisplay = fresh.displays.first(where: { $0.frame.intersects(current.frame) })
+    // Space and not hidden by other windows (a display filter showed only
+    // the active Space; RunB07). Nothing but the two windows can appear.
+    // Building this filter aborted inside macOS in RunB08 and on macOS 26.4
+    // while the process had not connected to the window server (see the
+    // top of main). Child processes that probed it first made
+    // ScreenCaptureKit itself unreliable: a child's or the parent's window
+    // listing never answered or failed, and a stream started right after a
+    // child exited was stopped (-3805), so there are no children. The window
+    // list was read just now, so the rectangles are current.
+    func currentWindow(_ window: SCWindow) -> SCWindow {
+      guard windowIdentity(window) != nil,
+        usableWindow(window, displays: content.displays)
       else {
         fail("A selected window is no longer usable (hidden, moving or off every display). Nothing was recorded.", code: 2, reason: "window-unusable")
       }
-      return (current, onDisplay)
+      return window
     }
-    let (emulatorNow, emulatorOnDisplay) = currentWindow(emulator)
-    let (companionNow, companionOnDisplay) = currentWindow(companion)
-    func chooseFilter(_ current: SCWindow, on onDisplay: SCDisplay) -> (
-      SCContentFilter, String, SCDisplay?
-    ) {
-      if probed[current.windowID] == true {
-        return (SCContentFilter(desktopIndependentWindow: current), "independent", nil)
-      }
-      return (SCContentFilter(display: onDisplay, including: [current]), "display", onDisplay)
-    }
-    let (emulatorFilter, emulatorKind, emulatorDisplay) = chooseFilter(
-      emulatorNow, on: emulatorOnDisplay)
-    let (companionFilter, companionKind, companionDisplay) = chooseFilter(
-      companionNow, on: companionOnDisplay)
+    let emulatorNow = currentWindow(emulator)
+    let companionNow = currentWindow(companion)
+    let emulatorFilter = SCContentFilter(desktopIndependentWindow: emulatorNow)
+    let companionFilter = SCContentFilter(desktopIndependentWindow: companionNow)
+    let emulatorKind = "independent"
+    let companionKind = "independent"
     // From here on, sizes, crops, placement and the canvas use the windows as
     // just re-read, not as first selected. The canvas is their union,
     // whichever displays they are on.
@@ -541,13 +501,8 @@ struct Capture {
     guard width <= 8192 && height <= 8192 else {
       fail("The two windows are too far apart to record together. Put both on one display.", code: 2, reason: "canvas-too-large")
     }
-    func windowConfiguration(_ window: SCWindow, display: SCDisplay? = nil) -> SCStreamConfiguration {
+    func windowConfiguration(_ window: SCWindow) -> SCStreamConfiguration {
       let configuration = SCStreamConfiguration()
-      // A display filter is cropped to the window's own rectangle.
-      if let display {
-        configuration.sourceRect = window.frame.offsetBy(
-          dx: -display.frame.minX, dy: -display.frame.minY)
-      }
       configuration.width = even(window.frame.width)
       configuration.height = even(window.frame.height)
       configuration.showsCursor = false
@@ -614,11 +569,11 @@ struct Capture {
     }
     let queue = DispatchQueue(label: "talkqte.lab.capture")
     let emulatorStream = SCStream(
-      filter: emulatorFilter, configuration: windowConfiguration(emulatorNow, display: emulatorDisplay),
+      filter: emulatorFilter, configuration: windowConfiguration(emulatorNow),
       delegate: writer)
     let companionStream = SCStream(
       filter: companionFilter,
-      configuration: windowConfiguration(companionNow, display: companionDisplay), delegate: writer)
+      configuration: windowConfiguration(companionNow), delegate: writer)
     let soundStream = SCStream(filter: soundFilter, configuration: sound, delegate: writer)
     queue.sync {
       writer.place(emulatorStream, at: placeOf(emulatorNow))
@@ -628,9 +583,10 @@ struct Capture {
       try emulatorStream.addStreamOutput(writer, type: .screen, sampleHandlerQueue: queue)
       try companionStream.addStreamOutput(writer, type: .screen, sampleHandlerQueue: queue)
       try soundStream.addStreamOutput(writer, type: .audio, sampleHandlerQueue: queue)
-      try await emulatorStream.startCapture()
-      try await companionStream.startCapture()
-      try await soundStream.startCapture()
+      // Each start is bounded like the listing: never a silent hang.
+      try await bounded(1.5, reason: "start-timeout") { try await emulatorStream.startCapture() }
+      try await bounded(1.5, reason: "start-timeout") { try await companionStream.startCapture() }
+      try await bounded(1.5, reason: "start-timeout") { try await soundStream.startCapture() }
     } catch {
       fail("Could not start recording: \(error.localizedDescription)", reason: "start-capture")
     }
@@ -664,9 +620,8 @@ struct Capture {
     var windowsMoved = false
     var windowsResized = false
     var windowsMissing = false
-    if let now = try? await SCShareableContent.excludingDesktopWindows(
-      true, onScreenWindowsOnly: false)
-    {
+    // Bounded too: an unanswered listing leaves these false, as a failed one did.
+    if let now = await listWindows(onScreenOnly: false, within: 1).content {
       for start in [emulatorNow, companionNow] {
         guard let current = now.windows.first(where: { $0.windowID == start.windowID }),
           matchesSelectedWindow(windowIdentity(start), windowIdentity(current))

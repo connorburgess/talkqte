@@ -120,6 +120,27 @@ test("a helper failure keeps its exit and fixed reason, never the helper's messa
     f.close();
   }
 });
+for (const [mode, reason, matched] of [
+  ['list-timeout', 'list-timeout', false],
+  ['start-timeout', 'start-timeout', true],
+])
+  test(`a helper that timed out (${reason}) fails the start with its fixed reason`, async () => {
+    const f = fixture(mode);
+    try {
+      await assert.rejects(f.recorder.start({ runId: 'owned-run' }));
+      await f.recorder.stop().catch(() => {});
+      const detail = f.recorder.failureDetail;
+      assert.deepEqual(
+        [detail.exit, detail.errorReason, detail.errorCode, detail.matched],
+        [{ code: 2, signal: null }, reason, null, matched],
+      );
+      assert.equal(detail.frameAccepted, false);
+      assert.equal(detail.timings.frameAcceptedMs, null);
+      assert.equal(detail.timings.matchedMs === null, !matched);
+    } finally {
+      f.close();
+    }
+  });
 test('a stream macOS stopped keeps its fixed reason, code and start timings, never its text', async () => {
   const f = fixture('stream-stopped');
   try {
@@ -223,46 +244,60 @@ test('strict Swift source gates exact identities before streams and readiness af
   );
   // Each window is captured on its own, never through a display filter
   // that shows only the active Space (RunB07's black recording).
-  // Independent only after a child probe built it cleanly, else a display
-  // filter that includes that one window; the window list is re-read first.
-  assert.match(source, /SCContentFilter\(desktopIndependentWindow: current\)/);
+  // Both windows get the desktop-independent filter, and the filters event
+  // says so; no child process probes it first.
+  assert.match(
+    source,
+    /let emulatorFilter = SCContentFilter\(desktopIndependentWindow: emulatorNow\)/,
+  );
+  assert.match(
+    source,
+    /let companionFilter = SCContentFilter\(desktopIndependentWindow: companionNow\)/,
+  );
+  assert.match(source, /let emulatorKind = "independent"/);
+  assert.match(source, /let companionKind = "independent"/);
+  assert.doesNotMatch(
+    source,
+    /Process\(\)|probe-window|SCContentFilter\(display: onDisplay/,
+  );
   // Sizes, crops, placement and the canvas use the windows as re-read.
   assert.match(
     source,
     /let union = emulatorNow\.frame\.union\(companionNow\.frame\)/,
   );
-  assert.match(source, /windowConfiguration\(companionNow, display:/);
+  assert.match(source, /windowConfiguration\(companionNow\)/);
   assert.match(source, /placeOf\(companionNow\)/);
   assert.doesNotMatch(source, /placeOf\(companion\)|placeOf\(emulator\)/);
-  // Every failure carries a fixed reason code.
+  // Every failure carries a fixed reason code: each direct fail() call
+  // (less the definition and bounded()'s own) names one, and so does each
+  // bounded() call.
   assert.equal(
-    source.match(/\bfail\(/g).length - 1,
+    source.match(/\bfail\(/g).length - 2 + source.match(/\bbounded\(1/g).length,
     source.match(/, reason: "[a-z][a-z-]*"\)/g).length,
   );
-  assert.match(
-    source,
-    /SCContentFilter\(display: onDisplay, including: \[current\]\)/,
-  );
-  assert.match(source, /if probed\[current\.windowID\] == true \{/);
-  // Both probes run at once, one second in all.
-  assert.match(source, /group\.wait\(timeout: \.now\(\) \+ 1\)/);
+  assert.match(source, /code: 2, reason: reason\)/);
   // The window server is connected before any ScreenCaptureKit call (an
-  // unconnected process aborts on the independent filter), and the window
-  // list is re-read after the probe children exit, before any stream
-  // starts (a stream started right after a child exits is stopped, -3805).
+  // unconnected process aborts on the independent filter).
   assert.ok(
     source.indexOf('_ = CGMainDisplayID()') <
       source.indexOf('let options = parseArguments()'),
   );
-  const probesAt = source.indexOf('let probed = probeIndependentFilters(');
-  const relistAt = source.indexOf(
-    'guard let fresh = try? await SCShareableContent',
-    source.indexOf('guard options["capture"] != nil'),
+  // Nothing before the first frame can hang silently: the listing and each
+  // stream start are bounded and end with a fixed reason. The only
+  // ScreenCaptureKit listing is the bounded one.
+  assert.match(
+    source,
+    /let listed = await listWindows\(onScreenOnly: true, within: 1\.5\)/,
   );
-  assert.ok(probesAt > 0 && probesAt < relistAt);
-  assert.ok(
-    relistAt < source.indexOf('try await emulatorStream.startCapture()'),
-  );
+  assert.match(source, /reason: "list-timeout"\)/);
+  assert.doesNotMatch(source, /SCShareableContent\.excludingDesktopWindows/);
+  for (const stream of ['emulatorStream', 'companionStream', 'soundStream'])
+    assert.match(
+      source,
+      new RegExp(
+        `try await bounded\\(1\\.5, reason: "start-timeout"\\) \\{ try await ${stream}\\.startCapture\\(\\) \\}`,
+      ),
+    );
   // A stream macOS stops is reported with a fixed reason and its code.
   assert.match(
     source,
@@ -288,7 +323,7 @@ test('strict Swift source gates exact identities before streams and readiness af
   // The canvas is the windows' union alone (as re-read, asserted above),
   // not clipped to one display.
   assert.ok(
-    source.indexOf('try await soundStream.startCapture()') <
+    source.indexOf('try await soundStream.startCapture() }') <
       source.indexOf('let signals ='),
   );
   assert.ok(
