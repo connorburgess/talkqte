@@ -1066,6 +1066,7 @@ mod tests {
 
     /// An owner-only folder and an empty placeholder token file in it, as
     /// the lab launcher leaves them before the review.
+    #[cfg(unix)]
     fn placeholder() -> (std::path::PathBuf, std::path::PathBuf) {
         use std::os::unix::fs::PermissionsExt;
         // Unique per call: two tests can read the same clock value.
