@@ -61,3 +61,13 @@ What changed:
 What did not change:
 
 - Colours (light paper/evergreen/terracotta palette unchanged; no dark scheme), control behaviour, three-step per-session approval, consent/safety/status wording, the cue card (`Question.tsx`), the floating companion window, and Rust backend behaviour. Ordinary builds still have no live transcription and no model connection.
+
+| Before a session, ordinary build: before | After |
+| --- | --- |
+| ![Notebook before a session in an ordinary build, before this pass](assets/notebook-product-before-ordinary.png) | ![Notebook before a session in an ordinary build, after this pass](assets/notebook-product-after-ordinary.png) |
+| **Live session in a development build, cue processing not yet approved: before** | **After** |
+| ![Fictional live session with Cue processing before this pass](assets/notebook-product-before-live.png) | ![Fictional live session with Cue processing after this pass](assets/notebook-product-after-live.png) |
+
+The [second approval step](assets/notebook-product-after-review.png) keeps its full data statement under the new `Step 2 of 2` marker. These are browser renders at 1320 × 880 with reduced motion, from the browser tests' fictional native stand-in with a fictional hosted processor; no microphone, transcription or provider was involved.
+
+Checked headlessly: the full browser suite in Chromium and WebKit; no horizontal overflow and no console errors at 1320 × 880 and 390 × 844 in twelve states (browser preview, ordinary build before a session and with the microphone check on, development build before, during and after a live session, each approval step, approved, and Settings with the application-audio host); the keyboard order through the notebook during an open approval is the same as before apart from the renamed **Cue appearance and timing**, with a visible focus ring on every stop; no overflow at 200% zoom or with root text at 200%; no animation or transition with reduced motion. In a development build that shows both a model processor and an idle application source, the application-audio controls now come after the approval controls in the panel and in keyboard order. Not checked: the desktop app, VoiceOver, and whether a person finds the window clearer.
