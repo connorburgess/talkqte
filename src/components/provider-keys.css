@@ -1,0 +1,62 @@
+/* Plain, self-contained layout for the provider keys setting. The design
+   lane restyles it; no borders here, so no one-sided accents either. */
+.provider-keys {
+  display: grid;
+  gap: 20px;
+  padding: 30px 0;
+}
+.provider-keys h2 {
+  font-size: 18px;
+}
+.provider-keys-intro p {
+  color: var(--muted);
+  font-size: 16px;
+  max-width: 55ch;
+  margin-top: 7px;
+}
+.provider-keys-list {
+  display: grid;
+  gap: 24px;
+}
+.provider-key {
+  display: grid;
+  gap: 8px;
+  max-width: 34rem;
+}
+.provider-key h3 {
+  font-size: 16px;
+}
+.provider-key-role,
+.provider-keys-usage {
+  color: var(--muted);
+  font-size: 15px;
+}
+.provider-key-state {
+  font-weight: 650;
+}
+.provider-key label {
+  font-size: 14px;
+  font-weight: 650;
+}
+.provider-key input {
+  min-height: 44px;
+  padding: 8px 12px;
+  background: var(--paper);
+  border: 1px solid #bfc7b6;
+  color: var(--ink);
+  width: 100%;
+}
+.provider-key-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.provider-keys-error {
+  color: var(--accent);
+  font-size: 15px;
+}
+.provider-key-note {
+  color: var(--muted);
+  font-size: 15px;
+  min-height: 1.4em;
+}
