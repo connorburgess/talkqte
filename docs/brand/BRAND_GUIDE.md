@@ -294,10 +294,14 @@ Used both as a two-column section on `talkqte.com` ([images/two-ways.png](images
 
 ## 10. Motion, Voice, and Accessibility
 
-### Motion
+### Motion and Hover States
 
-- **Reduced motion first.** Every screen, cue, and control stays fully readable and operable under `prefers-reduced-motion: reduce`.
-- **Website (`talkqte.com`):** Zero animations, zero CSS transitions, and no smooth scrolling.
+- **Reduced motion first.** Every screen, cue, and control stays fully readable and operable under `prefers-reduced-motion: reduce`, with zero running animations and zero transition durations anywhere (instant hover states and a static `62%` cue bar on `talkqte.com`).
+- **Website (`talkqte.com`):** No smooth scrolling and zero scripts. Motion is strictly scoped to three CSS-only elements:
+  - **Hero cue time line:** `@keyframes cue-time-run` (`18s linear infinite`, `transform: scaleX(1)` to `scaleX(0)` from `0%`–`88%`, brief empty hold `88%`–`97%`, crisp reset to full at `100%`, `transform-origin: left center`). Pauses on `.cue-window:hover` and `:focus-within` (as Hold does). Zero layout shift; nothing is conveyed by motion alone.
+  - **Button hover (studio sweep):** Left-to-right fill sweep via `linear-gradient` `background-size` (`0% 100%` right to `100% 100%` left over `200ms cubic-bezier(0.65, 0, 0.35, 1)` on `background-size`, `color`, `border-color`), matching Seatbelt Labs' sweep pattern. **No text underline on button hover.** Label vs fill contrast stays `>= 10.18:1` (`>= 4.5:1`) in both rest and hover states across light and dark modes (Light primary: `#FFFFFF`/`#11151B` ↔ `#11151B`/`#FFFFFF` `18.31:1`; Light secondary: `#11151B`/`#FFFFFF` ↔ `#FFFFFF`/`#11151B` `18.31:1`; Dark primary: `#0D1014`/`#EBB45B` ↔ `#EBB45B`/`#0D1014` `10.18:1`; Dark secondary: `#F5F7FA`/`#0D1014` ↔ `#0D1014`/`#F5F7FA` `17.77:1`). `:focus-visible` retains the `3px solid --focus` outline unreplaced by hover.
+  - **Text link hover:** Keeps the underline and transitions `color`, `text-decoration-color`, `text-underline-offset`, and `text-decoration-thickness` over `150ms ease` (`<= 250ms`).
+- **Hero framing:** No status eyebrow sits above the hero `h1` headline on `talkqte.com`; alpha is stated once in the hero body line beneath the headline.
 - **Desktop app:** Every timing in [DESIGN.md](../../DESIGN.md) stays authoritative: notebook cue arrival (`200ms` move / `480ms` widen), dock drawer expansion (`300ms`, source follows `90ms` later), word darkening from `>= 55%` (`3.2:1` large) or `>= 68%` (`4.6:1` smaller), Hold fill (`560ms`), answer arrival (`380ms`), cue fold leave (`190ms`; macOS dock waits `220ms`), and four-step time line under reduced motion. No bounce, pulsing, or celebratory animation.
 
 ### Voice and Copy Rules

@@ -2001,21 +2001,119 @@
       .sm-btn-p {
         padding: 11px 20px;
         border-radius: var(--d-rc);
-        background: var(--d-btn-bg);
+        background-color: var(--d-btn-bg);
+        background-image: linear-gradient(var(--d-paper), var(--d-paper));
+        background-repeat: no-repeat;
+        background-size: 0% 100%;
+        background-position: right;
         color: var(--d-btn-fg);
         border: 1px solid var(--d-btn-bg);
         font-size: 14px;
         font-weight: 600;
+        text-decoration: none;
+        transition:
+          background-size 200ms cubic-bezier(0.65, 0, 0.35, 1),
+          color 200ms cubic-bezier(0.65, 0, 0.35, 1),
+          border-color 200ms ease;
+      }
+
+      .sm-btn-p:hover {
+        background-size: 100% 100%;
+        background-position: left;
+        color: var(--d-btn-bg);
+        border-color: var(--d-btn-bg);
+        text-decoration: none;
       }
 
       .sm-btn-s {
         padding: 11px 20px;
         border-radius: var(--d-rc);
-        background: transparent;
+        background-color: transparent;
+        background-image: linear-gradient(var(--d-ink), var(--d-ink));
+        background-repeat: no-repeat;
+        background-size: 0% 100%;
+        background-position: right;
         color: var(--d-ink);
         border: 1px solid var(--d-border);
         font-size: 14px;
         font-weight: 600;
+        text-decoration: none;
+        transition:
+          background-size 200ms cubic-bezier(0.65, 0, 0.35, 1),
+          color 200ms cubic-bezier(0.65, 0, 0.35, 1),
+          border-color 200ms ease;
+      }
+
+      .sm-btn-s:hover {
+        background-size: 100% 100%;
+        background-position: left;
+        color: var(--d-paper);
+        border-color: var(--d-ink);
+        text-decoration: none;
+      }
+
+      @keyframes cue-time-run {
+        0% {
+          transform: scaleX(1);
+        }
+        88% {
+          transform: scaleX(0);
+        }
+        97% {
+          transform: scaleX(0);
+        }
+        100% {
+          transform: scaleX(1);
+        }
+      }
+
+      .sm-cue-fill {
+        display: block;
+        width: 100%;
+        height: 100%;
+        background: var(--d-cue-fill);
+        border-radius: 1px;
+        transform-origin: left center;
+        animation: cue-time-run 18s linear infinite;
+      }
+
+      .sm-cue-window:hover .sm-cue-fill,
+      .sm-cue-window:focus-within .sm-cue-fill {
+        animation-play-state: paused;
+      }
+
+      .sm-text-link {
+        display: inline-block;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--g-amber-ink);
+        text-decoration-line: underline;
+        text-decoration-color: var(--g-border);
+        text-underline-offset: 0.24em;
+        text-decoration-thickness: 1px;
+        transition:
+          color 150ms ease,
+          text-decoration-color 150ms ease,
+          text-underline-offset 150ms ease,
+          text-decoration-thickness 150ms ease;
+      }
+
+      .sm-text-link:hover {
+        text-decoration-color: currentColor;
+        text-underline-offset: 0.34em;
+        text-decoration-thickness: 2px;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .sm-cue-fill {
+          animation: none;
+          transform: scaleX(0.62);
+        }
+        .sm-btn-p,
+        .sm-btn-s,
+        .sm-text-link {
+          transition: none;
+        }
       }
 
       .sm-cue-fig {
@@ -2688,19 +2786,21 @@
                 TalkQTE
               </span>
               <div class="sm-nav">
-                <span>Concept</span><span>How a cue works</span><span>Today</span><span>Where your meeting goes</span><span>Direction</span><span>GitHub</span>
+                <span>How it works</span><span>Two ways</span><span>Alpha scope</span><span>Where your meeting goes</span><span>GitHub</span>
               </div>
             </div>
             <div class="sm-hero">
               <div>
-                <div class="sm-eyebrow">Early development · nothing to download yet</div>
                 <div class="sm-h1">Stay grounded. Respond in the moment.</div>
-                <p class="sm-lead">TalkQTE is being built to help keep meetings on target, with the right cue at the right moment. It runs on your own machine beside the call.</p>
-                <p class="sm-note">Nothing is released yet. Below, each part is labelled <strong>In source, not yet released</strong>, or <strong>Planned</strong>.</p>
+                <p class="sm-lead">TalkQTE surfaces one timely, source-backed cue beside a live conversation so you can keep the meeting on target without leaving the call.</p>
+                <p class="sm-note">It runs on your Mac beside the meeting, not as a participant in the room. In the alpha, you build from source and connect your own keys for transcription and cues.</p>
                 <div class="sm-actions">
-                  <span class="sm-btn-p">Follow development on GitHub</span>
-                  <span class="sm-btn-s">See the concept</span>
+                  <span class="sm-btn-p">Try the alpha on GitHub</span>
+                  <span class="sm-btn-s">See how it works</span>
                 </div>
+                <p class="sm-note" style="margin-top: 12px; font-family: var(--font-mono); font-size: 11px">
+                  Hover: 200ms left-sweep fill, no button underline · Text links: 150ms animated underline · Cue bar: 18s CSS scaleX run-down, pauses on hover/focus-within (static under reduced motion).
+                </p>
               </div>
               <div class="sm-cue-fig">
                 <div class="sm-cue-window">
@@ -2710,7 +2810,7 @@
                   </div>
                   <div class="sm-cue-text">Earlier, legal said review takes two days.</div>
                   <div class="nb-cue-time">
-                    <span class="nb-cue-track"><span class="nb-cue-fill"></span></span>
+                    <span class="nb-cue-track"><span class="sm-cue-fill"></span></span>
                     <span class="sm-cue-hold">Hold</span>
                   </div>
                   <div class="nb-cue-source">
@@ -2718,7 +2818,7 @@
                     <p class="nb-cue-source-quote">“Can we commit to Friday?”</p>
                   </div>
                 </div>
-                <p class="sm-cue-cap">Concept: a fictional example, not the current prototype.</p>
+                <p class="sm-cue-cap">Fictional example of a cue beside a live call.</p>
               </div>
             </div>
           </div>
@@ -4376,7 +4476,7 @@ Date: 2026-11-23 · Length: 06:42
                 <li>Pay each provider directly; the app shows a per-session request cap and local spend estimate.</li>
                 <li>Build from source on macOS; no signed release or installer yet.</li>
               </ul>
-              <span style="font-size: 14px; font-weight: 600; color: var(--g-amber-ink); text-decoration: underline; text-underline-offset: 4px">Build from source on GitHub</span>
+              <span class="sm-text-link">Build from source on GitHub</span>
             </article>
 
             <article class="tw-card">
@@ -4392,7 +4492,7 @@ Date: 2026-11-23 · Length: 06:42
                 <li>Audio and approved text would pass through TalkQTE's service as well as the transcription and cue providers.</li>
                 <li>Not available yet: no price, release date, or extra feature promise beyond managed keys and usage.</li>
               </ul>
-              <span style="font-size: 14px; font-weight: 600; color: var(--g-amber-ink); text-decoration: underline; text-underline-offset: 4px">Email to hear when it is ready (connor@seatbeltlabs.com)</span>
+              <span class="sm-text-link">Email to hear when it is ready (connor@seatbeltlabs.com)</span>
             </article>
           </div>
         </div>
