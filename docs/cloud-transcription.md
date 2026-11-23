@@ -24,9 +24,16 @@ end.
 selection, every live session uses it. The key is read from the Keychain on
 the stream's own thread when the stream opens, after approval, and is sent
 once in the handshake as `Authorization: Token …`; replacement streams after
-a connection failure read it again. A session may send at most 120 minutes
-of audio (`OWN_KEY_MINUTE_CAP`), across its reconnects; Deepgram bills the
-person's account for it. A 401 or 403 marks the key rejected, so Settings
+a connection failure read it again. Each stream attempt reads the Keychain
+once: a missing key, or a Keychain that refuses, is not asked again while the
+stream waits, and the stream stops with `settings`. A session may send at
+most 120 minutes of audio (`OWN_KEY_MINUTE_CAP`), across its reconnects;
+Deepgram bills the person's account for it. The budget is made once per live
+start, after the start gate is taken, and handed to that session's stream and
+its replacements only, so another start cannot replace or reuse it. A
+development application source started into a session opens its own streams
+under a separate 120-minute budget. The caps are per session only: there is
+no per-launch or per-day cap with the person's key. A 401 or 403 marks the key rejected, so Settings
 says so and the next start is refused with "Deepgram rejected your API key.
 Replace it in Settings to start a live session." Without a key, a start is
 refused with "Add your Deepgram API key in Settings to start a live
