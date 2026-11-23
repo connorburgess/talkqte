@@ -1,11 +1,13 @@
 /* ==========================================================================
    TalkQTE Design Tokens
-   Three directions on a pure white base, each with light and dark schemes.
-   Recommended default on :root: Direction C (White and studio amber).
+   Adopted identity (23 November 2026): Direction C (White and studio amber).
+   Exported as default on :root (light and dark schemes), plus Dock & Panel
+   sizing and spacing tokens. Historical directions A and B remain scoped
+   under [data-direction='a'|'b'] (not adopted).
    ========================================================================== */
 
 :root {
-  /* Shared typography (self-hosted SIL OFL 1.1) */
+  /* Typography (self-hosted SIL OFL 1.1) */
   --tq-font-sans: 'Manrope Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --tq-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
@@ -19,198 +21,72 @@
   --tq-cue-companion-source-size: 13px;
   --tq-cue-companion-source-large-size: 15px;
 
-  /* Default direction: Direction C (White and studio amber) */
-  --paper: #ffffff;               /* Pure White: primary light ground */
+  /* Spacing scale (shared by notebook panels and dock) */
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-48: 48px;
+
+  /* Dock and panel geometry (preserved from DESIGN.md & docs/panel-sizing.md) */
+  --dock-width: 320px;
+  --dock-bar-height: 76px;
+  --dock-question-height: 232px;
+  --dock-question-height-large: 276px;
+  --panel-sidebar-min: 200px;
+  --panel-notes-min: 260px;
+
+  /* Corner radii (adopted Direction C) */
+  --radius-control: 2px;
+  --radius-chip: 2px;
+  --radius-cue: 8px;
+  --radius-dock: 18px;
+  --radius-dock-card: 13px;
+  --radius-dialog: 10px;
+
+  /* Adopted Direction C: White and studio amber (Light scheme) */
+  --paper: #ffffff;               /* Pure White: primary canvas */
   --band: #f3f5f7;                /* Drafting Vellum: alternate band, sidebar (matches Seatbelt Labs) */
-  --surface: #ffffff;             /* Cue window surface on site */
+  --surface: #ffffff;             /* Cue window surface on site & dock card */
   --cue-surface: #f8f7f4;         /* Notebook cue card surface */
   --ink: #11151b;                 /* Deep Carbon: 18.31:1 on --paper, 16.75:1 on --band (AAA) */
-  --ink-inverse: #ffffff;         /* White text on dark primary button */
+  --ink-inverse: #ffffff;         /* 18.31:1 on --btn-primary-bg (AAA) */
   --muted: #4f5a68;               /* Slate Ink: 7.01:1 on --paper, 6.42:1 on --band (AA/AAA) */
-  --line: #d3d9e2;                /* Grid Rule: structural hairline dividers */
+  --line: #d3d9e2;                /* Grid Rule: 1px neutral structural dividers only */
   --border: #737f90;              /* Calibrated Rule: 4.06:1 on --paper, 3.72:1 on --band (AA UI) */
-  --accent: #ebb45b;              /* Studio Solar Amber: dark surfaces, mark, fills with --ink text */
-  --accent-ink: #875500;          /* Amber Ink: 6.31:1 on --paper, 5.77:1 on --band (AA) */
+  --accent: #ebb45b;              /* Studio Solar Amber: dark surfaces, mark, fills with --ink text; NEVER text on light (1.87:1 FAIL) */
+  --accent-ink: #875500;          /* Amber Ink: 6.31:1 on --paper, 5.77:1 on --band, 5.89:1 on --cue-surface (AA) */
   --btn-primary-bg: #11151b;      /* Deep Carbon primary button fill on light */
   --btn-primary-fg: #ffffff;      /* 18.31:1 on --btn-primary-bg (AAA) */
   --focus: #875500;               /* Focus ring: 6.31:1 on --paper, 5.77:1 on --band */
   --selection: #f7e3be;           /* Soft Amber selection highlight */
   --cue-fill: #875500;            /* Active cue timeline fill */
   --cue-held: #737f90;            /* Resting held timeline fill */
-  --cue-asked-edge: #a83b12;      /* Direct-address left edge & label: 6.37:1 on --paper */
-  --cue-asked-surface: #fdf5f0;   /* Direct-address card wash: 5.91:1 for label, 17.00:1 for ink */
-  --companion-bg: #0d1014;        /* Floating companion bar background */
+  --cue-asked-surface: #fdf6e9;   /* @ Asked you whole-card warm tint: 17.03:1 for ink, 5.87:1 for label */
+  --cue-asked-border: #875500;    /* @ Asked you uniform 1.5px border all round (never one-sided): 6.31:1 on white */
+  --cue-asked-label: #875500;     /* @ Asked you label and @ icon: 5.87:1 on --cue-asked-surface */
+  --error-surface: #fdf3f0;       /* Inline error banner surface */
+  --error-ink: #9c3418;           /* Inline error text: 6.42:1 on --error-surface */
+  --error-border: #9c3418;        /* Inline error uniform 1px border all round */
+  --companion-bg: #0d1014;        /* Floating dock bar & shell: Void Carbon (matches Seatbelt Labs) */
   --companion-fg: #f5f7fa;        /* 17.77:1 on --companion-bg (AAA) */
   --companion-muted: #9aa4b2;     /* 7.56:1 on --companion-bg (AAA) */
-  --companion-live: #ebb45b;      /* 10.18:1 on --companion-bg (AAA) */
+  --companion-live: #ebb45b;      /* Solar Amber active dot: 10.18:1 on --companion-bg (AAA) */
+  --companion-quiet: #7d8a9b;     /* Quiet/idle dot: 5.38:1 on --companion-bg (AA) */
+  --companion-hover: #1e2530;     /* Companion icon control hover fill */
   --companion-focus: #ebb45b;     /* 10.18:1 on --companion-bg */
   --shadow: 0 8px 24px rgba(17, 21, 27, 0.05);
-  --radius-control: 2px;
-  --radius-chip: 2px;
-  --radius-cue: 8px;
+  --shadow-dock: 0 12px 28px rgba(13, 16, 20, 0.18);
+  color-scheme: light dark;
 }
 
-/* ==========================================================================
-   Direction A: White and evergreen ("Still Water")
-   Departs from studio amber; refines TalkQTE's evergreen onto pure white.
-   ========================================================================== */
-
-[data-direction='a'] {
-  --paper: #ffffff;               /* Pure White */
-  --band: #f4f6f5;                /* Mist Stone */
-  --surface: #ffffff;             /* Cue window surface */
-  --cue-surface: #f2f6f3;         /* Pale Eucalyptus */
-  --ink: #162620;                 /* Deep Pine: 15.76:1 on --paper, 14.52:1 on --band (AAA) */
-  --ink-inverse: #ffffff;         /* 11.97:1 on --accent (AAA) */
-  --muted: #495b54;               /* Slate Pine: 7.22:1 on --paper, 6.65:1 on --band (AA/AAA) */
-  --line: #dce3df;                /* Hairline Sage */
-  --border: #6e8078;              /* Calibrated Pine: 4.18:1 on --paper, 3.85:1 on --band (AA UI) */
-  --accent: #203c32;              /* Evergreen: 11.97:1 on --paper, 11.03:1 on --band (AAA) */
-  --accent-hover: #162c24;        /* Deep Evergreen */
-  --accent-ink: #203c32;          /* Evergreen text accent on light */
-  --btn-primary-bg: #203c32;
-  --btn-primary-fg: #ffffff;
-  --focus: #1d5e47;               /* Focus Evergreen: 7.65:1 on --paper, 7.05:1 on --band */
-  --selection: #d6e7de;
-  --cue-fill: #203c32;
-  --cue-held: #6e8078;
-  --cue-asked-edge: #9e442a;      /* Quiet Terracotta: 6.34:1 on --paper, 5.77:1 on wash */
-  --cue-asked-surface: #faf3ee;
-  --companion-bg: #203c32;
-  --companion-fg: #f3f7f5;        /* 11.08:1 on --companion-bg (AAA) */
-  --companion-muted: #9db8ac;     /* 5.64:1 on --companion-bg (AA) */
-  --companion-live: #7ce0a8;      /* 7.46:1 on --companion-bg (AAA) */
-  --companion-focus: #d6efe1;     /* 9.86:1 on --companion-bg */
-  --shadow: 0 10px 28px rgba(22, 38, 32, 0.06);
-  --radius-control: 6px;
-  --radius-chip: 4px;
-  --radius-cue: 12px;
-}
-
-[data-direction='a'][data-scheme='dark'] {
-  --paper: #0e1513;               /* Deep Forest Night */
-  --band: #131d1a;                /* Pine Slate */
-  --surface: #16221e;             /* Elevated Pine */
-  --cue-surface: #1b2a25;
-  --ink: #ecf1ee;                 /* Mist White: 16.19:1 on --paper, 15.09:1 on --band (AAA) */
-  --ink-inverse: #0e1513;         /* 9.07:1 on --accent (AAA) */
-  --muted: #9fb0a8;               /* Muted Sage: 8.15:1 on --paper, 7.59:1 on --band (AAA) */
-  --line: #25352f;
-  --border: #668075;              /* 4.32:1 on --paper, 4.03:1 on --band (AA UI) */
-  --accent: #7cc4a5;              /* Luminous Evergreen: 9.07:1 on --paper (AAA) */
-  --accent-hover: #97d5ba;
-  --accent-ink: #7cc4a5;
-  --btn-primary-bg: #7cc4a5;
-  --btn-primary-fg: #0e1513;
-  --focus: #8fd4b6;               /* 10.80:1 on --paper, 10.06:1 on --band */
-  --selection: #244338;
-  --cue-fill: #7cc4a5;
-  --cue-held: #668075;
-  --cue-asked-edge: #ee9e7d;
-  --cue-asked-surface: #261d19;
-  --shadow: 0 10px 28px rgba(0, 0, 0, 0.3);
-}
-
-/* ==========================================================================
-   Direction B: White and ink ("Quiet Signal")
-   Departs from studio amber; monochrome neutral ink, colour only means live.
-   ========================================================================== */
-
-[data-direction='b'] {
-  --paper: #ffffff;               /* Pure White */
-  --band: #f4f6f8;                /* Cool Vellum */
-  --surface: #ffffff;             /* Cue window surface */
-  --cue-surface: #f6f8fa;         /* Alabaster Instrument */
-  --ink: #11151b;                 /* Deep Carbon: 18.31:1 on --paper, 16.90:1 on --band (AAA) */
-  --ink-inverse: #ffffff;         /* 18.31:1 on --ink (AAA) */
-  --muted: #4e5866;               /* Slate Ink: 7.21:1 on --paper, 6.66:1 on --band (AA/AAA) */
-  --line: #dde2e8;                /* Grid Hairline */
-  --border: #747f8d;              /* Steel Border: 4.07:1 on --paper, 3.75:1 on --band (AA UI) */
-  --accent: #11151b;              /* Carbon Ink structural accent */
-  --accent-ink: #11151b;
-  --live: #1b6b45;                /* Live Signal Green: 6.49:1 on --paper, 6.10:1 on --cue-surface (AA) */
-  --btn-primary-bg: #11151b;
-  --btn-primary-fg: #ffffff;
-  --focus: #11151b;               /* 18.31:1 on --paper, 16.90:1 on --band */
-  --selection: #dce4ec;
-  --cue-fill: #1b6b45;            /* Active live cue timeline */
-  --cue-held: #747f8d;            /* Resting held timeline (monochrome) */
-  --cue-asked-edge: #9e3e26;      /* Direct-address left edge & label: 6.62:1 on --paper */
-  --cue-asked-surface: #fbf4f2;
-  --companion-bg: #11151b;
-  --companion-fg: #f5f7fa;        /* 17.06:1 on --companion-bg (AAA) */
-  --companion-muted: #9aa4b2;     /* 7.26:1 on --companion-bg (AAA) */
-  --companion-live: #56c68e;      /* 8.60:1 on --companion-bg (AAA) */
-  --companion-focus: #f5f7fa;     /* 17.06:1 on --companion-bg */
-  --shadow: 0 8px 24px rgba(17, 21, 27, 0.05);
-  --radius-control: 4px;
-  --radius-chip: 3px;
-  --radius-cue: 10px;
-}
-
-[data-direction='b'][data-scheme='dark'] {
-  --paper: #0d1014;               /* Void Carbon */
-  --band: #141920;                /* Instrument Slate */
-  --surface: #181e27;             /* Elevated Carbon */
-  --cue-surface: #181e27;
-  --ink: #f5f7fa;                 /* Signal White: 17.77:1 on --paper, 16.45:1 on --band (AAA) */
-  --ink-inverse: #0d1014;         /* 17.77:1 on --ink (AAA) */
-  --muted: #9aa4b2;               /* Telemetry Grey: 7.56:1 on --paper, 7.00:1 on --band (AAA) */
-  --line: #252c36;
-  --border: #67758a;              /* 4.08:1 on --paper, 3.77:1 on --band (AA UI) */
-  --accent: #f5f7fa;
-  --accent-ink: #f5f7fa;
-  --live: #56c68e;                /* Live Signal Green: 8.96:1 on --paper, 7.87:1 on --surface (AAA) */
-  --btn-primary-bg: #f5f7fa;
-  --btn-primary-fg: #0d1014;
-  --focus: #f5f7fa;               /* 17.77:1 on --paper, 16.45:1 on --band */
-  --selection: #283444;
-  --cue-fill: #56c68e;
-  --cue-held: #67758a;
-  --cue-asked-edge: #f09278;
-  --cue-asked-surface: #251a18;
-  --shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
-}
-
-/* ==========================================================================
-   Direction C: White and studio amber ("Solar Cue" - Recommended)
-   Agrees with Seatbelt Labs' Solar Amber (#ebb45b / #875500) assignment.
-   ========================================================================== */
-
-[data-direction='c'] {
-  --paper: #ffffff;
-  --band: #f3f5f7;
-  --surface: #ffffff;
-  --cue-surface: #f8f7f4;
-  --ink: #11151b;
-  --ink-inverse: #ffffff;
-  --muted: #4f5a68;
-  --line: #d3d9e2;
-  --border: #737f90;
-  --accent: #ebb45b;              /* NEVER use raw #ebb45b as text on light (1.87:1 FAIL) */
-  --accent-ink: #875500;          /* 6.31:1 on --paper, 5.77:1 on --band, 5.89:1 on --cue-surface (AA) */
-  --btn-primary-bg: #11151b;
-  --btn-primary-fg: #ffffff;
-  --focus: #875500;
-  --selection: #f7e3be;
-  --cue-fill: #875500;
-  --cue-held: #737f90;
-  --cue-asked-edge: #a83b12;      /* 6.37:1 on --paper, 5.91:1 on --cue-asked-surface (AA) */
-  --cue-asked-surface: #fdf5f0;
-  --companion-bg: #0d1014;
-  --companion-fg: #f5f7fa;
-  --companion-muted: #9aa4b2;
-  --companion-live: #ebb45b;      /* 10.18:1 on --companion-bg (AAA) */
-  --companion-focus: #ebb45b;
-  --shadow: 0 8px 24px rgba(17, 21, 27, 0.05);
-  --radius-control: 2px;
-  --radius-chip: 2px;
-  --radius-cue: 8px;
-}
-
+/* Adopted Direction C: Dark scheme (website dark mode and dark previews) */
+:root[data-scheme='dark'],
 [data-direction='c'][data-scheme='dark'] {
-  --paper: #0d1014;               /* Void Carbon (matches Seatbelt Labs) */
-  --band: #151a21;                /* Instrument Slate (matches Seatbelt Labs) */
+  --paper: #0d1014;               /* Void Carbon */
+  --band: #151a21;                /* Instrument Slate */
   --surface: #181f28;             /* Elevated Cue Surface */
   --cue-surface: #181f28;
   --ink: #f5f7fa;                 /* Signal White: 17.77:1 on --paper, 16.28:1 on --band (AAA) */
@@ -226,7 +102,135 @@
   --selection: #3b2e16;
   --cue-fill: #ebb45b;
   --cue-held: #637286;
-  --cue-asked-edge: #ff7a4d;
-  --cue-asked-surface: #251916;
+  --cue-asked-surface: #221c12;   /* 15.74:1 for ink, 9.02:1 for amber label */
+  --cue-asked-border: #ebb45b;    /* Uniform 1.5px border all round */
+  --cue-asked-label: #ebb45b;
+  --error-surface: #261714;
+  --error-ink: #ff8e6b;
+  --error-border: #ff8e6b;
   --shadow: 0 8px 24px rgba(0, 0, 0, 0.34);
+}
+
+/* ==========================================================================
+   Historical Direction A: White and evergreen (NOT ADOPTED)
+   Retained for historical reference only.
+   ========================================================================== */
+
+[data-direction='a'] {
+  --paper: #ffffff;
+  --band: #f4f6f5;
+  --surface: #ffffff;
+  --cue-surface: #f2f6f3;
+  --ink: #162620;
+  --ink-inverse: #ffffff;
+  --muted: #495b54;
+  --line: #dce3df;
+  --border: #6e8078;
+  --accent: #203c32;
+  --accent-ink: #203c32;
+  --btn-primary-bg: #203c32;
+  --btn-primary-fg: #ffffff;
+  --focus: #1d5e47;
+  --selection: #d6e7de;
+  --cue-fill: #203c32;
+  --cue-held: #6e8078;
+  --cue-asked-surface: #faf3ee;
+  --cue-asked-border: #9e442a;
+  --cue-asked-label: #9e442a;
+  --companion-bg: #203c32;
+  --companion-fg: #f3f7f5;
+  --companion-muted: #9db8ac;
+  --companion-live: #7ce0a8;
+  --companion-focus: #d6efe1;
+  --shadow: 0 10px 28px rgba(22, 38, 32, 0.06);
+  --radius-control: 6px;
+  --radius-chip: 4px;
+  --radius-cue: 12px;
+}
+
+[data-direction='a'][data-scheme='dark'] {
+  --paper: #0e1513;
+  --band: #131d1a;
+  --surface: #16221e;
+  --cue-surface: #1b2a25;
+  --ink: #ecf1ee;
+  --ink-inverse: #0e1513;
+  --muted: #9fb0a8;
+  --line: #25352f;
+  --border: #668075;
+  --accent: #7cc4a5;
+  --accent-ink: #7cc4a5;
+  --btn-primary-bg: #7cc4a5;
+  --btn-primary-fg: #0e1513;
+  --focus: #8fd4b6;
+  --selection: #244338;
+  --cue-fill: #7cc4a5;
+  --cue-held: #668075;
+  --cue-asked-surface: #261d19;
+  --cue-asked-border: #ee9e7d;
+  --cue-asked-label: #ee9e7d;
+  --shadow: 0 10px 28px rgba(0, 0, 0, 0.3);
+}
+
+/* ==========================================================================
+   Historical Direction B: White and ink (NOT ADOPTED)
+   Retained for historical reference only.
+   ========================================================================== */
+
+[data-direction='b'] {
+  --paper: #ffffff;
+  --band: #f4f6f8;
+  --surface: #ffffff;
+  --cue-surface: #f6f8fa;
+  --ink: #11151b;
+  --ink-inverse: #ffffff;
+  --muted: #4e5866;
+  --line: #dde2e8;
+  --border: #747f8d;
+  --accent: #11151b;
+  --accent-ink: #11151b;
+  --live: #1b6b45;
+  --btn-primary-bg: #11151b;
+  --btn-primary-fg: #ffffff;
+  --focus: #11151b;
+  --selection: #dce4ec;
+  --cue-fill: #1b6b45;
+  --cue-held: #747f8d;
+  --cue-asked-surface: #fbf4f2;
+  --cue-asked-border: #9e3e26;
+  --cue-asked-label: #9e3e26;
+  --companion-bg: #11151b;
+  --companion-fg: #f5f7fa;
+  --companion-muted: #9aa4b2;
+  --companion-live: #56c68e;
+  --companion-focus: #f5f7fa;
+  --shadow: 0 8px 24px rgba(17, 21, 27, 0.05);
+  --radius-control: 4px;
+  --radius-chip: 3px;
+  --radius-cue: 10px;
+}
+
+[data-direction='b'][data-scheme='dark'] {
+  --paper: #0d1014;
+  --band: #141920;
+  --surface: #181e27;
+  --cue-surface: #181e27;
+  --ink: #f5f7fa;
+  --ink-inverse: #0d1014;
+  --muted: #9aa4b2;
+  --line: #252c36;
+  --border: #67758a;
+  --accent: #f5f7fa;
+  --accent-ink: #f5f7fa;
+  --live: #56c68e;
+  --btn-primary-bg: #f5f7fa;
+  --btn-primary-fg: #0d1014;
+  --focus: #f5f7fa;
+  --selection: #283444;
+  --cue-fill: #56c68e;
+  --cue-held: #67758a;
+  --cue-asked-surface: #251a18;
+  --cue-asked-border: #f09278;
+  --cue-asked-label: #f09278;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
 }

@@ -1,13 +1,16 @@
 # TalkQTE Brand Guide
 
-This document defines the visual, typographic, symbolic, and editorial identity for TalkQTE. Pair it with [index.html](index.html) for self-contained live specimens (notebook, floating companion, website hero, and side-by-side studio comparison) and [tokens.css](tokens.css) for drop-in CSS custom properties.
+**Adopted identity (23 November 2026, owner's choice): Direction C, White and studio amber.**
 
-Exported visual sheets are stored in `docs/brand/images/`:
+This document records the finalised visual, typographic, symbolic, surface, and editorial identity for TalkQTE. Pair it with [index.html](index.html) for self-contained live specimens (adopted identity, dock states, notebook panel states, and historical comparison) and [tokens.css](tokens.css) for drop-in CSS custom properties.
 
-- [Side-by-side comparison with Seatbelt Labs](images/comparison.png)
-- [Direction A: White and evergreen](images/direction-a.png)
-- [Direction B: White and ink](images/direction-b.png)
-- [Direction C: White and studio amber](images/direction-c.png)
+Exported visual sheets in `docs/brand/images/`:
+
+- [Adopted identity: White and studio amber](images/direction-c.png)
+- [Dock (floating companion): all states, 1x](images/dock.png) and [2x](images/dock-2x.png)
+- [Panel (desktop notebook): all states, 1x](images/panel.png) and [2x](images/panel-2x.png)
+- [Historical comparison with Seatbelt Labs](images/comparison.png)
+- [Not adopted: Direction A (White and evergreen)](images/direction-a.png) and [Direction B (White and ink)](images/direction-b.png)
 
 ---
 
@@ -24,7 +27,7 @@ Exported visual sheets are stored in `docs/brand/images/`:
 
 **Core attributes in practice:**
 
-1. **Calm.** Pure white surfaces, open space, quiet 1px rules, and zero visual noise so the tool never competes with the people in the room.
+1. **Calm.** Pure white surfaces, open space, neutral `1px` rules, and zero visual noise so the tool never competes with the people in the room.
 2. **Exact.** Plain, concrete statements paired with verbatim quoted sources and explicit maturity labels. Nothing is embellished or implied.
 3. **Fast to read at a glance.** One complete cue in upright, open-aperture sans-serif type with a thin time line and no countdown numbers, understood in under a second without clicking.
 
@@ -32,7 +35,8 @@ Exported visual sheets are stored in `docs/brand/images/`:
 
 - Product name: `TalkQTE` (repository name: `talkqte`).
 - Headline: `Stay grounded. Respond in the moment.`
-- Base ground: pure white (`#FFFFFF`) in every direction.
+- Base ground: pure white (`#FFFFFF`).
+- **No one-sided accent borders (hard rule):** Never place an accent border on one side only (left, right, top, or bottom, including inset `box-shadow` strips, pseudo-element bars, or absolutely positioned strip elements) on cards, cues, notes, callouts, alerts, quotes, chips, or list items. A neutral `1px` hairline (`--line`) used as a full-width section or row divider is allowed. Automated checks enforce this rule in both repositories (`scripts/check-brand-borders.test.mjs` for the brand guide specimens, the app border check on the notebook branch, and `tests/borders.spec.js` in the website repository).
 
 ---
 
@@ -40,281 +44,204 @@ Exported visual sheets are stored in `docs/brand/images/`:
 
 A review of the public home pages of Granola (`granola.ai`) and Fireflies (`fireflies.ai`) shows a meeting-tool category split between literary notepads and loud AI teammates. TalkQTE borrows nothing from either brand.
 
-### Granola
-
-- **What it does well:** One sharp differentiator ("Without a meeting bot") repeated consistently; a clean white base (`#FFFFFF`) with confident display scale; realistic, dense sample notes carried through before, during, and after a call.
-- **Where it is generic:** "AI notepad" category framing; art-collage backdrop panels and floating video-call tiles with real faces (the default SaaS launch-page house style); testimonial and logo walls; a stylised illustration window rather than an actual interface.
-- **Implication for TalkQTE:** Granola already owns "light serif display on white/cream with an olive pill button and a floating app window". Today's `talkqte.com` (Georgia serif on warm off-white `#f7f6f2`, evergreen pill CTA) sits uncomfortably close to Granola's visual move. TalkQTE must leave Georgia-on-cream and pill buttons behind.
-
-### Fireflies
-
-- **What it does well:** Plain consent and data-use answers in its FAQ ("tell them before you start recording"; vendor training opt-outs) and a structured role-by-role map of use cases.
-- **Where it is generic:** Dark starfield-to-sunset gradient hero, category-default violet (`#7a5af8`) glowing CTAs, a named robot mascot ("Fred") with an emoji-style avatar, rotating headline words, an announcement banner, and "100+ integrations" proof walls.
-
-### What this leaves open for TalkQTE
-
-Neither brand designs for **the live moment itself**. Both sell **the record** (notes, summaries, memory) and depict full document windows or dashboards. TalkQTE's product is the opposite: **one small, exact cue beside a live conversation, then nothing.** That leaves wide-open territory for an instrument-grade identity on pure white: upright sans-serif type, monospace provenance metadata, hairline structure, zero gradients or mascots, and **the cue itself** as the signature visual object.
+- **Granola:** Strong single differentiator ("Without a meeting bot"), clean white base, and realistic dense mock notes; generic in its "AI notepad" framing, art-collage backdrop panels, floating video-call tiles with real faces, and logo/testimonial walls. Because Granola already owns light serif display on white/cream with olive pill buttons, TalkQTE retires Georgia serif, warm cream, and pill buttons.
+- **Fireflies:** Clear consent and data-use FAQ and role-by-role use case map; generic in its dark starfield gradient, glowing violet CTAs, robot mascot ("Fred"), rotating headline words, and proof walls.
+- **What stays open for TalkQTE:** Neither designs for **the live moment itself**; both sell the record. TalkQTE owns pure white, upright sans-serif clarity, monospace provenance, studio amber warmth, and **the cue itself** as the signature object.
 
 ---
 
 ## 3. Relationship to Seatbelt Labs
 
-TalkQTE is a product of **Seatbelt Labs** (`seatbeltlabs.com`). A visitor moving from `seatbeltlabs.com/talkqte` to `talkqte.com` or into the macOS app should recognise one studio's craft while feeling an immediate shift in register from studio showcase to quiet live companion.
+TalkQTE is a product of **Seatbelt Labs** (`seatbeltlabs.com`).
 
-**Shared studio DNA:**
-
-- **Typography:** Both brands use **Manrope Variable** (upright weights 400 to 600 for display, headings, and body) paired with **IBM Plex Mono** (400 and 500 for status labels, provenance metadata, timestamps, and indices).
-- **Structural discipline:** Flat planes separated by `1px` hairline rules, no gradients, no decorative shadows, explicit text maturity labels, and no em dashes in copy.
-- **Studio lockup:** The `talkqte.com` footer retains the local Seatbelt Labs SVG lockup (`seatbelt-labs-logo-on-light.svg` and `seatbelt-labs-logo-on-dark.svg`) linking to `https://seatbeltlabs.com/`.
-
-**Deliberate differences:**
-
-- **Ground polarity:** Seatbelt Labs ("Signal & Vacuum") is dark (`#0D1014` Void Carbon) and monumental. TalkQTE is **pure white (`#FFFFFF`) and quiet** so it sits calmly beside daylight productivity tools and live video calls.
-- **Wordmark:** Seatbelt Labs uses uppercase `Archivo 800`. TalkQTE uses its own mixed-case `TalkQTE` wordmark in Manrope `700` paired with a dedicated geometric mark.
-- **Signature object:** Seatbelt Labs uses an optical light-mote hero and ruled project catalogue. TalkQTE centres on **the cue** (label line, statement, thin Hold time line, and quoted source).
-- **Studio project colour:** Seatbelt Labs currently assigns TalkQTE **Solar Amber** (`--project-talkqte: #EBB45B`, light ink `#875500`), alongside Signal Vermilion for Seatbelt, Orbital Cyan for Looptender, and Violet Quartz for Traceweave. Each direction below states explicitly whether it agrees with or departs from that assignment.
+- **Shared studio DNA:** Self-hosted **Manrope Variable** (400 to 700) and **IBM Plex Mono** (400 and 500), Seatbelt Labs' neutral scale (`#0D1014` Void Carbon, `#11151B` Deep Carbon, `#4F5A68` Slate Ink, `#F3F5F7` Drafting Vellum, `#D3D9E2` Grid Rule), sharp `2px` control corners, flat planes separated by `1px` neutral hairlines, no gradients, no em dashes, and the local Seatbelt Labs footer lockup on `talkqte.com`.
+- **Studio colour agreement:** TalkQTE adopts Seatbelt Labs' exact project colour assignment: **Solar Amber (`#EBB45B`)** and **Amber Ink (`#875500`)**.
+- **Deliberate differences:** Seatbelt Labs ("Signal & Vacuum") is dark (`#0D1014`) and monumental with uppercase `Archivo 800`. TalkQTE is **pure white (`#FFFFFF`) and quiet** beside a live call, uses a mixed-case `TalkQTE` wordmark in Manrope `700` with its own Calibrated Cue mark, and centres on the cue rather than a studio catalogue.
 
 ---
 
-## 4. Three Colour Directions
+## 4. Colour System (Adopted Direction C: White and Studio Amber)
 
-Every direction starts on pure white (`#FFFFFF`) with a verified dark-scheme variant for `talkqte.com`. Every ratio below is computed under WCAG 2.1 relative luminance.
-
-### Direction A: White and Evergreen ("Still Water")
-
-Refines TalkQTE's current prototype evergreen (`#203C32` app forest, `#203C3B` site ink) onto a pure white canvas, stripping away warm cream and serif headings while preserving continuity with the existing desktop prototype.
-
-- **Studio amber alignment:** **Departs from the studio's amber assignment.** Keeps TalkQTE's existing evergreen hue instead of Seatbelt Labs' `#EBB45B` / `#875500`.
-
-| Role | Token | Light Name & Hex | Dark Name & Hex |
-| --- | --- | --- | --- |
-| Primary canvas | `--paper` | Pure White `#FFFFFF` | Deep Forest Night `#0E1513` |
-| Alternate band / sidebar | `--band` | Mist Stone `#F4F6F5` | Pine Slate `#131D1A` |
-| Cue surface (site / notebook) | `--surface` / `--cue-surface` | White `#FFFFFF` / Pale Eucalyptus `#F2F6F3` | Elevated Pine `#16221E` / `#1B2A25` |
-| Primary text | `--ink` | Deep Pine `#162620` | Mist White `#ECF1EE` |
-| Inverse button text | `--ink-inverse` | Pure White `#FFFFFF` | Deep Forest Night `#0E1513` |
-| Muted text | `--muted` | Slate Pine `#495B54` | Muted Sage `#9FB0A8` |
-| Hairline divider | `--line` | Hairline Sage `#DCE3DF` | Dark Pine Rule `#25352F` |
-| Interactive border | `--border` | Calibrated Pine `#6E8078` | Muted Moss `#668075` |
-| Accent / primary CTA / cue fill | `--accent` / `--accent-ink` | Evergreen `#203C32` | Luminous Evergreen `#7CC4A5` |
-| Focus ring | `--focus` | Focus Evergreen `#1D5E47` | Bright Sage `#8FD4B6` |
-| Direct-address (`@ Asked you`) | `--cue-asked-edge` / wash | Quiet Terracotta `#9E442A` / `#FAF3EE` | Warm Terracotta `#EE9E7D` / `#261D19` |
-| Companion bar (dark chrome) | `--companion-bg` / `-fg` / `-live` | `#203C32` / `#F3F7F5` / `#7CE0A8` | Same dark companion chrome |
-
-**Computed WCAG 2.1 Contrast Ratios (Direction A):**
-
-| Pairing | Light (FG / BG) | Light Ratio | Dark (FG / BG) | Dark Ratio | Result |
-| --- | --- | --- | --- | --- | --- |
-| Body text on `--paper` | `#162620` / `#FFFFFF` | 15.76:1 | `#ECF1EE` / `#0E1513` | 16.19:1 | AAA |
-| Body text on `--band` | `#162620` / `#F4F6F5` | 14.52:1 | `#ECF1EE` / `#131D1A` | 15.09:1 | AAA |
-| Body text on cue surface | `#162620` / `#F2F6F3` | 14.45:1 | `#ECF1EE` / `#16221E` | 14.34:1 | AAA |
-| Muted text on `--paper` | `#495B54` / `#FFFFFF` | 7.22:1 | `#9FB0A8` / `#0E1513` | 8.15:1 | AAA |
-| Muted text on `--band` | `#495B54` / `#F4F6F5` | 6.65:1 | `#9FB0A8` / `#131D1A` | 7.59:1 | AA / AAA |
-| Muted text on cue surface | `#495B54` / `#F2F6F3` | 6.62:1 | `#9FB0A8` / `#16221E` | 7.22:1 | AA / AAA |
-| Accent-as-text on `--paper` | `#203C32` / `#FFFFFF` | 11.97:1 | `#7CC4A5` / `#0E1513` | 9.07:1 | AAA |
-| Accent-as-text on `--band` | `#203C32` / `#F4F6F5` | 11.03:1 | `#7CC4A5` / `#131D1A` | 8.45:1 | AAA |
-| Primary button label on fill | `#FFFFFF` / `#203C32` | 11.97:1 | `#0E1513` / `#7CC4A5` | 9.07:1 | AAA |
-| Borders on `--paper` / `--band` / cue | `#6E8078` | 4.18 / 3.85 / 3.83:1 | `#668075` | 4.32 / 4.03 / 3.83:1 | AA UI |
-| Focus ring on `--paper` / `--band` / cue | `#1D5E47` | 7.65 / 7.05 / 7.02:1 | `#8FD4B6` | 10.80 / 10.06 / 9.57:1 | AAA / AA UI |
-| `@ Asked you` label on wash | `#9E442A` / `#FAF3EE` | 5.77:1 | `#EE9E7D` / `#261D19` | 7.65:1 | AA / AAA |
-| Companion bar muted / live / focus | `#9DB8AC` / `#7CE0A8` / `#D6EFE1` on `#203C32` | 5.64 / 7.46 / 9.86:1 | Same | Same | AA / AAA |
-
----
-
-### Direction B: White and Ink ("Quiet Signal")
-
-Strips decorative brand colour out of the interface completely. Surfaces and controls share Seatbelt Labs' neutral Deep Carbon (`#11151B`) and cool vellum scale on pure white; a restrained Live Signal green (`#1B6B45` on light, `#56C68E` on dark) appears **only** for the cue's live state and active capture indicator, so colour has one unmistakable meaning: live right now.
-
-- **Studio amber alignment:** **Departs from the studio's amber assignment.** Adopts the studio's neutral carbon and vellum planes directly, but replaces a product brand hue with a semantic live-state green.
-
-| Role | Token | Light Name & Hex | Dark Name & Hex |
-| --- | --- | --- | --- |
-| Primary canvas | `--paper` | Pure White `#FFFFFF` | Void Carbon `#0D1014` |
-| Alternate band / sidebar | `--band` | Cool Vellum `#F4F6F8` | Instrument Slate `#141920` |
-| Cue surface (site / notebook) | `--surface` / `--cue-surface` | White `#FFFFFF` / Alabaster `#F6F8FA` | Elevated Carbon `#181E27` |
-| Primary text & primary CTA fill | `--ink` / `--accent` | Deep Carbon `#11151B` | Signal White `#F5F7FA` |
-| Inverse button text | `--ink-inverse` | Pure White `#FFFFFF` | Void Carbon `#0D1014` |
-| Muted text | `--muted` | Slate Ink `#4E5866` | Telemetry Grey `#9AA4B2` |
-| Hairline divider | `--line` | Grid Hairline `#DDE2E8` | Hairline Dark `#252C36` |
-| Interactive border | `--border` | Steel Border `#747F8D` | Steel Dark `#67758A` |
-| Live-only colour (cue active state) | `--live` / `--cue-fill` | Live Signal `#1B6B45` | Live Mint `#56C68E` |
-| Focus ring | `--focus` | Deep Carbon `#11151B` | Signal White `#F5F7FA` |
-| Direct-address (`@ Asked you`) | `--cue-asked-edge` / wash | Deep Rust `#9E3E26` / `#FBF4F2` | Warm Rust `#F09278` / `#251A18` |
-| Companion bar (dark chrome) | `--companion-bg` / `-fg` / `-live` | `#11151B` / `#F5F7FA` / `#56C68E` | Same dark companion chrome |
-
-**Computed WCAG 2.1 Contrast Ratios (Direction B):**
-
-| Pairing | Light (FG / BG) | Light Ratio | Dark (FG / BG) | Dark Ratio | Result |
-| --- | --- | --- | --- | --- | --- |
-| Body text on `--paper` | `#11151B` / `#FFFFFF` | 18.31:1 | `#F5F7FA` / `#0D1014` | 17.77:1 | AAA |
-| Body text on `--band` | `#11151B` / `#F4F6F8` | 16.90:1 | `#F5F7FA` / `#141920` | 16.45:1 | AAA |
-| Body text on cue surface | `#11151B` / `#F6F8FA` | 17.20:1 | `#F5F7FA` / `#181E27` | 15.61:1 | AAA |
-| Muted text on `--paper` | `#4E5866` / `#FFFFFF` | 7.21:1 | `#9AA4B2` / `#0D1014` | 7.56:1 | AAA |
-| Muted text on `--band` | `#4E5866` / `#F4F6F8` | 6.66:1 | `#9AA4B2` / `#141920` | 7.00:1 | AA / AAA |
-| Muted text on cue surface | `#4E5866` / `#F6F8FA` | 6.77:1 | `#9AA4B2` / `#181E27` | 6.64:1 | AA |
-| Live green as text on `--paper` / `--band` / cue | `#1B6B45` | 6.49 / 5.99 / 6.10:1 | `#56C68E` | 8.96 / 8.29 / 7.87:1 | AA / AAA |
-| Primary button label on fill | `#FFFFFF` / `#11151B` | 18.31:1 | `#0D1014` / `#F5F7FA` | 17.77:1 | AAA |
-| Borders on `--paper` / `--band` / cue | `#747F8D` | 4.07 / 3.75 / 3.82:1 | `#67758A` | 4.08 / 3.77 / 3.58:1 | AA UI |
-| Focus ring on `--paper` / `--band` / cue | `#11151B` | 18.31 / 16.90 / 17.20:1 | `#F5F7FA` | 17.77 / 16.45 / 15.61:1 | AAA / AA UI |
-| `@ Asked you` label on wash | `#9E3E26` / `#FBF4F2` | 6.09:1 | `#F09278` / `#251A18` | 7.20:1 | AA / AAA |
-| Companion bar muted / live / focus | `#9AA4B2` / `#56C68E` / `#F5F7FA` on `#11151B` | 7.26 / 8.60 / 17.06:1 | Same | Same | AAA |
-
----
-
-### Direction C: White and Studio Amber ("Solar Cue" - Recommended)
-
-Brings Seatbelt Labs' assigned TalkQTE colour (Solar Amber `#EBB45B` and Amber Ink `#875500`) directly into a crisp white-first product identity. Neutrals (`#11151B`, `#4F5A68`, `#F3F5F7`, `#D3D9E2`, `#0D1014`) and sharp `2px` control geometry align directly with the studio site. Raw Solar Amber (`#EBB45B`) is **never** used as text on white or light surfaces (1.87:1, FAIL); on light surfaces all accent text, cue indicators, timeline fills, and focus rings use Amber Ink (`#875500`). On dark surfaces (the companion bar, dark-mode `talkqte.com`, and the brand mark), Solar Amber shines cleanly at 10.18:1 against Void Carbon.
-
-- **Studio amber alignment:** **Agrees with the studio's amber assignment.** Directly implements `--project-talkqte: #EBB45B` and `--project-talkqte-ink: #875500`.
+Raw Solar Amber (`#EBB45B`) is **never** used as text or a thin UI border on white or light surfaces (`1.87:1`, FAIL). On light surfaces, all accent text, cue markers, timeline fills, `@ Asked you` all-round borders, and focus rings use **Amber Ink (`#875500`)**. Raw `#EBB45B` is used on dark surfaces (`#0D1014` companion dock bar, dark-mode `talkqte.com`, and the `#0D1014` brand mark) or as a solid fill paired with `#11151B` / `#0D1014` dark ink.
 
 | Role | Token | Light Name & Hex | Dark Name & Hex |
 | --- | --- | --- | --- |
 | Primary canvas | `--paper` | Pure White `#FFFFFF` | Void Carbon `#0D1014` |
 | Alternate band / sidebar | `--band` | Drafting Vellum `#F3F5F7` | Instrument Slate `#151A21` |
-| Cue surface (site / notebook) | `--surface` / `--cue-surface` | White `#FFFFFF` / Warm Vellum `#F8F7F4` | Elevated Carbon `#181F28` |
+| Cue surface (site / dock card) | `--surface` | Pure White `#FFFFFF` | Elevated Carbon `#181F28` |
+| Cue surface (notebook pane) | `--cue-surface` | Warm Vellum `#F8F7F4` | Elevated Carbon `#181F28` |
 | Primary text | `--ink` | Deep Carbon `#11151B` | Signal White `#F5F7FA` |
 | Primary button fill / label | `--btn-primary-bg` / `-fg` | `#11151B` / `#FFFFFF` | `#EBB45B` / `#0D1014` |
 | Muted text | `--muted` | Slate Ink `#4F5A68` | Telemetry Grey `#9AA4B2` |
-| Hairline divider | `--line` | Grid Rule `#D3D9E2` | Hairline Dark `#252C36` |
-| Interactive border | `--border` | Calibrated Rule `#737F90` | Steel Dark `#637286` |
-| Studio accent (fills, dark UI, cue top rule) | `--accent` | Solar Amber `#EBB45B` | Solar Amber `#EBB45B` |
-| Accent as text & timeline fill | `--accent-ink` / `--cue-fill` | Amber Ink `#875500` | Solar Amber `#EBB45B` |
+| Hairline divider (1px neutral) | `--line` | Grid Rule `#D3D9E2` | Hairline Dark `#252C36` |
+| Interactive border (all round) | `--border` | Calibrated Rule `#737F90` | Steel Dark `#637286` |
+| Studio accent (dark UI, mark, dark CTA) | `--accent` | Solar Amber `#EBB45B` | Solar Amber `#EBB45B` |
+| Accent text, marker & timeline fill | `--accent-ink` / `--cue-fill` | Amber Ink `#875500` | Solar Amber `#EBB45B` |
+| Held cue resting timeline | `--cue-held` | Calibrated Rule `#737F90` | Steel Dark `#637286` |
 | Focus ring | `--focus` | Amber Ink `#875500` | Solar Amber `#EBB45B` |
-| Direct-address (`@ Asked you`) | `--cue-asked-edge` / wash | Vermilion Ink `#A83B12` / `#FDF5F0` | Warm Vermilion `#FF7A4D` / `#251916` |
-| Companion bar (dark chrome) | `--companion-bg` / `-fg` / `-live` | `#0D1014` / `#F5F7FA` / `#EBB45B` | Same dark companion chrome |
+| `@ Asked you` whole-card tint | `--cue-asked-surface` | Warm Amber Wash `#FDF6E9` | Dark Amber Wash `#221C12` |
+| `@ Asked you` 1.5px border all round & label | `--cue-asked-border` / `-label` | Amber Ink `#875500` | Solar Amber `#EBB45B` |
+| Inline error banner (surface / ink & border) | `--error-surface` / `--error-ink` | `#FDF3F0` / `#9C3418` | `#261714` / `#FF8E6B` |
+| Dock bar & shell (always dark chrome) | `--companion-bg` / `-fg` / `-muted` / `-live` | `#0D1014` / `#F5F7FA` / `#9AA4B2` / `#EBB45B` | Same dark chrome |
 
-**Computed WCAG 2.1 Contrast Ratios (Direction C):**
+**Computed WCAG 2.1 Contrast Ratios (Adopted Direction C):**
 
 | Pairing | Light (FG / BG) | Light Ratio | Dark (FG / BG) | Dark Ratio | Result |
 | --- | --- | --- | --- | --- | --- |
 | Body text on `--paper` | `#11151B` / `#FFFFFF` | 18.31:1 | `#F5F7FA` / `#0D1014` | 17.77:1 | AAA |
 | Body text on `--band` | `#11151B` / `#F3F5F7` | 16.75:1 | `#F5F7FA` / `#151A21` | 16.28:1 | AAA |
-| Body text on cue surface | `#11151B` / `#F8F7F4` | 17.09:1 | `#F5F7FA` / `#181F28` | 15.46:1 | AAA |
-| Muted text on `--paper` | `#4F5A68` / `#FFFFFF` | 7.01:1 | `#9AA4B2` / `#0D1014` | 7.56:1 | AAA |
-| Muted text on `--band` | `#4F5A68` / `#F3F5F7` | 6.42:1 | `#9AA4B2` / `#151A21` | 6.93:1 | AA |
-| Muted text on cue surface | `#4F5A68` / `#F8F7F4` | 6.55:1 | `#9AA4B2` / `#181F28` | 6.58:1 | AA |
-| Amber Ink on `--paper` / `--band` / cue | `#875500` | 6.31 / 5.77 / 5.89:1 | `#EBB45B` | 10.18 / 9.33 / 8.86:1 | AA / AAA |
+| Body text on notebook cue surface | `#11151B` / `#F8F7F4` | 17.09:1 | `#F5F7FA` / `#181F28` | 15.46:1 | AAA |
+| Muted text on `--paper` / `--band` / cue | `#4F5A68` | 7.01 / 6.42 / 6.55:1 | `#9AA4B2` | 7.56 / 6.93 / 6.58:1 | AA / AAA |
+| Accent ink on `--paper` / `--band` / cue | `#875500` | 6.31 / 5.77 / 5.89:1 | `#EBB45B` | 10.18 / 9.33 / 8.86:1 | AA / AAA |
 | Raw Solar Amber as text on white (DO NOT USE) | `#EBB45B` / `#FFFFFF` | 1.87:1 | `#EBB45B` / `#0D1014` | 10.18:1 | FAIL on light / AAA on dark |
 | Primary button label on fill | `#FFFFFF` / `#11151B` | 18.31:1 | `#0D1014` / `#EBB45B` | 10.18:1 | AAA |
-| Dark text on Solar Amber fill | `#11151B` / `#EBB45B` | 9.78:1 | `#0D1014` / `#EBB45B` | 10.18:1 | AAA |
 | Borders on `--paper` / `--band` / cue | `#737F90` | 4.06 / 3.72 / 3.79:1 | `#637286` | 3.89 / 3.56 / 3.38:1 | AA UI |
 | Focus ring on `--paper` / `--band` / cue | `#875500` | 6.31 / 5.77 / 5.89:1 | `#EBB45B` | 10.18 / 9.33 / 8.86:1 | AA / AAA |
-| `@ Asked you` label on wash | `#A83B12` / `#FDF5F0` | 5.91:1 | `#FF7A4D` / `#251916` | 6.50:1 | AA |
-| Companion bar muted / live / focus | `#9AA4B2` / `#EBB45B` / `#EBB45B` on `#0D1014` | 7.56 / 10.18 / 10.18:1 | Same | Same | AAA |
-
----
-
-### Recommendation
-
-**Adopt Direction C: White and Studio Amber ("Solar Cue").**
-
-1. **Coherent studio family without copying the studio:** Seatbelt Labs already identifies TalkQTE with Solar Amber (`#EBB45B` / `#875500`) on `seatbeltlabs.com/talkqte`. Adopting it makes the jump from the studio catalogue to `talkqte.com` to the macOS companion feel unmistakably designed by one hand, while inverting the primary canvas to pure white (`#FFFFFF`) keeps TalkQTE calm and light beside a live call.
-2. **Clear visual separation from Granola and Fireflies:** Granola uses olive/chartreuse and literary serif display on white; Fireflies uses violet gradients on dark. Upright Manrope and IBM Plex Mono on pure white with restrained Amber Ink (`#875500`) and Void Carbon (`#0D1014`) occupies completely distinct territory.
-3. **Right emotional temperature for a cue:** Amber reads like a quiet warm pilot light coming on only when context matters, then going dark. Evergreen (Direction A) sits too close to the botanical eco-aesthetic Seatbelt Labs retired and adjacent to Granola's olive green. Monochrome Ink (Direction B) is a strong second choice for pure functional minimalism, and shares Direction C's exact neutral surfaces (`#FFFFFF`, `#F3F5F7`/`#F4F6F8`, `#11151B`), so moving between B and C changes only the mark and accent tokens if the owner later prefers colour strictly for live capture state.
+| `@ Asked you` body / muted / label on wash | `#11151B` / `#4F5A68` / `#875500` on `#FDF6E9` | 17.03 / 6.52 / 5.87:1 | `#F5F7FA` / `#9AA4B2` / `#EBB45B` on `#221C12` | 15.74 / 6.70 / 9.02:1 | AA / AAA |
+| `@ Asked you` 1.5px border on `--paper` / `--band` | `#875500` | 6.31 / 5.77:1 | `#EBB45B` | 10.18 / 9.33:1 | AA UI |
+| Dock bar muted / live / quiet / focus | `#9AA4B2` / `#EBB45B` / `#7D8A9B` / `#EBB45B` on `#0D1014` | 7.56 / 10.18 / 5.38 / 10.18:1 | Same | Same | AA / AAA |
 
 ---
 
 ## 5. Typography
 
-All three directions share one self-hosted typographic pairing: **Manrope Variable** + **IBM Plex Mono** (SIL Open Font License 1.1, self-hosted from `fonts/`, zero remote requests).
+Both the website and the desktop app use self-hosted **Manrope Variable** (display, headings, body, cues) paired with **IBM Plex Mono** (400 and 500 for labels, status chips, provenance, timestamps, and step counters), bundled under the SIL Open Font License 1.1 with zero remote requests.
 
-**Why this pairing:**
-
-- **Studio alignment:** Matches Seatbelt Labs' primary sans (`Manrope Variable`) and technical metadata face (`IBM Plex Mono`), creating immediate family recognition without borrowing the studio's uppercase `Archivo 800` wordmark.
-- **Against the benchmark:** Retires Georgia serif from `talkqte.com`, eliminating the overlap with Granola's light-serif-on-cream editorial look. Unlike Fireflies' DM Sans/Inter combination on gradients, upright Manrope paired with IBM Plex Mono provenance labels reads like a calibrated instrument.
-- **Glance legibility:** Manrope's open counters (`a`, `c`, `e`, `s`) and clean medium/semibold weights read cleanly at `17px` to `28px` glance sizes in the companion and notebook. IBM Plex Mono provides tabular alignment for timestamps, elapsed session clocks, and provenance labels.
-
-**Type Scale (preserving product [DESIGN.md](../../DESIGN.md) glance sizes):**
+The cue's glance sizes in [DESIGN.md](../../DESIGN.md) stay unchanged (`22px` / `28px` notebook, `17px` / `21px` dock companion, stepping down at >90 and >140 characters).
 
 | Role | Family | Size | Weight | Line Height | Tracking |
 | --- | --- | --- | --- | --- | --- |
-| Wordmark (`TalkQTE`) | Manrope Variable | `18px` site / `22px` notebook | 700 | `1.0` | `-0.025em` |
+| Wordmark (`TalkQTE`) | Manrope Variable | `18px` site / `20px` sidebar | 700 | `1.0` | `-0.025em` |
 | Site Hero Display (`h1`) | Manrope Variable | `clamp(31px, 4.6vw, 54px)` | 500 | `1.06` | `-0.038em` |
 | Site Section Heading (`h2`) | Manrope Variable | `clamp(24px, 2.8vw, 31px)` | 500 | `1.18` | `-0.03em` |
-| Notebook Cue (standard / large) | Manrope Variable | `22px` / `28px` (steps down at >90 and >140 chars) | 600–700 | `1.22` | `-0.015em` |
+| Notebook Session Heading (`h1`) | Manrope Variable | `24px` (`28px` Settings `h1`) | 600 | `1.2` | `-0.025em` |
+| Notebook Panel Heading (`h2`) | Manrope Variable | `20px` (`18px` section `h2`) | 600 | `1.3` | `-0.02em` |
+| Notebook Cue (standard / large) | Manrope Variable | `22px` / `28px` (>90 chars: `19px`/`24px`; >140: `17px`/`21px`) | 600–700 | `1.22` | `-0.015em` |
 | Notebook Cue Source (standard / large) | Manrope Variable | `14px` / `16px` | 400 | `1.45` | `0em` |
-| Companion Cue (standard / large) | Manrope Variable | `17px` / `21px` | 600–700 | `1.24` | `-0.015em` |
-| Companion Cue Source (standard / large) | Manrope Variable | `13px` / `15px` | 400 | `1.42` | `0em` |
+| Dock Companion Cue (standard / large) | Manrope Variable | `17px` / `21px` | 600–700 | `1.24` | `-0.015em` |
+| Dock Companion Source (standard / large) | Manrope Variable | `13px` / `15px` | 400 | `1.42` | `0em` |
 | Body Copy (site & notebook) | Manrope Variable | `16px` (`15px` compact rows) | 400 | `1.65` | `0em` |
-| Labels, Chips, Provenance, Status | IBM Plex Mono | `11px` to `12px` uppercase | 500 | `1.35` | `0.06em` |
-| Session Clock & Counts | IBM Plex Mono / tabular-nums | `12px` to `14px` | 400 | `1.35` | `0em` |
+| Labels, Chips, Provenance, Status, Steps | IBM Plex Mono | `11px` to `12px` uppercase | 500 | `1.35` | `0.06em` |
+| Session Clock, Counts & Code | IBM Plex Mono / tabular-nums | `12px` to `14px` | 400 | `1.4` | `0em` |
 
 ---
 
 ## 6. Mark and Wordmark
 
-Today's mark (a speech bubble with an exclamation mark) reads like generic chat or notification alerts, the opposite of a quiet companion that speaks only when helpful. Each direction replaces it with a simple hand-written SVG mark on a `32×32` integer grid designed to stay razor-sharp at `16px` favicon scale on both light and dark browser chrome.
+TalkQTE retires the speech-bubble-with-exclamation-mark glyph in favour of the **Calibrated Cue** mark: hand-written geometric SVG paths on a `32×32` integer grid.
 
-| Direction | Mark Name | Construction (`32×32` viewBox) | Meaning |
-| --- | --- | --- | --- |
-| **A: Evergreen** | Margin Mark | `#203C32` rounded tile (`rx="7"`), vertical sage thread (`x=8..11`), white cue block (`x=14..24`), sage time line beneath | One calm cue and its time line emerging beside the vertical conversation thread |
-| **B: Ink** | Quiet Aperture | `#11151B` tile (`rx="5"`), crisp white open square frame, single `#56C68E` live dot in the open top-right corner | Monochrome instrument at rest; one restrained green point means live |
-| **C: Studio Amber** | Calibrated Cue | `#0D1014` studio tile (`rx="3.5"`), opposing white viewfinder corners (`┌` and `┘`), centered `#EBB45B` Solar Amber cue bar | Staying grounded and on target; links visually to Seatbelt Labs' `#0D1014` mark |
-
-**Wordmark:** Mixed-case `TalkQTE` set in `Manrope Variable` weight `700`, `-0.025em` tracking, paired to the right of the mark with a `10px` gap (at `30px` mark height). Never set `TalkQTE` in all-caps Archivo (reserved for `SEATBELT LABS`).
-
-**Sizing, clear space, and dark/light surfaces:**
-
-- **Minimum sizes:** Mark alone `16px × 16px` (favicon / menu bar); mark + wordmark lockup `24px` mark height (`112px` total lockup width).
-- **Clear space:** Maintain at least `0.25×` the mark's width (e.g. `8px` around a `32px` mark) free of text, rules, or other logos on all four sides.
-- **Light and dark usage:** Every mark carries a `1px` calibrated edge stroke (`#3C5E51` in A, `#363E4A` in B, `#38414E` in C) so the dark tile separates cleanly on dark browser tabs and dark-mode pages without requiring `<style>` blocks inside SVG (preserving strict CSP).
-
-**Do / Don't:**
-
-- **Do** use the square tile at `16px` for favicons and `30px`–`34px` in headers and notebook sidebars.
-- **Do** preserve the exact mixed capitalisation `TalkQTE`.
-- **Don't** add drop shadows, gradients, glows, or rounded badges around the mark.
-- **Don't** recolour the Solar Amber bar (Direction C) or live dot (Direction B) to arbitrary hues.
-- **Don't** pair TalkQTE's mark with a speech bubble, microphone cartoon, or mascot.
+- **Construction:** Void Carbon (`#0D1014`) tile (`rx="3.5"`) with a calibrated `1px` edge stroke (`#38414E`) so it separates cleanly on dark browser chrome without `<style>` tags inside SVG. Inside, two opposing white viewfinder corners (`┌` top-left, `┘` bottom-right in `#F5F7FA`, `2.4px` stroke) frame a centered horizontal **Solar Amber (`#EBB45B`)** cue bar (`11×3`, `rx="1"`).
+- **Wordmark:** Mixed-case `TalkQTE` set in `Manrope Variable` `700` (`-0.025em` tracking), `10px` to the right of a `30px` mark. Never set `TalkQTE` in uppercase Archivo (reserved for `SEATBELT LABS`).
+- **Minimum sizes & clear space:** Mark alone `16px × 16px` (favicon / menu bar); mark + wordmark lockup `24px` mark height (`112px` width). Clear space is at least `0.25×` the mark's width on all four sides.
+- **Do / Don't:** Keep exact `TalkQTE` capitalisation; keep `#0D1014` + `#F5F7FA` + `#EBB45B`; never add drop shadows, glows, gradients, speech bubbles, or mascots.
 
 ---
 
 ## 7. The Cue as the Signature Element
 
-One visual object links the macOS notebook, the floating companion, and `talkqte.com`: **the cue**. All three surfaces draw the exact same four-part structure from top to bottom:
+One object carries identically across the notebook, the floating dock, and `talkqte.com`:
 
-1. **Label line:** Short plain words stating what the cue is (`Context`, `You could ask`, `Just said`, `Asked you`, `From your notes`, `From your focus`) in uppercase `IBM Plex Mono` (`11px`–`12px`) with a quiet `6px`–`7px` indicator marker (round dot in A and B, crisp `1px`-radius square in C). Dismiss (`×`) sits quietly in the top-right corner (`44×44px` hit target in the app; non-interactive visual glyph on the static website).
-2. **Cue statement:** One complete sentence in upright `Manrope Variable` (`600`–`700`, `-0.015em` tracking) at glance size (`22px`/`28px` notebook, `17px`/`21px` companion, `19px`–`22px` site). Never italic, never truncated behind a click.
-3. **Thin time line (and Hold control):** A single `3px` horizontal track separating the statement from its source. Its fill narrows quietly as unread time passes, with **no countdown numbers**. In the app, the entire `44px`-tall strip acts as the `Hold` button; hovering or focusing shows `Hold`, and activating fills the line to full width in its muted resting colour (`Held`). On the static site, it renders as a non-interactive proportional bar with a quiet `Hold` tag.
-4. **Quoted source (provenance):** Separated beneath the time line. Monospace provenance line (`FROM THE CONVERSATION`, `THIS CONVERSATION · 04:08 · JORDAN`, or `PRIOR NOTE · GRANOLA · 18 NOV`) above the verbatim quote in regular Manrope muted ink. No Save button, no score, no thumbs up/down.
+1. **Label line:** Every cue kind is identified by its small square marker (`6px × 6px`, `1px` radius in `--accent-ink` on light / `--accent` on dark) plus its plain label words in `IBM Plex Mono` (`11px` uppercase, `0.06em` tracking). Full list of app cue kinds from `src/components/Question.tsx` (plus `Context` on the website concept preview):
+   - `You could ask` (clarification or fixed question)
+   - `Suggested` (model suggestion; shown as `Context` on the site concept card)
+   - `Just said` / `Said earlier` (quoted commitment or date; no repeated source under it)
+   - `Asked you` (direct address by name; see exception below)
+   - `Asked the group` (open question to the room)
+   - `From your focus` (`Still open` focus reminder)
+   - `From your notes` (imported prior-note reminder, with provenance date and optional `Not verified` notice)
+   Dismiss (`×`) sits quietly in the top-right corner (`44×44px` hit target in the app; non-interactive glyph on the site).
+2. **Cue statement:** Complete, self-contained sentence in upright Manrope (`600`–`700`) at glance size.
+3. **Thin time line (and Hold control):** A single `3px` horizontal rule (`1px` radius) between the cue and its source. Proportional fill in `--cue-fill` (`#875500` light / `#EBB45B` dark), with **no countdown numbers**. Activating Hold fills the line to 100% in resting `--cue-held` (`#737F90`) and displays `Held`.
+4. **Quoted source (provenance):** Separated by a `1px` neutral `--line` hairline (or sitting cleanly beneath the time line). Monospace provenance (`FROM THE CONVERSATION`, `THIS CONVERSATION · 04:08 · JORDAN`, or `PRIOR NOTE · GRANOLA · 2026-11-01`) above the verbatim quote in regular Manrope `--muted`. When a held cue is answered later, the answering line opens above the original source with a small tick (`✓ Answered later in the conversation`).
 
-**Direct-address exception (`@ Asked you`):** Default cues never carry a coloured left border. Only a question asked directly to the person by name carries a `4px`–`6px` left edge, an `@` prefix before the label, a faint warm card tint, and `Stays longer · no countdown` in place of the timed bar so it is told apart before reading and without relying on colour alone (matching [DESIGN.md](../../DESIGN.md)).
+**Direct-address exception (`@ Asked you`):** Because being asked by name expects an answer, it must be recognised before reading and without relying on colour alone, while strictly obeying the no-one-sided-border rule:
+
+- Quiet warm tint of the **whole card**: `--cue-asked-surface` (`#FDF6E9` light / `#221C12` dark).
+- **Uniform `1.5px` solid border all round** in `--cue-asked-border` (`#875500` light / `#EBB45B` dark). **Never** a left edge bar, top strip, or inset shadow.
+- `@` icon directly before `Asked you`, both in `--cue-asked-label` (`#875500` light / `#EBB45B` dark).
+- `Stays longer · no countdown` in place of the timed bar (reduced to a plain neutral `1px` hairline rule in compact companion if needed; `Hold` retains the full accessible description).
 
 ---
 
-## 8. Layout, Motion, Voice, and Accessibility
+## 8. Dock and Panel Specifications
 
-### Layout and Components
+This section specifies the exact Direction C implementation for the desktop app's two working surfaces, preserving all dimensions from [DESIGN.md](../../DESIGN.md), [docs/glance-mode.md](../glance-mode.md), and [docs/panel-sizing.md](../panel-sizing.md), and all existing wording and structure from the notebook branch.
 
-- **Website (`talkqte.com`):** Pure white (`#FFFFFF`) primary ground alternating with `--band` sections separated by `1px solid var(--line)` hairlines; `1140px` max width; two-column desktop hero (copy left, static cue window right) and two-column section grids (`0.34fr / 0.66fr`) collapsing cleanly to one column on narrow screens. Status chips are quiet `1px`-bordered monospace tags, never coloured badges. Only the `.cue-window` carries one very soft shadow alongside its `1px` border.
-- **Desktop app (notebook and companion):** Preserves the real layout documented in [DESIGN.md](../../DESIGN.md): left sidebar (`Notebook`, optional setup, `Settings`), top toolbar, live session strip with visible capture state and `Stop`, split `Notes` / `Transcript` + `A timely question` workspace, and a `320 × 76px` resting companion bar that expands to `232px` (+ `44px` large text) when a cue arrives. (The desktop app keeps its current prototype stylesheet until a brand direction is chosen.)
+### 8.1 The Dock (Floating Companion Window)
+
+The dock (`FloatingQuestion`) is an opaque Void Carbon (`#0D1014`) shell anchored beside the meeting. It stays `320px` wide on every display: `320 × 76px` at rest (bar only), `320 × 232px` showing a cue in standard text, and `320 × 276px` (`+44px`) in larger text. Bottom-right placement (default) anchors the bar at the bottom with the cue card above it (`flex-direction: column-reverse`); top presets (`top-center`, `top-left`, `top-right`) and dragged positions anchor the bar at the top with the cue card below it.
+
+**Dock bar states:**
+
+- **Quiet / capturing (Mic on / App audio):** Capture glyph (`Mic` or `AudioLines`, `16px` stroke) + `6px` status dot (`--companion-live` `#EBB45B` when active signal, `--companion-quiet` `#7D8A9B` when quiet), optional `Cloud` / `CloudUpload` glyph (`16px`) when lines leave the device, then `44×44px` icon controls (`Pause`/`Play`, `Stop`, `Hide`). Words stay visually hidden for screen readers while capture is running normally.
+- **Spelled-out states (shown on one truncated line whenever the glyph alone cannot convey state):** `Mic only` (microphone check without a live session; shows Stop microphone + Hide), `Cues off` (cues paused: `Mic still on` / `App audio still on` with Play to resume; or model stopped: `Cues off: sending stopped.` / reason), `Mic on · not transcribing yet`, `Mic on · transcription stopped`, `Starting`, `Stop requested…`, `Status unavailable`.
+
+**Dock Token, Spacing, and Type Table:**
+
+| Element | Font / Size / Weight | Colour Token | Padding / Size / Radius | Border / Rule |
+| --- | --- | --- | --- | --- |
+| Dock outer shell (`.companion-shell`) | Inherited | `--companion-bg` (`#0D1014`) | `320px` wide, `6px` outer pad, `18px` radius | Uniform `1px solid #252C36` all round + `--shadow-dock` |
+| Dock bar (`.companion-bar`) | `IBM Plex Mono` `11px` / `500` status; `Manrope` `13px` / `700` bold state title (`Cues off`, `Mic only`) | `--companion-fg` title, `--companion-muted` icons/status | `min-height: 44px` (resting window `76px`), `0 6px 0 14px` | None |
+| Dock icon control (`.companion-control`) | `16px` stroke icon (`14px` Stop square) | `--companion-muted` rest (`7.56:1`), `--companion-fg` hover on `--companion-hover` | `44 × 44px`, `8px` radius | Focus: `3px solid --companion-focus`, `2px` offset |
+| Dock cue card (default) | Cue `Manrope` `17px` (`21px` large) / `600`, `1.24` lh; Source `13px` (`15px` large) / `400`; Labels `IBM Plex Mono` `10px`–`11px` / `500` uppercase | `--surface` (`#FFFFFF`), `--ink`, `--muted`, `--accent-ink` (`#875500`) | `14px 16px 13px`, `13px` radius; total dock height `232px` (`276px` large) | Uniform `1px solid --line` all round (no one-sided accent) |
+| Dock cue card (`@ Asked you`) | Same glance scale; `@` + `ASKED YOU` in `--cue-asked-label` | `--cue-asked-surface` (`#FDF6E9`), `--ink`, `--muted` | `14px 16px 13px`, `13px` radius | Uniform `1.5px solid --cue-asked-border` (`#875500`) all round |
+| Dock time line / Hold | `IBM Plex Mono` `10px` / `500` `HOLD` / `HELD` | Track `--line`, fill `--cue-fill` (`#875500`), held `--cue-held` (`#737F90`) | `3px` track inside `44px` hit target | None |
+| Dock answered block | `IBM Plex Mono` `10px` tick + `ANSWERED LATER IN THE CONVERSATION`; `Manrope` `13px` quote | `--accent-ink` label, `--ink` answer quote | `8px 0 10px` | Neutral `1px solid --line` bottom row divider above original source |
+
+### 8.2 The Panel (Desktop Notebook Working Surfaces)
+
+The notebook moves from warm cream and rounded green pills onto pure white (`#FFFFFF`) with a Drafting Vellum (`#F3F5F7`) sidebar, neutral `1px solid --line` (`#D3D9E2`) section dividers, sharp `2px` control corners, Manrope Variable headings and body, and IBM Plex Mono metadata. All wording, control order, disclosures, and resize limits (`Sidebar width` `>= 200px`, `Notes and transcript width` `>= 260px`) remain identical to the notebook branch.
+
+**Panel Token, Spacing, and Type Table:**
+
+| Surface / Component | Font / Size / Weight | Colour Token | Padding / Size / Radius | Border / Rule |
+| --- | --- | --- | --- | --- |
+| Sidebar (`.meeting-list`) | Wordmark `Manrope` `20px`/`700`; nav `14px`/`500`–`600`; version `IBM Plex Mono` `11px` | `--band` (`#F3F5F7`), `--ink`, `--muted` | `224px` default (`>= 200px`), `24px 14px 18px` | Neutral `1px solid --line` right column divider |
+| Active nav item (`.nav-item.selected`) | `Manrope` `14px` / `600` | `--paper` (`#FFFFFF`) fill, `--ink` text | `min-height: 44px`, `10px 12px`, `2px` radius | Uniform `1px solid --border` all round |
+| Toolbar & Panel sizes popover | Breadcrumb `Manrope` `13px`; `Panel sizes` `IBM Plex Mono` `11px`–`12px` | `--paper`, `--ink`, `--muted`; range `accent-color: --accent-ink` | Toolbar `56px` height, `0 28px`; popover `272px` wide, `20px` pad, `4px` radius | Toolbar `1px solid --line` bottom divider; popover uniform `1px solid --border` + `--shadow` |
+| Microphone check / Live capture bar | Title `Manrope` `15px` / `600`; status `IBM Plex Mono` `12px`; helper `14px` | `--paper`, `--ink`, `--muted`; active dot `--accent-ink` | `16px 0`, `max-width: 760px` prose | Neutral `1px solid --line` bottom divider |
+| Cue processing panel (all states) | Heading `Manrope` `20px` / `600`; step `IBM Plex Mono` `11px` uppercase (`STEP 1 OF 2`, `STEP 2 OF 2`); review heading `18px` / `600`; `dl` keys `IBM Plex Mono` `12px` | `--paper`, `--ink`, `--muted`; step label `--accent-ink`; warning/issue `--error-ink` | `16px 0 24px`; `dl` rows `12px 0` | Neutral `1px solid --line` top/bottom dividers; `Development build` label uses `1px dashed --line` bottom divider |
+| Session strip (`.session-strip`) | `h1` `Manrope` `24px` / `600` (`-0.025em`); subtitle `15px` `--muted`; clock `IBM Plex Mono` `13px` tabular | `--paper`, `--ink`, `--muted`; live dot `--accent-ink` | `20px 0` | Neutral `1px solid --line` bottom divider |
+| Primary button (`.primary-button`) | `Manrope` `14px`–`15px` / `600` | `--btn-primary-bg` (`#11151B`), `--btn-primary-fg` (`#FFFFFF`) | `min-height: 48px`, `10px 18px`, `2px` radius | Uniform `1px solid --btn-primary-bg` all round |
+| Secondary button (`.secondary-button`) | `Manrope` `14px`–`15px` / `600` | `--paper`, `--ink` | `min-height: 48px` (`44px` compact), `10px 16px`, `2px` radius | Uniform `1px solid --border` all round |
+| Notes & Transcript tabs | `Manrope` `15px` (`600` selected, `400` idle); count `IBM Plex Mono` `12px` | `--ink` active, `--muted` idle | `min-height: 44px`, `10px 0`; active indicator via `text-decoration: underline` (`2px`, `8px` offset) | Tab bar `1px solid --line` bottom divider |
+| Notes editor & Transcript rows | Editor `Manrope` `16px` / `1.75`; footer `IBM Plex Mono` `11px`; speaker `14px` / `600`, timestamp `IBM Plex Mono` `12px` | `--paper`, `--ink`, `--muted` | Editor `min-height: 220px`; transcript rows `16px 0` | Transcript rows separated by `1px solid --line` |
+| Notebook Cues pane & card | Heading `Manrope` `16px` / `600`; cue `22px`/`28px`; source `14px`/`16px` | Default: `--cue-surface` (`#F8F7F4`) + uniform `1px solid --border`; `@ Asked you`: `--cue-asked-surface` (`#FDF6E9`) + uniform `1.5px solid --cue-asked-border` | `18px 20px 16px`, `8px` radius | Uniform all-round border only; `1px solid --line` between timeline and source |
+| This meeting & Prior context disclosures | Summary `Manrope` `14px` / `600` + count `--muted`; note title `15px` / `600`; provenance `IBM Plex Mono` `11px` | `--paper`, `--ink`, `--muted` | Summary `min-height: 44px`, `12px 0`; items `12px 0` | Neutral `1px solid --line` top/bottom row dividers |
+| Settings rows & form controls | `h1` `28px`/`600`; row `h2` `17px`/`600`; inputs/selects `15px` | `--paper`, `--ink`, `--muted`; checkboxes `accent-color: --ink` | Rows `24px 0`; inputs `min-height: 44px`, `8px 12px`, `2px` radius | Neutral `1px solid --line` row dividers; inputs uniform `1px solid --border` |
+| Export dialog (`.export-dialog`) | `h2` `20px`/`600`; preview `<pre>` `IBM Plex Mono` `13px` / `1.65` on `--band` | `--paper`, `--ink`, `--muted` | `max-width: 640px`, `24px` pad, `10px` radius | Uniform `1px solid --border` all round + `--shadow-dock` |
+
+---
+
+## 9. Motion, Voice, and Accessibility
 
 ### Motion
 
-- **Reduced motion first.** Every screen, cue, and control must remain 100% legible and actionable with `prefers-reduced-motion: reduce`.
+- **Reduced motion first.** Every screen, cue, and control stays fully readable and operable under `prefers-reduced-motion: reduce`.
 - **Website (`talkqte.com`):** Zero animations, zero CSS transitions, and no smooth scrolling.
-- **Desktop app:** The timings and choreography in [DESIGN.md](../../DESIGN.md) remain authoritative: cues arrive from the left (`200ms` move / `480ms` widen in notebook; `300ms` drawer expansion in companion) without fading in from invisible; words darken in reading order from `>= 55%` strength (`3.2:1` large) or `>= 68%` (`4.6:1` smaller); holding fills the time line over `560ms`; leaving folds away over `190ms`; reduced motion removes animations and steps the time line in four discrete increments. No bounce, pulsing, or celebratory motion.
+- **Desktop app:** Every timing in [DESIGN.md](../../DESIGN.md) stays authoritative: notebook cue arrival (`200ms` move / `480ms` widen), dock drawer expansion (`300ms`, source follows `90ms` later), word darkening from `>= 55%` (`3.2:1` large) or `>= 68%` (`4.6:1` smaller), Hold fill (`560ms`), answer arrival (`380ms`), cue fold leave (`190ms`; macOS dock waits `220ms`), and four-step time line under reduced motion. No bounce, pulsing, or celebratory animation.
 
 ### Voice and Copy Rules
 
-TalkQTE speaks plainly and accurately, like a thoughtful colleague who respects the room.
+TalkQTE writes plainly and accurately, stating limits beside capabilities.
 
 - **No em dashes.** Use periods, colons, commas, or parentheses instead.
-- **State limits beside capabilities.** Label work honestly (`In source, not yet released`, `Planned`, `Fictional example`). Never claim live benefits without a user study.
-- **Never use banned category words:** Do not write "AI-powered", "seamless", "revolutionary", "effortless", "powerful", "first", "unique", "proven", or "guaranteed".
-- **Never describe TalkQTE as private, local-first, offline, or on-device.** Cloud transcription and cue decisions are stated plainly where data flow is described.
-- **No model names as features.** Never name model versions in marketing copy, hero text, headings, or alt text. Provider names appear only in the data-flow explanation.
-
-| Do | Don't |
-| --- | --- |
-| "Stay grounded. Respond in the moment." | "Unlock effortless, AI-powered meeting intelligence." |
-| "TalkQTE is being built to help keep meetings on target, with the right cue at the right moment. It runs on your own machine beside the call." | "The first local-first, on-device AI teammate that remembers every meeting privately." |
-| "Early development, running from source on macOS. There is no supported public release and nothing to download or install." | "Download the revolutionary beta now and join teams shipping seamlessly." |
-| "Concept: a fictional example, not the current prototype." | "See how TalkQTE's proven AI engine boosts your call performance." |
+- **Honest maturity labels:** Always label capabilities plainly (`In source, not yet released`, `Planned`, `Fictional example`). Never claim unproven meeting benefits.
+- **Prohibited marketing terms:** Never use "AI-powered", "seamless", "revolutionary", "effortless", "powerful", "first", "unique", "proven", or "guaranteed".
+- **Data-flow honesty:** Never describe TalkQTE as private, local-first, offline, or on-device. State cloud transcription and cue processing plainly in data-flow copy; never list model names as product features.
 
 ### Accessibility
 
-- **Text contrast:** Every body, muted, label, and accent-as-text pairing meets at least **4.5:1** (WCAG 2.1 AA), with primary body ink exceeding **14:1** (AAA) in all directions and both colour schemes.
-- **Non-text UI and focus rings:** Every control border, chip border, cue frame, companion glyph, and focus ring meets at least **3:1** on every surface it touches. Keyboard focus uses a `3px solid var(--focus)` outline with `3px` offset and is never suppressed.
-- **Reflow and text scaling:** Zero horizontal overflow from `320px` to `1440px`, including at **200% browser text enlargement**. Standalone controls keep a `44px` minimum target height (`48px` primary app actions).
-- **No colour-only meaning:** Direct-address cues combine left edge, `@` icon, label text, and tint; status chips use explicit text; companion states that a glyph cannot convey are spelled out in words.
+- **Contrast:** All text meets `>= 4.5:1` (`>= 15:1` primary ink); all interactive borders, dock glyphs, and focus rings meet `>= 3:1` on every surface they touch.
+- **Focus:** `3px solid var(--focus)` (`#875500` light, `#EBB45B` dark) with `3px` offset (`2px` inside the dark dock), never suppressed.
+- **Reflow & targets:** Zero horizontal overflow from `320px` to `1440px`, including at `200%` text size. Controls maintain `44px` minimum target height (`48px` primary app actions).
+- **No colour-only meaning:** `@ Asked you` pairs whole-card warm tint, uniform `1.5px` all-round border, `@` icon, explicit label, and `Stays longer · no countdown`; dock states spell out what a glyph alone cannot show.
+
+---
+
+## Appendix: Directions Considered (Not Adopted)
+
+During the 23 November 2026 identity review, two other white-base directions were explored alongside Direction C and documented in [index.html](index.html) (labelled *Not adopted*) and [tokens.css](tokens.css) (`[data-direction='a']` and `[data-direction='b']`):
+
+- **Direction A: White and evergreen ("Still Water", not adopted).** Refined the prototype's evergreen (`#203C32` accent, `#162620` Deep Pine ink, `#F4F6F5` Mist Stone band, `#1D5E47` focus, `#0E1513` dark ground, `6px` control corners, Margin Mark) onto pure white `#FFFFFF`. Not adopted because forest green on white sits closer to Granola's olive cue and to the eco-editorial palette Seatbelt Labs retired, and departs from the studio's assigned amber.
+- **Direction B: White and ink ("Quiet Signal", not adopted).** Used strictly neutral carbon ink (`#11151B` ink and buttons, `#4E5866` muted, `#F4F6F8` Cool Vellum band, `#0D1014` dark ground, `4px` corners, Quiet Aperture mark) on pure white `#FFFFFF`, reserving restrained green (`#1B6B45` light / `#56C68E` dark) solely for live cue state. Not adopted because Direction C preserves the same neutral carbon/vellum discipline while aligning directly with Seatbelt Labs' Solar Amber identity on `seatbeltlabs.com/talkqte`.
