@@ -162,6 +162,13 @@ export const ALLOWED_ONE_SIDED_BORDERS = [
   },
   {
     file: 'src/styles.css',
+    selector: '.transcript-segment + .transcript-segment',
+    property: 'border-top',
+    kind: 'hairline',
+    reason: 'Full-width 1px neutral row divider between transcript lines.',
+  },
+  {
+    file: 'src/styles.css',
     selector: '.context-list li',
     property: 'border-bottom',
     kind: 'hairline',
