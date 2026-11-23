@@ -69,7 +69,7 @@ The current notebook is a prototype surface, not a requirement to build a meetin
 - Capture and sharing require explicit actions and visible state.
 - Meeting audio and text leave the device only after the person turns cloud processing on for that session, and only to the named providers; public demos and tests use fictional data.
 - Describe implemented behavior accurately. A demo must never imply that audio is being captured.
-- Build in public under the Sustainable Use License, with free personal/internal-business use and separate commercial licensing. Follow the contributor agreement, human sign-off, and pull-request policies; preserve prior Apache-2.0 grants.
+- Build in public under the Sustainable Use License, with free personal/internal-business use and separate commercial licensing. Follow the contributor agreement, human sign-off, and pull-request policies.
 
 ## Future direct-address behavior
 

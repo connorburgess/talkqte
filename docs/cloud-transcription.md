@@ -25,9 +25,16 @@ end.
 selection, every live session uses it. The key is read from the Keychain on
 the stream's own thread when the stream opens, after approval, and is sent
 once in the handshake as `Authorization: Token …`; replacement streams after
-a connection failure read it again. A session may send at most 120 minutes
-of audio (`OWN_KEY_MINUTE_CAP`), across its reconnects; Deepgram bills the
-person's account for it. A 401 or 403 marks the key rejected, so Settings
+a connection failure read it again. Each stream attempt reads the Keychain
+once: a missing key, or a Keychain that refuses, is not asked again while the
+stream waits, and the stream stops with `settings`. A session may send at
+most 120 minutes of audio (`OWN_KEY_MINUTE_CAP`), across its reconnects;
+Deepgram bills the person's account for it. The budget is made once per live
+start, after the start gate is taken, and handed to that session's stream and
+its replacements only, so another start cannot replace or reuse it. A
+development application source started into a session opens its own streams
+under a separate 120-minute budget. The caps are per session only: there is
+no per-launch or per-day cap with the person's key. A 401 or 403 marks the key rejected, so Settings
 says so and the next start is refused with "Deepgram rejected your API key.
 Replace it in Settings to start a live session." Without a key, a start is
 refused with "Add your Deepgram API key in Settings to start a live
@@ -118,6 +125,7 @@ model, and only the timing log records it.
 | **Stop live session**, application-audio session | The stream is closed at once. Queued audio is discarded. |
 | End, quit, or a source that is not attached | The stream is closed at once. Queued audio is discarded. |
 | The review is turned off (**Disable processing**, **Off**, or anything else that withdraws it) | Sending stops at once, including audio already queued for the socket, and the stream is closed. The session ends with "cue processing was turned off, so audio stopped being sent". Approving again does not reopen the stream for that session. |
+| Pause cues, with your own Anthropic key | Cue requests stop and the review still holds, so audio is still sent to Deepgram and billed to your account, and the transcript continues (a kept meeting stays complete). The review, the Pause help in the notebook and the companion ("Mic still on · audio to Deepgram") say so. Turning processing off or Stop ends the audio. |
 | Pause cues, with the `claude-cli` backend | Cues stop, the review still holds, and audio is still transcribed. The companion says "Mic still on · audio to Deepgram". |
 | Pause cues, or any end of the run, with the lab evaluator | The lab's cue run ends, which ends its approval, so sending stops and the session ends with "the lab run ended, so audio stopped being sent". With the lab evaluator, turning the review off also ends the lab's cue run, so the code there is `lab_ended`, not `withdrawn` (`invalidate_evaluation` in `engine/evaluation.rs`). |
 | The minute cap is reached | The stream is closed and the session ends ("the transcription minute limit was reached"). With the person's key the cap is the session's 120 minutes; with a development token file it counts all sessions and both sources of the launch. |

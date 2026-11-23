@@ -5,7 +5,6 @@ import {
   AudioLines,
   BookOpen,
   ChevronRight,
-  CircleHelp,
   Cloud,
   CloudUpload,
   EyeOff,
@@ -934,63 +933,65 @@ function Notebook() {
         aria-label="Notebook navigation"
         style={listResizable ? { width: listWidth } : undefined}
       >
-        <a
-          className="brand"
-          href="#notebook"
-          onClick={(e) => {
-            e.preventDefault();
-            setView('notebook');
-          }}
-        >
-          <img src="/mark.svg" alt="" />
-          TalkQTE
-        </a>
-        <nav aria-label="Main navigation">
-          <button
-            ref={notebookNav}
-            className={view === 'notebook' ? 'nav-item selected' : 'nav-item'}
-            aria-current={view === 'notebook' ? 'page' : undefined}
-            onClick={() => setView('notebook')}
+        <div className="meeting-list-inner">
+          <a
+            className="brand"
+            href="#notebook"
+            onClick={(e) => {
+              e.preventDefault();
+              setView('notebook');
+            }}
           >
-            <BookOpen size={19} />
-            Notebook
-          </button>
-        </nav>
-        {view === 'notebook' && (
-          <div className="meeting-list-content">
-            {state &&
-              !setupDismissed &&
-              !live &&
-              !simulated &&
-              !state.userName && (
-                <details className="setup-disclosure">
-                  <summary>Set up a live session</summary>
-                  <SetupCard
-                    name={state.userName}
-                    focus={state.focus}
-                    items={contextItems}
-                    busy={busy}
-                    onGoTo={goToSetup}
-                    onDismiss={() => {
-                      setSetupDismissed(true);
-                      notebookNav.current?.focus();
-                    }}
-                  />
-                </details>
-              )}
-          </div>
-        )}
-        <div className="sidebar-bottom">
-          <button
-            className={view === 'settings' ? 'nav-item selected' : 'nav-item'}
-            aria-current={view === 'settings' ? 'page' : undefined}
-            onClick={() => setView('settings')}
-          >
-            <Settings size={19} />
-            Settings
-          </button>
-          <div className="version">
-            TalkQTE <span>Prototype 0.1</span>
+            <img src="/mark.svg" alt="" />
+            TalkQTE
+          </a>
+          <nav aria-label="Main navigation">
+            <button
+              ref={notebookNav}
+              className={view === 'notebook' ? 'nav-item selected' : 'nav-item'}
+              aria-current={view === 'notebook' ? 'page' : undefined}
+              onClick={() => setView('notebook')}
+            >
+              <BookOpen size={19} />
+              Notebook
+            </button>
+          </nav>
+          {view === 'notebook' && (
+            <div className="meeting-list-content">
+              {state &&
+                !setupDismissed &&
+                !live &&
+                !simulated &&
+                !state.userName && (
+                  <details className="setup-disclosure">
+                    <summary>Set up a live session</summary>
+                    <SetupCard
+                      name={state.userName}
+                      focus={state.focus}
+                      items={contextItems}
+                      busy={busy}
+                      onGoTo={goToSetup}
+                      onDismiss={() => {
+                        setSetupDismissed(true);
+                        notebookNav.current?.focus();
+                      }}
+                    />
+                  </details>
+                )}
+            </div>
+          )}
+          <div className="sidebar-bottom">
+            <button
+              className={view === 'settings' ? 'nav-item selected' : 'nav-item'}
+              aria-current={view === 'settings' ? 'page' : undefined}
+              onClick={() => setView('settings')}
+            >
+              <Settings size={19} />
+              Settings
+            </button>
+            <div className="version">
+              TalkQTE <span>0.1 · early development</span>
+            </div>
           </div>
         </div>
         {view === 'notebook' && listResizable && (
@@ -1079,9 +1080,9 @@ function Notebook() {
               </div>
             </details>
           )}
-          <span className="prototype-label">
-            {bridge.desktop ? 'Desktop prototype' : 'Browser preview'}
-          </span>
+          {!bridge.desktop && (
+            <span className="prototype-label">Browser preview</span>
+          )}
         </header>
         <MicrophoneControl
           microphone={microphone}
@@ -1211,8 +1212,8 @@ function Notebook() {
                                 ? 'Application audio and transcript continue. Stop live session to stop listening.'
                                 : 'Microphone and transcript continue. Stop live session to stop listening.'
                               : sourceApp
-                                ? `Audio from ${sourceApp} · ${transcribedWhere(state.transcription)} · not saved by TalkQTE`
-                                : `Your microphone · ${transcribedWhere(state.transcription)} · not saved by TalkQTE`
+                                ? `Audio from ${sourceApp} · not saved by TalkQTE`
+                                : 'Your microphone · not saved by TalkQTE'
                             : 'Nothing was saved. The transcript stays here until you start another session or quit and is never exported; your notes stay until you quit and can be exported.'
                           : simulated
                             ? 'Fictional replay · nothing is captured'
@@ -1468,8 +1469,7 @@ function Notebook() {
               )}
               <aside className="companion" aria-label="Question companion">
                 <div className="companion-heading">
-                  <h2>A timely question</h2>
-                  <CircleHelp size={16} aria-hidden="true" />
+                  <h2>Cues</h2>
                 </div>
                 <CueCard
                   cue={state.cue}
@@ -1495,7 +1495,7 @@ function Notebook() {
                             ? 'Cues pass quietly. You can keep listening without responding.'
                             : state.live
                               ? 'Start another session to see cues again.'
-                              : 'During a live session, one cue at a time appears here. Cues come from simple phrase rules on what is transcribed, not from AI.'}
+                              : 'During a live session, one cue at a time appears here. In this version cues come from simple phrase rules, not AI.'}
                       </p>
                     </div>
                   }
@@ -1519,7 +1519,7 @@ function Notebook() {
                   }}
                 >
                   <Settings size={14} />
-                  Question appearance & timing
+                  Cue appearance and timing
                 </button>
               </aside>
             </div>
@@ -1959,7 +1959,7 @@ function Notebook() {
             </section>
             <section className="setting">
               <div>
-                <h2>Your data in this prototype</h2>
+                <h2>Your data</h2>
                 <p>
                   The optional microphone check retains no audio and does not
                   transcribe. With cloud transcription or cue processing on,

@@ -64,7 +64,10 @@ first-run screen reads `provider_keys_status` at launch.
 }
 ```
 
-`state` is `notSet`, `set` or `rejected`. `verified` is true only after a
+`state` is `notSet`, `set`, `rejected` or `unreadable` (the Keychain could
+not be read, so whether a key is stored is unknown; nothing is attempted with
+it, and it does not count as missing). Each status call reads the Keychain
+again, so a key deleted or added outside TalkQTE is seen. `verified` is true only after a
 passing check in this app run, and is cleared when the key is replaced or
 rejected. `anyMissing` is true while either key is not set: the "no keys set"
 state a first-run screen asks for. A failed command returns one fixed message,

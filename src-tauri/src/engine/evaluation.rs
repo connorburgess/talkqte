@@ -76,8 +76,10 @@ pub enum EvaluationIssue {
     CallLimit,
     LabStopped,
     LabUnavailable,
-    /// The person's own Anthropic key was refused or removed.
+    /// Anthropic refused the person's own key.
     KeyRejected,
+    /// The person's own key was removed or the Keychain could not be read.
+    KeyUnavailable,
     /// The session's estimated spend cap was reached.
     SpendLimit,
     /// The session's request cap was reached, with the person's own key.
@@ -366,6 +368,7 @@ impl Engine {
             }
             Failure::SignIn if self.is_own_key() => EvaluationIssue::KeyRejected,
             Failure::SignIn => EvaluationIssue::SignIn,
+            Failure::Credentials if self.is_own_key() => EvaluationIssue::KeyUnavailable,
             Failure::SpendLimit => EvaluationIssue::SpendLimit,
             Failure::Credentials => EvaluationIssue::Credentials,
             Failure::UsageLimit => EvaluationIssue::UsageLimit,

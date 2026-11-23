@@ -49,6 +49,8 @@ jobs:
       - run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/lab-hosted-artifact.test.py
       - run: npm run test:cue-cases
       - run: npm run test:docs
+      - run: npm run test:borders
+      - run: npm run check:borders
       - run: npm run test:release
       - run: npm run format:check
       - run: npm run build

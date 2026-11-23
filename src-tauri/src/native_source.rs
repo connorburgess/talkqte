@@ -15,7 +15,7 @@ use crate::{
     },
     live_source::LineRefused,
     native_session_clock::{Measurement, Snapshot},
-    transcription::cloud::{CloudFeed, CloudStats, Opener},
+    transcription::cloud::{CloudFeed, CloudStats, Streams},
     Runtime,
 };
 use std::{
@@ -254,7 +254,7 @@ pub(crate) unsafe fn run<A: Access>(
     start: Start,
     selection: Selection,
     limits: Limits,
-    opener: Opener,
+    streams: Streams,
     monitor: Monitor,
 ) -> Result<Report, Refused> {
     run_with(
@@ -263,7 +263,7 @@ pub(crate) unsafe fn run<A: Access>(
         |snapshot| snapshot.measure(limits.max_width, limits.max_age),
         // SAFETY: the caller's obligations are those of this call.
         |start, binding| unsafe { NativeOwner::begin(start, selection, binding) },
-        opener,
+        streams,
         monitor,
     )
 }
@@ -276,13 +276,13 @@ pub(crate) fn run_with<A: Access, S: Source>(
     start: Start,
     measure: impl FnOnce(Snapshot) -> Result<Measurement, TimingError>,
     begin: impl FnOnce(Start, ClockBinding) -> Result<S, Failure>,
-    opener: Opener,
+    streams: Streams,
     monitor: Monitor,
 ) -> Result<Report, Refused> {
     let control = start.control();
     let accepted = prepare(&runtime, &control, measure).map_err(Refused::Clock)?;
     // Before any native request. Nothing is sent until the review is approved.
-    let feed = cloud_feed(runtime.clone(), accepted.session, &control, opener);
+    let feed = cloud_feed(runtime.clone(), accepted.session, &control, streams);
     // A refused start drops its lease, which cancels the operation; the next
     // runtime sync then detaches it.
     let source = begin(start, accepted.binding).map_err(Refused::Start)?;
@@ -300,7 +300,13 @@ pub(crate) fn run_with<A: Access, S: Source>(
 /// A cloud stream for this source. It opens, and audio is first sent, only
 /// once the session's processing review is approved; until then the audio is
 /// discarded. Its finals reach the engine through the same source sink.
-fn cloud_feed<A: Access>(runtime: A, session: u64, control: &Control, opener: Opener) -> CloudFeed {
+fn cloud_feed<A: Access>(
+    runtime: A,
+    session: u64,
+    control: &Control,
+    streams: Streams,
+) -> CloudFeed {
+    let (opener, reopener) = streams.into_parts();
     let approval = runtime.clone();
     let notice = runtime.clone();
     let keep = runtime.clone();
@@ -343,8 +349,8 @@ fn cloud_feed<A: Access>(runtime: A, session: u64, control: &Control, opener: Op
         });
     });
     // One replacement stream at a time after a connection failure, under
-    // the same approval, session and launch budget.
-    feed.with_reopener(crate::transcription::cloud::reopener().ok())
+    // the same approval, session and budget as the first.
+    feed.with_reopener(reopener)
 }
 
 /// Delivers a line only while this source is attached to the session; a
@@ -1006,10 +1012,13 @@ mod tests {
             fixture.runtime.clone(),
             fixture.session,
             &fixture.control,
-            Box::new(move || {
-                count.fetch_add(1, Ordering::SeqCst);
-                Err(SttFailure::Network)
-            }),
+            Streams::new(
+                Box::new(move || {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    Err(SttFailure::Network)
+                }),
+                None,
+            ),
         );
         let source = fixture.scripted(binding);
         let control = fixture.control.clone();

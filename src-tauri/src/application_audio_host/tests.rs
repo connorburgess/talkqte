@@ -264,7 +264,10 @@ impl Backend for Fake {
                     script,
                 })
             },
-            Box::new(|| Ok(Box::new(Silent) as Box<dyn StreamingTranscriber>)),
+            crate::transcription::cloud::Streams::new(
+                Box::new(|| Ok(Box::new(Silent) as Box<dyn StreamingTranscriber>)),
+                None,
+            ),
             monitor,
         )
     }

@@ -50,6 +50,7 @@ export type ProcessingIssue =
   | 'labStopped'
   | 'labUnavailable'
   | 'keyRejected'
+  | 'keyUnavailable'
   | 'spendLimit'
   | 'requestLimit'
   | 'worker'

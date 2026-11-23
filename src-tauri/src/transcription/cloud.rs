@@ -662,8 +662,10 @@ pub enum Source {
     OwnKey,
 }
 
-/// Most minutes of audio one session may send with the person's own key,
-/// across its reconnects and capture sources.
+/// Most minutes of audio one live session may send with the person's own
+/// key, across that session's reconnects. A development application source
+/// started into a session opens its own streams under a separate budget of
+/// the same size.
 pub const OWN_KEY_MINUTE_CAP: u32 = 120;
 
 /// The launch's source: development settings when selected (and then only
@@ -687,6 +689,7 @@ fn source_for(
         (None, KeyState::Set) => Ok(Source::OwnKey),
         (None, KeyState::Rejected) => Err(ReadinessFailure::KeyRejected),
         (None, KeyState::NotSet) => Err(ReadinessFailure::NoKey),
+        (None, KeyState::Unreadable) => Err(ReadinessFailure::KeyUnreadable),
     }
 }
 
@@ -767,6 +770,8 @@ pub enum ReadinessFailure {
     NoKey,
     /// Deepgram refused the stored key, at a check or in a session.
     KeyRejected,
+    /// The Keychain could not be read.
+    KeyUnreadable,
 }
 
 /// The same metadata-only checks as `ready`, with their boundary retained.
@@ -783,42 +788,62 @@ fn readiness_for(settings: Result<Settings, SttFailure>) -> Result<(), Readiness
     check_token_file(&settings.token_file).map_err(|_| ReadinessFailure::TokenMetadata)
 }
 
-/// The opener for this launch's Deepgram source. It reads the token file or
-/// the stored key only when the stream opens, after the review is approved.
-/// Refused when neither is usable; there is never a fallback to another
-/// recognizer. With the person's key it starts a new per-session budget,
-/// which this session's replacement streams then share.
-pub fn opener() -> Result<Opener, SttFailure> {
-    match source().map_err(|_| SttFailure::Settings)? {
-        Source::Dev(settings) => Ok(super::deepgram::opener(settings)),
+/// The streams for one capture source of a session: the opener, used once
+/// the review is approved, and the reopener for replacement streams after a
+/// connection failure. Both share one minute budget.
+pub struct Streams {
+    opener: Opener,
+    reopener: Option<Reopener>,
+    #[cfg(test)]
+    budget: Option<Budget>,
+}
+
+impl Streams {
+    pub fn new(opener: Opener, reopener: Option<Reopener>) -> Self {
+        Self {
+            opener,
+            reopener,
+            #[cfg(test)]
+            budget: None,
+        }
+    }
+
+    pub fn into_parts(self) -> (Opener, Option<Reopener>) {
+        (self.opener, self.reopener)
+    }
+}
+
+/// The streams for a capture source, made once per live start after the
+/// start gate is taken. They read the token file or the stored key only when
+/// a stream opens, after the review is approved. Refused when neither is
+/// usable; there is never a fallback to another recognizer. With the
+/// person's key, a new budget of [`OWN_KEY_MINUTE_CAP`] minutes is made here
+/// and shared by this opener and its reopener only, so no other start can
+/// replace or reuse it; with development settings the launch budget is used.
+pub fn streams() -> Result<Streams, SttFailure> {
+    Ok(streams_for(source().map_err(|_| SttFailure::Settings)?))
+}
+
+fn streams_for(source: Source) -> Streams {
+    match source {
+        Source::Dev(settings) => Streams::new(
+            super::deepgram::opener(settings.clone()),
+            Some(super::deepgram::reopener(settings)),
+        ),
         Source::OwnKey => {
             let budget = Budget::new(Duration::from_secs(u64::from(OWN_KEY_MINUTE_CAP) * 60));
-            *session_budget() = Some(budget.clone());
-            Ok(super::deepgram::key_opener(budget))
+            let (opener, reopener) = super::deepgram::key_streams(budget.clone());
+            let streams = Streams::new(opener, Some(reopener));
+            #[cfg(test)]
+            let streams = Streams {
+                budget: Some(budget),
+                ..streams
+            };
+            #[cfg(not(test))]
+            let _ = budget;
+            streams
         }
     }
-}
-
-/// A repeatable opener for replacement streams after a connection
-/// failure, under the same settings and budget. Refused as `opener`.
-pub fn reopener() -> Result<Reopener, SttFailure> {
-    match source().map_err(|_| SttFailure::Settings)? {
-        Source::Dev(settings) => Ok(super::deepgram::reopener(settings)),
-        Source::OwnKey => {
-            let budget = session_budget().clone().ok_or(SttFailure::Settings)?;
-            Ok(super::deepgram::key_reopener(budget))
-        }
-    }
-}
-
-/// The minute budget of the session the latest own-key opener was made for.
-/// Live starts are serialized by the start gate, so its replacement streams
-/// are the next to ask.
-fn session_budget() -> std::sync::MutexGuard<'static, Option<Budget>> {
-    static BUDGET: std::sync::Mutex<Option<Budget>> = std::sync::Mutex::new(None);
-    BUDGET
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// The sentence the session review adds when cloud transcription is
@@ -845,7 +870,7 @@ fn review_sentence_for(source: &Source) -> Option<String> {
             settings.minute_cap
         ),
         Source::OwnKey => format!(
-            "{SENT}, with your own Deepgram API key: Deepgram bills your account for each minute of audio. {TERMS} At most {OWN_KEY_MINUTE_CAP} minutes of audio for this session. {END}"
+            "{SENT}, with your own Deepgram API key: Deepgram bills your account for each minute of audio. {TERMS} At most {OWN_KEY_MINUTE_CAP} minutes of audio for this session. Pausing cues does not stop the audio; turning processing off or Stop does. {END}"
         ),
     })
 }
@@ -1498,7 +1523,12 @@ mod tests {
         };
         // The lab's selection is used, even with a key stored, and an invalid
         // one is refused rather than falling back to the key.
-        for key in [KeyState::NotSet, KeyState::Set, KeyState::Rejected] {
+        for key in [
+            KeyState::NotSet,
+            KeyState::Set,
+            KeyState::Rejected,
+            KeyState::Unreadable,
+        ] {
             assert_eq!(
                 source_for(Some(Ok(dev.clone())), key),
                 Ok(Source::Dev(dev.clone()))
@@ -1517,11 +1547,28 @@ mod tests {
             source_for(None, KeyState::Rejected),
             Err(ReadinessFailure::KeyRejected)
         );
+        assert_eq!(
+            source_for(None, KeyState::Unreadable),
+            Err(ReadinessFailure::KeyUnreadable)
+        );
         // The test build has no development selection and no stored key.
         assert!(!dev_selected());
         assert!(!selected());
-        assert!(opener().is_err() && reopener().is_err());
+        assert!(streams().is_err());
         assert_eq!(review_sentence(), None);
+    }
+
+    #[test]
+    fn each_start_gets_its_own_budget_and_a_second_start_cannot_touch_the_first() {
+        // The first start's streams, then a second start's (as a start refused
+        // at the gate would have made, were they made before it): spending
+        // the second's whole budget leaves the first's untouched.
+        let first = streams_for(Source::OwnKey);
+        let second = streams_for(Source::OwnKey);
+        let cap = u64::from(OWN_KEY_MINUTE_CAP) * 60 * SAMPLE_RATE as u64;
+        assert_eq!(second.budget.as_ref().unwrap().reserve(u64::MAX), cap);
+        assert_eq!(first.budget.as_ref().unwrap().reserve(u64::MAX), cap);
+        assert!(first.reopener.is_some());
     }
 
     #[test]
@@ -1535,6 +1582,7 @@ mod tests {
             "https://deepgram.com/terms",
             "Audio captured before this approval is never sent",
             "At most 120 minutes of audio for this session",
+            "Pausing cues does not stop the audio",
             "nothing falls back to another service",
         ] {
             assert!(own.contains(part), "missing: {part}");
