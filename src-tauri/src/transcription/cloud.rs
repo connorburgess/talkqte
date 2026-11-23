@@ -594,11 +594,63 @@ impl CloudFeed {
     }
 }
 
+/// The language Deepgram is asked to transcribe. Deepgram cannot detect a
+/// language on a live stream, so it is chosen before a session starts and a
+/// session's streams, reconnects included, keep the one they began with.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Language {
+    /// `language=en`, the request since #344.
+    #[default]
+    #[serde(rename = "en")]
+    English,
+    /// `language=multi`: several languages, following switches within one
+    /// stream. Deepgram bills it at a higher rate than English.
+    #[serde(rename = "multi")]
+    Multilingual,
+}
+
+impl Language {
+    /// How the review names it.
+    fn review_label(self) -> &'static str {
+        match self {
+            Self::English => "English",
+            Self::Multilingual => {
+                "Multilingual, which Deepgram bills at a higher rate than English"
+            }
+        }
+    }
+}
+
+/// The person's choice for the next live session with their own key. Kept
+/// for this app run, like the other settings; English until changed.
+static LANGUAGE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The language the next session started with the person's key will use.
+pub fn language() -> Language {
+    if LANGUAGE.load(std::sync::atomic::Ordering::Acquire) {
+        Language::Multilingual
+    } else {
+        Language::English
+    }
+}
+
+/// Sets the language for the next session. A session already running keeps
+/// the language it started with: its streams were made at its start.
+pub fn set_language(language: Language) {
+    LANGUAGE.store(
+        language == Language::Multilingual,
+        std::sync::atomic::Ordering::Release,
+    );
+}
+
 /// Development settings for cloud transcription.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Settings {
     pub token_file: std::path::PathBuf,
     pub minute_cap: u32,
+    /// `TALKQTE_DEV_STT_LANGUAGE`: absent or `en` for English, `multi` for
+    /// multilingual. A lab plan asks for multilingual explicitly.
+    pub language: Language,
 }
 
 impl Settings {
@@ -625,9 +677,15 @@ impl Settings {
         if !(1..=60).contains(&minute_cap) {
             return Err(SttFailure::Settings);
         }
+        let language = match get("TALKQTE_DEV_STT_LANGUAGE").as_deref() {
+            None | Some("en") => Language::English,
+            Some("multi") => Language::Multilingual,
+            Some(_) => return Err(SttFailure::Settings),
+        };
         Ok(Self {
             token_file,
             minute_cap,
+            language,
         })
     }
 
@@ -824,7 +882,17 @@ pub fn streams() -> Result<Streams, SttFailure> {
     Ok(streams_for(source().map_err(|_| SttFailure::Settings)?))
 }
 
+/// The language a source's streams use: the launch setting for a
+/// development source, the person's setting otherwise.
+fn language_of(source: &Source) -> Language {
+    match source {
+        Source::Dev(settings) => settings.language,
+        Source::OwnKey => language(),
+    }
+}
+
 fn streams_for(source: Source) -> Streams {
+    let language = language_of(&source);
     match source {
         Source::Dev(settings) => Streams::new(
             super::deepgram::opener(settings.clone()),
@@ -832,7 +900,7 @@ fn streams_for(source: Source) -> Streams {
         ),
         Source::OwnKey => {
             let budget = Budget::new(Duration::from_secs(u64::from(OWN_KEY_MINUTE_CAP) * 60));
-            let (opener, reopener) = super::deepgram::key_streams(budget.clone());
+            let (opener, reopener) = super::deepgram::key_streams(budget.clone(), language);
             let streams = Streams::new(opener, Some(reopener));
             #[cfg(test)]
             let streams = Streams {
@@ -855,22 +923,27 @@ pub fn review_sentence() -> Option<String> {
 /// The review sentence with the person's own key, for checks of a whole
 /// review's text.
 #[cfg(test)]
-pub(crate) fn review_sentence_for_own_key() -> String {
-    review_sentence_for(&Source::OwnKey).expect("always worded")
+pub(crate) fn review_sentence_for_own_key(language: Language) -> String {
+    review_sentence_with(&Source::OwnKey, language).expect("always worded")
 }
 
 fn review_sentence_for(source: &Source) -> Option<String> {
-    const SENT: &str = "Audio: this approval also sends the live audio of the session's capture source (the microphone, or the selected application) to Deepgram (US, model Nova-3) for transcription";
+    review_sentence_with(source, language_of(source))
+}
+
+fn review_sentence_with(source: &Source, language: Language) -> Option<String> {
+    let label = language.review_label();
+    let sent = format!("Audio: this approval also sends the live audio of the session's capture source (the microphone, or the selected application) to Deepgram (US, model Nova-3, {label}) for transcription");
     const TERMS: &str = "Each request asks Deepgram to opt out of its Model Improvement Program; what Deepgram keeps is set by its terms (https://deepgram.com/terms). Audio captured before this approval is never sent.";
     const END: &str =
         "If transcription stops, nothing is transcribed and nothing falls back to another service.";
     Some(match source {
         Source::Dev(settings) => format!(
-            "{SENT}. {TERMS} At most {} minutes of audio for this whole launch, across sessions and sources. {END}",
+            "{sent}. {TERMS} At most {} minutes of audio for this whole launch, across sessions and sources. {END}",
             settings.minute_cap
         ),
         Source::OwnKey => format!(
-            "{SENT}, with your own Deepgram API key: Deepgram bills your account for each minute of audio. {TERMS} At most {OWN_KEY_MINUTE_CAP} minutes of audio for this session. Pausing cues does not stop the audio; turning processing off or Stop does. {END}"
+            "{sent}, with your own Deepgram API key: Deepgram bills your account for each minute of audio. {TERMS} At most {OWN_KEY_MINUTE_CAP} minutes of audio for this session. Pausing cues does not stop the audio; turning processing off or Stop does. {END}"
         ),
     })
 }
@@ -1520,6 +1593,7 @@ mod tests {
         let dev = Settings {
             token_file: std::env::temp_dir().join("fictional-stt-token"),
             minute_cap: 5,
+            language: Language::English,
         };
         // The lab's selection is used, even with a key stored, and an invalid
         // one is refused rather than falling back to the key.
@@ -1575,7 +1649,7 @@ mod tests {
     fn the_review_names_the_persons_key_billing_opt_out_and_session_cap() {
         let own = review_sentence_for(&Source::OwnKey).unwrap();
         for part in [
-            "to Deepgram (US, model Nova-3)",
+            "to Deepgram (US, model Nova-3, English)",
             "with your own Deepgram API key",
             "Deepgram bills your account for each minute of audio",
             "opt out of its Model Improvement Program",
@@ -1591,10 +1665,34 @@ mod tests {
         let dev = review_sentence_for(&Source::Dev(Settings {
             token_file: std::env::temp_dir().join("fictional-stt-token"),
             minute_cap: 5,
+            language: Language::English,
         }))
         .unwrap();
         assert!(dev.contains("At most 5 minutes of audio for this whole launch"));
         assert!(!dev.contains("your own"));
+    }
+
+    #[test]
+    fn the_language_is_named_in_the_review_and_set_for_the_next_session() {
+        let english = review_sentence_with(&Source::OwnKey, Language::English).unwrap();
+        assert!(english.contains("Deepgram (US, model Nova-3, English)"));
+        assert!(!english.contains("higher rate"));
+        let multi = review_sentence_with(&Source::OwnKey, Language::Multilingual).unwrap();
+        assert!(multi.contains(
+            "Deepgram (US, model Nova-3, Multilingual, which Deepgram bills at a higher rate than English)"
+        ));
+        // No price is stated.
+        assert!(!multi.contains('$'));
+        // The setting, as the commands see it: English until changed.
+        assert_eq!(
+            serde_json::to_value(Language::Multilingual).unwrap(),
+            "multi"
+        );
+        assert_eq!(
+            serde_json::from_value::<Language>(serde_json::json!("en")).unwrap(),
+            Language::English
+        );
+        assert!(serde_json::from_value::<Language>(serde_json::json!("de")).is_err());
     }
 
     #[test]
@@ -1612,6 +1710,22 @@ mod tests {
         let absolute = absolute.to_str().unwrap();
         let good = parse(Some("deepgram"), Some(absolute), Some("5")).unwrap();
         assert_eq!(good.cap(), Duration::from_secs(300));
+        // A lab plan keeps English unless it asks for multilingual.
+        assert_eq!(good.language, Language::English);
+        let with = |language: &str| {
+            Settings::parse(|key| match key {
+                "TALKQTE_DEV_STT_BACKEND" => Some("deepgram".into()),
+                "TALKQTE_DEV_STT_TOKEN_FILE" => Some(absolute.into()),
+                "TALKQTE_DEV_STT_MINUTE_CAP" => Some("5".into()),
+                "TALKQTE_DEV_STT_LANGUAGE" => Some(language.into()),
+                _ => None,
+            })
+        };
+        assert_eq!(with("en").unwrap().language, Language::English);
+        assert_eq!(with("multi").unwrap().language, Language::Multilingual);
+        for refused in ["", "EN", "multi ", "de", "auto"] {
+            assert_eq!(with(refused), Err(SttFailure::Settings), "{refused}");
+        }
         let file = Some(absolute);
         for (backend, file, cap) in [
             (Some("Deepgram"), file, Some("5")),
@@ -1640,6 +1754,7 @@ mod tests {
             Ok(Settings {
                 token_file: file.clone(),
                 minute_cap: 5,
+                language: Language::English,
             })
         };
         assert_eq!(

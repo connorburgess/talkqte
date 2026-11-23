@@ -26,10 +26,30 @@ export const DEEPGRAM_GRANT_URL = 'https://api.deepgram.com/v1/auth/grant';
 // Long enough to outlive launch, Listening and the 180 s approval wait: the
 // app reads the token only when the stream opens, at approval.
 export const DEEPGRAM_GRANT_TTL_S = 900;
-// The app's fixed streaming query (#344, transcription/deepgram.rs). It is
-// recorded in evidence as the request the app sends; the app logs no URL.
+// The app's two fixed streaming queries (transcription/deepgram.rs): English
+// (#344), and Multilingual (`language=multi`, with the 100 ms endpointing
+// Deepgram recommends for code-switching). One is recorded in evidence as the
+// request the app sends; the app logs no URL. A plan keeps English unless its
+// `transcription.language` is `multi`.
 export const DEEPGRAM_APP_QUERY =
   'model=nova-3&language=en&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&diarize=true&endpointing=300&utterance_end_ms=1000&vad_events=true&mip_opt_out=true';
+export const DEEPGRAM_APP_QUERY_MULTI =
+  'model=nova-3&language=multi&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&diarize=true&endpointing=100&utterance_end_ms=1000&vad_events=true&mip_opt_out=true';
+export const DEEPGRAM_APP_QUERIES = Object.freeze({
+  en: DEEPGRAM_APP_QUERY,
+  multi: DEEPGRAM_APP_QUERY_MULTI,
+});
+/** The app's query for a plan's language; anything but `en` or `multi` is
+ * refused. */
+export function deepgramAppQuery(language = 'en') {
+  if (!Object.hasOwn(DEEPGRAM_APP_QUERIES, language))
+    throw new Error('invalid transcription language');
+  return DEEPGRAM_APP_QUERIES[language];
+}
+/** Exactly one of the app's two queries, and nothing else. */
+export function isAppQuery(query) {
+  return Object.values(DEEPGRAM_APP_QUERIES).includes(query);
+}
 // A query the app may report on its `connected` row: plain `name=value`
 // pairs whose names are only those of the app's own query (an allowlist, so
 // no other parameter, however named, can carry a value into evidence).

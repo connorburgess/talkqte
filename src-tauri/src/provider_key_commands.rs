@@ -70,3 +70,56 @@ pub async fn remove_provider_key(
 pub fn cue_usage() -> Option<crate::anthropic_api::UsageSnapshot> {
     crate::anthropic_api::usage()
 }
+
+/// The transcription language for the next live session with the person's
+/// own Deepgram key: `"en"` (English) or `"multi"` (Multilingual).
+#[tauri::command]
+pub fn transcription_language() -> crate::transcription::cloud::Language {
+    crate::transcription::cloud::language()
+}
+
+/// Chooses the transcription language for the next live session. Refused
+/// while a live session is starting, running or finishing, so its streams
+/// and its review always name the same language; nothing is sent by this.
+#[tauri::command]
+pub fn set_transcription_language(
+    state: tauri::State<crate::AppState>,
+    language: crate::transcription::cloud::Language,
+) -> Result<crate::transcription::cloud::Language, String> {
+    let runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    set_language_when_closed(runtime.live_session_open(), language)
+}
+
+fn set_language_when_closed(
+    session_open: bool,
+    language: crate::transcription::cloud::Language,
+) -> Result<crate::transcription::cloud::Language, String> {
+    if session_open {
+        return Err("Change the transcription language when no live session is running.".into());
+    }
+    crate::transcription::cloud::set_language(language);
+    Ok(crate::transcription::cloud::language())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transcription::cloud::{language, Language};
+
+    #[test]
+    fn the_language_changes_only_between_sessions() {
+        assert_eq!(
+            set_language_when_closed(true, Language::Multilingual).unwrap_err(),
+            "Change the transcription language when no live session is running."
+        );
+        assert_eq!(language(), Language::English);
+        assert_eq!(
+            set_language_when_closed(false, Language::Multilingual),
+            Ok(Language::Multilingual)
+        );
+        assert_eq!(
+            set_language_when_closed(false, Language::English),
+            Ok(Language::English)
+        );
+    }
+}

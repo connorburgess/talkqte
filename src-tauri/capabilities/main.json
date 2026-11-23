@@ -36,6 +36,8 @@
     "allow-test-provider-key",
     "allow-remove-provider-key",
     "allow-cue-usage",
+    "allow-transcription-language",
+    "allow-set-transcription-language",
     "allow-model-status",
     "allow-pick-context-file",
     "allow-read-context-file-path",

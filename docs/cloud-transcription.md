@@ -50,6 +50,7 @@ to the key:
 | `TALKQTE_DEV_STT_BACKEND=deepgram` | Use Deepgram for every live session of this launch, microphone and application audio alike. Nothing else is accepted. |
 | `TALKQTE_DEV_STT_TOKEN_FILE` | Absolute path of a file holding a short-lived Deepgram access token. The file must be a regular file (not a symlink), mode `0600`, owned by the user running the app, at most 4 KiB, in a directory of mode `0700` owned by that user. |
 | `TALKQTE_DEV_STT_MINUTE_CAP` | Most minutes of audio this launch may send, across all its sessions and both capture sources, from 1 to 60. |
+| `TALKQTE_DEV_STT_LANGUAGE` | Optional. Absent or `en` for English, `multi` for Multilingual ([language](#language)). Anything else is refused. |
 
 With this selection only the token reaches the app. The Deepgram API key
 stays in the owner's own file; the lab launcher uses it to mint a token
@@ -101,9 +102,52 @@ After approval, each capture source opens one WebSocket stream to
 - `KeepAlive` messages during gaps, `Finalize` when a result has stayed
   unfinished for 6 seconds, and `CloseStream` at the end.
 
-The request asks for `model=nova-3`, English, interim results, punctuation,
-speaker labels, 300 ms endpointing, utterance-end events and voice-activity
-events. Every request carries `mip_opt_out=true`, which asks Deepgram to opt
+The request asks for `model=nova-3`, the session's language (below),
+interim results, punctuation, speaker labels, endpointing, utterance-end
+events and voice-activity events.
+
+### Language
+
+Deepgram cannot detect a language on a live stream (`detect_language` is for
+recorded audio only, per its
+[language detection](https://developers.deepgram.com/docs/language-detection)
+page), so the app cannot start in English and switch by itself. **Settings →
+Transcription language** offers two exact requests:
+
+| Choice | Query |
+| --- | --- |
+| **English** (default) | `model=nova-3&language=en&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&diarize=true&endpointing=300&utterance_end_ms=1000&vad_events=true&mip_opt_out=true` |
+| **Multilingual** | `model=nova-3&language=multi&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&diarize=true&endpointing=100&utterance_end_ms=1000&vad_events=true&mip_opt_out=true` |
+
+Multilingual is Deepgram's code-switching mode for Nova-3: several languages,
+following switches within one stream
+([multilingual code-switching](https://developers.deepgram.com/docs/multilingual-code-switching)).
+It uses the 100 ms endpointing that page recommends; nothing else differs.
+Deepgram bills it at a higher rate than English
+([pricing](https://deepgram.com/pricing)); the review says so and states no
+price.
+
+- The choice applies to the next live session. A session's streams and
+  reconnects keep the language they started with, and the setting cannot be
+  changed while a session is starting, running or finishing ("Change the
+  transcription language when no live session is running."), so the review
+  and the stream always name the same one.
+- The session review names it: "Deepgram (US, model Nova-3, English)" or
+  "Deepgram (US, model Nova-3, Multilingual, which Deepgram bills at a higher
+  rate than English)".
+- Like the other settings it is kept for the app run and is English again
+  after the app restarts; nothing is written to disk.
+- The fixed phrase-rule questions (an owner, a date, a choice, a date said)
+  match English words only, so lines in other languages raise none of them.
+  The "Asked you" rule needs only the person's name opening a sentence that
+  ends in a question mark, so a question put to them by name raises it in any
+  language and quotes the line as said; its other English question openers
+  do not apply. Model cues work on whatever the model understands.
+- A development launch with a token file takes its language from
+  `TALKQTE_DEV_STT_LANGUAGE` instead (absent or `en`: English; `multi`:
+  Multilingual; anything else refuses the start). A lab plan keeps English
+  unless its `transcription.language` is `multi`; the lab's evidence accepts
+  exactly these two queries and checks that the one used matches the plan. Every request carries `mip_opt_out=true`, which asks Deepgram to opt
 out of its Model Improvement Program; what Deepgram keeps is set by its
 [terms](https://deepgram.com/terms). The request builder refuses a URL without
 exactly one such parameter, and a test checks it on the request a fake

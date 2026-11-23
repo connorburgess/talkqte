@@ -79,7 +79,7 @@ import {
   anthropicEnvironmentNames,
 } from './cue-lab-anthropic-core.mjs';
 import {
-  DEEPGRAM_APP_QUERY,
+  deepgramAppQuery,
   DEEPGRAM_GRANT_TTL_S,
   DEEPGRAM_GRANT_URL,
   DEEPGRAM_KEY_FILE,
@@ -376,7 +376,7 @@ function inspectTakePlan(planPath, { environment = process.env } = {}) {
           }
         : {
             what: "the lab player's application audio, only after Enable for this session",
-            query: DEEPGRAM_APP_QUERY,
+            query: deepgramAppQuery(p.transcription.language ?? 'en'),
             grant: `${DEEPGRAM_GRANT_URL} once before launch, ${DEEPGRAM_GRANT_TTL_S} s token`,
             keyFile: DEEPGRAM_KEY_FILE,
             keyFileReadAt: 'before launch, to mint the token',
@@ -855,6 +855,7 @@ async function runAttempt({
               backend: t.backend,
               minuteCap: t.minuteCap,
               grantTtlS: t.grantTtlS,
+              language: t.language,
             },
       );
       at = 'source';

@@ -43,6 +43,8 @@ fn main() {
             "test_provider_key",
             "remove_provider_key",
             "cue_usage",
+            "transcription_language",
+            "set_transcription_language",
             "model_status",
             "companion_anchor",
             "pick_context_file",

@@ -3320,6 +3320,39 @@ mod tests {
     }
 
     #[test]
+    fn on_lines_in_other_languages_only_a_question_put_to_the_user_by_name_raises_a_cue() {
+        // Multilingual transcription can deliver these. The fixed phrase
+        // questions (owner, timing, choice, a date said) match English words
+        // only, so these lines raise nothing, though their English versions
+        // would.
+        let quiet = |text: &str| {
+            let mut e = Engine::live();
+            e.set_user_name(Some("Jordan".into())).unwrap();
+            e.start().unwrap();
+            e.advance(5_000);
+            e.ingest(e.session(), live("l", 5_000, text)).unwrap();
+            e.state.cue.as_ref().map(|cue| cue.kind.clone())
+        };
+        for text in [
+            "Alguien puede llevar la lista pronto.",
+            "Il faut choisir: ou ceci ou cela.",
+            "Jemand sollte den Entwurf bald schicken.",
+        ] {
+            assert_eq!(quiet(text), None, "{text}");
+        }
+        assert!(quiet("Someone can take the list soon.").is_some());
+        // A question that opens with the user's name and ends with a question
+        // mark is put to them in any language: that is the Asked you rule's
+        // own signal, and the cue quotes the line as said.
+        for text in [
+            "Jordan, ¿puedes enviar el borrador pronto?",
+            "Jordan, kannst du den Entwurf bis Freitag schicken?",
+        ] {
+            assert_eq!(quiet(text).as_deref(), Some(ASKED), "{text}");
+        }
+    }
+
+    #[test]
     fn live_cue_resume_skips_delayed_speech_and_waits_for_new_input() {
         let mut e = Engine::live();
         e.start().unwrap();

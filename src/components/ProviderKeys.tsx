@@ -4,8 +4,11 @@ import {
   keysStatus,
   removeKey,
   setKey,
+  setTranscriptionLanguage,
   testKey,
+  transcriptionLanguage,
   watchKeys,
+  type TranscriptionLanguage,
   type CueUsage,
   type KeyProvider,
   type KeyStatus,
@@ -150,6 +153,7 @@ export function ProviderKeys() {
             ? `This session: ${usage.requests} of ${usage.requestCap} cue requests, about ${dollars(usage.spentMicroUsd)} of ${dollars(usage.spendCapMicroUsd)} (an estimate, not your bill), model ${usage.model}.`
             : 'No session has used your Anthropic key yet.'}
         </p>
+        <LanguageChoice />
       </div>
     </section>
   );
@@ -327,5 +331,64 @@ function KeyRow({
         </p>
       )}
     </form>
+  );
+}
+
+/** One plain control: which language Deepgram transcribes in the next live
+ * session. Deepgram cannot switch by itself on a live stream, so the choice
+ * is made before a session starts. */
+function LanguageChoice() {
+  const id = useId();
+  const [language, setLanguage] = useState<TranscriptionLanguage>();
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let live = true;
+    transcriptionLanguage().then(
+      (value) => live && setLanguage(value === 'multi' ? 'multi' : 'en'),
+      () => live && setLanguage('en'),
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  return (
+    <div className="provider-key provider-language">
+      <label htmlFor={`${id}-language`}>Transcription language</label>
+      <select
+        id={`${id}-language`}
+        value={language ?? 'en'}
+        disabled={language === undefined}
+        aria-describedby={`${id}-language-help${error ? ` ${id}-language-error` : ''}`}
+        onChange={(event) => {
+          const next = event.target.value === 'multi' ? 'multi' : 'en';
+          setError('');
+          setTranscriptionLanguage(next).then(
+            (value) => setLanguage(value),
+            (failure) =>
+              setError(message(failure, 'The language was not changed.')),
+          );
+        }}
+      >
+        <option value="en">English</option>
+        <option value="multi">Multilingual</option>
+      </select>
+      <p id={`${id}-language-help`} className="provider-key-role">
+        Applies to the next live session, never one already running.
+        Multilingual follows several languages and switches between them, and
+        Deepgram bills it at a higher rate than English. Phrase-rule cues
+        understand English only; a question that opens with your name and ends
+        in a question mark is noticed in any language; model cues work on what
+        the model understands.
+      </p>
+      {error && (
+        <p
+          id={`${id}-language-error`}
+          className="provider-keys-error"
+          role="alert"
+        >
+          {error}
+        </p>
+      )}
+    </div>
   );
 }

@@ -21,6 +21,10 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
   DEEPGRAM_APP_QUERY,
+  DEEPGRAM_APP_QUERY_MULTI,
+  deepgramAppQuery,
+  isAllowedSttQuery,
+  isAppQuery,
   DEEPGRAM_GRANT_TTL_S,
   mintDeepgramGrant,
   readDeepgramKeyFile,
@@ -213,7 +217,7 @@ async function launchCloud(
   t,
   fixtureCase,
   grant,
-  { minuteCap = 5, reconnect, userName } = {},
+  { minuteCap = 5, reconnect, userName, language } = {},
 ) {
   const launcher = prepareLabFixtureLauncher({
     fixtureCase,
@@ -222,6 +226,7 @@ async function launchCloud(
     transcription: {
       backend: 'deepgram',
       minuteCap,
+      ...(language === undefined ? {} : { language }),
       // `grant: 'refused-token'` here launches the provider-failure probe.
       ...(grant === 'refused-token'
         ? { failureProbe: grant }
@@ -262,6 +267,29 @@ async function launchCloud(
   return { launcher, owner, seen: () => seen, failures };
 }
 
+test('a plan asks for multilingual explicitly, and for no other language', async (t) => {
+  const api = await fakeGrant();
+  t.after(api.close);
+  const { launcher, owner, seen } = await launchCloud(
+    t,
+    'cloud-transcription',
+    await mint(api),
+    { language: 'multi' },
+  );
+  assert.equal(seen().TALKQTE_DEV_STT_LANGUAGE, 'multi');
+  assert.equal(launcher.transcription.language, 'multi');
+  await owner.stop().catch(() => {});
+  // Any other value is refused before anything is launched.
+  for (const language of ['', 'EN', 'de', 'auto', null])
+    assert.throws(() =>
+      prepareLabFixtureLauncher({
+        fixtureCase: 'cloud-transcription',
+        selection: apiSelection,
+        transcription: { backend: 'deepgram', minuteCap: 5, language },
+      }),
+    );
+});
+
 test('the app gets only an empty placeholder until the review row; the token follows, and goes once the stream connects', async (t) => {
   const api = await fakeGrant();
   t.after(api.close);
@@ -276,6 +304,9 @@ test('the app gets only an empty placeholder until the review row; the token fol
   assert.equal(env.TALKQTE_DEV_STT_BACKEND, 'deepgram');
   assert.equal(env.TALKQTE_DEV_STT_TOKEN_FILE, tokenFile);
   assert.equal(env.TALKQTE_DEV_STT_MINUTE_CAP, '5');
+  // A plan without a language keeps English: no language setting at all.
+  assert.equal(Object.hasOwn(env, 'TALKQTE_DEV_STT_LANGUAGE'), false);
+  assert.equal(launcher.transcription.language, 'en');
   assert.equal(Object.hasOwn(env, 'TALKQTE_WHISPER_MODEL'), false);
   // Neither the key nor the token is in the environment or arguments.
   assert.equal(JSON.stringify(env).includes(TOKEN), false);
@@ -308,6 +339,7 @@ test('the app gets only an empty placeholder until the review row; the token fol
   assert.deepEqual(facts, {
     backend: 'deepgram',
     minuteCap: 5,
+    language: 'en',
     grantTtlS: 900,
     failureProbe: null,
     reviewedSession: 2,
@@ -502,6 +534,7 @@ test('a refused-token probe takes no grant, hands the app only its fixed text af
     {
       backend: 'deepgram',
       minuteCap: 5,
+      language: 'en',
       grantTtlS: null,
       failureProbe: 'refused-token',
       reviewedSession: 2,
@@ -726,11 +759,34 @@ test("the lab's expected query is the app's QUERY constant", (t) => {
     t.skip('src-tauri/src/transcription/deepgram.rs is not in this checkout');
     return;
   }
-  const match = readFileSync(source, 'utf8').match(
-    /const QUERY: &str = "([^"]*)";/,
-  );
-  assert.ok(match, 'QUERY constant not found');
-  assert.equal(match[1], DEEPGRAM_APP_QUERY);
+  const rust = readFileSync(source, 'utf8');
+  const en = rust.match(/const QUERY_EN: &str = "([^"]*)";/);
+  const multi = rust.match(/const QUERY_MULTI: &str = "([^"]*)";/);
+  assert.ok(en && multi, 'QUERY_EN or QUERY_MULTI constant not found');
+  assert.equal(en[1], DEEPGRAM_APP_QUERY);
+  assert.equal(multi[1], DEEPGRAM_APP_QUERY_MULTI);
+});
+
+test('exactly the two app queries are accepted, and only en or multi selects one', () => {
+  assert.equal(deepgramAppQuery(), DEEPGRAM_APP_QUERY);
+  assert.equal(deepgramAppQuery('en'), DEEPGRAM_APP_QUERY);
+  assert.equal(deepgramAppQuery('multi'), DEEPGRAM_APP_QUERY_MULTI);
+  for (const bad of ['', 'EN', 'auto', 'de', null, 'constructor'])
+    assert.throws(
+      () => deepgramAppQuery(bad),
+      /invalid transcription language/,
+    );
+  assert.ok(isAppQuery(DEEPGRAM_APP_QUERY));
+  assert.ok(isAppQuery(DEEPGRAM_APP_QUERY_MULTI));
+  for (const near of [
+    DEEPGRAM_APP_QUERY.replace('language=en', 'language=multi'),
+    DEEPGRAM_APP_QUERY_MULTI.replace('endpointing=100', 'endpointing=300'),
+    DEEPGRAM_APP_QUERY.replace('language=en', 'language=de'),
+    DEEPGRAM_APP_QUERY + '&detect_language=true',
+  ])
+    assert.equal(isAppQuery(near), false, near);
+  // Both pass the connected-row allowlist; it has no new parameter name.
+  assert.ok(isAllowedSttQuery(DEEPGRAM_APP_QUERY_MULTI));
 });
 
 test('the stale-token sweep removes tokens only from runs that have provably ended, never a live one', (t) => {

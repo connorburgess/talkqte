@@ -14,7 +14,12 @@ export const commands = [
   'test_provider_key',
   'remove_provider_key',
   'cue_usage',
+  'transcription_language',
+  'set_transcription_language',
 ];
+let language: 'en' | 'multi' = 'en';
+/** Refuse a language change, as the app does while a session runs. */
+let sessionRunning = false;
 
 const keysParam = new URLSearchParams(location.search).get('keys');
 const unavailable = keysParam === 'unavailable';
@@ -139,6 +144,17 @@ async function answer(name: string, args?: Record<string, string>) {
       return changed();
     case 'cue_usage':
       return usage;
+    case 'transcription_language':
+      return language;
+    case 'set_transcription_language':
+      if (sessionRunning)
+        throw new Error(
+          'Change the transcription language when no live session is running.',
+        );
+      if (args?.language !== 'en' && args?.language !== 'multi')
+        throw new Error('invalid');
+      language = args.language;
+      return language;
   }
 }
 
@@ -150,6 +166,10 @@ export const providerKeysTest = {
   setUsage(next: CueUsage | null) {
     usage = next;
   },
+  setSessionRunning(running: boolean) {
+    sessionRunning = running;
+  },
+  language: () => language,
   setTestOutcome(provider: KeyProvider, outcome: TestOutcome) {
     testOverrides[provider] = structuredClone(outcome);
   },

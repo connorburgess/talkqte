@@ -20,10 +20,7 @@ import { parseUniqueLabJson } from './cue-lab-strict-json.mjs';
 import { TextDecoder } from 'node:util';
 import { gateFailure } from './cue-lab-operation-gate.mjs';
 import { LAB_MEDIA_MAX_MS } from './cue-lab-media.mjs';
-import {
-  DEEPGRAM_APP_QUERY,
-  REFUSED_TOKEN_PROBE,
-} from './cue-lab-deepgram.mjs';
+import { deepgramAppQuery, REFUSED_TOKEN_PROBE } from './cue-lab-deepgram.mjs';
 const CHECKOUT = realpathSync(fileURLToPath(new URL('../', import.meta.url)));
 const EVENT = 'talkqte.lab.evidence.event.v1';
 const MANIFEST = 'talkqte.lab.evidence.manifest.v1';
@@ -241,8 +238,19 @@ export function createLabEvidenceWriter({
     // The cloud transcription settings the launcher used, once; never the
     // token. The app's fixed query is recorded as the request it sends. A
     // provider-failure take records its probe instead of a grant TTL, so its
-    // manifest can never read as a normal take's.
-    recordTranscription(settings) {
+    // manifest can never read as a normal take's. An optional `language`
+    // (`en` by default, or `multi`) chooses which of the app's two queries
+    // is recorded; it is not kept as a separate field.
+    recordTranscription(recorded) {
+      const language = recorded?.language ?? 'en';
+      required(
+        recorded !== null &&
+          typeof recorded === 'object' &&
+          ['en', 'multi'].includes(language),
+      );
+      const settings = Object.hasOwn(recorded, 'language')
+        ? (({ language: _language, ...rest }) => rest)(recorded)
+        : recorded;
       const probe = settings?.failureProbe !== undefined;
       required(
         !terminal &&
@@ -266,7 +274,7 @@ export function createLabEvidenceWriter({
         ...(probe
           ? { failureProbe: settings.failureProbe }
           : { grantTtlS: settings.grantTtlS }),
-        query: DEEPGRAM_APP_QUERY,
+        query: deepgramAppQuery(language),
       });
     },
     addClock(clock) {

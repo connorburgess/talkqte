@@ -13,7 +13,7 @@ import {
 import { fileURLToPath } from 'node:url';
 import { isMain } from './is-main.mjs';
 import {
-  DEEPGRAM_APP_QUERY,
+  isAppQuery,
   isAllowedSttQuery,
   REFUSED_TOKEN_PROBE,
 } from './cue-lab-deepgram.mjs';
@@ -331,7 +331,7 @@ export function validateManifest(m) {
       !Number.isSafeInteger(m.transcription.minuteCap) ||
       m.transcription.minuteCap < 1 ||
       m.transcription.minuteCap > 60 ||
-      m.transcription.query !== DEEPGRAM_APP_QUERY)
+      !isAppQuery(m.transcription.query))
   )
     fail('invalid transcription settings');
   for (const r of m.reviews ?? []) {
