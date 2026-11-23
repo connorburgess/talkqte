@@ -474,6 +474,13 @@ export const RUNNER_SETTINGS = Object.freeze({
   recorderStartupMs: 3000,
   playerStartMs: 1000,
   providerDeadlineMs: 30000,
+  // The run's startup budget after the in-app approval. The app greets the
+  // lab broker only with its first cue request, which needs the meeting's
+  // first transcript line: the recorder and player start, the first line
+  // is spoken, and Deepgram finalizes it. The run's default of 10 s ended a
+  // real take 8 s into playback, before any line was final; this is the
+  // run's maximum.
+  runStartupMs: 30000,
   nativeApplication: 'TalkQTE',
 });
 // The only names the runner passes on to the launcher and the provider;
@@ -896,6 +903,7 @@ async function runAttempt({
         stopAfterS: API_STOP_AFTER_S,
         approvalBudgetMs: APPROVAL_BUDGET_MS,
         takeMs: TAKE_MS,
+        startupMs: RUNNER_SETTINGS.runStartupMs,
         ...(p.tailMs === undefined ? {} : { tailMs: p.tailMs }),
         ...(p.turnOffAfterMs === undefined
           ? {}
