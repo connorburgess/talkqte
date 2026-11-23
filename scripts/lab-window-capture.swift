@@ -592,12 +592,16 @@ struct Capture {
     }
 
     // Until the time is up, or Ctrl-C.
-    nonisolated(unsafe) var interrupted = false
+    // The flag is written and read only on the capture queue. A plain
+    // captured variable read from this loop is a data race the optimizer may
+    // resolve by reading it once, and then a Stop signal is never seen.
+    final class StopFlag: @unchecked Sendable { var raised = false }
+    let stop = StopFlag()
     signal(SIGINT, SIG_IGN)
     signal(SIGTERM, SIG_IGN)
     let signals = [SIGINT, SIGTERM].map { number in
       let source = DispatchSource.makeSignalSource(signal: number, queue: queue)
-      source.setEventHandler { interrupted = true }
+      source.setEventHandler { stop.raised = true }
       source.resume()
       return source
     }
@@ -607,10 +611,10 @@ struct Capture {
       writer.reportReady()
     }
     let deadline = Date().addingTimeInterval(seconds)
-    while Date() < deadline && !interrupted && writer.problem == nil {
+    while Date() < deadline && !queue.sync(execute: { stop.raised || writer.problem != nil }) {
       try? await Task.sleep(nanoseconds: 100_000_000)
     }
-    _ = signals
+    withExtendedLifetime(signals) {}
 
     try? await soundStream.stopCapture()
     try? await emulatorStream.stopCapture()
