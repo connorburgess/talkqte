@@ -13,10 +13,10 @@ not listed.
 Declared licences
 -----------------
 
-Rust crate: 170
-    79  MIT OR Apache-2.0
-    19  MIT
-    18  Apache-2.0 OR MIT
+Rust crate: 183
+    90  MIT OR Apache-2.0
+    20  MIT
+    19  Apache-2.0 OR MIT
     15  Unicode-3.0
     10  Zlib OR Apache-2.0 OR MIT
      4  MIT/Apache-2.0
@@ -58,17 +58,17 @@ Rust crate
 adler2 2.0.1
   Declared licence: 0BSD OR MIT OR Apache-2.0
   Source: https://github.com/oyvindln/adler2
-  Notice texts: T092 (LICENSE-0BSD), T013 (LICENSE-APACHE), T022 (LICENSE-MIT)
+  Notice texts: T101 (LICENSE-0BSD), T015 (LICENSE-APACHE), T025 (LICENSE-MIT)
 
 aho-corasick 1.1.5
   Declared licence: Unlicense OR MIT
   Source: https://github.com/BurntSushi/aho-corasick
-  Notice texts: T052 (COPYING), T008 (LICENSE-MIT), T112 (UNLICENSE)
+  Notice texts: T056 (COPYING), T009 (LICENSE-MIT), T124 (UNLICENSE)
 
 alloc-no-stdlib 3.0.0
   Declared licence: BSD-3-Clause
   Source: https://github.com/dropbox/rust-alloc-no-stdlib
-  Notice texts: T055 (LICENSE)
+  Notice texts: T059 (LICENSE)
 
 alloc-stdlib 0.3.0
   Declared licence: BSD-3-Clause
@@ -78,22 +78,27 @@ alloc-stdlib 0.3.0
 anyhow 1.0.104
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/dtolnay/anyhow
-  Notice texts: T079 (LICENSE-APACHE), T022 (LICENSE-MIT)
+  Notice texts: T085 (LICENSE-APACHE), T025 (LICENSE-MIT)
 
 base64 0.23.1
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/marshallpierce/rust-base64
-  Notice texts: T087 (LICENSE-APACHE), T021 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T024 (LICENSE-MIT)
 
 bitflags 2.13.2
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/bitflags/bitflags
-  Notice texts: T087 (LICENSE-APACHE), T007 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T008 (LICENSE-MIT)
 
 block-buffer 0.10.4
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/RustCrypto/utils
-  Notice texts: T122 (LICENSE-APACHE), T049 (LICENSE-MIT)
+  Notice texts: T136 (LICENSE-APACHE), T053 (LICENSE-MIT)
+
+block-buffer 0.12.1
+  Declared licence: MIT OR Apache-2.0
+  Source: https://github.com/RustCrypto/utils
+  Notice texts: T136 (LICENSE-APACHE), T070 (LICENSE-MIT)
 
 block2 0.6.2
   Declared licence: MIT
@@ -103,122 +108,152 @@ block2 0.6.2
 brotli 9.1.1
   Declared licence: BSD-3-Clause AND MIT
   Source: https://github.com/dropbox/rust-brotli
-  Notice texts: T055 (LICENSE.BSD-3-Clause), T019 (LICENSE.MIT)
+  Notice texts: T059 (LICENSE.BSD-3-Clause), T022 (LICENSE.MIT)
 
 brotli-decompressor 6.3.0
   Declared licence: BSD-3-Clause/MIT
   Source: https://github.com/dropbox/rust-brotli-decompressor
-  Notice texts: T055 (LICENSE)
+  Notice texts: T059 (LICENSE)
 
 bytes 1.12.1
   Declared licence: MIT
   Source: https://github.com/tokio-rs/bytes
-  Notice texts: T043 (LICENSE)
+  Notice texts: T046 (LICENSE)
 
 cfb 0.14.0
   Declared licence: MIT
   Source: https://github.com/mdsteele/rust-cfb
-  Notice texts: T029 (LICENSE)
+  Notice texts: T032 (LICENSE)
 
 cfg-if 1.0.5
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/rust-lang/cfg-if
-  Notice texts: T087 (LICENSE-APACHE), T076 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T082 (LICENSE-MIT)
+
+chacha20 0.10.2
+  Declared licence: MIT OR Apache-2.0
+  Source: https://github.com/RustCrypto/stream-ciphers
+  Notice texts: T136 (LICENSE-APACHE), T005 (LICENSE-MIT)
 
 chrono 0.4.45
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/chronotope/chrono
-  Notice texts: T114 (LICENSE.txt)
+  Notice texts: T127 (LICENSE.txt)
+
+const-oid 0.10.3
+  Declared licence: Apache-2.0 OR MIT
+  Source: https://github.com/RustCrypto/formats
+  Notice texts: T136 (LICENSE-APACHE), T137 (LICENSE-MIT)
 
 cookie 0.18.2
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/SergioBenitez/cookie-rs
-  Notice texts: T109 (LICENSE-APACHE), T037 (LICENSE-MIT)
+  Notice texts: T119 (LICENSE-APACHE), T040 (LICENSE-MIT)
 
 core-foundation 0.10.1
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/servo/core-foundation-rs
-  Notice texts: T087 (LICENSE-APACHE), T028 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T031 (LICENSE-MIT)
 
 core-foundation-sys 0.8.7
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/servo/core-foundation-rs
-  Notice texts: T087 (LICENSE-APACHE), T028 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T031 (LICENSE-MIT)
 
 core-graphics 0.25.0
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/servo/core-foundation-rs
-  Notice texts: T044 (COPYRIGHT), T087 (LICENSE-APACHE), T028 (LICENSE-MIT)
+  Notice texts: T048 (COPYRIGHT), T094 (LICENSE-APACHE), T031 (LICENSE-MIT)
 
 core-graphics-types 0.2.0
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/servo/core-foundation-rs
-  Notice texts: T087 (LICENSE-APACHE), T028 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T031 (LICENSE-MIT)
 
 coreaudio-rs 0.14.2
   Declared licence: MIT/Apache-2.0
   Source: https://github.com/RustAudio/coreaudio-rs.git
-  Notice texts: T087 (LICENSE-APACHE), T132 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T147 (LICENSE-MIT)
 
 cpal 0.18.2
   Declared licence: Apache-2.0
   Source: https://github.com/RustAudio/cpal
-  Notice texts: T017 (LICENSE)
+  Notice texts: T020 (LICENSE)
 
 cpufeatures 0.2.17
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/RustCrypto/utils
-  Notice texts: T122 (LICENSE-APACHE), T051 (LICENSE-MIT)
+  Notice texts: T136 (LICENSE-APACHE), T055 (LICENSE-MIT)
+
+cpufeatures 0.3.1
+  Declared licence: MIT OR Apache-2.0
+  Source: https://github.com/RustCrypto/utils
+  Notice texts: T136 (LICENSE-APACHE), T137 (LICENSE-MIT)
 
 crc32fast 1.5.4
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/srijs/rust-crc32fast
-  Notice texts: T057 (LICENSE-APACHE), T088 (LICENSE-MIT)
+  Notice texts: T061 (LICENSE-APACHE), T095 (LICENSE-MIT)
 
 crossbeam-channel 0.5.17
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/crossbeam-rs/crossbeam
-  Notice texts: T087 (LICENSE-APACHE), T045 (LICENSE-MIT), T116 (LICENSE-THIRD-PARTY)
+  Notice texts: T094 (LICENSE-APACHE), T049 (LICENSE-MIT), T129 (LICENSE-THIRD-PARTY)
 
 crossbeam-utils 0.8.23
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/crossbeam-rs/crossbeam
-  Notice texts: T087 (LICENSE-APACHE), T045 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T049 (LICENSE-MIT)
 
 crypto-common 0.1.7
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/RustCrypto/traits
-  Notice texts: T122 (LICENSE-APACHE), T054 (LICENSE-MIT)
+  Notice texts: T136 (LICENSE-APACHE), T058 (LICENSE-MIT)
+
+crypto-common 0.2.2
+  Declared licence: MIT OR Apache-2.0
+  Source: https://github.com/RustCrypto/traits
+  Notice texts: T136 (LICENSE-APACHE), T133 (LICENSE-MIT)
 
 ctor 1.0.13
   Declared licence: Apache-2.0 OR MIT
   Source: https://github.com/mmastrac/linktime
-  Notice texts: T057 (LICENSE-APACHE), T104 (LICENSE-MIT)
+  Notice texts: T061 (LICENSE-APACHE), T114 (LICENSE-MIT)
 
 dasp_sample 0.11.0
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/rustaudio/sample.git
   Notice texts: none shipped in the package; see the source for its licence files
 
+data-encoding 2.11.1
+  Declared licence: MIT
+  Source: https://github.com/ia0/data-encoding
+  Notice texts: T098 (LICENSE)
+
 deranged 0.5.9
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/jhpratt/deranged
-  Notice texts: T102 (LICENSE-Apache), T011 (LICENSE-MIT)
+  Notice texts: T112 (LICENSE-Apache), T013 (LICENSE-MIT)
 
 digest 0.10.7
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/RustCrypto/traits
-  Notice texts: T122 (LICENSE-APACHE), T090 (LICENSE-MIT)
+  Notice texts: T136 (LICENSE-APACHE), T097 (LICENSE-MIT)
+
+digest 0.11.3
+  Declared licence: MIT OR Apache-2.0
+  Source: https://github.com/RustCrypto/traits
+  Notice texts: T136 (LICENSE-APACHE), T120 (LICENSE-MIT)
 
 dirs 7.0.0
   Declared licence: MIT OR Apache-2.0
   Source: https://codeberg.org/dirs/dirs-rs
-  Notice texts: T063 (LICENSE-APACHE), T130 (LICENSE-MIT)
+  Notice texts: T068 (LICENSE-APACHE), T145 (LICENSE-MIT)
 
 dirs-sys 0.5.0
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/dirs-dev/dirs-sys-rs
-  Notice texts: T063 (LICENSE-APACHE), T130 (LICENSE-MIT)
+  Notice texts: T068 (LICENSE-APACHE), T145 (LICENSE-MIT)
 
 dispatch2 0.3.1
   Declared licence: Zlib OR Apache-2.0 OR MIT
@@ -228,227 +263,237 @@ dispatch2 0.3.1
 dpi 0.1.2
   Declared licence: Apache-2.0 AND MIT
   Source: https://github.com/rust-windowing/winit
-  Notice texts: T057 (LICENSE), T120 (LICENSE-LIBM-MIT)
+  Notice texts: T061 (LICENSE), T134 (LICENSE-LIBM-MIT)
 
 dunce 1.0.5
   Declared licence: CC0-1.0 OR MIT-0 OR Apache-2.0
   Source: https://gitlab.com/kornelski/dunce
-  Notice texts: T056 (LICENSE)
+  Notice texts: T060 (LICENSE)
 
 embed_plist 1.2.2
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/nvzqz/embed-plist-rs
-  Notice texts: T017 (LICENSE-APACHE), T093 (LICENSE-MIT)
+  Notice texts: T020 (LICENSE-APACHE), T102 (LICENSE-MIT)
 
 equivalent 1.0.3
   Declared licence: Apache-2.0 OR MIT
   Source: https://github.com/indexmap-rs/equivalent
-  Notice texts: T087 (LICENSE-APACHE), T033 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T036 (LICENSE-MIT)
 
 erased-serde 0.4.11
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/dtolnay/erased-serde
-  Notice texts: T079 (LICENSE-APACHE), T022 (LICENSE-MIT)
+  Notice texts: T085 (LICENSE-APACHE), T025 (LICENSE-MIT)
 
 fdeflate 0.3.7
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/image-rs/fdeflate
-  Notice texts: T040 (LICENSE-APACHE), T066 (LICENSE-MIT)
+  Notice texts: T043 (LICENSE-APACHE), T072 (LICENSE-MIT)
 
 flate2 1.1.11
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/rust-lang/flate2-rs
-  Notice texts: T087 (LICENSE-APACHE), T012 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T014 (LICENSE-MIT)
 
 fnv 1.0.7
   Declared licence: Apache-2.0 / MIT
   Source: https://github.com/servo/rust-fnv
-  Notice texts: T087 (LICENSE-APACHE), T107 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T117 (LICENSE-MIT)
 
 foreign-types 0.5.0
   Declared licence: MIT/Apache-2.0
   Source: https://github.com/sfackler/foreign-types
-  Notice texts: T057 (LICENSE-APACHE), T110 (LICENSE-MIT)
+  Notice texts: T061 (LICENSE-APACHE), T122 (LICENSE-MIT)
 
 foreign-types-shared 0.3.1
   Declared licence: MIT/Apache-2.0
   Source: https://github.com/sfackler/foreign-types
-  Notice texts: T057 (LICENSE-APACHE), T110 (LICENSE-MIT)
+  Notice texts: T061 (LICENSE-APACHE), T122 (LICENSE-MIT)
 
 form_urlencoded 1.2.2
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/servo/rust-url
-  Notice texts: T087 (LICENSE-APACHE), T025 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T028 (LICENSE-MIT)
 
 generic-array 0.14.7
   Declared licence: MIT
   Source: https://github.com/fizyk20/generic-array.git
-  Notice texts: T098 (LICENSE)
+  Notice texts: T108 (LICENSE)
 
 getrandom 0.2.17
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/rust-random/getrandom
-  Notice texts: T121 (LICENSE-APACHE), T036 (LICENSE-MIT)
+  Notice texts: T135 (LICENSE-APACHE), T039 (LICENSE-MIT)
 
 getrandom 0.3.4
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/rust-random/getrandom
-  Notice texts: T121 (LICENSE-APACHE), T060 (LICENSE-MIT)
+  Notice texts: T135 (LICENSE-APACHE), T065 (LICENSE-MIT)
+
+getrandom 0.4.3
+  Declared licence: MIT OR Apache-2.0
+  Source: https://github.com/rust-random/getrandom
+  Notice texts: T135 (LICENSE-APACHE), T093 (LICENSE-MIT)
 
 glob 0.3.4
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/rust-lang/glob
-  Notice texts: T087 (LICENSE-APACHE), T007 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T008 (LICENSE-MIT)
 
 hashbrown 0.17.1
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/rust-lang/hashbrown
-  Notice texts: T087 (LICENSE-APACHE), T099 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T109 (LICENSE-MIT)
 
 heck 0.5.0
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/withoutboats/heck
-  Notice texts: T087 (LICENSE-APACHE), T001 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T001 (LICENSE-MIT)
 
 http 1.5.0
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/hyperium/http
-  Notice texts: T084 (LICENSE-APACHE), T131 (LICENSE-MIT)
+  Notice texts: T090 (LICENSE-APACHE), T146 (LICENSE-MIT)
 
 httparse 1.10.1
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/seanmonstar/httparse
-  Notice texts: T087 (LICENSE-APACHE), T077 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T083 (LICENSE-MIT)
+
+hybrid-array 0.4.15
+  Declared licence: MIT OR Apache-2.0
+  Source: https://github.com/RustCrypto/hybrid-array
+  Notice texts: T136 (LICENSE-APACHE), T099 (LICENSE-MIT)
 
 icu_collections 2.4.0
   Declared licence: Unicode-3.0
   Source: https://github.com/unicode-org/icu4x
-  Notice texts: T113 (LICENSE)
+  Notice texts: T126 (LICENSE)
 
 icu_locale_core 2.4.0
   Declared licence: Unicode-3.0
   Source: https://github.com/unicode-org/icu4x
-  Notice texts: T113 (LICENSE)
+  Notice texts: T126 (LICENSE)
 
 icu_normalizer 2.4.0
   Declared licence: Unicode-3.0
   Source: https://github.com/unicode-org/icu4x
-  Notice texts: T113 (LICENSE)
+  Notice texts: T126 (LICENSE)
 
 icu_normalizer_data 2.4.0
   Declared licence: Unicode-3.0
   Source: https://github.com/unicode-org/icu4x
-  Notice texts: T113 (LICENSE)
+  Notice texts: T126 (LICENSE)
 
 icu_properties 2.4.0
   Declared licence: Unicode-3.0
   Source: https://github.com/unicode-org/icu4x
-  Notice texts: T113 (LICENSE)
+  Notice texts: T126 (LICENSE)
 
 icu_properties_data 2.4.0
   Declared licence: Unicode-3.0
   Source: https://github.com/unicode-org/icu4x
-  Notice texts: T113 (LICENSE)
+  Notice texts: T126 (LICENSE)
 
 icu_provider 2.4.0
   Declared licence: Unicode-3.0
   Source: https://github.com/unicode-org/icu4x
-  Notice texts: T113 (LICENSE)
+  Notice texts: T126 (LICENSE)
 
 idna 1.1.0
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/servo/rust-url/
-  Notice texts: T087 (LICENSE-APACHE), T068 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T074 (LICENSE-MIT)
 
 idna_adapter 1.2.2
   Declared licence: Apache-2.0 OR MIT
   Source: https://github.com/hsivonen/idna_adapter
-  Notice texts: T087 (LICENSE-APACHE), T004 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T004 (LICENSE-MIT)
 
 indexmap 2.14.2
   Declared licence: Apache-2.0 OR MIT
   Source: https://github.com/indexmap-rs/indexmap
-  Notice texts: T087 (LICENSE-APACHE), T042 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T045 (LICENSE-MIT)
 
 infer 0.22.0
   Declared licence: MIT
   Source: https://github.com/bojand/infer
-  Notice texts: T067 (LICENSE)
+  Notice texts: T073 (LICENSE)
 
 itoa 1.0.18
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/dtolnay/itoa
-  Notice texts: T079 (LICENSE-APACHE), T022 (LICENSE-MIT)
+  Notice texts: T085 (LICENSE-APACHE), T025 (LICENSE-MIT)
 
 json-patch 4.2.0
   Declared licence: MIT/Apache-2.0
   Source: https://github.com/idubrov/json-patch
-  Notice texts: T057 (LICENSE-APACHE), T009 (LICENSE-MIT)
+  Notice texts: T061 (LICENSE-APACHE), T011 (LICENSE-MIT)
 
 jsonptr 0.7.1
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/chanced/jsonptr
-  Notice texts: T048 (LICENSE-APACHE), T002 (LICENSE-MIT)
+  Notice texts: T052 (LICENSE-APACHE), T002 (LICENSE-MIT)
 
 keyboard-types 0.8.3
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/rust-windowing/keyboard-types
-  Notice texts: T087 (LICENSE-APACHE), T023 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T026 (LICENSE-MIT)
 
 libc 0.2.191
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/rust-lang/libc
-  Notice texts: T079 (LICENSE-APACHE), T111 (LICENSE-MIT)
+  Notice texts: T085 (LICENSE-APACHE), T123 (LICENSE-MIT)
 
 litemap 0.8.3
   Declared licence: Unicode-3.0
   Source: https://github.com/unicode-org/icu4x
-  Notice texts: T113 (LICENSE)
+  Notice texts: T126 (LICENSE)
 
 log 0.4.35
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/rust-lang/log
-  Notice texts: T087 (LICENSE-APACHE), T007 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T008 (LICENSE-MIT)
 
 mach2 0.6.0
   Declared licence: BSD-2-Clause OR MIT OR Apache-2.0
   Source: https://github.com/JohnTitor/mach2
-  Notice texts: T079 (LICENSE-APACHE), T118 (LICENSE-BSD), T086 (LICENSE-MIT)
+  Notice texts: T085 (LICENSE-APACHE), T131 (LICENSE-BSD), T092 (LICENSE-MIT)
 
 memchr 2.8.3
   Declared licence: Unlicense OR MIT
   Source: https://github.com/BurntSushi/memchr
-  Notice texts: T052 (COPYING), T008 (LICENSE-MIT), T112 (UNLICENSE)
+  Notice texts: T056 (COPYING), T009 (LICENSE-MIT), T124 (UNLICENSE)
 
 mime 0.3.18
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/hyperium/mime
-  Notice texts: T087 (LICENSE-APACHE), T094 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T103 (LICENSE-MIT)
 
 miniz_oxide 0.8.9
   Declared licence: MIT OR Zlib OR Apache-2.0
   Source: https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide
-  Notice texts: T062 (LICENSE), T040 (LICENSE-APACHE.md), T097 (LICENSE-MIT.md), T124 (LICENSE-ZLIB.md)
+  Notice texts: T067 (LICENSE), T043 (LICENSE-APACHE.md), T107 (LICENSE-MIT.md), T139 (LICENSE-ZLIB.md)
 
 miniz_oxide 0.9.1
   Declared licence: MIT OR Zlib OR Apache-2.0
   Source: https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide
-  Notice texts: T062 (LICENSE), T040 (LICENSE-APACHE.md), T097 (LICENSE-MIT.md), T124 (LICENSE-ZLIB.md)
+  Notice texts: T067 (LICENSE), T043 (LICENSE-APACHE.md), T107 (LICENSE-MIT.md), T139 (LICENSE-ZLIB.md)
 
 muda 0.20.0
   Declared licence: Apache-2.0 OR MIT
   Source: https://github.com/tauri-apps/muda
-  Notice texts: T087 (LICENSE-APACHE), T078 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T084 (LICENSE-MIT)
 
 num-conv 0.2.2
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/jhpratt/num-conv
-  Notice texts: T040 (LICENSE-Apache), T041 (LICENSE-MIT)
+  Notice texts: T043 (LICENSE-Apache), T044 (LICENSE-MIT)
 
 num-traits 0.2.19
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/rust-num/num-traits
-  Notice texts: T087 (LICENSE-APACHE), T007 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T008 (LICENSE-MIT)
 
 objc2 0.6.5
   Declared licence: MIT
@@ -513,397 +558,417 @@ objc2-web-kit 0.3.2
 once_cell 1.21.4
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/matklad/once_cell
-  Notice texts: T087 (LICENSE-APACHE), T022 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T025 (LICENSE-MIT)
 
 open 5.4.5
   Declared licence: MIT
   Source: https://github.com/Byron/open-rs
-  Notice texts: T106 (LICENSE.md)
+  Notice texts: T116 (LICENSE.md)
 
 option-ext 0.2.0
   Declared licence: MPL-2.0
   Source: https://github.com/soc/option-ext.git
-  Notice texts: T080 (LICENSE.txt)
+  Notice texts: T086 (LICENSE.txt)
 
 percent-encoding 2.3.2
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/servo/rust-url/
-  Notice texts: T087 (LICENSE-APACHE), T068 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T074 (LICENSE-MIT)
 
 phf 0.13.1
   Declared licence: MIT
   Source: https://github.com/rust-phf/rust-phf
-  Notice texts: T125 (LICENSE)
+  Notice texts: T140 (LICENSE)
 
 phf_shared 0.13.1
   Declared licence: MIT
   Source: https://github.com/rust-phf/rust-phf
-  Notice texts: T125 (LICENSE)
+  Notice texts: T140 (LICENSE)
 
 pin-project-lite 0.2.17
   Declared licence: Apache-2.0 OR MIT
   Source: https://github.com/taiki-e/pin-project-lite
-  Notice texts: T040 (LICENSE-APACHE), T022 (LICENSE-MIT)
+  Notice texts: T043 (LICENSE-APACHE), T025 (LICENSE-MIT)
 
 plist 1.10.3
   Declared licence: MIT
   Source: https://github.com/ebarnard/rust-plist/
-  Notice texts: T046 (LICENCE)
+  Notice texts: T050 (LICENCE)
 
 png 0.18.1
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/image-rs/image-png
-  Notice texts: T087 (LICENSE-APACHE), T073 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T079 (LICENSE-MIT)
 
 potential_utf 0.1.6
   Declared licence: Unicode-3.0
   Source: https://github.com/unicode-org/icu4x
-  Notice texts: T113 (LICENSE)
+  Notice texts: T126 (LICENSE)
 
 powerfmt 0.2.1
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/jhpratt/powerfmt
-  Notice texts: T039 (LICENSE-Apache), T058 (LICENSE-MIT)
+  Notice texts: T042 (LICENSE-Apache), T062 (LICENSE-MIT)
 
 quick-xml 0.42.0
   Declared licence: MIT
   Source: https://github.com/tafia/quick-xml
-  Notice texts: T006 (LICENSE-MIT.md)
+  Notice texts: T007 (LICENSE-MIT.md)
+
+rand 0.10.4
+  Declared licence: MIT OR Apache-2.0
+  Source: https://github.com/rust-random/rand
+  Notice texts: T017 (COPYRIGHT), T148 (LICENSE-APACHE), T125 (LICENSE-MIT)
+
+rand_core 0.10.1
+  Declared licence: MIT OR Apache-2.0
+  Source: https://github.com/rust-random/rand_core
+  Notice texts: T121 (COPYRIGHT), T010 (LICENSE-APACHE), T063 (LICENSE-MIT)
 
 raw-window-handle 0.6.2
   Declared licence: MIT OR Apache-2.0 OR Zlib
   Source: https://github.com/rust-windowing/raw-window-handle
-  Notice texts: T040 (LICENSE-APACHE.md), T096 (LICENSE-MIT.md), T074 (LICENSE-ZLIB.md)
+  Notice texts: T043 (LICENSE-APACHE.md), T106 (LICENSE-MIT.md), T080 (LICENSE-ZLIB.md)
 
 regex 1.13.1
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/rust-lang/regex
-  Notice texts: T087 (LICENSE-APACHE), T007 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T008 (LICENSE-MIT)
 
 regex-automata 0.4.18
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/rust-lang/regex
-  Notice texts: T087 (LICENSE-APACHE), T007 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T008 (LICENSE-MIT)
 
 regex-syntax 0.8.11
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/rust-lang/regex
-  Notice texts: T087 (LICENSE-APACHE), T007 (LICENSE-MIT), T123 (src/unicode_tables/LICENSE-UNICODE)
+  Notice texts: T094 (LICENSE-APACHE), T008 (LICENSE-MIT), T138 (src/unicode_tables/LICENSE-UNICODE)
 
 rfd 0.17.2
   Declared licence: MIT
   Source: https://github.com/PolyMeilex/rfd
-  Notice texts: T010 (LICENSE)
+  Notice texts: T012 (LICENSE)
 
 ring 0.17.14
   Declared licence: Apache-2.0 AND ISC
   Source: https://github.com/briansmith/ring
-  Notice texts: T126 (LICENSE), T035 (LICENSE-BoringSSL), T003 (LICENSE-other-bits), T087 (src/polyfill/once_cell/LICENSE-APACHE), T061 (src/polyfill/once_cell/LICENSE-MIT), T128 (third_party/fiat/LICENSE)
+  Notice texts: T141 (LICENSE), T038 (LICENSE-BoringSSL), T003 (LICENSE-other-bits), T094 (src/polyfill/once_cell/LICENSE-APACHE), T066 (src/polyfill/once_cell/LICENSE-MIT), T143 (third_party/fiat/LICENSE)
 
 rtrb 0.4.1
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/mgeier/rtrb
-  Notice texts: T087 (LICENSE-APACHE), T022 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T025 (LICENSE-MIT)
 
 rustls 0.23.46
   Declared licence: Apache-2.0 OR ISC OR MIT
   Source: https://github.com/rustls/rustls
-  Notice texts: T087 (LICENSE-APACHE), T100 (LICENSE-ISC), T095 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T110 (LICENSE-ISC), T104 (LICENSE-MIT)
 
 rustls-pki-types 1.15.1
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/rustls/pki-types
-  Notice texts: T032 (LICENSE-APACHE), T108 (LICENSE-MIT)
+  Notice texts: T035 (LICENSE-APACHE), T118 (LICENSE-MIT)
 
 rustls-webpki 0.103.16
   Declared licence: ISC
   Source: https://github.com/rustls/webpki
-  Notice texts: T027 (LICENSE)
+  Notice texts: T030 (LICENSE)
 
 same-file 1.0.6
   Declared licence: Unlicense/MIT
   Source: https://github.com/BurntSushi/same-file
-  Notice texts: T052 (COPYING), T059 (LICENSE-MIT), T112 (UNLICENSE)
+  Notice texts: T056 (COPYING), T064 (LICENSE-MIT), T124 (UNLICENSE)
 
 security-framework 3.7.0
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/kornelski/rust-security-framework
-  Notice texts: T087 (LICENSE-APACHE), T026 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T029 (LICENSE-MIT)
 
 security-framework-sys 2.17.0
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/kornelski/rust-security-framework
-  Notice texts: T087 (LICENSE-APACHE), T026 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T029 (LICENSE-MIT)
 
 semver 1.0.28
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/dtolnay/semver
-  Notice texts: T079 (LICENSE-APACHE), T022 (LICENSE-MIT)
+  Notice texts: T085 (LICENSE-APACHE), T025 (LICENSE-MIT)
 
 serde 1.0.229
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/serde-rs/serde
-  Notice texts: T079 (LICENSE-APACHE), T022 (LICENSE-MIT)
+  Notice texts: T085 (LICENSE-APACHE), T025 (LICENSE-MIT)
 
 serde-untagged 0.1.9
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/dtolnay/serde-untagged
-  Notice texts: T079 (LICENSE-APACHE), T022 (LICENSE-MIT)
+  Notice texts: T085 (LICENSE-APACHE), T025 (LICENSE-MIT)
 
 serde_core 1.0.229
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/serde-rs/serde
-  Notice texts: T079 (LICENSE-APACHE), T022 (LICENSE-MIT)
+  Notice texts: T085 (LICENSE-APACHE), T025 (LICENSE-MIT)
 
 serde_json 1.0.154
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/serde-rs/json
-  Notice texts: T079 (LICENSE-APACHE), T022 (LICENSE-MIT)
+  Notice texts: T085 (LICENSE-APACHE), T025 (LICENSE-MIT)
 
 serde_spanned 1.1.3
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/toml-rs/toml
-  Notice texts: T089 (LICENSE-APACHE), T034 (LICENSE-MIT)
+  Notice texts: T096 (LICENSE-APACHE), T037 (LICENSE-MIT)
 
 serde_with 3.24.0
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/jonasbb/serde_with/
-  Notice texts: T087 (LICENSE-APACHE), T132 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T147 (LICENSE-MIT)
 
 serialize-to-javascript 0.1.2
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/chippers/serialize-to-javascript
-  Notice texts: T017 (LICENSE-APACHE), T065 (LICENSE-MIT)
+  Notice texts: T020 (LICENSE-APACHE), T071 (LICENSE-MIT)
+
+sha1 0.11.0
+  Declared licence: MIT OR Apache-2.0
+  Source: https://github.com/RustCrypto/hashes
+  Notice texts: T136 (LICENSE-APACHE), T047 (LICENSE-MIT)
 
 sha2 0.10.9
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/RustCrypto/hashes
-  Notice texts: T122 (LICENSE-APACHE), T031 (LICENSE-MIT)
+  Notice texts: T136 (LICENSE-APACHE), T034 (LICENSE-MIT)
 
 simd-adler32 0.3.10
   Declared licence: MIT
   Source: https://github.com/mcountryman/simd-adler32
-  Notice texts: T050 (LICENSE.md)
+  Notice texts: T054 (LICENSE.md)
 
 siphasher 1.0.4
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/jedisct1/rust-siphash
-  Notice texts: T015 (COPYING), T017 (LICENSE-APACHE), T014 (LICENSE-MIT)
+  Notice texts: T018 (COPYING), T020 (LICENSE-APACHE), T016 (LICENSE-MIT)
 
 smallvec 1.16.5
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/servo/rust-smallvec
-  Notice texts: T087 (LICENSE-APACHE), T071 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T077 (LICENSE-MIT)
 
 stable_deref_trait 1.2.1
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/storyyeller/stable_deref_trait
-  Notice texts: T087 (LICENSE-APACHE), T047 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T051 (LICENSE-MIT)
 
 subtle 2.6.1
   Declared licence: BSD-3-Clause
   Source: https://github.com/dalek-cryptography/subtle
-  Notice texts: T016 (LICENSE)
+  Notice texts: T019 (LICENSE)
 
 tao 0.37.2
   Declared licence: Apache-2.0
   Source: https://github.com/tauri-apps/tao
-  Notice texts: T057 (LICENSE)
+  Notice texts: T061 (LICENSE)
 
 tauri 2.12.5
   Declared licence: Apache-2.0 OR MIT
   Source: https://github.com/tauri-apps/tauri
-  Notice texts: T040 (LICENSE-APACHE-2.0), T085 (LICENSE-MIT)
+  Notice texts: T043 (LICENSE-APACHE-2.0), T091 (LICENSE-MIT)
 
 tauri-plugin-dialog 2.8.4
   Declared licence: Apache-2.0 OR MIT
   Source: https://github.com/tauri-apps/plugins-workspace
-  Notice texts: T040 (LICENSE_APACHE-2.0), T085 (LICENSE_MIT)
+  Notice texts: T043 (LICENSE_APACHE-2.0), T091 (LICENSE_MIT)
 
 tauri-plugin-fs 2.7.1
   Declared licence: Apache-2.0 OR MIT
   Source: https://github.com/tauri-apps/plugins-workspace
-  Notice texts: T040 (LICENSE_APACHE-2.0), T085 (LICENSE_MIT)
+  Notice texts: T043 (LICENSE_APACHE-2.0), T091 (LICENSE_MIT)
 
 tauri-runtime 2.12.2
   Declared licence: Apache-2.0 OR MIT
   Source: https://github.com/tauri-apps/tauri
-  Notice texts: T040 (LICENSE-APACHE-2.0), T085 (LICENSE-MIT)
+  Notice texts: T043 (LICENSE-APACHE-2.0), T091 (LICENSE-MIT)
 
 tauri-runtime-wry 2.12.3
   Declared licence: Apache-2.0 OR MIT
   Source: https://github.com/tauri-apps/tauri
-  Notice texts: T040 (LICENSE-APACHE-2.0), T085 (LICENSE-MIT)
+  Notice texts: T043 (LICENSE-APACHE-2.0), T091 (LICENSE-MIT)
 
 tauri-utils 2.10.2
   Declared licence: Apache-2.0 OR MIT
   Source: https://github.com/tauri-apps/tauri
-  Notice texts: T040 (LICENSE-APACHE-2.0), T085 (LICENSE-MIT)
+  Notice texts: T043 (LICENSE-APACHE-2.0), T091 (LICENSE-MIT)
 
 thiserror 2.0.21
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/dtolnay/thiserror
-  Notice texts: T079 (LICENSE-APACHE), T022 (LICENSE-MIT)
+  Notice texts: T085 (LICENSE-APACHE), T025 (LICENSE-MIT)
 
 time 0.3.55
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/time-rs/time
-  Notice texts: T040 (LICENSE-Apache), T072 (LICENSE-MIT)
+  Notice texts: T043 (LICENSE-Apache), T078 (LICENSE-MIT)
 
 time-core 0.1.9
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/time-rs/time
-  Notice texts: T040 (LICENSE-Apache), T072 (LICENSE-MIT)
+  Notice texts: T043 (LICENSE-Apache), T078 (LICENSE-MIT)
 
 tinystr 0.8.5
   Declared licence: Unicode-3.0
   Source: https://github.com/unicode-org/icu4x
-  Notice texts: T113 (LICENSE)
+  Notice texts: T126 (LICENSE)
 
 tokio 1.54.1
   Declared licence: MIT
   Source: https://github.com/tokio-rs/tokio
-  Notice texts: T030 (LICENSE)
+  Notice texts: T033 (LICENSE)
 
 toml 1.2.1+spec-1.1.0
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/toml-rs/toml
-  Notice texts: T089 (LICENSE-APACHE), T034 (LICENSE-MIT)
+  Notice texts: T096 (LICENSE-APACHE), T037 (LICENSE-MIT)
 
 toml_datetime 1.1.3+spec-1.1.0
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/toml-rs/toml
-  Notice texts: T089 (LICENSE-APACHE), T034 (LICENSE-MIT)
+  Notice texts: T096 (LICENSE-APACHE), T037 (LICENSE-MIT)
 
 toml_parser 1.1.5+spec-1.1.0
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/toml-rs/toml
-  Notice texts: T089 (LICENSE-APACHE), T034 (LICENSE-MIT)
+  Notice texts: T096 (LICENSE-APACHE), T037 (LICENSE-MIT)
 
 toml_writer 1.2.0+spec-1.1.0
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/toml-rs/toml
-  Notice texts: T089 (LICENSE-APACHE), T034 (LICENSE-MIT)
+  Notice texts: T096 (LICENSE-APACHE), T037 (LICENSE-MIT)
+
+tungstenite 0.30.0
+  Declared licence: MIT OR Apache-2.0
+  Source: https://github.com/snapview/tungstenite-rs
+  Notice texts: T094 (LICENSE-APACHE), T105 (LICENSE-MIT)
 
 typeid 1.0.3
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/dtolnay/typeid
-  Notice texts: T079 (LICENSE-APACHE), T022 (LICENSE-MIT)
+  Notice texts: T085 (LICENSE-APACHE), T025 (LICENSE-MIT)
 
 typenum 1.20.1
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/paholg/typenum
-  Notice texts: T119 (LICENSE), T053 (LICENSE-APACHE), T083 (LICENSE-MIT)
+  Notice texts: T132 (LICENSE), T057 (LICENSE-APACHE), T089 (LICENSE-MIT)
 
 untrusted 0.9.0
   Declared licence: ISC
   Source: https://github.com/briansmith/untrusted
-  Notice texts: T091 (LICENSE.txt)
+  Notice texts: T100 (LICENSE.txt)
 
 ureq 3.5.1
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/algesten/ureq
-  Notice texts: T017 (LICENSE-APACHE), T018 (LICENSE-MIT)
+  Notice texts: T020 (LICENSE-APACHE), T021 (LICENSE-MIT)
 
 ureq-proto 0.7.1
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/algesten/ureq-proto
-  Notice texts: T017 (LICENSE-APACHE.txt), T105 (LICENSE-MIT.txt)
+  Notice texts: T020 (LICENSE-APACHE.txt), T115 (LICENSE-MIT.txt)
 
 url 2.5.8
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/servo/rust-url
-  Notice texts: T087 (LICENSE-APACHE), T068 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T074 (LICENSE-MIT)
 
 urlpattern 0.6.0
   Declared licence: MIT
   Source: https://github.com/denoland/rust-urlpattern
-  Notice texts: T129 (LICENSE)
+  Notice texts: T144 (LICENSE)
 
 utf8-zero 0.8.1
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/algesten/utf8-zero
-  Notice texts: T079 (LICENSE-APACHE), T022 (LICENSE-MIT)
+  Notice texts: T085 (LICENSE-APACHE), T025 (LICENSE-MIT)
 
 utf8_iter 1.1.0
   Declared licence: Apache-2.0 OR MIT
   Source: https://github.com/hsivonen/utf8_iter
-  Notice texts: T064 (COPYRIGHT), T017 (LICENSE-APACHE), T070 (LICENSE-MIT)
+  Notice texts: T069 (COPYRIGHT), T020 (LICENSE-APACHE), T076 (LICENSE-MIT)
 
 utf_types 1.0.0
   Declared licence: Apache-2.0 OR MIT
   Source: https://github.com/hsivonen/utf_types
-  Notice texts: T038 (COPYRIGHT), T017 (LICENSE-APACHE), T070 (LICENSE-MIT)
+  Notice texts: T041 (COPYRIGHT), T020 (LICENSE-APACHE), T076 (LICENSE-MIT)
 
 uuid 1.29.1
   Declared licence: Apache-2.0 OR MIT
   Source: https://github.com/uuid-rs/uuid
-  Notice texts: T087 (LICENSE-APACHE), T005 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T006 (LICENSE-MIT)
 
 walkdir 2.5.0
   Declared licence: Unlicense/MIT
   Source: https://github.com/BurntSushi/walkdir
-  Notice texts: T052 (COPYING), T008 (LICENSE-MIT), T112 (UNLICENSE)
+  Notice texts: T056 (COPYING), T009 (LICENSE-MIT), T124 (UNLICENSE)
 
 web-time 1.1.0
   Declared licence: MIT OR Apache-2.0
   Source: https://github.com/daxpedda/web-time
-  Notice texts: T103 (LICENSE-APACHE), T024 (LICENSE-MIT)
+  Notice texts: T113 (LICENSE-APACHE), T027 (LICENSE-MIT)
 
 webpki-roots 1.0.11
   Declared licence: CDLA-Permissive-2.0
   Source: https://github.com/rustls/webpki-roots
-  Notice texts: T117 (LICENSE)
+  Notice texts: T130 (LICENSE)
 
 window-vibrancy 0.8.1
   Declared licence: Apache-2.0 OR MIT
   Source: https://github.com/tauri-apps/tauri-plugin-vibrancy
-  Notice texts: T087 (LICENSE-APACHE), T101 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T111 (LICENSE-MIT)
 
 winnow 1.0.5
   Declared licence: MIT
   Source: https://github.com/winnow-rs/winnow
-  Notice texts: T082 (LICENSE-MIT)
+  Notice texts: T088 (LICENSE-MIT)
 
 writeable 0.6.4
   Declared licence: Unicode-3.0
   Source: https://github.com/unicode-org/icu4x
-  Notice texts: T113 (LICENSE)
+  Notice texts: T126 (LICENSE)
 
 wry 0.57.1
   Declared licence: Apache-2.0 OR MIT
   Source: https://github.com/tauri-apps/wry
-  Notice texts: T087 (LICENSE-APACHE), T081 (LICENSE-MIT)
+  Notice texts: T094 (LICENSE-APACHE), T087 (LICENSE-MIT)
 
 yoke 0.8.4
   Declared licence: Unicode-3.0
   Source: https://github.com/unicode-org/icu4x
-  Notice texts: T113 (LICENSE)
+  Notice texts: T126 (LICENSE)
 
 zerofrom 0.1.8
   Declared licence: Unicode-3.0
   Source: https://github.com/unicode-org/icu4x
-  Notice texts: T113 (LICENSE)
+  Notice texts: T126 (LICENSE)
 
 zeroize 1.9.1
   Declared licence: Apache-2.0 OR MIT
   Source: https://github.com/RustCrypto/utils
-  Notice texts: T017 (LICENSE-APACHE), T075 (LICENSE-MIT)
+  Notice texts: T020 (LICENSE-APACHE), T081 (LICENSE-MIT)
 
 zerotrie 0.2.5
   Declared licence: Unicode-3.0
   Source: https://github.com/unicode-org/icu4x
-  Notice texts: T113 (LICENSE)
+  Notice texts: T126 (LICENSE)
 
 zerovec 0.11.9
   Declared licence: Unicode-3.0
   Source: https://github.com/unicode-org/icu4x
-  Notice texts: T113 (LICENSE)
+  Notice texts: T126 (LICENSE)
 
 zmij 1.0.23
   Declared licence: MIT
   Source: https://github.com/dtolnay/zmij
-  Notice texts: T022 (LICENSE-MIT)
+  Notice texts: T025 (LICENSE-MIT)
 
 Rust standard library
 
@@ -917,39 +982,39 @@ JavaScript package
 @tauri-apps/api 2.12.4
   Declared licence: Apache-2.0 OR MIT
   Source: git+https://github.com/tauri-apps/tauri.git
-  Notice texts: T040 (LICENSE-APACHE-2.0), T085 (LICENSE-MIT)
+  Notice texts: T043 (LICENSE-APACHE-2.0), T091 (LICENSE-MIT)
 
 lucide-react 1.70.0
   Declared licence: ISC
   Source: https://github.com/lucide-icons/lucide.git
-  Notice texts: T127 (LICENSE)
+  Notice texts: T142 (LICENSE)
 
 react 19.3.1
   Declared licence: MIT
   Source: https://github.com/react/react.git
-  Notice texts: T115 (LICENSE)
+  Notice texts: T128 (LICENSE)
 
 react-dom 19.3.1
   Declared licence: MIT
   Source: https://github.com/react/react.git
-  Notice texts: T115 (LICENSE)
+  Notice texts: T128 (LICENSE)
 
 scheduler 0.28.0
   Declared licence: MIT
   Source: https://github.com/react/react.git
-  Notice texts: T115 (LICENSE)
+  Notice texts: T128 (LICENSE)
 
 Bundled font
 
 IBM Plex Mono woff2
   Declared licence: OFL-1.1
   Source: https://github.com/IBM/plex
-  Notice texts: T069 (LICENSES/IBM-PLEX-MONO-OFL.txt)
+  Notice texts: T075 (LICENSES/IBM-PLEX-MONO-OFL.txt)
 
 Manrope Variable woff2
   Declared licence: OFL-1.1
   Source: https://github.com/sharanda/manrope
-  Notice texts: T020 (LICENSES/MANROPE-OFL.txt)
+  Notice texts: T023 (LICENSES/MANROPE-OFL.txt)
 
 Licence and notice texts
 ------------------------
@@ -1050,7 +1115,35 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T005 ---- used by: uuid 1.29.1
+---- T005 ---- used by: chacha20 0.10.2
+
+Copyright (c) 2019-2026 The RustCrypto Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+---- T006 ---- used by: uuid 1.29.1
 
 Copyright (c) 2014 The Rust Project Developers
 Copyright (c) 2018 Ashley Mannix, Christopher Armstrong, Dylan DPC, Hunar Roop Kahlon
@@ -1079,7 +1172,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T006 ---- used by: quick-xml 0.42.0
+---- T007 ---- used by: quick-xml 0.42.0
 
 The MIT License (MIT)
 
@@ -1105,7 +1198,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
----- T007 ---- used by: bitflags 2.13.2, glob 0.3.4, log 0.4.35, num-traits 0.2.19, regex 1.13.1, regex-automata 0.4.18, regex-syntax 0.8.11
+---- T008 ---- used by: bitflags 2.13.2, glob 0.3.4, log 0.4.35, num-traits 0.2.19, regex 1.13.1, regex-automata 0.4.18, regex-syntax 0.8.11
 
 Copyright (c) 2014 The Rust Project Developers
 
@@ -1133,7 +1226,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T008 ---- used by: aho-corasick 1.1.5, memchr 2.8.3, walkdir 2.5.0
+---- T009 ---- used by: aho-corasick 1.1.5, memchr 2.8.3, walkdir 2.5.0
 
 The MIT License (MIT)
 
@@ -1157,7 +1250,197 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
----- T009 ---- used by: json-patch 4.2.0
+---- T010 ---- used by: rand_core 0.10.1
+
+Apache License
+                        Version 2.0, January 2004
+                     https://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+   "License" shall mean the terms and conditions for use, reproduction,
+   and distribution as defined by Sections 1 through 9 of this document.
+
+   "Licensor" shall mean the copyright owner or entity authorized by
+   the copyright owner that is granting the License.
+
+   "Legal Entity" shall mean the union of the acting entity and all
+   other entities that control, are controlled by, or are under common
+   control with that entity. For the purposes of this definition,
+   "control" means (i) the power, direct or indirect, to cause the
+   direction or management of such entity, whether by contract or
+   otherwise, or (ii) ownership of fifty percent (50%) or more of the
+   outstanding shares, or (iii) beneficial ownership of such entity.
+
+   "You" (or "Your") shall mean an individual or Legal Entity
+   exercising permissions granted by this License.
+
+   "Source" form shall mean the preferred form for making modifications,
+   including but not limited to software source code, documentation
+   source, and configuration files.
+
+   "Object" form shall mean any form resulting from mechanical
+   transformation or translation of a Source form, including but
+   not limited to compiled object code, generated documentation,
+   and conversions to other media types.
+
+   "Work" shall mean the work of authorship, whether in Source or
+   Object form, made available under the License, as indicated by a
+   copyright notice that is included in or attached to the work
+   (an example is provided in the Appendix below).
+
+   "Derivative Works" shall mean any work, whether in Source or Object
+   form, that is based on (or derived from) the Work and for which the
+   editorial revisions, annotations, elaborations, or other modifications
+   represent, as a whole, an original work of authorship. For the purposes
+   of this License, Derivative Works shall not include works that remain
+   separable from, or merely link (or bind by name) to the interfaces of,
+   the Work and Derivative Works thereof.
+
+   "Contribution" shall mean any work of authorship, including
+   the original version of the Work and any modifications or additions
+   to that Work or Derivative Works thereof, that is intentionally
+   submitted to Licensor for inclusion in the Work by the copyright owner
+   or by an individual or Legal Entity authorized to submit on behalf of
+   the copyright owner. For the purposes of this definition, "submitted"
+   means any form of electronic, verbal, or written communication sent
+   to the Licensor or its representatives, including but not limited to
+   communication on electronic mailing lists, source code control systems,
+   and issue tracking systems that are managed by, or on behalf of, the
+   Licensor for the purpose of discussing and improving the Work, but
+   excluding communication that is conspicuously marked or otherwise
+   designated in writing by the copyright owner as "Not a Contribution."
+
+   "Contributor" shall mean Licensor and any individual or Legal Entity
+   on behalf of whom a Contribution has been received by Licensor and
+   subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   copyright license to reproduce, prepare Derivative Works of,
+   publicly display, publicly perform, sublicense, and distribute the
+   Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   (except as stated in this section) patent license to make, have made,
+   use, offer to sell, sell, import, and otherwise transfer the Work,
+   where such license applies only to those patent claims licensable
+   by such Contributor that are necessarily infringed by their
+   Contribution(s) alone or by combination of their Contribution(s)
+   with the Work to which such Contribution(s) was submitted. If You
+   institute patent litigation against any entity (including a
+   cross-claim or counterclaim in a lawsuit) alleging that the Work
+   or a Contribution incorporated within the Work constitutes direct
+   or contributory patent infringement, then any patent licenses
+   granted to You under this License for that Work shall terminate
+   as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the
+   Work or Derivative Works thereof in any medium, with or without
+   modifications, and in Source or Object form, provided that You
+   meet the following conditions:
+
+   (a) You must give any other recipients of the Work or
+       Derivative Works a copy of this License; and
+
+   (b) You must cause any modified files to carry prominent notices
+       stating that You changed the files; and
+
+   (c) You must retain, in the Source form of any Derivative Works
+       that You distribute, all copyright, patent, trademark, and
+       attribution notices from the Source form of the Work,
+       excluding those notices that do not pertain to any part of
+       the Derivative Works; and
+
+   (d) If the Work includes a "NOTICE" text file as part of its
+       distribution, then any Derivative Works that You distribute must
+       include a readable copy of the attribution notices contained
+       within such NOTICE file, excluding those notices that do not
+       pertain to any part of the Derivative Works, in at least one
+       of the following places: within a NOTICE text file distributed
+       as part of the Derivative Works; within the Source form or
+       documentation, if provided along with the Derivative Works; or,
+       within a display generated by the Derivative Works, if and
+       wherever such third-party notices normally appear. The contents
+       of the NOTICE file are for informational purposes only and
+       do not modify the License. You may add Your own attribution
+       notices within Derivative Works that You distribute, alongside
+       or as an addendum to the NOTICE text from the Work, provided
+       that such additional attribution notices cannot be construed
+       as modifying the License.
+
+   You may add Your own copyright statement to Your modifications and
+   may provide additional or different license terms and conditions
+   for use, reproduction, or distribution of Your modifications, or
+   for any such Derivative Works as a whole, provided Your use,
+   reproduction, and distribution of the Work otherwise complies with
+   the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise,
+   any Contribution intentionally submitted for inclusion in the Work
+   by You to the Licensor shall be under the terms and conditions of
+   this License, without any additional terms or conditions.
+   Notwithstanding the above, nothing herein shall supersede or modify
+   the terms of any separate license agreement you may have executed
+   with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade
+   names, trademarks, service marks, or product names of the Licensor,
+   except as required for reasonable and customary use in describing the
+   origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or
+   agreed to in writing, Licensor provides the Work (and each
+   Contributor provides its Contributions) on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+   implied, including, without limitation, any warranties or conditions
+   of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+   PARTICULAR PURPOSE. You are solely responsible for determining the
+   appropriateness of using or redistributing the Work and assume any
+   risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory,
+   whether in tort (including negligence), contract, or otherwise,
+   unless required by applicable law (such as deliberate and grossly
+   negligent acts) or agreed to in writing, shall any Contributor be
+   liable to You for damages, including any direct, indirect, special,
+   incidental, or consequential damages of any character arising as a
+   result of this License or out of the use or inability to use the
+   Work (including but not limited to damages for loss of goodwill,
+   work stoppage, computer failure or malfunction, or any and all
+   other commercial damages or losses), even if such Contributor
+   has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing
+   the Work or Derivative Works thereof, You may choose to offer,
+   and charge a fee for, acceptance of support, warranty, indemnity,
+   or other liability obligations and/or rights consistent with this
+   License. However, in accepting such obligations, You may act only
+   on Your own behalf and on Your sole responsibility, not on behalf
+   of any other Contributor, and only if You agree to indemnify,
+   defend, and hold each Contributor harmless for any liability
+   incurred by, or claims asserted against, such Contributor by reason
+   of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+
+APPENDIX: How to apply the Apache License to your work.
+
+   To apply the Apache License to your work, attach the following
+   boilerplate notice, with the fields enclosed by brackets "[]"
+   replaced with your own identifying information. (Don't include
+   the brackets!)  The text should be enclosed in the appropriate
+   comment syntax for the file format. We also recommend that a
+   file or class name and description of purpose be included on the
+   same "printed page" as the copyright notice for easier
+   identification within third-party archives.
+
+---- T011 ---- used by: json-patch 4.2.0
 
 MIT License
 
@@ -1181,7 +1464,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T010 ---- used by: rfd 0.17.2
+---- T012 ---- used by: rfd 0.17.2
 
 MIT License
 
@@ -1205,7 +1488,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T011 ---- used by: deranged 0.5.9
+---- T013 ---- used by: deranged 0.5.9
 
 Copyright (c) 2024 Jacob Pratt et al.
 
@@ -1227,7 +1510,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T012 ---- used by: flate2 1.1.11
+---- T014 ---- used by: flate2 1.1.11
 
 Copyright (c) 2014-2026 Alex Crichton
 
@@ -1255,7 +1538,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T013 ---- used by: adler2 2.0.1
+---- T015 ---- used by: adler2 2.0.1
 
 Apache License
                         Version 2.0, January 2004
@@ -1459,7 +1742,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
----- T014 ---- used by: siphasher 1.0.4
+---- T016 ---- used by: siphasher 1.0.4
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -1479,7 +1762,22 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T015 ---- used by: siphasher 1.0.4
+---- T017 ---- used by: rand 0.10.4
+
+Copyrights in the Rand project are retained by their contributors. No
+copyright assignment is required to contribute to the Rand project.
+
+For full authorship information, see the version control history.
+
+Except as otherwise noted (below and/or in individual files), Rand is
+licensed under the Apache License, Version 2.0 <LICENSE-APACHE> or
+<http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+<LICENSE-MIT> or <http://opensource.org/licenses/MIT>, at your option.
+
+The Rand project includes code from the Rust project
+published under these same licenses.
+
+---- T018 ---- used by: siphasher 1.0.4
 
 Copyright 2012-2016 The Rust Project Developers.
 Copyright 2016-2026 Frank Denis.
@@ -1489,7 +1787,7 @@ http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
 <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
 option.
 
----- T016 ---- used by: subtle 2.6.1
+---- T019 ---- used by: subtle 2.6.1
 
 Copyright (c) 2016-2017 Isis Agora Lovecruft, Henry de Valence. All rights reserved.
 Copyright (c) 2016-2024 Isis Agora Lovecruft. All rights reserved.
@@ -1521,7 +1819,7 @@ LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
 NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
----- T017 ---- used by: cpal 0.18.2, embed_plist 1.2.2, serialize-to-javascript 0.1.2, siphasher 1.0.4, ureq 3.5.1, ureq-proto 0.7.1, utf8_iter 1.1.0, utf_types 1.0.0, zeroize 1.9.1
+---- T020 ---- used by: cpal 0.18.2, embed_plist 1.2.2, serialize-to-javascript 0.1.2, siphasher 1.0.4, ureq 3.5.1, ureq-proto 0.7.1, utf8_iter 1.1.0, utf_types 1.0.0, zeroize 1.9.1
 
 Apache License
                            Version 2.0, January 2004
@@ -1725,7 +2023,7 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
----- T018 ---- used by: ureq 3.5.1
+---- T021 ---- used by: ureq 3.5.1
 
 MIT License
 
@@ -1749,7 +2047,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T019 ---- used by: brotli 9.1.1
+---- T022 ---- used by: brotli 9.1.1
 
 Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors.
 
@@ -1771,7 +2069,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
----- T020 ---- used by: Manrope Variable woff2
+---- T023 ---- used by: Manrope Variable woff2
 
 Copyright 2019 The Manrope Project Authors (https://github.com/sharanda/manrope)
 
@@ -1867,7 +2165,7 @@ DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 
----- T021 ---- used by: base64 0.23.1
+---- T024 ---- used by: base64 0.23.1
 
 The MIT License (MIT)
 
@@ -1891,7 +2189,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
----- T022 ---- used by: adler2 2.0.1, anyhow 1.0.104, erased-serde 0.4.11, itoa 1.0.18, once_cell 1.21.4, pin-project-lite 0.2.17, rtrb 0.4.1, semver 1.0.28, serde 1.0.229, serde-untagged 0.1.9, serde_core 1.0.229, serde_json 1.0.154, thiserror 2.0.21, typeid 1.0.3, utf8-zero 0.8.1, zmij 1.0.23
+---- T025 ---- used by: adler2 2.0.1, anyhow 1.0.104, erased-serde 0.4.11, itoa 1.0.18, once_cell 1.21.4, pin-project-lite 0.2.17, rtrb 0.4.1, semver 1.0.28, serde 1.0.229, serde-untagged 0.1.9, serde_core 1.0.229, serde_json 1.0.154, thiserror 2.0.21, typeid 1.0.3, utf8-zero 0.8.1, zmij 1.0.23
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -1917,7 +2215,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T023 ---- used by: keyboard-types 0.8.3
+---- T026 ---- used by: keyboard-types 0.8.3
 
 Copyright (c) 2017 Pyfisch
 
@@ -1939,7 +2237,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
----- T024 ---- used by: web-time 1.1.0
+---- T027 ---- used by: web-time 1.1.0
 
 MIT License
 
@@ -1963,7 +2261,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T025 ---- used by: form_urlencoded 1.2.2
+---- T028 ---- used by: form_urlencoded 1.2.2
 
 Copyright (c) 2013-2016 The rust-url developers
 
@@ -1991,7 +2289,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T026 ---- used by: security-framework 3.7.0, security-framework-sys 2.17.0
+---- T029 ---- used by: security-framework 3.7.0, security-framework-sys 2.17.0
 
 The MIT License (MIT)
 
@@ -2014,7 +2312,7 @@ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
----- T027 ---- used by: rustls-webpki 0.103.16
+---- T030 ---- used by: rustls-webpki 0.103.16
 
 Except as otherwise noted, this project is licensed under the following
 (ISC-style) terms:
@@ -2036,7 +2334,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 The files under third-party/chromium are licensed as described in
 third-party/chromium/LICENSE.
 
----- T028 ---- used by: core-foundation 0.10.1, core-foundation-sys 0.8.7, core-graphics 0.25.0, core-graphics-types 0.2.0
+---- T031 ---- used by: core-foundation 0.10.1, core-foundation-sys 0.8.7, core-graphics 0.25.0, core-graphics-types 0.2.0
 
 Copyright (c) 2012-2013 Mozilla Foundation
 
@@ -2064,7 +2362,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T029 ---- used by: cfb 0.14.0
+---- T032 ---- used by: cfb 0.14.0
 
 MIT License
 
@@ -2088,7 +2386,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T030 ---- used by: tokio 1.54.1
+---- T033 ---- used by: tokio 1.54.1
 
 MIT License
 
@@ -2112,7 +2410,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T031 ---- used by: sha2 0.10.9
+---- T034 ---- used by: sha2 0.10.9
 
 Copyright (c) 2006-2009 Graydon Hoare
 Copyright (c) 2009-2013 Mozilla Foundation
@@ -2142,7 +2440,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T032 ---- used by: rustls-pki-types 1.15.1
+---- T035 ---- used by: rustls-pki-types 1.15.1
 
 Apache License
                         Version 2.0, January 2004
@@ -2346,7 +2644,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
----- T033 ---- used by: equivalent 1.0.3
+---- T036 ---- used by: equivalent 1.0.3
 
 Copyright (c) 2016--2023
 
@@ -2374,7 +2672,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T034 ---- used by: serde_spanned 1.1.3, toml 1.2.1+spec-1.1.0, toml_datetime 1.1.3+spec-1.1.0, toml_parser 1.1.5+spec-1.1.0, toml_writer 1.2.0+spec-1.1.0
+---- T037 ---- used by: serde_spanned 1.1.3, toml 1.2.1+spec-1.1.0, toml_datetime 1.1.3+spec-1.1.0, toml_parser 1.1.5+spec-1.1.0, toml_writer 1.2.0+spec-1.1.0
 
 Copyright (c) Individual contributors
 
@@ -2396,7 +2694,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T035 ---- used by: ring 0.17.14
+---- T038 ---- used by: ring 0.17.14
 
 Apache License
                            Version 2.0, January 2004
@@ -2670,7 +2968,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
----- T036 ---- used by: getrandom 0.2.17
+---- T039 ---- used by: getrandom 0.2.17
 
 Copyright (c) 2018-2024 The rust-random Project Developers
 Copyright (c) 2014 The Rust Project Developers
@@ -2699,7 +2997,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T037 ---- used by: cookie 0.18.2
+---- T040 ---- used by: cookie 0.18.2
 
 Copyright (c) 2017 Sergio Benitez
 Copyright (c) 2014 Alex Crichton
@@ -2728,7 +3026,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T038 ---- used by: utf_types 1.0.0
+---- T041 ---- used by: utf_types 1.0.0
 
 Copyright Mozilla Foundation
 
@@ -2751,7 +3049,7 @@ limitations under the Licenses.
 Test code is dedicated to the Public Domain when so designated (see
 the individual files for PD/CC0-dedicated sections).
 
----- T039 ---- used by: powerfmt 0.2.1
+---- T042 ---- used by: powerfmt 0.2.1
 
 Apache License
                            Version 2.0, January 2004
@@ -2955,7 +3253,7 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
----- T040 ---- used by: fdeflate 0.3.7, miniz_oxide 0.8.9, miniz_oxide 0.9.1, num-conv 0.2.2, pin-project-lite 0.2.17, raw-window-handle 0.6.2, tauri 2.12.5, tauri-plugin-dialog 2.8.4, tauri-plugin-fs 2.7.1, tauri-runtime 2.12.2, tauri-runtime-wry 2.12.3, tauri-utils 2.10.2, time 0.3.55, time-core 0.1.9, @tauri-apps/api 2.12.4
+---- T043 ---- used by: fdeflate 0.3.7, miniz_oxide 0.8.9, miniz_oxide 0.9.1, num-conv 0.2.2, pin-project-lite 0.2.17, raw-window-handle 0.6.2, tauri 2.12.5, tauri-plugin-dialog 2.8.4, tauri-plugin-fs 2.7.1, tauri-runtime 2.12.2, tauri-runtime-wry 2.12.3, tauri-utils 2.10.2, time 0.3.55, time-core 0.1.9, @tauri-apps/api 2.12.4
 
 Apache License
                            Version 2.0, January 2004
@@ -3134,7 +3432,7 @@ Apache License
 
    END OF TERMS AND CONDITIONS
 
----- T041 ---- used by: num-conv 0.2.2
+---- T044 ---- used by: num-conv 0.2.2
 
 Copyright (c) Jacob Pratt
 
@@ -3156,7 +3454,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T042 ---- used by: indexmap 2.14.2
+---- T045 ---- used by: indexmap 2.14.2
 
 Copyright (c) 2016--2017
 
@@ -3184,7 +3482,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T043 ---- used by: bytes 1.12.1
+---- T046 ---- used by: bytes 1.12.1
 
 Copyright (c) 2018 Carl Lerche
 
@@ -3212,7 +3510,38 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T044 ---- used by: core-graphics 0.25.0
+---- T047 ---- used by: sha1 0.11.0
+
+Copyright (c) 2016-2026 The RustCrypto Project Developers
+Copyright (c) 2016 Artyom Pavlov
+Copyright (c) 2009-2013 Mozilla Foundation
+Copyright (c) 2006-2009 Graydon Hoare
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+---- T048 ---- used by: core-graphics 0.25.0
 
 Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
 http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
@@ -3220,7 +3549,7 @@ http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
 option. All files in the project carrying such notice may not be
 copied, modified, or distributed except according to those terms.
 
----- T045 ---- used by: crossbeam-channel 0.5.17, crossbeam-utils 0.8.23
+---- T049 ---- used by: crossbeam-channel 0.5.17, crossbeam-utils 0.8.23
 
 The MIT License (MIT)
 
@@ -3250,7 +3579,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T046 ---- used by: plist 1.10.3
+---- T050 ---- used by: plist 1.10.3
 
 Copyright (c) 2015 Edward Barnard
 
@@ -3272,7 +3601,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T047 ---- used by: stable_deref_trait 1.2.1
+---- T051 ---- used by: stable_deref_trait 1.2.1
 
 Copyright (c) 2017 Robert Grosse
 
@@ -3300,7 +3629,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T048 ---- used by: jsonptr 0.7.1
+---- T052 ---- used by: jsonptr 0.7.1
 
 Apache License
                            Version 2.0, January 2004
@@ -3504,7 +3833,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
----- T049 ---- used by: block-buffer 0.10.4
+---- T053 ---- used by: block-buffer 0.10.4
 
 Copyright (c) 2018-2019 The RustCrypto Project Developers
 
@@ -3532,7 +3861,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T050 ---- used by: simd-adler32 0.3.10
+---- T054 ---- used by: simd-adler32 0.3.10
 
 MIT License
 
@@ -3556,7 +3885,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T051 ---- used by: cpufeatures 0.2.17
+---- T055 ---- used by: cpufeatures 0.2.17
 
 Copyright (c) 2020-2025 The RustCrypto Project Developers
 
@@ -3584,13 +3913,13 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T052 ---- used by: aho-corasick 1.1.5, memchr 2.8.3, same-file 1.0.6, walkdir 2.5.0
+---- T056 ---- used by: aho-corasick 1.1.5, memchr 2.8.3, same-file 1.0.6, walkdir 2.5.0
 
 This project is dual-licensed under the Unlicense and MIT licenses.
 
 You may use this code under the terms of either license.
 
----- T053 ---- used by: typenum 1.20.1
+---- T057 ---- used by: typenum 1.20.1
 
 Apache License
                         Version 2.0, January 2004
@@ -3794,7 +4123,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
----- T054 ---- used by: crypto-common 0.1.7
+---- T058 ---- used by: crypto-common 0.1.7
 
 Copyright (c) 2021 RustCrypto Developers
 
@@ -3822,7 +4151,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T055 ---- used by: alloc-no-stdlib 3.0.0, brotli 9.1.1, brotli-decompressor 6.3.0
+---- T059 ---- used by: alloc-no-stdlib 3.0.0, brotli 9.1.1, brotli-decompressor 6.3.0
 
 Copyright (c) 2016 Dropbox, Inc.
 All rights reserved.
@@ -3837,7 +4166,7 @@ Redistribution and use in source and binary forms, with or without modification,
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
----- T056 ---- used by: dunce 1.0.5
+---- T060 ---- used by: dunce 1.0.5
 
 Creative Commons Legal Code
 
@@ -3961,7 +4290,7 @@ express Statement of Purpose.
     party to this document and has no duty or obligation with respect to
     this CC0 or use of the Work.
 
----- T057 ---- used by: crc32fast 1.5.4, ctor 1.0.13, dpi 0.1.2, foreign-types 0.5.0, foreign-types-shared 0.3.1, json-patch 4.2.0, tao 0.37.2
+---- T061 ---- used by: crc32fast 1.5.4, ctor 1.0.13, dpi 0.1.2, foreign-types 0.5.0, foreign-types-shared 0.3.1, json-patch 4.2.0, tao 0.37.2
 
 Apache License
                            Version 2.0, January 2004
@@ -4165,7 +4494,7 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
----- T058 ---- used by: powerfmt 0.2.1
+---- T062 ---- used by: powerfmt 0.2.1
 
 Copyright (c) 2023 Jacob Pratt et al.
 
@@ -4187,7 +4516,35 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T059 ---- used by: same-file 1.0.6
+---- T063 ---- used by: rand_core 0.10.1
+
+Copyright (c) 2018-2026 The Rand Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+---- T064 ---- used by: same-file 1.0.6
 
 The MIT License (MIT)
 
@@ -4211,7 +4568,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
----- T060 ---- used by: getrandom 0.3.4
+---- T065 ---- used by: getrandom 0.3.4
 
 Copyright (c) 2018-2025 The rust-random Project Developers
 Copyright (c) 2014 The Rust Project Developers
@@ -4240,7 +4597,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T061 ---- used by: ring 0.17.14
+---- T066 ---- used by: ring 0.17.14
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -4266,7 +4623,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T062 ---- used by: miniz_oxide 0.8.9, miniz_oxide 0.9.1
+---- T067 ---- used by: miniz_oxide 0.8.9, miniz_oxide 0.9.1
 
 MIT License
 
@@ -4294,7 +4651,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T063 ---- used by: dirs 7.0.0, dirs-sys 0.5.0
+---- T068 ---- used by: dirs 7.0.0, dirs-sys 0.5.0
 
 Apache License
                         Version 2.0, January 2004
@@ -4471,7 +4828,7 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
    incurred by, or claims asserted against, such Contributor by reason
    of your accepting any such warranty or additional liability.
 
----- T064 ---- used by: utf8_iter 1.1.0
+---- T069 ---- used by: utf8_iter 1.1.0
 
 Copyright Mozilla Foundation
 
@@ -4516,7 +4873,35 @@ licensed under the Apache License, Version 2.0 <LICENSE-APACHE> or
 <http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
 <LICENSE-MIT> or <http://opensource.org/licenses/MIT>, at your option.
 
----- T065 ---- used by: serialize-to-javascript 0.1.2
+---- T070 ---- used by: block-buffer 0.12.1
+
+Copyright (c) 2018-2025 The RustCrypto Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+---- T071 ---- used by: serialize-to-javascript 0.1.2
 
 MIT License
 
@@ -4540,7 +4925,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T066 ---- used by: fdeflate 0.3.7
+---- T072 ---- used by: fdeflate 0.3.7
 
 MIT License
 
@@ -4568,7 +4953,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T067 ---- used by: infer 0.22.0
+---- T073 ---- used by: infer 0.22.0
 
 MIT License
 
@@ -4592,7 +4977,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T068 ---- used by: idna 1.1.0, percent-encoding 2.3.2, url 2.5.8
+---- T074 ---- used by: idna 1.1.0, percent-encoding 2.3.2, url 2.5.8
 
 Copyright (c) 2013-2025 The rust-url developers
 
@@ -4620,7 +5005,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T069 ---- used by: IBM Plex Mono woff2
+---- T075 ---- used by: IBM Plex Mono woff2
 
 Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-ThinItalic.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-ExtraLight.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-ExtraLightItalic.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-Light.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-LightItalic.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-Regular.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-Italic.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-Medium.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-MediumItalic.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-SemiBold.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-SemiBoldItalic.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-Bold.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-BoldItalic.ttf: Copyright 2017 IBM Corp. All rights reserved.
 
@@ -4716,7 +5101,7 @@ DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 
----- T070 ---- used by: utf8_iter 1.1.0, utf_types 1.0.0
+---- T076 ---- used by: utf8_iter 1.1.0, utf_types 1.0.0
 
 Copyright Mozilla Foundation
 
@@ -4744,7 +5129,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T071 ---- used by: smallvec 1.16.5
+---- T077 ---- used by: smallvec 1.16.5
 
 Copyright (c) 2018 The Servo Project Developers
 
@@ -4772,7 +5157,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T072 ---- used by: time 0.3.55, time-core 0.1.9
+---- T078 ---- used by: time 0.3.55, time-core 0.1.9
 
 Copyright (c) Jacob Pratt et al.
 
@@ -4794,7 +5179,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T073 ---- used by: png 0.18.1
+---- T079 ---- used by: png 0.18.1
 
 Copyright (c) 2015 nwin
 
@@ -4822,7 +5207,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T074 ---- used by: raw-window-handle 0.6.2
+---- T080 ---- used by: raw-window-handle 0.6.2
 
 Copyright (c) 2020 Osspial
 
@@ -4836,7 +5221,7 @@ Permission is granted to anyone to use this software for any purpose, including 
 
 3. This notice may not be removed or altered from any source distribution.
 
----- T075 ---- used by: zeroize 1.9.1
+---- T081 ---- used by: zeroize 1.9.1
 
 Copyright (c) 2018-2026 The RustCrypto Project Developers
 
@@ -4864,7 +5249,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T076 ---- used by: cfg-if 1.0.5
+---- T082 ---- used by: cfg-if 1.0.5
 
 Copyright (c) 2014 Alex Crichton
 
@@ -4892,7 +5277,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T077 ---- used by: httparse 1.10.1
+---- T083 ---- used by: httparse 1.10.1
 
 Copyright (c) 2015-2025 Sean McArthur
 
@@ -4914,7 +5299,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
----- T078 ---- used by: muda 0.20.0
+---- T084 ---- used by: muda 0.20.0
 
 MIT License
 
@@ -4938,7 +5323,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T079 ---- used by: anyhow 1.0.104, erased-serde 0.4.11, itoa 1.0.18, libc 0.2.191, mach2 0.6.0, semver 1.0.28, serde 1.0.229, serde-untagged 0.1.9, serde_core 1.0.229, serde_json 1.0.154, thiserror 2.0.21, typeid 1.0.3, utf8-zero 0.8.1
+---- T085 ---- used by: anyhow 1.0.104, erased-serde 0.4.11, itoa 1.0.18, libc 0.2.191, mach2 0.6.0, semver 1.0.28, serde 1.0.229, serde-untagged 0.1.9, serde_core 1.0.229, serde_json 1.0.154, thiserror 2.0.21, typeid 1.0.3, utf8-zero 0.8.1
 
 Apache License
                         Version 2.0, January 2004
@@ -5117,7 +5502,7 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 
 END OF TERMS AND CONDITIONS
 
----- T080 ---- used by: option-ext 0.2.0
+---- T086 ---- used by: option-ext 0.2.0
 
 Mozilla Public License Version 2.0
 ==================================
@@ -5493,7 +5878,7 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   This Source Code Form is "Incompatible With Secondary Licenses", as
   defined by the Mozilla Public License, v. 2.0.
 
----- T081 ---- used by: wry 0.57.1
+---- T087 ---- used by: wry 0.57.1
 
 MIT License
 
@@ -5517,7 +5902,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T082 ---- used by: winnow 1.0.5
+---- T088 ---- used by: winnow 1.0.5
 
 Permission is hereby granted, free of charge, to any person obtaining
 a copy of this software and associated documentation files (the
@@ -5538,7 +5923,7 @@ LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
----- T083 ---- used by: typenum 1.20.1
+---- T089 ---- used by: typenum 1.20.1
 
 The MIT License (MIT)
 
@@ -5562,7 +5947,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T084 ---- used by: http 1.5.0
+---- T090 ---- used by: http 1.5.0
 
 Apache License
                         Version 2.0, January 2004
@@ -5766,7 +6151,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
----- T085 ---- used by: tauri 2.12.5, tauri-plugin-dialog 2.8.4, tauri-plugin-fs 2.7.1, tauri-runtime 2.12.2, tauri-runtime-wry 2.12.3, tauri-utils 2.10.2, @tauri-apps/api 2.12.4
+---- T091 ---- used by: tauri 2.12.5, tauri-plugin-dialog 2.8.4, tauri-plugin-fs 2.7.1, tauri-runtime 2.12.2, tauri-runtime-wry 2.12.3, tauri-utils 2.10.2, @tauri-apps/api 2.12.4
 
 MIT License
 
@@ -5790,7 +6175,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T086 ---- used by: mach2 0.6.0
+---- T092 ---- used by: mach2 0.6.0
 
 Copyright (c) 2019 Nick Fitzgerald, 2021 Yuki Okushi
 
@@ -5818,7 +6203,36 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T087 ---- used by: base64 0.23.1, bitflags 2.13.2, cfg-if 1.0.5, core-foundation 0.10.1, core-foundation-sys 0.8.7, core-graphics 0.25.0, core-graphics-types 0.2.0, coreaudio-rs 0.14.2, crossbeam-channel 0.5.17, crossbeam-utils 0.8.23, equivalent 1.0.3, flate2 1.1.11, fnv 1.0.7, form_urlencoded 1.2.2, glob 0.3.4, hashbrown 0.17.1, heck 0.5.0, httparse 1.10.1, idna 1.1.0, idna_adapter 1.2.2, indexmap 2.14.2, keyboard-types 0.8.3, log 0.4.35, mime 0.3.18, muda 0.20.0, num-traits 0.2.19, once_cell 1.21.4, percent-encoding 2.3.2, png 0.18.1, regex 1.13.1, regex-automata 0.4.18, regex-syntax 0.8.11, ring 0.17.14, rtrb 0.4.1, rustls 0.23.46, security-framework 3.7.0, security-framework-sys 2.17.0, serde_with 3.24.0, smallvec 1.16.5, stable_deref_trait 1.2.1, url 2.5.8, uuid 1.29.1, window-vibrancy 0.8.1, wry 0.57.1
+---- T093 ---- used by: getrandom 0.4.3
+
+Copyright (c) 2018-2026 The rust-random Project Developers
+Copyright (c) 2014 The Rust Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+---- T094 ---- used by: base64 0.23.1, bitflags 2.13.2, cfg-if 1.0.5, core-foundation 0.10.1, core-foundation-sys 0.8.7, core-graphics 0.25.0, core-graphics-types 0.2.0, coreaudio-rs 0.14.2, crossbeam-channel 0.5.17, crossbeam-utils 0.8.23, equivalent 1.0.3, flate2 1.1.11, fnv 1.0.7, form_urlencoded 1.2.2, glob 0.3.4, hashbrown 0.17.1, heck 0.5.0, httparse 1.10.1, idna 1.1.0, idna_adapter 1.2.2, indexmap 2.14.2, keyboard-types 0.8.3, log 0.4.35, mime 0.3.18, muda 0.20.0, num-traits 0.2.19, once_cell 1.21.4, percent-encoding 2.3.2, png 0.18.1, regex 1.13.1, regex-automata 0.4.18, regex-syntax 0.8.11, ring 0.17.14, rtrb 0.4.1, rustls 0.23.46, security-framework 3.7.0, security-framework-sys 2.17.0, serde_with 3.24.0, smallvec 1.16.5, stable_deref_trait 1.2.1, tungstenite 0.30.0, url 2.5.8, uuid 1.29.1, window-vibrancy 0.8.1, wry 0.57.1
 
 Apache License
                         Version 2.0, January 2004
@@ -6022,7 +6436,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
----- T088 ---- used by: crc32fast 1.5.4
+---- T095 ---- used by: crc32fast 1.5.4
 
 MIT License
 
@@ -6046,7 +6460,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T089 ---- used by: serde_spanned 1.1.3, toml 1.2.1+spec-1.1.0, toml_datetime 1.1.3+spec-1.1.0, toml_parser 1.1.5+spec-1.1.0, toml_writer 1.2.0+spec-1.1.0
+---- T096 ---- used by: serde_spanned 1.1.3, toml 1.2.1+spec-1.1.0, toml_datetime 1.1.3+spec-1.1.0, toml_parser 1.1.5+spec-1.1.0, toml_writer 1.2.0+spec-1.1.0
 
 Apache License
                            Version 2.0, January 2004
@@ -6250,7 +6664,7 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
----- T090 ---- used by: digest 0.10.7
+---- T097 ---- used by: digest 0.10.7
 
 Copyright (c) 2017 Artyom Pavlov
 
@@ -6278,7 +6692,60 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T091 ---- used by: untrusted 0.9.0
+---- T098 ---- used by: data-encoding 2.11.1
+
+The MIT License (MIT)
+
+Copyright (c) 2015-2020 Julien Cretin
+Copyright (c) 2017-2020 Google Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---- T099 ---- used by: hybrid-array 0.4.15
+
+Copyright (c) 2022-2026 The RustCrypto Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+---- T100 ---- used by: untrusted 0.9.0
 
 // Copyright 2015-2016 Brian Smith.
 //
@@ -6294,7 +6761,7 @@ DEALINGS IN THE SOFTWARE.
 // ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 // OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
----- T092 ---- used by: adler2 2.0.1
+---- T101 ---- used by: adler2 2.0.1
 
 Copyright (C) Jonas Schievink <jonasschievink@gmail.com>
 
@@ -6309,7 +6776,7 @@ WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
 AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
 OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
----- T093 ---- used by: embed_plist 1.2.2
+---- T102 ---- used by: embed_plist 1.2.2
 
 MIT License
 
@@ -6333,7 +6800,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T094 ---- used by: mime 0.3.18
+---- T103 ---- used by: mime 0.3.18
 
 Copyright (c) 2014 Sean McArthur
 
@@ -6355,7 +6822,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
----- T095 ---- used by: rustls 0.23.46
+---- T104 ---- used by: rustls 0.23.46
 
 Copyright (c) 2016 Joseph Birr-Pixton <jpixton@gmail.com>
 
@@ -6383,7 +6850,30 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T096 ---- used by: raw-window-handle 0.6.2
+---- T105 ---- used by: tungstenite 0.30.0
+
+Copyright (c) 2017 Alexey Galakhov
+Copyright (c) 2016 Jason Housley
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+---- T106 ---- used by: raw-window-handle 0.6.2
 
 MIT License
 
@@ -6407,7 +6897,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T097 ---- used by: miniz_oxide 0.8.9, miniz_oxide 0.9.1
+---- T107 ---- used by: miniz_oxide 0.8.9, miniz_oxide 0.9.1
 
 MIT License
 
@@ -6434,7 +6924,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T098 ---- used by: generic-array 0.14.7
+---- T108 ---- used by: generic-array 0.14.7
 
 The MIT License (MIT)
 
@@ -6458,7 +6948,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T099 ---- used by: hashbrown 0.17.1
+---- T109 ---- used by: hashbrown 0.17.1
 
 Copyright (c) 2016 Amanieu d'Antras
 
@@ -6486,7 +6976,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T100 ---- used by: rustls 0.23.46
+---- T110 ---- used by: rustls 0.23.46
 
 ISC License (ISC)
 Copyright (c) 2016, Joseph Birr-Pixton <jpixton@gmail.com>
@@ -6504,7 +6994,7 @@ PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS
 ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
 THIS SOFTWARE.
 
----- T101 ---- used by: window-vibrancy 0.8.1
+---- T111 ---- used by: window-vibrancy 0.8.1
 
 MIT License
 
@@ -6528,7 +7018,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T102 ---- used by: deranged 0.5.9
+---- T112 ---- used by: deranged 0.5.9
 
 Apache License
                            Version 2.0, January 2004
@@ -6732,7 +7222,7 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
----- T103 ---- used by: web-time 1.1.0
+---- T113 ---- used by: web-time 1.1.0
 
 Apache License
                            Version 2.0, January 2004
@@ -6936,7 +7426,7 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
----- T104 ---- used by: ctor 1.0.13
+---- T114 ---- used by: ctor 1.0.13
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
@@ -6944,7 +7434,7 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
----- T105 ---- used by: ureq-proto 0.7.1
+---- T115 ---- used by: ureq-proto 0.7.1
 
 Copyright 2022 Martin Algesten
 
@@ -6954,7 +7444,7 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
----- T106 ---- used by: open 5.4.5
+---- T116 ---- used by: open 5.4.5
 
 The MIT License (MIT)
 =====================
@@ -6982,7 +7472,7 @@ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
 
----- T107 ---- used by: fnv 1.0.7
+---- T117 ---- used by: fnv 1.0.7
 
 Copyright (c) 2017 Contributors
 
@@ -7010,7 +7500,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T108 ---- used by: rustls-pki-types 1.15.1
+---- T118 ---- used by: rustls-pki-types 1.15.1
 
 Copyright (c) 2023 Dirkjan Ochtman <dirkjan@ochtman.nl>
 
@@ -7038,7 +7528,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T109 ---- used by: cookie 0.18.2
+---- T119 ---- used by: cookie 0.18.2
 
 Apache License
                         Version 2.0, January 2004
@@ -7243,7 +7733,48 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
----- T110 ---- used by: foreign-types 0.5.0, foreign-types-shared 0.3.1
+---- T120 ---- used by: digest 0.11.3
+
+Copyright (c) 2017-2025 RustCrypto Developers
+Copyright (c) 2017 Artyom Pavlov
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+---- T121 ---- used by: rand_core 0.10.1
+
+Copyrights in the Rand project are retained by their contributors. No
+copyright assignment is required to contribute to the Rand project.
+
+For full authorship information, see the version control history.
+
+Except as otherwise noted (below and/or in individual files), Rand is
+licensed under the Apache License, Version 2.0 <LICENSE-APACHE> or
+<http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+<LICENSE-MIT> or <http://opensource.org/licenses/MIT>, at your option.
+
+---- T122 ---- used by: foreign-types 0.5.0, foreign-types-shared 0.3.1
 
 Copyright (c) 2017 The foreign-types Developers
 
@@ -7265,7 +7796,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T111 ---- used by: libc 0.2.191
+---- T123 ---- used by: libc 0.2.191
 
 Copyright (c) The Rust Project Developers
 
@@ -7293,7 +7824,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T112 ---- used by: aho-corasick 1.1.5, memchr 2.8.3, same-file 1.0.6, walkdir 2.5.0
+---- T124 ---- used by: aho-corasick 1.1.5, memchr 2.8.3, same-file 1.0.6, walkdir 2.5.0
 
 This is free and unencumbered software released into the public domain.
 
@@ -7320,7 +7851,36 @@ OTHER DEALINGS IN THE SOFTWARE.
 
 For more information, please refer to <http://unlicense.org/>
 
----- T113 ---- used by: icu_collections 2.4.0, icu_locale_core 2.4.0, icu_normalizer 2.4.0, icu_normalizer_data 2.4.0, icu_properties 2.4.0, icu_properties_data 2.4.0, icu_provider 2.4.0, litemap 0.8.3, potential_utf 0.1.6, tinystr 0.8.5, writeable 0.6.4, yoke 0.8.4, zerofrom 0.1.8, zerotrie 0.2.5, zerovec 0.11.9
+---- T125 ---- used by: rand 0.10.4
+
+Copyright 2018 Developers of the Rand project
+Copyright (c) 2014 The Rust Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+---- T126 ---- used by: icu_collections 2.4.0, icu_locale_core 2.4.0, icu_normalizer 2.4.0, icu_normalizer_data 2.4.0, icu_properties 2.4.0, icu_properties_data 2.4.0, icu_provider 2.4.0, litemap 0.8.3, potential_utf 0.1.6, tinystr 0.8.5, writeable 0.6.4, yoke 0.8.4, zerofrom 0.1.8, zerotrie 0.2.5, zerovec 0.11.9
 
 UNICODE LICENSE V3
 
@@ -7369,7 +7929,7 @@ SPDX-License-Identifier: Unicode-3.0
 Portions of ICU4X may have been adapted from ICU4C and/or ICU4J.
 ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation and others.
 
----- T114 ---- used by: chrono 0.4.45
+---- T127 ---- used by: chrono 0.4.45
 
 Rust-chrono is dual-licensed under The MIT License [1] and
 Apache 2.0 License [2]. Copyright (c) 2014--2026, Kang Seonghoon and
@@ -7611,7 +8171,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ~~~~
 
----- T115 ---- used by: react 19.3.1, react-dom 19.3.1, scheduler 0.28.0
+---- T128 ---- used by: react 19.3.1, react-dom 19.3.1, scheduler 0.28.0
 
 MIT License
 
@@ -7635,7 +8195,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T116 ---- used by: crossbeam-channel 0.5.17
+---- T129 ---- used by: crossbeam-channel 0.5.17
 
 ===============================================================================
 
@@ -8231,7 +8791,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
----- T117 ---- used by: webpki-roots 1.0.11
+---- T130 ---- used by: webpki-roots 1.0.11
 
 # Community Data License Agreement - Permissive - Version 2.0
 
@@ -8295,7 +8855,7 @@ agreement.
 of Data, including for example machine learning models and models'
 insights.
 
----- T118 ---- used by: mach2 0.6.0
+---- T131 ---- used by: mach2 0.6.0
 
 Copyright (c) 2019 Nick Fitzgerald, 2021 Yuki Okushi
 All rights reserved.
@@ -8321,11 +8881,39 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
----- T119 ---- used by: typenum 1.20.1
+---- T132 ---- used by: typenum 1.20.1
 
 MIT OR Apache-2.0
 
----- T120 ---- used by: dpi 0.1.2
+---- T133 ---- used by: crypto-common 0.2.2
+
+Copyright (c) 2021-2026 RustCrypto Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+---- T134 ---- used by: dpi 0.1.2
 
 rust-lang/libm as a whole is available for use under the MIT license:
 
@@ -8379,7 +8967,7 @@ and labelled as such in comments in the individual source files. All
 have been licensed under extremely permissive terms.
 ------------------------------------------------------------------------------
 
----- T121 ---- used by: getrandom 0.2.17, getrandom 0.3.4
+---- T135 ---- used by: getrandom 0.2.17, getrandom 0.3.4, getrandom 0.4.3
 
 Apache License
                         Version 2.0, January 2004
@@ -8583,7 +9171,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
----- T122 ---- used by: block-buffer 0.10.4, cpufeatures 0.2.17, crypto-common 0.1.7, digest 0.10.7, sha2 0.10.9
+---- T136 ---- used by: block-buffer 0.10.4, block-buffer 0.12.1, chacha20 0.10.2, const-oid 0.10.3, cpufeatures 0.2.17, cpufeatures 0.3.1, crypto-common 0.1.7, crypto-common 0.2.2, digest 0.10.7, digest 0.11.3, hybrid-array 0.4.15, sha1 0.11.0, sha2 0.10.9
 
 Apache License
                         Version 2.0, January 2004
@@ -8787,7 +9375,35 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
----- T123 ---- used by: regex-syntax 0.8.11
+---- T137 ---- used by: const-oid 0.10.3, cpufeatures 0.3.1
+
+Copyright (c) 2020-2026 The RustCrypto Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+---- T138 ---- used by: regex-syntax 0.8.11
 
 UNICODE, INC. LICENSE AGREEMENT - DATA FILES AND SOFTWARE
 
@@ -8847,7 +9463,7 @@ shall not be used in advertising or otherwise to promote the sale,
 use or other dealings in these Data Files or Software without prior
 written authorization of the copyright holder.
 
----- T124 ---- used by: miniz_oxide 0.8.9, miniz_oxide 0.9.1
+---- T139 ---- used by: miniz_oxide 0.8.9, miniz_oxide 0.9.1
 
 Copyright 2013-2014 RAD Game Tools and Valve Software
 Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC
@@ -8864,7 +9480,7 @@ Permission is granted to anyone to use this software for any purpose, including 
 
 3. This notice may not be removed or altered from any source distribution.
 
----- T125 ---- used by: phf 0.13.1, phf_shared 0.13.1
+---- T140 ---- used by: phf 0.13.1, phf_shared 0.13.1
 
 The MIT License (MIT)
 
@@ -8887,7 +9503,7 @@ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
----- T126 ---- used by: ring 0.17.14
+---- T141 ---- used by: ring 0.17.14
 
 *ring* uses an "ISC" license, like BoringSSL used to use, for new code
 files. See LICENSE-other-bits for the text of that license.
@@ -8899,7 +9515,7 @@ license. In each case, the license info is at the top of the file.
 See src/polyfill/once_cell/LICENSE-APACHE and src/polyfill/once_cell/LICENSE-MIT
 for the license to code that was sourced from the once_cell project.
 
----- T127 ---- used by: lucide-react 1.70.0
+---- T142 ---- used by: lucide-react 1.70.0
 
 ISC License
 
@@ -8945,7 +9561,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T128 ---- used by: ring 0.17.14
+---- T143 ---- used by: ring 0.17.14
 
 The Apache License, Version 2.0 (Apache-2.0)
 
@@ -8963,7 +9579,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
----- T129 ---- used by: urlpattern 0.6.0
+---- T144 ---- used by: urlpattern 0.6.0
 
 MIT License
 
@@ -8987,7 +9603,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T130 ---- used by: dirs 7.0.0, dirs-sys 0.5.0
+---- T145 ---- used by: dirs 7.0.0, dirs-sys 0.5.0
 
 Copyright (c) 2018-2019 dirs-rs contributors
 
@@ -9009,7 +9625,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----- T131 ---- used by: http 1.5.0
+---- T146 ---- used by: http 1.5.0
 
 Copyright (c) 2017 http-rs authors
 
@@ -9037,7 +9653,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
----- T132 ---- used by: coreaudio-rs 0.14.2, serde_with 3.24.0
+---- T147 ---- used by: coreaudio-rs 0.14.2, serde_with 3.24.0
 
 Copyright (c) 2015
 
@@ -9064,3 +9680,182 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+---- T148 ---- used by: rand 0.10.4
+
+Apache License
+                        Version 2.0, January 2004
+                     https://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+   "License" shall mean the terms and conditions for use, reproduction,
+   and distribution as defined by Sections 1 through 9 of this document.
+
+   "Licensor" shall mean the copyright owner or entity authorized by
+   the copyright owner that is granting the License.
+
+   "Legal Entity" shall mean the union of the acting entity and all
+   other entities that control, are controlled by, or are under common
+   control with that entity. For the purposes of this definition,
+   "control" means (i) the power, direct or indirect, to cause the
+   direction or management of such entity, whether by contract or
+   otherwise, or (ii) ownership of fifty percent (50%) or more of the
+   outstanding shares, or (iii) beneficial ownership of such entity.
+
+   "You" (or "Your") shall mean an individual or Legal Entity
+   exercising permissions granted by this License.
+
+   "Source" form shall mean the preferred form for making modifications,
+   including but not limited to software source code, documentation
+   source, and configuration files.
+
+   "Object" form shall mean any form resulting from mechanical
+   transformation or translation of a Source form, including but
+   not limited to compiled object code, generated documentation,
+   and conversions to other media types.
+
+   "Work" shall mean the work of authorship, whether in Source or
+   Object form, made available under the License, as indicated by a
+   copyright notice that is included in or attached to the work
+   (an example is provided in the Appendix below).
+
+   "Derivative Works" shall mean any work, whether in Source or Object
+   form, that is based on (or derived from) the Work and for which the
+   editorial revisions, annotations, elaborations, or other modifications
+   represent, as a whole, an original work of authorship. For the purposes
+   of this License, Derivative Works shall not include works that remain
+   separable from, or merely link (or bind by name) to the interfaces of,
+   the Work and Derivative Works thereof.
+
+   "Contribution" shall mean any work of authorship, including
+   the original version of the Work and any modifications or additions
+   to that Work or Derivative Works thereof, that is intentionally
+   submitted to Licensor for inclusion in the Work by the copyright owner
+   or by an individual or Legal Entity authorized to submit on behalf of
+   the copyright owner. For the purposes of this definition, "submitted"
+   means any form of electronic, verbal, or written communication sent
+   to the Licensor or its representatives, including but not limited to
+   communication on electronic mailing lists, source code control systems,
+   and issue tracking systems that are managed by, or on behalf of, the
+   Licensor for the purpose of discussing and improving the Work, but
+   excluding communication that is conspicuously marked or otherwise
+   designated in writing by the copyright owner as "Not a Contribution."
+
+   "Contributor" shall mean Licensor and any individual or Legal Entity
+   on behalf of whom a Contribution has been received by Licensor and
+   subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   copyright license to reproduce, prepare Derivative Works of,
+   publicly display, publicly perform, sublicense, and distribute the
+   Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   (except as stated in this section) patent license to make, have made,
+   use, offer to sell, sell, import, and otherwise transfer the Work,
+   where such license applies only to those patent claims licensable
+   by such Contributor that are necessarily infringed by their
+   Contribution(s) alone or by combination of their Contribution(s)
+   with the Work to which such Contribution(s) was submitted. If You
+   institute patent litigation against any entity (including a
+   cross-claim or counterclaim in a lawsuit) alleging that the Work
+   or a Contribution incorporated within the Work constitutes direct
+   or contributory patent infringement, then any patent licenses
+   granted to You under this License for that Work shall terminate
+   as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the
+   Work or Derivative Works thereof in any medium, with or without
+   modifications, and in Source or Object form, provided that You
+   meet the following conditions:
+
+   (a) You must give any other recipients of the Work or
+       Derivative Works a copy of this License; and
+
+   (b) You must cause any modified files to carry prominent notices
+       stating that You changed the files; and
+
+   (c) You must retain, in the Source form of any Derivative Works
+       that You distribute, all copyright, patent, trademark, and
+       attribution notices from the Source form of the Work,
+       excluding those notices that do not pertain to any part of
+       the Derivative Works; and
+
+   (d) If the Work includes a "NOTICE" text file as part of its
+       distribution, then any Derivative Works that You distribute must
+       include a readable copy of the attribution notices contained
+       within such NOTICE file, excluding those notices that do not
+       pertain to any part of the Derivative Works, in at least one
+       of the following places: within a NOTICE text file distributed
+       as part of the Derivative Works; within the Source form or
+       documentation, if provided along with the Derivative Works; or,
+       within a display generated by the Derivative Works, if and
+       wherever such third-party notices normally appear. The contents
+       of the NOTICE file are for informational purposes only and
+       do not modify the License. You may add Your own attribution
+       notices within Derivative Works that You distribute, alongside
+       or as an addendum to the NOTICE text from the Work, provided
+       that such additional attribution notices cannot be construed
+       as modifying the License.
+
+   You may add Your own copyright statement to Your modifications and
+   may provide additional or different license terms and conditions
+   for use, reproduction, or distribution of Your modifications, or
+   for any such Derivative Works as a whole, provided Your use,
+   reproduction, and distribution of the Work otherwise complies with
+   the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise,
+   any Contribution intentionally submitted for inclusion in the Work
+   by You to the Licensor shall be under the terms and conditions of
+   this License, without any additional terms or conditions.
+   Notwithstanding the above, nothing herein shall supersede or modify
+   the terms of any separate license agreement you may have executed
+   with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade
+   names, trademarks, service marks, or product names of the Licensor,
+   except as required for reasonable and customary use in describing the
+   origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or
+   agreed to in writing, Licensor provides the Work (and each
+   Contributor provides its Contributions) on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+   implied, including, without limitation, any warranties or conditions
+   of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+   PARTICULAR PURPOSE. You are solely responsible for determining the
+   appropriateness of using or redistributing the Work and assume any
+   risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory,
+   whether in tort (including negligence), contract, or otherwise,
+   unless required by applicable law (such as deliberate and grossly
+   negligent acts) or agreed to in writing, shall any Contributor be
+   liable to You for damages, including any direct, indirect, special,
+   incidental, or consequential damages of any character arising as a
+   result of this License or out of the use or inability to use the
+   Work (including but not limited to damages for loss of goodwill,
+   work stoppage, computer failure or malfunction, or any and all
+   other commercial damages or losses), even if such Contributor
+   has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing
+   the Work or Derivative Works thereof, You may choose to offer,
+   and charge a fee for, acceptance of support, warranty, indemnity,
+   or other liability obligations and/or rights consistent with this
+   License. However, in accepting such obligations, You may act only
+   on Your own behalf and on Your sole responsibility, not on behalf
+   of any other Contributor, and only if You agree to indemnify,
+   defend, and hold each Contributor harmless for any liability
+   incurred by, or claims asserted against, such Contributor by reason
+   of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS

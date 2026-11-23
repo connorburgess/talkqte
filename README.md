@@ -87,7 +87,7 @@ Open **Prior context** in the notebook to manage selected notes and the Granola 
 
 A live session sends your microphone's audio to Deepgram for transcription and runs the phrase-based questions on what comes back. TalkQTE does not transcribe on this Mac. Ordinary and release builds have no live transcription; the notebook and Settings say "This build has no live transcription." Builds before 16 November 2026 could transcribe on the device with a downloaded speech model. That was removed, and a model downloaded then is left where it was: see [what is left on disk](docs/model-delivery.md).
 
-To try it, build a debug build with `cloud-transcription` and a cue backend, because transcription starts only when you approve cue processing for the session. For example, `claude-cli` uses your own Claude subscription:
+To try it, build a debug build with a cue backend, because transcription starts only when you approve cue processing for the session. For example, `claude-cli` uses your own Claude subscription. Transcription uses your own Deepgram API key stored in the Keychain ([provider keys](docs/provider-keys.md)); there is no Settings control for it yet. A development launch can instead use a short-lived token file, which wins over a stored key:
 
 ```sh
 TALKQTE_DEV_STT_BACKEND=deepgram \

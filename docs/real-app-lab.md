@@ -107,9 +107,9 @@ on a command line.
 Nothing is sent until the session's cue processing review is approved. Until
 then the captured audio is thrown away and nothing is transcribed.
 
-Without these settings, a session for the application is refused with "Live
-transcription needs cloud transcription selected for this development
-launch."; with settings the app refuses, "The cloud transcription settings
+Without these settings (and with no Deepgram key stored in Settings), a
+session for the application is refused with "Add your Deepgram API key in
+Settings to start a live session."; with settings the app refuses, "The cloud transcription settings
 are not usable." Nothing is cleared either way. The
 [lab-owned launcher](lab-owned-launcher.md) passes these three settings when
 its plan asks for transcription.

@@ -3,8 +3,10 @@
 //! The request is fixed: `ListenRequest::lab` is its only constructor and
 //! its URL always carries `mip_opt_out=true` (Deepgram's per-request opt-out
 //! from model training and retention), checked again before connecting. The
-//! credential is a short-lived token from an owner-only file, sent once as a
-//! Bearer header on connect; an open stream outlives the token.
+//! credential is the person's own Deepgram API key from the Keychain, sent
+//! once as a `Token` header on connect, or in a development launch a
+//! short-lived token from an owner-only file, sent as a `Bearer` header. An
+//! open stream outlives either.
 //!
 //! A socket thread sends 100 ms linear16 frames, a KeepAlive while no audio
 //! is sent, a Finalize when speech has gone 6 s without a final, and
@@ -21,6 +23,7 @@ use std::{
     thread::JoinHandle,
     time::{Duration, Instant},
 };
+use zeroize::Zeroizing;
 
 const QUERY: &str = "model=nova-3&language=en&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&diarize=true&endpointing=300&utterance_end_ms=1000&vad_events=true&mip_opt_out=true";
 const HOST: &str = "api.deepgram.com";
@@ -509,7 +512,7 @@ pub fn opener(settings: super::cloud::Settings) -> super::cloud::Opener {
         let budget = super::cloud::launch_budget(&settings);
         let path = settings.token_file;
         Ok(Box::new(DeepgramStream::start(
-            Network,
+            Network(Auth::Bearer),
             ListenRequest::lab(),
             Token::from_file(path),
             budget,
@@ -522,7 +525,7 @@ pub fn opener(settings: super::cloud::Settings) -> super::cloud::Opener {
 pub fn reopener(settings: super::cloud::Settings) -> super::cloud::Reopener {
     Box::new(move || {
         Ok(Box::new(DeepgramStream::start(
-            Network,
+            Network(Auth::Bearer),
             ListenRequest::lab(),
             Token::from_file(settings.token_file.clone()),
             super::cloud::launch_budget(&settings),
@@ -530,28 +533,85 @@ pub fn reopener(settings: super::cloud::Settings) -> super::cloud::Reopener {
     })
 }
 
+/// The stream and its replacements for one session with the person's own
+/// key: both draw on the one `budget` made for that session, so reconnects
+/// share its cap. The key is read from the Keychain on the socket thread
+/// once the review is approved, and again by each replacement, so a key
+/// replaced in Settings is used.
+pub fn key_streams(budget: Budget) -> (super::cloud::Opener, super::cloud::Reopener) {
+    key_streams_with(Network(Auth::Key), Token::from_keychain, budget)
+}
+
+fn key_streams_with<C: Connector + Clone>(
+    connector: C,
+    token: fn() -> Token,
+    budget: Budget,
+) -> (super::cloud::Opener, super::cloud::Reopener) {
+    let first = (connector.clone(), budget.clone());
+    let opener: super::cloud::Opener = Box::new(move || {
+        Ok(Box::new(DeepgramStream::start(
+            first.0,
+            ListenRequest::lab(),
+            token(),
+            first.1,
+        )) as Box<dyn StreamingTranscriber>)
+    });
+    let reopener: super::cloud::Reopener = Box::new(move || {
+        Ok(Box::new(DeepgramStream::start(
+            connector.clone(),
+            ListenRequest::lab(),
+            token(),
+            budget.clone(),
+        )) as Box<dyn StreamingTranscriber>)
+    });
+    (opener, reopener)
+}
+
 /// How long a stream waits after approval for a valid token.
 const TOKEN_WAIT: Duration = Duration::from_secs(10);
 /// How often it looks.
 const TOKEN_POLL: Duration = Duration::from_millis(50);
 
-/// Where the socket thread gets its token: a fixed one, or the owner-only
-/// file read when a valid token is there.
-pub struct Token(Box<dyn FnMut() -> Option<String> + Send>);
+/// Where the socket thread gets its credential: a fixed one, the owner-only
+/// file read when a valid token is there, or the stored key. The text is
+/// wiped once the handshake is sent.
+pub struct Token(Box<dyn FnMut() -> Option<Zeroizing<String>> + Send>);
 
 impl Token {
     pub fn from_file(path: std::path::PathBuf) -> Self {
-        Self(Box::new(move || super::cloud::read_token(&path).ok()))
+        Self(Box::new(move || {
+            super::cloud::read_token(&path).ok().map(Zeroizing::new)
+        }))
     }
 
-    fn take(&mut self) -> Option<String> {
+    /// The person's own Deepgram key, from the Keychain.
+    pub fn from_keychain() -> Self {
+        Self::from_keys(crate::provider_keys::global())
+    }
+
+    /// Read once per stream attempt: a missing key, or a Keychain that
+    /// refuses or asks, is not asked again every poll. The stream then waits
+    /// out its token wait and stops with `settings`.
+    fn from_keys(keys: &'static crate::provider_keys::Keys) -> Self {
+        let mut asked = false;
+        Self(Box::new(move || {
+            if std::mem::replace(&mut asked, true) {
+                return None;
+            }
+            keys.get(crate::provider_keys::Provider::Deepgram)
+                .ok()
+                .map(|key| Zeroizing::new(key.expose().to_string()))
+        }))
+    }
+
+    fn take(&mut self) -> Option<Zeroizing<String>> {
         (self.0)()
     }
 }
 
 impl From<String> for Token {
     fn from(token: String) -> Self {
-        let mut token = Some(token);
+        let mut token = Some(Zeroizing::new(token));
         Self(Box::new(move || token.take()))
     }
 }
@@ -559,22 +619,58 @@ impl From<String> for Token {
 /// How long opening the TCP connection may take before the stream fails.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How the credential is presented to Deepgram.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Auth {
+    /// A short-lived token from `/v1/auth/grant` (development launches).
+    Bearer,
+    /// The person's own API key.
+    Key,
+}
+
+impl Auth {
+    /// The `Authorization` header value. Never logged.
+    pub fn header(self, credential: &str) -> Zeroizing<String> {
+        Zeroizing::new(match self {
+            Self::Bearer => format!("Bearer {credential}"),
+            Self::Key => format!("Token {credential}"),
+        })
+    }
+}
+
 /// The network connector: TLS with the bundled web roots, a WebSocket
-/// handshake carrying the token as a Bearer header, then short read waits.
-pub struct Network;
+/// handshake carrying the credential in the `Authorization` header, then
+/// short read waits. A key Deepgram refuses is marked rejected, so Settings
+/// says so and the next live start is refused until it is replaced.
+#[derive(Clone)]
+pub struct Network(pub Auth);
 
 impl Connector for Network {
     fn connect(&self, url: &str, token: &str) -> Result<Box<dyn Socket>, SttFailure> {
+        let result = self.connect_inner(url, token);
+        note_refusal(crate::provider_keys::global(), self.0, &result);
+        result
+    }
+}
+
+/// A refused key (401 or 403) is marked rejected; a refused development
+/// token is not the person's key and leaves it alone.
+fn note_refusal<T>(keys: &crate::provider_keys::Keys, auth: Auth, result: &Result<T, SttFailure>) {
+    if auth == Auth::Key && matches!(result, Err(SttFailure::Auth)) {
+        keys.mark_rejected(crate::provider_keys::Provider::Deepgram);
+    }
+}
+
+impl Network {
+    fn connect_inner(&self, url: &str, token: &str) -> Result<Box<dyn Socket>, SttFailure> {
         use tungstenite::client::IntoClientRequest;
         let mut request = url
             .into_client_request()
             .map_err(|_| SttFailure::Protocol)?;
-        request.headers_mut().insert(
-            "Authorization",
-            format!("Bearer {token}")
-                .parse()
-                .map_err(|_| SttFailure::Settings)?,
-        );
+        let mut value = tungstenite::http::HeaderValue::from_str(&self.0.header(token))
+            .map_err(|_| SttFailure::Settings)?;
+        value.set_sensitive(true);
+        request.headers_mut().insert("Authorization", value);
         let roots = rustls::RootCertStore {
             roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
         };
@@ -838,6 +934,136 @@ mod tests {
         assert_eq!(wire.token.as_deref(), Some(token.as_str()));
     }
 
+    /// A store that counts reads, so a test can see the Keychain is asked
+    /// once per stream attempt.
+    #[derive(Default)]
+    struct Counting(
+        crate::provider_keys::MemoryStore,
+        std::sync::atomic::AtomicUsize,
+    );
+    impl crate::provider_keys::SecretStore for &'static Counting {
+        fn get(
+            &self,
+            account: &str,
+        ) -> Result<Option<crate::provider_keys::Secret>, crate::provider_keys::StoreError>
+        {
+            self.1.fetch_add(1, Ordering::SeqCst);
+            self.0.get(account)
+        }
+        fn set(
+            &self,
+            account: &str,
+            secret: &crate::provider_keys::Secret,
+        ) -> Result<(), crate::provider_keys::StoreError> {
+            self.0.set(account, secret)
+        }
+        fn delete(&self, account: &str) -> Result<(), crate::provider_keys::StoreError> {
+            self.0.delete(account)
+        }
+    }
+
+    struct Offline;
+    impl crate::provider_keys::Probe for Offline {
+        fn check(
+            &self,
+            _: crate::provider_keys::Provider,
+            _: &crate::provider_keys::Secret,
+        ) -> crate::provider_keys::ProbeResult {
+            crate::provider_keys::ProbeResult::Unreachable
+        }
+    }
+
+    fn fictional_keys() -> &'static crate::provider_keys::Keys {
+        Box::leak(Box::new(crate::provider_keys::Keys::new(
+            Box::new(crate::provider_keys::MemoryStore::default()),
+            Box::new(Offline),
+        )))
+    }
+
+    #[test]
+    fn the_persons_key_is_sent_only_as_a_token_header_on_the_opt_out_url() {
+        use crate::provider_keys::{KeyState, Provider};
+        const KEY: &str = "0123456789abcdef0123456789abcdef01234567";
+        let keys = fictional_keys();
+        keys.set(Provider::Deepgram, KEY).unwrap();
+        let fake = Fake::default();
+        let mut stream = DeepgramStream::start(
+            fake.clone(),
+            ListenRequest::lab(),
+            Token::from_keys(keys),
+            Duration::from_secs(60),
+        );
+        stream.push(&[0.25; FRAME]).unwrap();
+        let _ = stream.finish(Duration::from_secs(2));
+        let wire = fake.0.lock().unwrap();
+        // The stored key, on the opt-out URL, never in it.
+        assert_eq!(wire.token.as_deref(), Some(KEY));
+        let url = wire.url.as_deref().unwrap();
+        assert!(url.ends_with("mip_opt_out=true") && !url.contains(KEY));
+        // The header Deepgram expects for an API key, unlike the lab's token.
+        assert_eq!(*Auth::Key.header(KEY), format!("Token {KEY}"));
+        assert_eq!(*Auth::Bearer.header("t"), "Bearer t");
+        // A refusal of the key marks it rejected; a lab token's does not.
+        note_refusal::<()>(keys, Auth::Bearer, &Err(SttFailure::Auth));
+        assert_eq!(keys.status().deepgram.state, KeyState::Set);
+        note_refusal::<()>(keys, Auth::Key, &Err(SttFailure::Network));
+        assert_eq!(keys.status().deepgram.state, KeyState::Set);
+        note_refusal::<()>(keys, Auth::Key, &Err(SttFailure::Auth));
+        assert_eq!(keys.status().deepgram.state, KeyState::Rejected);
+    }
+
+    #[test]
+    fn a_removed_key_opens_no_stream_and_the_keychain_is_asked_once() {
+        let counting: &'static Counting = Box::leak(Box::default());
+        let keys: &'static crate::provider_keys::Keys = Box::leak(Box::new(
+            crate::provider_keys::Keys::new(Box::new(counting), Box::new(Offline)),
+        ));
+        let fake = Fake::default();
+        let mut stream = DeepgramStream::start_with(
+            fake.clone(),
+            ListenRequest::lab(),
+            Token::from_keys(keys),
+            Duration::from_secs(60),
+            Timing {
+                token_wait: Duration::from_millis(60),
+                ..Timing::default()
+            },
+        );
+        stream.push(&[0.25; FRAME]).unwrap();
+        let events = stream.finish(Duration::from_secs(2));
+        assert!(events.contains(&SttEvent::Failed(SttFailure::Settings)));
+        assert!(fake.0.lock().unwrap().url.is_none());
+        assert_eq!(counting.1.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_sessions_replacement_streams_share_its_minute_budget() {
+        // A one-second budget: the first stream spends it; the replacement
+        // made from the same session's streams sends nothing more.
+        let fake = Fake::default();
+        let (opener, mut reopener) = key_streams_with(
+            fake.clone(),
+            || Token::from("t".repeat(24)),
+            Budget::new(Duration::from_secs(1)),
+        );
+        let mut first = opener().unwrap();
+        first.push(&[0.1; SAMPLE_RATE]).unwrap();
+        let _ = first.finish(Duration::from_secs(2));
+        let sent = fake.0.lock().unwrap().binary.iter().sum::<usize>();
+        assert_eq!(sent, SAMPLE_RATE * 2);
+        let mut replacement = reopener().unwrap();
+        replacement.push(&[0.1; FRAME]).unwrap();
+        let mut events = Vec::new();
+        let until = Instant::now() + Duration::from_secs(5);
+        while !events.contains(&SttEvent::Failed(SttFailure::CapReached)) && Instant::now() < until
+        {
+            events.extend(replacement.poll());
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(events.contains(&SttEvent::Failed(SttFailure::CapReached)));
+        assert_eq!(fake.0.lock().unwrap().binary.iter().sum::<usize>(), sent);
+    }
+
     #[test]
     fn audio_goes_out_in_100_ms_linear16_frames_and_finish_flushes_and_closes() {
         let fake = Fake::default();
@@ -916,6 +1142,7 @@ mod tests {
 
     /// An owner-only folder and an empty placeholder token file in it, as
     /// the lab launcher leaves them before the review.
+    #[cfg(unix)]
     fn placeholder() -> (std::path::PathBuf, std::path::PathBuf) {
         use std::os::unix::fs::PermissionsExt;
         // Unique per call: two tests can read the same clock value.

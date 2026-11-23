@@ -15,7 +15,7 @@ const STOP_REASONS: Record<string, string> = {
   auth: 'the service refused the lab credential',
   quota: 'the account cannot pay for more audio',
   rate_limited: 'the service is limiting requests',
-  cap_reached: "this launch's transcription minute limit was reached",
+  cap_reached: 'the transcription minute limit was reached',
   network: 'the connection was lost',
   protocol: 'the service sent a reply TalkQTE could not read',
   closed: 'the service closed the connection',
