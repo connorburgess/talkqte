@@ -2057,6 +2057,27 @@ mod tests {
     }
 
     #[test]
+    fn a_kept_meeting_records_a_model_cue_with_its_line_but_no_speaker_label() {
+        let mut h = Harness::new();
+        h.line("The checklist handoff is still unassigned.");
+        h.request();
+        h.reply(
+            "show",
+            Some("Who owns the checklist?"),
+            &["transcript:line-1"],
+        );
+        let cue = h.engine.state.cue.as_ref().unwrap();
+        // The cue on screen shows the speaker and time; the record must not.
+        assert!(cue.evidence.contains("Maya"));
+        h.engine.set_keep_meeting(true);
+        let kept = h.engine.markdown();
+        assert!(kept.contains(
+            ": Who owns the checklist? (from: \"The checklist handoff is still unassigned.\")"
+        ));
+        assert!(!kept.contains("Maya"), "{kept}");
+    }
+
+    #[test]
     fn ticks_and_unchanged_imports_do_not_cancel_a_sourced_proposal_or_export_it() {
         let mut h = Harness::new();
         h.engine

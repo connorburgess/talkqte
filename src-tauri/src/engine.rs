@@ -758,18 +758,41 @@ impl Engine {
         // Publishing the state shows any cue created since the last change.
         self.unshown = None;
         self.state.revision += 1;
-        // Every published cue enters the session's record once.
+        // Each published cue is considered for the session's record once.
+        // Reminders quoting an imported note and the Still open list of focus
+        // lines are left out, so a kept meeting holds no imported-note
+        // content or focus line; a model cue's lines are kept as transcript
+        // text only, without the speaker label or time its evidence shows.
         if let Some(cue) = &self.state.cue {
-            if self.shown_cues.len() < MAX_SHOWN_CUES
-                && self.last_recorded_cue.as_deref() != Some(cue.id.as_str())
-            {
-                self.shown_cues.push(ShownCue {
-                    at_ms: self.state.elapsed_ms,
-                    kind: cue.kind.clone(),
-                    question: cue.question.clone(),
-                    evidence: cue.evidence.clone(),
-                });
+            if self.last_recorded_cue.as_deref() != Some(cue.id.as_str()) {
                 self.last_recorded_cue = Some(cue.id.clone());
+                if self.shown_cues.len() < MAX_SHOWN_CUES
+                    && cue.note.is_none()
+                    && cue.kind != CONTEXT
+                    && cue.kind != STILL_OPEN
+                {
+                    let evidence = if cue.sources.is_empty() {
+                        cue.evidence.clone()
+                    } else {
+                        cue.sources
+                            .iter()
+                            .filter(|source| {
+                                matches!(
+                                    source.provenance,
+                                    crate::cue_evaluator::Provenance::Transcript { .. }
+                                )
+                            })
+                            .map(|source| source.text.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" / ")
+                    };
+                    self.shown_cues.push(ShownCue {
+                        at_ms: self.state.elapsed_ms,
+                        kind: cue.kind.clone(),
+                        question: cue.question.clone(),
+                        evidence,
+                    });
+                }
             }
         }
     }
@@ -1899,8 +1922,10 @@ impl Engine {
     /// The export. By default it holds the person's notes and nothing else:
     /// no transcript, cue, name, focus line or imported note. When the person
     /// chose to keep the meeting, it also holds the cues this session showed
-    /// and its transcript, with times from the start of the session and no
-    /// speaker labels. Never the name, focus lines, imported notes or audio.
+    /// from its conversation (not note reminders or the Still open list) and
+    /// its transcript, with times from the start of the session and no
+    /// speaker labels. Never the name setting, focus lines, imported notes or
+    /// audio; words people said aloud, names included, are in the transcript.
     pub fn markdown(&self) -> String {
         let mut out = format!("# TalkQTE notes\n\n{}\n", self.state.notes);
         if !self.state.keep_meeting {
@@ -6315,6 +6340,54 @@ mod tests {
             },
         ]);
         e
+    }
+
+    #[test]
+    fn a_kept_meeting_leaves_out_note_reminders_and_the_still_open_list() {
+        // A reminder quoting an imported note.
+        let mut e = with_notes();
+        e.ingest(
+            e.session(),
+            live(
+                "w1",
+                9_000,
+                "Let's get the welcome guide sorted before the garden day.",
+            ),
+        )
+        .unwrap();
+        assert_eq!(e.state.cue.as_ref().unwrap().kind, CONTEXT);
+        e.set_keep_meeting(true);
+        let kept = e.markdown();
+        assert!(kept.contains("## Cues shown\n\nNone.\n"), "{kept}");
+        assert!(kept.contains("before the garden day."));
+        for excluded in ["Garden welcome guide", "tool shed", "Context"] {
+            assert!(!kept.contains(excluded), "{excluded} in {kept}");
+        }
+
+        // The Still open list of focus lines at the wrap-up, as the
+        // derailed-meeting check raises it.
+        let mut e = play(&[
+            (1_000, "Someone can take the first draft of the newsletter."),
+            (12_000, "Did anyone see the match last night?"),
+            (23_000, "Someone can bring snacks soon."),
+            (34_000, "We could go either to the park or the river."),
+            (45_000, "Does anyone have a recommendation for a plumber?"),
+            (56_000, "Someone should look at the compost bins soon."),
+            (67_000, "Anyway, that was a long tangent."),
+            (78_000, "Before we finish, anything else?"),
+            (90_000, "To wrap up then, thanks everyone."),
+        ]);
+        e.set_focus(vec!["Agree the launch plan for the newsletter".into()])
+            .unwrap();
+        e.set_sensitivity(Sensitivity::Focused);
+        e.advance(78_000);
+        assert_eq!(e.state.cue.as_ref().expect("still open").kind, STILL_OPEN);
+        let shown: Vec<_> = e.shown_cues.iter().map(|c| c.kind.clone()).collect();
+        assert!(!shown.iter().any(|kind| kind == STILL_OPEN));
+        e.set_keep_meeting(true);
+        let kept = e.markdown();
+        assert!(!kept.contains("Agree the launch plan"), "{kept}");
+        assert!(!kept.contains(STILL_OPEN), "{kept}");
     }
 
     #[test]

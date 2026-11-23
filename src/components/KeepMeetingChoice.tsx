@@ -52,8 +52,9 @@ export function KeepMeetingChoice({
           Also keep this meeting: its transcript and the cues shown
         </label>
         <p id={`${id}-help`}>
-          For this session only. The text below changes to show exactly what
-          will be saved; nothing is written until you choose a destination.
+          For this session only. Note reminders and the Still open list are left
+          out. The text below changes to show exactly what will be saved;
+          nothing is written until you choose a destination.
         </p>
         {error && <p role="alert">{error}</p>}
       </div>
