@@ -38,7 +38,7 @@ export function KeepMeetingChoice({
   };
 
   return (
-    <div className="keep-meeting">
+    <div className={keep ? 'keep-meeting is-kept' : 'keep-meeting'}>
       <input
         id={`${id}-keep`}
         type="checkbox"

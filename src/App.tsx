@@ -36,7 +36,7 @@ import {
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { ContextNotes } from './components/ContextNotes';
 import { SetupCard, type SetupTarget } from './components/SetupCard';
-import { ProviderKeys } from './components/ProviderKeys';
+import { isKeysStatus, ProviderKeys } from './components/ProviderKeys';
 import { KeepMeetingChoice } from './components/KeepMeetingChoice';
 import {
   PanelDivider,
@@ -45,8 +45,7 @@ import {
 } from './components/PanelDivider';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
 import { useCaptureControl } from './lib/useCaptureControl';
-import { useProviderKeys } from './lib/keys';
-import { ServiceKeys } from './components/ServiceKeys';
+import { keysStatus, type KeysStatus } from './lib/providerKeys';
 import { Onboarding } from './components/Onboarding';
 import {
   transcribedWhere,
@@ -693,9 +692,10 @@ function Notebook() {
   // The setup card: put away for this app session with Not now, or gone
   // once the required steps are done.
   const [setupDismissed, setSetupDismissed] = useState(false);
-  const keys = useProviderKeys();
-  const [onboardingState, setOnboardingState] = useState<
-    'idle' | 'open' | 'skipped' | 'finished'
+  const [keysAvailable, setKeysAvailable] = useState(false);
+  const [initialKeys, setInitialKeys] = useState<KeysStatus | null>(null);
+  const [onboardingMode, setOnboardingMode] = useState<
+    'idle' | 'auto' | 'manual' | 'skipped' | 'finished'
   >('idle');
   const onboardingChecked = useRef(false);
   const sessionHeading = useRef<HTMLHeadingElement>(null);
@@ -762,39 +762,64 @@ function Notebook() {
       stop?.();
     };
   }, []);
-  const showOnboarding = view === 'notebook' && onboardingState === 'open';
   useEffect(() => {
-    if (!keys.loaded || !state || onboardingChecked.current) return;
+    if (!bridge.desktop) return;
+    let live = true;
+    keysStatus().then(
+      (next) => {
+        if (!live) return;
+        if (isKeysStatus(next)) {
+          setKeysAvailable(true);
+          setInitialKeys(next);
+        } else {
+          setKeysAvailable(false);
+        }
+      },
+      () => {
+        if (live) setKeysAvailable(false);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  const showOnboarding =
+    view === 'notebook' &&
+    (onboardingMode === 'manual' ||
+      (onboardingMode === 'auto' && !state?.live && !preparing && !finishing));
+  useEffect(() => {
+    if (!bridge.desktop || !keysAvailable || !initialKeys || !state) return;
+    if (onboardingChecked.current) return;
     onboardingChecked.current = true;
+    // Auto-open once per launch only when both keys are notSet (an unreadable
+    // key is not missing) and no session is active.
     if (
-      keys.available &&
-      keys.status.anyMissing &&
-      keys.status.deepgram.state === 'notSet' &&
-      keys.status.anthropic.state === 'notSet' &&
+      initialKeys.deepgram.state === 'notSet' &&
+      initialKeys.anthropic.state === 'notSet' &&
       !preparing &&
       !finishing &&
       !state.live
     ) {
-      setOnboardingState('open');
+      setOnboardingMode('auto');
     }
-  }, [keys.loaded, keys.available, keys.status, preparing, finishing, state]);
+  }, [keysAvailable, initialKeys, preparing, finishing, state]);
   const focusSessionHeading = () => {
     setTimeout(() => sessionHeading.current?.focus(), 0);
   };
   const skipOnboarding = () => {
-    setOnboardingState('skipped');
+    setOnboardingMode('skipped');
     setNotice(
       'Setup skipped. Add your keys or run setup again any time in Settings.',
     );
     focusSessionHeading();
   };
   const finishOnboarding = () => {
-    setOnboardingState('finished');
+    setOnboardingMode('finished');
     setNotice('Setup complete.');
     focusSessionHeading();
   };
   const startFromOnboarding = () => {
-    setOnboardingState('finished');
+    setOnboardingMode('finished');
     if (liveStatus?.available && !busy && !startPending && !microphone.active) {
       void startLive();
     } else {
@@ -802,14 +827,9 @@ function Notebook() {
     }
   };
   const reopenOnboarding = () => {
-    setOnboardingState('open');
+    setOnboardingMode('manual');
     setView('notebook');
   };
-  useEffect(() => {
-    if (view === 'settings' && keys.available) {
-      void keys.refresh();
-    }
-  }, [view, keys.available, keys.refresh]);
 
   const modal = useRef<HTMLDialogElement>(null);
   const exportButton = useRef<HTMLButtonElement>(null);
@@ -1240,7 +1260,6 @@ function Notebook() {
 
         {view === 'notebook' && showOnboarding && (
           <Onboarding
-            keys={keys}
             canStartLive={
               !!liveStatus?.available &&
               !busy &&
@@ -1819,6 +1838,24 @@ function Notebook() {
               A few controls to keep questions on your terms.
             </p>
             <ProviderKeys />
+            {keysAvailable && (
+              <section className="setting">
+                <div>
+                  <h2>Setup walkthrough</h2>
+                  <p>
+                    Review keys, permissions, and how per-session approval
+                    works.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={reopenOnboarding}
+                >
+                  Set up TalkQTE again
+                </button>
+              </section>
+            )}
             <section className="setting">
               <div>
                 <h2>Your name</h2>
@@ -2039,25 +2076,6 @@ function Notebook() {
                 </p>
               </div>
             </section>
-            <ServiceKeys keys={keys} />
-            {keys.available && (
-              <section className="setting">
-                <div>
-                  <h2>Setup walkthrough</h2>
-                  <p>
-                    Review keys, permissions, and how per-session approval
-                    works.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={reopenOnboarding}
-                >
-                  Set up TalkQTE again
-                </button>
-              </section>
-            )}
             <section className="setting">
               <div>
                 <h2>Your data</h2>

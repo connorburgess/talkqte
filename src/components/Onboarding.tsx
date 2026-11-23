@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ProviderKeysController } from '../lib/keys';
-import { ServiceKeysRows } from './ServiceKeys';
+import { ProviderKeysRows } from './ProviderKeys';
 import './onboarding.css';
 
 type Step = 1 | 2 | 3 | 4;
 
 interface OnboardingProps {
-  keys: ProviderKeysController;
   canStartLive: boolean;
   onSkip: () => void;
   onFinish: () => void;
@@ -40,7 +38,6 @@ const STEP_META: Record<
 };
 
 export function Onboarding({
-  keys,
   canStartLive,
   onSkip,
   onFinish,
@@ -102,7 +99,7 @@ export function Onboarding({
             <span className="ob-head-note">{meta.badge}</span>
           ) : (
             <span
-              className={`sk-chip${meta.badgeClass ? ` ${meta.badgeClass}` : ''}`}
+              className={`ob-chip${meta.badgeClass ? ` ${meta.badgeClass}` : ''}`}
             >
               {meta.badge}
             </span>
@@ -157,9 +154,9 @@ export function Onboarding({
                 <span className="ob-ways-label">Two ways to use TalkQTE</span>
                 <div className="ob-ways-grid">
                   <div className="ob-way is-active">
-                    <div className="sk-row-head">
+                    <div className="ob-card-head">
                       <strong>Use your own keys</strong>
-                      <span className="sk-chip is-set">Active · BYOK</span>
+                      <span className="ob-chip is-set">Active · BYOK</span>
                     </div>
                     <p>
                       Add your own Deepgram and Anthropic keys in the next step.
@@ -168,9 +165,9 @@ export function Onboarding({
                     </p>
                   </div>
                   <div className="ob-way is-disabled" aria-disabled="true">
-                    <div className="sk-row-head">
+                    <div className="ob-card-head">
                       <strong>TalkQTE Hosted</strong>
-                      <span className="sk-chip">Coming later</span>
+                      <span className="ob-chip">Coming later</span>
                     </div>
                     <p>
                       Paid service with no keys to manage. Not available yet;
@@ -191,7 +188,7 @@ export function Onboarding({
                 </strong>{' '}
                 You can skip either key now and add it later in Settings.
               </p>
-              <ServiceKeysRows keys={keys} showWhereToGet />
+              <ProviderKeysRows showWhereToGet />
             </>
           )}
 
@@ -204,9 +201,11 @@ export function Onboarding({
               </p>
 
               <div className="ob-perm-card">
-                <div className="sk-row-head">
+                <div className="ob-card-head">
                   <h3>Microphone</h3>
-                  <span className="sk-role">Asked on first session start</span>
+                  <span className="ob-card-meta">
+                    Asked on first session start
+                  </span>
                 </div>
                 <p>
                   Needed so TalkQTE can listen to your voice when you start a
@@ -216,9 +215,9 @@ export function Onboarding({
               </div>
 
               <div className="ob-perm-card">
-                <div className="sk-row-head">
+                <div className="ob-card-head">
                   <h3>Screen &amp; System Audio Recording</h3>
-                  <span className="sk-role">
+                  <span className="ob-card-meta">
                     Only if choosing application audio
                   </span>
                 </div>

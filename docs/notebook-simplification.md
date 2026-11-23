@@ -62,11 +62,11 @@ What did not change:
 
 - Colours (light paper/evergreen/terracotta palette unchanged; no dark scheme), control behaviour, three-step per-session approval, consent/safety/status wording, the cue card (`Question.tsx`), the floating companion window, and Rust backend behaviour. Ordinary builds still have no live transcription and no model connection.
 
-| Before a session, ordinary build: before | After |
-| --- | --- |
+| Before a session, ordinary build: before                                                                         | After                                                                                                          |
+| ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | ![Notebook before a session in an ordinary build, before this pass](assets/notebook-product-before-ordinary.png) | ![Notebook before a session in an ordinary build, after this pass](assets/notebook-product-after-ordinary.png) |
-| **Live session in a development build, cue processing not yet approved: before** | **After** |
-| ![Fictional live session with Cue processing before this pass](assets/notebook-product-before-live.png) | ![Fictional live session with Cue processing after this pass](assets/notebook-product-after-live.png) |
+| **Live session in a development build, cue processing not yet approved: before**                                 | **After**                                                                                                      |
+| ![Fictional live session with Cue processing before this pass](assets/notebook-product-before-live.png)          | ![Fictional live session with Cue processing after this pass](assets/notebook-product-after-live.png)          |
 
 The [second approval step](assets/notebook-product-after-review.png) keeps its full data statement under the new `Step 2 of 2` marker. These are browser renders at 1320 × 880 with reduced motion, from the browser tests' fictional native stand-in with a fictional hosted processor; no microphone, transcription or provider was involved.
 
@@ -76,12 +76,12 @@ Checked headlessly: the full browser suite in Chromium and WebKit; no horizontal
 
 Following the owner's brand selection, the app adopted Direction C on a white base (`#ffffff` work areas, `#f3f5f7` drafting vellum sidebar, `#11151b` carbon ink and primary actions, `#875500` amber ink for light-surface accents and focus rings, `#ebb45b` solar amber reserved for dark companion surfaces and the mark, and `#0d1014` void carbon for the floating companion dock). Self-hosted `Manrope Variable` and `IBM Plex Mono` fonts (SIL OFL 1.1 under `public/fonts/` and `LICENSES/`, recorded in `LICENSING.md` and `src-tauri/THIRD-PARTY-NOTICES.txt`) replaced system sans and the earlier Georgia serif headings while preserving all glance cue sizes and motion timings in `DESIGN.md`. `public/mark.svg` now uses the Direction C Calibrated Cue mark. The **Asked you** cue replaced its one-sided left edge (`.cue-edge`) with a quiet warm tint (`#fdf6e9`) and a full 1.5 px border all round in amber ink (kept in `CanvasText` under forced colours), active Notes/Transcript tabs use `text-decoration: underline` instead of a bottom border, and `scripts/check-one-sided-borders.mjs` runs in CI allowing only reviewed 1 px neutral structural hairlines. Both the floating dock (pure white default cue card, `18px` shell / `13px` card corners, uppercase mono cue labels with square marker, bold Manrope state titles) and the desktop notebook working panels (sidebar, toolbar and Panel sizes popover, microphone check, session strip, Cue processing steps and review table, Notes/Transcript rows, Cues pane, disclosures, Settings, and export dialog) align to Section 8 of the brand guide without changing wording, control names, DOM/keyboard order, or lab contracts.
 
-### First-run onboarding and service keys (stub) — 23 November 2026
+### First-run onboarding and provider keys — 23 November 2026
 
-The four-step onboarding flow and the Settings **Service keys** section are implemented against the typed frontend stub (`src/lib/keys.ts`) while the own-key Rust backend is built separately. Builds without the Rust key commands show **Unavailable in this build** in Settings and never open onboarding automatically. See [First-run onboarding and service keys](onboarding.md).
+The four-step onboarding flow (`src/components/Onboarding.tsx`) shares the single provider-keys surface (`src/components/ProviderKeys.tsx`, `src/lib/providerKeys.ts`) with **Settings → Your API keys** in Direction C, alongside Direction C styling for the export dialog's kept-meeting controls (`src/components/KeepMeetingChoice.tsx`). Builds without the Rust key commands never open onboarding automatically. See [First-run onboarding and provider keys](onboarding.md).
 
-| Before a session, ordinary build | Live session, development build, Cue processing not yet approved |
-| --- | --- |
+| Before a session, ordinary build                                                  | Live session, development build, Cue processing not yet approved                               |
+| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | ![Notebook before a session in direction C](assets/notebook-brand-c-ordinary.png) | ![Fictional live session with Cue processing in direction C](assets/notebook-brand-c-live.png) |
 
 The [second approval step](assets/notebook-brand-c-review.png) and the [Development build group](assets/notebook-brand-c-development.png) are rendered in direction C too. The floating companion, before (first row) and after (second row), with the bar alone and with a suggested question, a Said quote, an Asked you question and a held question: ![Companion before and after direction C, five states](assets/companion-brand-c-before-after.png)

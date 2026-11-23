@@ -1,5 +1,5 @@
-// First-run onboarding and Settings Service keys checks against the real
-// PR #408 / #411 command shapes mocked in tests/fixtures/native-microphone.ts.
+// First-run onboarding and single Settings Your API keys checks against the
+// native provider-keys fixture (tests/fixtures/native-provider-keys.ts).
 // No real keys or network requests are ever made.
 import { expect, test, type Page } from '@playwright/test';
 import type {} from './fixtures/native-microphone';
@@ -23,13 +23,16 @@ async function openDesktop(page: Page, query = '') {
     });
   });
   await page.goto(`/${query}`);
-  await page.waitForFunction(() => !!window.keysTest);
+  await page.waitForFunction(() => !!window.providerKeysTest);
 }
 
-test('when key commands are missing, onboarding does not open and Settings reports Unavailable in this build', async ({
+const providerRow = (page: Page, name: string) =>
+  page.getByRole('form', { name, exact: true });
+
+test('when key commands are unavailable, onboarding does not open and Settings reports an error without Set up TalkQTE again', async ({
   page,
 }) => {
-  await openDesktop(page);
+  await openDesktop(page, '?keys=unavailable');
   await expect(
     page.getByRole('heading', { name: 'No session yet', level: 1 }),
   ).toBeVisible();
@@ -38,22 +41,49 @@ test('when key commands are missing, onboarding does not open and Settings repor
   );
 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  const keysSection = page.getByRole('region', { name: 'Service keys' });
+  const keysSection = page.getByRole('region', { name: 'Your API keys' });
   await expect(keysSection).toBeVisible();
-  await expect(keysSection).toContainText('Unavailable in this build');
-  await expect(keysSection).not.toContainText('Not set');
-  await expect(
-    keysSection.getByRole('button', { name: 'Add key' }),
-  ).toHaveCount(0);
+  await expect(keysSection.getByRole('alert')).toHaveText(
+    'Your keys could not be read. Try again later.',
+  );
   await expect(
     page.getByRole('button', { name: 'Set up TalkQTE again' }),
   ).toHaveCount(0);
 });
 
-test('onboarding opens with no keys, moves focus to each step heading, and Escape asks to confirm Skip', async ({
+test('an unreadable key in the Keychain is not missing and does not auto-open onboarding', async ({
   page,
 }) => {
-  await openDesktop(page, '?keys');
+  // Both keys unreadable.
+  await openDesktop(page, '?keys=unreadable');
+  await expect(
+    page.getByRole('heading', { name: 'No session yet', level: 1 }),
+  ).toBeVisible();
+  await expect(page.getByRole('region', { name: 'TalkQTE setup' })).toHaveCount(
+    0,
+  );
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(providerRow(page, 'Deepgram')).toContainText(
+    'Could not be read from the Keychain. Unlock it or allow access, or save the key again.',
+  );
+  await expect(
+    page.getByRole('button', { name: 'Set up TalkQTE again' }),
+  ).toBeVisible();
+
+  // One key unreadable, one notSet: still does not auto-open onboarding.
+  await openDesktop(page, '?keys=unreadable-one');
+  await expect(
+    page.getByRole('heading', { name: 'No session yet', level: 1 }),
+  ).toBeVisible();
+  await expect(page.getByRole('region', { name: 'TalkQTE setup' })).toHaveCount(
+    0,
+  );
+});
+
+test('onboarding auto-opens when both keys are notSet, moves focus to each step heading, and Escape asks to confirm Skip', async ({
+  page,
+}) => {
+  await openDesktop(page);
 
   // Step 1: focus lands on step heading; Two ways shows own keys active and Hosted disabled.
   const step1 = page.getByRole('heading', {
@@ -84,7 +114,7 @@ test('onboarding opens with no keys, moves focus to each step heading, and Escap
       'Test is the only action in setup that sends anything over the network, and only when you press it.',
     ),
   ).toBeVisible();
-  const calls = await page.evaluate(() => window.keysTest.calls);
+  const calls = await page.evaluate(() => window.providerKeysTest.calls);
   expect(calls.filter((c) => c.command === 'test_provider_key')).toHaveLength(
     0,
   );
@@ -137,37 +167,31 @@ test('onboarding opens with no keys, moves focus to each step heading, and Escap
   await expect(notebookHeading).toBeFocused();
 });
 
-test('key entry validates and clears without echoing, Test -> Rejected -> Replace -> Checked, Remove confirms, provider-keys:changed syncs, and cue_usage displays without model', async ({
+test('key entry clears without echoing, Test -> rejected -> replace -> set and checked, remove works, provider-keys:changed syncs, and Set up TalkQTE again reopens from Settings', async ({
   page,
 }) => {
-  await openDesktop(page, '?keys&live');
+  await openDesktop(page, '?live');
 
-  // Go to Step 2 and verify exact Deepgram & Anthropic data statements.
+  // Step 2 uses the single ProviderKeys rows with dashboard guidance.
   await page.getByRole('button', { name: 'Next: Your keys' }).click();
-  const deepgram = page.getByRole('region', { name: 'Deepgram' });
-  const anthropic = page.getByRole('region', { name: 'Anthropic' });
+  const deepgram = providerRow(page, 'Deepgram');
+  const anthropic = providerRow(page, 'Anthropic');
   await expect(deepgram).toContainText('Not set');
-  await expect(deepgram).toContainText(
-    "Receives the session's audio (microphone or the application you chose), only after you approve cue processing for that session; at most 120 minutes per session. Billed to your own Deepgram account.",
-  );
-  await expect(anthropic).toContainText(
-    'Receives up to six recent transcript lines, the cue on screen and earlier cues, and your session name if set, for cue decisions; never audio, your notes or focus lines. Billed to your own Anthropic account.',
-  );
+  await expect(deepgram).toContainText('console.deepgram.com');
+  await expect(anthropic).toContainText('Not set');
+  await expect(anthropic).toContainText('console.anthropic.com');
 
   // Bad shape rejects with verbatim Rust error and clears the password input.
-  await anthropic.getByRole('button', { name: 'Add key' }).click();
-  const anthropicInput = anthropic.getByLabel(/Anthropic API key/);
+  const anthropicInput = anthropic.getByLabel('Anthropic API key');
   await anthropicInput.fill('not-a-valid-key');
   await anthropic.getByRole('button', { name: 'Save key' }).click();
   await expect(anthropic.getByRole('alert')).toHaveText(
     'That does not look like an Anthropic API key. It starts with sk-ant-api.',
   );
   await expect(anthropicInput).toHaveValue('');
-  await anthropic.getByRole('button', { name: 'Cancel' }).click();
 
-  // Valid Deepgram key clears, sets Set (not yet Checked), and never echoes.
-  await deepgram.getByRole('button', { name: 'Add key' }).click();
-  const input = deepgram.getByLabel(/Deepgram API key/);
+  // Valid Deepgram key clears, sets Set, not checked yet, and never echoes.
+  const input = deepgram.getByLabel('Deepgram API key');
   await expect(input).toHaveAttribute('type', 'password');
   const save = deepgram.getByRole('button', { name: 'Save key' });
   await expect(save).toBeDisabled();
@@ -176,8 +200,7 @@ test('key entry validates and clears without echoing, Test -> Rejected -> Replac
   await expect(save).toBeEnabled();
   await save.click();
 
-  await expect(deepgram).toContainText('Set');
-  await expect(deepgram).not.toContainText('Checked');
+  await expect(deepgram).toContainText('Set, not checked yet');
   await expect(page.locator('body')).not.toContainText(FICTIONAL_DEEPGRAM_KEY);
   expect(
     await page.evaluate(
@@ -186,45 +209,44 @@ test('key entry validates and clears without echoing, Test -> Rejected -> Replac
     ),
   ).toBe(false);
 
-  // Unreachable error shows the exact verbatim message from Rust without changing Set.
+  // Unreachable error shows exact message without changing Set state.
   await page.evaluate(() => {
-    window.keysTest.setTestOutcome('deepgram', {
+    window.providerKeysTest.setTestOutcome('deepgram', {
       error:
         'Deepgram could not be reached to check the key. Nothing was changed.',
     });
   });
-  await deepgram.getByRole('button', { name: 'Test' }).click();
+  await deepgram.getByRole('button', { name: 'Test key' }).click();
   await expect(deepgram.getByRole('alert')).toHaveText(
     'Deepgram could not be reached to check the key. Nothing was changed.',
   );
-  await expect(deepgram).toContainText('Set');
+  await expect(deepgram).toContainText('Set, not checked yet');
 
   // Test -> Checking… (controls disabled) -> Rejected.
   await page.evaluate(() => {
-    window.keysTest.setTestOutcome('deepgram', 'rejected');
-    window.keysTest.holdNextTest();
+    window.providerKeysTest.setTestOutcome('deepgram', 'rejected');
+    window.providerKeysTest.holdNextTest();
   });
-  await deepgram.getByRole('button', { name: 'Test' }).click();
+  await deepgram.getByRole('button', { name: 'Test key' }).click();
   await expect(deepgram).toContainText('Checking…');
-  await expect(deepgram.getByRole('button', { name: 'Test' })).toBeDisabled();
   await expect(
-    deepgram.getByRole('button', { name: 'Replace' }),
+    deepgram.getByRole('button', { name: 'Checking…' }),
   ).toBeDisabled();
-  await expect(deepgram.getByRole('button', { name: 'Remove' })).toBeDisabled();
+  await expect(
+    deepgram.getByRole('button', { name: 'Remove key' }),
+  ).toBeDisabled();
 
-  await page.evaluate(() => window.keysTest.releaseTest());
-  await expect(deepgram).toContainText('Rejected');
-  await expect(deepgram.getByRole('alert')).toContainText(
-    'Refused by the service.',
+  await page.evaluate(() => window.providerKeysTest.releaseTest());
+  await expect(deepgram).toContainText(
+    'Rejected by Deepgram. Replace it with a new key.',
   );
 
-  // Replace -> password input starts empty -> Set -> Test verifies ("Checked").
-  await deepgram.getByRole('button', { name: 'Replace' }).click();
-  const replaceInput = deepgram.getByLabel(/Deepgram API key/);
+  // Replace -> password input is empty -> Set, not checked yet -> Test verifies.
+  const replaceInput = deepgram.getByLabel('Replace Deepgram key');
   await expect(replaceInput).toHaveValue('');
   await replaceInput.fill(FICTIONAL_DEEPGRAM_REPLACEMENT);
   await deepgram.getByRole('button', { name: 'Save key' }).click();
-  await expect(deepgram).toContainText('Set');
+  await expect(deepgram).toContainText('Set, not checked yet');
   expect(
     await page.evaluate(
       (secret) => document.documentElement.innerHTML.includes(secret),
@@ -233,70 +255,39 @@ test('key entry validates and clears without echoing, Test -> Rejected -> Replac
   ).toBe(false);
 
   await page.evaluate(() => {
-    window.keysTest.setTestOutcome('deepgram', 'verified');
+    window.providerKeysTest.setTestOutcome('deepgram', 'verified');
   });
-  await deepgram.getByRole('button', { name: 'Test' }).click();
-  await expect(deepgram).toContainText('Set');
-  await expect(deepgram).toContainText('Checked');
+  await deepgram.getByRole('button', { name: 'Test key' }).click();
+  await expect(deepgram).toContainText('Set and checked');
   await expect(deepgram.getByRole('alert')).toHaveCount(0);
 
-  // Remove asks for inline confirmation; Cancel keeps Set; Remove key sets Not set.
-  await deepgram.getByRole('button', { name: 'Remove' }).click();
-  const confirmGroup = deepgram.getByRole('group', {
-    name: 'Confirm removing Deepgram key',
-  });
-  await expect(confirmGroup).toContainText('Remove Deepgram key?');
-  await confirmGroup.getByRole('button', { name: 'Cancel' }).click();
-  await expect(confirmGroup).toHaveCount(0);
-  await expect(deepgram).toContainText('Set');
-
-  await deepgram.getByRole('button', { name: 'Remove' }).click();
-  await deepgram
-    .getByRole('group', { name: 'Confirm removing Deepgram key' })
-    .getByRole('button', { name: 'Remove key' })
-    .click();
+  // Remove resets state to Not set.
+  await deepgram.getByRole('button', { name: 'Remove key' }).click();
   await expect(deepgram).toContainText('Not set');
 
-  // Skip setup, inspect Settings Service keys + cue_usage (without showing model),
-  // verify provider-keys:changed event updates Settings live, then reopen onboarding.
+  // Skip setup, verify Settings has ONE keys surface ("Your API keys") beside
+  // "Set up TalkQTE again", live-syncs provider-keys:changed, and reopens onboarding.
   await page.getByRole('button', { name: 'Skip setup' }).click();
   await expect(
     page.getByRole('heading', { name: 'No session yet', level: 1 }),
   ).toBeVisible();
 
-  await page.evaluate(() => {
-    window.keysTest.setUsage({
-      model: 'claude-sonnet-fictional-hidden',
-      requests: 12,
-      requestCap: 400,
-      spentMicroUsd: 60_000,
-      spendCapMicroUsd: 500_000,
-    });
-  });
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  const keysSection = page.getByRole('region', { name: 'Service keys' });
-  await expect(keysSection).toBeVisible();
-  await expect(keysSection).toContainText('This session');
-  await expect(keysSection).toContainText('12 of 400');
-  await expect(keysSection).toContainText('Est. $0.06 of $0.50');
-  await expect(keysSection).toContainText(
-    'Estimate calculated locally from token counts; not a bill from Anthropic.',
+  await expect(
+    page.getByRole('region', { name: 'Your API keys' }),
+  ).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Service keys' })).toHaveCount(
+    0,
   );
-  await expect(keysSection).not.toContainText('claude-sonnet-fictional-hidden');
 
-  // Event `provider-keys:changed` updates Settings rows live.
   await page.evaluate(() =>
-    window.keysTest.emitStatus({
+    window.providerKeysTest.emitStatus({
       deepgram: { state: 'set', verified: true },
       anthropic: { state: 'notSet', verified: false },
       anyMissing: true,
     }),
   );
-  const settingsDeepgram = keysSection.getByRole('region', {
-    name: 'Deepgram',
-  });
-  await expect(settingsDeepgram).toContainText('Set');
-  await expect(settingsDeepgram).toContainText('Checked');
+  await expect(providerRow(page, 'Deepgram')).toContainText('Set and checked');
 
   // Reopen onboarding via "Set up TalkQTE again".
   await page.getByRole('button', { name: 'Set up TalkQTE again' }).click();
@@ -307,21 +298,20 @@ test('key entry validates and clears without echoing, Test -> Rejected -> Replac
     }),
   ).toBeFocused();
 
-  // Fresh load with keys already set: no auto-onboarding, empty cue_usage state.
+  // Fresh load with keys already set does not auto-open onboarding.
   await openDesktop(page, '?keys=set');
   await expect(
     page.getByRole('heading', { name: 'No session yet', level: 1 }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await expect(
-    page.getByRole('region', { name: 'Service keys' }),
-  ).toContainText('0 of 400 Anthropic requests · Est. $0.00 of $0.50');
+  await expect(page.getByRole('region', { name: 'TalkQTE setup' })).toHaveCount(
+    0,
+  );
 });
 
 test('keyboard-only path completes all four steps and finishes in the notebook', async ({
   page,
 }) => {
-  await openDesktop(page, '?keys');
+  await openDesktop(page);
 
   await expect(
     page.getByRole('heading', {
@@ -338,13 +328,12 @@ test('keyboard-only path completes all four steps and finishes in the notebook',
       level: 2,
     }),
   ).toBeFocused();
-  const anthropic = page.getByRole('region', { name: 'Anthropic' });
-  await anthropic.getByRole('button', { name: 'Add key' }).focus();
-  await page.keyboard.press('Enter');
-  await expect(anthropic.getByLabel(/Anthropic API key/)).toBeFocused();
+  const anthropic = providerRow(page, 'Anthropic');
+  const anthropicInput = anthropic.getByLabel('Anthropic API key');
+  await anthropicInput.focus();
   await page.keyboard.type(FICTIONAL_ANTHROPIC_KEY);
   await page.keyboard.press('Enter');
-  await expect(anthropic).toContainText('Set');
+  await expect(anthropic).toContainText('Set, not checked yet');
 
   await page.getByRole('button', { name: 'Next: Permissions' }).focus();
   await page.keyboard.press('Enter');
@@ -376,7 +365,7 @@ test('390px narrow layout has zero horizontal overflow and reduced motion disabl
 }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 390, height: 844 });
-  await openDesktop(page, '?keys');
+  await openDesktop(page);
 
   const checkNoOverflowAndReducedMotion = async (label: string) => {
     const metrics = await page.evaluate(() => ({
@@ -405,7 +394,7 @@ test('390px narrow layout has zero horizontal overflow and reduced motion disabl
   await page.getByRole('button', { name: 'Go to the notebook' }).click();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(
-    page.getByRole('region', { name: 'Service keys' }),
+    page.getByRole('region', { name: 'Your API keys' }),
   ).toBeVisible();
-  await checkNoOverflowAndReducedMotion('Settings Service keys at 390px');
+  await checkNoOverflowAndReducedMotion('Settings Your API keys at 390px');
 });

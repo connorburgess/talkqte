@@ -10,7 +10,6 @@ import * as preview from '../../src/lib/preview';
 import type { MicrophoneSnapshot } from '../../src/lib/microphone';
 import type { Commands, LiveStatus, Snapshot } from '../../src/lib/types';
 import type { ProcessingSnapshot, StopTarget } from '../../src/lib/processing';
-import type { CueUsage, KeysStatus, Provider } from '../../src/lib/keys';
 
 let microphone: MicrophoneSnapshot = {
   revision: 0,
@@ -155,68 +154,6 @@ const delayed = new URLSearchParams(location.search).has('delay-microphone');
 const liveAvailable = ['live', 'cloud'].some((key) =>
   new URLSearchParams(location.search).has(key),
 );
-// With ?keys, this fixture supplies the provider-key commands from PR #408
-// and cue_usage from PR #411. Without ?keys, those commands reject as unknown
-// so default tests exercise the "Unavailable in this build" path.
-const keysParam = new URLSearchParams(location.search).get('keys');
-const keysEnabled = new URLSearchParams(location.search).has('keys');
-type KeyTestOutcome = 'verified' | 'rejected' | { error: string };
-function buildKeysStatus(
-  deepgram: KeysStatus['deepgram'],
-  anthropic: KeysStatus['anthropic'],
-): KeysStatus {
-  return {
-    deepgram,
-    anthropic,
-    anyMissing: deepgram.state !== 'set' || anthropic.state !== 'set',
-  };
-}
-let keysStatus: KeysStatus = buildKeysStatus(
-  keysParam === 'set' || keysParam === 'deepgram'
-    ? { state: 'set', verified: false }
-    : { state: 'notSet', verified: false },
-  keysParam === 'set' || keysParam === 'anthropic'
-    ? { state: 'set', verified: false }
-    : { state: 'notSet', verified: false },
-);
-let cueUsage: CueUsage | null = null;
-const keysCalls: { command: string; provider?: Provider }[] = [];
-const keysTestOutcomes: Record<Provider, KeyTestOutcome> = {
-  deepgram: 'verified',
-  anthropic: 'verified',
-};
-let nextSetError = '';
-let holdKeyTest = false;
-let releaseKeyTest: (() => void) | undefined;
-function validateKeyShape(provider: Provider, raw: string) {
-  const key = raw.trim();
-  if (provider === 'anthropic') {
-    const ok =
-      (key.startsWith('sk-ant-api') || key.startsWith('sk-ant-usr-')) &&
-      !key.startsWith('sk-ant-admin') &&
-      key.length >= 40 &&
-      key.length <= 256 &&
-      /^[A-Za-z0-9_-]+$/.test(key);
-    if (!ok) {
-      throw new Error(
-        'That does not look like an Anthropic API key. It starts with sk-ant-api.',
-      );
-    }
-    return;
-  }
-  const ok =
-    key.length >= 32 && key.length <= 128 && /^[A-Za-z0-9]+$/.test(key);
-  if (!ok) {
-    throw new Error(
-      'That does not look like a Deepgram API key. It is letters and digits only.',
-    );
-  }
-}
-async function emitKeysChanged(next: KeysStatus) {
-  keysStatus = buildKeysStatus(next.deepgram, next.anthropic);
-  await emit('provider-keys:changed', structuredClone(keysStatus));
-  return structuredClone(keysStatus);
-}
 Object.defineProperty(window, 'isTauri', { value: true, configurable: true });
 
 async function send(value: Partial<MicrophoneSnapshot>) {
@@ -550,67 +487,6 @@ mockIPC(
           });
         }
         return;
-      case 'provider_keys_status': {
-        if (!keysEnabled)
-          throw new Error('Command provider_keys_status not found');
-        keysCalls.push({ command: 'provider_keys_status' });
-        return structuredClone(keysStatus);
-      }
-      case 'set_provider_key': {
-        if (!keysEnabled) throw new Error('Command set_provider_key not found');
-        const { provider, key } = args as { provider: Provider; key: string };
-        keysCalls.push({ command: 'set_provider_key', provider });
-        if (nextSetError) {
-          const message = nextSetError;
-          nextSetError = '';
-          throw new Error(message);
-        }
-        validateKeyShape(provider, key);
-        const next = {
-          ...keysStatus,
-          [provider]: { state: 'set' as const, verified: false },
-        };
-        return emitKeysChanged(next);
-      }
-      case 'test_provider_key': {
-        if (!keysEnabled)
-          throw new Error('Command test_provider_key not found');
-        const { provider } = args as { provider: Provider };
-        keysCalls.push({ command: 'test_provider_key', provider });
-        if (holdKeyTest) {
-          holdKeyTest = false;
-          await new Promise<void>((resolve) => {
-            releaseKeyTest = resolve;
-          });
-        }
-        const outcome = keysTestOutcomes[provider];
-        if (typeof outcome === 'object') {
-          throw new Error(outcome.error);
-        }
-        const next = {
-          ...keysStatus,
-          [provider]:
-            outcome === 'verified'
-              ? { state: 'set' as const, verified: true }
-              : { state: 'rejected' as const, verified: false },
-        };
-        return emitKeysChanged(next);
-      }
-      case 'remove_provider_key': {
-        if (!keysEnabled)
-          throw new Error('Command remove_provider_key not found');
-        const { provider } = args as { provider: Provider };
-        keysCalls.push({ command: 'remove_provider_key', provider });
-        const next = {
-          ...keysStatus,
-          [provider]: { state: 'notSet' as const, verified: false },
-        };
-        return emitKeysChanged(next);
-      }
-      case 'cue_usage': {
-        if (!keysEnabled) throw new Error('Command cue_usage not found');
-        return structuredClone(cueUsage);
-      }
       default:
         return preview.command(
           command as keyof Commands,
@@ -709,16 +585,6 @@ declare global {
       rejectNextStop: () => void;
       holdNextStop: () => void;
       releaseStop: () => void;
-    };
-    keysTest: {
-      calls: { command: string; provider?: Provider }[];
-      status: () => KeysStatus;
-      setTestOutcome: (provider: Provider, outcome: KeyTestOutcome) => void;
-      failNextSet: (message: string) => void;
-      holdNextTest: () => void;
-      releaseTest: () => void;
-      setUsage: (usage: CueUsage | null) => void;
-      emitStatus: (next: KeysStatus) => Promise<KeysStatus>;
     };
   }
 }
@@ -819,28 +685,6 @@ window.microphoneTest = {
     delayStop = true;
   },
   releaseStop: () => releaseStop?.(),
-};
-window.keysTest = {
-  calls: keysCalls,
-  status: () => structuredClone(keysStatus),
-  setTestOutcome: (provider, outcome) => {
-    keysTestOutcomes[provider] = structuredClone(outcome);
-  },
-  failNextSet: (message) => {
-    nextSetError = message;
-  },
-  holdNextTest: () => {
-    holdKeyTest = true;
-  },
-  releaseTest: () => {
-    const release = releaseKeyTest;
-    releaseKeyTest = undefined;
-    release?.();
-  },
-  setUsage: (usage) => {
-    cueUsage = structuredClone(usage);
-  },
-  emitStatus: emitKeysChanged,
 };
 await import('../../src/main');
 

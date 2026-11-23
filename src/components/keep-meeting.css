@@ -1,24 +1,56 @@
-/* The keep-the-meeting choice in the export review. Plain; no borders. */
+/* Kept-meeting choice in the export review dialog (Direction C).
+   Uniform all-round borders only; zero one-sided accent borders. */
 .keep-meeting {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  margin: 12px 0;
+  gap: var(--space-12);
+  margin: 14px 0;
+  padding: 12px 14px;
+  background: var(--band);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+}
+.keep-meeting.is-kept {
+  background: var(--cue-asked-surface);
+  border: 1.5px solid var(--accent-ink);
 }
 .keep-meeting input {
   width: 20px;
   height: 20px;
   margin-top: 2px;
   flex-shrink: 0;
+  accent-color: var(--ink);
+  cursor: pointer;
 }
 .keep-meeting label {
-  font-weight: 650;
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--ink);
+  cursor: pointer;
 }
 .keep-meeting p {
+  margin-top: var(--space-4);
+  font-size: 13px;
+  line-height: 1.55;
   color: var(--muted);
-  font-size: 15px;
-  margin-top: 4px;
 }
 .keep-meeting [role='alert'] {
-  color: var(--accent);
+  margin-top: var(--space-8);
+  padding: 8px 12px;
+  background: var(--danger-surface);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-control);
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.5;
+}
+@media (prefers-reduced-motion: reduce) {
+  .keep-meeting,
+  .keep-meeting * {
+    transition: none;
+    animation: none;
+  }
 }
