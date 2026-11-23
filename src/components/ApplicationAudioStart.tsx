@@ -86,8 +86,8 @@ export function ApplicationAudioStart() {
   const problem = sourceProblem(status.problem);
 
   return (
-    <div className="processing-review processing-source-start">
-      <h3>Application audio · development build</h3>
+    <div className="processing-source-start">
+      <h3>Application audio</h3>
       <p className="processing-muted">
         Start a live session from one application's audio, without the
         microphone. {status.scopeNotice} Listing applications can show the macOS
