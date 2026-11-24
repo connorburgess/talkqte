@@ -34,7 +34,7 @@ impl Transport for Scripted {
             key.expose().to_string(),
             serde_json::from_slice(body).unwrap(),
         ));
-        let (status, text) = script.replies.pop_front().unwrap_or(Err(NoReply))?;
+        let (status, text) = script.replies.pop_front().unwrap_or(Err(NoReply::Lost))?;
         Ok(Reply {
             status,
             body: Box::new(std::io::Cursor::new(text.into_bytes())),
@@ -289,9 +289,30 @@ fn request_scoped_non_decisions_continue_and_terminal_failures_stop() {
             worst,
         ),
         (Ok((429, String::new())), Failure::UsageLimit, worst),
+        // An account out of credit is told apart from an outage, and is not
+        // charged: nothing was generated.
+        (Ok((402, String::new())), Failure::Billing, 0),
+        (
+            Ok((
+                400,
+                r#"{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}"#.into(),
+            )),
+            Failure::Billing,
+            0,
+        ),
+        (
+            Ok((
+                400,
+                r#"{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: field required"}}"#.into(),
+            )),
+            Failure::Unreachable,
+            worst,
+        ),
         (Ok((500, String::new())), Failure::Unreachable, worst),
         (Ok((529, String::new())), Failure::Unreachable, worst),
-        (Err(NoReply), Failure::Unreachable, worst),
+        (Err(NoReply::Lost), Failure::Unreachable, worst),
+        // Never left the Mac: nothing to bill.
+        (Err(NoReply::Unsent), Failure::Unreachable, 0),
     ] {
         let mut run = run(Scripted::default().answer(reply), None, Some(KEY));
         assert_eq!(run.evaluate(&request(None)).unwrap_err(), expected);
@@ -630,6 +651,26 @@ fn a_refused_key_and_the_caps_stop_cues_with_their_own_reasons() {
     s.settle();
     assert!(!s.engine.has_processing_permission());
     assert_eq!(s.issue(), "keyRejected");
+
+    // A rate limit and an empty credit balance on the person's own key
+    // each say so, not that Anthropic could not be reached. Neither marks
+    // the key rejected (checked with the other replies above).
+    for (status, body, issue) in [
+        (429, String::new(), "keyRateLimited"),
+        (402, String::new(), "billing"),
+        (
+            400,
+            r#"{"type":"error","error":{"message":"Your credit balance is too low"}}"#.to_string(),
+            "billing",
+        ),
+    ] {
+        let mut s = session(Scripted::default().answer(Ok((status, body))));
+        s.approve();
+        s.say("The fictional rota has two gaps.");
+        s.settle();
+        assert!(!s.engine.has_processing_permission());
+        assert_eq!(s.issue(), issue);
+    }
 
     let mut s = session_with_cap(Scripted::default(), 1);
     s.approve();

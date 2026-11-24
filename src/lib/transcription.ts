@@ -12,11 +12,15 @@ export interface CloudTranscription {
 }
 
 const STOP_REASONS: Record<string, string> = {
-  auth: 'the service refused the lab credential',
-  quota: 'the account cannot pay for more audio',
-  rate_limited: 'the service is limiting requests',
+  auth: 'the service refused the API key or credential. Replace the key in Settings',
+  key_unavailable:
+    'your Deepgram key could not be read from the Keychain, or it was removed. Check it in Settings',
+  quota:
+    'the account cannot pay for more audio. Add credit in your Deepgram account',
+  rate_limited: 'the service is limiting requests. Wait a minute',
   cap_reached: 'the transcription minute limit was reached',
-  network: 'the connection was lost',
+  network: 'the connection failed or was lost. Check your internet connection',
+  unavailable: 'the service is having a problem on its side',
   protocol: 'the service sent a reply TalkQTE could not read',
   closed: 'the service closed the connection',
   settings: 'the development transcription settings are not usable',

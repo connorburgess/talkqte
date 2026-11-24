@@ -100,7 +100,11 @@ where
                     tap.push_interleaved(data.iter().map(|sample| sample.to_sample::<f32>()));
                 }
             },
-            move |_| failures.failed.store(true, Ordering::Release),
+            move |error: cpal::Error| {
+                if ends_capture(error.kind()) {
+                    failures.failed.store(true, Ordering::Release);
+                }
+            },
             Some(Duration::from_secs(2)),
         )
         .map(|stream| {
@@ -159,4 +163,43 @@ pub(super) fn build_stream(
     _tap_chunk_ms: Option<u64>,
 ) -> Result<(Box<dyn CaptureStream>, Option<crate::audio_tap::Chunker>), Failure> {
     Err(Failure::Unsupported)
+}
+
+/// Whether a stream error means the input is gone. A momentary overload
+/// (`Xrun`), a refused real-time priority or a rerouted default leave the
+/// stream running: ending a meeting for a glitch would lose more than the
+/// glitch did. Audio that really stops is still caught by the input timeout.
+#[cfg(target_os = "macos")]
+fn ends_capture(kind: cpal::ErrorKind) -> bool {
+    !matches!(
+        kind,
+        cpal::ErrorKind::Xrun | cpal::ErrorKind::RealtimeDenied | cpal::ErrorKind::DeviceChanged
+    )
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::ends_capture;
+    use cpal::ErrorKind;
+
+    #[test]
+    fn a_glitch_keeps_the_microphone_and_a_lost_device_ends_it() {
+        for kind in [
+            ErrorKind::Xrun,
+            ErrorKind::RealtimeDenied,
+            ErrorKind::DeviceChanged,
+        ] {
+            assert!(!ends_capture(kind), "{kind:?}");
+        }
+        for kind in [
+            ErrorKind::DeviceNotAvailable,
+            ErrorKind::StreamInvalidated,
+            ErrorKind::PermissionDenied,
+            ErrorKind::DeviceBusy,
+            ErrorKind::BackendError,
+            ErrorKind::Other,
+        ] {
+            assert!(ends_capture(kind), "{kind:?}");
+        }
+    }
 }
