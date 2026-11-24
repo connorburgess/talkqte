@@ -245,7 +245,9 @@ function Sources({
               ? `${source.provenance.title} · ${
                   source.provenance.provider === 'granola'
                     ? 'Granola'
-                    : 'Imported file'
+                    : source.provenance.provider === 'history'
+                      ? 'Kept meeting'
+                      : 'Imported file'
                 } · ${source.provenance.date} · prior note`
               : `This conversation · ${clockTime(source.provenance.atMs)} · ${source.provenance.speaker}`}
           </span>{' '}

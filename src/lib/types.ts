@@ -14,7 +14,7 @@ export interface CueSource {
     | { kind: 'transcript'; atMs: number; speaker: string }
     | {
         kind: 'priorNote';
-        provider: 'file' | 'granola';
+        provider: 'file' | 'granola' | 'history';
         date: string;
         title: string;
       };
@@ -179,7 +179,7 @@ export interface UpdateCheckReport {
 }
 /** One prior note the user imported; never mistaken for the conversation. */
 export interface ContextItem {
-  provider: 'granola' | 'file';
+  provider: 'granola' | 'file' | 'history';
   sourceId: string;
   title: string;
   sourceDate: string;

@@ -401,3 +401,131 @@ test('Meetings discloses unreadable entries, lab runs, and newer versions', asyn
     page.getByText('This is a lab run: kept meetings are not read or written.'),
   ).toBeVisible();
 });
+
+test('kept meetings can be selected into Prior context (notes only), approved in session review, and cited on cues', async ({
+  page,
+}) => {
+  await page.route('**/*', async (route) => {
+    if (route.request().resourceType() !== 'document') return route.continue();
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      body: (await response.text()).replace(
+        '/src/main.tsx',
+        '/tests/fixtures/native-microphone.ts',
+      ),
+    });
+  });
+  await page.goto('/?live&processor&keys=set');
+
+  const id = await page.evaluate(() => {
+    window.historyTest.add({
+      title: 'Empty notes meeting',
+      startedAtMs: Date.UTC(2026, 10, 1, 9),
+      durationMs: 300_000,
+      sources: 'microphone',
+      transcript: [{ atMs: 1_000, text: 'Secret empty-notes transcript.' }],
+      notes: '   ',
+      cues: [],
+    });
+    return window.historyTest.add({
+      title: 'Orchard supplier sync',
+      startedAtMs: Date.UTC(2026, 10, 2, 10),
+      durationMs: 900_000,
+      sources: 'microphone',
+      transcript: [
+        { atMs: 1_000, text: 'Secret transcript line that must stay out.' },
+      ],
+      notes: 'Check gate hinge bolts.',
+      cues: [],
+      meetingNotes: '## Decisions\n\n- Legal needs two days for review.',
+    });
+  });
+
+  const context = page.getByRole('region', { name: 'Prior context' });
+  await context.locator('summary').click();
+  await context
+    .getByRole('button', { name: 'Choose kept meetings', exact: true })
+    .click();
+
+  const chooser = page.getByRole('dialog', {
+    name: /Choose notes from kept meetings/,
+  });
+  await expect(chooser).toBeVisible();
+  await expect(chooser).toContainText('1 more note is not listed');
+  await expect(chooser).toContainText('Orchard supplier sync');
+  await expect(chooser).not.toContainText('Empty notes meeting');
+  await expect(chooser).not.toContainText(
+    'Secret transcript line that must stay out.',
+  );
+
+  await chooser.getByRole('checkbox').check();
+  await chooser
+    .getByRole('button', { name: 'Import 1 selected', exact: true })
+    .click();
+  await expect(chooser).not.toBeVisible();
+
+  await expect(context).toContainText('Orchard supplier sync');
+  await expect(context).toContainText('From a kept meeting');
+  await expect(context).toContainText('Legal needs two days for review.');
+  await expect(context).toContainText('Check gate hinge bolts.');
+  await expect(context).not.toContainText(
+    'Secret transcript line that must stay out.',
+  );
+
+  // Per-session review shows the kept meeting as optional (off unless ticked).
+  await page
+    .getByRole('button', { name: 'Start live session', exact: true })
+    .click();
+  const panel = page.getByRole('region', {
+    name: 'Cue processing',
+    exact: true,
+  });
+  await panel
+    .getByRole('button', { name: 'Review processing', exact: true })
+    .click();
+  const historyCheckbox = panel.getByRole('checkbox', {
+    name: /Orchard supplier sync.*Kept meeting.*2026-11-02/,
+  });
+  await expect(historyCheckbox).not.toBeChecked();
+  await historyCheckbox.check();
+  await panel.getByRole('button', { name: 'Review selected sources' }).click();
+  await expect(panel).toContainText('Orchard supplier sync');
+  await expect(panel).toContainText('Kept meeting · 2026-11-02 · prior note');
+  await panel.getByRole('button', { name: 'Enable for this session' }).click();
+
+  // Cue citing the kept meeting discloses it with Kept meeting provenance.
+  await page.evaluate((meetingId) => {
+    window.liveTest.setCue({
+      id: 'eval:1',
+      kind: 'Suggestion',
+      question: 'Will legal finish the two-day review before Friday?',
+      evidence: '',
+      sourceId: `prior:history:${meetingId}`,
+      sources: [
+        {
+          id: `prior:history:${meetingId}`,
+          revision: 1,
+          text: 'Legal needs two days for review.',
+          provenance: {
+            kind: 'priorNote',
+            provider: 'history',
+            date: '2026-11-02',
+            title: 'Orchard supplier sync',
+          },
+        },
+      ],
+      remainingMs: 18_000,
+      totalMs: 18_000,
+      held: false,
+      resolvedBy: null,
+      note: null,
+      aboutFocus: false,
+    });
+  }, id);
+  const cue = page.getByRole('region', { name: 'Suggested question' });
+  await expect(cue).toContainText(
+    'Orchard supplier sync · Kept meeting · 2026-11-02 · prior note',
+  );
+  await expect(cue).toContainText('Legal needs two days for review.');
+});

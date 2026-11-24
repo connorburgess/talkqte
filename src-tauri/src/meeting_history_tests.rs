@@ -485,3 +485,52 @@ fn a_kept_meeting_exports_notes_cues_and_transcript_without_unkept_fields() {
     assert!(named_md.contains("Microphone and Fictional Call"));
     assert!(named_md.contains("Fictional Call's audio"));
 }
+
+#[test]
+fn a_kept_meeting_context_item_sends_notes_and_meeting_notes_only_never_transcript() {
+    use crate::context::{NoteSource, Provider, MAX_EXCERPT_CHARS};
+    let folder = Folder::new("context");
+    let store = folder.store();
+
+    let with_notes = store
+        .keep(
+            "Orchard planning",
+            content(1_795_000_000_000, "Secret transcript sentence."),
+        )
+        .unwrap();
+    let mut empty_notes = content(1_795_000_100_000, "Another transcript line.");
+    empty_notes.notes = "   ".into();
+    empty_notes.meeting_notes = None;
+    let _without_notes = store.keep("Empty notes", empty_notes).unwrap();
+
+    let mut long_notes = content(1_795_000_200_000, "Transcript omitted.");
+    long_notes.notes = "a".repeat(MAX_EXCERPT_CHARS + 500);
+    long_notes.meeting_notes = None;
+    let bounded = store.keep("Long notes", long_notes).unwrap();
+
+    let mut source = HistorySource::read(&store).unwrap();
+    assert_eq!(source.provider(), Provider::History);
+    assert_eq!(source.skipped, 1, "meeting without notes is skipped");
+    let summaries = source.summaries();
+    assert_eq!(summaries.len(), 2);
+    assert_eq!(summaries[0].source_id, bounded.id);
+    assert_eq!(summaries[1].source_id, with_notes.id);
+
+    let fetched = source.fetch(std::slice::from_ref(&with_notes.id)).unwrap();
+    assert_eq!(fetched.len(), 1);
+    let item = &fetched[0];
+    assert_eq!(item.provider, Provider::History);
+    assert_eq!(item.revision, 1);
+    assert!(item.excerpt.contains("Meeting notes:"));
+    assert!(item.excerpt.contains("Review takes two days."));
+    assert!(item.excerpt.contains("Your notes:"));
+    assert!(item.excerpt.contains("Bring the fictional ladder."));
+    assert!(!item.excerpt.contains("Secret transcript sentence."));
+    assert!(!item.excerpt.contains("What date should we aim for?"));
+
+    let bounded_item = source.fetch(&[bounded.id]).unwrap();
+    assert_eq!(bounded_item[0].excerpt.chars().count(), MAX_EXCERPT_CHARS);
+
+    let lab = Store::open(Some(folder.root()), true);
+    assert!(matches!(HistorySource::read(&lab), Err(Error::Off)));
+}

@@ -53,6 +53,7 @@ fn main() {
             "delete_all_kept_meetings",
             "kept_meeting_export_preview",
             "export_kept_meeting",
+            "list_kept_meetings_for_context",
             "discard_meeting_notes",
             "meeting_notes_model",
             "set_meeting_notes_model",

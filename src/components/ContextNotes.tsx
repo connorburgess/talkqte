@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { FileText, Link2, X } from 'lucide-react';
+import { FileText, History, Link2, X } from 'lucide-react';
 import * as bridge from '../lib/bridge';
 import type {
   ContextItem,
@@ -34,7 +34,9 @@ export function ContextNotes({
   onGranola?: (status: GranolaStatus) => void;
 }) {
   const [picked, setPicked] = useState<PickedNotes | null>(null);
-  const [pickedFrom, setPickedFrom] = useState<'file' | 'granola'>('file');
+  const [pickedFrom, setPickedFrom] = useState<'file' | 'granola' | 'history'>(
+    'file',
+  );
   const [granola, setGranolaState] = useState<GranolaStatus>({
     connected: false,
     tools: [],
@@ -77,6 +79,7 @@ export function ContextNotes({
   const [pickError, setPickError] = useState('');
   const operation = useRef(0);
   const granolaButton = useRef<HTMLButtonElement>(null);
+  const historyButton = useRef<HTMLButtonElement>(null);
   const connectButton = useRef<HTMLButtonElement>(null);
   const returnConnectFocus = useRef(false);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -125,7 +128,12 @@ export function ContextNotes({
     }
     if (!picked && !working && returnFocus.current) {
       returnFocus.current = false;
-      (pickedFrom === 'granola' ? granolaButton : addButton).current?.focus();
+      (pickedFrom === 'granola'
+        ? granolaButton
+        : pickedFrom === 'history'
+          ? historyButton
+          : addButton
+      ).current?.focus();
     }
     if (!working && returnConnectFocus.current) {
       returnConnectFocus.current = false;
@@ -216,6 +224,14 @@ export function ContextNotes({
         if (current === operation.current) setListing(false);
       }
     });
+  const chooseHistory = () =>
+    void run(async () => {
+      const result = await bridge.listKeptMeetingsForContext();
+      returnFocus.current = true;
+      setChosen([]);
+      setPickedFrom('history');
+      setPicked(result);
+    });
   const disconnectGranola = () =>
     void run(async () => {
       // Retire the listing UI immediately, independently of its response.
@@ -283,7 +299,8 @@ export function ContextNotes({
         <div className="context-heading">
           <div>
             <span className="muted small">
-              Notes you chose from a file or from Granola · not from this
+              Notes you chose from a file, Granola, or kept meetings (your notes
+              and kept meeting notes only, never transcripts) · not from this
               conversation · kept in memory · excluded from Markdown exports.
               Sending selected prior notes to a cue provider requires a separate
               processing review and approval.
@@ -330,6 +347,17 @@ export function ContextNotes({
             >
               Use a local file path
             </button>
+            {bridge.desktop && (
+              <button
+                ref={historyButton}
+                className="secondary-button"
+                disabled={busy || working}
+                onClick={chooseHistory}
+              >
+                <History size={15} />
+                Choose kept meetings
+              </button>
+            )}
             {bridge.desktop &&
               (granola.connected ? (
                 <>
@@ -453,7 +481,9 @@ export function ContextNotes({
                     {item.sourceDate} ·{' '}
                     {item.provider === 'granola'
                       ? 'From Granola'
-                      : 'From a file'}
+                      : item.provider === 'history'
+                        ? 'From a kept meeting'
+                        : 'From a file'}
                   </span>
                   {item.provider === 'granola' && (
                     <GranolaNoteFreshness
@@ -538,7 +568,9 @@ export function ContextNotes({
             {picked.skipped === 1 ? 'note is' : 'notes are'} not listed
             {pickedFrom === 'granola'
               ? ': Granola returned a partial list, or it exceeds the 200-note chooser limit.'
-              : ': the file has repeated ids or more than 200 notes.'}
+              : pickedFrom === 'history'
+                ? ': only kept meetings with your notes or kept meeting notes (up to 200) are listed.'
+                : ': the file has repeated ids or more than 200 notes.'}
           </p>
         )}
         {picked && picked.notes.length > 1 && (
@@ -572,7 +604,9 @@ export function ContextNotes({
           <p className="context-empty" role="status">
             {pickedFrom === 'granola'
               ? 'No notes came back from Granola for the last 30 days. If you have meetings there from that time, the listing is not working yet; nothing was imported.'
-              : 'This file has no notes with an id, a date, and text; nothing was imported.'}
+              : pickedFrom === 'history'
+                ? 'No kept meetings with notes or meeting notes are available; nothing was imported.'
+                : 'This file has no notes with an id, a date, and text; nothing was imported.'}
           </p>
         )}
         <ul className="context-choices">

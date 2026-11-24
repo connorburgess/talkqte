@@ -367,3 +367,28 @@ pub(crate) async fn export_kept_meeting(
     }
     Ok(saved)
 }
+
+/// Lists kept meetings (their kept meeting notes and the person's own notes
+/// only, never transcripts) for selection into Prior context.
+#[tauri::command]
+pub(crate) async fn list_kept_meetings_for_context(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::PickedNotes, String> {
+    main_only(&window)?;
+    let source = blocking(&app, crate::meeting_history::HistorySource::read)
+        .await?
+        .map_err(message)?;
+    let notes = source.summaries();
+    let skipped = source.skipped;
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    runtime.pending_file_pick = None;
+    runtime.pending_import = Some(crate::context_import::PendingImport::new(Box::new(source)));
+    Ok(crate::PickedNotes {
+        file_name: "kept meetings".into(),
+        notes,
+        skipped,
+        asks_for_dates: false,
+    })
+}
