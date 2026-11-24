@@ -177,11 +177,17 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: '1'
         run: npm run tauri -- build --ci
       - name: Launch the built app under a virtual display
+        timeout-minutes: 5
         run: xvfb-run -a dbus-run-session -- scripts/platform/linux-launch-check.sh src-tauri/target/release/talkqte
+      # As an ordinary user, with the container's seccomp and AppArmor
+      # filters lifted so WebKitGTK can start its sandboxed web process
+      # (bubblewrap needs user namespaces), as it can on a desktop.
       - name: Install the deb on Ubuntu 26.04 LTS and launch it there
+        timeout-minutes: 10
         run: |
           deb="$(ls src-tauri/target/release/bundle/deb/*.deb | head -n 1)"
-          docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 bash -euo pipefail -c "
+          docker run --rm --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+            -v "$PWD:/src:ro" ubuntu:26.04 bash -euo pipefail -c "
             export DEBIAN_FRONTEND=noninteractive
             apt-get update -qq
             apt-get install -y -qq --no-install-recommends xvfb xauth x11-utils dbus ./src/$deb >/dev/null
@@ -189,8 +195,9 @@ jobs:
             pkg=\$(dpkg-deb -f /src/$deb Package)
             dpkg -s \$pkg | grep -E '^(Package|Version|Depends):'
             app=\$(dpkg -L \$pkg | grep '^/usr/bin/' | head -n 1)
-            echo \"Launching \$app\"
-            xvfb-run -a dbus-run-session -- /src/scripts/platform/linux-launch-check.sh \$app
+            useradd -m tester
+            echo \"Launching \$app as an ordinary user\"
+            su tester -c \"xvfb-run -a dbus-run-session -- /src/scripts/platform/linux-launch-check.sh \$app\"
           "
       - name: Collect packages and checksums
         run: |
