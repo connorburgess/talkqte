@@ -32,7 +32,7 @@ As of this branch. "CI" is the hosted-runner evidence above; "VM" is the owner's
 | --- | --- | --- | --- |
 | Install, launch, window | CI: installs, launches, uninstalls | CI: launches under Xvfb on 24.04 and, installed, on 26.04 | — |
 | Notebook, onboarding, settings, export | Built; Arm64 VM ran the fictional demo on an older commit | Built; Arm64 VM ran the demo under Wayland on an older commit | Interface copy names macOS throughout |
-| Provider keys | Kept in memory only, lost on quit (no Credential Manager store yet) | Kept in memory only (no Secret Service store yet) | `src-tauri/src/provider_keys.rs` (Keychain) |
+| Provider keys | Credential Manager; CI round-trips a fictional key in the runner's real store | Desktop keyring through the Secret Service; CI round-trips a fictional key in a throwaway GNOME Keyring; with no keyring service, keys cannot be saved and Settings says so | `src-tauri/src/provider_keys.rs` (Keychain); `provider_keys/windows.rs`, `provider_keys/secret_service.rs` |
 | Microphone check and live session | Reports the platform unsupported | Reports the platform unsupported | `src-tauri/src/microphone/native.rs`; cpal is a macOS-only dependency |
 | Another application's audio | Not built | Not built | `src-tauri/src/application_audio*`, `native_source.rs` (ScreenCaptureKit) |
 | Companion window | Always on top and not focusable through Tauri; placement in steps; focus over full-screen apps unverified | The same; GNOME Wayland neither lets an app keep a window on top nor report its position | `src-tauri/src/companion_macos.rs` |

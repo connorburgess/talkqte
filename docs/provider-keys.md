@@ -25,10 +25,30 @@ fictional keys in memory and cannot check one.
 
 ## Storage
 
-- Keys are kept only in the macOS login Keychain, as generic passwords under
-  the service `app.talkqte.provider-key`, with the accounts `deepgram` and
-  `anthropic` (`src-tauri/src/provider_keys.rs`). The Keychain encrypts them;
-  TalkQTE writes no key to a file.
+- Keys are kept only in the system's secret store, under the service
+  `app.talkqte.provider-key` with the accounts `deepgram` and `anthropic`
+  (`src-tauri/src/provider_keys.rs`). TalkQTE writes no key to a file.
+  - **macOS:** the login Keychain, as generic passwords. The Keychain encrypts
+    them.
+  - **Windows:** Credential Manager, as generic credentials named
+    `app.talkqte.provider-key/deepgram` and `app.talkqte.provider-key/anthropic`,
+    persisted for this user on this computer (not the roaming "enterprise"
+    persistence). Windows protects them with the user's logon credentials
+    (DPAPI). They are visible and removable in **Control Panel → Credential
+    Manager → Windows Credentials** (`provider_keys/windows.rs`).
+  - **Linux:** the desktop keyring through the freedesktop Secret Service on
+    the session D-Bus (GNOME Keyring on Ubuntu, or KWallet and others that
+    implement it), one item per key in the default collection with the
+    attributes `service` and `account`, labelled "TalkQTE provider key (…)".
+    The keyring encrypts what it stores. The key crosses the local session bus
+    in the Secret Service's plain transfer to that keyring
+    (`provider_keys/secret_service.rs`).
+  - **No store:** Linux without a session bus or a Secret Service provider
+    (headless, minimal or some tiling-window-manager sessions). Keys cannot be
+    saved: both read as `unreadable`, the status reports the store unavailable,
+    saving is refused with "This system has no keyring TalkQTE can use, so keys
+    cannot be saved here yet. Nothing was changed." and Settings says so. They
+    are never kept anywhere else instead.
 - A key crosses from the notebook to Rust once, when it is entered. It is never
   sent back to the webview, never logged and never put in an error message;
   its in-memory copy is wiped once used, and its `Debug` form is redacted.
@@ -38,8 +58,9 @@ fictional keys in memory and cannot check one.
   `_`. Deepgram: 32 to 128 letters and digits. Whitespace around a pasted key
   is removed; anything else is refused without quoting what was pasted.
 - Whether a key was checked or rejected is kept in memory for the app run.
-- Other platforms have no Keychain: a key is held in memory and is gone at
-  quit. The supported app is macOS only.
+- Checking whether a key is set does not unlock the Linux keyring: it searches
+  the items' attributes only. Reading a key for a session or a check may show
+  the keyring's own unlock prompt.
 - macOS may ask the person to allow TalkQTE to use a key it stored, for
   example after a development rebuild changes the app's signature. This has
   not been checked on a signed build.
@@ -62,12 +83,15 @@ first-run screen reads `provider_keys_status` at launch.
 {
   "deepgram": { "state": "notSet", "verified": false },
   "anthropic": { "state": "set", "verified": true },
-  "anyMissing": true
+  "anyMissing": true,
+  "store": { "kind": "keychain", "available": true }
 }
 ```
 
-`state` is `notSet`, `set`, `rejected` or `unreadable` (the Keychain could
-not be read, so whether a key is stored is unknown; nothing is attempted with
+`store.kind` is `keychain`, `credentialManager` or `secretService` (`memory`
+only in tests); `store.available` is false only where that store does not
+exist on the system. `state` is `notSet`, `set`, `rejected` or `unreadable`
+(the store could not be read, so whether a key is stored is unknown; nothing is attempted with
 it, and it does not count as missing). Each status call reads the Keychain
 again, so a key deleted or added outside TalkQTE is seen. `verified` is true only after a
 passing check in this app run, and is cleared when the key is replaced or
@@ -88,6 +112,13 @@ Offline Rust tests in `provider_keys` use an in-memory store and a scripted
 check. They cover a new install reporting no keys, storing without contacting
 the provider, shape refusals, a check sending the key only to its own
 provider, rejected and unreachable results, removal, a key found at launch, a
-Keychain failure, and redacted debug output. The test build cannot reach the
+store failure, a system with no store, and redacted debug output. On CI, a
+fictional key under the test-only service `app.talkqte.provider-key.ci-test`
+is written, read, replaced and removed in the runner's real Credential Manager
+(Windows x64) and in a throwaway GNOME Keyring in its own session bus
+(Ubuntu x64 and ARM64), and a session bus with no Secret Service is reported
+unavailable. The test build cannot reach the
 real Keychain or network. Not yet checked: the real Keychain on a signed
-build, and either provider's real response to the check.
+build, Credential Manager and GNOME Keyring in a person's desktop session
+(including the keyring's unlock prompt), KWallet, and either provider's real
+response to the check.
