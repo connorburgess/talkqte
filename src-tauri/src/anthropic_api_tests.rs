@@ -696,3 +696,77 @@ fn usage_is_reported_only_for_a_registered_session() {
         json!({"model":"claude-haiku-5-5","requests":0,"requestCap":400,"spentMicroUsd":0,"spendCapMicroUsd":500_000})
     );
 }
+
+/// Fictional content that must never reach a file, a log or the terminal.
+const PRIVATE_LINE: &str = "Who owns the fictional Marigold checklist?";
+const PRIVATE_CUE: &str = "Who owns the Marigold checklist?";
+const PRIVATE_NOTE: &str = "Fictional note: the Marigold keys are in the blue tin.";
+const PRIVATE_FOCUS: &str = "Agree the Marigold potluck seating";
+const PRIVATE_NAME: &str = "Ottoline";
+
+#[test]
+#[ignore = "run in an isolated process by a_cue_session_with_failures_and_notes_writes_nothing_and_prints_nothing"]
+fn isolated_cue_session_with_failures_and_notes() {
+    // A cue, then an outage, with the person's key, notes, focus and name.
+    let shown = decision("show", Some(PRIVATE_CUE), &["transcript:line-1"]);
+    let mut s = session(
+        Scripted::default()
+            .answer(Ok((200, sse(MODEL, &shown, "end_turn"))))
+            .answer(Ok((529, String::new()))),
+    );
+    s.engine.update_notes(PRIVATE_NOTE.into()).unwrap();
+    s.engine.set_focus(vec![PRIVATE_FOCUS.into()]).unwrap();
+    s.engine.set_user_name(Some(PRIVATE_NAME.into())).unwrap();
+    s.approve();
+    s.say(PRIVATE_LINE);
+    s.settle();
+    assert!(s.engine.state.cue.is_some());
+    s.say("The fictional Marigold list is in the shared folder.");
+    s.settle();
+    assert_eq!(s.issue(), "unreachable");
+    // The kept meeting is built in memory; only Export writes it, to a file
+    // the person chooses.
+    s.engine.set_keep_meeting(true);
+    assert!(s.engine.markdown().contains(PRIVATE_LINE));
+    // Meeting notes after the session: refused for the key, then offline.
+    s.engine.end();
+    let plan = s.engine.meeting_notes_plan(true).unwrap();
+    let prepared = s
+        .engine
+        .begin_meeting_notes(true, &plan.fingerprint)
+        .unwrap();
+    let mut refused = Scripted::default().answer(Ok((401, String::new())));
+    let written =
+        crate::meeting_notes::write(&mut refused, Secret::for_test(KEY), &prepared, || {});
+    assert!(written.result.is_err());
+}
+
+#[test]
+fn a_cue_session_with_failures_and_notes_writes_nothing_and_prints_nothing() {
+    // The timing log is asked for: only a development build with the
+    // `timing-log` feature may write it, and then only that one file.
+    let crate::test_isolation::Isolated { left, printed } = crate::test_isolation::run(
+        "anthropic_api::tests::isolated_cue_session_with_failures_and_notes",
+        &[("TALKQTE_TIMING_LOG", "timing.jsonl")],
+        &[],
+    );
+    if cfg!(feature = "timing-log") {
+        assert!(
+            left.iter().all(|name| name == "timing.jsonl"),
+            "the session left files: {left:?}"
+        );
+    } else {
+        assert!(left.is_empty(), "the session left files: {left:?}");
+    }
+    for private in [
+        KEY,
+        "Marigold",
+        PRIVATE_LINE,
+        PRIVATE_CUE,
+        PRIVATE_NOTE,
+        PRIVATE_FOCUS,
+        PRIVATE_NAME,
+    ] {
+        assert!(!printed.contains(private), "printed {private}: {printed}");
+    }
+}

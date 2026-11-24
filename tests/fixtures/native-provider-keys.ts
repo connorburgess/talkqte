@@ -23,6 +23,19 @@ let sessionRunning = false;
 
 const keysParam = new URLSearchParams(location.search).get('keys');
 const unavailable = keysParam === 'unavailable';
+/** Which platform store answers: the Keychain unless a test names another;
+ * `none` is a Linux system with no keyring service. */
+const storeParam = new URLSearchParams(location.search).get('store');
+const store: NonNullable<KeysStatus['store']> =
+  storeParam === 'credentialManager'
+    ? { kind: 'credentialManager', available: true }
+    : storeParam === 'secretService'
+      ? { kind: 'secretService', available: true }
+      : storeParam === 'none'
+        ? { kind: 'secretService', available: false }
+        : { kind: 'keychain', available: true };
+const NO_STORE =
+  'This system has no keyring TalkQTE can use, so keys cannot be saved here yet. Nothing was changed.';
 
 const stored: Record<KeyProvider, string | null> = {
   deepgram:
@@ -60,7 +73,8 @@ export const calls: { command: string; provider?: KeyProvider }[] = [];
 let usage: CueUsage | null = null;
 
 function keyStatus(provider: KeyProvider): KeyStatus {
-  if (unreadable[provider]) return { state: 'unreadable', verified: false };
+  if (!store.available || unreadable[provider])
+    return { state: 'unreadable', verified: false };
   if (!stored[provider]) return { state: 'notSet', verified: false };
   if (rejected[provider]) return { state: 'rejected', verified: false };
   return { state: 'set', verified: verified[provider] };
@@ -73,6 +87,7 @@ function status(): KeysStatus {
     deepgram,
     anthropic,
     anyMissing: deepgram.state === 'notSet' || anthropic.state === 'notSet',
+    store,
   };
 }
 
@@ -99,6 +114,7 @@ async function answer(name: string, args?: Record<string, string>) {
     case 'provider_keys_status':
       return status();
     case 'set_provider_key': {
+      if (!store.available) throw new Error(NO_STORE);
       const key = (args?.key ?? '').trim();
       if (provider === 'anthropic' && !key.startsWith('sk-ant-api'))
         throw new Error(
