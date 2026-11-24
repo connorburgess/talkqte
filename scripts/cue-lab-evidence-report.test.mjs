@@ -1178,6 +1178,17 @@ test('cloud transcription evidence records settings, review order, stop, cap and
   const md = renderEvidenceMarkdown(r);
   assert.match(md, /### Cloud transcription/);
   assert.match(md, /mip_opt_out=true/);
+  // The native figure says plainly it is not the heard-end target, and the
+  // recording-derived estimates stay out of the target rows.
+  assert.match(
+    md,
+    /Final end of speech → transcript line: [\s\S]*This is not the "Heard end → transcript line" target below\. It starts from the transcription service's own end-of-speech time/,
+  );
+  assert.match(
+    md,
+    /Recording-derived estimates \(scripts\/cue-lab-take-timing\.mjs\) join by order and time overlap and are kept out of these rows\./,
+  );
+  assert.equal(r.budgets.speechToLine.samples, 0);
 });
 
 test('a stream that started before the review row, and a stop code, are reported as such', () => {

@@ -302,6 +302,17 @@ The runner does this after the take settles, and only after native release and r
 4. Writes the report into `<evidence>/tq-evidence-XXXX/report` (`writeEvidenceReport`, metadata only).
 5. Writes `take-outcome.json` beside the manifest: the take's terminal state, `failure`, `failedStep`, `runStopReason`, `approval`, `turnOff`, `dispatchesUsed`, `providerSpentMicroUsd`, `providerReceipts`, `evaluationSummary`, `startupDiagnostics`, the launcher's content-free transcription facts, `player.diagnostics`, the recorder's `failureDetail` and report, and what was attached. It never holds a token, key or transcript.
 
+The outcome also keeps the broker's `clockCalibration` (native session elapsed ↔ the runner's clock, half the round trip).
+
+The report's "Timing targets" rows stay unmeasured on a real take: no heard end per line and no painted frame carries an exact identity. For labelled estimates from the recording (when the cue was painted and cleared, heard end → transcript line, heard end → painted cue), run afterwards:
+
+```sh
+npm run lab:take-timing -- --manifest <evidence>/tq-evidence-XXXX/manifest.json \
+  --out <evidence>/tq-evidence-XXXX/timing-estimates
+```
+
+See [take timing estimates](lab-take-timing.md); they never fill the report's target rows.
+
 It then prints `Take ended: <state> (…)`, the report path and the outcome path, and exits 0 when the report was written (1 otherwise). **The runner claims nothing:** a `completed` state is not an accepted take. The coordinator reviews the evidence afterwards; visible cues still need a person to check recording frames.
 
 To include the fictional transcript and cue text, write a second report into a new folder:

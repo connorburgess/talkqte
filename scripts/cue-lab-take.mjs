@@ -1165,6 +1165,10 @@ async function finishAttempt({
     providerReceipts: get(() => take.providerReceipts),
     evaluationSummary: get(() => take.evaluationSummary),
     startupDiagnostics: get(() => take.startupDiagnostics),
+    // The broker's measured clock bridge (native session elapsed ↔ Node
+    // midpoint, half the round trip); scripts/cue-lab-take-timing.mjs uses
+    // it in place of its causal bracket. It does not anchor the recording.
+    clockCalibration: get(() => take.clockCalibration),
     native: {
       launched: get(() => launcher.processStarted) ?? false,
       released: get(() => launcher.sourceReleased),

@@ -201,6 +201,12 @@ the measured ones and never treated as passing. This is a comparison for one
 take; it does not confirm a budget, which needs the 60-minute meeting and the
 lowest supported Mac that page names.
 
+The Markdown places a note under the native "Final end of speech → transcript
+line" figure: it starts from the transcription service's own end-of-speech time,
+not from the heard end the target needs. A second note under "Timing targets"
+says that recording-derived estimates ([take timing estimates](lab-take-timing.md))
+join by order and time overlap and never fill these rows.
+
 Missing endpoints, ambiguous relationships or absent clock bridges remain unknown.
 A heard/render-end endpoint must use actual `event` basis. A validated completion
 receipt remains in the timeline, labelled receipt only, but cannot establish
