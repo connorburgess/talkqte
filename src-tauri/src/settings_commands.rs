@@ -117,3 +117,84 @@ pub(crate) fn reset_settings(
     crate::companion::refresh(&app);
     Ok(())
 }
+
+/// The menu bar and login choices, as Settings shows them. Open at login is
+/// read from the system each time, never from the settings file.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Presence {
+    /// This launch has a menu bar item to keep running in.
+    menu_bar: bool,
+    keep_running: bool,
+    open_at_login: crate::login_item::Status,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+fn presence(
+    app: &tauri::AppHandle,
+    store: &Store,
+    login: &crate::login_item::LoginItems,
+    error: Option<String>,
+) -> Presence {
+    Presence {
+        menu_bar: crate::menu_bar::has_item(app),
+        keep_running: store.saved().keep_running_in_menu_bar,
+        open_at_login: login.0.status(),
+        error,
+    }
+}
+
+#[tauri::command]
+pub(crate) fn presence_settings(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    store: tauri::State<Store>,
+    login: tauri::State<crate::login_item::LoginItems>,
+) -> Result<Presence, String> {
+    main_only(&window)?;
+    Ok(presence(&app, &store, &login, None))
+}
+
+/// Whether closing the notebook leaves TalkQTE in the menu bar. Saved.
+#[tauri::command]
+pub(crate) fn set_keep_running_in_menu_bar(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    store: tauri::State<Store>,
+    login: tauri::State<crate::login_item::LoginItems>,
+    enabled: bool,
+) -> Result<Presence, String> {
+    main_only(&window)?;
+    if enabled && !crate::menu_bar::has_item(&app) {
+        return Err("TalkQTE has no menu bar item in this launch.".into());
+    }
+    store.record(|settings| settings.keep_running_in_menu_bar = enabled);
+    Ok(presence(&app, &store, &login, None))
+}
+
+/// Turns Open at login on or off through the system, then reports what the
+/// system says.
+#[tauri::command]
+pub(crate) fn set_open_at_login(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    store: tauri::State<Store>,
+    login: tauri::State<crate::login_item::LoginItems>,
+    enabled: bool,
+) -> Result<Presence, String> {
+    main_only(&window)?;
+    let (_, error) = crate::login_item::change(login.0.as_ref(), enabled);
+    Ok(presence(&app, &store, &login, error))
+}
+
+/// Opens System Settings at Login Items, where macOS asks for approval.
+#[tauri::command]
+pub(crate) fn open_login_items(
+    window: tauri::WebviewWindow,
+    login: tauri::State<crate::login_item::LoginItems>,
+) -> Result<(), String> {
+    main_only(&window)?;
+    login.0.open_settings();
+    Ok(())
+}

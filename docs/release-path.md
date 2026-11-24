@@ -224,6 +224,8 @@ The rule, in `src-tauri/src/updates.rs`, is that an update is neither offered no
 
 An offer found then is held (`Deferral`), replaced only by a newer one, and shown once nothing holds it: after Stop, the next check gives it back. Nothing installs on its own; installation and the restart wait for the person's choice, and a restart is offered only when nothing holds. Checks happen at launch and when the person asks, never on a timer during a session. Tests cover each hold, the release after Stop, and a newer offer replacing a held one, against the fictional feed.
 
+The menu bar does not change this. With **Keep running in the menu bar** on, TalkQTE can run for days with the notebook closed; the hold is read from the session, microphone and capture state, never from whether the notebook window is open, so a session or microphone left running behind a closed notebook still holds an offer. The menu bar item has no update action and its choices never start a check: "at launch" means a real launch, not reopening the notebook from the menu bar.
+
 ### Recoverable upgrades
 
 - **Failed update:** the Tauri updater on macOS unpacks the new bundle to a temporary location and swaps it for the old one only after the archive's signature checks out; a failed download, a bad signature or an interrupted unpack leaves the old app in place and working. To be observed on the first two signed candidates (step 7), along with whether the swap needs the person's password when the app is in `/Applications` and they are not an administrator.
@@ -289,7 +291,7 @@ Moving TalkQTE to the Trash removes the app only. What is left, and how to remov
 | Settings file and data folder                         | `rm -rf ~/Library/Application\ Support/com.talkqte.desktop` (also holds a speech model left by an early development build).                                                                                                                      |
 | Web view storage, caches, preferences, window state   | `rm -rf ~/Library/WebKit/com.talkqte.desktop ~/Library/Caches/com.talkqte.desktop ~/Library/HTTPStorages/com.talkqte.desktop ~/Library/Saved\ Application\ State/com.talkqte.desktop.savedState ~/Library/Preferences/com.talkqte.desktop.plist` |
 | Microphone and Screen & System Audio Recording grants | `tccutil reset Microphone com.talkqte.desktop` and `tccutil reset ScreenCapture com.talkqte.desktop`.                                                                                                                                            |
-| A login item, once that exists                        | Check System Settings, General, Login Items after deleting the app, and remove TalkQTE there if it is still listed.                                                                                                                              |
+| A login item, if Open at login was on                 | Turn **Open at login** off in Settings before deleting the app, or check System Settings, General, Login Items afterwards and remove TalkQTE there if it is still listed.                                                                        |
 
 Pass: a data snapshot recorded after these commands lists nothing for TalkQTE, and reinstalling starts at onboarding with no keys.
 

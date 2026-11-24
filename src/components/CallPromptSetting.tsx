@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { desktop } from '../lib/bridge';
 
 interface Settings {
@@ -18,8 +19,20 @@ export function CallPromptSetting() {
     invoke<Settings>('call_prompt_settings')
       .then((next) => alive && setSettings(next))
       .catch(() => alive && setError('This setting is unavailable.'));
+    // The menu bar has the same switch.
+    let stop: (() => void) | undefined;
+    if (desktop)
+      void listen<Settings>('call-prompt:settings', ({ payload }) => {
+        if (alive) setSettings(payload);
+      })
+        .then((unlisten) => {
+          if (alive) stop = unlisten;
+          else unlisten();
+        })
+        .catch(() => {});
     return () => {
       alive = false;
+      stop?.();
     };
   }, []);
 

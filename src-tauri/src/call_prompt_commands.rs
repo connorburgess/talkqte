@@ -5,7 +5,9 @@ use crate::{
     call_prompt::{Answer, Settings},
     AppState,
 };
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
+#[cfg(target_os = "macos")]
+use tauri::Manager;
 
 fn main_only(window: &tauri::WebviewWindow) -> Result<(), String> {
     (window.label() == "main")
@@ -83,13 +85,9 @@ pub(crate) fn respond_to_call_prompt(
     };
     crate::companion::refresh(&app);
     if let Some(preselect) = start {
-        if let Some(main) = app.get_webview_window("main") {
-            let _ = main.show();
-            let _ = main.unminimize();
-            // The person clicked Start: bringing the notebook forward is
-            // what they asked for.
-            let _ = main.set_focus();
-        }
+        // The person clicked Start: bringing the notebook forward, from the
+        // menu bar if it was closed there, is what they asked for.
+        crate::menu_bar::show_notebook(&app);
         // The name and bundle identifier go to the notebook only.
         let _ = app.emit_to("main", "call-prompt:start", preselect);
     }

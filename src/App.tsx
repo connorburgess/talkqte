@@ -53,6 +53,7 @@ import { listen } from '@tauri-apps/api/event';
 import { CallPrompt } from './components/CallPrompt';
 import { CallPromptSetting } from './components/CallPromptSetting';
 import { SavedSettings } from './components/SavedSettings';
+import { MenuBarSettings } from './components/MenuBarSettings';
 import { savedPanelSizes, savePanelSizes } from './lib/savedSettings';
 import {
   SessionSources,
@@ -639,6 +640,34 @@ function Notebook() {
     });
   };
   const [view, setView] = useState<'notebook' | 'settings'>('notebook');
+  // The menu bar's Start session…: the notebook with its ordinary start in
+  // reach. Nothing is chosen, listed or started.
+  const [startRequested, setStartRequested] = useState(0);
+  useEffect(() => {
+    if (!bridge.desktop) return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void listen('menu-bar:start-session', () => {
+      setView('notebook');
+      setStartRequested((count) => count + 1);
+    })
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else stop = unlisten;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, []);
+  useEffect(() => {
+    if (!startRequested) return;
+    const button = startButton.current;
+    if (!button) return;
+    button.scrollIntoView({ block: 'center' });
+    button.focus();
+  }, [startRequested, view]);
   useEffect(() => {
     if (
       !preparing ||
@@ -2281,6 +2310,7 @@ function Notebook() {
               />
             </section>
             <CallPromptSetting key={settingsEpoch} />
+            <MenuBarSettings key={`menu-bar-${settingsEpoch}`} />
             <section className="setting">
               <div>
                 <h2 id="live-transcription" tabIndex={-1}>

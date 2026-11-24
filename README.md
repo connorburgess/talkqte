@@ -120,6 +120,8 @@ A default-off [bounded transcript-history option](docs/cue-evaluator.md#opt-in-b
 
 **Saved settings:** the choices in Settings (your name, transcription language, notes model, question size and timing, companion position preset and whether it shows, panel sizes, and the call-starting offer) are kept between launches in one small settings file on this Mac, readable by your account only. It never holds keys, which stay in the Keychain, or anything from a meeting. **Settings → Saved settings → Reset settings** deletes it ([what it holds and where](PRIVACY.md)).
 
+**Menu bar and login:** TalkQTE shows a menu bar item with whether a session is running, **Open notebook**, **Start session…** (the notebook's usual start and approval; nothing starts from the menu bar), **Stop session** while one runs, the call-starting switch and **Quit TalkQTE**. Under **Settings → Menu bar and login**, **Keep running in the menu bar when the notebook is closed** (off by default; off, closing the notebook quits as before) and **Open at login** (off by default; macOS keeps it and may ask for approval in Login Items) let TalkQTE notice a call with the notebook closed ([call-starting prompt](docs/call-prompt.md#the-app-has-to-be-running)). Checked with fictional state only; the item has not been seen on a device.
+
 **Your name** in Settings is optional and remembered between launches. Enter or leaving the field applies it to phrase-based **Asked you** cues. Later edits survive a slow save; rejected names show an inline error and keep the last applied name unless you have already typed a newer draft. See the [name recovery checks](docs/name-save-recovery.md).
 
 ## Fictional cue lab
