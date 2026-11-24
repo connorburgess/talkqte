@@ -536,7 +536,7 @@ export function release(options, tools) {
     );
   else
     log(
-      `  Skipped Gatekeeper: macOS refuses ${mode === 'adhoc' ? 'an ad-hoc' : `a ${mode}`} build from the internet by design (${mode === 'signed' ? '"Unnotarized Developer ID"' : 'no Developer ID signature'}).`,
+      `  Skipped Gatekeeper: macOS refuses ${mode === 'adhoc' ? 'an ad-hoc' : mode === 'unsigned' ? 'an unsigned' : `a ${mode}`} build from the internet by design (${mode === 'signed' ? '"Unnotarized Developer ID"' : 'no Developer ID signature'}).`,
     );
   tools.fs.reset(work, { remove: true });
 
