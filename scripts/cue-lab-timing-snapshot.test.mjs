@@ -55,14 +55,95 @@ snapshotTest(
     assert.equal(fs.readFileSync(s.path, 'utf8'), row);
   },
 );
-for (const proof of ['sourceReleased', 'recorderFinalized'])
-  snapshotTest(
-    `missing ${proof} cannot produce a post-release snapshot`,
-    (t) => {
-      const f = fixture(t);
-      assert.throws(() => snapshotLabTiming({ ...f.options, [proof]: false }));
-    },
+snapshotTest('a snapshot needs a stated source end and recorder state', (t) => {
+  const f = fixture(t);
+  assert.throws(() =>
+    snapshotLabTiming({ ...f.options, sourceReleased: false }),
   );
+  const { recorderFinalized: _r, ...unstated } = f.options;
+  assert.throws(() => snapshotLabTiming(unstated));
+  assert.throws(() =>
+    snapshotLabTiming({ ...f.options, recorderFinalized: 'yes' }),
+  );
+  // Released and unconfirmed are mutually exclusive.
+  assert.throws(() =>
+    snapshotLabTiming({ ...f.options, sourceUnconfirmed: true }),
+  );
+});
+snapshotTest(
+  'a failed take is snapshotted as unconfirmed, with the recorder state, and the writer and report say so',
+  async (t) => {
+    const f = fixture(t);
+    const { sourceReleased: _released, ...rest } = f.options;
+    assert.throws(() =>
+      snapshotLabTiming({ ...rest, sourceUnconfirmed: false }),
+    );
+    assert.throws(() =>
+      snapshotLabTiming({
+        ...rest,
+        sourceUnconfirmed: true,
+        nativeEnded: { problem: 'source_gone' },
+      }),
+    );
+    const writer = createLabEvidenceWriter({
+      parentDirectory: f.parent,
+      runId: 'fictional-snapshot',
+      fictional: true,
+      contentMode: 'fictional-content',
+    });
+    writer.addClock({ id: 'node', kind: 'monotonic' });
+    const s = snapshotLabTiming({
+      ...rest,
+      parentDirectory: writer.directory,
+      sourceUnconfirmed: true,
+      recorderFinalized: false,
+    });
+    assert.equal(s.coverage.sourceEnd, 'unconfirmed');
+    assert.equal(s.coverage.sourceReleaseObserved, false);
+    assert.equal(s.coverage.recorderFinalizationObserved, false);
+    assert.equal(s.coverage.nativeWriterMayRemainOpen, true);
+    assert.equal(s.coverage.completeRunCoverage, false);
+    assert.equal(s.coverage.unknownLateRecords, true);
+    assert.equal(s.coverage.nativeEndProblem, undefined);
+    writer.attach({
+      id: 'native',
+      kind: 'native-timing',
+      path: s.path,
+      clockId: 'node',
+      sealed: true,
+      snapshotCoverage: s.coverage,
+    });
+    // A coverage claiming release while unconfirmed is refused.
+    assert.throws(() =>
+      writer.attach({
+        id: 'native-2',
+        kind: 'native-timing',
+        path: s.path,
+        clockId: 'node',
+        sealed: true,
+        snapshotCoverage: { ...s.coverage, sourceReleaseObserved: true },
+      }),
+    );
+    const { manifestPath } = writer.close();
+    const { writeEvidenceReport } =
+      await import('./cue-lab-evidence-report.mjs');
+    const out = join(f.parent, 'report');
+    await writeEvidenceReport({ manifestPath, outDir: out });
+    const report = JSON.parse(
+      fs.readFileSync(join(out, 'report.json'), 'utf8'),
+    );
+    const coverage = report.evidence.find(
+      (a) => a.id === 'native',
+    ).snapshotCoverage;
+    assert.equal(coverage.sourceEnd, 'unconfirmed');
+    assert.equal(coverage.recorderFinalizationObserved, false);
+    assert.equal(coverage.completeRunCoverage, false);
+    assert.match(
+      fs.readFileSync(join(out, 'report.md'), 'utf8'),
+      /release not confirmed: the app may still have been writing, so rows after the cutoff are unknown; recorder finalization not observed/,
+    );
+  },
+);
 snapshotTest(
   'byte cutoff copies only complete prefix and records trailing/unobserved bytes',
   (t) => {

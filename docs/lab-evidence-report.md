@@ -221,7 +221,11 @@ rows: when writing the gap itself fails, a sealed manifest can still retain the
 failure. Do not add writer and event-gap counts, which may describe the same loss.
 Other writer metadata is not copied.
 
-Native artifacts may carry `snapshotCoverage` from a bounded post-release snapshot.
+Native artifacts may carry `snapshotCoverage` from a bounded snapshot taken after
+release, after native ended the session, or after a failed take with release
+unconfirmed (`sourceEnd: "unconfirmed"`, shown as "release not confirmed"; see
+[timing snapshot](lab-timing-snapshot.md#when-release-is-not-confirmed)). Its
+`recorderFinalizationObserved` is shown when false.
 The report validates its run, copied hash/bytes/rows, cutoff/omitted/unobserved byte
 counters, receipt clock and explicit `completeRunCoverage: false`,
 `unknownLateRecords: true`, `nativeWriterMayRemainOpen: true`. It retains and

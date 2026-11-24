@@ -5,8 +5,9 @@ observer does not close that writer, acknowledge a flush or exit the app.
 `snapshotLabTiming` therefore preserves the live original and creates a separate,
 write-once private snapshot. No native lifecycle control is added.
 
-Call only after observed exact source release and recorder completed-file
-finalization. Supply the launcher's frozen `timingFileIdentity` with exact run ID
+Call after observed exact source release and recorder completed-file
+finalization, or after a failed take with both stated as observed
+([when release is not confirmed](#when-release-is-not-confirmed)). Supply the launcher's frozen `timingFileIdentity` with exact run ID
 and device/inode strings; pathname equality alone is insufficient. The reader
 requires the canonical external 0600 regular file, owned by the current user,
 without symlink/identity substitution. It opens once and fixes a cutoff at the
@@ -55,3 +56,13 @@ Native can end a session without the lab's ordinary Stop, when its source fails 
 - **Snapshot:** a snapshot may then be taken with `nativeEnded: { problem }` instead of `sourceReleased: true`. Its coverage says `sourceEnd: "native-ended"`, with the problem label and `sourceReleaseObserved: false`.
 - **Checks:** the evidence writer and report accept exactly that combination. The report says the source was ended by native, not released by Stop.
 - **First causes:** the run's first stop reason (`stopReason`) and the take's first failure cause (`failure`, `runStopReason`) are kept, so the evidence names what ended a take even when cleanup fails afterwards.
+
+## When release is not confirmed
+
+A take can fail after the app wrote a full meeting's rows: cleanup that never confirmed release (`failed-cleanup`), or a recorder that did not finalize. The take runner still snapshots and attaches the timing log then, because the snapshot's own cutoff is what bounds a file the app may still be writing.
+
+- **Call:** `sourceUnconfirmed: true` in place of `sourceReleased` or `nativeEnded` (exactly one of the three), and `recorderFinalized` as observed, `true` or `false`. It must be stated either way.
+- **Coverage:** `sourceEnd: "unconfirmed"`, `sourceReleaseObserved: false`, and `recorderFinalizationObserved` as given. `nativeWriterMayRemainOpen`, `unknownLateRecords` stay true and `completeRunCoverage` false, as always.
+- **What it means:** every complete row before the cutoff is copied exactly. Rows the app wrote after the cutoff, or still writes, are unknown. It is not evidence that the app stopped writing, released its capture or exited.
+- **Checks:** the evidence writer and report accept exactly that combination. The report's snapshot table says "release not confirmed: the app may still have been writing, so rows after the cutoff are unknown", and adds "recorder finalization not observed" when that was false.
+- **Take outcome:** `evidence.timing` is `attached`, `failed` (the snapshot or its attachment was refused; the original stays where the app wrote it) or `not-attached` (the app was not launched, or the run never froze the file's identity). `evidence.timingDetail` gives the source end, the recorder state, whether the app process had ended before the snapshot, rows, bytes copied of those seen at open, omitted and unobserved bytes, the row limit and growth during the copy, and `completeRunCoverage: false`. The runner prints one `Native timing attached: …` or `Native timing not attached: …` line saying the same.
