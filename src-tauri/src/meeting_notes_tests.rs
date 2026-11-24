@@ -229,7 +229,7 @@ impl Transport for Scripted {
             key.expose().to_string(),
             serde_json::from_slice(body).unwrap(),
         ));
-        let (status, text) = script.replies.pop_front().unwrap_or(Err(NoReply))?;
+        let (status, text) = script.replies.pop_front().unwrap_or(Err(NoReply::Lost))?;
         Ok(Reply {
             status,
             body: Box::new(std::io::Cursor::new(text.into_bytes())),
@@ -295,7 +295,7 @@ fn every_failure_is_shown_as_failed_and_nothing_is_retried() {
     let invented = reply.replace("\"owner\":null", "\"owner\":\"Sam\"");
     for (answer, expected, charge, rejected) in [
         // A cost the API did not report is recorded as not known.
-        (Err(NoReply), Failure::Unreachable, None, false),
+        (Err(NoReply::Lost), Failure::Unreachable, None, false),
         (Ok((401, String::new())), Failure::SignIn, Some(0), true),
         (Ok((429, String::new())), Failure::UsageLimit, None, false),
         (Ok((529, String::new())), Failure::Unreachable, None, false),
@@ -341,6 +341,34 @@ fn every_failure_is_shown_as_failed_and_nothing_is_retried() {
         assert!(message.contains("nothing else will be sent for this meeting"));
         assert!(!message.contains("Sam") && !message.contains(KEY));
     }
+}
+
+#[test]
+fn offline_sends_nothing_and_keeps_the_meetings_request() {
+    // No connection could be made (offline, or the name did not resolve):
+    // nothing reached Anthropic, so the one request is not used up and the
+    // person is told to try again rather than that nothing more is sent.
+    let mut engine = Engine::live();
+    let session = ended_session(&mut engine);
+    engine.end();
+    let plan = engine.meeting_notes_plan(false).unwrap();
+    let prepared = engine
+        .begin_meeting_notes(false, &plan.fingerprint)
+        .unwrap();
+    let mut transport = Scripted::answer(Err(NoReply::Unsent));
+    let written = write(&mut transport, Secret::for_test(KEY), &prepared, || {
+        panic!("offline is not a refused key")
+    });
+    assert!(!written.sent);
+    assert_eq!(written.spent_micro_usd, Some(0));
+    assert_eq!(written.result.unwrap_err(), Failure::Unreachable);
+    engine.abandon_meeting_notes(session);
+    let again = engine.meeting_notes_plan(false).unwrap();
+    assert!(engine
+        .begin_meeting_notes(false, &again.fingerprint)
+        .is_ok());
+    assert!(UNSENT_OFFLINE.contains("nothing was sent"));
+    assert!(!UNSENT_OFFLINE.contains("nothing else will be sent"));
 }
 
 #[test]
