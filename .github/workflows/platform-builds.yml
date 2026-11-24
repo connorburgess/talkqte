@@ -186,8 +186,11 @@ jobs:
             apt-get update -qq
             apt-get install -y -qq --no-install-recommends xvfb xauth x11-utils dbus ./src/$deb >/dev/null
             . /etc/os-release; echo \"Installed on \$PRETTY_NAME\"
-            dpkg -s talkqte | grep -E '^(Version|Depends):'
-            xvfb-run -a dbus-run-session -- /src/scripts/platform/linux-launch-check.sh /usr/bin/talkqte
+            pkg=\$(dpkg-deb -f /src/$deb Package)
+            dpkg -s \$pkg | grep -E '^(Package|Version|Depends):'
+            app=\$(dpkg -L \$pkg | grep '^/usr/bin/' | head -n 1)
+            echo \"Launching \$app\"
+            xvfb-run -a dbus-run-session -- /src/scripts/platform/linux-launch-check.sh \$app
           "
       - name: Collect packages and checksums
         run: |
