@@ -22,6 +22,9 @@ pub const MAX_RETRY_WAIT: Duration = Duration::from_secs(30);
 pub enum Provider {
     Granola,
     File,
+    /// A meeting the person kept in TalkQTE: its kept meeting notes and the
+    /// person's own notes, never its transcript ([`crate::meeting_context`]).
+    Meeting,
 }
 
 impl Provider {
@@ -30,6 +33,7 @@ impl Provider {
         match self {
             Provider::Granola => "granola",
             Provider::File => "file",
+            Provider::Meeting => "meeting",
         }
     }
 }

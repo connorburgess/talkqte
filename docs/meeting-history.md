@@ -64,6 +64,75 @@ Nothing is kept unless the person keeps that meeting.
 The engine builds this (`Engine::keepable_meeting`, `src-tauri/src/engine/history.rs`)
 with the same exclusions as an export that keeps the meeting.
 
+## Past meetings as prior context
+
+First slice, built 24 November 2026 (`src-tauri/src/meeting_context.rs`).
+
+**Choosing.**
+
+- **Prior context → Choose kept meetings** opens the same chooser as a notes
+  file. It lists, newest first (up to 200), the kept meetings that have kept
+  meeting notes or notes of the person's.
+- Only the ones ticked are imported, up to 5 per import, within the store's
+  20-note limit. They then sit under Prior context as "From a kept meeting:
+  its meeting notes and your notes".
+- **Remove** and **Remove all** work as for any note. Deleting the kept
+  meeting, or **Delete all meetings**, also removes its copy from prior
+  context and closes an open chooser of kept meetings.
+
+**What a chosen meeting contributes.** One prior note (provider `meeting`):
+
+- `title`: the meeting's title.
+- `sourceDate`: its local date.
+- `revision`: its revision.
+- `excerpt`: `Meeting notes:` and the kept meeting notes, then `Your notes:`
+  and the person's notes, cut at 2,000 characters (the bound for every
+  imported note).
+
+It never carries the transcript, cues, sources or application name. The copy
+is taken when it is imported; renaming the meeting later does not change it.
+
+**Where it goes.**
+
+- **Nowhere, unless the session's review includes it.** Importing grants no
+  processing. In the review a kept meeting is listed as "Kept meeting · date
+  · prior note", unticked. Ticked, the review's second step shows the exact
+  text it would send and its length.
+- **With your own Anthropic key: never sent.** That connection takes no
+  prior notes (`without_notes()`). Its review says "Prior notes are never
+  sent to this processor. Kept meetings you chose stay on this Mac."
+- **A processor that takes prior notes** (today only the development lab's
+  selected-context path) receives exactly that text, with the meeting's
+  provider, title and date as its citation. A cue that cites it shows "Title
+  · Kept meeting · date · prior note". Lab runs never read kept meetings, so
+  in practice none reaches the lab either.
+- **Reminders.** In a session without a cue model, the title-word rule can
+  show it as a reminder labelled "kept meeting". A model-backed session (the
+  own-key path) does not run that rule.
+
+**So today a chosen meeting reaches no cue in an ordinary build.** The
+plumbing, bounds, review and citation are in place. What a fuller version
+would need:
+
+1. The own-key connection accepting prior notes. This means porting the
+   lab's selected-context request (`buildSelectedContextParams`: the
+   selected-snapshot rule appended to the live prompt, the v2 input with
+   `priorNotes`, the citation schema) to `anthropic_api.rs`, with a fixture
+   shared with the lab. It also means allowing `meeting` in the JS validator.
+   The [handoff](selected-context-handoff.md#concrete-next-readiness-blocker)
+   requires a separate review of that input contract, and an authorized
+   fictional comparison with and without selected context (useful additions,
+   stale or resolved constraints, latency, cost), before this is turned on.
+2. Bounds that suit meetings: a whole meeting's decisions may not fit 2,000
+   characters. A fuller version would select the relevant sections and say
+   what was cut.
+3. Transcript excerpts, if ever: chosen lines with their times, shown in the
+   review like the notes, never the whole transcript by default.
+4. Refresh: re-importing after the kept meeting is updated or renamed, as
+   the Granola update check does for Granola notes.
+5. A real run showing that "Earlier, legal said review takes two days" comes
+   back at the right moment, not as noise.
+
 ## Storage
 
 `src-tauri/src/meeting_history.rs`, under the app's Application Support
@@ -155,6 +224,18 @@ the main thread (`src-tauri/src/meeting_history_commands.rs`).
   its row, rename, export and delete with confirmation, and a meeting kept in
   this session appearing in the list. The Markdown export's content and file
   name are tested in Rust.
+
+- `cargo test --lib meeting_context`: the excerpt order, bound and that no
+  transcript text is ever included; the local date by UTC offset; the
+  chooser lists only meetings with notes and imports only those ticked; lab
+  runs list nothing; an imported but unselected meeting is not in the
+  request, and a selected one is, exactly, with provider, title and date; the
+  own-key style processor refuses a review that selects one and sends
+  nothing from it; removal takes it out of the session.
+- `tests/meeting-context.spec.ts`: the chooser and its import, the review
+  showing nothing unless the meeting is selected and then its exact text,
+  the no-prior-notes connection's wording, and deletion removing it from
+  prior context.
 
 ## What a real run must confirm
 

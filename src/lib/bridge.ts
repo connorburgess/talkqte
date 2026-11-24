@@ -89,6 +89,16 @@ export async function readContextFilePath(path: string) {
   return invoke<PickedNotes>('read_context_file_path', { path });
 }
 
+/** Lists the kept meetings that have notes to bring, for the prior-context
+ * chooser. Imports nothing and grants no processing; desktop only. */
+export async function listMeetingsForContext() {
+  if (preview)
+    throw new Error('Kept meetings are available in the desktop app.');
+  return invoke<PickedNotes>('list_meetings_for_context', {
+    offsetMinutes: -new Date().getTimezoneOffset(),
+  });
+}
+
 /** Signs in to Granola in the browser and opens a session; desktop only. */
 export async function connectGranola() {
   if (preview) return (await preview).connectGranola();

@@ -328,6 +328,25 @@ export function pickContextFile(): PickedNotes {
     })),
   };
 }
+/** Browser tests only: lists `notes` from another source (a stand-in for
+ * kept meetings) for the same selection and import. */
+export function offerNotes(
+  fileName: string,
+  notes: ContextItem[],
+): PickedNotes {
+  pickedNotes = notes;
+  return {
+    fileName,
+    skipped: 0,
+    asksForDates: false,
+    notes: notes.map((note) => ({
+      sourceId: note.sourceId,
+      title: note.title,
+      sourceDate: note.sourceDate,
+      preview: note.excerpt,
+    })),
+  };
+}
 export function importContextNotes(
   ids: string[],
   dates: Record<string, string> = {},

@@ -19,6 +19,32 @@ fn message(error: Error) -> String {
     error.message().into()
 }
 
+/// A deleted meeting is gone from this session too: its copy in prior
+/// context is removed and an open chooser of kept meetings is closed, so
+/// nothing deleted can still be imported or sent. `None` forgets them all.
+fn forget_in_session(app: &tauri::AppHandle, id: Option<&str>) {
+    use crate::context::Provider;
+    let state = app.state::<AppState>();
+    let Ok(mut runtime) = state.0.lock() else {
+        return;
+    };
+    if runtime
+        .pending_import
+        .as_ref()
+        .is_some_and(|pending| pending.provider() == Provider::Meeting)
+    {
+        runtime.pending_import = None;
+    }
+    let cue_changed = match id {
+        Some(id) => runtime.remove_imported_note(Provider::Meeting, id),
+        None => (runtime.context.remove_all_from(Provider::Meeting) > 0)
+            .then(|| runtime.sync_prior_notes()),
+    };
+    if let Some(cue_changed) = cue_changed {
+        crate::emit_context(app, &mut runtime, cue_changed);
+    }
+}
+
 /// The meeting the current session was kept as, so later notes or meeting
 /// notes can be added to it, and whether to offer keeping at all.
 pub(crate) struct Keeping(Mutex<KeepingState>);
@@ -284,6 +310,7 @@ pub(crate) async fn delete_kept_meeting(
             keeping.kept = None;
         }
     }
+    forget_in_session(&app, Some(&id));
     Ok(())
 }
 
@@ -299,6 +326,7 @@ pub(crate) async fn delete_all_kept_meetings(
     if let Ok(mut keeping) = app.state::<Keeping>().0.lock() {
         keeping.kept = None;
     }
+    forget_in_session(&app, None);
     Ok(count)
 }
 
@@ -338,4 +366,49 @@ pub(crate) async fn export_kept_meeting(
     })
     .await
     .map_err(|_| "Could not open the save dialog.")?
+}
+
+/// What the prior-context chooser lists from kept meetings.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PickedMeetings {
+    file_name: &'static str,
+    notes: Vec<crate::notes_file::NoteSummary>,
+    skipped: usize,
+    asks_for_dates: bool,
+}
+
+/// Lists kept meetings that have notes to bring, for the prior-context
+/// chooser. Nothing is imported until `import_context_notes`, and nothing
+/// is sent anywhere unless a session's processing review includes it.
+/// `offset_minutes` is the person's UTC offset, for each meeting's date.
+#[tauri::command]
+pub(crate) async fn list_meetings_for_context(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    offset_minutes: i32,
+) -> Result<PickedMeetings, String> {
+    main_only(&window)?;
+    if !(-840..=840).contains(&offset_minutes) {
+        return Err("The time zone could not be read.".into());
+    }
+    if app.state::<Store>().availability() == Availability::LabRun {
+        return Err(message(Error::Off));
+    }
+    let source = blocking(&app, move |store| {
+        crate::meeting_context::MeetingSource::read(store, offset_minutes)
+    })
+    .await?;
+    let picked = PickedMeetings {
+        file_name: "your kept meetings",
+        notes: source.summaries(),
+        skipped: source.skipped,
+        asks_for_dates: false,
+    };
+    let state = app.state::<AppState>();
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    // A file read still in flight no longer owns the chooser.
+    runtime.pending_file_pick = None;
+    runtime.pending_import = Some(crate::context_import::PendingImport::new(Box::new(source)));
+    Ok(picked)
 }

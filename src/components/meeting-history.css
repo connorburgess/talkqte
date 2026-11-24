@@ -217,3 +217,28 @@
   color: var(--muted);
   padding-top: 2px;
 }
+
+/* In the processing review: the exact text a kept meeting would send. */
+.processing-meeting-text {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+.processing-meeting-text p {
+  font-size: 13px;
+  color: var(--muted);
+}
+.processing-meeting-text pre {
+  margin: 0;
+  max-height: 12em;
+  overflow: auto;
+  padding: var(--space-8);
+  background: var(--band);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+}

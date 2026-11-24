@@ -14,7 +14,7 @@ export interface CueSource {
     | { kind: 'transcript'; atMs: number; speaker: string }
     | {
         kind: 'priorNote';
-        provider: 'file' | 'granola';
+        provider: NoteProvider;
         date: string;
         title: string;
       };
@@ -177,9 +177,19 @@ export interface UpdateCheckReport {
   retryAfterS: number | null;
   notes: NoteFreshness[];
 }
+/** Where a prior note came from: a file, Granola, or a meeting the person
+ * kept in TalkQTE (its meeting notes and their notes, never its transcript). */
+export type NoteProvider = 'granola' | 'file' | 'meeting';
+export function noteSourceName(provider: string) {
+  return provider === 'granola'
+    ? 'Granola'
+    : provider === 'meeting'
+      ? 'Kept meeting'
+      : 'Imported file';
+}
 /** One prior note the user imported; never mistaken for the conversation. */
 export interface ContextItem {
-  provider: 'granola' | 'file';
+  provider: NoteProvider;
   sourceId: string;
   title: string;
   sourceDate: string;

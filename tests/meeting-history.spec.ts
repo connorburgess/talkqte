@@ -258,7 +258,7 @@ async function withMeetings(page: Page) {
     (list) => list.forEach((meeting) => window.historyTest.add(meeting)),
     fictional,
   );
-  await page.getByRole('button', { name: 'Meetings' }).click();
+  await page.getByRole('button', { name: 'Meetings', exact: true }).click();
 }
 
 const list = (page: Page) => page.getByRole('list', { name: 'Kept meetings' });
@@ -289,7 +289,7 @@ test('the Meetings page lists kept meetings newest first and searches titles and
 
 test('an empty history says how to keep a meeting', async ({ page }) => {
   await openNative(page);
-  await page.getByRole('button', { name: 'Meetings' }).click();
+  await page.getByRole('button', { name: 'Meetings', exact: true }).click();
   await expect(page.locator('.history').getByRole('status')).toHaveText(
     'No meetings are kept yet. After a live session ends, choose Keep meeting to keep it here.',
   );
@@ -372,6 +372,6 @@ test('a kept meeting from this session appears in the list', async ({
   await offer(page).getByRole('textbox', { name: 'Title' }).fill('Gate sign');
   await offer(page).getByRole('button', { name: 'Keep meeting' }).click();
   await expect(page.getByText(/Kept in your meetings as/)).toBeVisible();
-  await page.getByRole('button', { name: 'Meetings' }).click();
+  await page.getByRole('button', { name: 'Meetings', exact: true }).click();
   await expect(list(page).getByRole('button')).toHaveText([/^Gate sign/]);
 });

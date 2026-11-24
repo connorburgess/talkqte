@@ -1,7 +1,9 @@
 // Fictional kept meetings for browser tests: an in-memory stand-in for the
 // Rust history commands. It writes nothing; storage, permissions, versions
 // and bounds are tested in Rust.
-import type { Snapshot } from '../../src/lib/types';
+import type { ContextItem, Snapshot } from '../../src/lib/types';
+import * as preview from '../../src/lib/preview';
+import { emit } from '@tauri-apps/api/event';
 import type {
   HistoryAvailability,
   KeptMeeting,
@@ -19,6 +21,7 @@ export const commands = [
   'delete_kept_meeting',
   'delete_all_kept_meetings',
   'export_kept_meeting',
+  'list_meetings_for_context',
 ];
 
 /** Every command the notebook invoked, with its arguments. */
@@ -173,7 +176,14 @@ export function command(
         throw 'That meeting is no longer kept.';
       meetings = meetings.filter((item) => item.id !== id);
       if (sessionKept?.id === id) sessionKept = null;
-      return null;
+      // As Rust: a deleted meeting leaves prior context too.
+      preview.command('remove_context_item', {
+        provider: 'meeting',
+        sourceId: id,
+      });
+      return emit('context:changed', preview.contextItemsNow()).then(
+        () => null,
+      );
     }
     case 'export_kept_meeting': {
       const { id } = args as { id: string };
@@ -181,6 +191,28 @@ export function command(
         throw 'That meeting is no longer kept.';
       // The save dialog is the system's; the stand-in reports a save.
       return true;
+    }
+    case 'list_meetings_for_context': {
+      // As Rust: meeting notes, then the person's notes; never the
+      // transcript; a meeting with neither is not offered.
+      const notes: ContextItem[] = meetings
+        .filter((meeting) => meeting.meetingNotes || meeting.notes.trim())
+        .sort((a, b) => b.startedAtMs - a.startedAtMs)
+        .map((meeting) => ({
+          provider: 'meeting',
+          sourceId: meeting.id,
+          title: meeting.title,
+          sourceDate: new Date(meeting.startedAtMs).toISOString().slice(0, 10),
+          revision: meeting.revision,
+          excerpt: [
+            meeting.meetingNotes && `Meeting notes:\n${meeting.meetingNotes}`,
+            meeting.notes.trim() && `Your notes:\n${meeting.notes.trim()}`,
+          ]
+            .filter(Boolean)
+            .join('\n\n')
+            .slice(0, 2000),
+        }));
+      return preview.offerNotes('your kept meetings', notes);
     }
     case 'delete_all_kept_meetings': {
       const count = meetings.length;

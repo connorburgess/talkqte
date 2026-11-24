@@ -44,6 +44,16 @@ These tests establish a cross-boundary regression contract when they pass;
 adding them does not establish native IPC, account behavior, semantic
 relevance, timing under a real provider, or usefulness while listening.
 
+## Kept meetings
+
+Since 24 November 2026 a kept meeting can be imported as prior context with
+provider `meeting` ([kept meetings](meeting-history.md#past-meetings-as-prior-context)).
+It uses the same store, review and cancellation as a file note, and the
+native serializer labels it `meeting`. The JS validator in
+`scripts/cue-selected-snapshot.mjs` accepts only `file` and `granola`, so a
+lab selected-context run would refuse it; lab runs never read kept meetings,
+so none can reach it.
+
 ## Concrete next readiness blocker
 
 The real CLI and lab processor configurations still use `without_notes()`.

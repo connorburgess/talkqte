@@ -1367,6 +1367,7 @@ function Notebook() {
                 failed: capture.statusError,
                 refresh: capture.refresh,
               }}
+              items={contextItems}
             />
           </div>
         )}

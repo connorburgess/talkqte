@@ -11,6 +11,7 @@ import {
 import { AtSign, Check, X } from 'lucide-react';
 import {
   clockTime,
+  noteSourceName,
   type Cue,
   type CueSnapshot,
   type CueSource,
@@ -236,11 +237,9 @@ function Sources({
         <li key={source.id}>
           <span className="cue-source-label">
             {source.provenance.kind === 'priorNote'
-              ? `${source.provenance.title} · ${
-                  source.provenance.provider === 'granola'
-                    ? 'Granola'
-                    : 'Imported file'
-                } · ${source.provenance.date} · prior note`
+              ? `${source.provenance.title} · ${noteSourceName(
+                  source.provenance.provider,
+                )} · ${source.provenance.date} · prior note`
               : `This conversation · ${clockTime(source.provenance.atMs)} · ${source.provenance.speaker}`}
           </span>{' '}
           <blockquote className="cue-quote">“{source.text}”</blockquote>
@@ -409,7 +408,11 @@ export function Question({
           ) : cue.note ? (
             <>
               <span className="cue-source-label">
-                Its title came up · imported note, {cue.note.sourceDate}
+                Its title came up ·{' '}
+                {cue.note.provider === 'meeting'
+                  ? 'kept meeting'
+                  : 'imported note'}
+                , {cue.note.sourceDate}
               </span>{' '}
               {/* Present for every note reminder, so a warning that appears
                 or changes in place is announced; empty when there is none.

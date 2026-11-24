@@ -9,6 +9,7 @@ import {
   type ProcessingScope,
   type ProcessingSnapshot,
 } from '../lib/processing';
+import { noteSourceName, type ContextItem } from '../lib/types';
 import './processing.css';
 
 /** Present to assistive technology, absent from the visual layout. */
@@ -111,10 +112,37 @@ function NoteLabel({ note }: { note: ProcessingNote }) {
     <>
       <strong>{note.title}</strong>
       <span>
-        {note.provider === 'granola' ? 'Granola' : 'Imported file'} ·{' '}
-        {note.sourceDate} · prior note
+        {noteSourceName(note.provider)} · {note.sourceDate} · prior note
       </span>
     </>
+  );
+}
+/** For a kept meeting in the review: the exact text that would be sent,
+ * its meeting notes and the person's notes from it, already bounded. */
+function MeetingText({
+  note,
+  items,
+}: {
+  note: ProcessingNote;
+  items: ContextItem[];
+}) {
+  if (note.provider !== 'meeting') return null;
+  const item = items.find(
+    (candidate) =>
+      candidate.provider === 'meeting' &&
+      candidate.sourceId === note.sourceId &&
+      candidate.revision === note.revision,
+  );
+  if (!item) return null;
+  return (
+    <div className="processing-meeting-text">
+      <p>
+        Sends from this meeting its meeting notes and your notes, never its
+        transcript ({[...item.excerpt].length.toLocaleString()} of at most 2,000
+        characters):
+      </p>
+      <pre>{item.excerpt}</pre>
+    </div>
   );
 }
 function conversationLabel(scope: ProcessingScope) {
@@ -127,12 +155,16 @@ function conversationLabel(scope: ProcessingScope) {
  * Standalone mounting is retained for the fictional control-contract tests. */
 export function ProcessingControl({
   status,
+  items = [],
 }: {
   status?: {
     snapshot: ProcessingSnapshot | null;
     failed: boolean;
     refresh: () => Promise<ProcessingSnapshot>;
   };
+  /** The imported prior notes, so the review can show the exact text a
+   * kept meeting would send. */
+  items?: ContextItem[];
 }) {
   const [snapshot, setSnapshot] = useState<ProcessingSnapshot | null>(null);
   const current = useRef<ProcessingSnapshot | null>(null);
@@ -678,7 +710,11 @@ export function ProcessingControl({
             </label>
           </fieldset>
           {snapshot?.processor?.acceptsNotes === false ? (
-            <p>Prior notes are never sent to this processor.</p>
+            <p>
+              Prior notes are never sent to this processor.
+              {items.some((item) => item.provider === 'meeting') &&
+                ' Kept meetings you chose stay on this Mac.'}
+            </p>
           ) : (
             <>
               <fieldset disabled={!!busy || !!status?.failed}>
@@ -786,6 +822,7 @@ export function ProcessingControl({
                   {review.notes.map((note) => (
                     <li key={noteKey(note)}>
                       <NoteLabel note={note} />
+                      <MeetingText note={note} items={items} />
                     </li>
                   ))}
                 </ul>

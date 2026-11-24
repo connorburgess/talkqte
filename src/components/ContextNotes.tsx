@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { FileText, Link2, X } from 'lucide-react';
+import { FileText, History, Link2, X } from 'lucide-react';
 import * as bridge from '../lib/bridge';
 import type {
   ContextItem,
@@ -34,7 +34,9 @@ export function ContextNotes({
   onGranola?: (status: GranolaStatus) => void;
 }) {
   const [picked, setPicked] = useState<PickedNotes | null>(null);
-  const [pickedFrom, setPickedFrom] = useState<'file' | 'granola'>('file');
+  const [pickedFrom, setPickedFrom] = useState<'file' | 'granola' | 'meeting'>(
+    'file',
+  );
   const [granola, setGranolaState] = useState<GranolaStatus>({
     connected: false,
     tools: [],
@@ -80,7 +82,8 @@ export function ContextNotes({
   const connectButton = useRef<HTMLButtonElement>(null);
   const returnConnectFocus = useRef(false);
   const dialog = useRef<HTMLDialogElement>(null);
-  const selectionLimit = pickedFrom === 'granola' ? 10 : 200;
+  const selectionLimit =
+    pickedFrom === 'granola' ? 10 : pickedFrom === 'meeting' ? 5 : 200;
   const allChosen =
     !!picked &&
     chosen.length === Math.min(picked.notes.length, selectionLimit) &&
@@ -125,7 +128,12 @@ export function ContextNotes({
     }
     if (!picked && !working && returnFocus.current) {
       returnFocus.current = false;
-      (pickedFrom === 'granola' ? granolaButton : addButton).current?.focus();
+      (pickedFrom === 'granola'
+        ? granolaButton
+        : pickedFrom === 'meeting'
+          ? meetingButton
+          : addButton
+      ).current?.focus();
     }
     if (!working && returnConnectFocus.current) {
       returnConnectFocus.current = false;
@@ -216,6 +224,18 @@ export function ContextNotes({
         if (current === operation.current) setListing(false);
       }
     });
+  // Kept meetings: their meeting notes and the person's notes, chosen here
+  // like any other prior note.
+  const meetingButton = useRef<HTMLButtonElement>(null);
+  const chooseMeetings = () =>
+    void run(async () => {
+      const result = await bridge.listMeetingsForContext();
+      returnFocus.current = true;
+      setChosen([]);
+      setDates({});
+      setPickedFrom('meeting');
+      setPicked(result);
+    });
   const disconnectGranola = () =>
     void run(async () => {
       // Retire the listing UI immediately, independently of its response.
@@ -283,10 +303,10 @@ export function ContextNotes({
         <div className="context-heading">
           <div>
             <span className="muted small">
-              Notes you chose from a file or from Granola · not from this
-              conversation · kept in memory · excluded from Markdown exports.
-              Sending selected prior notes to a cue provider requires a separate
-              processing review and approval.
+              Notes you chose from a file, from Granola or from a meeting you
+              kept · not from this conversation · kept in memory · excluded from
+              Markdown exports. Sending selected prior notes to a cue provider
+              requires a separate processing review and approval.
             </span>
           </div>
           <div className="context-actions">
@@ -330,6 +350,17 @@ export function ContextNotes({
             >
               Use a local file path
             </button>
+            {bridge.desktop && (
+              <button
+                ref={meetingButton}
+                className="secondary-button"
+                disabled={busy || working}
+                onClick={chooseMeetings}
+              >
+                <History size={15} />
+                Choose kept meetings
+              </button>
+            )}
             {bridge.desktop &&
               (granola.connected ? (
                 <>
@@ -453,7 +484,9 @@ export function ContextNotes({
                     {item.sourceDate} ·{' '}
                     {item.provider === 'granola'
                       ? 'From Granola'
-                      : 'From a file'}
+                      : item.provider === 'meeting'
+                        ? 'From a kept meeting: its meeting notes and your notes'
+                        : 'From a file'}
                   </span>
                   {item.provider === 'granola' && (
                     <GranolaNoteFreshness
@@ -527,6 +560,12 @@ export function ContextNotes({
           Only the notes you tick are kept, for this session. They are listed
           under Prior context and never feed a question on their own.
         </p>
+        {pickedFrom === 'meeting' && picked && picked.notes.length > 0 && (
+          <p className="small">
+            Each brings its meeting notes and your notes from it, never its
+            transcript, up to 2,000 characters. Choose up to 5 per import.
+          </p>
+        )}
         {pickedFrom === 'granola' && picked && picked.notes.length > 0 && (
           <p className="small">
             Choose up to 10 notes per import. Keep up to 20 in this session.
@@ -538,7 +577,9 @@ export function ContextNotes({
             {picked.skipped === 1 ? 'note is' : 'notes are'} not listed
             {pickedFrom === 'granola'
               ? ': Granola returned a partial list, or it exceeds the 200-note chooser limit.'
-              : ': the file has repeated ids or more than 200 notes.'}
+              : pickedFrom === 'meeting'
+                ? ': they have no notes or meeting notes to bring, could not be read, or are beyond the newest 200.'
+                : ': the file has repeated ids or more than 200 notes.'}
           </p>
         )}
         {picked && picked.notes.length > 1 && (
@@ -572,7 +613,9 @@ export function ContextNotes({
           <p className="context-empty" role="status">
             {pickedFrom === 'granola'
               ? 'No notes came back from Granola for the last 30 days. If you have meetings there from that time, the listing is not working yet; nothing was imported.'
-              : 'This file has no notes with an id, a date, and text; nothing was imported.'}
+              : pickedFrom === 'meeting'
+                ? 'No kept meeting has notes or meeting notes to bring; nothing was imported.'
+                : 'This file has no notes with an id, a date, and text; nothing was imported.'}
           </p>
         )}
         <ul className="context-choices">

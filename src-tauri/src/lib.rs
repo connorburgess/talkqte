@@ -77,6 +77,7 @@ mod lab_evaluator;
 pub mod live;
 mod live_control;
 mod live_source;
+mod meeting_context;
 pub mod meeting_history;
 mod meeting_history_commands;
 pub mod meeting_notes;
@@ -922,6 +923,9 @@ async fn import_context_notes(
         if provider == context::Provider::Granola && ids.len() > 10 {
             return Err("Choose up to 10 Granola notes per import.".into());
         }
+        if provider == context::Provider::Meeting && ids.len() > meeting_context::MAX_PER_IMPORT {
+            return Err("Choose up to 5 kept meetings per import.".into());
+        }
         (
             pending.start().ok_or("An import is already running.")?,
             provider,
@@ -1006,7 +1010,8 @@ fn remove_context_from(
 ) -> Result<usize, String> {
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
     let removed = runtime.context.remove_all_from(context::Provider::File)
-        + runtime.context.remove_all_from(context::Provider::Granola);
+        + runtime.context.remove_all_from(context::Provider::Granola)
+        + runtime.context.remove_all_from(context::Provider::Meeting);
     runtime.pending_import = None;
     runtime.refresh.forget_all();
     publish_context(&app, &mut runtime);
@@ -1753,6 +1758,7 @@ pub fn run() {
             meeting_history_commands::delete_kept_meeting,
             meeting_history_commands::delete_all_kept_meetings,
             meeting_history_commands::export_kept_meeting,
+            meeting_history_commands::list_meetings_for_context,
             live_status,
             provider_key_commands::provider_keys_status,
             provider_key_commands::set_provider_key,

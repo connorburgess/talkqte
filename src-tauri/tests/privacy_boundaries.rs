@@ -119,6 +119,7 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-delete-kept-meeting",
         "allow-delete-all-kept-meetings",
         "allow-export-kept-meeting",
+        "allow-list-meetings-for-context",
     ]);
     assert!(
         notebook_only.is_subset(&main),
