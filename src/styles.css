@@ -1626,3 +1626,28 @@ svg {
   height: 19px;
   flex-shrink: 0;
 }
+
+/* Settings → Diagnostics: the report the person reads before copying. */
+.diagnostics-report {
+  margin-top: var(--space-12);
+  padding: var(--space-12);
+  max-height: 280px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  background: var(--band);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+.diagnostics-report:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.diagnostics-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin-top: var(--space-12);
+}

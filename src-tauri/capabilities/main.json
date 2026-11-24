@@ -54,6 +54,7 @@
     "allow-stop-microphone",
     "allow-live-status",
     "allow-provider-keys-status",
+    "allow-platform-capabilities",
     "allow-set-provider-key",
     "allow-test-provider-key",
     "allow-remove-provider-key",
