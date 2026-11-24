@@ -99,6 +99,13 @@ export const ALLOWED_ONE_SIDED_BORDERS = [
     reason: 'Full-width 1px neutral section divider below Cue processing.',
   },
   {
+    file: 'src/components/processing.css',
+    selector: '.session-sources',
+    property: 'border-bottom',
+    kind: 'hairline',
+    reason: 'Full-width 1px neutral section divider below Listen to sources.',
+  },
+  {
     file: 'src/components/provider-keys.css',
     selector: '.provider-keys',
     property: 'border-bottom',

@@ -169,9 +169,34 @@ export function MeetingNotes({ snapshot }: { snapshot: Snapshot }) {
       ? ` Estimated cost of this request: about ${dollars(result.spentMicroUsd)} (an estimate, not your bill).`
       : ' The API did not report what this request cost; your Anthropic Console shows it.';
 
+  const chip =
+    phase === 'writing'
+      ? { label: 'Writing notes…', tone: 'is-checking' }
+      : phase === 'draft'
+        ? { label: 'Editable draft', tone: 'is-set' }
+        : phase === 'kept'
+          ? { label: 'Kept', tone: 'is-set' }
+          : phase === 'failed'
+            ? { label: 'Failed', tone: 'is-failed' }
+            : phase === 'discarded'
+              ? { label: 'Discarded', tone: '' }
+              : plan
+                ? { label: 'Nothing sent yet', tone: '' }
+                : null;
+
   return (
     <section className="meeting-notes" aria-labelledby={`${id}-title`}>
-      <h2 id={`${id}-title`}>Meeting notes</h2>
+      <div className="meeting-notes-head">
+        <h2 id={`${id}-title`}>Meeting notes</h2>
+        {chip && (
+          <span
+            className={`meeting-notes-chip${chip.tone ? ` ${chip.tone}` : ''}`}
+            aria-hidden="true"
+          >
+            {chip.label}
+          </span>
+        )}
+      </div>
 
       {phase === 'none' && !plan && (
         <>
@@ -225,21 +250,23 @@ export function MeetingNotes({ snapshot }: { snapshot: Snapshot }) {
             />
             <label htmlFor={`${id}-include`}>Also send my notes</label>
           </div>
-          <p>To: {plan.destination}.</p>
-          <p>
-            Notes setting: {care(plan.model)}, model {plan.model}. Change it in
-            Settings before sending.
-          </p>
-          <p>
-            Estimated cost: about {dollars(plan.likelyMicroUsd)}, at most{' '}
-            {dollars(plan.worstMicroUsd)}
-            {plan.cueSpentMicroUsd
-              ? `, on top of about ${dollars(plan.cueSpentMicroUsd)} for this meeting's cues`
-              : ''}
-            . An estimate, not your bill; one meeting's notes may not be
-            estimated above {dollars(plan.spendCapMicroUsd)}.
-          </p>
-          <p>
+          <div className="meeting-notes-summary">
+            <p>To: {plan.destination}.</p>
+            <p>
+              Notes setting: {care(plan.model)}, model {plan.model}. Change it
+              in Settings before sending.
+            </p>
+            <p>
+              Estimated cost: about {dollars(plan.likelyMicroUsd)}, at most{' '}
+              {dollars(plan.worstMicroUsd)}
+              {plan.cueSpentMicroUsd
+                ? `, on top of about ${dollars(plan.cueSpentMicroUsd)} for this meeting's cues`
+                : ''}
+              . An estimate, not your bill; one meeting's notes may not be
+              estimated above {dollars(plan.spendCapMicroUsd)}.
+            </p>
+          </div>
+          <p className="meeting-notes-help">
             One request, no retry: if it fails, nothing more is sent for this
             meeting. Anthropic handles what is sent under your API account's
             terms, and it cannot be recalled once sent.
@@ -339,7 +366,7 @@ export function MeetingNotes({ snapshot }: { snapshot: Snapshot }) {
               Keep with this meeting
             </button>
             <button
-              className="secondary-button"
+              className="secondary-button meeting-notes-danger"
               disabled={busy}
               onClick={() =>
                 void act(
@@ -362,7 +389,7 @@ export function MeetingNotes({ snapshot }: { snapshot: Snapshot }) {
           <pre>{result?.kept ?? text}</pre>
           <div className="meeting-notes-actions">
             <button
-              className="secondary-button"
+              className="secondary-button meeting-notes-danger"
               disabled={busy}
               onClick={() =>
                 void act(discardMeetingNotes, 'The notes could not be removed.')

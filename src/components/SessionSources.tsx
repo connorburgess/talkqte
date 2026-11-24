@@ -158,7 +158,7 @@ export function SessionSources({
               onChange={() => onChange({ ...value, mode: item.mode })}
             />
             <span>
-              {item.label}
+              <strong className="session-sources-label">{item.label}</strong>
               <span className="session-sources-hint">{item.hint}</span>
             </span>
           </label>
@@ -167,7 +167,7 @@ export function SessionSources({
       {needsApplication && (
         <div className="session-sources-application">
           {value.wanted && !value.application && (
-            <p className="processing-muted" role="status">
+            <p className="session-sources-wanted" role="status">
               For the call in {value.wanted.name}: list applications, check it
               is chosen, then start.
             </p>
@@ -185,7 +185,7 @@ export function SessionSources({
             .
           </p>
           {value.mode === 'both' && (
-            <p className="processing-muted">
+            <p className="session-sources-headphones">
               Use headphones if you can. Through speakers the microphone also
               hears the call; TalkQTE leaves out lines it can tell are repeats,
               but not all of them.
@@ -255,7 +255,7 @@ export function SessionSources({
             </p>
           )}
           {(problem || error) && (
-            <p className="processing-message" role="alert">
+            <p className="session-sources-error" role="alert">
               {error || problem}
             </p>
           )}

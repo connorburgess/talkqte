@@ -50,7 +50,7 @@ export function CallPromptSetting() {
           setting lasts until you quit.
         </p>
         {settings && (
-          <label className="processing-option">
+          <label className="processing-option call-prompt-setting-option">
             <input
               type="checkbox"
               checked={settings.enabled}
@@ -64,8 +64,8 @@ export function CallPromptSetting() {
           </label>
         )}
         {!!settings?.notFor.length && (
-          <p className="small muted">
-            Not offered for: {settings.notFor.join(', ')}.{' '}
+          <p className="small muted call-prompt-not-for">
+            <span>Not offered for: {settings.notFor.join(', ')}.</span>
             <button
               className="secondary-button"
               onClick={() => void change('clear_call_prompt_apps')}
@@ -74,7 +74,11 @@ export function CallPromptSetting() {
             </button>
           </p>
         )}
-        {error && <p role="alert">{error}</p>}
+        {error && (
+          <p role="alert" className="call-prompt-setting-error">
+            {error}
+          </p>
+        )}
       </div>
     </section>
   );

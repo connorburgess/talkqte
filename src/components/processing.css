@@ -272,8 +272,9 @@
   display: none;
 }
 .session-sources {
-  margin-top: var(--space-16);
-  max-width: 68ch;
+  padding: var(--space-16) 0;
+  border-bottom: 1px solid var(--line);
+  max-width: 720px;
 }
 .session-sources fieldset {
   border: 0;
@@ -282,21 +283,78 @@
   min-width: 0;
 }
 .session-sources legend {
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
   padding: 0;
+  margin-bottom: var(--space-4);
+}
+.session-sources .processing-option {
+  padding: 8px 0;
+}
+.session-sources-label {
+  display: block;
+  font-weight: 600;
+  color: var(--ink);
 }
 .session-sources-hint {
   display: block;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.5;
+  margin-top: 2px;
 }
 .session-sources-application {
-  margin-top: var(--space-8);
+  display: grid;
+  gap: var(--space-12);
+  margin-top: var(--space-12);
+  padding: var(--space-12) var(--space-16);
+  background: var(--band);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+.session-sources-application .processing-muted {
+  font-size: 13px;
+  line-height: 1.5;
 }
 .session-sources-application fieldset {
-  margin-top: var(--space-16);
+  margin-top: 0;
 }
-.session-sources-application .processing-muted + .processing-muted {
-  margin-top: var(--space-8);
+.session-sources-application .processing-option {
+  padding: 6px 0;
+}
+.session-sources-application .processing-actions {
+  margin-top: 0;
+}
+.session-sources-application .processing-actions button {
+  min-height: 44px;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+.session-sources-wanted {
+  padding: 8px 12px;
+  background: var(--cue-asked-surface);
+  border: 1px solid var(--accent-ink);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.session-sources-headphones {
+  padding: 8px 12px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.session-sources-error {
+  padding: 8px 12px;
+  background: var(--danger-surface);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-control);
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.5;
 }

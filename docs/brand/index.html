@@ -1947,9 +1947,10 @@
       }
 
       .dock-prompt {
+        position: relative;
         width: min(320px, 100%);
         max-width: 100%;
-        padding: 14px 16px;
+        padding: 12px 16px;
         background: #0d1014;
         color: #f5f7fa;
         border: 1px solid #252c36;
@@ -1957,76 +1958,66 @@
         box-shadow: 0 12px 28px rgba(13, 16, 20, 0.22);
       }
 
-      .dock-prompt-kicker {
-        display: flex;
+      .dock-prompt-close {
+        position: absolute;
+        top: 6px;
+        right: 6px;
+        width: 44px;
+        height: 44px;
+        display: inline-flex;
         align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        font-family: var(--font-mono);
-        font-size: 10px;
-        font-weight: 500;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-        color: #ebb45b;
+        justify-content: center;
+        padding: 0 0 12px 12px;
+        color: #9aa4b2;
+        font-size: 16px;
       }
 
       .dock-prompt-title {
-        margin-top: 8px;
-        font-size: 15px;
+        font-size: 14px;
         font-weight: 600;
-        line-height: 1.28;
+        line-height: 1.24;
+        letter-spacing: -0.015em;
         color: #f5f7fa;
+        padding-right: 36px;
       }
 
       .dock-prompt.is-large .dock-prompt-title {
-        font-size: 18px;
-        line-height: 1.25;
+        font-size: 17px;
+        line-height: 1.24;
       }
 
       .dock-prompt-copy {
-        margin-top: 6px;
-        font-size: 13px;
-        line-height: 1.45;
+        margin-top: 4px;
+        font-size: 12px;
+        line-height: 1.35;
         color: #9aa4b2;
       }
 
       .dock-prompt.is-large .dock-prompt-copy {
-        font-size: 15px;
-        line-height: 1.45;
-      }
-
-      .dock-prompt-bar {
-        height: 3px;
-        background: #252c36;
-        border-radius: 1px;
-        margin: 12px 0;
-        overflow: hidden;
-      }
-
-      .dock-prompt-bar span {
-        display: block;
-        width: 68%;
-        height: 100%;
-        background: #ebb45b;
+        font-size: 14px;
+        line-height: 1.4;
       }
 
       .dock-prompt-actions {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
+        align-items: center;
+        gap: 6px;
+        margin-top: 8px;
       }
 
       .dock-prompt-btn-primary {
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        gap: 6px;
         min-height: 44px;
-        padding: 8px 14px;
+        padding: 6px 12px;
         background: #ebb45b;
         color: #0d1014;
         border: 1px solid #ebb45b;
         border-radius: 6px;
-        font-size: 13px;
+        font-size: 12.5px;
         font-weight: 700;
       }
 
@@ -2035,18 +2026,62 @@
         align-items: center;
         justify-content: center;
         min-height: 44px;
-        padding: 8px 11px;
+        padding: 6px 10px;
         background: #181f28;
         color: #f5f7fa;
-        border: 1px solid #38414e;
+        border: 1px solid #637286;
         border-radius: 6px;
         font-size: 12px;
         font-weight: 500;
       }
 
-      .dock-prompt.is-large .dock-prompt-btn-primary,
+      .dock-prompt.is-large .dock-prompt-btn-primary {
+        font-size: 13.5px;
+      }
+
       .dock-prompt.is-large .dock-prompt-btn {
-        font-size: 14px;
+        font-size: 13px;
+      }
+
+      .panel-echo-card {
+        margin: 8px 0;
+        padding: 12px 14px;
+        background: var(--g-band);
+        border: 1px solid var(--g-line);
+        border-radius: 2px;
+      }
+
+      .panel-echo-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        background: #ffffff;
+        border: 1px solid var(--g-line);
+        border-radius: 2px;
+        color: var(--g-muted);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 500;
+      }
+
+      .panel-wanted-box {
+        padding: 8px 12px;
+        background: #fdf6e9;
+        border: 1px solid var(--g-amber-ink);
+        border-radius: 2px;
+        color: var(--g-ink);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .panel-status-box {
+        padding: 8px 12px;
+        background: var(--g-band);
+        border: 1px solid var(--g-line);
+        border-radius: 2px;
+        color: var(--g-ink);
+        font-size: 12px;
+        line-height: 1.5;
       }
 
       .up-notes-editor {
@@ -5502,6 +5537,132 @@
               </div>
             </div>
           </div>
+
+          <!-- 5. Call-starting offer (built in CallPrompt.tsx) -->
+          <div id="dock-call-prompt">
+            <div class="dock-matrix-head">
+              <h3>
+                5. Call-Starting Offer (320 × 232px standard · 320 × 276px
+                large)
+              </h3>
+              <span class="mono-label" style="color: var(--g-muted)"
+                >CallPrompt.tsx · Solar Amber Start · 44px targets · never takes
+                focus or auto-starts</span
+              >
+            </div>
+            <div class="dock-grid">
+              <div class="comp-col">
+                <span class="mono-label comp-label"
+                  >21 · Meeting app offer (standard · 320 × 232px)</span
+                >
+                <div class="dock-prompt">
+                  <span class="dock-prompt-close" aria-hidden="true">×</span>
+                  <div class="dock-prompt-title">
+                    A call seems to be starting in Fictional Call.
+                  </div>
+                  <p class="dock-prompt-copy">
+                    Start a session with your microphone and Fictional Call? You
+                    choose and approve everything in the notebook; nothing is
+                    heard until then.
+                  </p>
+                  <div class="dock-prompt-actions">
+                    <span class="dock-prompt-btn-primary"
+                      >▶ Start session…</span
+                    >
+                    <span class="dock-prompt-btn">Not for Fictional Call</span>
+                    <span class="dock-prompt-btn">Don’t ask again</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="comp-col">
+                <span class="mono-label comp-label"
+                  >22 · Browser offer with caveat (standard · 320 × 232px)</span
+                >
+                <div class="dock-prompt">
+                  <span class="dock-prompt-close" aria-hidden="true">×</span>
+                  <div class="dock-prompt-title">
+                    The microphone is in use and Fictional Browser is in front.
+                    A call?
+                  </div>
+                  <p class="dock-prompt-copy">
+                    Start a session with your microphone? You approve it in the
+                    notebook; nothing is heard until then. You can add Fictional
+                    Browser there, but a browser’s audio includes every tab and
+                    may not be heard yet.
+                  </p>
+                  <div class="dock-prompt-actions">
+                    <span class="dock-prompt-btn-primary"
+                      >▶ Start session…</span
+                    >
+                    <span class="dock-prompt-btn"
+                      >Not for Fictional Browser</span
+                    >
+                    <span class="dock-prompt-btn">Don’t ask again</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="comp-col">
+                <span class="mono-label comp-label"
+                  >23 · Unknown app offer (no app named · 320 × 232px)</span
+                >
+                <div class="dock-prompt">
+                  <span class="dock-prompt-close" aria-hidden="true">×</span>
+                  <div class="dock-prompt-title">
+                    The microphone is in use. A call?
+                  </div>
+                  <p class="dock-prompt-copy">
+                    Start a session with your microphone? You approve it in the
+                    notebook; nothing is heard until then.
+                  </p>
+                  <div class="dock-prompt-actions">
+                    <span class="dock-prompt-btn-primary"
+                      >▶ Start session…</span
+                    >
+                    <span class="dock-prompt-btn">Don’t ask again</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="comp-col">
+                <span class="mono-label comp-label"
+                  >24 · Meeting app offer · Larger text (320 × 276px)</span
+                >
+                <div class="dock-prompt is-large">
+                  <span class="dock-prompt-close" aria-hidden="true">×</span>
+                  <div class="dock-prompt-title">
+                    A call seems to be starting in Fictional Call.
+                  </div>
+                  <p class="dock-prompt-copy">
+                    Start a session with your microphone and Fictional Call? You
+                    choose and approve everything in the notebook; nothing is
+                    heard until then.
+                  </p>
+                  <div class="dock-prompt-actions">
+                    <span class="dock-prompt-btn-primary"
+                      >▶ Start session…</span
+                    >
+                    <span class="dock-prompt-btn">Not for Fictional Call</span>
+                    <span class="dock-prompt-btn">Don’t ask again</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="up-boundary">
+              <strong>Component boundary:</strong>
+              <code>src/components/CallPrompt.tsx</code> (styled in
+              <code>src/styles.css</code>), mounted in
+              <code>FloatingQuestion</code> when no session is running and
+              <code>callPrompt</code> is present. Four answers:
+              <code>Start session…</code>,
+              <code>Not for &lt;App&gt;</code> (when named),
+              <code>Don’t ask again</code>, and top-right <code>×</code> (<code
+                >Not now</code
+              >). Settings opt-in lives in
+              <code>src/components/CallPromptSetting.tsx</code> (Panel 15).
+            </div>
+          </div>
         </div>
       </section>
 
@@ -6860,6 +7021,577 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
                 <code>set_transcription_language</code>, event
                 <code>provider-keys:changed</code>, and <code>cue_usage</code>.
               </p>
+            </article>
+
+            <!-- 14. Session sources chooser (Listen to) -->
+            <article class="panel-card is-wide" id="panel-session-sources">
+              <div class="panel-card-tag mono-label">
+                <span>14 · Session sources (Listen to chooser)</span
+                ><span
+                  >Microphone, both, or one application · all built states</span
+                >
+              </div>
+              <div class="km-split">
+                <div class="km-pane">
+                  <div class="sk-row-head">
+                    <strong class="panel-h3"
+                      >Listen to · Call offer preselect &amp; listed
+                      apps</strong
+                    >
+                    <span class="mono-label" style="color: var(--g-amber-ink)"
+                      >SessionSources.tsx</span
+                    >
+                  </div>
+                  <div class="panel-check" style="margin-top: 8px">
+                    <span class="panel-radio"></span>
+                    <div>
+                      <strong>Microphone</strong>
+                      <p class="panel-muted" style="font-size: 12px">
+                        Everyone your Mac’s microphone hears, as in a room.
+                      </p>
+                    </div>
+                  </div>
+                  <div class="panel-check">
+                    <span class="panel-radio is-checked"></span>
+                    <div>
+                      <strong>Microphone and one application</strong>
+                      <p class="panel-muted" style="font-size: 12px">
+                        For a call: you through the microphone, the other side
+                        from the app you choose.
+                      </p>
+                    </div>
+                  </div>
+                  <div class="panel-check">
+                    <span class="panel-radio"></span>
+                    <div>
+                      <strong>One application only</strong>
+                      <p class="panel-muted" style="font-size: 12px">
+                        Only the app’s sound, such as a recording. The
+                        microphone is not used.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div
+                    style="
+                      margin-top: 10px;
+                      padding: 12px 14px;
+                      background: var(--g-band);
+                      border: 1px solid var(--g-line);
+                      border-radius: 2px;
+                      display: grid;
+                      gap: 10px;
+                    "
+                  >
+                    <div class="panel-wanted-box">
+                      For the call in Fictional Call: list applications, check
+                      it is chosen, then start.
+                    </div>
+                    <p class="panel-muted" style="font-size: 12px">
+                      Audio from all windows of this application may be
+                      included. The first time you list applications, macOS asks
+                      you to allow Screen &amp; System Audio Recording for
+                      TalkQTE. Nothing is captured until the session starts, and
+                      nothing is sent until you enable cue processing for it;
+                      that one approval covers the microphone and the
+                      application.
+                    </p>
+                    <div
+                      style="
+                        padding: 8px 12px;
+                        background: #ffffff;
+                        border: 1px solid var(--g-line);
+                        border-radius: 2px;
+                        font-size: 12px;
+                      "
+                    >
+                      Use headphones if you can. Through speakers the microphone
+                      also hears the call; TalkQTE leaves out lines it can tell
+                      are repeats, but not all of them.
+                    </div>
+                    <div class="sk-actions" style="margin-top: 0">
+                      <span class="sk-btn">List applications</span>
+                      <span class="sk-btn">Cancel listing</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="km-pane">
+                  <div class="sk-row-head">
+                    <strong class="panel-h3"
+                      >Listed applications &amp; permission problem</strong
+                    >
+                    <span class="mono-label" style="color: var(--g-muted)"
+                      >Matches bundle ID</span
+                    >
+                  </div>
+                  <div
+                    style="
+                      margin-top: 10px;
+                      padding: 12px 14px;
+                      background: var(--g-band);
+                      border: 1px solid var(--g-line);
+                      border-radius: 2px;
+                      display: grid;
+                      gap: 8px;
+                    "
+                  >
+                    <strong style="font-size: 13px">Application</strong>
+                    <div class="panel-check" style="padding: 3px 0">
+                      <span class="panel-radio"></span
+                      ><span>Fictional player</span>
+                    </div>
+                    <div class="panel-check" style="padding: 3px 0">
+                      <span class="panel-radio is-checked"></span
+                      ><span><strong>Fictional Call</strong></span>
+                    </div>
+                    <p class="panel-muted" style="font-size: 12px">
+                      Only open applications with a window are listed. If yours
+                      is missing, open it or one of its windows, then list
+                      again. A browser can be listed and still give no sound:
+                      browser calls are not yet known to work.
+                    </p>
+                    <div class="sk-actions" style="margin-top: 0">
+                      <span class="sk-btn">List again</span>
+                    </div>
+                    <div class="panel-error-box" style="font-size: 12px">
+                      Application audio did not start. Try again.
+                    </div>
+                  </div>
+                  <p class="panel-footer-line" style="margin-top: 12px">
+                    Component boundary:
+                    <code>src/components/SessionSources.tsx</code> +
+                    <code>src/components/processing.css</code>, mounted in
+                    <code>src/App.tsx</code> directly below
+                    <code>.session-strip</code> before a live session starts.
+                  </p>
+                </div>
+              </div>
+            </article>
+
+            <!-- 15. Session sources in Transcript (You/Them & echo) + When a call starts setting -->
+            <article class="panel-card is-wide" id="panel-transcript-sources">
+              <div class="panel-card-tag mono-label">
+                <span
+                  >15 · Two-source Transcript, Echo Guard &amp; Call
+                  Setting</span
+                ><span
+                  >You / Them labels · Likely an echo · When a call starts</span
+                >
+              </div>
+              <div class="km-split">
+                <div class="km-pane">
+                  <div class="sk-row-head">
+                    <strong class="panel-h3"
+                      >Session strip notices &amp; Transcript echo guard</strong
+                    >
+                    <span class="mono-label" style="color: var(--g-muted)"
+                      >Source labels, not speakers</span
+                    >
+                  </div>
+                  <div
+                    class="panel-error-box"
+                    style="margin-top: 10px; font-size: 12px"
+                  >
+                    Audio from Fictional Call stopped: the connection was lost.
+                    Only your microphone is heard now; Cue processing says why.
+                    Stop and start again to hear both.
+                  </div>
+                  <div class="panel-status-box" style="margin-top: 8px">
+                    1 microphone line looks like a repeat of Fictional Call's
+                    sound through your speakers. They are marked in the
+                    transcript, not used for cues; keep or remove each there.
+                    Headphones avoid this.
+                  </div>
+                  <p
+                    class="panel-muted"
+                    style="margin-top: 12px; font-size: 12px"
+                  >
+                    You: your microphone · Them: audio from Fictional Call ·
+                    transcribed by Deepgram once cue processing is enabled. The
+                    labels say where a line was heard, not who said it.
+                  </p>
+                  <div class="panel-transcript-row" style="margin-top: 8px">
+                    <div
+                      style="
+                        display: flex;
+                        justify-content: space-between;
+                        font-size: 13px;
+                      "
+                    >
+                      <strong>Them</strong
+                      ><span class="mono-label" style="color: var(--g-muted)"
+                        >4:08</span
+                      >
+                    </div>
+                    <p style="font-size: 14px; margin-top: 4px">
+                      Can you send the revised fictional budget?
+                    </p>
+                  </div>
+                  <div class="panel-echo-card">
+                    <div
+                      style="
+                        display: flex;
+                        align-items: center;
+                        flex-wrap: wrap;
+                        gap: 6px 10px;
+                        font-size: 13px;
+                      "
+                    >
+                      <strong>You</strong>
+                      <span class="panel-echo-chip"
+                        >Likely an echo of Them · not used for cues</span
+                      >
+                      <span
+                        class="mono-label"
+                        style="margin-left: auto; color: var(--g-muted)"
+                        >4:11</span
+                      >
+                    </div>
+                    <p
+                      class="panel-muted"
+                      style="font-size: 14px; margin-top: 4px"
+                    >
+                      Can you send the revised fictional budget?
+                    </p>
+                    <div class="sk-actions" style="margin-top: 10px">
+                      <span class="sk-btn">It was me</span>
+                      <span class="sk-btn is-danger">Remove</span>
+                    </div>
+                  </div>
+                  <div class="panel-transcript-row">
+                    <div
+                      style="
+                        display: flex;
+                        justify-content: space-between;
+                        font-size: 13px;
+                      "
+                    >
+                      <strong>You</strong
+                      ><span class="mono-label" style="color: var(--g-muted)"
+                        >4:16</span
+                      >
+                    </div>
+                    <p style="font-size: 14px; margin-top: 4px">
+                      Yes, by Friday.
+                    </p>
+                  </div>
+                </div>
+
+                <div class="km-pane">
+                  <div class="sk-row-head">
+                    <strong class="panel-h3"
+                      >Settings · When a call starts</strong
+                    >
+                    <span class="mono-label" style="color: var(--g-muted)"
+                      >CallPromptSetting.tsx</span
+                    >
+                  </div>
+                  <p
+                    class="panel-muted"
+                    style="margin-top: 8px; font-size: 12px"
+                  >
+                    While TalkQTE is open, it can notice that another app is
+                    using your microphone and offer, in the companion, to start
+                    a session with the microphone and that app. It reads only
+                    whether the microphone is in use and which app is in front,
+                    never audio or what is on screen, and that stays on this
+                    Mac. It never starts a session by itself: Start opens the
+                    notebook, where you choose and approve as usual. A browser
+                    call (Google Meet, for example) looks like any other use of
+                    the microphone in a browser. TalkQTE has to be running to
+                    notice. This setting lasts until you quit.
+                  </p>
+                  <div class="panel-check" style="margin-top: 10px">
+                    <span class="panel-box is-checked">✓</span>
+                    <span
+                      >Offer to start a session when a call seems to start</span
+                    >
+                  </div>
+                  <div
+                    style="
+                      display: flex;
+                      flex-wrap: wrap;
+                      align-items: center;
+                      gap: 10px;
+                      margin-top: 10px;
+                    "
+                  >
+                    <span class="panel-muted" style="font-size: 12px"
+                      >Not offered for: Fictional Call.</span
+                    >
+                    <span class="sk-btn">Offer for these again</span>
+                  </div>
+                  <div
+                    class="panel-error-box"
+                    style="margin-top: 10px; font-size: 12px"
+                  >
+                    The change was not confirmed. Try again.
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <!-- 16. Meeting notes (all built states + Settings model selector) -->
+            <article class="panel-card is-wide" id="panel-meeting-notes">
+              <div class="panel-card-tag mono-label">
+                <span>16 · Meeting notes &amp; Notes model setting</span
+                ><span
+                  >Idle, Confirm, Writing, Draft, Kept, Failed, Discarded</span
+                >
+              </div>
+              <div class="km-split">
+                <!-- Left: Idle, Confirmation, Writing, Failed -->
+                <div class="km-pane">
+                  <div class="sk-row-head">
+                    <strong class="panel-h3">1. Idle &amp; Confirmation</strong>
+                    <span class="sk-chip">Nothing sent yet</span>
+                  </div>
+                  <p
+                    class="panel-muted"
+                    style="margin-top: 6px; font-size: 12px"
+                  >
+                    A model can write a short summary, decisions, action items
+                    and open questions from this meeting's transcript, using
+                    your Anthropic key. You see what will be sent and an
+                    estimated cost first; nothing is sent until you confirm.
+                    Each meeting gets one request.
+                  </p>
+                  <div class="sk-actions">
+                    <span class="sk-btn">Write meeting notes…</span>
+                  </div>
+
+                  <div
+                    style="
+                      margin-top: 12px;
+                      padding: 14px;
+                      background: #ffffff;
+                      border: 1px solid var(--g-border);
+                      border-radius: 2px;
+                      display: grid;
+                      gap: 8px;
+                    "
+                  >
+                    <strong class="panel-h3 sk-focused"
+                      >Send this meeting to Anthropic?</strong
+                    >
+                    <p style="font-size: 12px">
+                      This sends this session's transcript: 1 line, about 1
+                      minute (1 KB), with each line's time but no speaker
+                      labels. Your notes are not sent. Your session name, focus
+                      lines, imported notes and the cues shown are never sent.
+                    </p>
+                    <div class="panel-check" style="padding: 2px 0">
+                      <span class="panel-box"></span>
+                      <strong>Also send my notes</strong>
+                    </div>
+                    <div
+                      class="sk-session-box"
+                      style="
+                        margin-top: 0;
+                        padding: 10px 12px;
+                        display: grid;
+                        gap: 4px;
+                      "
+                    >
+                      <p style="font-size: 12px">
+                        To: the Anthropic API (US), with your own Anthropic API
+                        key, billed to your Anthropic account.
+                      </p>
+                      <p style="font-size: 12px">
+                        Notes setting: Most careful (default), model
+                        claude-opus-5-5. Change it in Settings before sending.
+                      </p>
+                      <p style="font-size: 12px">
+                        Estimated cost: about $0.07, at most $0.34, on top of
+                        about $0.01 for this meeting's cues. An estimate, not
+                        your bill; one meeting's notes may not be estimated
+                        above $1.00.
+                      </p>
+                    </div>
+                    <p class="panel-muted" style="font-size: 12px">
+                      One request, no retry: if it fails, nothing more is sent
+                      for this meeting. Anthropic handles what is sent under
+                      your API account's terms, and it cannot be recalled once
+                      sent.
+                    </p>
+                    <div class="sk-actions" style="margin-top: 2px">
+                      <span class="sk-btn-primary">Send and write notes</span>
+                      <span class="sk-btn">Cancel</span>
+                    </div>
+                  </div>
+
+                  <div class="sk-row" style="margin-top: 14px">
+                    <div class="sk-row-head">
+                      <strong class="panel-h3">2. Writing in progress</strong>
+                      <span class="sk-chip is-checking">Writing notes…</span>
+                    </div>
+                    <div
+                      class="sk-session-box"
+                      style="
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        gap: 10px;
+                        margin-top: 8px;
+                        padding: 10px 12px;
+                      "
+                    >
+                      <span class="panel-muted" style="font-size: 12px"
+                        >Writing meeting notes… This can take a minute or
+                        two.</span
+                      >
+                      <span class="sk-btn">Stop waiting</span>
+                    </div>
+                  </div>
+
+                  <div class="sk-row" style="margin-top: 14px">
+                    <div class="sk-row-head">
+                      <strong class="panel-h3">3. Failed</strong>
+                      <span class="sk-chip is-rejected">Failed</span>
+                    </div>
+                    <div class="panel-error-box" style="font-size: 12px">
+                      The notes that came back failed a check (an action item
+                      named an owner that its lines do not mention), so none are
+                      shown. No notes were written, and nothing else will be
+                      sent for this meeting.
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Right: Draft, Sources, Kept, Discarded, Settings model -->
+                <div class="km-pane">
+                  <div class="sk-row-head">
+                    <strong class="panel-h3"
+                      >4. Editable draft &amp; sources</strong
+                    >
+                    <span class="sk-chip is-set">Editable draft</span>
+                  </div>
+                  <p style="font-size: 13px; font-weight: 600; margin-top: 6px">
+                    Check, edit, then keep or discard
+                  </p>
+                  <p
+                    class="panel-muted"
+                    style="margin-top: 4px; font-size: 12px"
+                  >
+                    Written by a model, which can still be wrong. Each item ends
+                    with the transcript times or note lines it came from. An
+                    owner or date is shown only when those words appear in the
+                    lines the item cites; that does not show the person agreed
+                    to it. Estimated cost of this request: about $0.04 (an
+                    estimate, not your bill).
+                  </p>
+                  <span
+                    class="mono-label"
+                    style="display: block; margin-top: 8px; color: var(--g-ink)"
+                    >Notes to keep, editable</span
+                  >
+                  <pre
+                    style="
+                      margin: 6px 0 0;
+                      padding: 10px 12px;
+                      background: #ffffff;
+                      border: 1px solid var(--g-border);
+                      border-radius: 2px;
+                      font-family: var(--font-mono);
+                      font-size: 12px;
+                      line-height: 1.55;
+                      white-space: pre-wrap;
+                    "
+                  >
+## Meeting notes
+
+### Summary
+- The greenhouse keys were discussed. (transcript 00:05)
+
+### Action items
+- Return the keys to the blue tin. Owner: not stated. Due: not stated. (transcript 00:05)</pre>
+                  <p
+                    style="
+                      margin-top: 10px;
+                      font-size: 13px;
+                      font-weight: 600;
+                      text-decoration: underline;
+                      text-underline-offset: 4px;
+                    "
+                  >
+                    ▾ Where each item came from
+                  </p>
+                  <div class="panel-status-box" style="margin-top: 6px">
+                    <strong>Action item:</strong> Return the keys to the blue
+                    tin.<br />
+                    <span class="up-citation">transcript 00:05</span>
+                    <span class="panel-muted"
+                      >“The fictional greenhouse keys are in the blue
+                      tin.”</span
+                    >
+                  </div>
+                  <div class="sk-actions" style="margin-top: 10px">
+                    <span class="sk-btn-primary">Keep with this meeting</span>
+                    <span class="sk-btn is-danger">Discard</span>
+                  </div>
+
+                  <div class="sk-row" style="margin-top: 14px">
+                    <div class="sk-row-head">
+                      <strong class="panel-h3">5. Kept &amp; Discarded</strong>
+                      <span class="sk-chip is-set">Kept</span>
+                    </div>
+                    <p
+                      class="panel-muted"
+                      style="margin-top: 4px; font-size: 12px"
+                    >
+                      Notes kept. They are included when you export, after your
+                      own notes.
+                    </p>
+                    <div class="sk-actions">
+                      <span class="sk-btn is-danger">Remove kept notes</span>
+                    </div>
+                    <p
+                      class="panel-muted"
+                      style="margin-top: 8px; font-size: 12px"
+                    >
+                      <strong>Discarded:</strong> Notes discarded. Each meeting
+                      gets one request, so none will be written again for this
+                      meeting.
+                    </p>
+                  </div>
+
+                  <div class="sk-row" style="margin-top: 14px">
+                    <span
+                      class="mono-label"
+                      style="
+                        display: block;
+                        color: var(--g-ink);
+                        margin-bottom: 6px;
+                      "
+                      >Settings · Model for meeting notes
+                      (MeetingNotesModel.tsx)</span
+                    >
+                    <div class="panel-input" style="width: 100%">
+                      Most careful (default) · highest cost ▾
+                    </div>
+                    <p
+                      class="panel-muted"
+                      style="margin-top: 6px; font-size: 12px"
+                    >
+                      After a live session you can ask for notes written from
+                      its transcript with your Anthropic key, one request per
+                      meeting, shown before anything is sent. This picks the
+                      model for that request (now claude-opus-5-5); cues during
+                      a session use their own, cheaper one.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div class="up-boundary">
+                <strong>Component boundary:</strong>
+                <code>src/components/MeetingNotes.tsx</code> +
+                <code>src/components/meeting-notes.css</code> (mounted in
+                <code>src/App.tsx</code> below <code>.session-strip</code> after
+                a live session with transcript ends) and
+                <code>src/components/MeetingNotesModel.tsx</code> (mounted
+                inside <code>ProviderKeys</code> in Settings).
+              </div>
             </article>
           </div>
         </div>
@@ -8287,7 +9019,7 @@ Date: 2026-11-23 · Length: 06:42
         </div>
       </section>
 
-      <!-- DESIGNED, NOT BUILT: THREE UPCOMING SCREENS -->
+      <!-- DESIGNED, NOT BUILT -->
       <section id="upcoming-spec" class="sheet" data-dir="c">
         <div class="wrap">
           <div class="sheet-head">
@@ -8297,456 +9029,24 @@ Date: 2026-11-23 · Length: 06:42
                   >Surface 06 · Designed, not built</span
                 >
                 <span class="mono-label" style="color: var(--g-amber-ink)"
-                  >Three upcoming screens · one component &amp; one mount point
-                  each</span
+                  >All previously listed screens have shipped</span
                 >
               </div>
-              <h2>Three Upcoming Screens (Designed, not built)</h2>
+              <h2>Designed, Not Built</h2>
               <p class="studio-line">
-                Direction C specifications for three planned surfaces in active
-                or upcoming lanes: dual-source session start, the quiet dock
-                call-starting prompt, and post-session structured meeting notes.
-                Every tile is visibly labelled
-                <strong>Designed, not built</strong>, never names a model, and
-                uses uniform all-round borders with zero one-sided accents.
+                The three previously planned screens have shipped in Direction C
+                and moved into the adopted sheets: the call-starting offer
+                (<code>CallPrompt.tsx</code>) is now in
+                <a href="#dock-call-prompt">The Dock (Section 5)</a>, and
+                session sources (<code>SessionSources.tsx</code>), two-source
+                transcript &amp; echo guard, and post-session meeting notes
+                (<code>MeetingNotes.tsx</code>,
+                <code>MeetingNotesModel.tsx</code>) are now in
+                <a href="#panel-session-sources">The Panel (Panels 14–16)</a>.
+                Future unbuilt screens will be specified here before
+                implementation.
               </p>
             </div>
-          </div>
-
-          <div class="panel-grid">
-            <!-- TILE 1: SESSION START WITH SOURCES -->
-            <article class="panel-card is-wide" id="session-sources-spec">
-              <div class="panel-card-tag mono-label">
-                <span>Tile 01 · Session start with sources</span>
-                <span class="sk-chip">Designed, not built</span>
-              </div>
-              <div class="panel-h2">Choose audio sources before starting</div>
-              <p class="panel-muted" style="margin-top: 4px; max-width: 72ch">
-                Before pressing Start live session, choose your microphone, one
-                application from the list, or both. One per-session approval
-                names both sources when both are chosen, and Stop ends both.
-              </p>
-
-              <div class="km-split" style="margin-top: 14px">
-                <!-- Choosing + Both chosen -->
-                <div class="km-pane">
-                  <div class="sk-row-head">
-                    <strong class="panel-h3"
-                      >1. Choosing &amp; both sources chosen</strong
-                    >
-                    <span class="mono-label" style="color: var(--g-amber-ink)"
-                      >Mic + App</span
-                    >
-                  </div>
-                  <div class="panel-check" style="margin-top: 8px">
-                    <span class="panel-box is-checked">✓</span>
-                    <div>
-                      <strong>Microphone</strong>
-                      <span class="panel-muted">· Fictional microphone</span>
-                    </div>
-                  </div>
-                  <div class="panel-check">
-                    <span class="panel-box is-checked">✓</span>
-                    <div>
-                      <strong>Application audio</strong>
-                      <span class="panel-muted">· choose one running app</span>
-                    </div>
-                  </div>
-                  <div
-                    style="
-                      margin: 6px 0 10px 26px;
-                      padding: 10px 12px;
-                      background: var(--g-band);
-                      border: 1px solid var(--g-line);
-                      border-radius: 2px;
-                    "
-                  >
-                    <div class="panel-check" style="padding: 4px 0">
-                      <span class="panel-radio is-checked"></span
-                      ><span><strong>Fictional player</strong></span>
-                    </div>
-                    <div class="panel-check" style="padding: 4px 0">
-                      <span class="panel-radio"></span
-                      ><span>Fictional call app</span>
-                    </div>
-                    <div style="margin-top: 6px">
-                      <span
-                        class="nb-btn"
-                        style="padding: 4px 10px; font-size: 12px"
-                        >List again</span
-                      >
-                    </div>
-                  </div>
-                  <p class="panel-muted" style="font-size: 12px">
-                    All windows of the chosen application may be included.
-                    Listing applications or capturing application audio makes
-                    macOS ask for Screen &amp; System Audio Recording.
-                  </p>
-                  <div
-                    class="km-notice"
-                    style="margin-top: 10px; font-size: 12px"
-                  >
-                    <strong
-                      >Headphones recommended when both sources are on</strong
-                    >, so the call audio does not bleed back into your
-                    microphone.
-                  </div>
-                  <div class="sk-actions">
-                    <span class="sk-btn-primary">▶ Start live session</span>
-                  </div>
-                </div>
-
-                <!-- Single per-session approval + One source failed -->
-                <div class="km-pane">
-                  <div class="sk-row-head">
-                    <strong class="panel-h3"
-                      >2. Single per-session approval (both sources)</strong
-                    >
-                    <span class="mono-label" style="color: var(--g-muted)"
-                      >Stop ends both</span
-                    >
-                  </div>
-                  <dl class="panel-dl" style="margin-top: 10px">
-                    <dt>Sources</dt>
-                    <dd>
-                      <strong>the microphone and Fictional player</strong>
-                    </dd>
-                    <dt>Transcription</dt>
-                    <dd>Deepgram (your key, up to 120 minutes per session)</dd>
-                    <dt>Cue decisions</dt>
-                    <dd>Anthropic (your key, recent transcript lines only)</dd>
-                    <dt>Stopping</dt>
-                    <dd>
-                      Stop live session ends both sources and stops sending.
-                    </dd>
-                  </dl>
-                  <div class="sk-actions">
-                    <span class="sk-btn-primary">Enable for this session</span>
-                    <span class="sk-btn">Cancel</span>
-                  </div>
-
-                  <div class="sk-row" style="margin-top: 16px">
-                    <div class="sk-row-head">
-                      <strong class="panel-h3"
-                        >3. One source failed (partial failure)</strong
-                      >
-                      <span class="sk-chip is-rejected">App audio failed</span>
-                    </div>
-                    <div class="panel-error-box" style="font-size: 12px">
-                      <strong>Could not capture Fictional player.</strong> Check
-                      Screen &amp; System Audio Recording permission or pick
-                      another app. Your microphone is still ready.
-                    </div>
-                    <div class="sk-actions">
-                      <span class="sk-btn">Retry app audio</span>
-                      <span class="sk-btn">Continue with microphone only</span>
-                      <span class="sk-btn is-danger">Stop live session</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="up-boundary">
-                <strong>Component boundary (Designed, not built):</strong> One
-                new component <code>src/components/SessionSources.tsx</code> +
-                <code>src/components/session-sources.css</code>, mounted at one
-                mount point in <code>src/App.tsx</code> directly above the
-                notebook session strip's Start live session action (replaces the
-                separate dev-only <code>ApplicationAudioStart</code> block once
-                dual-source lands).
-              </div>
-            </article>
-
-            <!-- TILE 2: CALL STARTING PROMPT -->
-            <article class="panel-card is-wide" id="call-prompt-spec">
-              <div class="panel-card-tag mono-label">
-                <span>Tile 02 · Call starting prompt</span>
-                <span class="sk-chip">Designed, not built</span>
-              </div>
-              <div class="panel-h2">
-                Quiet dock prompt when a call seems to be starting
-              </div>
-              <p class="panel-muted" style="margin-top: 4px; max-width: 72ch">
-                Shown only when no session is running. Styled in the floating
-                dock's Void Carbon chrome (320px wide, uniform 1px border).
-                Never takes keyboard focus, never auto-starts, captures nothing
-                before Start and per-session approval, and clears by itself via
-                a quiet time line with no countdown numbers.
-              </p>
-
-              <div class="up-prompt-pair">
-                <!-- Standard text -->
-                <div>
-                  <span
-                    class="mono-label"
-                    style="
-                      display: block;
-                      color: var(--g-muted);
-                      margin-bottom: 8px;
-                    "
-                    >Standard text · 320px dock shell</span
-                  >
-                  <div class="dock-prompt">
-                    <div class="dock-prompt-kicker">
-                      <span>■ Call detected · No capture yet</span>
-                      <span style="color: #9aa4b2">Fictional</span>
-                    </div>
-                    <div class="dock-prompt-title">
-                      Call starting in Fictional call app?
-                    </div>
-                    <p class="dock-prompt-copy">
-                      Start a session with your microphone and Fictional call
-                      app preselected. Nothing is captured until you start and
-                      approve.
-                    </p>
-                    <div class="dock-prompt-bar"><span></span></div>
-                    <div class="dock-prompt-actions">
-                      <span class="dock-prompt-btn-primary">Start</span>
-                      <span class="dock-prompt-btn">Not now</span>
-                      <span class="dock-prompt-btn">Not for this app</span>
-                      <span class="dock-prompt-btn">Don't ask again</span>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Larger text -->
-                <div>
-                  <span
-                    class="mono-label"
-                    style="
-                      display: block;
-                      color: var(--g-muted);
-                      margin-bottom: 8px;
-                    "
-                    >Larger text · 320px dock shell (wraps cleanly, 44px
-                    targets)</span
-                  >
-                  <div class="dock-prompt is-large">
-                    <div class="dock-prompt-kicker">
-                      <span>■ Call detected · No capture yet</span>
-                      <span style="color: #9aa4b2">Fictional</span>
-                    </div>
-                    <div class="dock-prompt-title">
-                      Call starting in Fictional call app?
-                    </div>
-                    <p class="dock-prompt-copy">
-                      Start a session with your microphone and Fictional call
-                      app preselected. Nothing is captured until you start and
-                      approve.
-                    </p>
-                    <div class="dock-prompt-bar"><span></span></div>
-                    <div class="dock-prompt-actions">
-                      <span class="dock-prompt-btn-primary">Start</span>
-                      <span class="dock-prompt-btn">Not now</span>
-                      <span class="dock-prompt-btn">Not for this app</span>
-                      <span class="dock-prompt-btn">Don't ask again</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="up-boundary">
-                <strong>Component boundary (Designed, not built):</strong> One
-                new component <code>src/components/CallStartPrompt.tsx</code> +
-                <code>src/components/call-start-prompt.css</code>, mounted at
-                one mount point inside the floating companion window (<code
-                  >FloatingQuestion</code
-                >
-                in <code>src/App.tsx</code> / companion entry) when no session
-                is active. Never steals window focus; pressing
-                <code>Start</code> opens the notebook's normal start and
-                per-session approval flow.
-              </div>
-            </article>
-
-            <!-- TILE 3: WRITE MEETING NOTES -->
-            <article class="panel-card is-wide" id="write-notes-spec">
-              <div class="panel-card-tag mono-label">
-                <span>Tile 03 · Write meeting notes</span>
-                <span class="sk-chip">Designed, not built</span>
-              </div>
-              <div class="panel-h2">
-                Post-session structured meeting notes (explicit confirmation,
-                never names model)
-              </div>
-              <p class="panel-muted" style="margin-top: 4px; max-width: 72ch">
-                One explicit action after Stop. Confirms exact payload, optional
-                inclusion of the person's own notes, estimated token size, and
-                estimated Anthropic cost before sending anything. Editable
-                structured output cites transcript lines and marks unstated
-                owners as <code>not stated</code>.
-              </p>
-
-              <div class="km-split" style="margin-top: 14px">
-                <!-- 1. Confirmation before sending + 2. Progress + 4. Failed -->
-                <div class="km-pane">
-                  <div class="sk-row-head">
-                    <strong class="panel-h3"
-                      >1. Confirmation before sending</strong
-                    >
-                    <span class="sk-chip">Nothing sent yet</span>
-                  </div>
-                  <p
-                    class="panel-muted"
-                    style="margin-top: 6px; font-size: 12px"
-                  >
-                    Sent to <strong>Anthropic</strong> using your own key. Model
-                    name is never shown.
-                  </p>
-                  <div class="panel-check" style="margin-top: 8px">
-                    <span class="panel-box is-checked">✓</span>
-                    <div>
-                      <strong>This session's transcript</strong>
-                      <span class="panel-muted">(14 lines · ~320 words)</span>
-                    </div>
-                  </div>
-                  <div class="panel-check">
-                    <span class="panel-box"></span>
-                    <div>
-                      <strong>Include my own notes</strong>
-                      <span class="panel-muted"
-                        >(optional · off by default · 2 lines · ~24 words)</span
-                      >
-                    </div>
-                  </div>
-                  <div
-                    class="sk-session-box"
-                    style="margin-top: 8px; padding: 10px 12px"
-                  >
-                    <span class="mono-label" style="color: var(--g-ink)"
-                      >Estimated size &amp; cost: ~480 tokens · est. $0.01</span
-                    >
-                    <p
-                      class="panel-muted"
-                      style="margin-top: 4px; font-size: 11px"
-                    >
-                      Local estimate from token counts; billed to your own
-                      Anthropic account.
-                    </p>
-                  </div>
-                  <div class="sk-actions">
-                    <span class="sk-btn-primary"
-                      >Send to Anthropic &amp; write notes</span
-                    >
-                    <span class="sk-btn">Cancel</span>
-                  </div>
-
-                  <div class="sk-row" style="margin-top: 16px">
-                    <div class="sk-row-head">
-                      <strong class="panel-h3">2. In progress</strong>
-                      <span class="sk-chip is-checking">Writing notes…</span>
-                    </div>
-                    <p
-                      class="panel-muted"
-                      style="margin-top: 6px; font-size: 12px"
-                    >
-                      Sending approved session text to Anthropic and waiting for
-                      structured notes.
-                    </p>
-                    <div class="sk-actions">
-                      <span class="sk-btn">Cancel</span>
-                    </div>
-                  </div>
-
-                  <div class="sk-row" style="margin-top: 14px">
-                    <div class="sk-row-head">
-                      <strong class="panel-h3">4. Failed state</strong>
-                      <span class="sk-chip is-rejected">Failed</span>
-                    </div>
-                    <div class="panel-error-box" style="font-size: 12px">
-                      <strong>Could not write meeting notes.</strong> Anthropic
-                      did not return structured notes (request timed out). Your
-                      transcript and notes were not changed.
-                    </div>
-                    <div class="sk-actions">
-                      <span class="sk-btn">Try again</span>
-                      <span class="sk-btn">Dismiss</span>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- 3. Editable structured result + Keep / Discard -->
-                <div class="km-pane">
-                  <div class="sk-row-head">
-                    <strong class="panel-h3"
-                      >3. Editable structured notes (Keep or Discard)</strong
-                    >
-                    <span class="sk-chip is-set">Editable draft</span>
-                  </div>
-                  <p
-                    class="panel-muted"
-                    style="margin-top: 6px; font-size: 12px"
-                  >
-                    Review and edit any line before keeping. Keeping adds these
-                    notes to your Keep this meeting Markdown export; Discard
-                    removes them from memory.
-                  </p>
-                  <div class="up-notes-editor">
-                    <div class="up-notes-section">
-                      <span class="mono-label" style="color: var(--g-muted)"
-                        >Summary</span
-                      >
-                      <p style="font-size: 13px; margin-top: 4px">
-                        Release review for the Friday date; legal review needs
-                        two full working days once the draft lands
-                        <span class="up-citation">[02:11]</span>.
-                      </p>
-                    </div>
-                    <div class="up-notes-section">
-                      <span class="mono-label" style="color: var(--g-muted)"
-                        >Decisions</span
-                      >
-                      <p style="font-size: 13px; margin-top: 4px">
-                        Hold off on confirming Friday until the draft reaches
-                        legal by Wednesday morning
-                        <span class="up-citation">[02:11] [06:40]</span>.
-                      </p>
-                    </div>
-                    <div class="up-notes-section">
-                      <span class="mono-label" style="color: var(--g-muted)"
-                        >Action items (owners only where stated)</span
-                      >
-                      <p style="font-size: 13px; margin-top: 4px">
-                        Send draft contract text to legal by Wednesday morning ·
-                        Owner: <strong>Sam</strong>
-                        <span class="up-citation">[06:40]</span>
-                      </p>
-                      <p style="font-size: 13px; margin-top: 4px">
-                        Confirm final sign-off window · Owner:
-                        <strong>not stated</strong>
-                        <span class="up-citation">[04:08]</span>
-                      </p>
-                    </div>
-                    <div class="up-notes-section">
-                      <span class="mono-label" style="color: var(--g-muted)"
-                        >Open questions</span
-                      >
-                      <p style="font-size: 13px; margin-top: 4px">
-                        Can legal finish review in time for Friday if the draft
-                        arrives Wednesday morning?
-                        <span class="up-citation">[04:08] [06:40]</span>
-                      </p>
-                    </div>
-                  </div>
-                  <div class="sk-actions" style="margin-top: 12px">
-                    <span class="sk-btn-primary"
-                      >Keep (add to meeting export)</span
-                    >
-                    <span class="sk-btn is-danger">Discard</span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="up-boundary">
-                <strong>Component boundary (Designed, not built):</strong> One
-                new component
-                <code>src/components/WriteMeetingNotes.tsx</code> +
-                <code>src/components/write-meeting-notes.css</code>, mounted at
-                one mount point in <code>src/App.tsx</code> inside the post-Stop
-                ended-session panel directly below
-                <code>KeepMeetingChoice</code>.
-              </div>
-            </article>
           </div>
         </div>
       </section>

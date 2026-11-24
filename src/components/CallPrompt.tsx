@@ -15,15 +15,20 @@ export type CallPromptAnswer =
 export function CallPrompt({
   offer,
   busy,
+  large = false,
   onAnswer,
 }: {
   offer: CallPromptOffer;
   busy: boolean;
+  large?: boolean;
   onAnswer: (answer: CallPromptAnswer) => void;
 }) {
   const app = offer.application;
   return (
-    <section className="call-prompt" aria-labelledby="call-prompt-title">
+    <section
+      className={`call-prompt${large ? ' is-large' : ''}`}
+      aria-labelledby="call-prompt-title"
+    >
       <p id="call-prompt-title" className="call-prompt-title" role="status">
         {app
           ? offer.kind === 'browser'
@@ -44,7 +49,7 @@ export function CallPrompt({
           disabled={busy}
           onClick={() => onAnswer('start')}
         >
-          <Play size={15} aria-hidden="true" />
+          <Play size={13} fill="currentColor" aria-hidden="true" />
           Start session…
         </button>
         {app && (
