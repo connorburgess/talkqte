@@ -611,7 +611,9 @@ declare global {
       callPromptAnswers: unknown[];
       callPrompt: () => { enabled: boolean; notFor: string[] };
       /** The companion's Start on an offer, as the native side relays it. */
-      callPromptStart: (application: string | null) => Promise<void>;
+      callPromptStart: (
+        application: { name: string; bundleId: string } | null,
+      ) => Promise<void>;
       /** Answer application_audio as a fictional host with this status. */
       host: (value: Partial<ApplicationAudioStatus>) => void;
       /** The host publishes a change, as when listing finishes. */

@@ -70,12 +70,14 @@ pub(crate) fn respond_to_call_prompt(
 ) -> Result<(), String> {
     let start = {
         let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
-        let start = runtime.call_prompt.answer(id, answer);
+        let start = runtime
+            .call_prompt
+            .answer(id, answer, std::time::Instant::now());
         changed(&app, &mut runtime);
         start
     };
     crate::companion::refresh(&app);
-    if let Some(application) = start {
+    if let Some(preselect) = start {
         if let Some(main) = app.get_webview_window("main") {
             let _ = main.show();
             let _ = main.unminimize();
@@ -83,7 +85,8 @@ pub(crate) fn respond_to_call_prompt(
             // what they asked for.
             let _ = main.set_focus();
         }
-        let _ = app.emit_to("main", "call-prompt:start", application);
+        // The name and bundle identifier go to the notebook only.
+        let _ = app.emit_to("main", "call-prompt:start", preselect);
     }
     Ok(())
 }

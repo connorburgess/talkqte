@@ -13,9 +13,9 @@ export interface SourceChoice {
   mode: SourceMode;
   /** The listed application chosen, for `both` and `application`. */
   application: { id: string; name: string } | null;
-  /** An application to choose once listed, by name: the one a
-   * call-starting offer named. Nothing is listed for it by itself. */
-  wanted?: string;
+  /** An application to choose once listed, matched by bundle identifier:
+   * the one a call-starting offer named. Nothing is listed for it. */
+  wanted?: { name: string; bundleId: string };
 }
 export const microphoneOnly: SourceChoice = {
   mode: 'microphone',
@@ -104,7 +104,10 @@ export function SessionSources({
   // has listed applications and it is there.
   useEffect(() => {
     if (!value.wanted || value.application || !status) return;
-    const match = status.choices.find((item) => item.name === value.wanted);
+    const wanted = value.wanted;
+    const match = status.choices.find(
+      (item) => item.bundleId === wanted.bundleId,
+    );
     if (match) onChange({ ...value, application: match, wanted: undefined });
   }, [status, value, onChange]);
 
@@ -165,8 +168,8 @@ export function SessionSources({
         <div className="session-sources-application">
           {value.wanted && !value.application && (
             <p className="processing-muted" role="status">
-              For the call in {value.wanted}: list applications, check it is
-              chosen, then start.
+              For the call in {value.wanted.name}: list applications, check it
+              is chosen, then start.
             </p>
           )}
           <p className="processing-muted">

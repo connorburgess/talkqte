@@ -32,10 +32,11 @@ export function CallPrompt({
           : 'The microphone is in use. A call?'}
       </p>
       <p className="call-prompt-detail">
-        {app
+        {app && offer.kind !== 'browser'
           ? `Start a session with your microphone and ${app}? You choose and approve everything in the notebook; nothing is heard until then.`
           : 'Start a session with your microphone? You approve it in the notebook; nothing is heard until then.'}
-        {offer.kind === 'browser' && ' A browser’s audio may not be heard yet.'}
+        {offer.kind === 'browser' &&
+          ` You can add ${app} there, but a browser’s audio includes every tab and may not be heard yet.`}
       </p>
       <div className="call-prompt-actions">
         <button

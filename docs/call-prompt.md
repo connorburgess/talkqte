@@ -17,11 +17,17 @@ session starting or running and no microphone check on, the companion shows
 one small offer: "A call seems to be starting in Zoom." with **Start
 session…**, **Not for Zoom**, **Don't ask again** and **Not now**. It goes
 away by itself after 45 seconds or when the microphone stops, and appears
-once per spell of microphone use. The companion never takes focus, and a
+once per spell of microphone use. After **Not now**, or an offer left to go
+away, the same application is not offered again for 20 minutes, so a call in
+which the microphone briefly stops (a mute, a device change) is asked about
+once. The companion never takes focus, and a
 companion the person hid stays hidden.
 
 **Start session…** brings the notebook forward with **Listen to** set to the
-microphone and that application. Nothing is listed, captured or sent: the
+microphone and, for a meeting application, that application, matched in the
+list by its bundle identifier, not its name. For a browser it sets the
+microphone only: a browser's audio would include every tab, so the person
+adds it deliberately if they want it. Nothing is listed, captured or sent: the
 person still lists applications (the application is chosen when it appears),
 presses Start live session and approves cue processing, as always. TalkQTE
 never starts a session by itself.
@@ -53,7 +59,8 @@ No entitlement or Info.plist usage string is added for this slice.
 Whether the microphone is in use and the frontmost application's name and
 bundle identifier; never audio, window titles or screen content. It stays on
 the Mac: the companion receives only the offer (the application's name, its
-kind and an identifier). Nothing is read while the setting is off: the
+kind and an identifier), and the notebook the name and bundle identifier to
+preselect. The frontmost read runs inside an autorelease pool each second. Nothing is read while the setting is off: the
 watcher thread checks the setting and returns before any read.
 
 ## The app has to be running

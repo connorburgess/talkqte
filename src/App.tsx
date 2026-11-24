@@ -525,14 +525,17 @@ function Notebook() {
   useEffect(() => {
     let disposed = false;
     let stop: (() => void) | undefined;
-    void listen<string | null>('call-prompt:start', ({ payload }) => {
-      setView('notebook');
-      setSources({
-        mode: payload ? 'both' : 'microphone',
-        application: null,
-        wanted: payload ?? undefined,
-      });
-    })
+    void listen<{ name: string; bundleId: string } | null>(
+      'call-prompt:start',
+      ({ payload }) => {
+        setView('notebook');
+        setSources({
+          mode: payload ? 'both' : 'microphone',
+          application: null,
+          wanted: payload ?? undefined,
+        });
+      },
+    )
       .then((unlisten) => {
         if (disposed) unlisten();
         else stop = unlisten;

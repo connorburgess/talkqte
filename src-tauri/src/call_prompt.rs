@@ -25,6 +25,10 @@ pub const SETTLE: Duration = Duration::from_secs(3);
 pub const SHOWN_FOR: Duration = Duration::from_secs(45);
 /// How often the macOS adapter reads the two signals while the prompt is on.
 pub const POLL: Duration = Duration::from_secs(1);
+/// After Not now, or an offer left to go away by itself, the same
+/// application is not offered again for this long, so one call that briefly
+/// releases the microphone (muting, a device change) is asked about once.
+pub const QUIET_FOR: Duration = Duration::from_secs(20 * 60);
 
 /// The frontmost application, as macOS names it. Metadata only.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -95,6 +99,15 @@ pub struct Prompt {
     pub id: u64,
 }
 
+/// The application the notebook chooses once it is listed, matched by
+/// bundle identifier. Sent to the notebook only.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Preselect {
+    pub name: String,
+    pub bundle_id: String,
+}
+
 /// The person's choices. For this launch only.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -130,6 +143,9 @@ pub struct Watcher {
     spent: bool,
     prompt: Option<(Prompt, Instant, Option<String>)>,
     next_id: u64,
+    /// Until when each application (by bundle identifier; `None` for an
+    /// unknown one) is not offered again.
+    quiet: Vec<(Option<String>, Instant)>,
 }
 
 impl Watcher {
@@ -188,12 +204,16 @@ impl Watcher {
             return self.clear();
         }
         let since = *self.in_use_since.get_or_insert(now);
-        if let Some((_, shown, _)) = &self.prompt {
+        if let Some((_, shown, bundle)) = &self.prompt {
             if now.saturating_duration_since(*shown) >= SHOWN_FOR {
+                // Left to go away: as Not now, for the rest of this call.
+                let bundle = bundle.clone();
+                self.quiet_for(bundle, now);
                 return self.clear();
             }
             return false;
         }
+        self.quiet.retain(|(_, until)| *until > now);
         if self.spent || now.saturating_duration_since(since) < SETTLE {
             return false;
         }
@@ -202,10 +222,13 @@ impl Watcher {
             .frontmost
             .as_ref()
             .and_then(|app| kind(&app.bundle_id).map(|kind| (app, kind)));
-        if let Some((app, _)) = candidate {
-            if self.not_for_ids.contains(&app.bundle_id) {
-                return false;
-            }
+        let bundle = candidate.map(|(app, _)| app.bundle_id.clone());
+        if bundle
+            .as_ref()
+            .is_some_and(|bundle| self.not_for_ids.contains(bundle))
+            || self.quiet.iter().any(|(quiet, _)| *quiet == bundle)
+        {
+            return false;
         }
         self.next_id += 1;
         let prompt = Prompt {
@@ -213,19 +236,32 @@ impl Watcher {
             kind: candidate.map(|(_, kind)| kind),
             id: self.next_id,
         };
-        let bundle = candidate.map(|(app, _)| app.bundle_id.clone());
         self.prompt = Some((prompt, now, bundle));
         true
     }
 
-    /// The person answered offer `id`. Returns the application to preselect
-    /// when they chose to start, as `Some(application)`; a stale answer
-    /// changes nothing.
-    pub fn answer(&mut self, id: u64, answer: Answer) -> Option<Option<String>> {
+    fn quiet_for(&mut self, bundle: Option<String>, now: Instant) {
+        self.quiet.retain(|(quiet, _)| *quiet != bundle);
+        self.quiet.push((bundle, now + QUIET_FOR));
+    }
+
+    /// The person answered offer `id`. Returns what to preselect beside the
+    /// microphone when they chose to start: a meeting application's name and
+    /// bundle identifier, or nothing for a browser (whose audio would include
+    /// every tab; the person can add it) or an unknown application. A stale
+    /// answer changes nothing.
+    pub fn answer(&mut self, id: u64, answer: Answer, now: Instant) -> Option<Option<Preselect>> {
         let (prompt, _, bundle) = self.prompt.take_if(|(prompt, _, _)| prompt.id == id)?;
         match answer {
-            Answer::Start => return Some(prompt.application),
-            Answer::Dismiss => {}
+            Answer::Start => {
+                return Some(match (prompt.kind, prompt.application, bundle) {
+                    (Some(Kind::Meeting), Some(name), Some(bundle_id)) => {
+                        Some(Preselect { name, bundle_id })
+                    }
+                    _ => None,
+                })
+            }
+            Answer::Dismiss => self.quiet_for(bundle, now),
             Answer::NotForThisApp => {
                 if let (Some(name), Some(bundle)) = (prompt.application, bundle) {
                     if !self.not_for_ids.contains(&bundle) {
@@ -309,11 +345,15 @@ pub mod native {
 
     pub fn frontmost() -> Option<Frontmost> {
         use objc2_app_kit::NSWorkspace;
-        let workspace = NSWorkspace::sharedWorkspace();
-        let app = workspace.frontmostApplication()?;
-        let bundle_id = app.bundleIdentifier()?.to_string();
-        let name = app.localizedName()?.to_string();
-        Some(Frontmost { bundle_id, name })
+        // Read once a second on a plain thread: drain what AppKit
+        // autoreleases each time, rather than letting it build up.
+        objc2::rc::autoreleasepool(|_| {
+            let workspace = NSWorkspace::sharedWorkspace();
+            let app = workspace.frontmostApplication()?;
+            let bundle_id = app.bundleIdentifier()?.to_string();
+            let name = app.localizedName()?.to_string();
+            Some(Frontmost { bundle_id, name })
+        })
     }
 
     pub fn read() -> Signals {
@@ -379,8 +419,15 @@ mod tests {
             );
         }
         assert_eq!(watcher.prompt(), None);
-        // A new spell of microphone use is a new call.
-        let later = start + Duration::from_secs(300);
+        // The microphone pausing within the same call, such as a mute,
+        // brings no second offer for the app it was left for.
+        let blip = start + Duration::from_secs(300);
+        watcher.observe(&Signals::default(), false, blip);
+        watcher.observe(&IN_USE(zoom()), false, blip);
+        watcher.observe(&IN_USE(zoom()), false, blip + SETTLE);
+        assert_eq!(watcher.prompt(), None);
+        // A new call, once that quiet time has passed, is offered again.
+        let later = start + SETTLE + SHOWN_FOR + QUIET_FOR;
         watcher.observe(&Signals::default(), false, later);
         watcher.observe(&IN_USE(zoom()), false, later);
         assert!(watcher.observe(&IN_USE(zoom()), false, later + SETTLE));
@@ -432,42 +479,67 @@ mod tests {
     #[test]
     fn the_answers_start_dismiss_skip_an_app_or_turn_the_prompt_off() {
         let start = Instant::now();
-        let offered = |watcher: &mut Watcher, at: Instant| {
+        let offered = |watcher: &mut Watcher, at: Instant, app: Option<Frontmost>| {
             watcher.observe(&Signals::default(), false, at);
-            watcher.observe(&IN_USE(zoom()), false, at);
-            watcher.observe(&IN_USE(zoom()), false, at + SETTLE);
+            watcher.observe(&IN_USE(app.clone()), false, at);
+            watcher.observe(&IN_USE(app), false, at + SETTLE);
             watcher.prompt().map(|prompt| prompt.id)
         };
         let mut watcher = on();
-        let id = offered(&mut watcher, start).unwrap();
+        let id = offered(&mut watcher, start, zoom()).unwrap();
         // A stale answer changes nothing.
-        assert_eq!(watcher.answer(id + 1, Answer::Start), None);
+        assert_eq!(watcher.answer(id + 1, Answer::Start, start), None);
         assert_eq!(
-            watcher.answer(id, Answer::Start),
-            Some(Some("zoom.us".to_string()))
+            watcher.answer(id, Answer::Start, start),
+            Some(Some(Preselect {
+                name: "zoom.us".into(),
+                bundle_id: "us.zoom.xos".into(),
+            }))
         );
         assert_eq!(watcher.prompt(), None);
 
-        let id = offered(&mut watcher, start + Duration::from_secs(60)).unwrap();
-        assert_eq!(watcher.answer(id, Answer::Dismiss), None);
-        assert!(offered(&mut watcher, start + Duration::from_secs(120)).is_some());
-
-        let id = watcher.prompt().unwrap().id;
-        watcher.answer(id, Answer::NotForThisApp);
-        assert_eq!(watcher.settings().not_for, ["zoom.us"]);
+        // Not now covers the rest of that call for that app, not others.
+        let at = start + Duration::from_secs(60);
+        let id = offered(&mut watcher, at, zoom()).unwrap();
+        assert_eq!(watcher.answer(id, Answer::Dismiss, at), None);
         assert_eq!(
-            offered(&mut watcher, start + Duration::from_secs(180)),
+            offered(&mut watcher, at + Duration::from_secs(60), zoom()),
             None
         );
-        watcher.clear_not_for();
-        let id = offered(&mut watcher, start + Duration::from_secs(240)).unwrap();
-
-        watcher.answer(id, Answer::DontAskAgain);
+        let facetime = Some(Frontmost {
+            bundle_id: "com.apple.FaceTime".into(),
+            name: "FaceTime".into(),
+        });
+        let id = offered(&mut watcher, at + Duration::from_secs(120), facetime).unwrap();
+        watcher.answer(id, Answer::NotForThisApp, at);
+        assert_eq!(watcher.settings().not_for, ["FaceTime"]);
+        let at = at + QUIET_FOR + Duration::from_secs(1);
+        assert!(
+            offered(&mut watcher, at, zoom()).is_some(),
+            "quiet time over"
+        );
+        let id = watcher.prompt().unwrap().id;
+        watcher.answer(id, Answer::DontAskAgain, at);
         assert!(!watcher.enabled());
         assert_eq!(
-            offered(&mut watcher, start + Duration::from_secs(300)),
+            offered(&mut watcher, at + Duration::from_secs(60), zoom()),
             None
         );
+    }
+
+    #[test]
+    fn starting_from_a_browser_offer_preselects_the_microphone_only() {
+        let mut watcher = on();
+        let start = Instant::now();
+        let chrome = Some(Frontmost {
+            bundle_id: "com.google.Chrome".into(),
+            name: "Google Chrome".into(),
+        });
+        watcher.observe(&IN_USE(chrome.clone()), false, start);
+        watcher.observe(&IN_USE(chrome), false, start + SETTLE);
+        let id = watcher.prompt().unwrap().id;
+        // Every tab's audio would come with the browser: the person adds it.
+        assert_eq!(watcher.answer(id, Answer::Start, start), Some(None));
     }
 
     #[test]

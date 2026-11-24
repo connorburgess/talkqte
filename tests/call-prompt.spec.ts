@@ -65,7 +65,7 @@ test('a browser is named with its caveat, and an unknown app gets a microphone o
     'The microphone is in use and Fictional Browser is in front. A call?',
   );
   await expect(page.locator('main')).toContainText(
-    'A browser’s audio may not be heard yet.',
+    'You can add Fictional Browser there, but a browser’s audio includes every tab and may not be heard yet.',
   );
   await page.evaluate(
     (callPrompt) => window.liveTest.publish({ callPrompt }),
@@ -104,7 +104,10 @@ test('Start opens the notebook with the microphone and the offered app chosen on
   const chooser = page.getByRole('region', { name: 'Listen to' });
   await expect(chooser).toBeVisible();
   await page.evaluate(() =>
-    window.captureTest.callPromptStart('Fictional Call'),
+    window.captureTest.callPromptStart({
+      name: 'Fictional Call',
+      bundleId: 'com.example.fictional-call',
+    }),
   );
   await expect(
     chooser.getByRole('radio', { name: /^Microphone and one application/ }),
@@ -123,14 +126,23 @@ test('Start opens the notebook with the microphone and the offered app chosen on
     window.captureTest.hostChanged({
       phase: 'off',
       choices: [
-        { id: 'fictional-player', name: 'Fictional player' },
-        { id: 'fictional-call', name: 'Fictional Call' },
+        // The same name from another app: matched by bundle id, not name.
+        {
+          id: 'fictional-impostor',
+          name: 'Fictional Call',
+          bundleId: 'com.example.other',
+        },
+        {
+          id: 'fictional-call',
+          name: 'Fictional Call',
+          bundleId: 'com.example.fictional-call',
+        },
       ],
     }),
   );
-  await expect(
-    chooser.getByRole('radio', { name: 'Fictional Call' }),
-  ).toBeChecked();
+  const radios = chooser.getByRole('radio', { name: 'Fictional Call' });
+  await expect(radios.nth(1)).toBeChecked();
+  await expect(radios.nth(0)).not.toBeChecked();
   expect(await page.evaluate(() => window.captureTest.liveStarts)).toEqual([]);
 });
 
