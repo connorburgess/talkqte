@@ -116,7 +116,8 @@
   animation-delay: var(--at);
 }
 .cue-card .cue-quote .cue-word,
-.question-standard.cue-card.cue-longer .cue-word {
+.question-standard.cue-card.cue-longer .cue-word,
+.floating-surface .cue-card .cue-word {
   --cue-wait: 0.68;
 }
 .question.cue-card.is-leaving {
@@ -467,7 +468,7 @@
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
-  margin: 0 4px 4px;
+  margin: 0;
   border: 1px solid var(--line);
   border-radius: var(--cue-radius);
   padding: 0;
@@ -480,7 +481,7 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden auto;
-  padding: 10px 16px;
+  padding: 11px 16px;
 }
 /* In the companion a cue grows out of the bar above it and folds back into
    it. The window is already at the cue's size (the native side changes its
@@ -533,7 +534,7 @@
    placement) the bar is at the bottom, and the card grows up out of it and
    folds back down into it. */
 .floating-surface .companion-shell.is-bottom .question.cue-card {
-  margin: 4px 4px 0;
+  margin: 0;
   animation-name: cue-expand-up;
 }
 .floating-surface .companion-shell.is-bottom .question.cue-card.is-leaving {
@@ -647,6 +648,9 @@
   line-height: 1.24;
   letter-spacing: -0.015em;
 }
+.floating-surface .question.cue-card .cue-line h2 {
+  font-weight: 600;
+}
 .floating-surface .cue-card.cue-long .cue-line {
   font-size: 16px;
 }
@@ -676,12 +680,18 @@
 }
 .floating-surface .cue-card .cue-source {
   font-size: 13px;
-  line-height: 1.35;
+  line-height: 1.42;
 }
 .floating-surface .cue-card .cue-source-label,
 .floating-surface .cue-card .question-warning {
   font-size: 10px;
   letter-spacing: 0.05em;
+}
+.floating-surface .cue-card .cue-source-label {
+  font-weight: 400;
+}
+.floating-surface .cue-card .cue-answer .cue-source-label {
+  font-weight: 500;
 }
 .floating-surface .question-large.cue-card .cue-source {
   font-size: 15px;
@@ -691,7 +701,7 @@
   font-size: 11px;
 }
 .floating-surface .cue-card .cue-quote {
-  margin-top: 2px;
+  margin-top: 3px;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -712,4 +722,5 @@
   right: 0;
   width: 44px;
   height: 44px;
+  padding: 0 0 6px 6px;
 }

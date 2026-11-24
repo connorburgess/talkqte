@@ -445,7 +445,7 @@ export function Question({
         disabled={busy}
         onClick={onDismiss}
       >
-        <X size={18} />
+        <X size={compact ? 15 : 18} strokeWidth={compact ? 1.75 : 2} />
       </button>
     </section>
   );

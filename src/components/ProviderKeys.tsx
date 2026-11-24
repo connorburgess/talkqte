@@ -254,9 +254,11 @@ function KeyRow({
         <h3 id={`${id}-name`}>{provider.name}</h3>
         <p
           id={`${id}-state`}
-          className={`provider-key-state ${stateClass(status)}`}
+          className={`provider-key-state ${
+            busy === 'test' ? 'is-checking' : stateClass(status)
+          }`}
         >
-          {stateText(provider.name, status)}
+          {busy === 'test' ? 'Checking…' : stateText(provider.name, status)}
         </p>
       </div>
       <p id={`${id}-role`} className="provider-key-role">

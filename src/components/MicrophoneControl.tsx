@@ -80,7 +80,11 @@ export function MicrophoneControl({
                   <span className="status-sep" aria-hidden="true">
                     ·
                   </span>
-                  <span className="microphone-activity">
+                  <span
+                    className={`microphone-activity${
+                      state.activity === 'active' ? ' is-active' : ''
+                    }`}
+                  >
                     <span
                       className={`status-dot ${state.activity}`}
                       aria-hidden="true"
@@ -157,7 +161,11 @@ export function MicrophoneControl({
                 <span className="status-sep" aria-hidden="true">
                   ·
                 </span>
-                <span className="microphone-activity">
+                <span
+                  className={`microphone-activity${
+                    state.activity === 'active' ? ' is-active' : ''
+                  }`}
+                >
                   <span
                     className={`status-dot ${state.activity}`}
                     aria-hidden="true"
