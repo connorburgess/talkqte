@@ -12,6 +12,9 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
+  # TEMPORARY while the branch is iterated before its pull request opens.
+  push:
+    branches: ['cb/platform-*']
 
 permissions:
   contents: read
