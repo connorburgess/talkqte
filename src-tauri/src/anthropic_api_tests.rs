@@ -405,7 +405,7 @@ fn the_review_names_the_provider_key_billing_caps_and_both_destinations() {
     // The longest: Multilingual, with both sources and the longest name.
     let multi = crate::transcription::cloud::review_sentence_for_own_key(
         Language::Multilingual,
-        &crate::engine::SessionSources::both(&"W".repeat(200)),
+        &crate::engine::SessionSources::both(("W".repeat(200).as_str(), "fictional-long")),
     );
     let longest = format!("{} {multi}", data_policy(haiku()));
     assert!(

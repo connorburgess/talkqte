@@ -115,7 +115,7 @@ impl Runtime {
             .map_err(|refused| match refused {
                 Refused::SessionChanged => TimingError::SessionChanged,
                 Refused::Occupied => TimingError::Occupied,
-                Refused::Undeclared => TimingError::Undeclared,
+                Refused::Undeclared | Refused::Spent => TimingError::Undeclared,
             })?;
         Ok(MeasuredBinding {
             session: snapshot.session,
@@ -206,10 +206,14 @@ pub(crate) mod tests {
 
     fn setup() -> (Runtime, Gate, Review, Control) {
         let mut runtime = Runtime::default();
-        let ticket = runtime
-            .begin_live_start()
-            .unwrap()
-            .with_sources(crate::engine::SessionSources::both("Fictional player"));
+        let ticket =
+            runtime
+                .begin_live_start()
+                .unwrap()
+                .with_sources(crate::engine::SessionSources::both((
+                    "Fictional player",
+                    "fictional",
+                )));
         runtime.install_live_start(&ticket).unwrap();
         drop(ticket);
         let gate = Gate::default();
@@ -325,7 +329,10 @@ pub(crate) mod tests {
                             runtime.take_live_for_stop();
                             runtime.engine.end();
                             let ticket = runtime.begin_live_start().unwrap().with_sources(
-                                crate::engine::SessionSources::both("Fictional player"),
+                                crate::engine::SessionSources::both((
+                                    "Fictional player",
+                                    "fictional",
+                                )),
                             );
                             runtime.install_live_start(&ticket).unwrap();
                         }
@@ -486,11 +493,11 @@ pub(crate) mod tests {
         assert!(runtime.live_source.is_none() && !control.is_cancelled());
 
         assert!(accepted(&mut runtime, &control).is_ok());
-        // Neither a second binding for this source nor another source's
-        // binding is accepted, and the attached source keeps running.
+        // Neither a second binding for this source nor another operation's
+        // is accepted, and the attached source keeps running.
         let other_gate = Gate::default();
         let other = other_gate
-            .review(Application::new("other".into(), "Fictional player".into()).unwrap())
+            .review(Application::new("fictional".into(), "Fictional player".into()).unwrap())
             .unwrap();
         for candidate in [control.clone(), other.control()] {
             assert!(matches!(
@@ -500,11 +507,15 @@ pub(crate) mod tests {
         }
         assert!(!control.is_cancelled() && !other.control().is_cancelled());
 
-        // The source stops by itself; the session then takes the other one.
+        // The source stops by itself; the session takes no other, since its
+        // one application has been used.
         gate.stop(&control).unwrap();
-        assert!(accepted(&mut runtime, &other.control()).is_ok());
+        assert!(matches!(
+            accepted(&mut runtime, &other.control()),
+            Err(TimingError::Undeclared)
+        ));
+        assert!(runtime.live_source.is_none());
         runtime.take_live_for_stop().unwrap();
-        assert!(other.control().is_cancelled());
     }
 
     #[test]

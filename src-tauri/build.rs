@@ -34,6 +34,7 @@ fn main() {
             "export_markdown",
             "export_preview",
             "set_keep_meeting",
+            "resolve_echo_line",
             "microphone_snapshot",
             "start_microphone",
             "stop_microphone",
